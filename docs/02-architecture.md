@@ -1,8 +1,8 @@
 # poly · Architecture
 
-*Cognitive Fab · September 2026 · draft v0.5 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.6 · specification only, no code*
 
-The meaning of poly programs is defined in [`04-semantics.md`](04-semantics.md). v0.2 to v0.5 answer the four reviews in [`reviews/`](reviews/).
+The meaning of poly programs is defined in [`04-semantics.md`](04-semantics.md). v0.2 to v0.6 answer the five reviews in [`reviews/`](reviews/).
 
 This document describes how poly is built from the engines of the Poly stack. What poly must do is in [`01-functional-spec.md`](01-functional-spec.md) (`PF` ids). The grammar, semantics and formats are in [`03-technical-spec.md`](03-technical-spec.md) (`PT` ids). Facts about the existing engines come from [`research/primitive-inventory.md`](research/primitive-inventory.md).
 
@@ -16,7 +16,7 @@ A poly module is compiled to the artefact family the Poly engines already read. 
 |---|---|---|
 | PA0.0 | **The semantics is the definition.** | 04-semantics defines what a program means. The lowering is correct when it agrees with it (PS9), and every `poly check` verifies that agreement for the program at hand. |
 | PA0.0a | **One program, three interpreters.** | A machine is a pure step function. Checking (polygraph, poly-ref), simulation (Polytrion, v2) and running (the runtime) are three interpretations of one environment interface over it: all inputs, sampled inputs, real inputs (PS4.1a). "The checked program is the running program" is a theorem about two of them (PS4.1b). |
-| PA0.1 | **Lower, never reimplement.** | Safety checking, simulation, governance and mining stay in the engines. A new semantic need is a change to an engine, made in that engine's repository. One stated exception: `poly-ref`, the reference interpreter, checks translation validation, deadlock freedom, liveness and configurations of communicating machines, which no engine checks today (section 2a). The configuration explorer is a candidate to move into polygraph. |
+| PA0.1 | **The engines check single machines; poly checks how machines relate.** | Safety of single machines, emission and composition of attached children, governance, simulation and mining stay in the engines, and a new need there is a change to that engine. poly has its own model checker, `poly-ref`. It checks the lowering against the semantics, deadlock freedom, liveness under fairness, and configurations of communicating machines. These are the checks that concern how machines relate over time, and no engine performs them today. poly-ref is the part of poly most likely to have bugs of its own, so the independent evidence explorations are its first acceptance tests. If polygraph gains any of these checks, poly defers to it. |
 | PA0.0b | **Machines talk only by messages.** | A machine holds addresses (`Ref<M>`), not other machines' state. `send` is the only way to affect a peer, and `emit` is a send to a capability's address. The checked unit for interacting machines is a configuration, explored with messages arriving in any order (PS13). |
 | PA0.2 | **The checked program is the running program, over its check domains.** | The runtime executes the lowered `next.cjs` the checker checked. The certificate binds them by digest, and a digest mismatch refuses the load. Inputs outside a `strict` check domain are rejected at dispatch; inputs outside a `disclosed` domain are accepted and journaled as drift, and the certificate lists those fields (PT3.4). |
 | PA0.3 | **One source per machine.** | Contract, module, invariants, effects, manifest, emission invariants and migration are derived. None is edited by hand. |
@@ -40,7 +40,8 @@ poly adds no new checking, simulation or governance engine. It is still a substa
 | | Certificate format, signer and verifier, person keyring | toolchain |
 | | Runtime host: certificate check at load, outbox worker with the gate hook, per-run ledger writer, anchors | runtime |
 | | The outbox intent machine (PT9.7), written in poly | runtime model |
-| | `poly-ref`: reference interpreter written from 04-semantics; translation validation, deadlock, liveness and configuration exploration (arrival-order nondeterminism, declared bounds) | checker (the one exception to PA0.1) |
+| | `poly-ref`, poly's model checker: a reference interpreter written from 04-semantics; translation validation, deadlock, liveness (with per-value fairness and oldest-copy delivery), configuration exploration (arrival-order nondeterminism, declared bounds), possibility checks for obligation consistency | model checker (PA0.1) |
+| | The `Delivery` machine (PT9.8) and the `OutboxIntent` machine (PT9.7), both written in poly and checked; the runtime conforms to them by trace replay (K8) | runtime models |
 | | CLI, MCP server, language server, Claude Code plugin | agent interface |
 | **Changed code in engines** | polyrun: gate hook point in the outbox worker; ledger as a store option; a `sendTo` built-in intent beside `spawnChild` and `signalChild`; shard placement by attached-tree root | small, specified in PT7a, PT9 and PT16 |
 | | polyaxion: an `effect` proposal kind that carries the emitting-step snapshot | small, PT9.1 and PT9.3 |
@@ -275,6 +276,8 @@ The Claude Code plugin packages this loop as a skill with commands (`/poly:new`,
 
 | Id | Decision | Options | Proposed |
 |---|---|---|---|
+| AD-14 | Which sends the gate sees | (a) none; (b) all; (c) sends that cross a trust scope | (c), since v0.6. A denied send is returned to the sender as `SendDenied`, an ordinary message. |
+| AD-15 | Delivery order | (a) always in order; (b) unordered by default, in order where declared `fifo` | (b). The checked `Delivery` machine shows that `fifo` needs the in-order worker, and that exactly-once holds either way. |
 | AD-12 | How machines talk to peers | (a) through host code; (b) `Ref<M>` and `send`, checked as configurations | (b), since v0.5. (a) remains possible but is outside every check. |
 | AD-13 | Composition of children | (a) atomic cascades only; (b) attached (atomic, co-located) or detached (messages, configuration check) | (b), since v0.5. |
 | AD-10 | Surface | (a) standalone syntax; (b) TypeScript-embedded DSL over the same AST | Both are built to M2. The first experiment compares them (PT13, arm 4) and the result picks the primary. |

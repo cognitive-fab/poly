@@ -1,8 +1,8 @@
 # poly · Functional specification
 
-*Cognitive Fab · September 2026 · draft v0.5 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.6 · specification only, no code*
 
-The meaning of every requirement below is defined in [`04-semantics.md`](04-semantics.md). v0.2 to v0.5 answer the four reviews in [`reviews/`](reviews/).
+The meaning of every requirement below is defined in [`04-semantics.md`](04-semantics.md). v0.2 to v0.6 answer the five reviews in [`reviews/`](reviews/).
 
 Requirement ids (`PF1.1`) are cited by the architecture (`PA`) and technical (`PT`) specifications.
 
@@ -169,6 +169,8 @@ The nearest systems each cover part of the ground:
 - **PF3.2** A machine may set and cancel named timers that fire actions.
 - **PF3.3** A machine may spawn and signal child machines. Attached children (the default) take part in their parent's atomic cascade and are co-located with it. Detached children are separate actors that communicate by messages and are checked as a configuration.
 - **PF3.3a** A machine may hold the address of another instance (`Ref<M>`) and send it a message (`send`). Addresses may be passed in messages. A machine cannot read another machine's state.
+- **PF3.3b** A message that crosses a trust scope passes the gate. If it is denied, the sender receives `SendDenied(to, action, reason)` as an ordinary message.
+- **PF3.3c** Each message takes exactly one step at its receiver. The delivery protocol that guarantees this (outbox, retries, deduplication kept for the life of the instance) is itself specified as a poly machine and checked. Delivery is unordered unless a pair is declared `fifo`.
 - **PF3.4** An effect declares its targets as well as its labels. Its handler receives only the capabilities those labels and targets grant, and a handler module that reaches for ambient authority is refused. Optionally, handlers run in a sandbox whose policy is generated from the labels and targets.
 
 ### PF4 · Declaring governance
@@ -181,7 +183,7 @@ The nearest systems each cover part of the ground:
 - **PF4.2** Policy expressions have their own truth type, `Tri` (true, false, unknown), because policy inputs may be missing; machine expressions have type `Bool`. The type checker keeps them apart, and one set of operators serves both. Policy expressions are three-valued. An unknown value never satisfies a requirement, and a deny rule whose condition is unknown escalates unless the author states otherwise (PS8.2). In a scope with label-based rules, an unlabelled effect is refused at admission (PS8.4).
 - **PF4.3** A policy may reference effect labels and the program's own machine states. This is the link between governance and program semantics. A machine state is read as of the step that emitted the effect under decision, so every gate decision can be replayed.
 - **PF4.4** A rule mined by Polyx and adjudicated `real` can be emitted as a poly obligation.
-- **PF4.5** All obligations in a scope, from every source, are checked together: each mandate must remain dischargeable. A conflict is reported with the smallest set of obligations that causes it, and a promotion that would create one is refused.
+- **PF4.5** All obligations in a scope, from every source, are checked together: each mandate must remain dischargeable. A conflict is reported with the smallest set of obligations that causes it, and a promotion that would create one is refused. This is a possibility property (a good path exists), checked over the actions the scope's tools can perform, and the conflicting subset is minimal and reproducible.
 
 ### PF5 · Declaring agent workflows
 
@@ -258,6 +260,8 @@ The nearest systems each cover part of the ground:
 | AC9 | The `OutboxIntent` machine is deadlock-free and satisfies its liveness property under its stated fairness. Replacing the `Dead` branch of `SettleFailed` with `Allowed` yields a witness: `PL3102 DOMAIN_ESCAPE` in the union form, `PL3201 DEADLOCK` in the v0.3 five-field form. |
 | AC10 | The `checkout` configuration (two orders, one inventory) reports the double-confirmation witness when the order confirms optimistically, and is clean, with no stuck state, when the order waits for `Taken`. |
 | AC11 | Promoting a mined rule that makes a mandate undischargeable is refused, and the finding names the minimal conflicting set. |
+| AC12 | The `Delivery` machine is checked: at most one step per message always, exactly one under fairness, in order with the in-order worker. Clearing the dedupe table on archive yields the double-step witness. |
+| AC13 | poly-ref reproduces every result of the evidence scripts in `reviews/evidence`. |
 | AC7 | A breaking change is refused by `poly check --since` against a live snapshot set. |
 
 ## 8. How success is measured

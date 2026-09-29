@@ -1,8 +1,8 @@
 # poly · Technical specification
 
-*Cognitive Fab · September 2026 · draft v0.5 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.6 · specification only, no code*
 
-The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2 to v0.5 answer the four reviews in [`reviews/`](reviews/), with a response to each.
+The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2 to v0.6 answer the five reviews in [`reviews/`](reviews/), with a response to each.
 
 This document fixes the grammar, the semantics and the formats. It covers the lowering of each construct to the Poly stack artefacts, the integration of the gate with the kernel, the diagnostics, the command surface, the implementation plan and the first experiment.
 
@@ -75,7 +75,8 @@ Property    = "invariant" Ident ":" Expr
             | "compose" "invariant" Ident ":" Expr
             | "liveness" Ident ":" ( "eventually" Expr | Expr "leads" "to" Expr )
               "under" "fair" "{" Group { "," Group } "}" ;
-Group       = Ident { "|" Ident } ;
+Group       = Fair { "|" Fair } ;
+Fair        = Ident [ "(" "*" ")" ] ;
 Effect      = "effect" Ident "(" [ Param { "," Param } ] ")" "{" { EffectItem } "}" ;
 EffectItem  = "kind" String | "labels" "{" Label { "," Label } "}" | "class" Class
             | "retry" "{" "attempts" Int "," "base" Duration "," "timeout" Duration "}"
@@ -99,6 +100,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - `implies`;
   - `count(kind)` and `before(a, b)` (in emission invariants);
   - `in { … }`;
+  - in configuration properties only: `forall i in g: …`, `exists i in g: …`, the aggregates `count`, `sum`, `all` and `any` over `g[*]`, and `init(e)` for the initial value of `e` (PS13.6);
   - map indexing `m[k]`, where `k` is a value of the map's key enum; map update is the statement form `m' = m with [k] = v`, which writes one entry and leaves the others unchanged.
 
   It has no loops, no calls to host functions and no string operations beyond equality and membership. Every expression terminates by construction. Precedence and associativity are fixed in PS12; the formatter parenthesises any mix of `implies` with `&&` or `||`.
@@ -326,7 +328,7 @@ The five kinds and their meanings are defined in PS5. This section fixes how eac
 
 The engine formats keep their names (`transitionInvariants`, `effectInvariants`). Only the poly keywords changed, so each keyword now says what kind of property it is.
 
-**poly-ref.** The reference interpreter of PS9.3 explores the checked instance for translation validation. The same exploration yields the reachable graph, and poly-ref checks deadlock freedom and liveness on it. No engine checks either today. This is a deliberate exception to PA0.1, stated in the architecture's scope table. If polygraph gains deadlock or liveness checks, poly defers to it and keeps poly-ref for translation validation only.
+**poly-ref is poly's model checker.** It is written from 04-semantics as a reference interpreter, and it explores the checked instance for translation validation. The same exploration yields the reachable graph, on which poly-ref checks deadlock freedom, liveness and configurations of communicating machines. No engine checks these today. The architecture states this plainly (PA0.1): poly has its own checker for everything that concerns how machines relate over time. It is also the part most likely to have bugs of its own, so its first acceptance tests are the evidence scripts in `reviews/evidence` (PT18, M0 and M1). If polygraph gains any of these checks, poly defers to it.
 
 A named invariant is a forbidden region when it carries `region "<name>"`. The name is copied to the Polyaxion `security.json` `forbiddenRegions` entry when the machine is referenced by a policy (PT8.4).
 
@@ -472,8 +474,8 @@ configuration two-buyers {
   order[2]  : Order { inv: inv }
   inputs    { order[*].Place }
   bounds    { transit 4 }
-  invariant confirmed-within-stock: count(order[*] is Done) <= 1     // initial stock
-  liveness  settle: order[*] is Asked leads to order[*] is Done | Refused
+  invariant confirmed-within-stock: count(order[*] is Done) <= init(inv.onHand)
+  liveness  settle: forall i in order: order[i] is Asked leads to order[i] is Done | Refused
 }
 ```
 
@@ -684,6 +686,96 @@ This is the only new engine integration (architecture section 7.2).
 
   The check of this machine is gate M4b in PT18. Adding a state or a transition to the worker without changing this machine first is `PL2401 RUNTIME_MODEL_DRIFT` in the runtime's own CI.
 
+- **PT9.8 The delivery protocol is a checked machine.** "Each message takes exactly one step at its receiver" (PS14.3) depends on the outbox worker, the network path and the receiver's dedupe table working together, with retries and archiving in between. The protocol is specified as a poly machine, with the network's choices as the environment's inputs, and checked. Two messages from one sender to one receiver are enough to exhibit every interleaving that matters: loss, duplication by resend, acknowledgement loss, archiving and ordering.
+
+  ```poly
+  module delivery
+
+  type Msg = M1 | M2
+  type Status = Unsent | Pending | InFlight | Acked
+
+  service machine Delivery {
+    state {
+      status   : map<Msg, Status> = { M1: Unsent, M2: Unsent }
+      req      : map<Msg, 0..2>   = { M1: 0, M2: 0 }            // request copies in the network
+      ack      : map<Msg, 0..2>   = { M1: 0, M2: 0 }            // acknowledgement copies in the network
+      lost     : map<Msg, 0..1>   = { M1: 0, M2: 0 }            // the network loses at most one copy per message
+      seen     : map<Msg, bool>   = { M1: false, M2: false }    // the receiver's dedupe table (K4)
+      steps    : map<Msg, 0..2>   = { M1: 0, M2: 0 }            // steps taken at the receiver
+      archived : bool = false
+    }
+    action Emit(m: Msg)     action Send(m: Msg)       action Resend(m: Msg)
+    action LoseReq(m: Msg)  action DeliverReq(m: Msg) action LoseAck(m: Msg)
+    action DeliverAck(m: Msg)  action Archive()
+
+    on Emit(m) {
+      require status[m] == Unsent else reject "emitted"
+      require m == M1 || status[M1] != Unsent else reject "emit-order"
+      status' = status with [m] = Pending
+    }
+    on Send(m) {
+      require status[m] == Pending && req[m] < 2 else reject "not-pending"
+      require m == M1 || status[M1] == Acked else reject "in-order"      // the in-order worker
+      status' = status with [m] = InFlight
+      req' = req with [m] = req[m] + 1
+    }
+    on Resend(m) {
+      require status[m] == InFlight && req[m] < 2 else reject "not-in-flight"
+      req' = req with [m] = req[m] + 1
+    }
+    on LoseReq(m) {
+      require req[m] > 0 && lost[m] < 1 else reject "no-loss"
+      req' = req with [m] = req[m] - 1
+      lost' = lost with [m] = 1
+    }
+    on DeliverReq(m) {
+      require req[m] > 0 else reject "nothing-in-transit"
+      req' = req with [m] = req[m] - 1
+      if ack[m] < 2 { ack' = ack with [m] = ack[m] + 1 }
+      if !seen[m] { seen' = seen with [m] = true
+                    steps' = steps with [m] = steps[m] + 1 }
+    }
+    on LoseAck(m) {
+      require ack[m] > 0 && lost[m] < 1 else reject "no-loss"
+      ack' = ack with [m] = ack[m] - 1
+      lost' = lost with [m] = 1
+    }
+    on DeliverAck(m) {
+      require ack[m] > 0 else reject "no-ack"
+      ack' = ack with [m] = ack[m] - 1
+      if status[m] == InFlight { status' = status with [m] = Acked }
+    }
+    on Archive {
+      require !archived && steps[M1] == 1 && steps[M2] == 1 else reject "not-done"
+      archived' = true                                  // the dedupe table is kept (K4)
+    }
+
+    invariant at-most-once: steps[M1] <= 1 && steps[M2] <= 1
+    invariant in-order: steps[M2] == 1 implies steps[M1] == 1
+    liveness exactly-once:
+      eventually (status[M1] == Acked && status[M2] == Acked && steps[M1] == 1 && steps[M2] == 1)
+      under fair { Emit(*), Send(*), Resend(*), DeliverReq(*), DeliverAck(*) }
+  }
+  ```
+
+  Losses are not in the fairness list: the network may lose, but only finitely often (`lost` bounds it). The results of an independent exploration ([`reviews/evidence/delivery_check.py`](reviews/evidence/delivery_check.py)) are:
+
+  | Variant | Result |
+  |---|---|
+  | In-order worker, dedupe kept on archive (the machine above) | 1,147 states; `at-most-once` and `in-order` hold; `exactly-once` holds under the stated fairness |
+  | Parallel worker (no `in-order` guard), dedupe kept | 2,368 states; `at-most-once` and `exactly-once` hold |
+  | Parallel worker, `in-order` required | violated in 4 steps: `Emit(M1), Emit(M2), Send(M2), DeliverReq(M2)` |
+  | In-order worker, dedupe cleared on archive | `at-most-once` violated in 10 steps: `M1` is resent, delivered, acknowledged; `M2` is delivered; the receiver is archived; the duplicate of `M1` arrives and takes a second step |
+
+  Three rules follow and are normative for the runtime:
+
+  1. **Dedupe records live as long as the instance** (K4). Archiving keeps them.
+  2. **`fifo` requires the in-order worker.** A pair declared `fifo` is served by a worker that sends a message only after the previous one to the same receiver is acknowledged. For co-located pairs this is local, in-order dispatch.
+  3. **Unordered delivery is the default.** Without `fifo`, the parallel worker is used. Exactly-once still holds, and order is not promised.
+
+  The runtime's conformance to this machine is kernel assumption K8, checked by trace replay at M4.
+- **PT9.9 Sends across trust scopes.** A `send` from one trust scope to another is proposed to the gate like an effect (PS8.7). The proposal carries `kind: "send"`, the target's machine and scope, the action, and the payload digest. On deny, the runtime does not deliver the message. It delivers `SendDenied(to, action, reason)` to the sender instead, with its own idempotency key. Sends within one scope are not proposed.
+
 ## PT10. Workflows
 
 ```poly
@@ -758,7 +850,7 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL2xxx | lowering, strict validate, translation validation | `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
-| PL5xxx | composition, configurations | `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK` |
+| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK` |
 | PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
@@ -970,11 +1062,11 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 
 | Milestone | Scope | Gate |
 |---|---|---|
-| M0 · Language core | `poly-core` AST, parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`, tagged unions, `match`, `Tri`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). |
-| M1 · Effects, composition and configurations | `emit`, effect declarations, timers, attached and detached children, `Ref` and `send`, configurations explored by poly-ref, emission and compose invariants, maps | The `polyrun-oms` order machine in poly gives the same `check-effects` and `check-product` results as the hand-written artefacts (AC1). The `checkout` configuration finds the double-confirmation witness with the optimistic order and is clean with the waiting order (AC10). |
+| M0 · Language core | `poly-core` AST, parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`, tagged unions, `match`, `Tri`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). poly-ref reproduces the evidence scripts for single machines: the turnstile (7 states, the deadlock witness), `OutboxIntent` in its v0.3 form (two deadlocked states) and in its union form (17 states, clean). |
+| M1 · Effects, composition and configurations | `emit`, effect declarations, timers, attached and detached children, `Ref` and `send`, configurations explored by poly-ref, emission and compose invariants, maps | The `polyrun-oms` order machine in poly gives the same `check-effects` and `check-product` results as the hand-written artefacts (AC1). The `checkout` configuration finds the double-confirmation witness with the optimistic order and is clean with the waiting order (AC10). poly-ref reproduces the configuration and delivery evidence scripts: the checkout results (six-step witness; 44 states clean) and all four `Delivery` variants of PT9.8. A disagreement with a script is investigated until one side is shown wrong. |
 | M2 · Diagnostics and second surface | `poly-embed` front end producing the same AST; handler capability lint (PT6.5); diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain and today's polyrun | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
-| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. |
+| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. M4c: the runtime's delivery traces replay against the `Delivery` machine of PT9.8 (K8), including traces captured across an archive. |
 | M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, obligation consistency (PT8.5), escalation with timeout, person-key signatures (PT12.5), `sendTo` delivery in polyrun | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. |
 | M6 · Agents | Workflow lowering, MCP server, language server, Claude Code plugin, `poly new` | AC5. A workflow in poly runs through unchanged polyflow tools. |
 | M7 · Feedback | `poly mine`, `poly propose`, `poly export traces` | A Polyx rule adjudicated `real` round-trips to an admitted obligation. A polyness proposal arrives as poly source and is admitted or refused by the pipeline. |
@@ -988,7 +1080,7 @@ Worlds (appendix A) are planned after M7 and are not part of v1.
 - **State explosion.** It is managed by small machines and atomic cascades, not by abstraction. A check that hits its bound reports `INCONCLUSIVE` (`PL3901 BOUND_HIT`).
 - **Liveness.** Liveness holds only under the fairness stated with each property plus the delivery guarantee of PS14. At runtime, delivery is obligation R1: it is monitored, and a missed delivery is a runtime fault, not a program fault.
 - **Configurations.** Checks cover the bounded fragment: finite instances and a declared bound on messages in transit (PS4.1e, PS13.5). A bound hit is reported. The state space of a configuration grows with its instances, and that growth is the cost of checking interactions.
-- **Kernel assumptions.** Every guarantee about a running program holds under the kernel assumptions K1 to K7 of PS10. Their evidence is listed there. poly does not verify the kernel.
+- **Kernel assumptions.** Every guarantee about a running program holds under the kernel assumptions K1 to K8 of PS10. Their evidence is listed there. poly does not verify the kernel.
 - **Over-approximation.** The checked instance lets the environment offer any action at any time (PS4.4). Clean results are sound; some witnesses may be infeasible and are marked `environment: unconstrained`.
 - **Advice.** Advice is recorded but not enforced until it is promoted, adjudicated and admitted.
 - **Worlds.** Not in v1 (appendix A).

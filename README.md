@@ -14,7 +14,7 @@ poly adds no new checking, simulation or governance engine. It is a compiler, a 
 | Learn | Polyx, polyness |
 | Simulate (v2) | Polytrion |
 
-> Status: specification, draft v0.5 (after four reviews). No code yet.
+> Status: specification, draft v0.6 (after five reviews). No code yet.
 
 ## Hello, world
 
@@ -160,6 +160,8 @@ No per-machine check can see this. The defect lives in the arrival order between
 | [`docs/reviews/response-2026-09-29-formal.md`](docs/reviews/response-2026-09-29-formal.md) | The response to the formal review, and what changed in v0.3 |
 | [`docs/reviews/review-2026-09-29-functional.md`](docs/reviews/review-2026-09-29-functional.md), [`response`](docs/reviews/response-2026-09-29-functional.md) | The v0.3 functional-programming review and its response (v0.4) |
 | [`docs/reviews/review-2026-09-29-actors.md`](docs/reviews/review-2026-09-29-actors.md), [`response`](docs/reviews/response-2026-09-29-actors.md) | The v0.4 actor-model review and its response (v0.5) |
+| [`docs/reviews/review-2026-09-29-final.md`](docs/reviews/review-2026-09-29-final.md), [`response`](docs/reviews/response-2026-09-29-final.md) | The final formal review of v0.5 and its response (v0.6) |
+| [`docs/reviews/evidence/`](docs/reviews/evidence/) | Independent explorations of every example model; the first acceptance tests of poly-ref |
 | [`docs/research/landscape-2026-09.md`](docs/research/landscape-2026-09.md) | The current landscape: model-checkable languages, verification languages, languages for agents, durable runtimes, agent governance, and evidence on how coding agents fail |
 
 ## Principles
@@ -167,7 +169,7 @@ No per-machine check can see this. The defect lives in the arrival order between
 0. **The semantics is the definition.** 04-semantics says what a program means; every `poly check` validates the lowering against it.
 0a. **One program, three interpreters.** The same machine is checked (all inputs), simulated (sampled inputs, v2) and run (real inputs). Only the environment changes.
 0b. **Machines talk only by messages.** Addresses are values, `send` is the only way to affect a peer, and interacting machines are checked together as configurations.
-1. **Lower, never reimplement.** Safety checking, governance, simulation and mining stay in the engines. The one exception is the reference interpreter, which checks lowering agreement, deadlock, liveness and configurations.
+1. **The engines check single machines; poly checks how machines relate.** Safety, governance, simulation and mining stay in the engines. poly's own model checker, poly-ref, checks the lowering, deadlock, liveness and configurations.
 2. **The checked program is the running program, over its check domains.** A certificate binds the source, the artefacts and the check results by digest. Out-of-domain inputs are rejected (`strict`) or journaled as drift (`disclosed`).
 3. **One source per machine.** Every engine artefact is derived.
 4. **No silent clean.** Every check reports clean, findings, refused, underpowered or inconclusive.
@@ -193,7 +195,9 @@ The Poly stack already holds the primitives a coding agent needs to write statef
 | **Liveness** | A property that something eventually happens, stated with the weak-fairness assumption it needs; its counterexample is a lasso. |
 | **Deadlock** | A reachable non-terminal state in which no action is accepted. Checked for every machine. |
 | **Checked instance** | The finite set of inputs and states a verdict covers. Every verdict is printed with it. |
-| **poly-ref** | The reference interpreter written from 04-semantics, used for translation validation, deadlock and liveness. |
+| **poly-ref** | poly's model checker: a reference interpreter written from 04-semantics, used for translation validation, deadlock, liveness, configurations and obligation consistency. |
+| **Possibility property** | A property that a good path exists (such as a mandate being dischargeable), as opposed to a property of all behaviours. |
+| **Trust scope** | The governance scope an instance belongs to. Messages that cross a trust scope pass the gate. |
 | **Tagged union** | A type whose values are one of several constructors, each with its own payload. Makes invalid states unrepresentable. |
 | **Tri** | The three-valued truth type of policy expressions (true, false, unknown). Machine expressions are `Bool`. |
 | **Capability** | An object passed to a handler that grants exactly the authority its effect's labels and targets declare. |
@@ -204,7 +208,7 @@ The Poly stack already holds the primitives a coding agent needs to write statef
 | **Attached / detached child** | An attached child shares its parent's atomic cascade and kernel shard. A detached child is a separate actor that communicates by messages. |
 | **Delivery guarantee** | Every message sent is eventually received: part of the semantics, implemented by the runtime (obligation R1). |
 | **Dischargeable** | A mandate is dischargeable when some path reaches its discharge state without a deny under all obligations together. |
-| **Kernel assumption** | A property of the runtime (K1 to K7) that a guarantee about running programs depends on. |
+| **Kernel assumption** | A property of the runtime (K1 to K8) that a guarantee about running programs depends on. |
 | **Witness** | The shortest concrete sequence that violates an invariant or reaches a forbidden region. It can be exported as a trace and as a test. |
 | **Effect** | A declared side effect emitted by an accepted step. It carries labels and a class, and passes the gate before it runs. |
 | **Label** | A term from a closed vocabulary (for example `egress:external`) that describes what an effect touches. |
