@@ -74,6 +74,10 @@ test('match exhaustiveness enumerates literal payloads (PS2.2)', () => {
   assert.deepEqual(codesOf(src("E { ok: true } => s' = D  E { ok: false } => s' = D  D => s' = E { ok: true }")), []);
   assert.deepEqual(codesOf(src("E { ok: true } => s' = D  D => s' = E { ok: true }")), ['PL1501']);
   assert.deepEqual(codesOf(src("E { ok: _ } => s' = D  D => s' = E { ok: true }")), []);
-  // A literal on an undeclared payload is reported, not a crash in the coverage check; it adds no constraint to coverage.
-  assert.deepEqual([...new Set(codesOf(src("E { nope: true } => s' = D  D => s' = D")))].sort(), ['PL1001']);
+  // A literal on an undeclared payload is reported, not a crash in the coverage check. It adds no
+  // constraint to coverage, so the program gets exactly one diagnostic, at the pattern: PL1001, and
+  // no PL1501 (a behaviour change of the S21 coverage rewrite, recorded in plan-m0.md §14).
+  const bad = parse(src("E { nope: true } => s' = D  D => s' = D")).module!;
+  const d = checkModule(bad).diagnostics;
+  assert.deepEqual(d.map((x) => [x.code, x.at.line, x.at.col]), [['PL1001', 6, 20]]);
 });

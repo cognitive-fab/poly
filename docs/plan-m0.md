@@ -188,7 +188,7 @@ The owner's rulings are in [`decisions-m0.md`](decisions-m0.md). S9 to S15 were 
 
 ## 7. What was built
 
-All ten steps are done. The M0 gate passes with one command, `npm test` at the root: build, the import-boundary check, then 184 tests (109 at the end of step 10, 75 more from the review, section 14).
+All ten steps are done. The M0 gate passes with one command, `npm test` at the root: build, the import-boundary check, then 188 tests (109 at the end of step 10, 79 more from the review, section 14).
 
 | Package | What it holds | Tests |
 |---|---|---|
@@ -209,8 +209,8 @@ Around them: `scripts/check-boundaries.mjs` (poly-ref imports only AST types fro
 | Translation validation agrees on every transition of every conformance case | 20 of 20 sources, 0 mismatches | `tv.test.mjs` |
 | A deliberately broken lowering is caught with `PL2501` | 8 of 8 faults caught | `tv.test.mjs` |
 | poly-ref reproduces the single-machine evidence | all numbers and witnesses, and each script still prints them | `evidence.test.mjs` |
-| One command | `npm test`: 184 of 184 | root `package.json` |
-| No user program reaches a toolchain code (standing rule) | 0 of 49 sources reach `PL2501` or `PL2001` | `standing.test.mjs` |
+| One command | `npm test`: 188 of 188 | root `package.json` |
+| No user program reaches a toolchain code (standing rule) | 0 of 50 sources reach `PL2501` or `PL2001` | `standing.test.mjs` |
 
 ## 9. Spec issues and how each was resolved
 
@@ -294,6 +294,46 @@ All times are single runs on Node 24.12.
 
 Two pipeline decisions for review. **polygraph's cap (S5):** poly-ref's state count, plus the out-of-instance states, plus one; with no such state the two counts must agree or it is `PL2501`, and inside a capped exploration poly-ref's findings are reported as well. **A failed strict `validate()` (S20):** exit 4, since the catalogue has no code.
 
+### The final gate run, after the review
+
+The whole gate was run again at commit `7cbc48b`, after every review fix, to close M0. Nothing moved.
+
+**Field studies**, under polygraph's own replay:
+
+| Study | Windows | Hand-written reference / broken | poly / poly broken | Windows that differ | States | Transitions compared (TV) | Property evaluations | Mismatches |
+|---|---|---|---|---|---|---|---|---|
+| turnstile | 12 | 12/12, 9/12 | 12/12, 9/12 | 0, 0 | 7 | 14 | 21 | 0 |
+| raft | 67 | 54/67, 44/67 | 54/67, 44/67 | 0, 0 | 38 | 342 | 1,444 | 0 |
+| hatchet | 19 | 19/19, 18/19 | 19/19, 18/19 | 0, 0 | 216 | 3,888 | 4,320 | 0 |
+
+Raft is the one to watch, because S19 changed how names resolve. Raft has no guard, so S19 bears only on its handler: in `NewerTermSeen(term)`, `term` is the parameter and `pre.term` the field, exactly as before the ruling. The same 13 windows fail for the hand-written reference and for poly (the deferred term increment of its REPORT.md), the same 23 for the broken pair, and translation validation agrees on all 342 transitions.
+
+**Evidence**, poly-ref against each script's output:
+
+| Machine | poly-ref | Script prints | Time |
+|---|---|---|---|
+| hello turnstile | 7 states, 8 accepted steps; `PL3201` at `(Locked, 3)`, witness `Coin, Coin, Coin, Push`, then `Coin: coin-box-full, Push: locked` | `states 7 deadlocks [('Locked', 3)] witness ['Coin', 'Coin', 'Coin', 'Push']` | 2.5 ms |
+| hello with `Empty` | 7 states, clean | `states 7 deadlocks [] witness []` | 1.2 ms |
+| `OutboxIntent`, union | 17 states, 24 accepted steps, clean | `reachable 17 edges 24 deadlocks []` | 7.4 ms |
+| `OutboxIntent`, AC9 escape | `PL3102` after `Propose, GateAllow, Start, HandlerFailed, Start, HandlerFailed, Start, HandlerOk, SettleFailed` | (AC9) | 5.2 ms |
+| `OutboxIntent`, v0.3 | 33 states, 40 accepted steps, clean | `v0.3 states 33 accepted steps 40 deadlocks []` | 9.5 ms |
+| `OutboxIntent`, v0.2 | 35 states, 40 accepted steps; `PL3201` at `(Allowed, 3, 1, T, F)` and `(Allowed, 3, 2, T, T)` | `v0.2 states 35 accepted steps 40 deadlocks [('Allowed', 3, 1, True, False), ('Allowed', 3, 2, True, True)]` | 11.9 ms |
+
+**`poly check`**, whole pipeline:
+
+| Source | Verdict | Codes | States | Stage times (lower, validate, TV, model check) | Total |
+|---|---|---|---|---|---|
+| hello | `FINDINGS`, exit 1 | `PL3201` | 7 | 11, 4, 13, 20 ms | 74 ms |
+| hello with `Empty` | `CLEAN`, exit 0 | none | 7 | 6, 2, 9, 8 ms | 32 ms |
+| turnstile | `INCONCLUSIVE`, exit 2 | `PL3901` (`coins`) | 7 | 7, 2, 8, 13 ms | 39 ms |
+| raft | `INCONCLUSIVE`, exit 2 | `PL3901` (`term`) | 38 | 10, 3, 81, 90 ms | 195 ms |
+| hatchet | `CLEAN`, exit 0 | none | 216 | 9, 3, 1,148, 907 ms | 2,084 ms |
+| AC9 escape (fixture) | `FINDINGS`, exit 1 | `PL3102`, `PL3901` | 17 | 11, 5, 63, 38 ms | 130 ms |
+
+The escape fixture now also lists `PL3901`: polygraph's exploration past the escaped state is capped, and since finding 6 that cap is kept as its own entry rather than hidden behind the escape.
+
+**On the times.** They vary with the load on the machine by a factor of five or more between sessions: hatchet's whole check took 396 ms at step 9 and 2,084 ms here. To see whether the review's fixes cost anything, the step 9 commit and the current one were built side by side and run alternately three times on hatchet. Translation validation took 1,463 to 1,745 ms at step 9 and 1,600 to 1,857 ms now; the model check took 1,459 to 1,623 ms and 1,312 to 1,917 ms. They are the same within the noise, so the fixes cost nothing measurable. The vm loader of finding 5 was also timed against a plain `require` on the same module: 410 to 424 ms and 416 to 469 ms. State and transition counts, unlike times, are exact and identical across runs.
+
 ## 11. What surprised us
 
 - **Two gate items could not pass as written** (S1, S2). Reading the corpora and running the scripts before planning found both; nothing in the specs alone showed them.
@@ -336,7 +376,11 @@ A review of `714c513..HEAD` found ten defects. The owner's rulings are in `decis
 
 Findings 9 and 10 change no behaviour. That was checked against a baseline taken before them: for all 49 sources, `poly check` gives the same verdict, codes, stages, state and transition counts, and byte-identical lowered artefacts.
 
-Two standing rules come out of the review. S20 made a failed strict `validate()` `PL2001`, and `test/standing.test.mjs` runs the whole pipeline over every source in the repository and fails on any `PL2501` or `PL2001`: those codes are for toolchain faults, and a user program that reaches one is a checker bug. The deliberately broken lowerings are the only programs that reach `PL2501`, and they never pass through that pipeline.
+**Behaviour changes a user can see.** Besides the fixes above, one earlier result changed. The coverage rewrite of S21 no longer counts a literal on an undeclared payload as a constraint, so the program `match s { E { nope: true } => … D => … }` now gets exactly one diagnostic, `PL1001 UNKNOWN_NAME` at its pattern (line 6, column 20 in the test), where it used to get `PL1001` and also `PL1501 NON_EXHAUSTIVE_MATCH`. The `PL1501` was a consequence of the undeclared name, not a second defect, and the test now pins the one diagnostic and its position (`packages/poly-lang/test/check.test.ts`).
+
+**Found after the review's fixes.** Three more defects were found by review of the fixes themselves, each fixed after a failing regression test (`0100101`). poly-ref read a pattern name against the first union declaring a shared constructor, not against the scrutinee's union, which gave `PL2501` on a user program; it now uses the scrutinee's static type. The initial-value check skipped the payload of a qualified constructor (`Valve.Closed { turns: 7 }`), and never checked a map literal's keys against the key range; both are now `PL1201`.
+
+Two standing rules come out of the review. S20 made a failed strict `validate()` `PL2001`, and `test/standing.test.mjs` runs the whole pipeline over every source in the repository and fails on any `PL2501` or `PL2001`: those codes are for toolchain faults, and a user program that reaches one is a checker bug. The deliberately broken lowerings are the only programs that may reach `PL2501`. They are named one by one in `test/toolchain-faults.mjs`, an explicit list with no path pattern, directory or file name in it; the standing test checks that list against poly-lower's own faults and checks that it covers every poly source in the repository (`7cbc48b`).
 
 ## Conclusion
 
