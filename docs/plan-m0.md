@@ -181,14 +181,14 @@ Each issue states what the spec says, what was found, and the resolution propose
 - **S16. Two SAM versions in one check.** polygraph's loader resolves `@cognitive-fab/sam-pattern` inside a spec to its vendored 2.2.0 bundle. Strict `validate()` and translation validation use npm 2.2.1. No behaviour difference is known. *Proposal:* record both versions in the instance line; no engine change. If they ever disagree, that is a polygraph issue, raised in its repository.
 - **S17. Where the corpora live (blocking step 8).** The gate reads corpora from `C:\Users\jjdub\code\polygraph` and `C:\Users\jjdub\code\osssm`, outside this repository, so CI cannot see them. *Proposal:* copy the traces, contracts, invariants and hand-written controls (data, not engine code) into `conformance/field-studies/<name>/` with a `PROVENANCE.md` giving the source path and commit, plus a script that diffs them against the local sources when those exist.
 - **S18. `Ref<M>` in M0.** The handoff says "as a type only". *Proposal:* parsed and type-checked, `none` and `==` included; a machine with a `Ref` field is refused at lowering with `PL0901` until M1.
-- **S19. A parameter that shares a field's name hides the field (found at step 8; open).** The raft corpus names both `NewerTermSeen`'s datum and a state key `term`, and the handler must compare them (`data.term > model.term`). Names lower verbatim (PT2.1), so neither can be renamed, and nothing in PT2 or PS2 lets a handler name the field once the parameter shadows it. *Proposal:* in a handler, `pre.f` names the pre-state field `f`, as it already does in step and reject properties (PT5); a bare name resolves to the innermost binding (local, then parameter, then field), as in TypeScript. *Status:* implemented provisionally in the checker, the lowering and poly-ref, so the raft gate can run; the spec text is unchanged until the owner rules. The alternative, an error on any parameter that shares a field's name, would make the raft corpus inexpressible (AC2).
-- **S20. No code for a lowered module that fails strict `validate()` (found at step 9; open, minor).** The catalogue (PT12.2) lists the stage but no code. *Proposal:* `PL2001 STRICT_VALIDATE`, verdict `REFUSED`, addressed to the toolchain like `PL2501`. *Status:* `poly check` stops with exit 4 (error) and the engine's message; no source reaches it today.
+- **S19. A parameter that shares a field's name hides the field (found at step 8; ruled after the review, see section 9).** The raft corpus names both `NewerTermSeen`'s datum and a state key `term`, and the handler must compare them (`data.term > model.term`). Names lower verbatim (PT2.1), so neither can be renamed, and nothing in PT2 or PS2 lets a handler name the field once the parameter shadows it. *Proposal:* in a handler, `pre.f` names the pre-state field `f`, as it already does in step and reject properties (PT5); a bare name resolves to the innermost binding (local, then parameter, then field), as in TypeScript. *Status:* implemented provisionally in the checker, the lowering and poly-ref, so the raft gate can run; the spec text is unchanged until the owner rules. The alternative, an error on any parameter that shares a field's name, would make the raft corpus inexpressible (AC2).
+- **S20. No code for a lowered module that fails strict `validate()` (found at step 9; ruled after the review: PL2001, see section 9).** The catalogue (PT12.2) lists the stage but no code. *Proposal:* `PL2001 STRICT_VALIDATE`, verdict `REFUSED`, addressed to the toolchain like `PL2501`. *Status:* `poly check` stops with exit 4 (error) and the engine's message; no source reaches it today.
 
 The owner's rulings are in [`decisions-m0.md`](decisions-m0.md). S9 to S15 were written into 03 and 04 in commit `7506a66`.
 
 ## 7. What was built
 
-All ten steps are done. The M0 gate passes with one command, `npm test` at the root: build, the import-boundary check, then 109 tests.
+All ten steps are done. The M0 gate passes with one command, `npm test` at the root: build, the import-boundary check, then 184 tests (109 at the end of step 10, 75 more from the review, section 14).
 
 | Package | What it holds | Tests |
 |---|---|---|
@@ -205,11 +205,12 @@ Around them: `scripts/check-boundaries.mjs` (poly-ref imports only AST types fro
 | Gate item (PT18, as ruled in decisions-m0.md) | Result | Test |
 |---|---|---|
 | Field studies replay window for window like the hand-written controls, both directions | turnstile 12/12 and 9/12, raft 54/67 and 44/67, hatchet 19/19 and 18/19; no window differs | `field-studies.test.mjs` |
-| Every lowered `next.cjs` passes strict `validate()` | 18 of 18 | `validate.test.mjs` |
-| Translation validation agrees on every transition of every conformance case | 18 of 18 sources, 0 mismatches | `tv.test.mjs` |
+| Every lowered `next.cjs` passes strict `validate()` | 20 of 20 | `validate.test.mjs` |
+| Translation validation agrees on every transition of every conformance case | 20 of 20 sources, 0 mismatches | `tv.test.mjs` |
 | A deliberately broken lowering is caught with `PL2501` | 8 of 8 faults caught | `tv.test.mjs` |
 | poly-ref reproduces the single-machine evidence | all numbers and witnesses, and each script still prints them | `evidence.test.mjs` |
-| One command | `npm test`: 109 of 109 | root `package.json` |
+| One command | `npm test`: 184 of 184 | root `package.json` |
+| No user program reaches a toolchain code (standing rule) | 0 of 49 sources reach `PL2501` or `PL2001` | `standing.test.mjs` |
 
 ## 9. Spec issues and how each was resolved
 
@@ -233,8 +234,10 @@ Around them: `scripts/check-boundaries.mjs` (poly-ref imports only AST types fro
 | S16 two SAM versions | Both recorded in every report | accepted |
 | S17 corpora outside the repository | Copies with provenance, licences and hashes, stored byte for byte | owner, PT17 |
 | S18 `Ref<M>` in M0 | Type-checked, refused at lowering with `PL0901` | accepted |
-| S19 a parameter that hides a field (raft's `term`) | **Open.** Proposal: `pre.f` in a handler names the field. Implemented provisionally; spec text unchanged | §6 |
-| S20 no code for a failed strict `validate()` | **Open, minor.** `poly check` stops with exit 4 (a toolchain fault); a `PL2001` could be added | §10 |
+| S19 a parameter that hides a field (raft's `term`), extended by review finding 1 | One name rule for handlers, guards, step and reject properties: local, parameter, field; `pre.f` is the field; parameters only where the action is known | owner; PS2.2, PS5.2, PS5.3, PT2.2, PT4.3, PT5 (`ce69431`) |
+| S20 no code for a failed strict `validate()` | `PL2001 STRICT_VALIDATE`, `REFUSED`, addressed to the toolchain | owner; PT12.2 (`ce69431`) |
+| S21 a name in a pattern (review finding 2) | Constructor of the payload type: literal; of another type: `PL1201`; else a binder. `PL1504 UNUSED_BINDER`, `PL1503 UNREACHABLE_ARM` | owner; PT2, PT2.4, PT12.2 (`ce69431`) |
+| S22 a constructor declared by two types (review finding 4) | Resolved against the other side of `==`; `Type.C` always legal; `PL1005 AMBIGUOUS_CONSTRUCTOR` | owner; PT2.4, PT12.2 (`ce69431`) |
 
 A consequence of S13 remains visible: the three `OutboxIntent` forms carry `settles` as the spec writes it, so `poly check` refuses them (`PL0901`). poly-ref checks them for the evidence; the lowering tests remove the liveness item first and say so.
 
@@ -307,7 +310,6 @@ Two pipeline decisions for review. **polygraph's cap (S5):** poly-ref's state co
 - **Maps of unions with payloads, nested payload unions, union parameters**: refused at lowering in M0.
 - **Liveness (M2)** is a pass over the same graph; until then S13 refuses the three `OutboxIntent` examples.
 - **A project manifest (`poly.json`, PT1.2).** `poly check` takes one file and writes `.poly/build` under the working directory, which must resolve `@cognitive-fab/sam-pattern`.
-- **Rulings on S19 and S20.**
 
 ## 13. Risks
 
@@ -315,6 +317,27 @@ Two pipeline decisions for review. **polygraph's cap (S5):** poly-ref's state co
 - **polygraph caps.** For raft and the turnstile, polygraph's exploration of the lowered module has no natural end; it is capped from poly-ref's count, and the verdict is `INCONCLUSIVE` by design.
 - **The field-study rewrites differ from the hand references where poly adds a rule.** Raft gains `terminal role is Shutdown`, which changes reject reasons but not states; replay compares states, so the gate is unaffected. The difference is written in the example's header.
 
+## 14. The code review after step 10
+
+A review of `714c513..HEAD` found ten defects. The owner's rulings are in `decisions-m0.md` ("Rulings after the M0 code review"); the spec text is commit `ce69431`. Each fix below landed with a regression test (`test/review.test.mjs`, programs in `test/fixtures/review`) that failed before it.
+
+| Finding | Defect | Fix | Commit |
+|---|---|---|---|
+| 2 | An enum member in a payload pattern bound a variable: a violated invariant came out `CLEAN` | S21, with `PL1504` and `PL1503` | `e913959` |
+| 1 | A parameter named like a field was read as the parameter by poly-ref and as the field by the lowering, in guards and reject properties: a valid program refused with `PL2501` | S19 as one rule for four contexts; guards may read `action` | `d8dc2ac` |
+| 3 | `coins : 0..3 = -1` passed the checker and became `PL2501` | Every initial value folded and checked, `PL1201` at its line | `905083b` |
+| 7 | polygraph's findings beyond a check-domain bound counted as `FINDINGS` | Each polygraph witness is confirmed by poly-ref; outside the instance it is a bound hit, a contradiction is `PL2501` | `170dcf2` |
+| 8 | Stage 2 merged the engines' findings by parsing message text | Diagnostics carry `property`, `field` and `stateDigest`; `mergeFindings` keys on them | `d4df192` |
+| 6 | A second field's escape, and poly-ref's exploration cap, were dropped by the merge | One escape or bound per field | `0e59dc7` |
+| 4 | `Open == s` refused where `s == Open` was accepted | S22: resolution against the other side, `Type.C`, `PL1005` | `787ba90` |
+| 5 | `--root` outside a `node_modules` tree failed with exit 4 | Lowered modules load with poly's own `sam-pattern` | `0413529` |
+| 9 | One type mapping written three times in the lowering | `tyOfTypeExpr`, `checkDomainValues` | `9d9b33e` |
+| 10 | Map key lists rebuilt on every transition; the terminal test compiled per value | Cached per type; compiled once | `9df5613` |
+
+Findings 9 and 10 change no behaviour. That was checked against a baseline taken before them: for all 49 sources, `poly check` gives the same verdict, codes, stages, state and transition counts, and byte-identical lowered artefacts.
+
+Two standing rules come out of the review. S20 made a failed strict `validate()` `PL2001`, and `test/standing.test.mjs` runs the whole pipeline over every source in the repository and fails on any `PL2501` or `PL2001`: those codes are for toolchain faults, and a user program that reaches one is a checker bug. The deliberately broken lowerings are the only programs that reach `PL2501`, and they never pass through that pipeline.
+
 ## Conclusion
 
-M0 is built and its gate passes with one command. poly source becomes artefacts the engines accept: every lowered module passes strict `validate()`, and polygraph replays the three field studies window for window like their hand-written controls. The lowering behaves exactly as the semantics says: poly-ref, written from 04-semantics and sharing no code with the compiler, agrees with every lowered module on every transition of every case, and catches all eight deliberately broken lowerings. poly-ref reproduces every number and witness of the single-machine evidence scripts. Twenty spec issues were found; eighteen are resolved, and S19 and S20 wait for the owner.
+M0 is built and its gate passes with one command. poly source becomes artefacts the engines accept: every lowered module passes strict `validate()`, and polygraph replays the three field studies window for window like their hand-written controls. The lowering behaves exactly as the semantics says: poly-ref, written from 04-semantics and sharing no code with the compiler, agrees with every lowered module on every transition of every case, and catches all eight deliberately broken lowerings. poly-ref reproduces every number and witness of the single-machine evidence scripts. Twenty-two spec issues were found and all are resolved. A code review after step 10 found ten defects, among them a wrong `CLEAN`; each was fixed after a regression test that failed first, and a standing test now fails the suite if any user program reaches a toolchain code.
