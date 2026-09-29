@@ -65,10 +65,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const stateCx: Cx = { ...base, mode: 'state', stateVar: 'model', dataVar: 'proposal' };
   const termCode = terminal ? expr(terminal.expr, stateCx) : 'false';
   const control = layout.fields[0];
-  const terminalStates = terminal ? controlValues(m.fields[0], facts, env).filter((v) => {
-    const fn = new Function(`${pre}\nreturn (model) => ${termCode};`)() as (s: unknown) => boolean;
-    return fn({ ...initState, [control.field]: v });
-  }) : [];
+  // The terminal predicate is compiled once, then applied to each control value (review finding 10).
+  const isTerminal = terminal ? (new Function(`${pre}\nreturn (model) => ${termCode};`)() as (s: unknown) => boolean) : null;
+  const terminalStates = isTerminal ? controlValues(m.fields[0], facts, env).filter((v) => isTerminal({ ...initState, [control.field]: v })) : [];
 
   // ── acceptors ────────────────────────────────────────────────────────
   const handlers = new Map(mutated.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => [h.action, h]));

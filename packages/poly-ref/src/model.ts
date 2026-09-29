@@ -162,6 +162,18 @@ export function dataDomain(a: RAction, M: RMachine): Record<string, Value>[] {
   return recs;
 }
 
+// The canonical keys of a map type, computed once per type object: inType runs on every successor
+// of every state, and the key domain does not change (review finding 10).
+const KEYS = new WeakMap<RType, string[]>();
+function keyList(t: Extract<RType, { k: 'map' }>, M: RMachine): string[] {
+  let keys = KEYS.get(t);
+  if (!keys) {
+    keys = valuesOf(t.key, M).map(keyOf);
+    KEYS.set(t, keys);
+  }
+  return keys;
+}
+
 /** `v ∈ T`: membership of the declared type (PS1.2). */
 export function inType(v: Value, t: RType, M: RMachine): boolean {
   switch (t.k) {
@@ -179,7 +191,7 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     }
     case 'map': {
       if (!isMap(v)) return false;
-      const keys = valuesOf(t.key, M).map(keyOf);
+      const keys = keyList(t, M);
       return v.entries.length === keys.length && v.entries.every(([k, x], i) => keyOf(k) === keys[i] && inType(x, t.value, M));
     }
   }
