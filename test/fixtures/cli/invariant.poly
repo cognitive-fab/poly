@@ -1,0 +1,19 @@
+// An invariant that fails: FINDINGS with PL3001 from polygraph's model check.
+module fixtures
+
+machine Counter {
+  state {
+    n : 0..3 = 0
+  }
+  action Inc()
+  on Inc {
+    require n < 3 else reject "full"
+    n' = n + 1
+  }
+  action Reset()
+  on Reset {
+    require n > 0 else reject "zero"
+    n' = 0
+  }
+  invariant small: n < 2
+}

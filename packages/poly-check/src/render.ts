@@ -1,0 +1,73 @@
+// The text form of a check report (PT12, README): each diagnostic with its
+// witness, the stages that ran and did not run, and the verdict with its
+// checked instance (PT12.3a). A verdict without its instance is not a valid
+// output, so the instance line is printed for every machine that reached
+// translation validation, and its absence is stated for any that did not.
+import { basename } from 'node:path';
+import type { Diagnostic } from '@poly/core';
+import type { CheckReport, MachineCheck } from './pipeline.js';
+
+function value(v: unknown): string {
+  if (v === null || v === undefined) return String(v);
+  if (typeof v !== 'object') return String(v);
+  if (Array.isArray(v)) return `[${v.map(value).join(',')}]`;
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length === 1 && entries[0][1] && typeof entries[0][1] === 'object' && !Array.isArray(entries[0][1])) {
+    // A union value { Ctor: { payload } }.
+    return `${entries[0][0]}{${Object.entries(entries[0][1] as object).map(([k, x]) => `${k}:${value(x)}`).join(',')}}`;
+  }
+  return `{${entries.map(([k, x]) => `${k}:${value(x)}`).join(',')}}`;
+}
+
+function state(s: unknown): string {
+  if (s && typeof s === 'object' && !Array.isArray(s)) return Object.values(s as object).map(value).join('/');
+  return value(s);
+}
+
+function call(action: string, data: unknown): string {
+  const vals = data && typeof data === 'object' ? Object.values(data as object).map(value) : [];
+  return `${action}(${vals.join(', ')})`;
+}
+
+export function renderDiagnostic(d: Diagnostic, file: string): string[] {
+  const where = `${basename(file)}${d.at.line ? `:${d.at.line}` : ''}`;
+  const lines = [`${where}  ${d.code} ${d.name}${d.at.machine ? `  ${d.at.machine}` : ''}`, `  ${d.message}`];
+  if (d.witness && d.witness.trace.length) {
+    lines.push(`  witness (${d.witness.length} step${d.witness.length === 1 ? '' : 's'}):`);
+    const rows = d.witness.trace.map((s) => [call(s.action, s.data), state(s.pre), state(s.post), s.verdict && s.verdict !== 'accepted' ? s.verdict : '']);
+    const w0 = Math.max(...rows.map((r) => r[0].length));
+    const w1 = Math.max(...rows.map((r) => r[1].length));
+    for (const r of rows) lines.push(`    ${r[0].padEnd(w0)}   ${r[1].padEnd(w1)} -> ${r[2]}${r[3] ? `   ${r[3]}` : ''}`);
+  }
+  const rejections = (d as Diagnostic & { rejections?: string[] }).rejections;
+  if (rejections?.length) lines.push(`  then ${rejections.join(', ')}`);
+  return lines;
+}
+
+function instanceLine(m: MachineCheck, module: string | null): string {
+  if (!m.instance) return `${module}.${m.machine}: no checked instance (the machine did not reach translation validation)`;
+  const i = m.instance;
+  const parts = [...i.domains];
+  parts.push(`${i.states} states`);
+  if (i.bounds.length) parts.push(`bound hit: ${i.bounds.join(', ')}`);
+  parts.push(`kernel assumptions ${i.kernelAssumptions.join(', ')}`);
+  return `${module}.${m.machine}  over ${parts.join('; ')}`;
+}
+
+export function render(r: CheckReport): string {
+  const out: string[] = [];
+  for (const d of r.diagnostics) out.push(...renderDiagnostic(d, r.file));
+  for (const m of r.machines) for (const d of m.diagnostics) out.push(...renderDiagnostic(d, r.file));
+  if (r.error) out.push(`error: ${r.error}`);
+  for (const m of r.machines) {
+    const ran = m.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
+    const notRun = m.stages.filter((s) => s.status === 'not-run');
+    out.push(`${m.machine}: ${ran.join(' · ')}`);
+    if (notRun.length) out.push(`  not run: ${notRun.map((s) => s.stage).join(', ')} (${notRun[0].reason})`);
+  }
+  const instances = r.machines.map((m) => instanceLine(m, r.module));
+  out.push(`verdict: ${r.verdict} (exit ${r.exit})${instances.length ? `  ${instances[0]}` : ''}`);
+  for (const line of instances.slice(1)) out.push(`         ${line}`);
+  out.push(`engines: ${Object.entries(r.engines).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  return out.join('\n') + '\n';
+}

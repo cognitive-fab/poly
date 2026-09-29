@@ -1,2 +1,2 @@
-// Filled in by the milestone M0 steps of docs/plan-m0.md.
-export {};
+export { checkFile, engineVersions, type CheckReport, type CheckOptions, type MachineCheck, type StageRecord, type InstanceRecord } from './pipeline.js';
+export { render, renderDiagnostic } from './render.js';

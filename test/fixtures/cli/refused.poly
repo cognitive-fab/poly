@@ -1,0 +1,12 @@
+// A type error: REFUSED at stage 0 (PL1201).
+module fixtures
+
+machine M {
+  state {
+    n : 0..3 = 0
+  }
+  action A()
+  on A {
+    n' = true
+  }
+}

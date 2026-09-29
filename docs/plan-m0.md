@@ -187,7 +187,7 @@ The owner's rulings are in [`decisions-m0.md`](decisions-m0.md). S9 to S15 were 
 
 ## 7. Progress and measurements
 
-Steps 1 to 8 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
+Steps 1 to 9 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
 
 | Machine | poly-ref | Script | Check time |
 |---|---|---|---|
@@ -201,6 +201,24 @@ Steps 1 to 8 are done. poly-ref reproduces every single-machine evidence number 
 Times are single runs of `checkMachine` on Node 24.12, including exploration and every property.
 
 Step 6 is done. Every example and conformance source lowers to `contract.json`, `next.cjs` and `invariants.mjs`; each `next.cjs` passes strict `validate()` from `@cognitive-fab/sam-pattern` 2.2.1 (`test/validate.test.mjs`, 12 sources). As a probe before translation validation, polygraph's model check of each lowered module reached the same state count as poly-ref on all 12 (7, 7, 17, 33, 35, and 5 to 19 for the six conformance cases). The AC9 escape variant is the expected exception: polygraph explores past the out-of-type state until its cap (S5), which `poly check` will set from poly-ref's count at step 9. The probe found one lowering bug, a union tag read through `pre` inside a reject property, now fixed; step 7 makes such checks systematic.
+
+Step 9 is done. `poly check <file.poly>` (`packages/poly-check`) runs stage 0 (parse, type, domains), the lowering into `.poly/build/<module>.<Machine>/`, stage 1 (strict `validate()`), 1b (translation validation), 2 (polygraph's `check()` on the lowered module) and 2b (poly-ref's deadlock check). It folds the verdict (02 §5), prints it with its checked instance (PT12.3a) and the engine versions (S16), lists every stage that did not run with its reason, and exits with the PT12.3 codes. `--json` prints the report with every diagnostic in `poly.diagnostic/1` form. `test/cli.test.mjs` covers each verdict and exit code.
+
+| Source | Verdict | States | Translation validation | polygraph model check | Wall time, whole command |
+|---|---|---|---|---|---|
+| hello | `FINDINGS` (exit 1), `PL3201` | 7 | 6 ms | 3 ms | 107 ms |
+| hello with `Empty` | `CLEAN` (exit 0) | 7 | 6 ms | 4 ms | 152 ms |
+| turnstile | `INCONCLUSIVE` (exit 2), `PL3901 coins` | 7 | 8 ms | 5 ms | 134 ms |
+| raft | `INCONCLUSIVE` (exit 2), `PL3901 term` | 38 | 21 ms | 18 ms | 151 ms |
+| hatchet | `CLEAN` (exit 0) | 216 | 156 ms | 126 ms | 396 ms |
+| AC9 escape (fixture, no liveness) | `FINDINGS` (exit 1), `PL3102` | 17 | 16 ms | 14 ms | 140 ms |
+
+Single runs on Node 24.12. Wall time includes starting Node.
+
+Two decisions made in the pipeline, recorded here for review:
+
+- **polygraph's cap (S5).** polygraph cannot stop at a state outside the instance, so it is given poly-ref's state count plus the out-of-instance states plus one. When the instance has no such state, polygraph's count must equal poly-ref's, or the difference is `PL2501`. Inside a capped exploration poly-ref is authoritative, and any property it finds violated that polygraph did not reach is reported under poly-ref's name.
+- **A lowered module that fails strict `validate()`** has no code in the catalogue. It is a toolchain fault, so `poly check` stops with exit 4 (error) and the engine's message. A code such as `PL2001 STRICT_VALIDATE` could be added; no source reaches this today.
 
 Step 8 is done. The corpora are copied into `conformance/field-studies/` with a `PROVENANCE.md` each (source path and commit, upstream project and commit, licence, SHA-256 of every file); `scripts/sync-corpora.mjs` verifies them, and CI reads only the copies. The six rewrites are in `examples/field-studies/`. Under polygraph's own replay (`replaySpecResults`), each gives the same result as its hand-written control on every window, in both directions:
 
