@@ -150,4 +150,19 @@ test('finding 8: findings merge on (code, property or field), never on message t
   assert.deepEqual(merged.map((d) => `${d.code}:${d.property}`), ['PL3002:p', 'PL3003:q']);
 });
 
+// ── Finding 6: no field's escape or bound is dropped by the merge ──────────
+
+test('finding 6: poly-ref escapes and bounds on other fields, and its exploration cap, all survive the merge', async () => {
+  const { mergeFindings } = await import('@poly/check');
+  const pg = [{ code: 'PL3102', field: 'a', message: 'shape:a', at: {} }, { code: 'PL3901', field: 'x', message: 'bound:x', at: {} }];
+  const ref = [
+    { code: 'PL3102', field: 'a', message: 'a leaves its type', at: {} },
+    { code: 'PL3102', field: 'b', message: 'b leaves its type', at: {} },
+    { code: 'PL3901', field: 'x', message: 'x leaves its check domain', at: {} },
+    { code: 'PL3901', message: 'exploration stopped at 1000000 states', at: {} },
+  ];
+  const merged = mergeFindings(pg, ref);
+  assert.deepEqual(merged.map((d) => `${d.code}:${d.field ?? '*'}`).sort(), ['PL3102:a', 'PL3102:b', 'PL3901:*', 'PL3901:x']);
+});
+
 void readFileSync;

@@ -269,14 +269,11 @@ export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]
   const have = new Set(out.map(mergeKey));
   for (const f of fromRef) {
     if (f.code === 'PL3201') continue; // stage 2b reports deadlocks
-    if (f.code === 'PL3901' || f.code === 'PL3102') {
-      if (!out.some((d) => d.code === f.code)) out.push(f);
-      continue;
-    }
-    if (!have.has(mergeKey(f))) {
-      out.push({ ...f, message: `${f.message} (poly-ref; polygraph's exploration was capped at the bound)` });
-      have.add(mergeKey(f));
-    }
+    if (have.has(mergeKey(f))) continue;
+    // Finding 6: an escape or bound is kept per field, and poly-ref's exploration cap (no field) on its own.
+    const capped = f.code === 'PL3001' || f.code === 'PL3002' || f.code === 'PL3003';
+    out.push(capped ? { ...f, message: `${f.message} (poly-ref; polygraph's exploration was capped at the bound)` } : f);
+    have.add(mergeKey(f));
   }
   return out;
 }
