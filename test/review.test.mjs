@@ -83,4 +83,25 @@ test('S19: a colliding name in all four contexts checks CLEAN', async () => {
   assert.equal(r.verdict, 'CLEAN', codes(r).join(', ') + (r.error ?? ''));
 });
 
+// ── Finding 3: every initial value is folded and range-checked ─────────────
+
+test('finding 3: an initial value outside its range is PL1201 at its line', async () => {
+  const r = await run('f3-init-range.poly');
+  assert.equal(r.verdict, 'REFUSED');
+  const d = r.diagnostics.filter((x) => x.code === 'PL1201');
+  assert.equal(d.length, 1, JSON.stringify(r.diagnostics));
+  assert.equal(d[0].at.line, 8);
+});
+
+test('finding 3: folded arithmetic, array items, payloads and check sets are checked too', () => {
+  const field = (decl, types = '') => compile(`module t\n${types}machine M {\n  state {\n    ${decl}\n  }\n  action A()\n  on A { reject "no" }\n}\n`).map((d) => d.code);
+  assert.deepEqual(field('n : 0..3 = 2 + 5'), ['PL1201']);
+  assert.deepEqual(field('n : 0..3 = 1 + 1'), []);
+  assert.deepEqual(field('m : map<0..1, 0..3> = [0, 9]'), ['PL1201']);
+  assert.deepEqual(field('s : S = B { k: 7 }', 'type S = A | B { k: 0..3 }\n'), ['PL1201']);
+  assert.deepEqual(field('p : int check { 10, 20 } = 15'), ['PL1201']);
+  assert.deepEqual(field('w : string check { "a", "b" } = "c"'), ['PL1201']);
+  assert.deepEqual(field('p : int check { 10, 20 } = 20'), []);
+});
+
 void readFileSync;

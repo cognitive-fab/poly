@@ -286,10 +286,66 @@ class Checker {
   private checkInit(f: A.Field, ty: Ty): void {
     const got = this.typeOf(f.init, this.scope('init'), ty);
     if (!same(got, ty)) { this.err('PL1201', f.init, `initial value of ${f.name} has type ${tyToString(got)}, not ${tyToString(ty)}`); return; }
-    if (ty.k === 'int' && f.init.kind === 'Int') {
-      const v = f.init.value;
-      if (v < ty.lo || v > ty.hi) this.err('PL1201', f.init, `initial value ${v} is outside ${tyToString(ty)}`);
-      if (f.check?.domain.kind === 'DomainRange' && (v < f.check.domain.lo || v > f.check.domain.hi)) this.err('PL1201', f.init, `initial value ${v} is outside the check domain of ${f.name}`);
+    // Review finding 3: the initial state must be in the instance (PS4.2), so every initial value is
+    // folded to a constant and checked against its declared type and check domain, part by part.
+    this.checkConst(f.init, ty, f.check, f.name);
+  }
+
+  /** Folds a constant expression: a number, bool, string or constructor name; undefined when not constant. */
+  private fold(e: A.Expr): number | boolean | string | undefined {
+    switch (e.kind) {
+      case 'Int': case 'Bool': case 'String': return e.value;
+      case 'Name': return e.name;
+      case 'Unary': {
+        const v = this.fold(e.arg);
+        if (e.op === '-' && typeof v === 'number') return -v;
+        if (e.op === '!' && typeof v === 'boolean') return !v;
+        return undefined;
+      }
+      case 'Binary': {
+        const a = this.fold(e.left);
+        const b = this.fold(e.right);
+        if (typeof a !== 'number' || typeof b !== 'number') return undefined;
+        switch (e.op) {
+          case '+': return a + b;
+          case '-': return a - b;
+          case '*': return a * b;
+          case '/': return b === 0 ? undefined : Math.trunc(a / b);
+          case '%': return b === 0 ? undefined : a % b;
+          default: return undefined;
+        }
+      }
+      default: return undefined;
+    }
+  }
+
+  /** Reports the first part of a constant that leaves its declared type or check domain, at that part's line. */
+  private checkConst(e: A.Expr, ty: Ty, check: A.CheckClause | null, what: string): void {
+    if (e.kind === 'CtorExpr' && ty.k === 'union') {
+      const c = this.env.unions.get(ty.name)!.ctors.find((x) => x.name === e.ctor);
+      for (const f of e.fields) {
+        const decl = c?.fields.find((x) => x.name === f.name);
+        if (decl) this.checkConst(f.value, this.tyOf(decl.type), null, `${what}.${f.name}`);
+      }
+      return;
+    }
+    if (ty.k === 'map' && (e.kind === 'MapLit' || e.kind === 'ArrayLit')) {
+      const items = e.kind === 'MapLit' ? e.entries.map((x) => x.value) : e.items;
+      items.forEach((x, i) => this.checkConst(x, ty.value, null, `${what}[${i}]`));
+      return;
+    }
+    const v = this.fold(e);
+    if (v === undefined) return;
+    if (ty.k === 'int' && typeof v === 'number' && (v < ty.lo || v > ty.hi)) {
+      this.err('PL1201', e, `initial value ${v} of ${what} is outside its type ${tyToString(ty)}`);
+      return;
+    }
+    if (check) {
+      const d = check.domain;
+      const inDomain = d.kind === 'DomainRange'
+        ? typeof v === 'number' && v >= d.lo && v <= d.hi
+        : d.values.some((x) => (x.kind === 'Name' ? x.name : x.value) === v);
+      if (!inDomain) this.err('PL1201', e, `initial value ${JSON.stringify(v)} of ${what} is outside its check domain (PS4.2)`);
     }
   }
 

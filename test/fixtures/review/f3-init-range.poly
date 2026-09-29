@@ -1,0 +1,15 @@
+// Review finding 3: an initial value outside the field's declared range must be a type error at its line.
+// Before the fix `-1` (a unary minus, not a literal) passed stage 0, and poly check refused the
+// program with PL2501, blaming the toolchain.
+module review
+
+machine Gate {
+  state {
+    coins : 0..3 = -1
+  }
+  action Coin()
+  on Coin {
+    require coins < 3 else reject "full"
+    coins' = coins + 1
+  }
+}
