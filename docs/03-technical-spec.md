@@ -1,8 +1,8 @@
 # poly · Technical specification
 
-*Cognitive Fab · September 2026 · draft v0.2 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.3 · specification only, no code*
 
-v0.2 answers the review in [`reviews/review-2026-09-29-blunt.md`](reviews/review-2026-09-29-blunt.md). The response, item by item, is in [`reviews/response-2026-09-29.md`](reviews/response-2026-09-29.md).
+The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2 answered [`reviews/review-2026-09-29-blunt.md`](reviews/review-2026-09-29-blunt.md) and v0.3 answers [`reviews/review-2026-09-29-formal.md`](reviews/review-2026-09-29-formal.md); the responses are in [`reviews/`](reviews/).
 
 This document fixes the grammar, the semantics and the formats. It covers the lowering of each construct to the Poly stack artefacts, the integration of the gate with the kernel, the diagnostics, the command surface, the implementation plan and the first experiment.
 
@@ -44,7 +44,7 @@ Migrate     = "{" "migrate" "{" { "new" "." Ident "=" Expr } "}" "}" ;
 StateBlock  = "state" "{" { Field } "}" ;
 Field       = Ident ":" Type [ Check ] "=" Expr [ "internal" | "derived" ] ;
 Check       = "check" Domain [ "strict" | "disclosed" ] ;
-MachineItem = Terminal | Action | Handler | Guard | Invariant | Effect | Timer ;
+MachineItem = Terminal | Action | Handler | Guard | Property | Effect ;
 Terminal    = "terminal" Expr ;
 Action      = "action" Ident "(" [ Param { "," Param } ] ")" ;
 Param       = Ident ":" Type [ Check ] ;
@@ -62,7 +62,14 @@ Stmt        = "require" Expr "else" "reject" String
             | "spawn" QualIdent "as" Ident "(" [ Args ] ")" ChildWiring
             | "signal" Ident "->" Ident "(" [ Args ] ")" ;
 ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
-Invariant   = [ "step" | "reject" | "emits" | "compose" ] "invariant" Ident ":" Expr ;
+Property    = "invariant" Ident ":" Expr
+            | "step" "property" Ident ":" Expr
+            | "reject" "property" Ident ":" Expr
+            | "path" "property" Ident ":" Expr
+            | "compose" "invariant" Ident ":" Expr
+            | "liveness" Ident ":" ( "eventually" Expr | Expr "leads" "to" Expr )
+              "under" "fair" "{" Group { "," Group } "}" ;
+Group       = Ident { "|" Ident } ;
 Effect      = "effect" Ident "(" [ Param { "," Param } ] ")" "{" { EffectItem } "}" ;
 EffectItem  = "kind" String | "labels" "{" Label { "," Label } "}" | "class" Class
             | "retry" "{" "attempts" Int "," "base" Duration "," "timeout" Duration "}"
@@ -77,14 +84,15 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
 
 - **PT2.1** Keywords are reserved. Identifiers follow TypeScript identifier rules. Rejection reasons and effect kinds are string literals, so agents can reuse the names already present in a system.
 - **PT2.2** The expression sublanguage (AD-2) is a total, side-effect-free subset of TypeScript expressions:
-  - literals, field and parameter names, `pre.` and `post.` (in step invariants), enum members;
+  - literals, field and parameter names, `pre.` and `post.` (in step properties), enum members;
   - `== != < <= > >= && || !`, `+ - *`, and integer `/` and `%` (division by zero is a type error);
   - `implies`;
   - `count(kind)` and `before(a, b)` (in emission invariants);
   - `in { … }`;
   - map indexing `m[k]`, where `k` is a value of the map's key enum; map update is the statement form `m' = m with [k] = v`, which writes one entry and leaves the others unchanged.
 
-  It has no loops, no calls to host functions and no string operations beyond equality and membership. Every expression terminates by construction.
+  It has no loops, no calls to host functions and no string operations beyond equality and membership. Every expression terminates by construction. Precedence and associativity are fixed in PS12; the formatter parenthesises any mix of `implies` with `&&` or `||`.
+  Primed fields are write-only: an expression never reads `f'` (PS2.3), and a field written twice on one path is `PL2102 DOUBLE_WRITE` (PS2.4).
 - **PT2.3** Policies use PX, Polyaxion's three-valued (Kleene) language, and they live in `.policy.poly` files (PT1.1a). The difference is visible in the syntax, not only in the checker:
   - policies compare with `is`, `is not` and `in`, and test for a missing value with `unknown(x)`;
   - policies do not accept `==`, `!=` or `!`, and machines do not accept `is`, `is not` or `unknown`.
@@ -203,8 +211,8 @@ machine Order {
   }
 
   invariant shipped-was-paid: status == Shipped implies paid
-  step invariant cancel-is-final: pre.status == Cancelled implies post.status == Cancelled
-  reject invariant place-empty: action == Place && pre.items == 0 implies rejected("empty-order")
+  step property cancel-is-final: pre.status == Cancelled implies post.status == Cancelled
+  reject property place-empty: (action == Place && pre.items == 0) implies rejected("empty-order")
 
   effect charge(amount: int) {
     kind "payment.charge"
@@ -215,7 +223,7 @@ machine Order {
     failed -> PaymentFailed(code: "declined")
     exhausted -> PaymentFailed(code: "exhausted")
   }
-  emits invariant charge-at-most-once: count("payment.charge") <= 1
+  path property charge-at-most-once: count("payment.charge") <= 1
 }
 ```
 
@@ -224,7 +232,7 @@ This source contains two findings.
 1. **Domain escape.** `AddItem` can overflow `items: 0..3`. The model check reports `PL3102 DOMAIN_ESCAPE` with the witness `AddItem, AddItem, AddItem, AddItem`, and offers two typed fixes:
    - add `require items < 3 else reject "cart-full"`;
    - widen the range.
-2. **Double charge.** `Pay` accepts while the order is `Placed` but does not change its state, so a second `Pay` emits a second charge. Emission admission reports `PL4001 EMISSION_INVARIANT` for `charge-at-most-once`, with the witness `AddItem, Place, Pay(10), Pay(10)`. The fix is a `Charging` status that `Pay` enters and `PaymentOk` / `PaymentFailed` leave. This is the double-charge sequence the Poly stack was built to find: each call is allowed, and the sequence is not.
+2. **Double charge.** `Pay` accepts while the order is `Placed` but does not change its state, so a second `Pay` emits a second charge. The path property check reports `PL4001 PATH_PROPERTY` for `charge-at-most-once`, with the witness `AddItem, Place, Pay(10), Pay(10)`. The fix is a `Charging` status that `Pay` enters and `PaymentOk` / `PaymentFailed` leave. This is the double-charge sequence the Poly stack was built to find: each call is allowed, and the sequence is not.
 
 `amount` flows into the irreversible `charge`, so its check domain `{ 10, 20 }` is `strict` by default (PT3.4a). A `Pay(15)` is rejected at dispatch with `outside-check-domain`, and the program that runs is the program that was checked.
 
@@ -259,16 +267,24 @@ export const rejectionInvariants = [
 ]
 ```
 
-## PT5. Invariants
+## PT5. Properties
 
-| poly form | Lowered to | Checked by | Semantics |
+The five kinds and their meanings are defined in PS5. This section fixes how each is lowered and which engine checks it.
+
+| poly form | Meaning | Lowered to | Checked by |
 |---|---|---|---|
-| `invariant n: e` | `stateInvariants` | polygraph BFS, Polytrion monitors | `e` holds in every reachable state |
-| `step invariant n: e` | `transitionInvariants` | polygraph BFS | `e` holds over every accepted step `(pre, action, data, post)` |
-| `reject invariant n: e` | `rejectionInvariants` | polygraph BFS with step verdicts | `e` holds over every step; `rejected(r)` is true when the step was rejected with reason `r` |
-| `emits invariant n: e` | `effect-invariants.mjs` | polyrun `check-effects` | `e` holds over every emission path; `count(k)`, `before(a, b)` and `actions` are available |
-| `compose invariant n: e` | `invariants.compose.mjs` | polyrun `check-product` | `e` holds over every joint state of a parent and its children |
-| (automatic) `domain:<field>` | `stateInvariants` | polygraph BFS | PT3.5 |
+| `invariant n: e` | state predicate on every reachable state (PS5.1) | `stateInvariants` | polygraph BFS; Polytrion monitors (v2) |
+| `step property n: e` | predicate on every accepted step (PS5.2) | `transitionInvariants` | polygraph BFS |
+| `reject property n: e` | predicate on every step, any verdict (PS5.3) | `rejectionInvariants` | polygraph BFS with step verdicts |
+| `path property n: e` | prefix-closed predicate on emission paths (PS5.4) | `effect-invariants.mjs` | polyrun `check-effects` |
+| `compose invariant n: e` | invariant of the joint machine (PS7.3) | `invariants.compose.mjs` | polyrun `check-product` |
+| `liveness n: … under fair { … }` | eventually or leads-to under weak fairness (PS5.5, PS6) | none (no engine format) | `poly-ref` over the explored graph (PS6.4) |
+| (automatic) `domain:<field>` | invariant (PT3.5) | `stateInvariants` | polygraph BFS |
+| (automatic) deadlock freedom | no reachable non-terminal state without an accepting action (PS5.6) | none | `poly-ref` over the explored graph |
+
+The engine formats keep their names (`transitionInvariants`, `effectInvariants`). Only the poly keywords changed, so each keyword now says what kind of property it is.
+
+**poly-ref.** The reference interpreter of PS9.3 explores the checked instance for translation validation. The same exploration yields the reachable graph, and poly-ref checks deadlock freedom and liveness on it. No engine checks either today. This is a deliberate exception to PA0.1, stated in the architecture's scope table. If polygraph gains deadlock or liveness checks, poly defers to it and keeps poly-ref for translation validation only.
 
 A named invariant is a forbidden region when it carries `region "<name>"`. The name is copied to the Polyaxion `security.json` `forbiddenRegions` entry when the machine is referenced by a policy (PT8.4).
 
@@ -301,7 +317,7 @@ Labels come from the closed Polyaxion vocabulary:
 - `egress:public`, `egress:external`;
 - `exec`, `admin`.
 
-An effect with no labels is reported as `PL6301 UNLABELLED_EFFECT` unless the project declares `unlabelled: "report"`. The `unlabelled` setting follows the polyflow platform policy field.
+An effect with no labels is reported as `PL6301 UNLABELLED_EFFECT`. In any scope where an obligation mentions `effects`, `labels` or `class`, it is refused instead (`PL6302 UNLABELLED_IN_LABELLED_SCOPE`, verdict `REFUSED`), because an unlabelled effect would make a label-based rule's condition unknown at runtime (PS8.4). Outside such scopes, `unlabelled: "report"` keeps the finding a finding, as in the polyflow platform policy field.
 
 ### PT6.3 Timers
 
@@ -363,6 +379,7 @@ policy repo-hygiene {
   obligation no-egress-after-secret "Never send data out after reading a secret." rule {
     when action.effects has "egress:external"
     require not history.any(a => a.effects has "read:private") else deny
+    on unknown escalate
   }
 
   obligation orders-irreversible "No irreversible effect on a cancelled order." rule {
@@ -381,7 +398,7 @@ In PX, `glob(action.path, …)` is unknown when `action.path` is missing, and an
 | poly | `polyaxion.policy.json` |
 |---|---|
 | `obligation … machine { … }` | `kind: "machine"` with `states`, `initial`, `transitions` (`{from, when, to}`), `guards` (`{in, when, reason}`) and `end` |
-| `obligation … rule { … }` | `kind: "rule"`, `when` / `require`; `else deny`, `else warn` and `else escalate` map to `severity` |
+| `obligation … rule { … }` | `kind: "rule"`, `when` / `require`; `else deny`, `else warn` and `else escalate` map to `severity`. `on unknown escalate \| deny \| skip` gives the outcome when `when` is unknown (PS8.2). The default is `escalate` for deny rules and `warn` for warn rules. `skip` must be explicit and is listed in the certificate under `skippedOnUnknown`. Polyaxion receives it as an `unknownWhen` field; if the engine does not yet support the field, the compiler rewrites the rule so that an unknown `when` yields the declared outcome. |
 | `obligation … invariant { … }` | `kind: "invariant"` over declared `vars` |
 | `recalled` | `kind: "recalled"`, compiled into `unenforced[]` |
 
@@ -415,7 +432,8 @@ This is the only new engine integration (architecture section 7.2).
   - **escalate:** the intent is held as `escalated` until a recorded approval (`poly approve <intent> --by <person> --ref <escalation>`) re-proposes it with `approved: { by, ref }`. An unmatched approval is refused with `wrong-participant:polyaxion:approval-unmatched`. An escalation that is not approved within `escalation.timeoutMs` is denied (PT9.7).
 - **PT9.3 Snapshot semantics.** The gate evaluates a proposal against exactly one snapshot: the post-state of the step that emitted the intent, identified by the `seq` and `stateDigest` the proposal carries (PT9.1).
   - The worker loads that snapshot from the journal by `(instance, seq)` and passes it with the proposal. The gate keeps no mirror of application state, so there is nothing to go stale.
-  - A gate decision is therefore a function of three inputs: the policy digest, the gate's session state Σ at proposal, and the snapshot at the emitting `seq`. All three are in the ledger, so replay reproduces every decision (PF8.6).
+  - A gate decision is a function of three inputs: the policy digest, the gate's session state Σ at proposal, and the snapshot at the emitting `seq` (kernel assumption K6).
+  - Σ depends on the order in which the session received proposals and settles, and a session spans runs. The gate therefore assigns a **session sequence** `sseq` to every proposal and settle, and each ledger event records its `sseq` and the digest of Σ before it (PS11.1). Replaying a session in `sseq` order reproduces every decision and every Σ digest (PS11.2). Replaying a run reproduces its gate decisions when the sessions it touched are replayed with it (PS11.3).
   - If the snapshot at `seq` cannot be loaded (archived and not restored), the proposal is refused with class `unavailable`, never evaluated against a newer state.
 - **PT9.4 Settle.** After the handler returns, the worker calls `SETTLE { observed: { ok, output digest } }`, then dispatches the completion action. Taint only grows, as in Polyaxion today.
 - **PT9.5 Unavailability.** If the gate is unreachable, the intent stays pending and is not executed. The failure class is `unavailable`. The runtime never fails open.
@@ -475,13 +493,17 @@ This is the only new engine integration (architecture section 7.2).
     on HandlerOk    { require status == Running  else reject "not-running"   status' = Settled }
     on HandlerFailed { require status == Running else reject "not-running"
                        if attempts < 3 { status' = Allowed } else { status' = Dead } }
-    on SettleFailed { require status == Settled  else reject "not-settled"   status' = Allowed }
+    on SettleFailed { require status == Settled  else reject "not-settled"
+                      if attempts < 3 { status' = Allowed } else { status' = Dead } }
     on SettleOk     { require status == Settled  else reject "not-settled"   status' = Done }
 
-    invariant one-decision-per-execution: executed implies decisions <= 1 || approved
-    step invariant no-reproposal-after-allow:
+    invariant one-decision-per-execution: executed implies (decisions <= 1 || approved)
+    step property no-reproposal-after-allow:
       pre.status in { Allowed, Running, Settled } implies post.status != Proposed
-    step invariant no-deny-after-run: pre.executed implies post.status != Denied
+    step property no-deny-after-run: pre.executed implies post.status != Denied
+    liveness settles: eventually status in { Done, Denied, Dead }
+      under fair { Propose, GateAllow | GateDeny | GateEscalate, EscalationTimeout, Start,
+                   HandlerOk | HandlerFailed, SettleOk | SettleFailed }
   }
   ```
 
@@ -564,11 +586,11 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 |---|---|---|
 | PL0xxx | parse, format, fixes | `PL0001 SYNTAX`, `PL0201 STALE_FIX` |
 | PL1xxx | types, domains | `PL1101 UNBOUNDED_DOMAIN`, `PL1201 POLICY_ONLY_CONSTRUCT`, `PL1202 MACHINE_ONLY_CONSTRUCT`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD` |
-| PL2xxx | lowering, strict validate | `PL2101 WRITE_BEFORE_REQUIRE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT` |
-| PL3xxx | model check | `PL3001 INVARIANT_REACHABLE`, `PL3002 REJECTION_INVARIANT`, `PL3102 DOMAIN_ESCAPE`, `PL3901 BOUND_HIT` |
-| PL4xxx | emission admission | `PL4001 EMISSION_INVARIANT` |
-| PL5xxx | composition | `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION` |
-| PL6xxx | policy admission, labels | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT` |
+| PL2xxx | lowering, strict validate, translation validation | `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
+| PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
+| PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
+| PL5xxx | composition | `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH` |
+| PL6xxx | policy admission, labels | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
 | PL9xxx | replay | `PL9001 SPEC_DIVERGENCE`, `PL9101 CONTROL_FAILED` |
@@ -587,6 +609,17 @@ The verdicts and exit codes follow the polygents codes:
 | Non-determinism detected by the double pass | 3 |
 | Error | 4 |
 | Usage | 64 |
+
+### PT12.3a Every verdict carries its instance
+
+A verdict is printed with the checked instance it holds for (PS4.3), and the same record is written to the certificate under `instance`:
+
+```
+CLEAN  orders.Order  over items ∈ 0..3, amount ∈ {10, 20}, code ∈ {declined, exhausted, denied};
+       children ≤ 0; cascade depth ≤ 8; 212 states; kernel assumptions K1, K2, K4, K7
+```
+
+The line above is illustrative; the counts are not measured. A `CLEAN` without its instance is not a valid output of the toolchain.
 
 ### PT12.4 Witness export
 
@@ -751,11 +784,11 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 
 | Milestone | Scope | Gate |
 |---|---|---|
-| M0 · Language core | Parser, formatter, AST digest and node ids, types and domains (with `strict` / `disclosed`), lowering of `state`, `action`, `on`, `guard`, `terminal` and the three invariant kinds | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. |
+| M0 · Language core | Parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). |
 | M1 · Effects and composition | `emit`, effect declarations, timers, children, emission and compose invariants, maps | The `polyrun-oms` order machine in poly gives the same `check-effects` and `check-product` results as the hand-written artefacts (AC1). |
-| M2 · Diagnostics | Diagnostic model, verdict fold, witness export to trace and test, node-addressed fixes with preconditions, `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. |
+| M2 · Diagnostics | Diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain and today's polyrun | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
-| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is model-checked clean and the worker conforms to it by trace replay. |
+| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. |
 | M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, escalation with timeout, person-key signatures (PT12.5) | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. |
 | M6 · Agents | Workflow lowering, MCP server, language server, Claude Code plugin, `poly new` | AC5. A workflow in poly runs through unchanged polyflow tools. |
 | M7 · Feedback | `poly mine`, `poly propose`, `poly export traces` | A Polyx rule adjudicated `real` round-trips to an admitted obligation. A polyness proposal arrives as poly source and is admitted or refused by the pipeline. |
@@ -767,13 +800,16 @@ Worlds (appendix A) are planned after M7 and are not part of v1.
 - **Bounded checks.** Checks are exhaustive only over declared check domains. A defect that needs a value outside the domain is not found. For `strict` fields, out-of-domain input is rejected at dispatch, so the checked domain is the running domain. For `disclosed` fields, drift is journaled (PT3.4), not prevented.
 - **Model-code gap.** poly removes the gap between model and code for the machine itself. It does not check host handlers. Handler behaviour is observed only through completion actions and the `SETTLE` record.
 - **State explosion.** It is managed by small machines and atomic cascades, not by abstraction. A check that hits its bound reports `INCONCLUSIVE` (`PL3901 BOUND_HIT`).
+- **Liveness.** Liveness holds only under the fairness stated with each property, and at runtime only under K5 (worker and timer fairness), which is monitored, not proved.
+- **Kernel assumptions.** Every guarantee about a running program holds under the kernel assumptions K1 to K7 of PS10. Their evidence is listed there. poly does not verify the kernel.
+- **Over-approximation.** The checked instance lets the environment offer any action at any time (PS4.4). Clean results are sound; some witnesses may be infeasible and are marked `environment: unconstrained`.
 - **Advice.** Advice is recorded but not enforced until it is promoted, adjudicated and admitted.
 - **Worlds.** Not in v1 (appendix A).
 - **Language models.** The toolchain calls a language model only in `poly new` and in optional explanation text. No verdict depends on one.
 
 ## Conclusion
 
-The technical core of poly is a lowering table and a verdict fold:
+The meaning of poly is fixed in 04-semantics. The technical core is a lowering table checked against that meaning on every run, and a verdict fold:
 
 - Every construct maps to an artefact an existing engine reads.
 - Every engine result maps to a diagnostic with a stable code, a witness and typed fixes.

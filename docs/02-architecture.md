@@ -1,8 +1,8 @@
 # poly · Architecture
 
-*Cognitive Fab · September 2026 · draft v0.2 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.3 · specification only, no code*
 
-v0.2 answers the review in [`reviews/review-2026-09-29-blunt.md`](reviews/review-2026-09-29-blunt.md); see [`reviews/response-2026-09-29.md`](reviews/response-2026-09-29.md).
+The meaning of poly programs is defined in [`04-semantics.md`](04-semantics.md). v0.2 and v0.3 answer the two reviews in [`reviews/`](reviews/).
 
 This document describes how poly is built from the engines of the Poly stack. What poly must do is in [`01-functional-spec.md`](01-functional-spec.md) (`PF` ids). The grammar, semantics and formats are in [`03-technical-spec.md`](03-technical-spec.md) (`PT` ids). Facts about the existing engines come from [`research/primitive-inventory.md`](research/primitive-inventory.md).
 
@@ -14,7 +14,8 @@ A poly module is compiled to the artefact family the Poly engines already read. 
 
 | Id | Principle | Consequence |
 |---|---|---|
-| PA0.1 | **Lower, never reimplement.** | poly has no model checker, simulator, gate or miner of its own. A new semantic need is a change to an engine, made in that engine's repository. |
+| PA0.0 | **The semantics is the definition.** | 04-semantics defines what a program means. The lowering is correct when it agrees with it (PS9), and every `poly check` verifies that agreement for the program at hand. |
+| PA0.1 | **Lower, never reimplement.** | Safety checking, simulation, governance and mining stay in the engines. A new semantic need is a change to an engine, made in that engine's repository. One stated exception: `poly-ref`, the reference interpreter, checks translation validation, deadlock freedom and liveness, which no engine checks today (section 2a). |
 | PA0.2 | **The checked program is the running program, over its check domains.** | The runtime executes the lowered `next.cjs` the checker checked. The certificate binds them by digest, and a digest mismatch refuses the load. Inputs outside a `strict` check domain are rejected at dispatch; inputs outside a `disclosed` domain are accepted and journaled as drift, and the certificate lists those fields (PT3.4). |
 | PA0.3 | **One source per machine.** | Contract, module, invariants, effects, manifest, emission invariants and migration are derived. None is edited by hand. |
 | PA0.4 | **No silent clean.** | Every check reports `CLEAN`, `FINDINGS`, `REFUSED`, `UNDERPOWERED` or `INCONCLUSIVE`. A check that did not run is listed as not run. |
@@ -35,6 +36,7 @@ poly adds no new checking, simulation or governance engine. It is still a substa
 | | Certificate format, signer and verifier, person keyring | toolchain |
 | | Runtime host: certificate check at load, outbox worker with the gate hook, per-run ledger writer, anchors | runtime |
 | | The outbox intent machine (PT9.7), written in poly | runtime model |
+| | `poly-ref`: reference interpreter written from 04-semantics; translation validation, deadlock and liveness checks over the explored graph | checker (the one exception to PA0.1) |
 | | CLI, MCP server, language server, Claude Code plugin | agent interface |
 | **Changed code in engines** | polyrun: gate hook point in the outbox worker; ledger as a store option | small, specified in PT9 and PT16 |
 | | polyaxion: an `effect` proposal kind that carries the emitting-step snapshot | small, PT9.1 and PT9.3 |
@@ -85,10 +87,10 @@ Every construct has one target artefact and one or more engines that read it. Th
 |---|---|---|---|
 | `machine`, `state`, `action`, `terminal` | `contract.json` | every engine | `stateKeys`, `actions`, `dataDomain`, `initState`, `terminalStates` |
 | `on Action { require … else reject …; field' = … }` | `next.cjs` (SAM v2 strict: named intents, sealed `modelShape`, keyed acceptors, `reject`, `next`, `unchanged`) | polygraph, polyrun, polyflow, Polytrion, polyaxion | `module.exports = { instance, init, actions, getState, setState }` |
-| `invariant`, `step invariant`, `reject invariant` | `invariants.mjs` | polygraph, polynv, polyvers, Polytrion monitors | `stateInvariants`, `transitionInvariants`, `rejectionInvariants` |
+| `invariant`, `step property`, `reject property` | `invariants.mjs` | polygraph, polynv, polyvers, Polytrion monitors | `stateInvariants`, `transitionInvariants`, `rejectionInvariants` |
 | `emit`, `after`, `cancel`, `spawn`, `signal` | `effects.cjs` (pure mapper) | polyrun, polyflow | built-in `timer`, `cancelTimer`, `spawnChild`, `signalChild` plus manifest kinds |
 | `effect Kind { … }` | `effects.manifest.json` | polyrun, polyflow, Polyaxion (labels) | `payloadSchema`, `onSuccess`, `onFailure`, `onExhausted`, `retry` |
-| `emits invariant` | `effect-invariants.mjs` | polyrun `check-effects`, polyflow admission | `effectInvariants:[{name, pred(path)}]` |
+| `path property` | `effect-invariants.mjs` | polyrun `check-effects`, polyflow admission | `effectInvariants:[{name, pred(path)}]` |
 | `compose invariant` | `invariants.compose.mjs` | polyrun `check-product` | joint state and stimulus predicates |
 | `policy`, `obligation` (in `.policy.poly` files) | `polyaxion.policy.json` (version 2) | Polyaxion compile, admission, gate; polycheck regions | `rule`, `machine`, `invariant`, `recalled` kinds |
 | effect `labels`, `class` | manifest fields + Polyaxion label catalogue | Polyaxion, polycheck | closed label vocabulary |
@@ -96,6 +98,8 @@ Every construct has one target artefact and one or more engines that read it. Th
 | `world` (deferred to v2) | `topology.json`, `responders.mjs`, `drivers.mjs`, `probes.mjs` | Polytrion | Polytrion world layout |
 | `version N from M { migrate … }` | `migrate.cjs` | polyvers, polyrun deploy gate | pure `migrate(oldState)` |
 | `check` domains | `dataDomain` + certificate `domains` | polygraph, polynv | disclosed assumptions |
+
+Every row is checked, per program, by translation validation against 04-semantics (PS9.3). Liveness properties and the deadlock check have no engine artefact; poly-ref checks them.
 
 Two constructs have no artefact of their own:
 
@@ -108,11 +112,13 @@ Two constructs have no artefact of their own:
 
 ```
 source ─► 0 parse, type, domain ─► lower ─► 1 strict validate
+                                           ─► 1b translation validation (poly-ref vs lowered module, PS9.3)
                                                │
           ┌────────────────────────────────────┘
           ▼
-   2 model check (polygraph BFS over declared domains, invariants, rejection invariants)
-   3 emission admission (polyrun check-effects over effect-invariants)
+   2 model check (polygraph BFS: invariants, step and reject properties)
+   2b deadlock freedom and liveness under stated fairness (poly-ref, PS5.6, PS6)
+   3 path properties (polyrun check-effects over effect-invariants)
    4 composition (polyrun check-product over invariants.compose)
    5 policy admission (polyaxion compile → triple → harden, fullyMediated)
    6 capability proof (polycheck regions over effect labels and agent tools)
@@ -190,7 +196,7 @@ poly connects the two at the outbox worker. Each effect intent is proposed to th
 
 This is the only engine integration poly requires that does not exist today. It is specified in PT9.
 
-The gate also sees the program's own state, but only one snapshot of it: the post-state of the step that emitted the effect, carried with the proposal by `seq` and digest. The gate keeps no mirror of application state. This lets an obligation refer to machine states (PF4.3) while every decision stays a function of recorded inputs, so replay reproduces it (PT9.3).
+The gate also sees the program's own state, but only one snapshot of it: the post-state of the step that emitted the effect, carried with the proposal by `seq` and digest. The gate keeps no mirror of application state. This lets an obligation refer to machine states (PF4.3) while every decision stays a function of recorded inputs (kernel assumption K6). Because the gate's session state depends on the order of events across runs, each proposal and settle carries a session sequence number and the digest of the state before it, so a session replays exactly (PS11).
 
 The interleavings of retry, gate decision, handler and settle are themselves specified as a poly machine and model-checked (PT9.7). One rule matters most: once allowed, an intent is not proposed again for the same idempotency key.
 
@@ -295,7 +301,7 @@ The aim is to change the engines as little as possible.
 
 ## 14. Conclusion
 
-poly is a compiler, a toolchain and one runtime integration over engines that already exist. Section 2a lists its full extent. Its checking, governance and execution semantics all come from those engines. The new runtime surface is small and is itself modelled: the gate hook evaluates against recorded snapshots, the outbox intent is a checked machine, and the ledger is chained per run. This keeps the claims of each engine intact. poly checks nothing the engines do not check, and it runs nothing the checker did not see.
+poly is a compiler, a toolchain and one runtime integration over engines that already exist, with a meaning of its own defined in 04-semantics. Section 2a lists its full extent. Safety checking, governance and execution come from the engines; poly-ref adds what none of them checks today: agreement of the lowering with the semantics, deadlock freedom and liveness. Every guarantee about a running program names the kernel assumptions it rests on (PS10). The new runtime surface is small and is itself modelled: the gate hook evaluates against recorded snapshots, the outbox intent is a checked machine, and the ledger is chained per run. This keeps the claims of each engine intact. poly checks nothing the engines do not check, and it runs nothing the checker did not see.
 
 ## References
 

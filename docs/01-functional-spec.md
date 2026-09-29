@@ -1,8 +1,8 @@
 # poly · Functional specification
 
-*Cognitive Fab · September 2026 · draft v0.2 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.3 · specification only, no code*
 
-v0.2 answers the review in [`reviews/review-2026-09-29-blunt.md`](reviews/review-2026-09-29-blunt.md); see [`reviews/response-2026-09-29.md`](reviews/response-2026-09-29.md).
+The meaning of every requirement below is defined in [`04-semantics.md`](04-semantics.md). v0.2 and v0.3 answer the two reviews in [`reviews/`](reviews/).
 
 Requirement ids (`PF1.1`) are cited by the architecture (`PA`) and technical (`PT`) specifications.
 
@@ -107,7 +107,7 @@ The nearest systems each cover part of the ground:
 - **G2.** A poly program cannot run until it is admitted. Admission means the program passes every applicable check or the failure is recorded as a declared exception.
 - **G3.** Every finding comes as a witness: a concrete, replayable sequence plus a generated test.
 - **G4.** The checked program is the running program, over its check domains. The runtime executes the lowered artefacts the checker checked, and no other code. Inputs outside a `strict` check domain are rejected; inputs outside a `disclosed` one are journaled as drift.
-- **G5.** Every effect crosses a gate and every decision is journaled with a receipt.
+- **G5.** Every effect crosses a gate and every decision is journaled with a receipt. That every effect is eventually executed or refused is a liveness property. It holds under the fairness stated in PS6 and kernel assumption K5, and it is listed as such, not as a checked guarantee.
 - **G6.** The journal feeds back into design:
   - replay corpora;
   - mined rules (Polyx);
@@ -145,13 +145,15 @@ The nearest systems each cover part of the ground:
 
 ### PF2 · Declaring what must hold
 
-- **PF2.1** A machine declares three kinds of invariant:
-  - **state invariants**, predicates over a state;
-  - **step invariants**, predicates over `(pre, action, data, post)`;
-  - **reject invariants**, predicates about rejections and their reasons.
-- **PF2.2** A machine declares **emission invariants** over the effects it may emit on any path.
+- **PF2.1** A machine declares properties of distinct kinds, each with its own keyword (PS5):
+  - **invariants**, predicates over a state;
+  - **step properties**, predicates over an accepted step `(pre, action, data, post)`;
+  - **reject properties**, predicates over any step and its verdict.
+- **PF2.2** A machine declares **path properties** over the effects it may emit along any path. They are prefix-closed, so they are safety properties with finite witnesses.
 - **PF2.3** A module declares **composition invariants** over a parent and its children.
 - **PF2.4** An invariant may name a forbidden region. A check returns either a proof that no path enters it or the shortest witness that one does.
+- **PF2.5** A machine may declare **liveness** properties (`eventually P`, `P leads to Q`), always with the weak-fairness assumption they need (PS6). A violation is reported as a lasso: a path to a cycle that can repeat forever.
+- **PF2.6** Every machine is checked for **deadlock**: a reachable non-terminal state in which no action is accepted. No declaration is needed.
 
 ### PF3 · Declaring effects, timers and children
 
@@ -171,7 +173,7 @@ The nearest systems each cover part of the ground:
   - machine obligations;
   - invariant obligations;
   - recalled text.
-- **PF4.2** Policy expressions are three-valued. An unknown value never satisfies a requirement.
+- **PF4.2** Policy expressions are three-valued. An unknown value never satisfies a requirement, and a deny rule whose condition is unknown escalates unless the author states otherwise (PS8.2). In a scope with label-based rules, an unlabelled effect is refused at admission (PS8.4).
 - **PF4.3** A policy may reference effect labels and the program's own machine states. This is the link between governance and program semantics. A machine state is read as of the step that emitted the effect under decision, so every gate decision can be replayed.
 - **PF4.4** A rule mined by Polyx and adjudicated `real` can be emitted as a poly obligation.
 
@@ -205,6 +207,8 @@ The nearest systems each cover part of the ground:
 - **PF7.5** `poly check --against <traces>` replays recorded traces from the host system against the program and reports divergences. Positive and negative controls run first.
 - **PF7.6** `poly check --since <version>` runs the version gate against the previous version and, when given, live snapshots.
 - **PF7.7** `poly grade` reports the adequacy of the invariants by mutation (polynv).
+- **PF7.8** Every `poly check` validates the lowering: a reference interpreter written from the semantics explores the checked instance and must agree with the lowered module on every transition (PS9.3). A disagreement refuses the program and is reported as a toolchain defect.
+- **PF7.9** Every verdict is printed with the checked instance it holds for: the domains, the bounds, and the kernel assumptions it relies on.
 
 ### PF8 · Running
 
@@ -214,7 +218,7 @@ The nearest systems each cover part of the ground:
 - **PF8.4** Every effect crosses the governance gate before it runs. A denial carries a witness and dispatches the effect's failure action with the denial reason.
 - **PF8.5** Every step and every gate decision is journaled. The ledger is hash-chained per run, with signed heads and a periodic signed anchor over all runs.
 - **PF8.5a** Once the gate allows an effect, retries of that effect are not proposed again. Escalations have a timeout and are denied when it expires.
-- **PF8.6** A run can be replayed from its journal alone, and the replay must reproduce every post-state and every gate decision.
+- **PF8.6** A run can be replayed from its journal alone, and the replay must reproduce every post-state. Gate decisions are reproduced by replaying the gate sessions the run touched, in their recorded session order (PS11).
 - **PF8.7** The runtime refuses to load a new version that the version gate rejected. Instances can be pinned, migrated or upgraded.
 
 ### PF9 · The agent interface
@@ -242,7 +246,9 @@ The nearest systems each cover part of the ground:
 | AC3 | A seeded invariant violation yields a diagnostic with a witness. The exported host test fails on the unfixed program and passes on the fixed one. |
 | AC4 | A policy with a machine obligation over effect labels compiles, is admitted, and denies an irreversible effect in the forbidden state, with a witness and a signed receipt. |
 | AC5 | A workflow declared in poly runs through the polyflow MCP tools with no change to those tools. |
-| AC6 | Replaying a journal reproduces every post-state and every gate decision. |
+| AC6 | Replaying a journal reproduces every post-state. Replaying the sessions it touched, in session order, reproduces every gate decision and every session-state digest. |
+| AC8 | For every conformance case, translation validation agrees on every transition, and a deliberately broken lowering is refused with `PL2501`. |
+| AC9 | The `OutboxIntent` machine is deadlock-free and satisfies its liveness property under its stated fairness. Removing the `Dead` branch from `SettleFailed` yields a `PL3201 DEADLOCK` witness. |
 | AC7 | A breaking change is refused by `poly check --since` against a live snapshot set. |
 
 ## 8. How success is measured

@@ -14,7 +14,7 @@ poly adds no new checking, simulation or governance engine. It is a compiler, a 
 | Learn | Polyx, polyness |
 | Simulate (v2) | Polytrion |
 
-> Status: specification, draft v0.2 (after review). No code yet.
+> Status: specification, draft v0.3 (after two reviews). No code yet.
 
 ## A first look
 
@@ -40,7 +40,7 @@ machine Order {
   }
 
   invariant shipped-was-paid: status == Shipped implies paid
-  emits invariant charge-at-most-once: count("payment.charge") <= 1
+  path property charge-at-most-once: count("payment.charge") <= 1
 
   effect charge(amount: int) {
     kind "payment.charge"
@@ -55,7 +55,7 @@ machine Order {
 `poly check` finds that two `Pay` calls emit two charges:
 
 ```
-orders.poly:17  PL4001 EMISSION_INVARIANT  charge-at-most-once
+orders.poly:17  PL4001 PATH_PROPERTY  charge-at-most-once
   witness (4 steps):
     AddItem()      Draft/0  -> Draft/1
     Place()        Draft/1  -> Placed/1
@@ -63,7 +63,7 @@ orders.poly:17  PL4001 EMISSION_INVARIANT  charge-at-most-once
     Pay(10)        Placed/1 -> Placed/1   emits payment.charge   <- count = 2
   test:  poly witness sha256:3be1… --test   (fails on this program)
   fixes: [enter-charging-status]  add status Charging, entered by Pay, left by PaymentOk / PaymentFailed
-verdict: FINDINGS (exit 1)
+verdict: FINDINGS (exit 1)  over items ∈ 0..3, amount ∈ {10, 20}
 ```
 
 Each call is allowed; the sequence is not. That is the bug the Poly stack was built to find, reported before the program can run. The snippet is abridged; the full example is in the technical specification, PT4.5.
@@ -76,15 +76,19 @@ Each call is allowed; the sequence is not. That is the bug the Poly stack was bu
 |---|---|
 | [`docs/01-functional-spec.md`](docs/01-functional-spec.md) | The problem, users, goals, non-goals, functional requirements (`PF`), acceptance criteria and risks |
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Layers, the lowering map, the check pipeline, the certificate, the runtime and the gate, one ledger, the agent interface and architectural decisions (`PA`, `AD`) |
+| [`docs/04-semantics.md`](docs/04-semantics.md) | What a poly program means: states, steps, rejected steps, behaviours, the five kinds of property, fairness and liveness, composition, three-valued policies, lowering correctness, kernel assumptions and operator precedence (`PS`). The other documents defer to it. |
 | [`docs/03-technical-spec.md`](docs/03-technical-spec.md) | Grammar, types and domains, step semantics, invariants, effects, policies, the gate integration, diagnostics, commands, host API, ledger, layout, implementation plan and the first experiment (`PT`) |
 | [`docs/research/primitive-inventory.md`](docs/research/primitive-inventory.md) | The design-time and runtime primitives of every engine, read from source |
 | [`docs/reviews/review-2026-09-29-blunt.md`](docs/reviews/review-2026-09-29-blunt.md) | The v0.1 peer review |
 | [`docs/reviews/response-2026-09-29.md`](docs/reviews/response-2026-09-29.md) | The response to the review, item by item, and what changed in v0.2 |
+| [`docs/reviews/review-2026-09-29-formal.md`](docs/reviews/review-2026-09-29-formal.md) | The v0.2 formal review |
+| [`docs/reviews/response-2026-09-29-formal.md`](docs/reviews/response-2026-09-29-formal.md) | The response to the formal review, and what changed in v0.3 |
 | [`docs/research/landscape-2026-09.md`](docs/research/landscape-2026-09.md) | The current landscape: model-checkable languages, verification languages, languages for agents, durable runtimes, agent governance, and evidence on how coding agents fail |
 
 ## Principles
 
-1. **Lower, never reimplement.** poly has no checker, gate, simulator or miner of its own.
+0. **The semantics is the definition.** 04-semantics says what a program means; every `poly check` validates the lowering against it.
+1. **Lower, never reimplement.** Safety checking, governance, simulation and mining stay in the engines. The one exception is the reference interpreter, which checks lowering agreement, deadlock and liveness.
 2. **The checked program is the running program, over its check domains.** A certificate binds the source, the artefacts and the check results by digest. Out-of-domain inputs are rejected (`strict`) or journaled as drift (`disclosed`).
 3. **One source per machine.** Every engine artefact is derived.
 4. **No silent clean.** Every check reports clean, findings, refused, underpowered or inconclusive.
@@ -103,7 +107,15 @@ The Poly stack already holds the primitives a coding agent needs to write statef
 | **Machine** | A sealed state, a set of actions and one handler per action. The unit of checking and of execution. |
 | **Handler** | `on Action { … }`. Requires first, then writes. It either accepts or rejects with a named reason. |
 | **Check domain** | The finite set of values a field or parameter takes during checking. Narrower than the runtime type when declared so, and then disclosed. |
-| **Invariant** | A predicate that must hold: over states, steps, rejections, emissions or a parent with its children. |
+| **Invariant** | A predicate on states that holds in every reachable state. |
+| **Step property** | A predicate on every accepted step `(pre, action, data, post)`. |
+| **Reject property** | A predicate on every step, whatever its verdict. |
+| **Path property** | A prefix-closed predicate on the effects emitted along a path, such as `count(k) <= 1`. |
+| **Liveness** | A property that something eventually happens, stated with the weak-fairness assumption it needs; its counterexample is a lasso. |
+| **Deadlock** | A reachable non-terminal state in which no action is accepted. Checked for every machine. |
+| **Checked instance** | The finite set of inputs and states a verdict covers. Every verdict is printed with it. |
+| **poly-ref** | The reference interpreter written from 04-semantics, used for translation validation, deadlock and liveness. |
+| **Kernel assumption** | A property of the runtime (K1 to K7) that a guarantee about running programs depends on. |
 | **Witness** | The shortest concrete sequence that violates an invariant or reaches a forbidden region. It can be exported as a trace and as a test. |
 | **Effect** | A declared side effect emitted by an accepted step. It carries labels and a class, and passes the gate before it runs. |
 | **Label** | A term from a closed vocabulary (for example `egress:external`) that describes what an effect touches. |
