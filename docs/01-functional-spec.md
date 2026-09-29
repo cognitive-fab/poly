@@ -1,8 +1,8 @@
 # poly · Functional specification
 
-*Cognitive Fab · September 2026 · draft v0.4 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.5 · specification only, no code*
 
-The meaning of every requirement below is defined in [`04-semantics.md`](04-semantics.md). v0.2, v0.3 and v0.4 answer the three reviews in [`reviews/`](reviews/).
+The meaning of every requirement below is defined in [`04-semantics.md`](04-semantics.md). v0.2 to v0.5 answer the four reviews in [`reviews/`](reviews/).
 
 Requirement ids (`PF1.1`) are cited by the architecture (`PA`) and technical (`PT`) specifications.
 
@@ -107,7 +107,7 @@ The nearest systems each cover part of the ground:
 - **G2.** A poly program cannot run until it is admitted. Admission means the program passes every applicable check or the failure is recorded as a declared exception.
 - **G3.** Every finding comes as a witness: a concrete, replayable sequence plus a generated test.
 - **G4.** The checked program is the running program, over its check domains. The runtime executes the lowered artefacts the checker checked, and no other code. Inputs outside a `strict` check domain are rejected; inputs outside a `disclosed` one are journaled as drift.
-- **G5.** Every effect crosses a gate and every decision is journaled with a receipt. That every effect is eventually executed or refused is a liveness property. It holds under the fairness stated in PS6 and kernel assumption K5, and it is listed as such, not as a checked guarantee.
+- **G5.** Every effect crosses a gate and every decision is journaled with a receipt. That every effect is eventually executed or refused is part of the delivery guarantee, which belongs to the semantics (PS14). The runtime is obliged to implement it (R1), and a missed delivery is a runtime fault.
 - **G6.** The journal feeds back into design:
   - replay corpora;
   - mined rules (Polyx);
@@ -155,7 +155,8 @@ The nearest systems each cover part of the ground:
 - **PF2.3** A module declares **composition invariants** over a parent and its children.
 - **PF2.4** An invariant may name a forbidden region. A check returns either a proof that no path enters it or the shortest witness that one does.
 - **PF2.5** A machine may declare **liveness** properties (`eventually P`, `P leads to Q`), always with the weak-fairness assumption they need (PS6). A violation is reported as a lasso: a path to a cycle that can repeat forever.
-- **PF2.6** Every machine is checked for **deadlock**: a reachable non-terminal state in which no action is accepted. No declaration is needed.
+- **PF2.6** Every machine is checked for **deadlock**: a reachable non-terminal state in which no action is accepted. No declaration is needed. Machines marked `service` (never terminal) are exempt and are covered by the configuration's stuck check.
+- **PF2.7** A module may declare **configurations**: finite sets of instances with their initial addresses, the inputs the environment may inject and a bound on messages in transit. A configuration is checked with messages arriving in any order. Its invariants may span instances, and a bound hit is reported, never treated as clean.
 
 ### PF3 · Declaring effects, timers and children
 
@@ -166,7 +167,8 @@ The nearest systems each cover part of the ground:
   - its **class** (none, reversible, compensable or irreversible);
   - its **labels** from a closed vocabulary (for example `egress:external`, `read:private`).
 - **PF3.2** A machine may set and cancel named timers that fire actions.
-- **PF3.3** A machine may spawn and signal child machines. Children declare a completion action and a parent-terminal action.
+- **PF3.3** A machine may spawn and signal child machines. Attached children (the default) take part in their parent's atomic cascade and are co-located with it. Detached children are separate actors that communicate by messages and are checked as a configuration.
+- **PF3.3a** A machine may hold the address of another instance (`Ref<M>`) and send it a message (`send`). Addresses may be passed in messages. A machine cannot read another machine's state.
 - **PF3.4** An effect declares its targets as well as its labels. Its handler receives only the capabilities those labels and targets grant, and a handler module that reaches for ambient authority is refused. Optionally, handlers run in a sandbox whose policy is generated from the labels and targets.
 
 ### PF4 · Declaring governance
@@ -179,6 +181,7 @@ The nearest systems each cover part of the ground:
 - **PF4.2** Policy expressions have their own truth type, `Tri` (true, false, unknown), because policy inputs may be missing; machine expressions have type `Bool`. The type checker keeps them apart, and one set of operators serves both. Policy expressions are three-valued. An unknown value never satisfies a requirement, and a deny rule whose condition is unknown escalates unless the author states otherwise (PS8.2). In a scope with label-based rules, an unlabelled effect is refused at admission (PS8.4).
 - **PF4.3** A policy may reference effect labels and the program's own machine states. This is the link between governance and program semantics. A machine state is read as of the step that emitted the effect under decision, so every gate decision can be replayed.
 - **PF4.4** A rule mined by Polyx and adjudicated `real` can be emitted as a poly obligation.
+- **PF4.5** All obligations in a scope, from every source, are checked together: each mandate must remain dischargeable. A conflict is reported with the smallest set of obligations that causes it, and a promotion that would create one is refused.
 
 ### PF5 · Declaring agent workflows
 
@@ -252,7 +255,9 @@ The nearest systems each cover part of the ground:
 | AC5 | A workflow declared in poly runs through the polyflow MCP tools with no change to those tools. |
 | AC6 | Replaying a journal reproduces every post-state. Replaying the sessions it touched, in session order, reproduces every gate decision and every session-state digest. |
 | AC8 | For every conformance case, translation validation agrees on every transition, and a deliberately broken lowering is refused with `PL2501`. |
-| AC9 | The `OutboxIntent` machine is deadlock-free and satisfies its liveness property under its stated fairness. Removing the `Dead` branch from `SettleFailed` yields a `PL3201 DEADLOCK` witness. |
+| AC9 | The `OutboxIntent` machine is deadlock-free and satisfies its liveness property under its stated fairness. Replacing the `Dead` branch of `SettleFailed` with `Allowed` yields a witness: `PL3102 DOMAIN_ESCAPE` in the union form, `PL3201 DEADLOCK` in the v0.3 five-field form. |
+| AC10 | The `checkout` configuration (two orders, one inventory) reports the double-confirmation witness when the order confirms optimistically, and is clean, with no stuck state, when the order waits for `Taken`. |
+| AC11 | Promoting a mined rule that makes a mandate undischargeable is refused, and the finding names the minimal conflicting set. |
 | AC7 | A breaking change is refused by `poly check --since` against a live snapshot set. |
 
 ## 8. How success is measured

@@ -1,8 +1,8 @@
 # poly · Technical specification
 
-*Cognitive Fab · September 2026 · draft v0.4 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.5 · specification only, no code*
 
-The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2, v0.3 and v0.4 answer the three reviews in [`reviews/`](reviews/), with a response to each.
+The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2 to v0.5 answer the four reviews in [`reviews/`](reviews/), with a response to each.
 
 This document fixes the grammar, the semantics and the formats. It covers the lowering of each construct to the Poly stack artefacts, the integration of the gate with the kernel, the diagnostics, the command surface, the implementation plan and the first experiment.
 
@@ -34,7 +34,7 @@ The core grammar in EBNF. Terminals are quoted. `Expr` is the expression sublang
 
 ```ebnf
 Module      = "module" Ident { Decl } ;
-Decl        = Machine | Workflow | Enum | TypeDecl | Policy | Use ;
+Decl        = [ "service" ] Machine | Workflow | Enum | TypeDecl | Policy | Configuration | Use ;
 TypeDecl    = "type" Ident "=" [ "|" ] Ctor { "|" Ctor } ;
 Ctor        = Ident [ "{" Ident ":" Type { "," Ident ":" Type } "}" ] ;
 Use         = "use" QualIdent ;
@@ -62,7 +62,8 @@ Stmt        = "require" Expr "else" "reject" String
             | "emit" Ident "(" [ Args ] ")"
             | "after" Duration "->" Ident "(" [ Args ] ")" "as" Ident
             | "cancel" Ident
-            | "spawn" QualIdent "as" Ident "(" [ Args ] ")" ChildWiring
+            | "spawn" [ "detached" ] QualIdent "as" Ident "(" [ Args ] ")" [ ChildWiring ]
+            | "send" Expr "<-" Ident "(" [ Args ] ")" [ "as" Ident ]
             | "signal" Ident "->" Ident "(" [ Args ] ")" ;
 ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
 Arm         = Pattern "=>" ( Block | Stmt ) ;
@@ -81,7 +82,11 @@ EffectItem  = "kind" String | "labels" "{" Label { "," Label } "}" | "class" Cla
             | ( "ok" | "failed" | "exhausted" ) "->" Ident "(" [ Args ] ")" ;
 Class       = "none" | "reversible" | "compensable" | "irreversible" ;
 Type        = "bool" | "int" | "string" | Ident | Int ".." Int
-            | "map" "<" Ident "," Type ">" ;
+            | "map" "<" Ident "," Type ">" | "Ref" "<" QualIdent ">" ;
+Configuration = "configuration" Ident "{" { Instance | Inputs | Bounds | Property } "}" ;
+Instance    = Ident [ "[" Int "]" ] ":" QualIdent [ "{" Ident ":" Expr { "," Ident ":" Expr } "}" ] ;
+Inputs      = "inputs" "{" InputRef { "," InputRef } "}" ;
+Bounds      = "bounds" "{" "transit" Int [ "," "instances" Int ] "}" ;
 Domain      = "{" Literal { "," Literal } "}" | Int ".." Int ;
 ```
 
@@ -374,6 +379,8 @@ Timer keys are declared by use and scoped to the machine. Arming a key that may 
 
 `signal pay -> Refund()` lowers to `signalChild`. The child instance id is `hash(parentId, childKey, seq)`, as polyrun defines it.
 
+These are **attached** children: checked as a cascade (PT7) and co-located with their parent on one kernel shard (PS7.4). `spawn detached …` creates a separate actor instead. It returns the child's address to the parent (`as pay` binds a `Ref`). From then on the two communicate only by `send`, and they are checked together as a configuration (PT7a). A detached spawn takes no `on complete` wiring, because completion is a message the child sends.
+
 ### PT6.5 Handlers receive capabilities, not ambient authority
 
 A label is a claim until the code is unable to exceed it. Two mechanisms make it so.
@@ -407,6 +414,8 @@ The runtime passes the handler only the capabilities its labels and targets gran
 
 The principle, in both cases: **an effect's type is what it can do, not what it says it does.**
 
+**Capabilities are addresses.** A capability is the address of a host actor that performs one kind of effect for declared targets. `emit k(d)` is a message to that address (PS2.2). The effect system and the message system are one mechanism: a machine can affect the world only by sending to an address it was given.
+
 ## PT7. Composition
 
 A machine that spawns children is checked with its children as a product:
@@ -415,7 +424,7 @@ A machine that spawns children is checked with its children as a product:
 - Per-instance dispatch has a single writer.
 - `MAX_CASCADE_DEPTH` is 8.
 
-These rules are polyrun's composition semantics, unchanged. The compiler emits `invariants.compose.mjs` from `compose invariant` declarations. Joint state is addressed as `parent.<field>` and `children.<key>.<field>`.
+These rules are polyrun's composition semantics, unchanged, and they apply to **attached** children only. The compiler emits `invariants.compose.mjs` from `compose invariant` declarations. Joint state is addressed as `parent.<field>` and `children.<key>.<field>`. The runtime places an attached tree on the shard of its root and refuses to place a descendant elsewhere (`PL5202 ATTACHED_ACROSS_SHARDS`, PS7.4).
 
 The built-in doctrine findings are surfaced as poly diagnostics in the `PL5xxx` range:
 
@@ -423,6 +432,76 @@ The built-in doctrine findings are surfaced as poly diagnostics in the `PL5xxx` 
 - unhandled cascade delivery;
 - unnamed rejects;
 - child-key collision.
+
+## PT7a. Configurations
+
+A configuration (PS13) is the unit of checking for machines that talk to each other. It has no engine artefact. poly-ref explores it, as it explores liveness.
+
+```poly
+module checkout
+
+service machine Inventory {
+  state { onHand: 0..1 = 1 }
+  action Query(from: Ref<Order>)
+  action Take(from: Ref<Order>)
+
+  on Query(from) { send from <- Available(n: onHand) }
+  on Take(from) {
+    if onHand > 0 { onHand' = onHand - 1   send from <- Taken() }
+    else          { send from <- OutOfStock() }
+  }
+}
+
+type OrderState = Idle | Asked | Taking | Done | Refused
+
+machine Order {
+  state { st: OrderState = Idle   inv: Ref<Inventory> = none }
+  terminal st is Done | Refused
+  action Place()  action Available(n: 0..1)  action Taken()  action OutOfStock()
+
+  on Place      { require st is Idle   else reject "not-idle"    st' = Asked   send inv <- Query(from: self) }
+  on Available(n) { require st is Asked else reject "not-asked"
+                    if n > 0 { st' = Taking   send inv <- Take(from: self) } else { st' = Refused } }
+  // Taking waits for the inventory's answer before the order is confirmed (Done)
+  on Taken      { require st is Taking else reject "not-taking"  st' = Done }
+  on OutOfStock { require st is Taking else reject "not-taking"  st' = Refused }
+}
+
+configuration two-buyers {
+  inv       : Inventory
+  order[2]  : Order { inv: inv }
+  inputs    { order[*].Place }
+  bounds    { transit 4 }
+  invariant confirmed-within-stock: count(order[*] is Done) <= 1     // initial stock
+  liveness  settle: order[*] is Asked leads to order[*] is Done | Refused
+}
+```
+
+Both machines are safe on their own: the inventory never lets `onHand` go below zero, and each order's handlers respect its own states. Now make the order **optimistic**. On `Available(n)` with `n > 0`, it confirms at once (`st' = Done`) and sends `Take` afterwards, instead of waiting in `Taking`. That is the classic check-then-act race between actors. Every message is handled correctly by its receiver, the per-machine checks stay clean, and the interleaving confirms two orders against one unit of stock:
+
+```
+$ poly check checkout.poly
+checkout.poly:33  PL5401 CONFIGURATION_INVARIANT  confirmed-within-stock
+  witness (6 global steps):
+    input   Place@order[0]
+    input   Place@order[1]
+    deliver Query(order[0])   -> inv
+    deliver Query(order[1])   -> inv          both queries answered with onHand = 1
+    deliver Available(1)      -> order[0]     order[0] confirmed
+    deliver Available(1)      -> order[1]     order[1] confirmed; one unit, two confirmations
+verdict: FINDINGS (exit 1)  over 2 orders, 1 inventory, transit ≤ 4
+```
+
+With the order waiting for `Taken`, the configuration is clean over 44 global states within the same bounds. No quiescent state is stuck, and every placed order settles. An independent exploration of both versions is in [`reviews/evidence/config_check.py`](reviews/evidence/config_check.py). No per-machine check can find this defect. It lives in the arrival order and in an invariant that spans instances, and neither machine sees both.
+
+**Lowering and runtime.**
+
+- A `send` lowers to a new built-in intent kind, `sendTo { target, action, data }`, beside polyrun's `spawnChild` and `signalChild`. This is a small change to polyrun (architecture §2a).
+- The runtime delivers it through the outbox, at least once, as a `dispatch` to the target with the intent's idempotency key as its `actionId`. So each message takes exactly one step at its receiver (K4, PS14.3).
+- A delivery the receiver rejects is a rejected step there. The sender is not notified unless the receiver sends a reply, which is the actor discipline.
+- `fifo` between a pair of instances is available only when they share a kernel shard, and it is checked with the narrower arrival order.
+
+**Configurations in the pipeline.** Stage 4b of the check pipeline (architecture §5) explores every declared configuration. Every verdict carries the configuration's bounds (PT12.3a). A bound hit is `INCONCLUSIVE` (`PL5301`, `PL5302`), never `CLEAN`.
 
 ## PT8. Policies
 
@@ -482,6 +561,13 @@ Closed history predicates are lifted into counters and model-checked by Polyaxio
 
 Policy admission runs Polyaxion `compile` and `harden`. Machines with regions or gates must be `fullyMediated`. The coverage grade (`checked` or `runtime-only`) is copied into the certificate. polycheck then runs the regions against the effect labels of every admitted machine and the tool labels of the declared scope. Its result, `PROOF`, `WITNESS` or `INCONCLUSIVE`, maps to `CLEAN`, `FINDINGS` or `INCONCLUSIVE`.
 
+### PT8.5 Obligation consistency
+
+After compilation, stage 5b checks that each mandate in scope is **dischargeable** under all obligations together: declared, promoted, recalled and native (PS8.6). This is Polyaxion's m2 condition, surfaced as a named stage with its own diagnostic.
+
+- An undischargeable mandate is `PL6501 UNDISCHARGEABLE_MANDATE`. The finding lists the minimal conflicting subset of obligations, with each one's source (file, or the Polyx rule id and its adjudication record), and a path that shows the conflict.
+- `poly mine` runs the stage again for each rule a person proposes to promote. A promotion that would make a mandate undischargeable is refused at that moment, before the rule is ever served.
+
 ## PT9. The gate in the runtime
 
 This is the only new engine integration (architecture section 7.2).
@@ -509,7 +595,9 @@ This is the only new engine integration (architecture section 7.2).
 - **PT9.5 Unavailability.** If the gate is unreachable, the intent stays pending and is not executed. The failure class is `unavailable`. The runtime never fails open.
 - **PT9.6 Budget.** Polyaxion measures a 0.63 ms p50 composite merge with durable writes. The in-process placement (AD-4) targets the same order. The first implementation reports:
   - p50 and p99 latency for PT9.1 to PT9.4;
-  - throughput in effects per second on one runtime, with 1, 8 and 64 concurrent instances, so that any serialisation point shows up as a flat line.
+  - throughput in effects per second on one runtime, with 1, 8 and 64 concurrent instances, so that any serialisation point shows up as a flat line;
+  - throughput **per gate session**, with 1, 8 and 64 concurrent runs in one session. The gate is an actor, and a session is its serialisation point (PS11.0).
+- **PT9.6a Sharding.** The gate is sharded along sessions and only along sessions. A policy that needs state across sessions is refused at admission (`PL6601 CROSS_SESSION_STATE`) unless that state lives in a separate machine that the policy consults by message.
 
 - **PT9.7 The outbox intent is a checked machine.** The interleavings of retry, gate decision, handler execution and settle are the most dangerous part of the runtime. They are specified as a poly machine, lowered like any other, and model-checked by polygraph as part of the runtime's own test suite. The runtime's outbox worker is the host of this machine.
 
@@ -670,8 +758,8 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL2xxx | lowering, strict validate, translation validation | `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
-| PL5xxx | composition | `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH` |
-| PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER` |
+| PL5xxx | composition, configurations | `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK` |
+| PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
 | PL9xxx | replay | `PL9001 SPEC_DIVERGENCE`, `PL9101 CONTROL_FAILED` |
@@ -723,7 +811,7 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
   2. Does it ship fewer escaped defects than the same agent writing TypeScript, with or without polygraph after the fact?
   3. At what cost in tokens and wall time?
   4. Which surface works better for agents: the standalone syntax or poly embedded in TypeScript (PT2.5)?
-- **Tasks.** Ten stateful features, fixed before any run, drawn from three families:
+- **Tasks.** Ten stateful features, fixed before any run. At least three of them involve two or more machines that talk to each other (for example an order and an inventory), so the configuration check (PT7a) is exercised. They are drawn from three families:
   - order and payment lifecycles;
   - workflow status derivation (modelled on the hatchet study);
   - leader election roles (modelled on the raft study).
@@ -862,7 +950,7 @@ poly/
   plugin/                    Claude Code plugin: skill, commands, hooks
   examples/
     orders/                  PT4.5, with its lowered build checked in for review
-    turnstile/ raft-roles/ hatchet-status/
+    turnstile/ raft-roles/ hatchet-status/ checkout/ (PT7a)
   conformance/               lowering conformance, generated from the lowering map (02 §4): one case per row, poly source vs hand-written artefacts
 ```
 
@@ -883,11 +971,11 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 | Milestone | Scope | Gate |
 |---|---|---|
 | M0 · Language core | `poly-core` AST, parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`, tagged unions, `match`, `Tri`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). |
-| M1 · Effects and composition | `emit`, effect declarations, timers, children, emission and compose invariants, maps | The `polyrun-oms` order machine in poly gives the same `check-effects` and `check-product` results as the hand-written artefacts (AC1). |
+| M1 · Effects, composition and configurations | `emit`, effect declarations, timers, attached and detached children, `Ref` and `send`, configurations explored by poly-ref, emission and compose invariants, maps | The `polyrun-oms` order machine in poly gives the same `check-effects` and `check-product` results as the hand-written artefacts (AC1). The `checkout` configuration finds the double-confirmation witness with the optimistic order and is clean with the waiting order (AC10). |
 | M2 · Diagnostics and second surface | `poly-embed` front end producing the same AST; handler capability lint (PT6.5); diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain and today's polyrun | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
 | M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. |
-| M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, escalation with timeout, person-key signatures (PT12.5) | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. |
+| M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, obligation consistency (PT8.5), escalation with timeout, person-key signatures (PT12.5), `sendTo` delivery in polyrun | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. |
 | M6 · Agents | Workflow lowering, MCP server, language server, Claude Code plugin, `poly new` | AC5. A workflow in poly runs through unchanged polyflow tools. |
 | M7 · Feedback | `poly mine`, `poly propose`, `poly export traces` | A Polyx rule adjudicated `real` round-trips to an admitted obligation. A polyness proposal arrives as poly source and is admitted or refused by the pipeline. |
 
@@ -898,7 +986,8 @@ Worlds (appendix A) are planned after M7 and are not part of v1.
 - **Bounded checks.** Checks are exhaustive only over declared check domains. A defect that needs a value outside the domain is not found. For `strict` fields, out-of-domain input is rejected at dispatch, so the checked domain is the running domain. For `disclosed` fields, drift is journaled (PT3.4), not prevented.
 - **Model-code gap.** poly removes the gap between model and code for the machine itself. It does not check host handlers. Handler behaviour is observed only through completion actions and the `SETTLE` record.
 - **State explosion.** It is managed by small machines and atomic cascades, not by abstraction. A check that hits its bound reports `INCONCLUSIVE` (`PL3901 BOUND_HIT`).
-- **Liveness.** Liveness holds only under the fairness stated with each property, and at runtime only under K5 (worker and timer fairness), which is monitored, not proved.
+- **Liveness.** Liveness holds only under the fairness stated with each property plus the delivery guarantee of PS14. At runtime, delivery is obligation R1: it is monitored, and a missed delivery is a runtime fault, not a program fault.
+- **Configurations.** Checks cover the bounded fragment: finite instances and a declared bound on messages in transit (PS4.1e, PS13.5). A bound hit is reported. The state space of a configuration grows with its instances, and that growth is the cost of checking interactions.
 - **Kernel assumptions.** Every guarantee about a running program holds under the kernel assumptions K1 to K7 of PS10. Their evidence is listed there. poly does not verify the kernel.
 - **Over-approximation.** The checked instance lets the environment offer any action at any time (PS4.4). Clean results are sound; some witnesses may be infeasible and are marked `environment: unconstrained`.
 - **Advice.** Advice is recorded but not enforced until it is promoted, adjudicated and admitted.
