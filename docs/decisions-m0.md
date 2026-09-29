@@ -19,6 +19,37 @@ S6 (terminal as the first acceptor), S7 (`PL2201` as an error in M0; the classif
 
 The agent applies those that change the spec text (S9 to S15, and the `reject` statement of S11) to `03-technical-spec.md` and `04-semantics.md` in one commit before step 5. The commit message cites each issue id. The v0.6 draft number is unchanged; these are clarifications within M0.
 
+## Rulings after the M0 code review
+
+The review of `714c513..HEAD` returned ten findings. These rulings settle the two spec questions it raised, and the open issues S19 and S20, before any fix.
+
+| Issue | Ruling | Spec change (applied by the agent, one commit, ids cited) |
+|---|---|---|
+| **S19** A parameter that shares a field's name (handlers) | **Accepted, as one rule for every context.** A bare name resolves to the innermost binding: local, then parameter, then field, as in TypeScript. `pre.f` always names the pre-state field `f`, in handlers as well as properties. | PS2.2, PT2.2, PT5 |
+| **S19 extended** (finding 1) Guards and reject properties | **Accepted.** Parameters are visible only where the action is known: in a handler, or where `action == A` narrows it in a guard, step property or reject property. There the S19 rule applies. With no narrowing, no parameter is in scope, and a bare name is the field. The checker, the lowering and poly-ref implement this one rule, and a conformance case covers a colliding name in each of the four contexts. | PS2.2, PS5.2, PS5.3, PT4.3, PT5 |
+| **S20** No code for a failed strict `validate()` | **Accepted.** `PL2001 STRICT_VALIDATE`, verdict `REFUSED`, addressed to the toolchain, like `PL2501`. | PT12.2 |
+| **S21** (finding 2) A name in a pattern: binder or constructor? | **Accepted, with two additions.** (1) A name that is a constructor of the **expected type** is a literal pattern. (2) A name that is a constructor of **another** type in scope is a type error (`PL1201`), not a binder. (3) Any other name binds. A binder that shadows a constructor in scope is an error. **Additions:** (4) a binder that its arm never reads is an error (`PL1504 UNUSED_BINDER`; write `_` instead), so a misspelled constructor cannot silently become a catch-all; (5) an arm that an earlier arm always covers is an error (`PL1503 UNREACHABLE_ARM`). With (4) and (5), the finding-2 program is refused at the source line instead of passing as `CLEAN`. | PT2 `Pattern`, PT2.4, PT12.2 |
+| **S22** (finding 4) A constructor declared in two types | **New ruling.** Constructor names resolve against the expected type. In `a == b`, each side is typed first, and an ambiguous constructor on either side takes the other side's type. The qualified form `Type.C` is always legal. A constructor that stays ambiguous after that is `PL1005 AMBIGUOUS_CONSTRUCTOR`, whose fix is the qualified form. `Open == s` and `s == Open` then mean the same thing. | PT2.4, PT12.2 |
+
+## Standing rules the review adds
+
+- **PL2501 and PL2001 are for toolchain faults only.** A program with a user error must be reported at its source line with a user-facing code. Any user program that reaches `PL2501` or `PL2001` is a checker bug. The test suite fails on any `PL2501` or `PL2001` except the deliberately broken lowering.
+- **polygraph's findings are confirmed by poly-ref** (finding 7). Every finding polygraph reports on the lowered module has a witness path, which is replayed through poly-ref. The finding counts only if every state on that path is in the checked instance (PS4.2). If the path leaves the instance, it becomes a bound hit (`INCONCLUSIVE`), not `FINDINGS`. If poly-ref disagrees about a state inside the instance, that is `PL2501`.
+- **Diagnostics carry structure** (finding 8). Each diagnostic records its property name, field and state digest as fields, and results are merged on `(code, property or field)`, never on message text. This fix lands before finding 6, which depends on it.
+
+## Order of the fixes
+
+For each finding, first add a regression test that fails, then fix it, and commit the two together.
+
+1. **Finding 2**, under S21.
+2. **Finding 1**, under S19 extended.
+3. **Finding 3.** Constant-fold and range-check every initial value, reported as `PL1201` at the line.
+4. **Finding 7**, by confirming polygraph's witnesses through poly-ref.
+5. **Finding 8, then finding 6.**
+6. **Finding 4**, under S22.
+7. **Finding 5.** The CLI resolves `@cognitive-fab/sam-pattern` from its own install location, for any `--root`.
+8. **Findings 9 and 10**, as separate refactoring commits with no change in behaviour. Every test result and state count stays identical.
+
 ## Conclusion
 
 Every issue that blocked steps 5 and 8 is resolved. The raft gate now tests what can be true: identity with the controls, not a pass rate no deterministic machine can reach. Unbounded counters are checked up to their bound, and the verdict says so (`INCONCLUSIVE`). Corpus names and arrays are expressible without renaming. The gate reads only data inside the repository.
