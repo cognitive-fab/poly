@@ -182,7 +182,26 @@ Each issue states what the spec says, what was found, and the resolution propose
 - **S17. Where the corpora live (blocking step 8).** The gate reads corpora from `C:\Users\jjdub\code\polygraph` and `C:\Users\jjdub\code\osssm`, outside this repository, so CI cannot see them. *Proposal:* copy the traces, contracts, invariants and hand-written controls (data, not engine code) into `conformance/field-studies/<name>/` with a `PROVENANCE.md` giving the source path and commit, plus a script that diffs them against the local sources when those exist.
 - **S18. `Ref<M>` in M0.** The handoff says "as a type only". *Proposal:* parsed and type-checked, `none` and `==` included; a machine with a `Ref` field is refused at lowering with `PL0901` until M1.
 
-## 7. Risks
+The owner's rulings are in [`decisions-m0.md`](decisions-m0.md). S9 to S15 were written into 03 and 04 in commit `7506a66`.
+
+## 7. Progress and measurements
+
+Steps 1 to 5 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
+
+| Machine | poly-ref | Script | Check time |
+|---|---|---|---|
+| hello turnstile | 7 states; `PL3201` at `Locked/3`, witness `Coin, Coin, Coin, Push`, rejections `Coin: coin-box-full, Push: locked` | same | 6 ms |
+| hello with `Empty` | 7 states, clean | same | 1 ms |
+| `OutboxIntent`, union | 17 states, 24 accepted steps, 187 transitions, no deadlock | 17, 24 | 6 ms |
+| `OutboxIntent`, union, AC9 escape | `PL3102` at `Allowed { attempts: 3 }` after `SettleFailed` | (AC9) | 4 ms |
+| `OutboxIntent`, v0.3 | 33 states, 40 accepted steps, no deadlock | 33, 40 | 7 ms |
+| `OutboxIntent`, v0.2 | 35 states, 40 accepted steps, `PL3201` at `(Allowed, 3, 1, T, F)` and `(Allowed, 3, 2, T, T)` | same | 3 ms |
+
+Times are single runs of `checkMachine` on Node 24.12, including exploration and every property.
+
+One consequence of S13 surfaced while checking the examples: the three `OutboxIntent` forms carry the `settles` liveness property as the spec writes it, so the checker refuses them with `PL0901` until M2. poly-ref ignores liveness and checks them. For steps 6 to 9, the lowering and `poly check` will see `PL0901` on these files; the gate items that need them lowered (translation validation) will use them with the liveness item removed, and the test says so.
+
+## 8. Risks
 
 - **The formatter and comments.** Keeping every comment in place while printing one canonical text is the fiddliest part of the front end. The test is idempotence and digest invariance over every example.
 - **polygraph caps.** For raft and the turnstile, polygraph's exploration of the lowered module has no natural end (S5). The result is `INCONCLUSIVE` by design, and the time spent is measured and recorded.
