@@ -1,24 +1,46 @@
 # poly · Architecture
 
-*Cognitive Fab · September 2026 · draft v0.1 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.2 · specification only, no code*
+
+v0.2 answers the review in [`reviews/review-2026-09-29-blunt.md`](reviews/review-2026-09-29-blunt.md); see [`reviews/response-2026-09-29.md`](reviews/response-2026-09-29.md).
 
 This document describes how poly is built from the engines of the Poly stack. What poly must do is in [`01-functional-spec.md`](01-functional-spec.md) (`PF` ids). The grammar, semantics and formats are in [`03-technical-spec.md`](03-technical-spec.md) (`PT` ids). Facts about the existing engines come from [`research/primitive-inventory.md`](research/primitive-inventory.md).
 
 ## 1. The architecture in one paragraph
 
-A poly module is compiled to the artefact family the Poly engines already read. The checker then runs those engines in a fixed order and folds their verdicts into one diagnostic model. An admitted module carries a certificate binding its source digest to its artefact digests and its check results. The runtime loads only certified artefacts. It executes them on the polyrun kernel, with every effect passing the Polyaxion gate, and writes a single hash-chained ledger. That ledger is the input to the next check, to Polyx mining, to polyness proposals and to Polytrion twins.
+A poly module is compiled to the artefact family the Poly engines already read. The checker then runs those engines in a fixed order and folds their verdicts into one diagnostic model. An admitted module carries a certificate binding its source digest to its artefact digests and its check results. The runtime loads only certified artefacts. It executes them on the polyrun kernel, with every effect passing the Polyaxion gate, and writes a ledger chained per run. That ledger is the input to the next check, to Polyx mining, to polyness proposals and to Polytrion twins.
 
 ## 2. Design principles
 
 | Id | Principle | Consequence |
 |---|---|---|
 | PA0.1 | **Lower, never reimplement.** | poly has no model checker, simulator, gate or miner of its own. A new semantic need is a change to an engine, made in that engine's repository. |
-| PA0.2 | **The checked program is the running program.** | The runtime executes the lowered `next.cjs` the checker checked. The certificate binds them by digest, and a digest mismatch refuses the load. |
+| PA0.2 | **The checked program is the running program, over its check domains.** | The runtime executes the lowered `next.cjs` the checker checked. The certificate binds them by digest, and a digest mismatch refuses the load. Inputs outside a `strict` check domain are rejected at dispatch; inputs outside a `disclosed` domain are accepted and journaled as drift, and the certificate lists those fields (PT3.4). |
 | PA0.3 | **One source per machine.** | Contract, module, invariants, effects, manifest, emission invariants and migration are derived. None is edited by hand. |
 | PA0.4 | **No silent clean.** | Every check reports `CLEAN`, `FINDINGS`, `REFUSED`, `UNDERPOWERED` or `INCONCLUSIVE`. A check that did not run is listed as not run. |
 | PA0.5 | **No model call on a check or decision path.** | Language models may draft source (`poly new`) and explain findings. They never decide a verdict or a gate decision. |
 | PA0.6 | **The journal is the corpus.** | Runtime journals use the trace window format, so they feed every design-time engine unchanged. |
 | PA0.7 | **Respect the engine boundary.** | Public engines ship with the toolchain. A check that needs a private engine (Polytrion) is reported as not run when that engine is unavailable. |
+
+## 2a. Scope: what is new, what changes, what stays
+
+poly adds no new checking, simulation or governance engine. It is still a substantial build: a compiler, a toolchain and one runtime integration. The table is the full extent.
+
+| Category | Item | Size class |
+|---|---|---|
+| **New code** | Lexer, parser, canonical formatter, AST with node ids and digests | compiler front end |
+| | Type and domain checker, flow analysis for `strict` defaults | compiler |
+| | Lowering to seven artefact kinds (contract, module, invariants, effects mapper, manifest, emission and compose invariants, migration) plus policy and workflow descriptors | compiler back end |
+| | Verdict fold, diagnostic model, node-addressed fixes, witness export | toolchain |
+| | Certificate format, signer and verifier, person keyring | toolchain |
+| | Runtime host: certificate check at load, outbox worker with the gate hook, per-run ledger writer, anchors | runtime |
+| | The outbox intent machine (PT9.7), written in poly | runtime model |
+| | CLI, MCP server, language server, Claude Code plugin | agent interface |
+| **Changed code in engines** | polyrun: gate hook point in the outbox worker; ledger as a store option | small, specified in PT9 and PT16 |
+| | polyaxion: an `effect` proposal kind that carries the emitting-step snapshot | small, PT9.1 and PT9.3 |
+| | polyx: exporter from an adjudicated rule to a poly obligation | small |
+| | polyness: proposals emitted as poly source | small |
+| **Unchanged** | polygraph model check and replay, polynv, polyvers, `check-effects`, `check-product`, polycheck, polyflow and polycrew tools, Polytrion | none |
 
 ## 3. Layers
 
@@ -35,13 +57,11 @@ A poly module is compiled to the artefact family the Poly engines already read. 
  │                    compose → invariants.compose.mjs                         │
  │                    policy → polyaxion.policy.json                           │
  │                    workflow → polyflow.workflow.json (six-file workflow)    │
- │                    world → topology.json, responders.mjs, drivers.mjs       │
  │                    version → migrate.cjs                                    │
  ├────────────────────────────────────────────────────────────────────────────┤
  │ CHECK              strict validate · polygraph model check · check-effects  │
  │ (existing engines) check-product · polyaxion compile + admission ·          │
- │                    polycheck · polyvers · polynv · polygraph replay ·       │
- │                    Polytrion experiment (optional, hosted)                  │
+ │                    polycheck · polyvers · polynv · polygraph replay         │
  ├────────────────────────────────────────────────────────────────────────────┤
  │ ADMISSION          certificate {source, artefacts, checks, domains} signed  │
  ├────────────────────────────────────────────────────────────────────────────┤
@@ -49,12 +69,12 @@ A poly module is compiled to the artefact family the Poly engines already read. 
  │ (existing engines) children) · Polyaxion gate on every effect ·             │
  │                    polyflow / polycrew work orders · Polyx advisor          │
  ├────────────────────────────────────────────────────────────────────────────┤
- │ LEDGER             one hash-chained, signed ledger · trace export           │
+ │ LEDGER             chained per run, signed heads, periodic anchor · export  │
  └────────────────────────────────────────────────────────────────────────────┘
                  │ traces, snapshots, agent journals
                  ▼
   replay corpora · polyvers corpus · polynv drift · Polyx mining ·
-  polyness proposals · Polytrion twin
+  polyness proposals · (v2: Polytrion twin)
 ```
 
 ## 4. The lowering map
@@ -70,10 +90,10 @@ Every construct has one target artefact and one or more engines that read it. Th
 | `effect Kind { … }` | `effects.manifest.json` | polyrun, polyflow, Polyaxion (labels) | `payloadSchema`, `onSuccess`, `onFailure`, `onExhausted`, `retry` |
 | `emits invariant` | `effect-invariants.mjs` | polyrun `check-effects`, polyflow admission | `effectInvariants:[{name, pred(path)}]` |
 | `compose invariant` | `invariants.compose.mjs` | polyrun `check-product` | joint state and stimulus predicates |
-| `policy`, `obligation` | `polyaxion.policy.json` (version 2) | Polyaxion compile, admission, gate; polycheck regions | `rule`, `machine`, `invariant`, `recalled` kinds |
+| `policy`, `obligation` (in `.policy.poly` files) | `polyaxion.policy.json` (version 2) | Polyaxion compile, admission, gate; polycheck regions | `rule`, `machine`, `invariant`, `recalled` kinds |
 | effect `labels`, `class` | manifest fields + Polyaxion label catalogue | Polyaxion, polycheck | closed label vocabulary |
 | `workflow` | `polyflow.workflow.json` with the five machine files | polyflow, polycrew | name, input action, tools, key template |
-| `world` | `topology.json`, `responders.mjs`, `drivers.mjs`, `probes.mjs` | Polytrion | Polytrion world layout |
+| `world` (deferred to v2) | `topology.json`, `responders.mjs`, `drivers.mjs`, `probes.mjs` | Polytrion | Polytrion world layout |
 | `version N from M { migrate … }` | `migrate.cjs` | polyvers, polyrun deploy gate | pure `migrate(oldState)` |
 | `check` domains | `dataDomain` + certificate `domains` | polygraph, polynv | disclosed assumptions |
 
@@ -84,7 +104,7 @@ Two constructs have no artefact of their own:
 
 ## 5. The check pipeline
 
-`poly check` runs the stages below in order. A stage that cannot run because an earlier stage refused is listed as not run. Stages 1 to 8 use public engines. Stage 9 needs the hosted Polytrion.
+`poly check` runs the stages below in order. A stage that cannot run because an earlier stage refused is listed as not run. All stages in v1 use public engines.
 
 ```
 source ─► 0 parse, type, domain ─► lower ─► 1 strict validate
@@ -98,7 +118,6 @@ source ─► 0 parse, type, domain ─► lower ─► 1 strict validate
    6 capability proof (polycheck regions over effect labels and agent tools)
    7 version gate (polyvers lanes, when --since or live snapshots are given)
    8 replay (polygraph replay with controls, when --against traces are given)
-   9 world experiment (Polytrion, when a world and a hosted engine are declared)
           │
           ▼
    fold ─► verdict + diagnostics + witnesses ─► certificate (if CLEAN or accepted exceptions)
@@ -171,7 +190,9 @@ poly connects the two at the outbox worker. Each effect intent is proposed to th
 
 This is the only engine integration poly requires that does not exist today. It is specified in PT9.
 
-The gate also sees the program's own state. The session state Σ is extended with the instance snapshot. This lets an obligation refer to machine states (PF4.3).
+The gate also sees the program's own state, but only one snapshot of it: the post-state of the step that emitted the effect, carried with the proposal by `seq` and digest. The gate keeps no mirror of application state. This lets an obligation refer to machine states (PF4.3) while every decision stays a function of recorded inputs, so replay reproduces it (PT9.3).
+
+The interleavings of retry, gate decision, handler and settle are themselves specified as a poly machine and model-checked (PT9.7). One rule matters most: once allowed, an intent is not proposed again for the same idempotency key.
 
 ### 7.3 One ledger
 
@@ -183,9 +204,8 @@ Today there are three journals:
 | Polyaxion | `px_window` with receipts |
 | polyflow platform | ledger events (`admission`, `proposal`, `verdict`, `effect`, `observation`, `closure`) |
 
-poly writes one ledger, in the polyflow platform event format, which is already hash-chained and signed. polyrun journal rows and Polyaxion windows become event kinds in that ledger. Trace export projects the ledger onto `{pre, action, data, post}` windows. Receipt verification uses Polyaxion's four checks: signature, chain, binding and replay.
+poly writes one ledger, in the polyflow platform event format, which is already hash-chained and signed. polyrun journal rows and Polyaxion windows become event kinds in that ledger. The chain is **per run**, following polyrun's single writer per instance, so the ledger adds no runtime-wide serialisation point. A periodic, signed Merkle anchor over the run heads covers audit periods (PT16). Trace export projects the ledger onto `{pre, action, data, post}` windows. Receipt verification uses Polyaxion's four checks: signature, chain, binding and replay.
 
-**Open decision (AD-3).** The ledger could instead stay as two stores joined by digest. Section 11 gives the options.
 
 ## 8. Three kinds of program, one runtime
 
@@ -232,7 +252,7 @@ The command line, the MCP server and the language server are three transports ov
             poly test (exported witnesses + replay) ─► poly admit ─► poly deploy
                                                            │ (version gate vs live)
                                                            ▼
-                                          runtime ─► ledger ─► poly export / mine / twin
+                                          runtime ─► ledger ─► poly export / mine    
 ```
 
 The Claude Code plugin packages this loop as a skill with commands (`/poly:new`, `/poly:check`, `/poly:explain`, `/poly:admit`), following the polygraph plugin. The existing polygraph, polyflow and Polyaxion plugins keep working. poly adds a front end; it does not replace them.
@@ -243,10 +263,12 @@ The Claude Code plugin packages this loop as a skill with commands (`/poly:new`,
 |---|---|---|---|
 | AD-1 | Canonical form of source | (a) text canonical, AST derived; (b) AST canonical, text as projection, patched by hash-guarded operations as in Zero [1] | (a) for v1, with a canonical formatter and an exported AST. Revisit after the first experiment measures agent edit failures. |
 | AD-2 | Expression language inside handlers | (a) a total, side-effect-free subset of TypeScript expressions; (b) a new expression language | (a). It lowers directly to JavaScript, and agents already write it. |
-| AD-3 | Ledger | (a) one ledger in the polyflow platform format; (b) keep `pr_journal` and `px_window`, joined by digest | (a). It gives one replay path and one verification tool. |
+| AD-3 | Ledger | (a) one ledger in the polyflow platform format, chained per run with periodic anchors; (b) keep `pr_journal` and `px_window`, joined by digest | (a). It gives one replay path and one verification tool, with no global chain. |
 | AD-4 | Gate placement for application effects | (a) in the outbox worker, in process; (b) in a Polyaxion daemon over a socket | (a) for latency, with (b) available when the operator runs a shared daemon. |
 | AD-5 | Host languages | TypeScript first; Python through the existing polyflow platform Python ports | TypeScript for v1. |
-| AD-6 | World lowering in the public toolchain | (a) emit world artefacts publicly, run them only on hosted Polytrion; (b) keep world syntax private | (a), consistent with PA0.7. |
+| AD-6 | Worlds | (a) in v1; (b) deferred to v2 | (b). They are not needed for the first experiment and add a fourth expression language. |
+| AD-8 | Where policies live | (a) in the same file as machines; (b) in `.policy.poly` files with their own operators (`is`, `is not`, `unknown`) | (b). The two expression semantics never share a file or an operator. |
+| AD-9 | Out-of-domain inputs at runtime | (a) always accept and journal; (b) per-field `strict` or `disclosed`, `strict` by default where a value reaches an irreversible or compensable effect | (b). |
 | AD-7 | Licence | follow each engine's licence; the language and compiler under one licence | Open question for the owner (section 13). |
 
 ## 12. What changes in existing repositories
@@ -256,11 +278,11 @@ The aim is to change the engines as little as possible.
 | Repository | Change | Why |
 |---|---|---|
 | polygraph / polyrun | A gate hook in the outbox worker. The ledger writer as a store option. | Section 7.2 and AD-3. |
-| polyaxion | Accept an instance snapshot in Σ. A proposal kind for effect intents. | PF4.3 and PF8.4. |
+| polyaxion | A proposal kind for effect intents that carries the emitting-step snapshot. | PF4.3 and PF8.4. |
 | polyflow | Load a workflow from lowered artefacts. This is already the six-file format, so no change is expected. | PF5. |
 | polyx | An exporter from an adjudicated rule to a poly obligation. | PF4.4. |
 | polyness | Emit proposals as poly source as well as the six files. | PF10.3. |
-| Polytrion | None. Worlds arrive in the existing layout. | PF6.2. |
+| Polytrion | None in v1. | Worlds are deferred (AD-6). |
 
 ## 13. Open questions for the owner
 
@@ -273,14 +295,7 @@ The aim is to change the engines as little as possible.
 
 ## 14. Conclusion
 
-poly is a thin architecture by design. It has four layers of its own:
-
-- a language layer;
-- a lowering layer;
-- a verdict fold;
-- a certificate.
-
-Every other layer is an existing engine. Only two integrations are new: the gate in the outbox worker and the single ledger. Everything else is a mapping from a construct to an artefact an engine already reads. This keeps the claims of each engine intact. poly checks nothing the engines do not check, and it runs nothing the checker did not see.
+poly is a compiler, a toolchain and one runtime integration over engines that already exist. Section 2a lists its full extent. Its checking, governance and execution semantics all come from those engines. The new runtime surface is small and is itself modelled: the gate hook evaluates against recorded snapshots, the outbox intent is a checked machine, and the ledger is chained per run. This keeps the claims of each engine intact. poly checks nothing the engines do not check, and it runs nothing the checker did not see.
 
 ## References
 

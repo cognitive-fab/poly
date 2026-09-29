@@ -1,6 +1,8 @@
 # poly · Functional specification
 
-*Cognitive Fab · September 2026 · draft v0.1 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.2 · specification only, no code*
+
+v0.2 answers the review in [`reviews/review-2026-09-29-blunt.md`](reviews/review-2026-09-29-blunt.md); see [`reviews/response-2026-09-29.md`](reviews/response-2026-09-29.md).
 
 Requirement ids (`PF1.1`) are cited by the architecture (`PA`) and technical (`PT`) specifications.
 
@@ -17,7 +19,7 @@ A poly program is a set of declared state machines. Each machine carries:
 
 The compiler checks the whole program exhaustively over declared finite domains before it can run. The runtime executes the same program durably, gates every effect, and writes a journal that replays exactly.
 
-poly adds no new engine. It is one surface over the primitives the Poly stack already has:
+poly adds no new checking, simulation or governance engine. It is a compiler, a toolchain and one runtime integration over the primitives the Poly stack already has (the full scope is in the architecture, section 2a):
 
 - the SAM v2 strict profile;
 - the polygraph family (polygraph, polygen, polynv, polyrun, polyvers);
@@ -104,13 +106,13 @@ The nearest systems each cover part of the ground:
 - **G1.** An agent writes one poly source per machine. Everything the engines need is derived from it.
 - **G2.** A poly program cannot run until it is admitted. Admission means the program passes every applicable check or the failure is recorded as a declared exception.
 - **G3.** Every finding comes as a witness: a concrete, replayable sequence plus a generated test.
-- **G4.** The checked program is the running program. The runtime executes the lowered artefacts the checker checked, and no other code.
+- **G4.** The checked program is the running program, over its check domains. The runtime executes the lowered artefacts the checker checked, and no other code. Inputs outside a `strict` check domain are rejected; inputs outside a `disclosed` one are journaled as drift.
 - **G5.** Every effect crosses a gate and every decision is journaled with a receipt.
 - **G6.** The journal feeds back into design:
   - replay corpora;
   - mined rules (Polyx);
   - proposed workflows (polyness);
-  - twins (Polytrion).
+  - twins (Polytrion), in v2.
 - **G7.** One language covers three kinds of program:
   - the application's stateful core;
   - the agent's own workflows;
@@ -130,7 +132,11 @@ The nearest systems each cover part of the ground:
 ### PF1 · Declaring a machine
 
 - **PF1.1** A machine declares its state as a sealed set of typed fields with initial values. Writing an undeclared field is a compile error.
-- **PF1.2** Every field and every action parameter has a finite **check domain**. The check domain may be narrower than the runtime type (for example `amount: int check {10, 20}`). The compiler records each narrowing as a disclosed assumption.
+- **PF1.2** Every field and every action parameter has a finite **check domain**. The check domain may be narrower than the runtime type (for example `amount: int check {10, 20}`). Each check domain has a mode:
+  - `strict`: an input outside the domain is rejected at dispatch, so the checked domain is the running domain;
+  - `disclosed`: an input outside the domain is accepted and journaled as drift, and the certificate lists the field.
+
+  The default is `strict` for any value that can reach an irreversible or compensable effect, and `disclosed` elsewhere.
 - **PF1.3** A machine declares its actions (named intents with typed parameters) and its terminal states.
 - **PF1.4** A handler (`on Action`) either accepts, writing the next state, or rejects with a named reason.
   - A handler that writes nothing and does not reject is flagged.
@@ -160,13 +166,13 @@ The nearest systems each cover part of the ground:
 
 ### PF4 · Declaring governance
 
-- **PF4.1** A module may declare policies that govern the program's effects or an agent's tool calls. A policy contains four kinds of obligation:
+- **PF4.1** A project may declare policies that govern the program's effects or an agent's tool calls. Policies live in their own files (`.policy.poly`) with their own comparison operators, so the three-valued semantics never shares a file with machine code. A policy contains four kinds of obligation:
   - rule obligations;
   - machine obligations;
   - invariant obligations;
   - recalled text.
 - **PF4.2** Policy expressions are three-valued. An unknown value never satisfies a requirement.
-- **PF4.3** A policy may reference effect labels and the program's own machine states. This is the link between governance and program semantics.
+- **PF4.3** A policy may reference effect labels and the program's own machine states. This is the link between governance and program semantics. A machine state is read as of the step that emitted the effect under decision, so every gate decision can be replayed.
 - **PF4.4** A rule mined by Polyx and adjudicated `real` can be emitted as a poly obligation.
 
 ### PF5 · Declaring agent workflows
@@ -178,13 +184,13 @@ The nearest systems each cover part of the ground:
   - the mapping from effect kinds to agent tools.
 - **PF5.3** Several participants may work one run. Claims are leases, and only the holder may report.
 
-### PF6 · Declaring worlds
+### PF6 · Declaring worlds (deferred to v2)
 
-- **PF6.1** A module may declare a world:
+- **PF6.1** In v2, a module may declare a world:
   - nodes that are machines;
   - responders that complete effects with declared distributions;
   - drivers that generate arrivals.
-- **PF6.2** A world lowers to Polytrion artefacts. Running it requires the Polytrion engine.
+- **PF6.2** A world lowers to Polytrion artefacts. Running it requires the Polytrion engine. Worlds are not needed to test the claims of the first experiment and are out of v1.
 
 ### PF7 · Checking
 
@@ -194,7 +200,7 @@ The nearest systems each cover part of the ground:
   - a stable code;
   - a source location;
   - a witness where one exists;
-  - zero or more typed fixes.
+  - zero or more typed fixes, addressed to AST nodes and guarded by a digest of the node, so a fix invalidated by an earlier edit is refused, never misapplied.
 - **PF7.4** Every witness can be exported as a trace (`{pre, action, data, post}` windows) and as a host-language test.
 - **PF7.5** `poly check --against <traces>` replays recorded traces from the host system against the program and reports divergences. Positive and negative controls run first.
 - **PF7.6** `poly check --since <version>` runs the version gate against the previous version and, when given, live snapshots.
@@ -206,7 +212,8 @@ The nearest systems each cover part of the ground:
 - **PF8.2** `dispatch(instance, action, data, actionId)` executes one step atomically. The step, snapshot, journal entry, outbox and timers commit together, and dispatch is idempotent on `actionId`.
 - **PF8.3** Effects run at least once, with exactly-once emission and an idempotency key. Exhausted effects go to a dead-letter queue and dispatch the declared action.
 - **PF8.4** Every effect crosses the governance gate before it runs. A denial carries a witness and dispatches the effect's failure action with the denial reason.
-- **PF8.5** Every step and every gate decision is journaled. Journals are hash-chained and receipts are signed.
+- **PF8.5** Every step and every gate decision is journaled. The ledger is hash-chained per run, with signed heads and a periodic signed anchor over all runs.
+- **PF8.5a** Once the gate allows an effect, retries of that effect are not proposed again. Escalations have a timeout and are denied when it expires.
 - **PF8.6** A run can be replayed from its journal alone, and the replay must reproduce every post-state and every gate decision.
 - **PF8.7** The runtime refuses to load a new version that the version gate rejected. Instances can be pinned, migrated or upgraded.
 
@@ -216,21 +223,22 @@ The nearest systems each cover part of the ground:
 - **PF9.2** All output has a JSON form with a published schema. Human-readable output is a projection of it.
 - **PF9.3** `poly new "<description>"` drafts a machine from a feature description (polygen). The draft is not admitted until it passes `poly check`.
 - **PF9.4** `poly explain <code|witness>` returns the rule, the witness and the fixes in a form an agent can act on.
-- **PF9.5** Formatting is canonical. Two sources that format to the same text have the same content hash.
+- **PF9.5** Formatting is canonical. The content hash is taken over the AST; comments are trivia and do not change it.
+- **PF9.6** Accepting a finding and approving an escalation require a signature from a key registered to a person. An agent key cannot sign either record.
 
 ### PF10 · Feedback from runtime to design
 
 - **PF10.1** `poly export traces` writes journals as trace corpora for replay, the version gate and grading.
 - **PF10.2** `poly mine` passes journals to Polyx. Candidate rules come back as proposed obligations for a person to adjudicate.
 - **PF10.3** `poly propose` passes agent journals to polyness. Repeated work comes back as a proposed workflow in poly source.
-- **PF10.4** `poly twin` imports runtime snapshots into a Polytrion world.
+- **PF10.4** (v2) `poly twin` imports runtime snapshots into a Polytrion world.
 
 ## 7. Acceptance criteria for v1
 
 | Id | Criterion |
 |---|---|
 | AC1 | The order machine of the `polyrun-oms` example, rewritten in poly, lowers to artefacts that replay its existing trace corpus at 100% and produce the same `check-effects` result as the hand-written artefacts. |
-| AC2 | The turnstile, raft role-transition and hatchet status-derivation machines from the field studies are expressible in poly. Their positive and negative controls behave as they do today. |
+| AC2 | The turnstile, raft role-transition and hatchet status-derivation machines from the field studies are expressible in poly. Their positive and negative controls behave as they do today. The raft study found no defects, so for raft this criterion establishes expressibility and control behaviour only. |
 | AC3 | A seeded invariant violation yields a diagnostic with a witness. The exported host test fails on the unfixed program and passes on the fixed one. |
 | AC4 | A policy with a machine obligation over effect labels compiles, is admitted, and denies an irreversible effect in the forbidden state, with a witness and a signed receipt. |
 | AC5 | A workflow declared in poly runs through the polyflow MCP tools with no change to those tools. |
@@ -239,17 +247,21 @@ The nearest systems each cover part of the ground:
 
 ## 8. How success is measured
 
-The first experiment, specified in the technical specification (section PT13), compares three arms. In each, a coding agent implements the same stateful features:
+The first experiment (PT13) is milestone M3. It runs as soon as the language core, effects and diagnostics exist, before any runtime work, and the rest of the plan depends on its result. It compares three arms. In each, a coding agent implements the same stateful features behind the same host interface:
 
 1. the host language alone;
 2. the host language plus polygraph after the fact;
 3. poly.
 
-The measures are:
+The co-primary measures are:
 
-- defects that escape to a hidden oracle;
-- iterations and tokens to an admitted program;
-- regressions caught when the features evolve over several checkpoints.
+- escaped defects, judged by scenario tests written from the brief by someone who has not seen any reference machine;
+- tokens per delivered task.
+
+The decision rule is fixed before any run:
+
+- **Win:** at least a 30% reduction in mean escaped defects against both other arms, at no more than twice the tokens of arm 1.
+- **Stop:** the poly arm delivers an admitted program in fewer than 70% of its runs. The language surface is then revised before any runtime work.
 
 A null result is reported with the same prominence as a positive one.
 
@@ -260,12 +272,12 @@ A null result is reported with the same prominence as a positive one.
 | Agents write poly less well than TypeScript, because there is little poly in training data. | Adoption stalls. | Keep the surface small and close to TypeScript expressions. Make diagnostics carry fixes. Measure this directly in the first experiment. |
 | Check domains are too narrow to find real defects. | False confidence. | Grade adequacy with polynv. Report domains as disclosed assumptions in every certificate. |
 | State explosion on realistic machines. | Checks hit bounds. | `INCONCLUSIVE` with the bound, never clean. Rely on composition semantics (atomic cascades) and small machines. |
-| Two expression semantics: two-valued in machines, three-valued in policies. | Author confusion. | Keep them in separate syntactic contexts. The compiler rejects a policy-only construct inside a machine and the reverse. |
+| Two expression semantics: two-valued in machines, three-valued in policies. | Author confusion. | Separate file types and separate operators (`==` in machines; `is`, `is not`, `unknown` in policies). The compiler rejects each in the other context. |
 | Engine licences differ (Apache-2.0, BUSL-1.1, private Polytrion). | Distribution friction. | The compiler emits all artefacts. Checks that need a private engine are reported as not run, never as clean. |
 
 ## 10. Conclusion
 
-The Poly stack already has every primitive a coding agent needs to write stateful code that holds: declared machines, exhaustive checks with witnesses, admission, durable execution, gated effects, receipts, mined expertise and simulation. Today those primitives sit behind separate formats and tools. poly puts them behind one language. The program the agent writes is the model that is checked, the policy that governs it, and the code that runs. Its journal becomes the corpus for the next check. The first version is judged on one question: does an agent writing poly ship fewer escaped defects than an agent writing the host language alone?
+The Poly stack already has every primitive a coding agent needs to write stateful code that holds: declared machines, exhaustive checks with witnesses, admission, durable execution, gated effects, receipts, mined expertise and simulation. Today those primitives sit behind separate formats and tools. poly puts them behind one language. The program the agent writes is the model that is checked, the policy that governs it, and the code that runs. Its journal becomes the corpus for the next check. The first version is judged early, at M3, on one question: does an agent writing poly ship fewer escaped defects than an agent writing the host language alone, and at what cost?
 
 ## References
 
