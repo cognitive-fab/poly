@@ -62,7 +62,7 @@ The static checker lives in core, not in `poly-lang`, because both surfaces must
 |---|---|
 | `src/lexer.ts` | Tokens, `//` comments kept as trivia with their positions, string and integer literals, the prime as a postfix token on an identifier. |
 | `src/parser.ts` | Recursive descent for declarations and statements; a precedence-climbing expression parser with the nine levels of PS12 (`implies` right-associative, levels 5 and 6 non-associative, `is` at level 5). Errors are `PL0001 SYNTAX` with the node path so far. |
-| `src/format.ts` | The canonical printer. One text per AST. Parenthesises `implies` whenever it is mixed with `&&` or `||`, and only minimally elsewhere. Reattaches leading and trailing comments to the statement or item they belong to. |
+| `src/format.ts` | The canonical printer, `format(ast, trivia)`. The parser returns comments in a side table keyed by node id (leading and trailing comments per statement or item); they never enter the AST, so they never reach the digest (PT1.4a). The printer's layout is a function of the AST alone, one text per AST, and the side table only adds comment lines at their nodes. Parenthesises `implies` whenever it is mixed with `&&` or `||`, and only minimally elsewhere. |
 
 ### 3.3 `packages/poly-lower` (construct to artefact)
 
