@@ -1,4 +1,8 @@
-# Independent BFS of the v0.3 OutboxIntent machine (PT9.7) per 04-semantics.
+# Independent BFS of the five-field OutboxIntent machine per 04-semantics, in two variants:
+# v0.3 (SettleFailed goes to Dead after the third attempt) and v0.2 (SettleFailed always
+# returns to Allowed, the form the formal review found stuck; also AC9's variant).
+import sys
+VARIANT=sys.argv[1] if len(sys.argv)>1 else 'v0.3'
 from collections import deque
 TERM={'Done','Denied','Dead'}
 init=('Pending',0,0,False,False)  # status, attempts, decisions, executed, approved
@@ -29,7 +33,8 @@ def step(s,a):
         return acc(status='Allowed' if att<3 else 'Dead')
     if a=='SettleFailed':
         if st!='Settled': return None
-        return acc(status='Allowed' if att<3 else 'Dead')
+        if VARIANT=='v0.2': return acc(status='Allowed')      # v0.2: always back to Allowed
+        return acc(status='Allowed' if att<3 else 'Dead')     # v0.3: Dead after the third attempt
     if a=='SettleOk': return acc(status='Done') if st=='Settled' else None
 ACTS=['Propose','GateAllow','GateDeny','GateEscalate','Approve','EscalationTimeout','Start','HandlerOk','HandlerFailed','SettleFailed','SettleOk']
 seen={init}; q=deque([init]); edges=[]
@@ -46,7 +51,7 @@ while q:
         if s[3]: assert t[0]!='Denied'
         if t not in seen: seen.add(t); q.append(t)
 dead=[s for s in seen if s[0] not in TERM and not any(e[0]==s for e in edges)]
-print('states',len(seen),'edges',len(edges),'deadlocks',dead)
+print(VARIANT,'states',len(seen),'accepted steps',len(edges),'deadlocks',sorted(dead))
 # liveness: fair SCCs among non-terminal states (weak fairness per group)
 G=[{'Propose'},{'GateAllow','GateDeny','GateEscalate'},{'EscalationTimeout'},{'Start'},{'HandlerOk','HandlerFailed'},{'SettleOk','SettleFailed'}]
 nodes=[s for s in seen if s[0] not in TERM]

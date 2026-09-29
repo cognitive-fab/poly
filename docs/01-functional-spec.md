@@ -251,7 +251,7 @@ The nearest systems each cover part of the ground:
 | Id | Criterion |
 |---|---|
 | AC1 | The order machine of the `polyrun-oms` example, rewritten in poly, lowers to artefacts that replay its existing trace corpus at 100% and produce the same `check-effects` result as the hand-written artefacts. |
-| AC2 | The turnstile, raft role-transition and hatchet status-derivation machines from the field studies are expressible in poly. Their positive and negative controls behave as they do today. The raft study found no defects, so for raft this criterion establishes expressibility and control behaviour only. |
+| AC2 | The turnstile, raft role-transition and hatchet status-derivation machines from the field studies are expressible in poly. Their positive and negative controls behave as they do today: the same pass or fail on every trace window as the hand-written controls. The raft study found no defects, so for raft this criterion establishes expressibility and control behaviour only. |
 | AC3 | A seeded invariant violation yields a diagnostic with a witness. The exported host test fails on the unfixed program and passes on the fixed one. |
 | AC4 | A policy with a machine obligation over effect labels compiles, is admitted, and denies an irreversible effect in the forbidden state, with a witness and a signed receipt. |
 | AC5 | A workflow declared in poly runs through the polyflow MCP tools with no change to those tools. |

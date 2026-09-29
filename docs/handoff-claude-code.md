@@ -53,13 +53,14 @@ Then write a short plan in `docs/plan-m0.md` before writing code: packages, file
 
 ## The M0 gate (all must pass)
 
-- **Field-study corpora.** The turnstile (`polygraph/examples/turnstile-v2`), raft-roles (`osssm/polygraph-raft`) and hatchet-status (`osssm/polygraph-hatchet`) machines, rewritten in poly, lower to modules that replay their existing trace corpora at 100%. Their negative controls (`specs-mutant` or `specs_broken`), rewritten in poly, fail. Use polygraph's replay for this, not a reimplementation.
+- **Field-study corpora.** The turnstile (`polygraph/examples/turnstile-v2`), raft-roles (`osssm/polygraph-raft`) and hatchet-status (`osssm/polygraph-hatchet`) machines and their negative controls (`specs-mutant` or `specs_broken`), rewritten in poly, give the same pass or fail **on every window** as the hand-written controls: turnstile 12/12 and 9/12, raft 54/67 and 44/67, hatchet 19/19 and 18/19. Use polygraph's replay for this, not a reimplementation. The corpora are read from copies in `conformance/field-studies/` (PT17).
 - **Strict validation.** Every lowered `next.cjs` passes strict `validate()` from `@cognitive-fab/sam-pattern`.
 - **Translation validation.** It agrees on every transition of every conformance case. A deliberately broken lowering (for example, a lowering that drops the derived frame) is caught with `PL2501`.
 - **Evidence scripts.** poly-ref reproduces the single-machine evidence:
   - the hello-world turnstile from `README.md`: 7 states, `PL3201 DEADLOCK` with the witness `Coin, Coin, Coin, Push`; with `Empty` added, no deadlock;
   - `OutboxIntent` in its union form (PT9.7): 17 reachable states, no deadlock;
-  - `OutboxIntent` in its v0.3 five-field form (from `evidence/outbox_check.py`): the two deadlocked states that script prints.
+  - `OutboxIntent` in its v0.3 five-field form (`evidence/outbox_check.py v0.3`): 33 states, 40 accepted steps, no deadlock;
+  - `OutboxIntent` in its v0.2 form, AC9's variant (`evidence/outbox_check.py v0.2`): 35 states, deadlocked at `(Allowed, 3, 1, T, F)` and `(Allowed, 3, 2, T, T)`.
 
 ## Constraints
 

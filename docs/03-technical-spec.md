@@ -83,7 +83,7 @@ EffectItem  = "kind" String | "labels" "{" Label { "," Label } "}" | "class" Cla
             | ( "ok" | "failed" | "exhausted" ) "->" Ident "(" [ Args ] ")" ;
 Class       = "none" | "reversible" | "compensable" | "irreversible" ;
 Type        = "bool" | "int" | "string" | Ident | Int ".." Int
-            | "map" "<" Ident "," Type ">" | "Ref" "<" QualIdent ">" ;
+            | "map" "<" ( Ident | Int ".." Int ) "," Type ">" | "Ref" "<" QualIdent ">" ;
 Configuration = "configuration" Ident "{" { Instance | Inputs | Bounds | Property } "}" ;
 Instance    = Ident [ "[" Int "]" ] ":" QualIdent [ "{" Ident ":" Expr { "," Ident ":" Expr } "}" ] ;
 Inputs      = "inputs" "{" InputRef { "," InputRef } "}" ;
@@ -93,7 +93,7 @@ Domain      = "{" Literal { "," Literal } "}" | Int ".." Int ;
 
 The `Policy` production is in PT8, in its own file type. The `Workflow` production is in PT10.
 
-- **PT2.1** Keywords are reserved. Identifiers follow TypeScript identifier rules. Rejection reasons and effect kinds are string literals, so agents can reuse the names already present in a system.
+- **PT2.1** Keywords are **contextual**: a keyword is reserved only in the grammar positions that use it, and anywhere an identifier is expected it is an ordinary identifier. So a field may be named `state`, `derived`, `internal`, `terminal` or `type`. The parser decides with at most two tokens of lookahead: after a field's initial expression, `derived` or `internal` followed by `:` begins the next field, and otherwise it is the modifier. Field and action names lower verbatim into `contract.json`, traces and diagnostics, so a corpus's own names are kept. There is no second, external name for a field. Identifiers follow TypeScript identifier rules. Rejection reasons and effect kinds are string literals, so agents can reuse the names already present in a system.
 - **PT2.2** The expression sublanguage (AD-2) is a total, side-effect-free subset of TypeScript expressions:
   - literals, field and parameter names, `pre.` and `post.` (in step properties), enum members;
   - `== != < <= > >= && || !`, `+ - *`, and integer `/` and `%` (division by zero is a type error);
@@ -101,7 +101,8 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - `count(kind)` and `before(a, b)` (in emission invariants);
   - `in { … }`;
   - in configuration properties only: `forall i in g: …`, `exists i in g: …`, the aggregates `count`, `sum`, `all` and `any` over `g[*]`, and `init(e)` for the initial value of `e` (PS13.6);
-  - map indexing `m[k]`, where `k` is a value of the map's key enum; map update is the statement form `m' = m with [k] = v`, which writes one entry and leaves the others unchanged.
+  - map indexing `m[k]`, where `k` is a value of the map's key type;
+  - map literals `{ k1: v1, …, kn: vn }`, which must list every key of the map's key type exactly once (`PL1502 INCOMPLETE_MAP_LITERAL`), and, for maps keyed by an integer range, the array literal `[v0, v1, …, vn]`; map update is the statement form `m' = m with [k] = v`, which writes one entry and leaves the others unchanged.
 
   It has no loops, no calls to host functions and no string operations beyond equality and membership. Every expression terminates by construction. Precedence and associativity are fixed in PS12; the formatter parenthesises any mix of `implies` with `&&` or `||`.
   Primed fields are write-only: an expression never reads `f'` (PS2.3), and a field written twice on one path is `PL2102 DOUBLE_WRITE` (PS2.4).
@@ -150,7 +151,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - integer ranges `a..b`;
   - `int`;
   - `string`;
-  - `map<E, T>`, where the key type `E` is an enum;
+  - `map<K, T>`, where the key type `K` is an enum or an integer range `0..n`. A map keyed by an enum lowers to a JSON object keyed by constructor name. A map keyed by `0..n` lowers to a JSON array of length `n + 1`. A range key that does not start at 0 is `PL1602 ARRAY_MAP_NOT_ZERO_BASED`. So a corpus field such as `taskStatuses: ["QUEUED", "RUNNING", "FAILED"]` is `map<0..2, Status>`;
   - **tagged unions** `type U = C1 { … } | … | Cn { … }` (PS1.4), finite when their payload fields are. Handlers read a union with `match` or `is` and write it as a whole value. The lowering flattens it to a tag field and nullable payload fields, with an automatic `shape:` invariant (PS9.1b).
 - **PT3.2** Every field and parameter has a finite check domain (PF1.2). Enums, `bool`, ranges and maps over finite value types are finite by construction. `int` and `string` need an explicit `check` clause. Without one, the compiler reports `PL1101 UNBOUNDED_DOMAIN`.
 - **PT3.3** A `check` clause narrower than the runtime type is an assumption. It is written to `dataDomain` and to the certificate's `domains`, and it is graded by `poly grade` (polynv).
@@ -1044,6 +1045,10 @@ poly/
     orders/                  PT4.5, with its lowered build checked in for review
     turnstile/ raft-roles/ hatchet-status/ checkout/ (PT7a)
   conformance/               lowering conformance, generated from the lowering map (02 §4): one case per row, poly source vs hand-written artefacts
+    field-studies/<name>/    copied traces, contracts, invariants and hand-written controls (data, not engine code),
+                             with PROVENANCE.md (source path and commit, upstream project and its licence, SHA-256 of
+                             every file) and a sync script that re-verifies the hashes against the local sources when
+                             they exist. CI reads only these copies.
 ```
 
 The build directory per machine matches the engines' expected layout:
@@ -1062,7 +1067,7 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 
 | Milestone | Scope | Gate |
 |---|---|---|
-| M0 · Language core | `poly-core` AST, parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`, tagged unions, `match`, `Tri`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). poly-ref reproduces the evidence scripts for single machines: the turnstile (7 states, the deadlock witness), `OutboxIntent` in its v0.3 form (two deadlocked states) and in its union form (17 states, clean). |
+| M0 · Language core | `poly-core` AST, parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`, tagged unions, `match`, `Tri`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines and their broken controls, written in poly, give **the same pass or fail on every window** as the hand-written controls do today: turnstile 12/12 (broken 9/12), raft 54/67 (broken 44/67), hatchet 19/19 (broken 18/19). Identity is required window by window, not only in the counts; a window the poly version passes and the control fails is also a gate failure. Raft's 13 failing windows are explained in its `REPORT.md` (the term observed on either side of a deferred increment), and no deterministic machine passes them. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). poly-ref reproduces the evidence scripts for single machines: the turnstile (7 states, the deadlock witness), `OutboxIntent` in its v0.3 five-field form (33 states, 40 accepted steps, no deadlock), in its v0.2 form, which is AC9's variant (35 states, deadlocked at `(Allowed, 3, 1, T, F)` and `(Allowed, 3, 2, T, T)`), and in its union form (17 states, clean). The field-study corpora and controls are read from `conformance/field-studies/`, copied with provenance (PT17). |
 | M1 · Effects, composition and configurations | `emit`, effect declarations, timers, attached and detached children, `Ref` and `send`, configurations explored by poly-ref, emission and compose invariants, maps | The `polyrun-oms` order machine in poly gives the same `check-effects` and `check-product` results as the hand-written artefacts (AC1). The `checkout` configuration finds the double-confirmation witness with the optimistic order and is clean with the waiting order (AC10). poly-ref reproduces the configuration and delivery evidence scripts: the checkout results (six-step witness; 44 states clean) and all four `Delivery` variants of PT9.8. A disagreement with a script is investigated until one side is shown wrong. |
 | M2 · Diagnostics and second surface | `poly-embed` front end producing the same AST; handler capability lint (PT6.5); diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain and today's polyrun | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
