@@ -5,11 +5,11 @@
 import type * as A from '@poly/core';
 import type { Fault } from './lower.js';
 
-export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal'];
+export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant'];
 
-/** The machine as the broken lowering sees it. drop-frame and skip-terminal act in the emitter instead. */
+/** The machine as the broken lowering sees it. drop-frame, skip-terminal and the property faults act in the emitter instead. */
 export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {
-  if (!fault || fault === 'drop-frame' || fault === 'skip-terminal') return m;
+  if (!fault || fault === 'drop-frame' || fault === 'skip-terminal' || fault === 'drop-property' || fault === 'drop-auto-invariant') return m;
   const copy = structuredClone(m);
   let done = false;
   const visitStmts = (body: A.Stmt[]): void => {

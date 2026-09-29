@@ -13,7 +13,7 @@ export interface LowerOptions {
   fault?: Fault;
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant';
 
 export interface Lowered {
   machine: string;
@@ -169,7 +169,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   };
 
   // ── invariants.mjs ───────────────────────────────────────────────────
-  const invariants = invariantsModule(mutated, facts, env, layout, pre, actions.filter((a) => !handlers.has(a.name)).map((a) => a.name));
+  const invariants = invariantsModule(mutated, facts, env, layout, pre, actions.filter((a) => !handlers.has(a.name)).map((a) => a.name), opts.fault);
 
   return {
     lowered: {
@@ -182,39 +182,43 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   };
 }
 
-function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layout: Layout, pre: string, unhandled: string[]): string {
+function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layout: Layout, pre: string, unhandled: string[], fault?: Fault): string {
   const q = JSON.stringify;
   const state: string[] = [];
+  const auto: string[] = [];
+  // Test-only faults: drop the first step or reject property (else the first invariant), or every automatic invariant.
+  const dropped = fault === 'drop-property' ? (m.items.find((p) => p.kind === 'Property' && (p.form === 'step' || p.form === 'reject')) ?? m.items.find((p) => p.kind === 'Property' && p.form === 'invariant')) : undefined;
   const invCx: Cx = { facts, env, layout, mode: 'state', stateVar: 's', dataVar: 'data' };
   for (const p of m.items) {
-    if (p.kind === 'Property' && p.form === 'invariant') state.push(`  { name: ${q(p.name)}, pred: (s) => ${expr(p.expr, invCx)} },`);
+    if (p.kind === 'Property' && p.form === 'invariant' && p !== dropped) state.push(`  { name: ${q(p.name)}, pred: (s) => ${expr(p.expr, invCx)} },`);
   }
   // Automatic invariants: domain (PT3.5), shape (PS9.1b), bound (PS4.2a).
   for (const f of m.fields) {
     const l = layout.byField.get(f.name)!;
     const t = l.ty;
-    if (t.k === 'int' && Number.isFinite(t.lo)) state.push(`  { name: ${q(`domain:${f.name}`)}, pred: (s) => Number.isInteger(s[${q(f.name)}]) && s[${q(f.name)}] >= ${t.lo} && s[${q(f.name)}] <= ${t.hi} },`);
-    if (t.k === 'map' && t.value.k === 'int' && Number.isFinite(t.value.lo)) state.push(`  { name: ${q(`domain:${f.name}`)}, pred: (s) => Object.values(s[${q(f.name)}]).every((x) => Number.isInteger(x) && x >= ${t.value.lo} && x <= ${t.value.hi}) },`);
+    if (t.k === 'int' && Number.isFinite(t.lo)) auto.push(`  { name: ${q(`domain:${f.name}`)}, pred: (s) => Number.isInteger(s[${q(f.name)}]) && s[${q(f.name)}] >= ${t.lo} && s[${q(f.name)}] <= ${t.hi} },`);
+    if (t.k === 'map' && t.value.k === 'int' && Number.isFinite(t.value.lo)) auto.push(`  { name: ${q(`domain:${f.name}`)}, pred: (s) => Object.values(s[${q(f.name)}]).every((x) => Number.isInteger(x) && x >= ${t.value.lo} && x <= ${t.value.hi}) },`);
     if (l.kind === 'union') {
-      state.push(`  { name: ${q(`shape:${f.name}`)}, pred: (s) => __SHAPES[${q(f.name)}][s[${q(f.name)}]] !== undefined && __FLAT[${q(f.name)}].every(([p, k]) => (__SHAPES[${q(f.name)}][s[${q(f.name)}]].some(([x]) => x === p) ? s[k] !== null : s[k] === null)) },`);
+      auto.push(`  { name: ${q(`shape:${f.name}`)}, pred: (s) => __SHAPES[${q(f.name)}][s[${q(f.name)}]] !== undefined && __FLAT[${q(f.name)}].every(([p, k]) => (__SHAPES[${q(f.name)}][s[${q(f.name)}]].some(([x]) => x === p) ? s[k] !== null && s[k] !== undefined : s[k] === null)) },`);
       const u = env.unions.get((t as { name: string }).name)!;
       for (const [p, k] of l.payloads!) {
         const decl = u.ctors.flatMap((c) => c.fields).find((x) => x.name === p)!;
-        if (decl.type.kind === 'TRange') state.push(`  { name: ${q(`domain:${k}`)}, pred: (s) => s[${q(k)}] === null || (Number.isInteger(s[${q(k)}]) && s[${q(k)}] >= ${decl.type.lo} && s[${q(k)}] <= ${decl.type.hi}) },`);
+        if (decl.type.kind === 'TRange') auto.push(`  { name: ${q(`domain:${k}`)}, pred: (s) => s[${q(k)}] === null || (Number.isInteger(s[${q(k)}]) && s[${q(k)}] >= ${decl.type.lo} && s[${q(k)}] <= ${decl.type.hi}) },`);
       }
     }
     if (f.check && (t.k === 'int' || t.k === 'string')) {
       const values = f.check.domain.kind === 'DomainRange' ? null : f.check.domain.values.map((v) => (v as A.IntLit | A.StringLit).value);
       const pred = values ? `${q(values)}.includes(s[${q(f.name)}])` : `s[${q(f.name)}] >= ${(f.check.domain as A.DomainRange).lo} && s[${q(f.name)}] <= ${(f.check.domain as A.DomainRange).hi}`;
-      state.push(`  { name: ${q(`bound:${f.name}`)}, pred: (s) => ${pred} },`);
+      auto.push(`  { name: ${q(`bound:${f.name}`)}, pred: (s) => ${pred} },`);
     }
   }
+  if (fault !== 'drop-auto-invariant') state.push(...auto);
   const stepCx: Cx = { facts, env, layout, mode: 'step', stateVar: 'pre', dataVar: 'data' };
-  const trans = m.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'step')
+  const trans = m.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'step' && p !== dropped)
     // S8: the engine calls transitionInvariants on every step; a step property holds on accepted steps only (PS5.2).
     .map((p) => `  { name: ${q(p.name)}, pred: (pre, action, data, post, v) => (!!(v && v.rejected)) || UNHANDLED.has(action) || ${expr(p.expr, stepCx)} },`);
   const rejCx: Cx = { facts, env, layout, mode: 'reject', stateVar: 'state', dataVar: 'data' };
-  const rej = m.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'reject')
+  const rej = m.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'reject' && p !== dropped)
     .map((p) => `  { name: ${q(p.name)}, pred: (state, action, data, v) => ${expr(p.expr, rejCx)} },`);
   return [
     `// Generated by poly-lower from ${m.name}. Do not edit.`,

@@ -16,6 +16,7 @@ import { pathTo, type Edge } from './explore.js';
 import { evaluate, type Verdict } from './eval.js';
 import { alpha, flatten, flattenData } from './alpha.js';
 import { keyOf, stateKey, statePlain, toPlain, type State } from './values.js';
+import type { RMachine } from './model.js';
 
 interface SamModule {
   instance: (o: object) => { lastStep: () => { intent?: string; classification: string; rejections: { reason?: string }[] } };
@@ -122,22 +123,31 @@ export async function translationValidate(module: Module, machineName: string, b
     }
   }
 
-  // Property modules (PS9.2, last sentence): declared properties agree with PS5; automatic ones hold on Reach(I).
+  // Property modules (PS9.2, last sentence). Every property must be present: the declared ones, and the
+  // automatic ones PT3.5, PS9.1b and PS4.2a require. A missing or throwing predicate is a mismatch in
+  // itself, never read as false, so a dropped property cannot hide where PS5 is also false.
   let propertyChecks = 0;
   const declaredInv = new Map(M.invariants.map((p) => [p.name, p]));
+  const lowState = new Map((props.stateInvariants ?? []).map((x) => [x.name, x]));
+  const lowStep = new Map((props.transitionInvariants ?? []).map((x) => [x.name, x]));
+  const lowRej = new Map((props.rejectionInvariants ?? []).map((x) => [x.name, x]));
+  for (const name of [...declaredInv.keys(), ...automaticInvariants(M)]) {
+    if (!lowState.has(name)) mismatch(`state invariant ${name} is missing from the lowered property module`, []);
+  }
+  for (const p of M.stepProperties) if (!lowStep.has(p.name)) mismatch(`step property ${p.name} is missing from the lowered property module`, []);
+  for (const p of M.rejectProperties) if (!lowRej.has(p.name)) mismatch(`reject property ${p.name} is missing from the lowered property module`, []);
+  const call = (f: () => boolean): boolean | string => {
+    try { return f() === true; } catch (err) { return `threw ${(err as Error).message}`; }
+  };
   for (const [i, s] of g.states.entries()) {
     const flat = flatten(s, M);
     for (const inv of props.stateInvariants ?? []) {
       propertyChecks++;
-      let got: boolean;
-      try { got = inv.pred(flat) === true; } catch (err) { got = false; void err; }
+      const got = call(() => inv.pred(flat));
       const p = declaredInv.get(inv.name);
       const want = p ? evaluate(p.expr, { M, state: s, data: {}, locals: new Map() }) === true : true;
       if (got !== want) mismatch(`state invariant ${inv.name} is ${got} in the lowered module and ${want} by PS5.1 in ${stateKey(s, M.fieldNames)}`, pathTo(g, i));
     }
-  }
-  for (const name of declaredInv.keys()) {
-    if (!(props.stateInvariants ?? []).some((x) => x.name === name)) mismatch(`invariant ${name} is missing from the lowered property module`, []);
   }
   for (const e of g.edges) {
     const s = g.states[e.from];
@@ -147,23 +157,51 @@ export async function translationValidate(module: Module, machineName: string, b
     const flatData = flattenData(e.label.data, e.label.action, M);
     const v = e.label.verdict.kind === 'rejected' ? { rejected: true, reason: e.label.verdict.reason } : { rejected: false, reason: null };
     for (const p of M.stepProperties) {
+      const lowered = lowStep.get(p.name);
+      if (!lowered) continue; // reported missing above
       propertyChecks++;
-      const lowered = (props.transitionInvariants ?? []).find((x) => x.name === p.name);
       const want = e.label.verdict.kind !== 'accepted' || evaluate(p.expr, { M, state: s, data: e.label.data, locals: new Map(), pre: s, post, action: e.label.action }) === true;
-      let got = false;
-      try { got = lowered?.pred(flatPre, e.label.action, flatData, flatPost, v) === true; } catch { got = false; }
+      const got = call(() => lowered.pred(flatPre, e.label.action, flatData, flatPost, v));
       if (got !== want) mismatch(`step property ${p.name} is ${got} in the lowered module and ${want} by PS5.2`, [...pathTo(g, e.from), e]);
     }
     for (const p of M.rejectProperties) {
+      const lowered = lowRej.get(p.name);
+      if (!lowered) continue; // reported missing above
       propertyChecks++;
-      const lowered = (props.rejectionInvariants ?? []).find((x) => x.name === p.name);
       const want = evaluate(p.expr, { M, state: s, data: e.label.data, locals: new Map(), pre: s, action: e.label.action, verdict: e.label.verdict }) === true;
-      let got = false;
-      try { got = lowered?.pred(flatPre, e.label.action, flatData, v) === true; } catch { got = false; }
+      const got = call(() => lowered.pred(flatPre, e.label.action, flatData, v));
       if (got !== want) mismatch(`reject property ${p.name} is ${got} in the lowered module and ${want} by PS5.3`, [...pathTo(g, e.from), e]);
     }
   }
   return { machine: M.name, transitions, propertyChecks, mismatches, report };
+}
+
+/**
+ * The automatic invariants a lowered property module must carry, named as the specification names them:
+ * domain:<f> for a range field or a map of ranges (PT3.5), shape:<f> for a union with payloads and
+ * domain:<f>_<p> for each range payload (PS9.1b), bound:<f> for a field with a check domain (PS4.2a).
+ */
+export function automaticInvariants(M: RMachine): string[] {
+  const out: string[] = [];
+  for (const f of M.fields) {
+    const t = f.type;
+    if (t.k === 'int' && Number.isFinite(t.lo)) out.push(`domain:${f.name}`);
+    if (t.k === 'map' && t.value.k === 'int' && Number.isFinite(t.value.lo)) out.push(`domain:${f.name}`);
+    if (t.k === 'union') {
+      const u = M.unions.get(t.name)!;
+      const seen = new Set<string>();
+      if (u.ctors.some((c) => c.fields.length)) out.push(`shape:${f.name}`);
+      for (const c of u.ctors) {
+        for (const pf of c.fields) {
+          if (seen.has(pf.name)) continue;
+          seen.add(pf.name);
+          if (pf.type.k === 'int' && Number.isFinite(pf.type.lo)) out.push(`domain:${f.name}_${pf.name}`);
+        }
+      }
+    }
+    if (f.check) out.push(`bound:${f.name}`);
+  }
+  return out;
 }
 
 /** The flat keys the expected state has: the module may keep keys α ignores, which `shape:` covers. */
