@@ -1,0 +1,18 @@
+// expect: PL1503 (an arm the arms before it always cover, S21)
+module errors
+enum Prio { High, Low }
+type Job = Idle | Busy { prio: Prio }
+
+machine M {
+  state {
+    j : Job = Idle
+    n : 0..3 = 0
+  }
+  action Go()
+  on Go {
+    match j {
+      _ => n' = 1
+      Idle => n' = 2
+    }
+  }
+}

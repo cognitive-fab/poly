@@ -60,12 +60,12 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, M: RMachine, s
       }
       case 'Match': {
         const v = evaluate(st.scrutinee, env);
-        const arm = st.arms.find((a) => matches(a.pattern, v));
+        const arm = st.arms.find((a) => matches(M, a.pattern, v));
         // The compiler requires exhaustive arms (PL1501), so a match never falls through.
         if (!arm) throw new EvalError(`poly-ref: no arm of a match covers ${keyOf(v)}`);
         const armEnv: Env = { ...env, locals: new Map(env.locals) };
         if (arm.pattern.kind === 'PCtor' && isUnion(v)) {
-          for (const f of arm.pattern.fields) if (f.bind) armEnv.locals.set(f.bind, v.payload[f.name]);
+          for (const f of arm.pattern.fields) if (f.bind && patternName(M, v.ctor, f.name, f.bind) === 'bind') armEnv.locals.set(f.bind, v.payload[f.name]);
         }
         const r = block(arm.body, armEnv, w, M, s);
         if (r) return r;
@@ -83,10 +83,25 @@ function write(w: Map<string, Value>, field: string, v: Value): void {
   w.set(field, v);
 }
 
-function matches(p: A.Pattern, v: Value): boolean {
+/**
+ * What a name in a payload pattern means (PT2.4, S21): a constructor of the payload's type is a
+ * literal, `_` ignores the payload, and any other name binds it.
+ */
+function patternName(M: RMachine, ctor: string, payload: string, name: string): 'literal' | 'ignore' | 'bind' {
+  if (name === '_') return 'ignore';
+  const t = M.unions.get(M.ctors.get(ctor) ?? '')?.ctors.find((c) => c.name === ctor)?.fields.find((f) => f.name === payload)?.type;
+  if (t && t.k === 'union' && M.unions.get(t.name)?.ctors.some((c) => c.name === name)) return 'literal';
+  return 'bind';
+}
+
+function matches(M: RMachine, p: A.Pattern, v: Value): boolean {
   if (p.kind === 'PWild') return true;
   if (!isUnion(v) || v.ctor !== p.ctor) return false;
-  return p.fields.every((f) => f.literal === null || keyOf(v.payload[f.name]) === keyOf(literal(f.literal)));
+  return p.fields.every((f) => {
+    if (f.literal !== null) return keyOf(v.payload[f.name]) === keyOf(literal(f.literal));
+    if (f.bind && patternName(M, v.ctor, f.name, f.bind) === 'literal') return keyOf(v.payload[f.name]) === keyOf({ ctor: f.bind, payload: {} });
+    return true;
+  });
 }
 
 function literal(l: A.Literal): Value {

@@ -20,7 +20,7 @@ machine Worker {
   }
   on Fail {
     match job {
-      Running { prio: p, tries: 2 } => job' = Done { ok: false }
+      Running { prio: _, tries: 2 } => job' = Done { ok: false }
       Running { prio: p, tries: t } => job' = Running { prio: p, tries: t + 1 }
       _ => reject "not-running"
     }

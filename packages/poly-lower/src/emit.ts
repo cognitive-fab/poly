@@ -209,7 +209,10 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
           const parts = [`${v}t === ${q(p.ctor)}`];
           for (const f of p.fields) {
             if (f.literal) parts.push(`${v}[${q(f.name)}] === ${f.literal.kind === 'Name' ? q(f.literal.name) : JSON.stringify(f.literal.value)}`);
-            if (f.bind) binds.push(`${ind}    const b_${f.bind} = ${v}[${q(f.name)}];`);
+            // S21: a name that is a constructor of the payload's type is a literal; `_` ignores the payload.
+            const ctorLiteral = cx.facts.patternLiterals.get(`${arm.id}:${f.name}`);
+            if (ctorLiteral !== undefined) parts.push(`${v}[${q(f.name)}] === ${q(ctorLiteral)}`);
+            else if (f.bind && f.bind !== '_') binds.push(`${ind}    const b_${f.bind} = ${v}[${q(f.name)}];`);
           }
           cond = parts.join(' && ');
         }

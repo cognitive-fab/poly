@@ -1,0 +1,27 @@
+// Review finding 2 (S21): High and Low in a payload pattern are constructors of the payload's type,
+// so they are literal patterns. The Low arm is reachable, and the invariant must be found violated.
+module review
+
+enum Prio { High, Low }
+type Job = Idle | Busy { prio: Prio }
+
+machine Worker {
+  state {
+    j : Job = Idle
+    n : 0..3 = 0
+  }
+  action Start(p: Prio)
+  action Step()
+  on Start(p) {
+    require j is Idle else reject "busy"
+    j' = Busy { prio: p }
+  }
+  on Step {
+    match j {
+      Busy { prio: High } => n' = 1
+      Busy { prio: Low } => n' = 2
+      Idle => n' = 3
+    }
+  }
+  invariant never-two: n != 2
+}

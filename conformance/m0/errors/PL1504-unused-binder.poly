@@ -1,0 +1,18 @@
+// expect: PL1504 (a binder its arm never reads: a misspelled constructor, S21)
+module errors
+enum Prio { High, Low }
+type Job = Idle | Busy { prio: Prio }
+
+machine M {
+  state {
+    j : Job = Idle
+    n : 0..3 = 0
+  }
+  action Go()
+  on Go {
+    match j {
+      Busy { prio: Hgh } => n' = 1
+      Idle => n' = 2
+    }
+  }
+}

@@ -65,6 +65,8 @@ export interface MachineFacts {
   fieldTypes: Map<string, Ty>;
   /** Actions with no handler: unhandled in every state (PS3.2). */
   unhandled: string[];
+  /** S21: pattern names that are constructors of the payload type, by `<arm id>:<payload>`, with the constructor. */
+  patternLiterals: Map<string, string>;
 }
 
 export interface CheckResult {
@@ -80,7 +82,7 @@ type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'r
 interface Scope {
   ctx: Ctx;
   /** Local names: lets and pattern binders. */
-  locals: Map<string, { ty: Ty; res: Resolution }>;
+  locals: Map<string, { ty: Ty; res: Resolution; mark?: { used: boolean } }>;
   /** Parameters in scope (handler: its action's; properties: established by `action == A`). */
   params: Map<string, Ty>;
   /** In a property, the action established by an `action == A` conjunct. */
@@ -181,7 +183,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [] };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -369,55 +371,82 @@ class Checker {
       return;
     }
     const u = this.env.unions.get(st.name)!;
+    // The constraints each arm places on its constructor's payload, for coverage below.
+    const constraints: ({ ctor: string; lits: Map<string, unknown> } | null)[] = [];
     for (const arm of s.arms) {
       const armScope: Scope = { ...scope, locals: new Map(scope.locals) };
+      const marks: { name: string; mark: { used: boolean } }[] = [];
+      let constraint: { ctor: string; lits: Map<string, unknown> } | null = null;
       if (arm.pattern.kind === 'PCtor') {
-        const c = u.ctors.find((x) => x.name === (arm.pattern as A.PCtor).ctor);
-        if (!c) { this.err('PL1201', arm.pattern, `${arm.pattern.ctor} is not a constructor of ${u.name}`); continue; }
-        for (const pf of arm.pattern.fields) {
+        const pat = arm.pattern;
+        const c = u.ctors.find((x) => x.name === pat.ctor);
+        if (!c) { this.err('PL1201', pat, `${pat.ctor} is not a constructor of ${u.name}`); constraints.push({ ctor: '', lits: new Map() }); continue; }
+        constraint = { ctor: c.name, lits: new Map() };
+        for (const pf of pat.fields) {
           const decl = c.fields.find((x) => x.name === pf.name);
-          if (!decl) { this.err('PL1001', arm.pattern, `${c.name} has no payload ${pf.name}`); continue; }
+          if (!decl) { this.err('PL1001', pat, `${c.name} has no payload ${pf.name}`); continue; }
           const ty = this.tyOf(decl.type);
+          if (pf.bind === '_') continue; // S21: `_` ignores the payload
           if (pf.bind) {
-            if (armScope.locals.has(pf.bind) || scope.params.has(pf.bind) || this.facts!.fieldTypes.has(pf.bind)) this.err('PL1002', arm.pattern, `${pf.bind} is already a name here`);
-            armScope.locals.set(pf.bind, { ty, res: { k: 'bind', name: pf.bind } });
+            // S21: (1) a constructor of the payload's type is a literal pattern;
+            // (2) a constructor of another type is a type error; (3) any other name binds.
+            if (ty.k === 'union' && this.env.unions.get(ty.name)!.ctors.some((x) => x.name === pf.bind)) {
+              this.facts!.patternLiterals.set(`${arm.id}:${pf.name}`, pf.bind);
+              constraint.lits.set(pf.name, pf.bind);
+              continue;
+            }
+            if (this.env.ctorOwners.has(pf.bind)) {
+              this.err('PL1201', pat, `${pf.bind} is a constructor of ${this.env.ctorOwners.get(pf.bind)!.join(', ')}, not of ${tyToString(ty)}, the type of ${c.name}.${pf.name}; it cannot be a binder (S21)`);
+              continue;
+            }
+            if (armScope.locals.has(pf.bind) || scope.params.has(pf.bind) || this.facts!.fieldTypes.has(pf.bind)) this.err('PL1002', pat, `${pf.bind} is already a name here`);
+            const mark = { used: false };
+            marks.push({ name: pf.bind, mark });
+            armScope.locals.set(pf.bind, { ty, res: { k: 'bind', name: pf.bind }, mark });
           } else if (pf.literal) {
             const lt = this.typeOf(pf.literal, armScope, ty);
             if (!same(lt, ty)) this.err('PL1201', pf.literal, `pattern literal for ${c.name}.${pf.name} is not a ${tyToString(ty)}`);
+            constraint.lits.set(pf.name, pf.literal.kind === 'Name' ? pf.literal.name : pf.literal.value);
           }
         }
       }
+      constraints.push(constraint);
       this.stmts(arm.body, armScope);
+      // S21 (4): a binder its arm never reads is an error; `_` says so on purpose.
+      for (const { name, mark } of marks) if (!mark.used) this.err('PL1504', arm.pattern, `${name} is bound and never read; write \`_\` to ignore the payload (a misspelled constructor binds too)`);
     }
-    const missing = this.uncovered(u, s.arms);
-    if (missing.length) this.err('PL1501', s, `match on ${u.name} does not cover ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ', …' : ''}; add the arms or a \`_\` arm`);
+    this.coverage(u, s, constraints);
   }
 
-  /** The constructor values no arm covers (PS2.2: match never falls through). */
-  private uncovered(u: UnionInfo, arms: A.Arm[]): string[] {
-    if (arms.some((a) => a.pattern.kind === 'PWild')) return [];
-    const missing: string[] = [];
+  /**
+   * S21 (5) and PS2.2: every value of the union is covered by some arm (PL1501), and no arm is
+   * covered by the arms before it (PL1503). Coverage is decided by enumerating the payload values
+   * the arms' literals constrain, which are finite (PT3.2).
+   */
+  private coverage(u: UnionInfo, s: A.Match, constraints: ({ ctor: string; lits: Map<string, unknown> } | null)[]): void {
+    const values: { ctor: string; rec: Map<string, unknown> }[] = [];
+    const litFields = new Map<string, string[]>();
     for (const c of u.ctors) {
-      const mine = arms.map((a) => a.pattern).filter((p): p is A.PCtor => p.kind === 'PCtor' && p.ctor === c.name);
-      if (mine.some((p) => p.fields.every((f) => f.literal === null))) continue;
-      if (mine.length === 0) { missing.push(c.name); continue; }
-      // Literal patterns: enumerate the payload values the literals constrain.
-      // Undeclared payload names were reported by match() (PL1001); only declared ones constrain coverage.
-      const litFields = [...new Set(mine.flatMap((p) => p.fields.filter((f) => f.literal && c.fields.some((x) => x.name === f.name)).map((f) => f.name)))];
-      const domains = litFields.map((n) => this.values(c.fields.find((f) => f.name === n)!.type));
-      if (domains.some((d) => d === null)) { missing.push(`${c.name} { … }`); continue; }
-      const combos = domains.reduce<unknown[][]>((acc, d) => acc.flatMap((x) => d!.map((v) => [...x, v])), [[]]);
-      for (const combo of combos) {
-        const covered = mine.some((p) => p.fields.every((f) => {
-          if (!f.literal) return true;
-          const idx = litFields.indexOf(f.name);
-          const lit = f.literal.kind === 'Int' || f.literal.kind === 'Bool' || f.literal.kind === 'String' ? f.literal.value : f.literal.name;
-          return combo[idx] === lit;
-        }));
-        if (!covered) missing.push(`${c.name} { ${litFields.map((n, k) => `${n}: ${String(combo[k])}`).join(', ')} }`);
-      }
+      const names = [...new Set(constraints.filter((k) => k && k.ctor === c.name).flatMap((k) => [...k!.lits.keys()]))];
+      litFields.set(c.name, names);
+      const domains = names.map((n) => this.values(c.fields.find((f) => f.name === n)!.type));
+      if (domains.some((d) => d === null)) { values.push({ ctor: c.name, rec: new Map() }); continue; }
+      let recs: Map<string, unknown>[] = [new Map()];
+      names.forEach((n, i) => { recs = recs.flatMap((r) => domains[i]!.map((v) => new Map([...r, [n, v]]))); });
+      for (const rec of recs) values.push({ ctor: c.name, rec });
     }
-    return missing;
+    const matches = (k: { ctor: string; lits: Map<string, unknown> } | null, v: { ctor: string; rec: Map<string, unknown> }) =>
+      k === null || (k.ctor === v.ctor && [...k.lits].every(([n, lit]) => !v.rec.has(n) || v.rec.get(n) === lit));
+    const covered = new Set<number>();
+    s.arms.forEach((arm, i) => {
+      const k = constraints[i];
+      if (k && k.ctor === '') return; // an unknown constructor, already reported
+      const mine = values.map((v, j) => (matches(k, v) ? j : -1)).filter((j) => j >= 0);
+      if (mine.length && mine.every((j) => covered.has(j))) this.err('PL1503', arm, `this arm can never run: the arms before it cover every value it matches (S21)`);
+      for (const j of mine) covered.add(j);
+    });
+    const missing = values.filter((_, j) => !covered.has(j)).map((v) => (v.rec.size ? `${v.ctor} { ${[...v.rec].map(([n, x]) => `${n}: ${String(x)}`).join(', ')} }` : v.ctor));
+    if (missing.length) this.err('PL1501', s, `match on ${u.name} does not cover ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ', …' : ''}; add the arms or a \`_\` arm`);
   }
 
   private values(t: A.TypeExpr): unknown[] | null {
@@ -525,7 +554,7 @@ class Checker {
       case 'Name': {
         const n = e.name;
         const local = scope.locals.get(n);
-        if (local) { this.resolve(e, local.res); return local.ty; }
+        if (local) { if (local.mark) local.mark.used = true; this.resolve(e, local.res); return local.ty; }
         if (scope.params.has(n)) { this.resolve(e, { k: 'param', name: n }); return scope.params.get(n)!; }
         if (fields.has(n) && scope.ctx !== 'init' && scope.ctx !== 'step') {
           this.resolve(e, { k: 'field', name: n });

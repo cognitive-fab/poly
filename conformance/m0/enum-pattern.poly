@@ -1,0 +1,28 @@
+// Conformance: enum members and _ in payload patterns (S21).
+module conf
+
+enum Prio { High, Low }
+type Job = Idle | Busy { prio: Prio, tries: 0..1 }
+
+machine Worker {
+  state {
+    j : Job = Idle
+    n : 0..3 = 0
+  }
+  action Start(p: Prio)
+  action Step()
+  on Start(p) {
+    require j is Idle else reject "busy"
+    j' = Busy { prio: p, tries: 0 }
+  }
+  on Step {
+    match j {
+      Busy { prio: High, tries: _ } => n' = 1
+      Busy { prio: Low, tries: t } => {
+        n' = 2 + t
+        j' = Idle
+      }
+      Idle => reject "idle"
+    }
+  }
+}

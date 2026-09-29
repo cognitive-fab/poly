@@ -35,6 +35,9 @@ export const CODES: Record<string, CodeInfo> = {
   PL1401: { name: 'TERMINAL_NOT_ON_CONTROL_FIELD', stage: 'types', severity: 'error' },
   PL1501: { name: 'NON_EXHAUSTIVE_MATCH', stage: 'types', severity: 'error' },
   PL1502: { name: 'INCOMPLETE_MAP_LITERAL', stage: 'types', severity: 'error' },
+  // S21: a misspelled constructor cannot become a silent catch-all.
+  PL1503: { name: 'UNREACHABLE_ARM', stage: 'types', severity: 'error' },
+  PL1504: { name: 'UNUSED_BINDER', stage: 'types', severity: 'error' },
   PL1601: { name: 'PAYLOAD_TYPE_CONFLICT', stage: 'types', severity: 'error' },
   PL1602: { name: 'ARRAY_MAP_NOT_ZERO_BASED', stage: 'types', severity: 'error' },
   PL2101: { name: 'WRITE_BEFORE_REQUIRE', stage: 'types', severity: 'error' },

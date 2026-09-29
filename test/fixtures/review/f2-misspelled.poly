@@ -1,0 +1,27 @@
+// Review finding 2 (S21): a misspelled constructor must not become a silent catch-all.
+// `Hgh` is not a constructor, so it binds; its arm never reads it (PL1504 UNUSED_BINDER),
+// and the Low arm after it can never run (PL1503 UNREACHABLE_ARM).
+module review
+
+enum Prio { High, Low }
+type Job = Idle | Busy { prio: Prio }
+
+machine Worker {
+  state {
+    j : Job = Idle
+    n : 0..3 = 0
+  }
+  action Start(p: Prio)
+  action Step()
+  on Start(p) {
+    require j is Idle else reject "busy"
+    j' = Busy { prio: p }
+  }
+  on Step {
+    match j {
+      Busy { prio: Hgh } => n' = 1
+      Busy { prio: Low } => n' = 2
+      Idle => n' = 3
+    }
+  }
+}
