@@ -1,0 +1,39 @@
+// Negative control: hatchet's status derivation with FAILED dominance disabled
+// (conformance/field-studies/hatchet/specs_broken/reference.js: 'if (false) return FAILED').
+module hatchet
+
+type Status = QUEUED | RUNNING | EVICTED | CANCELLED | FAILED | COMPLETED
+
+machine WorkflowRun {
+  state {
+    derived      : Status = QUEUED
+    taskStatuses : map<0..2, Status> = [QUEUED, QUEUED, QUEUED]
+  }
+  action SetTaskStatus(index: 0..2, status: Status)
+
+  // The new statuses are the old ones with slot `index` set to `status`. Expressions read the
+  // pre-state (PS2.3), so each test below states the new value of slot i as
+  // `index == i` (it is `status`) or `taskStatuses[i]` (unchanged).
+  on SetTaskStatus(index, status) {
+    let uniform = (index == 0 || taskStatuses[0] == status) && (index == 1 || taskStatuses[1] == status) && (index == 2 || taskStatuses[2] == status)
+    let anyInFlight = status in { QUEUED, RUNNING, EVICTED } || index != 0 && taskStatuses[0] in { QUEUED, RUNNING, EVICTED } || index != 1 && taskStatuses[1] in { QUEUED, RUNNING, EVICTED } || index != 2 && taskStatuses[2] in { QUEUED, RUNNING, EVICTED }
+    let anyCancelled = status == CANCELLED || index != 0 && taskStatuses[0] == CANCELLED || index != 1 && taskStatuses[1] == CANCELLED || index != 2 && taskStatuses[2] == CANCELLED
+    // One status for every task passes through; then FAILED, then the in-flight family, then CANCELLED.
+    if uniform {
+      derived' = status
+    } else {
+      // The broken branch: FAILED no longer dominates.
+      if anyInFlight {
+        derived' = RUNNING
+      } else {
+        if anyCancelled {
+          derived' = CANCELLED
+        } else {
+          reject "cannot-derive-status"
+        }
+      }
+    }
+    taskStatuses' = taskStatuses with [index] = status
+  }
+
+}

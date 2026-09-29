@@ -1,0 +1,51 @@
+{
+  "lang": "go",
+  "stateKeys": [
+    { "name": "derived", "type": "'QUEUED'|'RUNNING'|'FAILED'|'CANCELLED'|'COMPLETED' -- the rolled-up workflow-run status computed from taskStatuses" },
+    { "name": "taskStatuses", "type": "fixed 3-element array, each 'QUEUED'|'RUNNING'|'EVICTED'|'CANCELLED'|'FAILED'|'COMPLETED' -- one status per task in the workflow run" }
+  ],
+  "initState": { "derived": "QUEUED", "taskStatuses": ["QUEUED", "QUEUED", "QUEUED"] },
+  "actions": {
+    "SetTaskStatus": {
+      "dataFields": {
+        "index": "0 | 1 | 2 -- which task slot changed status",
+        "status": "'QUEUED'|'RUNNING'|'EVICTED'|'CANCELLED'|'FAILED'|'COMPLETED' -- the task's new status"
+      }
+    }
+  },
+  "terminalStates": [],
+  "specialRules": [
+    {
+      "name": "all-same-status-passes-through",
+      "note": "When every task shares the same status, derived equals that status exactly (the len(uniqueStatuses)==1 branch) -- including 'derived' becoming COMPLETED, which is otherwise unreachable any other way.",
+      "whenAction": "SetTaskStatus"
+    },
+    {
+      "name": "failed-dominates-except-when-uniform",
+      "note": "Any task FAILED (given tasks are not all identical) forces derived=FAILED, regardless of how many tasks already COMPLETED.",
+      "whenAction": "SetTaskStatus"
+    },
+    {
+      "name": "in-flight-family-beats-cancelled-and-completed",
+      "note": "Any task QUEUED, RUNNING, or EVICTED (and no FAILED present, and not all identical) forces derived=RUNNING -- even alongside CANCELLED or COMPLETED tasks. Checked BEFORE the CANCELLED branch, so a mix of CANCELLED+QUEUED reports RUNNING, not CANCELLED.",
+      "whenAction": "SetTaskStatus"
+    },
+    {
+      "name": "cancelled-only-when-no-failed-and-no-inflight",
+      "note": "derived=CANCELLED requires at least one CANCELLED task, no FAILED task, and no QUEUED/RUNNING/EVICTED task remaining (and not all-identical, which is the pass-through branch instead).",
+      "whenAction": "SetTaskStatus"
+    },
+    {
+      "name": "evicted-treated-as-inflight-not-its-own-bucket",
+      "note": "EVICTED is grouped with QUEUED/RUNNING for precedence purposes (forces RUNNING), never treated as a distinct terminal outcome.",
+      "whenAction": "SetTaskStatus"
+    }
+  ],
+  "dataDomain": {
+    "SetTaskStatus": {
+      "index": [0, 1, 2],
+      "status": ["QUEUED", "RUNNING", "EVICTED", "CANCELLED", "FAILED", "COMPLETED"]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

@@ -1,0 +1,30 @@
+// The turnstile of the polygraph field study (conformance/field-studies/turnstile), in poly.
+// The corpus names are kept verbatim: the field `state` (a contextual keyword, PT2.1),
+// the actions COIN and PUSH, the reason push-while-locked-is-noop.
+// `coins` counts without limit in the real machine, so it is checked up to a bound (PS4.2a).
+module turnstile
+
+type Mode = LOCKED | UNLOCKED
+
+machine Turnstile {
+  state {
+    state : Mode = LOCKED
+    coins : int check 0..3 = 0
+  }
+  action COIN()
+  action PUSH()
+
+  // COIN always unlocks and counts the coin, even when already UNLOCKED.
+  on COIN {
+    state' = UNLOCKED
+    coins' = coins + 1
+  }
+
+  // PUSH while LOCKED is the contract's named special rule: an observable rejection.
+  on PUSH {
+    require state == UNLOCKED else reject "push-while-locked-is-noop"
+    state' = LOCKED
+  }
+
+  reject property push-locked-must-reject: (action == PUSH && pre.state == LOCKED) implies rejected("push-while-locked-is-noop")
+}

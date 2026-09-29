@@ -1,0 +1,6 @@
+{"pre":{"taskStatuses":["QUEUED","QUEUED","QUEUED"],"derived":"QUEUED"},"action":"SetTaskStatus","data":{"index":0,"status":"RUNNING"},"post":{"taskStatuses":["RUNNING","QUEUED","QUEUED"],"derived":"RUNNING"}}
+{"pre":{"taskStatuses":["RUNNING","QUEUED","QUEUED"],"derived":"RUNNING"},"action":"SetTaskStatus","data":{"index":1,"status":"RUNNING"},"post":{"taskStatuses":["RUNNING","RUNNING","QUEUED"],"derived":"RUNNING"}}
+{"pre":{"taskStatuses":["RUNNING","RUNNING","QUEUED"],"derived":"RUNNING"},"action":"SetTaskStatus","data":{"index":2,"status":"RUNNING"},"post":{"taskStatuses":["RUNNING","RUNNING","RUNNING"],"derived":"RUNNING"}}
+{"pre":{"taskStatuses":["RUNNING","RUNNING","RUNNING"],"derived":"RUNNING"},"action":"SetTaskStatus","data":{"index":0,"status":"COMPLETED"},"post":{"taskStatuses":["COMPLETED","RUNNING","RUNNING"],"derived":"RUNNING"}}
+{"pre":{"taskStatuses":["COMPLETED","RUNNING","RUNNING"],"derived":"RUNNING"},"action":"SetTaskStatus","data":{"index":1,"status":"COMPLETED"},"post":{"taskStatuses":["COMPLETED","COMPLETED","RUNNING"],"derived":"RUNNING"}}
+{"pre":{"taskStatuses":["COMPLETED","COMPLETED","RUNNING"],"derived":"RUNNING"},"action":"SetTaskStatus","data":{"index":2,"status":"COMPLETED"},"post":{"taskStatuses":["COMPLETED","COMPLETED","COMPLETED"],"derived":"COMPLETED"}}

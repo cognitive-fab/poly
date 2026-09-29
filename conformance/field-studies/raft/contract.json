@@ -1,0 +1,50 @@
+{
+  "lang": "go",
+  "stateKeys": [
+    { "name": "role", "type": "'Follower' | 'Candidate' | 'Leader' | 'Shutdown'" },
+    { "name": "term", "type": "number (Raft term, monotonically non-decreasing)" }
+  ],
+  "initState": { "role": "Follower", "term": 0 },
+  "actions": {
+    "ElectionTimeout": { "dataFields": {} },
+    "ElectionWon": { "dataFields": {} },
+    "NewerTermSeen": { "dataFields": { "term": "number, the newly observed (higher) term" } },
+    "QuorumLost": { "dataFields": {} },
+    "ShutdownRequested": { "dataFields": {} }
+  },
+  "terminalStates": [],
+  "specialRules": [
+    {
+      "name": "election-timeout-only-from-follower",
+      "note": "ElectionTimeout (no leader contact within the timeout) only starts a new election from Follower; a no-op (reject) from Candidate, Leader, or Shutdown.",
+      "whenState": "role == 'Follower'",
+      "whenAction": "ElectionTimeout"
+    },
+    {
+      "name": "election-won-only-from-candidate",
+      "note": "ElectionWon (quorum of votes granted) only promotes to Leader when currently Candidate; a no-op elsewhere.",
+      "whenState": "role == 'Candidate'",
+      "whenAction": "ElectionWon"
+    },
+    {
+      "name": "quorum-lost-only-from-leader",
+      "note": "QuorumLost (failed to contact a quorum / stepped down / removed self / lost a verify round) only demotes a Leader to Follower at the same term; a no-op elsewhere.",
+      "whenState": "role == 'Leader'",
+      "whenAction": "QuorumLost"
+    },
+    {
+      "name": "newer-term-seen-goes-to-follower",
+      "note": "NewerTermSeen (an RPC or vote/pre-vote response carrying a term greater than the current one) moves ANY role -- Follower, Candidate, or Leader -- to Follower at the new term.",
+      "whenAction": "NewerTermSeen"
+    },
+    {
+      "name": "shutdown-is-terminal-from-any-role",
+      "note": "ShutdownRequested moves any role (including Shutdown itself, as a no-op) to the terminal Shutdown state.",
+      "whenAction": "ShutdownRequested"
+    }
+  ],
+  "dataDomain": {
+    "NewerTermSeen": { "term": [1, 2, 3, 5, 8] }
+  },
+  "invariants": "invariants.mjs"
+}

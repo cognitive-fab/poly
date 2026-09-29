@@ -1,0 +1,5 @@
+{"pre":{"role":"Follower","term":1},"action":"ElectionTimeout","data":{},"post":{"role":"Candidate","term":2}}
+{"pre":{"role":"Candidate","term":2},"action":"ElectionWon","data":{},"post":{"role":"Leader","term":2}}
+{"pre":{"role":"Leader","term":2},"action":"QuorumLost","data":{},"post":{"role":"Follower","term":2}}
+{"pre":{"role":"Follower","term":2},"action":"ElectionTimeout","data":{},"post":{"role":"Candidate","term":2}}
+{"pre":{"role":"Candidate","term":2},"action":"NewerTermSeen","data":{"term":3},"post":{"role":"Follower","term":3}}

@@ -1,0 +1,47 @@
+// Negative control: raft, except that NewerTermSeen keeps the old term
+// (conformance/field-studies/raft/specs_broken/reference.js, one line changed).
+module raft
+
+type Role = Follower | Candidate | Leader | Shutdown
+
+machine Node {
+  state {
+    role : Role = Follower
+    term : int check 0..9 = 0
+  }
+  terminal role is Shutdown
+
+  action ElectionTimeout()
+  action ElectionWon()
+  action NewerTermSeen(term: int check { 1, 2, 3, 5, 8 })
+  action QuorumLost()
+  action ShutdownRequested()
+
+  on ElectionTimeout {
+    require role == Follower else reject "election-timeout-only-from-follower"
+    role' = Candidate
+    term' = term + 1
+  }
+
+  on ElectionWon {
+    require role == Candidate else reject "election-won-only-from-candidate"
+    role' = Leader
+  }
+
+  on QuorumLost {
+    require role == Leader else reject "quorum-lost-only-from-leader"
+    role' = Follower
+  }
+
+  // The broken line: the term is not updated.
+  on NewerTermSeen(term) {
+    require role != Shutdown else reject "shutdown-is-terminal"
+    require term > pre.term else reject "stale-term-ignored"
+    role' = Follower
+  }
+
+  on ShutdownRequested {
+    require role != Shutdown else reject "already-shutdown"
+    role' = Shutdown
+  }
+}

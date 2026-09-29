@@ -1,0 +1,3 @@
+{"pre":{"taskStatuses":["QUEUED","QUEUED","QUEUED"],"derived":"QUEUED"},"action":"SetTaskStatus","data":{"index":0,"status":"CANCELLED"},"post":{"taskStatuses":["CANCELLED","QUEUED","QUEUED"],"derived":"RUNNING"}}
+{"pre":{"taskStatuses":["CANCELLED","QUEUED","QUEUED"],"derived":"RUNNING"},"action":"SetTaskStatus","data":{"index":1,"status":"CANCELLED"},"post":{"taskStatuses":["CANCELLED","CANCELLED","QUEUED"],"derived":"RUNNING"}}
+{"pre":{"taskStatuses":["CANCELLED","CANCELLED","QUEUED"],"derived":"RUNNING"},"action":"SetTaskStatus","data":{"index":2,"status":"CANCELLED"},"post":{"taskStatuses":["CANCELLED","CANCELLED","CANCELLED"],"derived":"CANCELLED"}}

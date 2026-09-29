@@ -35,7 +35,7 @@ function unionTag(cx: Cx, e: A.Expr, code: string): string {
     // A field read directly: its flat tag is the field itself.
     const r = e.kind === 'Name' ? cx.facts.resolutions.get(e.id) : undefined;
     if (r?.k === 'field') return `${cx.stateVar}[${q(r.name)}]`;
-    if (e.kind === 'Member' && e.object.kind === 'Name') return `${cx.mode === 'reject' ? cx.stateVar : e.object.name}[${q(e.prop)}]`;
+    if (e.kind === 'Member' && e.object.kind === 'Name') return `${cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : e.object.name}[${q(e.prop)}]`;
     return `(${code}).$`;
   }
   return code;
@@ -73,7 +73,8 @@ export function expr(e: A.Expr, cx: Cx): string {
     }
     case 'Member': {
       const obj = (e.object as A.NameRef).name;
-      const v = cx.mode === 'reject' ? cx.stateVar : obj;
+      // Reject properties and handlers read pre.f from their state variable (PT5; S19 for handlers).
+      const v = cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : obj;
       return readField(cx, v, e.prop);
     }
     case 'Index': return `(${expr(e.object, cx)})[${expr(e.index, cx)}]`;

@@ -1,0 +1,24 @@
+// Negative control: the turnstile, except that PUSH while LOCKED wrongly UNLOCKS
+// instead of rejecting (conformance/field-studies/turnstile/specs-mutant/mutant.js).
+// The corpus must tell it apart from the reference.
+module turnstile
+
+type Mode = LOCKED | UNLOCKED
+
+machine Turnstile {
+  state {
+    state : Mode = LOCKED
+    coins : int check 0..3 = 0
+  }
+  action COIN()
+  action PUSH()
+
+  on COIN {
+    state' = UNLOCKED
+    coins' = coins + 1
+  }
+
+  on PUSH {
+    if state == LOCKED { state' = UNLOCKED } else { state' = LOCKED }
+  }
+}

@@ -16,7 +16,8 @@ export interface Step {
 
 /** PS2.2: guards in declaration order, then the body; the first failure rejects. */
 export function runHandler(M: RMachine, h: A.Handler, s: State, d: Record<string, Value>): HandlerResult {
-  const env: Env = { M, state: s, data: d, locals: new Map() };
+  // pre.f reads the pre-state field f, also where a parameter f shadows it (S19, proposed).
+  const env: Env = { M, state: s, data: d, locals: new Map(), pre: s };
   for (const g of M.guards) {
     if (evaluate(g.cond, env) === true) return { kind: 'reject', reason: g.reason };
   }

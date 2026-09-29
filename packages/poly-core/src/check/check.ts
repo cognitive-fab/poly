@@ -552,14 +552,17 @@ class Checker {
         return ERR;
       }
       case 'Member': {
-        if (e.object.kind === 'Name' && (e.object.name === 'pre' || e.object.name === 'post') && (scope.ctx === 'step' || scope.ctx === 'reject')) {
-          if (e.object.name === 'post' && scope.ctx === 'reject') { this.err('PL1201', e, 'a reject property reads the state a step starts from: pre.f, not post.f (PT5)'); return ERR; }
-          this.resolve(e.object, e.object.name === 'pre' ? { k: 'pre' } : { k: 'post' });
+        // S19 (proposed, awaiting the owner): in a handler, pre.f names the pre-state field f even where a parameter f shadows it.
+        const handlerPre = scope.ctx === 'handler' && e.object.kind === 'Name' && e.object.name === 'pre' && !scope.locals.has('pre') && !scope.params.has('pre');
+        if (handlerPre || (e.object.kind === 'Name' && (e.object.name === 'pre' || e.object.name === 'post') && (scope.ctx === 'step' || scope.ctx === 'reject'))) {
+          const obj = e.object as A.NameRef;
+          if (obj.name === 'post' && scope.ctx === 'reject') { this.err('PL1201', e, 'a reject property reads the state a step starts from: pre.f, not post.f (PT5)'); return ERR; }
+          this.resolve(obj, obj.name === 'pre' ? { k: 'pre' } : { k: 'post' });
           const t = fields.get(e.prop);
           if (!t) { this.err('PL1001', e, `unknown field ${e.prop}`); return ERR; }
           return t;
         }
-        this.err('PL1201', e, `field access .${e.prop} is only pre.f or post.f, in step and reject properties`);
+        this.err('PL1201', e, `field access .${e.prop} is only pre.f or post.f, in step and reject properties, and pre.f in handlers`);
         return ERR;
       }
       case 'Index': {

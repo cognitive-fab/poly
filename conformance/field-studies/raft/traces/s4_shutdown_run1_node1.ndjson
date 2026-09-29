@@ -1,0 +1,2 @@
+{"pre":{"role":"Follower","term":1},"action":"ElectionTimeout","data":{},"post":{"role":"Candidate","term":3}}
+{"pre":{"role":"Candidate","term":3},"action":"ElectionWon","data":{},"post":{"role":"Leader","term":3}}

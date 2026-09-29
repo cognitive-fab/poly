@@ -1,0 +1,48 @@
+// hatchet's DeriveWorkflowRunStatus, from the field study (conformance/field-studies/hatchet), in poly.
+// The corpus names are kept verbatim: the field `derived` (a contextual keyword, PT2.1) and the
+// array `taskStatuses`, a map keyed by 0..2 (S4).
+module hatchet
+
+type Status = QUEUED | RUNNING | EVICTED | CANCELLED | FAILED | COMPLETED
+
+machine WorkflowRun {
+  state {
+    derived      : Status = QUEUED
+    taskStatuses : map<0..2, Status> = [QUEUED, QUEUED, QUEUED]
+  }
+  action SetTaskStatus(index: 0..2, status: Status)
+
+  // The new statuses are the old ones with slot `index` set to `status`. Expressions read the
+  // pre-state (PS2.3), so each test below states the new value of slot i as
+  // `index == i` (it is `status`) or `taskStatuses[i]` (unchanged).
+  on SetTaskStatus(index, status) {
+    let uniform = (index == 0 || taskStatuses[0] == status) && (index == 1 || taskStatuses[1] == status) && (index == 2 || taskStatuses[2] == status)
+    let anyFailed = status == FAILED || index != 0 && taskStatuses[0] == FAILED || index != 1 && taskStatuses[1] == FAILED || index != 2 && taskStatuses[2] == FAILED
+    let anyInFlight = status in { QUEUED, RUNNING, EVICTED } || index != 0 && taskStatuses[0] in { QUEUED, RUNNING, EVICTED } || index != 1 && taskStatuses[1] in { QUEUED, RUNNING, EVICTED } || index != 2 && taskStatuses[2] in { QUEUED, RUNNING, EVICTED }
+    let anyCancelled = status == CANCELLED || index != 0 && taskStatuses[0] == CANCELLED || index != 1 && taskStatuses[1] == CANCELLED || index != 2 && taskStatuses[2] == CANCELLED
+    // One status for every task passes through; then FAILED, then the in-flight family, then CANCELLED.
+    if uniform {
+      derived' = status
+    } else {
+      if anyFailed {
+        derived' = FAILED
+      } else {
+        if anyInFlight {
+          derived' = RUNNING
+        } else {
+          if anyCancelled {
+            derived' = CANCELLED
+          } else {
+            // Unreachable with the six statuses, kept for parity with the Go error path.
+            reject "cannot-derive-status"
+          }
+        }
+      }
+    }
+    taskStatuses' = taskStatuses with [index] = status
+  }
+
+  invariant completed-only-when-every-task-completed: derived == COMPLETED implies taskStatuses[0] == COMPLETED && taskStatuses[1] == COMPLETED && taskStatuses[2] == COMPLETED
+  invariant failed-reported-whenever-any-task-failed: taskStatuses[0] == FAILED || taskStatuses[1] == FAILED || taskStatuses[2] == FAILED implies derived == FAILED
+  step property a-terminal-workflow-status-implies-no-inflight-tasks: post.derived == CANCELLED || post.derived == COMPLETED implies !(post.taskStatuses[0] in { QUEUED, RUNNING, EVICTED } || post.taskStatuses[1] in { QUEUED, RUNNING, EVICTED } || post.taskStatuses[2] in { QUEUED, RUNNING, EVICTED })
+}

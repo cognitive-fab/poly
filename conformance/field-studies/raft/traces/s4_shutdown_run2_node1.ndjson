@@ -1,0 +1,1 @@
+{"pre":{"role":"Follower","term":1},"action":"ShutdownRequested","data":{},"post":{"role":"Shutdown","term":2}}

@@ -181,12 +181,13 @@ Each issue states what the spec says, what was found, and the resolution propose
 - **S16. Two SAM versions in one check.** polygraph's loader resolves `@cognitive-fab/sam-pattern` inside a spec to its vendored 2.2.0 bundle. Strict `validate()` and translation validation use npm 2.2.1. No behaviour difference is known. *Proposal:* record both versions in the instance line; no engine change. If they ever disagree, that is a polygraph issue, raised in its repository.
 - **S17. Where the corpora live (blocking step 8).** The gate reads corpora from `C:\Users\jjdub\code\polygraph` and `C:\Users\jjdub\code\osssm`, outside this repository, so CI cannot see them. *Proposal:* copy the traces, contracts, invariants and hand-written controls (data, not engine code) into `conformance/field-studies/<name>/` with a `PROVENANCE.md` giving the source path and commit, plus a script that diffs them against the local sources when those exist.
 - **S18. `Ref<M>` in M0.** The handoff says "as a type only". *Proposal:* parsed and type-checked, `none` and `==` included; a machine with a `Ref` field is refused at lowering with `PL0901` until M1.
+- **S19. A parameter that shares a field's name hides the field (found at step 8; open).** The raft corpus names both `NewerTermSeen`'s datum and a state key `term`, and the handler must compare them (`data.term > model.term`). Names lower verbatim (PT2.1), so neither can be renamed, and nothing in PT2 or PS2 lets a handler name the field once the parameter shadows it. *Proposal:* in a handler, `pre.f` names the pre-state field `f`, as it already does in step and reject properties (PT5); a bare name resolves to the innermost binding (local, then parameter, then field), as in TypeScript. *Status:* implemented provisionally in the checker, the lowering and poly-ref, so the raft gate can run; the spec text is unchanged until the owner rules. The alternative, an error on any parameter that shares a field's name, would make the raft corpus inexpressible (AC2).
 
 The owner's rulings are in [`decisions-m0.md`](decisions-m0.md). S9 to S15 were written into 03 and 04 in commit `7506a66`.
 
 ## 7. Progress and measurements
 
-Steps 1 to 7 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
+Steps 1 to 8 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
 
 | Machine | poly-ref | Script | Check time |
 |---|---|---|---|
@@ -200,6 +201,16 @@ Steps 1 to 7 are done. poly-ref reproduces every single-machine evidence number 
 Times are single runs of `checkMachine` on Node 24.12, including exploration and every property.
 
 Step 6 is done. Every example and conformance source lowers to `contract.json`, `next.cjs` and `invariants.mjs`; each `next.cjs` passes strict `validate()` from `@cognitive-fab/sam-pattern` 2.2.1 (`test/validate.test.mjs`, 12 sources). As a probe before translation validation, polygraph's model check of each lowered module reached the same state count as poly-ref on all 12 (7, 7, 17, 33, 35, and 5 to 19 for the six conformance cases). The AC9 escape variant is the expected exception: polygraph explores past the out-of-type state until its cap (S5), which `poly check` will set from poly-ref's count at step 9. The probe found one lowering bug, a union tag read through `pre` inside a reject property, now fixed; step 7 makes such checks systematic.
+
+Step 8 is done. The corpora are copied into `conformance/field-studies/` with a `PROVENANCE.md` each (source path and commit, upstream project and commit, licence, SHA-256 of every file); `scripts/sync-corpora.mjs` verifies them, and CI reads only the copies. The six rewrites are in `examples/field-studies/`. Under polygraph's own replay (`replaySpecResults`), each gives the same result as its hand-written control on every window, in both directions:
+
+| Study | Hand-written reference / broken | poly / poly broken | Windows that differ |
+|---|---|---|---|
+| turnstile | 12/12, 9/12 | 12/12, 9/12 | 0 |
+| raft | 54/67, 44/67 | 54/67, 44/67 | 0 |
+| hatchet | 19/19, 18/19 | 19/19, 18/19 | 0 |
+
+The rewrites also pass strict `validate()` and translation validation: hatchet 216 states (the full 6³ space the study reports), 3,888 transitions; raft 38 states within `term ∈ 0..9`, 342 transitions; turnstile 7 states within `coins ∈ 0..3`. poly-ref reports `PL3901` for raft's `term` and the turnstile's `coins`, which grow without limit in the real machines (PS4.2a), so `poly check` will give those two `INCONCLUSIVE`, as designed. The raft rewrite depends on S19.
 
 Step 7 is done. `translationValidate` in poly-ref drives each lowered `next.cjs` through its SAM surface on every `(s, a, d)` of `Reach(I) × D(a)`. It compares the verdict kind, the reason and the next state through its own α (`alpha.ts`, written from PS9.1b), and also compares the flat next state. It then evaluates the lowered `invariants.mjs` on every reachable state and every transition, and compares the results with PS5.
 
