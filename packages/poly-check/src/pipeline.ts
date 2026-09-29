@@ -169,8 +169,11 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   let problems: string[];
   try { problems = mod.instance({}).validate(); } catch (e) { problems = [(e as Error).message]; }
   if (problems.length) {
-    // The catalogue has no code for a lowered module that fails strict validation: it is a toolchain fault.
-    throw new Error(`the lowered module fails strict validate(): ${problems.join('; ')}`);
+    // S20: a lowered module that fails strict validation is a toolchain fault, PL2001, never the author's.
+    mc.diagnostics.push(diag('PL2001', { module: module.name, machine }, `the lowered module fails strict validate(): ${problems.join('; ')} (addressed to the toolchain, not the author)`, { engine: `sam-pattern@${engines['sam-pattern']}` }));
+    mc.stages.push({ stage: 'validate', status: 'ran', engine: `sam-pattern@${engines['sam-pattern']}`, verdict: 'REFUSED', ms: performance.now() - t0 });
+    notRun(mc, ['translation-validation', 'model-check', 'deadlock'], 'strict validate() refused the lowered module (PL2001)');
+    return;
   }
   mc.stages.push({ stage: 'validate', status: 'ran', engine: `sam-pattern@${engines['sam-pattern']}`, verdict: 'CLEAN', ms: performance.now() - t0 });
 

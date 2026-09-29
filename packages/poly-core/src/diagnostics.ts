@@ -39,6 +39,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL1602: { name: 'ARRAY_MAP_NOT_ZERO_BASED', stage: 'types', severity: 'error' },
   PL2101: { name: 'WRITE_BEFORE_REQUIRE', stage: 'types', severity: 'error' },
   PL2102: { name: 'DOUBLE_WRITE', stage: 'types', severity: 'error' },
+  // S20: addressed to the toolchain, like PL2501.
+  PL2001: { name: 'STRICT_VALIDATE', stage: 'validate', severity: 'error' },
   // An error in M0, where no step can be accepted by an effect alone (S7).
   PL2201: { name: 'SILENT_NOOP', stage: 'types', severity: 'error' },
   PL2501: { name: 'LOWERING_MISMATCH', stage: 'translation-validation', severity: 'error' },
