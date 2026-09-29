@@ -18,7 +18,7 @@ import { performance } from 'node:perf_hooks';
 import { parse } from '@poly/lang';
 import { checkModule, fold, verdictOf, diag, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { translationValidate, keyOf, type MachineReport } from '@poly/ref';
+import { translationValidate, confirmWitness, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock';
@@ -209,7 +209,20 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     stage2.push(diag('PL2501', { module: module.name, machine }, `polygraph explored ${pg.statesExplored} states of the lowered module and poly-ref ${ref.states}; with no state outside the instance they must agree`, { engine: `polygraph@${engines.polygraph}` }));
   }
   const at = { module: module.name, machine };
-  for (const v of pg.violations) stage2.push(fromPolygraph(v, at, engines.polygraph));
+  // Review finding 7: every polygraph finding is confirmed through poly-ref. It counts only if its
+  // witness stays inside the checked instance (PS4.2); if the witness leaves the instance first, it is
+  // a bound hit; if poly-ref disagrees inside the instance, the lowering is at fault (PL2501).
+  for (const v of pg.violations) {
+    const d = fromPolygraph(v, at, engines.polygraph);
+    if (v.kind !== 'state' && v.kind !== 'transition' && v.kind !== 'rejection') { stage2.push(d); continue; }
+    const c = confirmWitness(ref, { kind: v.kind, property: v.invariant, path: v.path });
+    if (c.status === 'confirmed') stage2.push(d);
+    else if (c.status === 'outside') {
+      stage2.push(diag('PL3901', at, `${v.invariant} is violated only on a path that leaves the checked instance at step ${c.step} (PS4.2a): a bound hit, not a finding`, { engine: d.engine, witness: d.witness }));
+    } else {
+      stage2.push(diag('PL2501', at, `polygraph reports ${v.invariant} violated, and poly-ref disagrees: ${c.reason} (addressed to the toolchain, not the author)`, { engine: d.engine, witness: d.witness }));
+    }
+  }
   // poly-ref is authoritative inside Reach(I), which polygraph's cap may truncate (S5): its findings join
   // polygraph's under their own codes when polygraph did not report the same property.
   const seen = new Set(stage2.map((d) => `${d.code}:${d.message.split(' ')[1] ?? ''}`));

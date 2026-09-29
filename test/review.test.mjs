@@ -104,4 +104,30 @@ test('finding 3: folded arithmetic, array items, payloads and check sets are che
   assert.deepEqual(field('p : int check { 10, 20 } = 20'), []);
 });
 
+// ── Finding 7: polygraph's findings are confirmed by poly-ref ──────────────
+
+test('finding 7: an invariant that fails only beyond a bound is a bound hit, INCONCLUSIVE', async () => {
+  const r = await run('f7-beyond-bound.poly');
+  assert.equal(r.verdict, 'INCONCLUSIVE', codes(r).join(', '));
+  assert.ok(!codes(r).includes('PL3001'), codes(r).join(', '));
+  assert.ok(codes(r).includes('PL3901'));
+});
+
+test('finding 7: a finding inside the instance stays a finding', async () => {
+  const r = await checkFile(join(ROOT, 'test', 'fixtures', 'cli', 'invariant.poly'), { root: OUT });
+  assert.equal(r.verdict, 'FINDINGS');
+  assert.ok(codes(r).includes('PL3001'));
+});
+
+test('finding 7: a witness that poly-ref contradicts inside the instance is refused as a disagreement', async () => {
+  const { checkMachine, confirmWitness } = await import('@poly/ref');
+  const m = parse(readFileSync(join(ROOT, 'test', 'fixtures', 'cli', 'invariant.poly'), 'utf8')).module;
+  const report = checkMachine(m, 'Counter');
+  // `small: n < 2` holds at n = 1, so a witness claiming it fails there must be refused.
+  const lie = { kind: 'state', property: 'small', path: [{ action: null, data: null, state: { n: 0 } }, { action: 'Inc', data: {}, state: { n: 1 } }] };
+  assert.equal(confirmWitness(report, lie).status, 'disagrees');
+  const truth = { kind: 'state', property: 'small', path: [...lie.path, { action: 'Inc', data: {}, state: { n: 2 } }] };
+  assert.equal(confirmWitness(report, truth).status, 'confirmed');
+});
+
 void readFileSync;

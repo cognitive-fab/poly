@@ -9,3 +9,4 @@ export { checkMachine, instanceOf, alphabetSize, ENGINE, type MachineReport, typ
 export { keyOf, stateKey, statePlain, toPlain, type Value, type State, type UnionValue, type MapValue } from './values.js';
 export { alpha, flatten, flattenData } from './alpha.js';
 export { translationValidate, type TvResult } from './tv.js';
+export { confirmWitness, type Confirmation, type WitnessToConfirm, type FlatStep } from './confirm.js';

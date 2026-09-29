@@ -1,0 +1,16 @@
+// Review finding 7: `term` leaves its check domain 0..9, and the invariant fails only at term = 10,
+// a state outside the checked instance, which is not explored (PS4.2a). The verdict must be
+// INCONCLUSIVE (a bound hit), not FINDINGS. Before the fix, polygraph's exploration past the bound
+// reported the invariant as a finding.
+module review
+
+machine Clock {
+  state {
+    term : int check 0..9 = 0
+  }
+  action Tick()
+  on Tick {
+    term' = term + 1
+  }
+  invariant under-ten: term < 10
+}
