@@ -561,7 +561,7 @@ class Checker {
           scope.reads?.add(n);
           return fields.get(n)!;
         }
-        if (n === 'action' && (scope.ctx === 'step' || scope.ctx === 'reject')) { this.resolve(e, { k: 'actionVar' }); return { k: 'action' }; }
+        if (n === 'action' && (scope.ctx === 'step' || scope.ctx === 'reject' || scope.ctx === 'guard')) { this.resolve(e, { k: 'actionVar' }); return { k: 'action' }; }
         if (expected?.k === 'action' && this.actions.has(n)) { this.resolve(e, { k: 'action', name: n }); return { k: 'action' }; }
         if (n === 'none') { this.resolve(e, { k: 'none' }); return { k: 'ref' }; }
         const c = this.ctorType(n, expected, e);
@@ -571,9 +571,9 @@ class Checker {
           this.resolve(e, { k: 'ctor', union: c.union, ctor: n });
           return { k: 'union', name: c.union };
         }
-        if (this.actions.has(n) && (scope.ctx === 'step' || scope.ctx === 'reject')) { this.resolve(e, { k: 'action', name: n }); return { k: 'action' }; }
+        if (this.actions.has(n) && (scope.ctx === 'step' || scope.ctx === 'reject' || scope.ctx === 'guard')) { this.resolve(e, { k: 'action', name: n }); return { k: 'action' }; }
         if (fields.has(n) && scope.ctx === 'step') { this.err('PL1201', e, `a step property reads pre.${n} or post.${n}, not ${n} (PT5)`); return ERR; }
-        if ((scope.ctx === 'step' || scope.ctx === 'reject') && this.isParamOfSomeAction(n)) {
+        if ((scope.ctx === 'step' || scope.ctx === 'reject' || scope.ctx === 'guard') && this.isParamOfSomeAction(n)) {
           this.err('PL1201', e, `parameter ${n} is read where no \`action == A\` establishes an action that declares it (PT5, S15)`);
           return ERR;
         }
@@ -757,7 +757,9 @@ class Checker {
   }
 
   private establishedAction(e: A.Expr): string | null {
+    // `action == A` or `A == action` (S19: parameters are visible where the action is known).
     if (e.kind === 'Binary' && e.op === '==' && e.left.kind === 'Name' && e.left.name === 'action' && e.right.kind === 'Name' && this.actions.has(e.right.name)) return e.right.name;
+    if (e.kind === 'Binary' && e.op === '==' && e.right.kind === 'Name' && e.right.name === 'action' && e.left.kind === 'Name' && this.actions.has(e.left.name)) return e.left.name;
     if (e.kind === 'Binary' && e.op === '&&') return this.establishedAction(e.left) ?? this.establishedAction(e.right);
     return null;
   }

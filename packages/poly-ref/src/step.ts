@@ -16,11 +16,13 @@ export interface Step {
 
 /** PS2.2: guards in declaration order, then the body; the first failure rejects. */
 export function runHandler(M: RMachine, h: A.Handler, s: State, d: Record<string, Value>): HandlerResult {
-  // pre.f reads the pre-state field f, also where a parameter f shadows it (S19, proposed).
-  const env: Env = { M, state: s, data: d, locals: new Map(), pre: s };
+  // Guards see the state and the action; parameters only where `action == A` narrows it (PS2.2, S19).
+  const guardEnv: Env = { M, state: s, data: d, locals: new Map(), pre: s, action: h.action, params: false };
   for (const g of M.guards) {
-    if (evaluate(g.cond, env) === true) return { kind: 'reject', reason: g.reason };
+    if (evaluate(g.cond, guardEnv) === true) return { kind: 'reject', reason: g.reason };
   }
+  // In the handler a bare name is local, then parameter, then field; pre.f names the field (S19).
+  const env: Env = { M, state: s, data: d, locals: new Map(), pre: s, action: h.action, params: true };
   const w = new Map<string, Value>();
   const r = block(h.body, env, w, M, s);
   return r ?? { kind: 'accept', w };

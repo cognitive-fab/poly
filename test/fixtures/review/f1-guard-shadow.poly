@@ -1,0 +1,15 @@
+// Review finding 1 (S19 extended): the parameter `coins` shares the field's name.
+// In the guard no action is narrowed, so `coins` is the field; in the handler it is the parameter.
+// Before the fix poly-ref read the parameter in the guard, and poly check refused the program with PL2501.
+module review
+
+machine Box {
+  state {
+    coins : 0..3 = 0
+  }
+  action Set(coins: 0..3)
+  guard all when coins > 2 reject "full"
+  on Set(coins) {
+    coins' = coins
+  }
+}

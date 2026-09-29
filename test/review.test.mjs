@@ -63,4 +63,24 @@ test('S21: `_` in a payload pattern formats and reparses to the same AST', () =>
   assert.match(format(m), /Busy \{ prio: _ \} =>/);
 });
 
+// ── Finding 1, S19 extended: one name rule in every context ────────────────
+
+test('finding 1: an un-narrowed guard reads the field, not a same-named parameter', async () => {
+  const r = await run('f1-guard-shadow.poly');
+  assert.ok(!codes(r).includes('PL2501'), codes(r).join(', '));
+  // At coins = 3 every Set is rejected "full": the one reachable deadlock.
+  assert.deepEqual(codes(r), ['PL3201']);
+});
+
+test('finding 1: an un-narrowed reject property reads the field, and holds', async () => {
+  const r = await run('f1-reject-shadow.poly');
+  assert.ok(!codes(r).includes('PL2501'), codes(r).join(', '));
+  assert.ok(!codes(r).includes('PL3003'), codes(r).join(', '));
+});
+
+test('S19: a colliding name in all four contexts checks CLEAN', async () => {
+  const r = await checkFile(join(ROOT, 'conformance', 'm0', 'shadowing.poly'), { root: OUT });
+  assert.equal(r.verdict, 'CLEAN', codes(r).join(', ') + (r.error ?? ''));
+});
+
 void readFileSync;

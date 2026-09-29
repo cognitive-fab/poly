@@ -27,6 +27,11 @@ export interface Env {
   post?: State;
   action?: string;
   verdict?: Verdict;
+  /**
+   * Whether the action's parameters are visible (PS2.2, S19): always in a handler; in a guard, step or
+   * reject property only on the right of a conjunct `action == A` that holds.
+   */
+  params?: boolean;
 }
 
 export class EvalError extends Error {}
@@ -116,9 +121,26 @@ function field(s: State, name: string): Value {
   return s[name];
 }
 
+/**
+ * The environment for the right of `L && R` or `L implies R`, where L has held. If L has a conjunct
+ * `action == A`, the action is A there, so its parameters become visible (PS2.2, S19).
+ */
+function narrowed(left: A.Expr, env: Env): Env {
+  if (env.params) return env;
+  return establishes(left) ? { ...env, params: true } : env;
+}
+
+function establishes(e: A.Expr): boolean {
+  if (e.kind === 'Binary' && e.op === '==') {
+    const isAction = (x: A.Expr) => x.kind === 'Name' && x.name === 'action';
+    return isAction(e.left) || isAction(e.right);
+  }
+  return e.kind === 'Binary' && e.op === '&&' && (establishes(e.left) || establishes(e.right));
+}
+
 function lookup(name: string, env: Env): Value {
   if (env.locals.has(name)) return env.locals.get(name)!;
-  if (name in env.data) return env.data[name];
+  if (env.params && name in env.data) return env.data[name];
   if (name in env.state) return env.state[name];
   if (env.M.ctors.has(name)) return { ctor: name, payload: {} };
   if (name === 'none') return null;
@@ -127,9 +149,9 @@ function lookup(name: string, env: Env): Value {
 
 function binary(e: A.Binary, env: Env): Value {
   switch (e.op) {
-    case '&&': return truth(evaluate(e.left, env), '&&') && truth(evaluate(e.right, env), '&&');
+    case '&&': return truth(evaluate(e.left, env), '&&') && truth(evaluate(e.right, narrowed(e.left, env)), '&&');
     case '||': return truth(evaluate(e.left, env), '||') || truth(evaluate(e.right, env), '||');
-    case 'implies': return !truth(evaluate(e.left, env), 'implies') || truth(evaluate(e.right, env), 'implies');
+    case 'implies': return !truth(evaluate(e.left, env), 'implies') || truth(evaluate(e.right, narrowed(e.left, env)), 'implies');
     case '==':
     case '!=': {
       // `action == A` in step and reject properties compares the step's action by name (PT5, S15).

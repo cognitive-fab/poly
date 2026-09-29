@@ -1,0 +1,32 @@
+// Conformance: a parameter named like a field, in each of the four contexts (S19).
+// A bare name is the innermost binding (local, parameter, field); parameters are visible only
+// where the action is known; pre.level always names the field.
+module conf
+
+machine Tank {
+  state {
+    level : 0..3 = 0
+  }
+  action Set(level: 0..3)
+  action Drain()
+
+  // Guards: narrowed to Set, `level` is the parameter; narrowed to Drain, which has none, it is the field.
+  guard all when action == Set && level == 3 reject "no-three"
+  guard all when level == 2 && action == Drain reject "drain-at-two"
+
+  // Handler: `level` is the parameter, `pre.level` the field.
+  on Set(level) {
+    require level != pre.level else reject "same"
+    level' = level
+  }
+  on Drain {
+    require level > 0 else reject "empty"
+    level' = level - 1
+  }
+
+  // Step property: narrowed to Set, `level` is the parameter.
+  step property set-sets: (action == Set && level == 1) implies post.level == 1
+  // Reject properties: narrowed to Set, the parameter; with no narrowing, the field.
+  reject property never-three: (action == Set && level == 3) implies rejected("no-three")
+  reject property drain-empty: (action == Drain && level == 0) implies rejected("empty")
+}

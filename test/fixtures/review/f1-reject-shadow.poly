@@ -1,0 +1,21 @@
+// Review finding 1 (S19 extended): in a reject property with no `action == A`, a bare name is the field,
+// even where an action has a parameter of the same name. The property holds; before the fix poly-ref
+// read the parameter and poly check refused the program with PL2501.
+module review
+
+machine Counter {
+  state {
+    count : 0..3 = 0
+  }
+  action Set(count: 0..3)
+  action Reset()
+  guard all when count >= 3 reject "full"
+  on Set(count) {
+    count' = count
+  }
+  on Reset {
+    require count > 0 else reject "zero"
+    count' = 0
+  }
+  reject property full-rejects: count == 3 implies rejected("full")
+}
