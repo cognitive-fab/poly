@@ -186,7 +186,7 @@ The owner's rulings are in [`decisions-m0.md`](decisions-m0.md). S9 to S15 were 
 
 ## 7. Progress and measurements
 
-Steps 1 to 6 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
+Steps 1 to 7 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
 
 | Machine | poly-ref | Script | Check time |
 |---|---|---|---|
@@ -200,6 +200,27 @@ Steps 1 to 6 are done. poly-ref reproduces every single-machine evidence number 
 Times are single runs of `checkMachine` on Node 24.12, including exploration and every property.
 
 Step 6 is done. Every example and conformance source lowers to `contract.json`, `next.cjs` and `invariants.mjs`; each `next.cjs` passes strict `validate()` from `@cognitive-fab/sam-pattern` 2.2.1 (`test/validate.test.mjs`, 12 sources). As a probe before translation validation, polygraph's model check of each lowered module reached the same state count as poly-ref on all 12 (7, 7, 17, 33, 35, and 5 to 19 for the six conformance cases). The AC9 escape variant is the expected exception: polygraph explores past the out-of-type state until its cap (S5), which `poly check` will set from poly-ref's count at step 9. The probe found one lowering bug, a union tag read through `pre` inside a reject property, now fixed; step 7 makes such checks systematic.
+
+Step 7 is done. `translationValidate` in poly-ref drives each lowered `next.cjs` through its SAM surface on every `(s, a, d)` of `Reach(I) × D(a)`. It compares the verdict kind, the reason and the next state through its own α (`alpha.ts`, written from PS9.1b), and also compares the flat next state. It then evaluates the lowered `invariants.mjs` on every reachable state and every transition, and compares the results with PS5.
+
+| Source | States | Transitions compared | Property evaluations compared | Mismatches |
+|---|---|---|---|---|
+| `OutboxIntent` union / AC9 escape | 17 / 17 | 187 / 187 | 255 / 255 | 0 |
+| `OutboxIntent` v0.2 / v0.3 | 35 / 33 | 385 / 363 | 875 / 825 | 0 |
+| hello / with `Empty` | 7 / 7 | 14 / 21 | 14 / 14 | 0 |
+| conformance (six cases) | 5 to 19 | 25 to 76 | 10 to 143 | 0 |
+
+Broken lowerings (`test/tv.test.mjs`): each fault is caught with `PL2501` on at least one source.
+
+| Fault | Caught on | Equivalent on I |
+|---|---|---|
+| `drop-frame` | 8 sources | union outbox (both), `match-union`: there every frame it drops follows a `return reject(...)` and never runs |
+| `swap-reason`, `invert-require` | all 12 | none |
+| `off-by-one` | 10 (the other two have no integer literal in a write) | none |
+| `skip-guard` | `guard-terminal`, the only source with a guard | none |
+| `skip-terminal` | the 6 sources with a reachable terminal state | none |
+
+A fault that changes the artefacts but not any transition of I is listed as equivalent, never counted as caught.
 
 One consequence of S13 surfaced while checking the examples: the three `OutboxIntent` forms carry the `settles` liveness property as the spec writes it, so the checker refuses them with `PL0901` until M2. poly-ref ignores liveness and checks them. For steps 6 to 9, the lowering and `poly check` will see `PL0901` on these files; the gate items that need them lowered (translation validation) will use them with the liveness item removed, and the test says so.
 

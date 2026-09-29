@@ -7,3 +7,5 @@ export { transition, runHandler, initialState, isTerminal, type Step } from './s
 export { explore, machineSystem, pathTo, type System, type Graph, type Edge, type Label, type Outcome } from './explore.js';
 export { checkMachine, instanceOf, alphabetSize, ENGINE, type MachineReport, type InstanceLine } from './check.js';
 export { keyOf, stateKey, statePlain, toPlain, type Value, type State, type UnionValue, type MapValue } from './values.js';
+export { alpha, flatten, flattenData } from './alpha.js';
+export { translationValidate, type TvResult } from './tv.js';
