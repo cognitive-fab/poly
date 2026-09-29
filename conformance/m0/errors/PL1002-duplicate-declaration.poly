@@ -1,0 +1,9 @@
+// expect: PL1002 (two handlers for one action)
+module errors
+
+machine M {
+  state { x : bool = false }
+  action A()
+  on A { x' = true }
+  on A { x' = false }
+}

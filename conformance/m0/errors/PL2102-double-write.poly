@@ -1,0 +1,8 @@
+// expect: PL2102 (a field written twice on one path)
+module errors
+
+machine M {
+  state { x : 0..3 = 0 }
+  action A()
+  on A { x' = 1  if x == 0 { x' = 2 } }
+}

@@ -1,0 +1,9 @@
+// expect: PL1501 (a match that misses Done)
+module errors
+type S = Open | Busy { n: 1..2 } | Done
+
+machine M {
+  state { s : S = Open }
+  action Go()
+  on Go { match s { Open => s' = Busy { n: 1 }  Busy { n: 1 } => s' = Done } }
+}

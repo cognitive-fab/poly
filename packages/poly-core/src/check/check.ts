@@ -1,0 +1,742 @@
+// The static checker (PT2, PT3, PT4, PS2): names, types, domains and the
+// per-path rules of a handler. It runs on the AST every surface produces, so
+// it lives in poly-core. It is compiler code: poly-ref never imports it.
+//
+// Output: diagnostics, plus per-machine facts the lowering reads (how each
+// name resolved, the type of each expression). A program with any error is
+// not lowered.
+import type * as A from '../ast.js';
+import { diag, type Diagnostic, type NodeAt } from '../diagnostics.js';
+import { buildTypeEnv, cardinality, type TypeEnv, type UnionInfo } from '../types.js';
+
+// ── semantic types ─────────────────────────────────────────────────────────
+
+export type Ty =
+  | { k: 'bool' }
+  | { k: 'int'; lo: number; hi: number }
+  | { k: 'string' }
+  | { k: 'union'; name: string }
+  | { k: 'map'; key: Ty; value: Ty; array: boolean }
+  | { k: 'ref' }
+  | { k: 'action' }
+  | { k: 'error' };
+
+const BOOL: Ty = { k: 'bool' };
+const INT: Ty = { k: 'int', lo: -Infinity, hi: Infinity };
+const ERR: Ty = { k: 'error' };
+
+export function tyToString(t: Ty): string {
+  switch (t.k) {
+    case 'int': return Number.isFinite(t.lo) && Number.isFinite(t.hi) ? `${t.lo}..${t.hi}` : 'int';
+    case 'union': return t.name;
+    case 'map': return `map<${tyToString(t.key)}, ${tyToString(t.value)}>`;
+    default: return t.k;
+  }
+}
+
+function same(a: Ty, b: Ty): boolean {
+  if (a.k === 'error' || b.k === 'error') return true;
+  if (a.k !== b.k) return false;
+  if (a.k === 'union') return a.name === (b as { name: string }).name;
+  if (a.k === 'map') {
+    const m = b as typeof a;
+    return same(a.key, m.key) && same(a.value, m.value);
+  }
+  return true; // int ranges are one type; ranges bound values, not the type (PT3.5)
+}
+
+/** What a name in an expression turned out to be. The lowering reads this. */
+export type Resolution =
+  | { k: 'field'; name: string }
+  | { k: 'param'; name: string }
+  | { k: 'let'; name: string }
+  | { k: 'bind'; name: string }
+  | { k: 'ctor'; union: string; ctor: string }
+  | { k: 'action'; name: string }
+  | { k: 'actionVar' }
+  | { k: 'none' }
+  | { k: 'pre' }
+  | { k: 'post' };
+
+export interface MachineFacts {
+  machine: A.Machine;
+  resolutions: Map<string, Resolution>;
+  types: Map<string, Ty>;
+  fieldTypes: Map<string, Ty>;
+  /** Actions with no handler: unhandled in every state (PS3.2). */
+  unhandled: string[];
+}
+
+export interface CheckResult {
+  diagnostics: Diagnostic[];
+  env: TypeEnv;
+  machines: Map<string, MachineFacts>;
+}
+
+// ── scopes ────────────────────────────────────────────────────────────────
+
+type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'reject';
+
+interface Scope {
+  ctx: Ctx;
+  /** Local names: lets and pattern binders. */
+  locals: Map<string, { ty: Ty; res: Resolution }>;
+  /** Parameters in scope (handler: its action's; properties: established by `action == A`). */
+  params: Map<string, Ty>;
+  /** In a property, the action established by an `action == A` conjunct. */
+  knownAction: string | null;
+  /** Names read, for PL1401. */
+  reads?: Set<string>;
+}
+
+export function checkModule(module: A.Module): CheckResult {
+  return new Checker(module).run();
+}
+
+class Checker {
+  private diags: Diagnostic[] = [];
+  private env: TypeEnv;
+  private machine: A.Machine | null = null;
+  private facts: MachineFacts | null = null;
+  private actions = new Map<string, A.Action>();
+
+  constructor(private readonly module: A.Module) {
+    this.env = buildTypeEnv(module);
+  }
+
+  private at(n: A.NodeBase): NodeAt {
+    return { module: this.module.name, machine: this.machine?.name, node: n.id, line: n.span?.line, col: n.span?.col };
+  }
+  private err(code: string, n: A.NodeBase, msg: string): void {
+    this.diags.push(diag(code, this.at(n), msg));
+  }
+
+  run(): CheckResult {
+    const machines = new Map<string, MachineFacts>();
+    this.declarations();
+    for (const d of this.module.decls) {
+      if (d.kind === 'Use') this.err('PL0901', d, '`use` (imports between modules) is not lowered in milestone M0');
+      if (d.kind !== 'Machine') continue;
+      if (machines.has(d.name)) { this.err('PL1002', d, `machine ${d.name} is declared twice`); continue; }
+      machines.set(d.name, this.checkMachine(d));
+    }
+    return { diagnostics: this.diags, env: this.env, machines };
+  }
+
+  // ── declarations ────────────────────────────────────────────────────────
+  private declarations(): void {
+    const seen = new Set<string>();
+    for (const d of this.module.decls) {
+      if (d.kind !== 'TypeDecl' && d.kind !== 'EnumDecl') continue;
+      if (seen.has(d.name)) this.err('PL1002', d, `type ${d.name} is declared twice`);
+      seen.add(d.name);
+      const names = d.kind === 'EnumDecl' ? d.members : d.ctors.map((c) => c.name);
+      const dup = names.find((n, i) => names.indexOf(n) !== i);
+      if (dup) this.err('PL1002', d, `constructor ${dup} is declared twice in ${d.name}`);
+      if (d.kind === 'TypeDecl') {
+        // S9: constructors of one union share a payload name only with one type.
+        const byName = new Map<string, string>();
+        for (const c of d.ctors) {
+          const fdup = c.fields.map((f) => f.name).find((n, i, a) => a.indexOf(n) !== i);
+          if (fdup) this.err('PL1002', c, `payload field ${fdup} is declared twice in ${c.name}`);
+          for (const f of c.fields) {
+            const t = this.tyOf(f.type);
+            const key = tyToString(t);
+            const prev = byName.get(f.name);
+            if (prev !== undefined && prev !== key) this.err('PL1601', f, `payload ${f.name} is ${prev} in one constructor of ${d.name} and ${key} in ${c.name}; a shared payload name needs one type`);
+            byName.set(f.name, key);
+            if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `payload ${c.name}.${f.name} has no finite domain; give it a range or an enum type`);
+          }
+        }
+      }
+    }
+  }
+
+  /** The semantic type of a type expression, reporting unknown names and bad map keys. */
+  private tyOf(t: A.TypeExpr): Ty {
+    switch (t.kind) {
+      case 'TBool': return BOOL;
+      case 'TInt': return INT;
+      case 'TString': return { k: 'string' };
+      case 'TRange':
+        if (t.lo > t.hi) { this.errOnce('PL1201', t, `empty range ${t.lo}..${t.hi}`); return ERR; }
+        return { k: 'int', lo: t.lo, hi: t.hi };
+      case 'TRef': return { k: 'ref' };
+      case 'TName':
+        if (!this.env.unions.has(t.name)) { this.errOnce('PL1001', t, `unknown type ${t.name}`); return ERR; }
+        return { k: 'union', name: t.name };
+      case 'TMap': {
+        const value = this.tyOf(t.value);
+        if (t.key.kind === 'TRange') {
+          if (t.key.lo !== 0) this.errOnce('PL1602', t.key, `a map keyed by a range must start at 0, as it lowers to a JSON array (${t.key.lo}..${t.key.hi})`);
+          return { k: 'map', key: { k: 'int', lo: t.key.lo, hi: t.key.hi }, value, array: true };
+        }
+        const key = this.tyOf(t.key);
+        if (key.k === 'union' && !this.env.unions.get(key.name)!.isEnum) this.errOnce('PL1201', t.key, `map key ${key.name} must be an enum (constructors without payload)`);
+        return { k: 'map', key, value, array: false };
+      }
+    }
+  }
+
+  // ── machines ────────────────────────────────────────────────────────────
+  private checkMachine(m: A.Machine): MachineFacts {
+    this.machine = m;
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [] };
+    this.facts = facts;
+    this.actions = new Map();
+
+    if (m.version !== null) void 0; // `version N` is recorded; migrations were refused by the parser (PL0901)
+    if (m.fields.length === 0) this.err('PL1201', m, `machine ${m.name} declares no state; the first field is its control field (PT4.4a)`);
+    for (const f of m.fields) {
+      if (facts.fieldTypes.has(f.name)) { this.err('PL1002', f, `field ${f.name} is declared twice`); continue; }
+      const ty = this.tyOf(f.type);
+      facts.fieldTypes.set(f.name, ty);
+      if (f.flag) this.err('PL0901', f, `\`${f.flag}\` fields are not lowered in milestone M0`);
+      this.checkDomain(f.name, f.type, ty, f.check, f);
+      this.checkInit(f, ty);
+    }
+
+    for (const it of m.items) {
+      if (it.kind !== 'Action') continue;
+      if (this.actions.has(it.name)) { this.err('PL1002', it, `action ${it.name} is declared twice`); continue; }
+      this.actions.set(it.name, it);
+      const pnames = new Set<string>();
+      for (const p of it.params) {
+        if (pnames.has(p.name)) this.err('PL1002', p, `parameter ${p.name} is declared twice`);
+        pnames.add(p.name);
+        this.checkDomain(`${it.name}.${p.name}`, p.type, this.tyOf(p.type), p.check, p);
+      }
+    }
+
+    const handled = new Set<string>();
+    const propNames = new Set<string>();
+    let terminal: A.Terminal | null = null;
+    for (const it of m.items) {
+      switch (it.kind) {
+        case 'Action': break;
+        case 'Handler': {
+          const act = this.actions.get(it.action);
+          if (!act) { this.err('PL1001', it, `handler for undeclared action ${it.action}`); break; }
+          if (handled.has(it.action)) { this.err('PL1002', it, `action ${it.action} has two handlers (PT4.1)`); break; }
+          handled.add(it.action);
+          this.checkHandler(it, act);
+          break;
+        }
+        case 'Guard':
+          this.expectBool(it.cond, this.scope('guard'));
+          break;
+        case 'Terminal': {
+          if (terminal) { this.err('PL1002', it, 'a machine has one terminal predicate'); break; }
+          terminal = it;
+          const scope = this.scope('terminal');
+          scope.reads = new Set();
+          this.expectBool(it.expr, scope);
+          const control = m.fields[0]?.name;
+          const others = [...scope.reads].filter((n) => n !== control);
+          if (others.length) this.err('PL1401', it, `terminal reads ${others.join(', ')}; it may depend only on the control field ${control} (PT4.4a)`);
+          break;
+        }
+        case 'Property': {
+          if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
+          propNames.add(it.name);
+          if (it.form === 'path' || it.form === 'compose') { this.err('PL0901', it, `${it.form} properties are not checked in milestone M0`); break; }
+          this.expectBool(it.expr, this.scope(it.form === 'invariant' ? 'invariant' : it.form));
+          break;
+        }
+        case 'Liveness':
+          if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
+          propNames.add(it.name);
+          this.err('PL0901', it, 'liveness properties are checked from milestone M2');
+          break;
+        case 'EffectDecl':
+          this.err('PL0901', it, 'effects are lowered from milestone M1');
+          break;
+      }
+    }
+    facts.unhandled = [...this.actions.keys()].filter((a) => !handled.has(a));
+    this.machine = null;
+    return facts;
+  }
+
+  private checkDomain(what: string, t: A.TypeExpr, ty: Ty, check: A.CheckClause | null, at: A.NodeBase): void {
+    if (check) {
+      if (ty.k !== 'int' && ty.k !== 'string') { this.err('PL1201', check, `a check clause applies to int and string, not ${tyToString(ty)}`); return; }
+      if (ty.k === 'int' && Number.isFinite(ty.lo)) { this.err('PL1201', check, `${what} has a range type; narrow the range instead of adding a check clause`); return; }
+      if (check.domain.kind === 'DomainRange') {
+        if (ty.k !== 'int') this.err('PL1201', check, `a range check domain needs an int, and ${what} is ${tyToString(ty)}`);
+        if (check.domain.lo > check.domain.hi) this.err('PL1201', check, `empty check domain ${check.domain.lo}..${check.domain.hi}`);
+      } else {
+        if (check.domain.values.length === 0) this.err('PL1201', check, `empty check domain for ${what}`);
+        const vals = check.domain.values.map((v) => (v.kind === 'Int' ? v.value : v.kind === 'String' ? v.value : undefined));
+        for (const v of check.domain.values) {
+          const ok = (ty.k === 'int' && v.kind === 'Int') || (ty.k === 'string' && v.kind === 'String');
+          if (!ok) this.err('PL1201', v, `check domain value does not have type ${tyToString(ty)}`);
+        }
+        if (new Set(vals).size !== vals.length) this.err('PL1002', check, `check domain of ${what} lists a value twice`);
+      }
+      return;
+    }
+    if (ty.k === 'error') return;
+    if (cardinality(t, this.env) === null) this.err('PL1101', at, `${what} has type ${tyToString(ty)}, which has no finite check domain; add \`check { … }\` or \`check a..b\` (PT3.2)`);
+  }
+
+  // ── initial values ─────────────────────────────────────────────────────
+  private checkInit(f: A.Field, ty: Ty): void {
+    const got = this.typeOf(f.init, this.scope('init'), ty);
+    if (!same(got, ty)) { this.err('PL1201', f.init, `initial value of ${f.name} has type ${tyToString(got)}, not ${tyToString(ty)}`); return; }
+    if (ty.k === 'int' && f.init.kind === 'Int') {
+      const v = f.init.value;
+      if (v < ty.lo || v > ty.hi) this.err('PL1201', f.init, `initial value ${v} is outside ${tyToString(ty)}`);
+      if (f.check?.domain.kind === 'DomainRange' && (v < f.check.domain.lo || v > f.check.domain.hi)) this.err('PL1201', f.init, `initial value ${v} is outside the check domain of ${f.name}`);
+    }
+  }
+
+  // ── handlers ───────────────────────────────────────────────────────────
+  private checkHandler(h: A.Handler, act: A.Action): void {
+    const declared = act.params.map((p) => p.name);
+    if (h.params && (h.params.length !== declared.length || h.params.some((p, i) => p !== declared[i]))) {
+      this.err('PL1201', h, `on ${h.action}(${h.params.join(', ')}) must repeat the declared parameters (${declared.join(', ')}) in order (PT2.4a)`);
+    }
+    const scope = this.scope('handler');
+    for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
+    this.stmts(h.body, scope);
+    // Per-path rules (PT4.1, PS2.4, PT4.4).
+    const ends = this.paths(h.body, [{ written: new Map(), done: false }]);
+    for (const e of ends) {
+      if (!e.done && e.written.size === 0) {
+        this.err('PL2201', h, `on ${h.action} can complete with no write and no rejection; every accepted step must write (PT4.4, S7)`);
+        break;
+      }
+    }
+  }
+
+  private stmts(body: A.Stmt[], scope: Scope): void {
+    const local: Scope = { ...scope, locals: new Map(scope.locals) };
+    for (const s of body) this.stmt(s, local);
+  }
+
+  private stmt(s: A.Stmt, scope: Scope): void {
+    const fields = this.facts!.fieldTypes;
+    switch (s.kind) {
+      case 'Require':
+        this.expectBool(s.cond, scope);
+        break;
+      case 'Reject':
+        break;
+      case 'Let': {
+        if (scope.locals.has(s.name) || scope.params.has(s.name) || fields.has(s.name)) this.err('PL1002', s, `${s.name} is already a name here`);
+        const ty = this.typeOf(s.expr, scope);
+        scope.locals.set(s.name, { ty, res: { k: 'let', name: s.name } });
+        break;
+      }
+      case 'Assign': {
+        const ft = fields.get(s.field);
+        if (!ft) { this.err('PL1001', s, `${s.field} is not a declared field (PF1.1)`); this.typeOf(s.expr, scope); break; }
+        const got = this.typeOf(s.expr, scope, ft);
+        if (!same(got, ft)) this.err('PL1201', s.expr, `${s.field}' is ${tyToString(ft)}, and the value is ${tyToString(got)}`);
+        break;
+      }
+      case 'MapUpdate': {
+        const ft = fields.get(s.field);
+        if (!ft) { this.err('PL1001', s, `${s.field} is not a declared field (PF1.1)`); break; }
+        if (s.base !== s.field) this.err('PL1201', s, `a map update writes one entry of the same field: ${s.field}' = ${s.field} with [k] = v`);
+        if (ft.k !== 'map') { this.err('PL1201', s, `${s.field} is not a map`); break; }
+        const kt = this.typeOf(s.key, scope, ft.key);
+        if (!same(kt, ft.key)) this.err('PL1201', s.key, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(ft.key)}`);
+        const vt = this.typeOf(s.value, scope, ft.value);
+        if (!same(vt, ft.value)) this.err('PL1201', s.value, `value has type ${tyToString(vt)}, the map's values are ${tyToString(ft.value)}`);
+        break;
+      }
+      case 'If':
+        this.expectBool(s.cond, scope);
+        this.stmts(s.then, scope);
+        if (s.else) this.stmts(s.else, scope);
+        break;
+      case 'Match':
+        this.match(s, scope);
+        break;
+      case 'Intent':
+        this.err('PL0901', s, `\`${s.op}\` is lowered from milestone M1`);
+        break;
+    }
+  }
+
+  private match(s: A.Match, scope: Scope): void {
+    const st = this.typeOf(s.scrutinee, scope);
+    if (st.k !== 'union') {
+      if (st.k !== 'error') this.err('PL1201', s.scrutinee, `match needs a union value, not ${tyToString(st)}`);
+      for (const arm of s.arms) this.stmts(arm.body, scope);
+      return;
+    }
+    const u = this.env.unions.get(st.name)!;
+    for (const arm of s.arms) {
+      const armScope: Scope = { ...scope, locals: new Map(scope.locals) };
+      if (arm.pattern.kind === 'PCtor') {
+        const c = u.ctors.find((x) => x.name === (arm.pattern as A.PCtor).ctor);
+        if (!c) { this.err('PL1201', arm.pattern, `${arm.pattern.ctor} is not a constructor of ${u.name}`); continue; }
+        for (const pf of arm.pattern.fields) {
+          const decl = c.fields.find((x) => x.name === pf.name);
+          if (!decl) { this.err('PL1001', arm.pattern, `${c.name} has no payload ${pf.name}`); continue; }
+          const ty = this.tyOf(decl.type);
+          if (pf.bind) {
+            if (armScope.locals.has(pf.bind) || scope.params.has(pf.bind) || this.facts!.fieldTypes.has(pf.bind)) this.err('PL1002', arm.pattern, `${pf.bind} is already a name here`);
+            armScope.locals.set(pf.bind, { ty, res: { k: 'bind', name: pf.bind } });
+          } else if (pf.literal) {
+            const lt = this.typeOf(pf.literal, armScope, ty);
+            if (!same(lt, ty)) this.err('PL1201', pf.literal, `pattern literal for ${c.name}.${pf.name} is not a ${tyToString(ty)}`);
+          }
+        }
+      }
+      this.stmts(arm.body, armScope);
+    }
+    const missing = this.uncovered(u, s.arms);
+    if (missing.length) this.err('PL1501', s, `match on ${u.name} does not cover ${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ', …' : ''}; add the arms or a \`_\` arm`);
+  }
+
+  /** The constructor values no arm covers (PS2.2: match never falls through). */
+  private uncovered(u: UnionInfo, arms: A.Arm[]): string[] {
+    if (arms.some((a) => a.pattern.kind === 'PWild')) return [];
+    const missing: string[] = [];
+    for (const c of u.ctors) {
+      const mine = arms.map((a) => a.pattern).filter((p): p is A.PCtor => p.kind === 'PCtor' && p.ctor === c.name);
+      if (mine.some((p) => p.fields.every((f) => f.literal === null))) continue;
+      if (mine.length === 0) { missing.push(c.name); continue; }
+      // Literal patterns: enumerate the payload values the literals constrain.
+      const litFields = [...new Set(mine.flatMap((p) => p.fields.filter((f) => f.literal).map((f) => f.name)))];
+      const domains = litFields.map((n) => this.values(c.fields.find((f) => f.name === n)!.type));
+      if (domains.some((d) => d === null)) { missing.push(`${c.name} { … }`); continue; }
+      const combos = domains.reduce<unknown[][]>((acc, d) => acc.flatMap((x) => d!.map((v) => [...x, v])), [[]]);
+      for (const combo of combos) {
+        const covered = mine.some((p) => p.fields.every((f) => {
+          if (!f.literal) return true;
+          const idx = litFields.indexOf(f.name);
+          const lit = f.literal.kind === 'Int' || f.literal.kind === 'Bool' || f.literal.kind === 'String' ? f.literal.value : f.literal.name;
+          return combo[idx] === lit;
+        }));
+        if (!covered) missing.push(`${c.name} { ${litFields.map((n, k) => `${n}: ${String(combo[k])}`).join(', ')} }`);
+      }
+    }
+    return missing;
+  }
+
+  private values(t: A.TypeExpr): unknown[] | null {
+    if (t.kind === 'TBool') return [false, true];
+    if (t.kind === 'TRange') return Array.from({ length: t.hi - t.lo + 1 }, (_, k) => t.lo + k);
+    if (t.kind === 'TName') {
+      const u = this.env.unions.get(t.name);
+      return u && u.isEnum ? u.ctors.map((c) => c.name) : null;
+    }
+    return null;
+  }
+
+  // ── per-path analysis (PT4.1, PS2.4) ────────────────────────────────────
+  private paths(body: A.Stmt[], starts: PathState[]): PathState[] {
+    let cur = starts;
+    for (const s of body) {
+      const next: PathState[] = [];
+      for (const p of cur) {
+        if (p.done) { next.push(p); continue; }
+        next.push(...this.pathStmt(s, p));
+      }
+      cur = next;
+    }
+    return cur;
+  }
+
+  private pathStmt(s: A.Stmt, p: PathState): PathState[] {
+    switch (s.kind) {
+      case 'Require':
+      case 'Reject': {
+        if (p.written.size) {
+          const [f, w] = [...p.written][0];
+          this.errOnce('PL2101', s, `${s.kind === 'Require' ? 'require' : 'reject'} after the write of ${f}' on the same path (written at line ${w.span?.line ?? '?'}); requires come before writes (PT4.1)`);
+        }
+        return s.kind === 'Reject' ? [{ ...p, done: true }] : [p];
+      }
+      case 'Assign':
+      case 'MapUpdate': {
+        const prev = p.written.get(s.field);
+        if (prev) this.errOnce('PL2102', s, `${s.field}' is written twice on one path (first at line ${prev.span?.line ?? '?'}) (PS2.4)`);
+        const written = new Map(p.written);
+        written.set(s.field, s);
+        return [{ ...p, written }];
+      }
+      case 'If':
+        return [...this.paths(s.then, [p]), ...this.paths(s.else ?? [], [p])];
+      case 'Match':
+        return s.arms.flatMap((a) => this.paths(a.body, [p]));
+      default:
+        return [p];
+    }
+  }
+
+  private reported = new Set<string>();
+  private errOnce(code: string, n: A.NodeBase, msg: string): void {
+    const key = code + n.id;
+    if (this.reported.has(key)) return;
+    this.reported.add(key);
+    this.err(code, n, msg);
+  }
+
+  // ── expressions ─────────────────────────────────────────────────────────
+  private scope(ctx: Ctx): Scope {
+    return { ctx, locals: new Map(), params: new Map(), knownAction: null };
+  }
+
+  private expectBool(e: A.Expr, scope: Scope): void {
+    const t = this.typeOf(e, scope, BOOL);
+    if (t.k !== 'bool' && t.k !== 'error') this.err('PL1201', e, `expected a Bool condition, found ${tyToString(t)}`);
+  }
+
+  private record(e: A.Expr, t: Ty): Ty {
+    this.facts?.types.set(e.id, t);
+    return t;
+  }
+
+  private resolve(e: A.NodeBase, r: Resolution): void {
+    this.facts?.resolutions.set(e.id, r);
+  }
+
+  /** The type of an expression. `expected` only disambiguates constructors shared by two unions. */
+  typeOf(e: A.Expr, scope: Scope, expected?: Ty): Ty {
+    return this.record(e, this.typeOfInner(e, scope, expected));
+  }
+
+  private ctorType(name: string, expected: Ty | undefined, at: A.NodeBase): { union: string; info: UnionInfo } | null {
+    const owners = this.env.ctorOwners.get(name) ?? [];
+    let union: string | undefined;
+    if (expected?.k === 'union' && owners.includes(expected.name)) union = expected.name;
+    else if (owners.length === 1) union = owners[0];
+    else if (owners.length > 1) { this.err('PL1201', at, `${name} is a constructor of ${owners.join(' and ')}; the context does not say which`); return null; }
+    if (!union) return null;
+    return { union, info: this.env.unions.get(union)! };
+  }
+
+  private typeOfInner(e: A.Expr, scope: Scope, expected?: Ty): Ty {
+    const fields = this.facts?.fieldTypes ?? new Map<string, Ty>();
+    switch (e.kind) {
+      case 'Int': return { k: 'int', lo: e.value, hi: e.value };
+      case 'Bool': return BOOL;
+      case 'String': return { k: 'string' };
+      case 'Primed':
+        this.err('PL1202', e, `${e.name}' is write-only; expressions read the pre-state (PS2.3)`);
+        return ERR;
+      case 'Name': {
+        const n = e.name;
+        const local = scope.locals.get(n);
+        if (local) { this.resolve(e, local.res); return local.ty; }
+        if (scope.params.has(n)) { this.resolve(e, { k: 'param', name: n }); return scope.params.get(n)!; }
+        if (fields.has(n) && scope.ctx !== 'init' && scope.ctx !== 'step') {
+          this.resolve(e, { k: 'field', name: n });
+          scope.reads?.add(n);
+          return fields.get(n)!;
+        }
+        if (n === 'action' && (scope.ctx === 'step' || scope.ctx === 'reject')) { this.resolve(e, { k: 'actionVar' }); return { k: 'action' }; }
+        if (expected?.k === 'action' && this.actions.has(n)) { this.resolve(e, { k: 'action', name: n }); return { k: 'action' }; }
+        if (n === 'none') { this.resolve(e, { k: 'none' }); return { k: 'ref' }; }
+        const c = this.ctorType(n, expected, e);
+        if (c) {
+          const ci = c.info.ctors.find((x) => x.name === n)!;
+          if (ci.fields.length) this.err('PL1201', e, `${n} carries a payload; write ${n} { … }`);
+          this.resolve(e, { k: 'ctor', union: c.union, ctor: n });
+          return { k: 'union', name: c.union };
+        }
+        if (this.actions.has(n) && (scope.ctx === 'step' || scope.ctx === 'reject')) { this.resolve(e, { k: 'action', name: n }); return { k: 'action' }; }
+        if (fields.has(n) && scope.ctx === 'step') { this.err('PL1201', e, `a step property reads pre.${n} or post.${n}, not ${n} (PT5)`); return ERR; }
+        if ((scope.ctx === 'step' || scope.ctx === 'reject') && this.isParamOfSomeAction(n)) {
+          this.err('PL1201', e, `parameter ${n} is read where no \`action == A\` establishes an action that declares it (PT5, S15)`);
+          return ERR;
+        }
+        this.err('PL1001', e, `unknown name ${n}`);
+        return ERR;
+      }
+      case 'Member': {
+        if (e.object.kind === 'Name' && (e.object.name === 'pre' || e.object.name === 'post') && (scope.ctx === 'step' || scope.ctx === 'reject')) {
+          if (e.object.name === 'post' && scope.ctx === 'reject') { this.err('PL1201', e, 'a reject property reads the state a step starts from: pre.f, not post.f (PT5)'); return ERR; }
+          this.resolve(e.object, e.object.name === 'pre' ? { k: 'pre' } : { k: 'post' });
+          const t = fields.get(e.prop);
+          if (!t) { this.err('PL1001', e, `unknown field ${e.prop}`); return ERR; }
+          return t;
+        }
+        this.err('PL1201', e, `field access .${e.prop} is only pre.f or post.f, in step and reject properties`);
+        return ERR;
+      }
+      case 'Index': {
+        const mt = this.typeOf(e.object, scope);
+        if (mt.k !== 'map') { if (mt.k !== 'error') this.err('PL1201', e, `indexing needs a map, not ${tyToString(mt)}`); this.typeOf(e.index, scope); return ERR; }
+        const kt = this.typeOf(e.index, scope, mt.key);
+        if (!same(kt, mt.key)) this.err('PL1201', e.index, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(mt.key)}`);
+        return mt.value;
+      }
+      case 'Call': {
+        if (e.callee === 'rejected' && scope.ctx === 'reject') {
+          if (e.args.length !== 1 || e.args[0].kind !== 'String') { this.err('PL1201', e, 'rejected takes one reason string: rejected("reason")'); return ERR; }
+          this.record(e.args[0], { k: 'string' });
+          return BOOL;
+        }
+        if (e.callee === 'count' || e.callee === 'before') { this.err('PL0901', e, `${e.callee}(…) belongs to path properties, checked from milestone M1`); return ERR; }
+        this.err('PL1001', e, `unknown function ${e.callee}; expressions call no functions (PT2.2)`);
+        return ERR;
+      }
+      case 'Unary': {
+        if (e.op === '!') { this.expectBool(e.arg, scope); return BOOL; }
+        const t = this.typeOf(e.arg, scope);
+        if (t.k !== 'int') { if (t.k !== 'error') this.err('PL1201', e, `unary - needs an int, not ${tyToString(t)}`); return ERR; }
+        return { k: 'int', lo: -t.hi, hi: -t.lo };
+      }
+      case 'Binary': return this.binary(e, scope);
+      case 'Is': {
+        const t = this.typeOf(e.expr, scope);
+        if (t.k !== 'union') { if (t.k !== 'error') this.err('PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
+        const u = this.env.unions.get(t.name)!;
+        for (const c of e.ctors) if (!u.ctors.some((x) => x.name === c)) this.err('PL1201', e, `${c} is not a constructor of ${u.name}`);
+        return BOOL;
+      }
+      case 'In': {
+        const t = this.typeOf(e.expr, scope);
+        for (const x of e.set) {
+          const xt = this.typeOf(x, scope, t);
+          if (!same(xt, t)) this.err('PL1201', x, `set member has type ${tyToString(xt)}, not ${tyToString(t)}`);
+        }
+        return BOOL;
+      }
+      case 'CtorExpr': {
+        const c = this.ctorType(e.ctor, expected, e);
+        if (!c) { this.err('PL1001', e, `unknown constructor ${e.ctor}`); return ERR; }
+        const ci = c.info.ctors.find((x) => x.name === e.ctor)!;
+        const given = e.fields.map((f) => f.name);
+        for (const f of ci.fields) if (!given.includes(f.name)) this.err('PL1201', e, `${e.ctor} needs its payload ${f.name}`);
+        for (const f of e.fields) {
+          const decl = ci.fields.find((x) => x.name === f.name);
+          if (!decl) { this.err('PL1001', e, `${e.ctor} has no payload ${f.name}`); continue; }
+          const dt = this.tyOf(decl.type);
+          const vt = this.typeOf(f.value, scope, dt);
+          if (!same(vt, dt)) this.err('PL1201', f.value, `${e.ctor}.${f.name} is ${tyToString(dt)}, the value is ${tyToString(vt)}`);
+        }
+        if (given.some((n, i) => given.indexOf(n) !== i)) this.err('PL1002', e, `a payload is given twice in ${e.ctor} { … }`);
+        return { k: 'union', name: c.union };
+      }
+      case 'MapLit': {
+        if (expected?.k !== 'map') { this.err('PL1201', e, 'a map literal needs a map type from its context'); return ERR; }
+        const keys = this.keyValues(expected.key);
+        const seen: unknown[] = [];
+        for (const en of e.entries) {
+          const kt = this.typeOf(en.key, scope, expected.key);
+          if (!same(kt, expected.key)) this.err('PL1201', en.key, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(expected.key)}`);
+          const kv = en.key.kind === 'Name' ? en.key.name : en.key.kind === 'Int' ? en.key.value : undefined;
+          if (seen.includes(kv)) this.err('PL1502', en.key, `key ${String(kv)} is listed twice`);
+          seen.push(kv);
+          const vt = this.typeOf(en.value, scope, expected.value);
+          if (!same(vt, expected.value)) this.err('PL1201', en.value, `value has type ${tyToString(vt)}, the map's values are ${tyToString(expected.value)}`);
+        }
+        if (keys) {
+          const missing = keys.filter((k) => !seen.includes(k));
+          if (missing.length) this.err('PL1502', e, `a map literal lists every key; missing ${missing.join(', ')} (PT2.2)`);
+        }
+        return expected;
+      }
+      case 'ArrayLit': {
+        if (expected?.k !== 'map' || !expected.array) { this.err('PL1201', e, 'an array literal is the value of a map keyed by 0..n'); return ERR; }
+        const key = expected.key as { lo: number; hi: number };
+        const n = key.hi - key.lo + 1;
+        if (e.items.length !== n) this.err('PL1502', e, `an array literal for keys ${key.lo}..${key.hi} lists ${n} values, not ${e.items.length}`);
+        for (const x of e.items) {
+          const vt = this.typeOf(x, scope, expected.value);
+          if (!same(vt, expected.value)) this.err('PL1201', x, `value has type ${tyToString(vt)}, the map's values are ${tyToString(expected.value)}`);
+        }
+        return expected;
+      }
+    }
+  }
+
+  private isParamOfSomeAction(n: string): boolean {
+    for (const a of this.actions.values()) if (a.params.some((p) => p.name === n)) return true;
+    return false;
+  }
+
+  private keyValues(t: Ty): unknown[] | null {
+    if (t.k === 'int') return Array.from({ length: t.hi - t.lo + 1 }, (_, k) => t.lo + k);
+    if (t.k === 'union') return this.env.unions.get(t.name)!.ctors.map((c) => c.name);
+    return null;
+  }
+
+  private binary(e: A.Binary, scope: Scope): Ty {
+    switch (e.op) {
+      case '&&':
+      case '||':
+      case 'implies': {
+        this.expectBool(e.left, scope);
+        // S15: `action == A` on the left establishes A's parameters on the right.
+        const known = e.op !== '||' ? this.establishedAction(e.left) : null;
+        const right: Scope = known ? { ...scope, knownAction: known, params: this.paramsOf(known, scope) } : scope;
+        this.expectBool(e.right, right);
+        return BOOL;
+      }
+      case '==':
+      case '!=': {
+        const l = this.typeOf(e.left, scope);
+        const r = this.typeOf(e.right, scope, l);
+        // `Name == field`: retype the left with the right as context (a constructor on the left).
+        if (l.k === 'error' && e.left.kind === 'Name') return BOOL;
+        if (!same(l, r)) this.err('PL1201', e, `cannot compare ${tyToString(l)} with ${tyToString(r)}`);
+        return BOOL;
+      }
+      case '<':
+      case '<=':
+      case '>':
+      case '>=': {
+        const l = this.typeOf(e.left, scope);
+        const r = this.typeOf(e.right, scope);
+        if ((l.k !== 'int' && l.k !== 'error') || (r.k !== 'int' && r.k !== 'error')) this.err('PL1201', e, `${e.op} compares ints, not ${tyToString(l)} and ${tyToString(r)}`);
+        return BOOL;
+      }
+      default: {
+        const l = this.typeOf(e.left, scope);
+        const r = this.typeOf(e.right, scope);
+        if (l.k !== 'int' || r.k !== 'int') {
+          if (l.k !== 'error' && r.k !== 'error') this.err('PL1201', e, `${e.op} needs ints, not ${tyToString(l)} and ${tyToString(r)}`);
+          return ERR;
+        }
+        return this.arith(e, l, r);
+      }
+    }
+  }
+
+  private arith(e: A.Binary, l: { lo: number; hi: number }, r: { lo: number; hi: number }): Ty {
+    const range = (xs: number[]): Ty => {
+      const ok = xs.filter((x) => !Number.isNaN(x));
+      return { k: 'int', lo: Math.min(...ok), hi: Math.max(...ok) };
+    };
+    switch (e.op) {
+      case '+': return { k: 'int', lo: l.lo + r.lo, hi: l.hi + r.hi };
+      case '-': return { k: 'int', lo: l.lo - r.hi, hi: l.hi - r.lo };
+      case '*': return range([l.lo * r.lo, l.lo * r.hi, l.hi * r.lo, l.hi * r.hi]);
+      case '/':
+      case '%': {
+        // S12: a divisor whose static range contains 0 is refused, so division is total.
+        if (r.lo <= 0 && r.hi >= 0) { this.err('PL1204', e.right, `the divisor may be 0 (its range is ${tyToString({ k: 'int', ...r })}); division must be total (PT2.2)`); return ERR; }
+        if (e.op === '%') { const m = Math.max(Math.abs(r.lo), Math.abs(r.hi)) - 1; return { k: 'int', lo: l.lo < 0 ? -m : 0, hi: l.hi > 0 ? m : 0 }; }
+        const q = [l.lo / r.lo, l.lo / r.hi, l.hi / r.lo, l.hi / r.hi].map(Math.trunc);
+        return range(q);
+      }
+      default: return INT;
+    }
+  }
+
+  private establishedAction(e: A.Expr): string | null {
+    if (e.kind === 'Binary' && e.op === '==' && e.left.kind === 'Name' && e.left.name === 'action' && e.right.kind === 'Name' && this.actions.has(e.right.name)) return e.right.name;
+    if (e.kind === 'Binary' && e.op === '&&') return this.establishedAction(e.left) ?? this.establishedAction(e.right);
+    return null;
+  }
+
+  private paramsOf(action: string, scope: Scope): Map<string, Ty> {
+    const params = new Map(scope.params);
+    for (const p of this.actions.get(action)?.params ?? []) params.set(p.name, this.tyOf(p.type));
+    return params;
+  }
+}
+
+interface PathState {
+  written: Map<string, A.NodeBase>;
+  done: boolean;
+}

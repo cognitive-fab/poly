@@ -1,0 +1,8 @@
+// expect: PL2101 (a require after a write)
+module errors
+
+machine M {
+  state { x : 0..3 = 0 }
+  action A()
+  on A { x' = 1  require x < 3 else reject "full" }
+}

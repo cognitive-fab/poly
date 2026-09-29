@@ -1,0 +1,9 @@
+// expect: PL1601 (one payload name, two types)
+module errors
+type S = A { n: 1..2 } | B { n: bool }
+
+machine M {
+  state { s : S = A { n: 1 } }
+  action Go()
+  on Go { s' = B { n: true } }
+}

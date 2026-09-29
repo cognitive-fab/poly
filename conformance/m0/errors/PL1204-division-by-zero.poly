@@ -1,0 +1,8 @@
+// expect: PL1204 (a divisor whose range contains 0)
+module errors
+
+machine M {
+  state { x : 0..3 = 0  y : 0..3 = 0 }
+  action A()
+  on A { x' = 3 / y }
+}

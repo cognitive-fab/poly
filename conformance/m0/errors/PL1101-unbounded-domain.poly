@@ -1,0 +1,8 @@
+// expect: PL1101 (an int parameter with no check clause)
+module errors
+
+machine M {
+  state { x : 0..3 = 0 }
+  action Set(v: int)
+  on Set(v) { x' = 0 }
+}

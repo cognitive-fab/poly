@@ -1,0 +1,10 @@
+// expect: PL1401 (terminal reads a second field)
+module errors
+type S = Open | Closed
+
+machine M {
+  state { s : S = Open  n : 0..3 = 0 }
+  terminal s is Closed || n == 3
+  action Close()
+  on Close { s' = Closed }
+}

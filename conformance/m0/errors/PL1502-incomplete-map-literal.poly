@@ -1,0 +1,9 @@
+// expect: PL1502 (a map literal missing a key)
+module errors
+type Msg = M1 | M2
+
+machine M {
+  state { seen : map<Msg, bool> = { M1: false } }
+  action A()
+  on A { seen' = seen with [M1] = true }
+}

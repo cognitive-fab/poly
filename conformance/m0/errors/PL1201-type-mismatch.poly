@@ -1,0 +1,8 @@
+// expect: PL1201 (a bool written into a range field)
+module errors
+
+machine M {
+  state { x : 0..3 = 0 }
+  action A()
+  on A { x' = true }
+}

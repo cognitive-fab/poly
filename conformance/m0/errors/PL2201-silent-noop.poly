@@ -1,0 +1,8 @@
+// expect: PL2201 (a path with no write and no reject)
+module errors
+
+machine M {
+  state { x : 0..3 = 0 }
+  action A()
+  on A { if x < 3 { x' = x + 1 } }
+}

@@ -5,3 +5,4 @@ export { assignIds, idOfPath } from './ids.js';
 export * from './truth.js';
 export * from './types.js';
 export * from './diagnostics.js';
+export { checkModule, tyToString, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';

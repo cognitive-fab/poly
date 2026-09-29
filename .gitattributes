@@ -1,0 +1,2 @@
+# LF everywhere: the formatter prints LF, and the field-study copies are pinned by SHA-256 (PT17).
+* text=auto eol=lf

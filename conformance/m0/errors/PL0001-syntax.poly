@@ -1,0 +1,8 @@
+// expect: PL0001 (a statement cut short)
+module errors
+
+machine M {
+  state { x : bool = false }
+  action A()
+  on A { require x else }
+}

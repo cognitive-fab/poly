@@ -1,0 +1,8 @@
+// expect: PL1001 (a write to an undeclared field (PF1.1))
+module errors
+
+machine M {
+  state { x : bool = false }
+  action A()
+  on A { y' = true }
+}
