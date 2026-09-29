@@ -1,2 +1,7 @@
-// Filled in by the milestone M0 steps of docs/plan-m0.md.
-export {};
+export type * from './ast.js';
+export { canonicalize } from './jcs.js';
+export { digest, stripped, sha256Hex } from './digest.js';
+export { assignIds, idOfPath } from './ids.js';
+export * from './truth.js';
+export * from './types.js';
+export * from './diagnostics.js';
