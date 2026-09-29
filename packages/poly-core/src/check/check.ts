@@ -322,7 +322,8 @@ class Checker {
   /** Reports the first part of a constant that leaves its declared type or check domain, at that part's line. */
   private checkConst(e: A.Expr, ty: Ty, check: A.CheckClause | null, what: string): void {
     if (e.kind === 'CtorExpr' && ty.k === 'union') {
-      const c = this.env.unions.get(ty.name)!.ctors.find((x) => x.name === e.ctor);
+      // S22: `Type.C { … }` names the constructor C.
+      const c = this.env.unions.get(ty.name)!.ctors.find((x) => x.name === e.ctor.slice(e.ctor.indexOf('.') + 1));
       for (const f of e.fields) {
         const decl = c?.fields.find((x) => x.name === f.name);
         if (decl) this.checkConst(f.value, this.tyOf(decl.type), null, `${what}.${f.name}`);
@@ -739,7 +740,9 @@ class Checker {
         for (const en of e.entries) {
           const kt = this.typeOf(en.key, scope, expected.key);
           if (!same(kt, expected.key)) this.err('PL1201', en.key, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(expected.key)}`);
-          const kv = en.key.kind === 'Name' ? en.key.name : en.key.kind === 'Int' ? en.key.value : undefined;
+          const kv = this.fold(en.key);
+          // A key outside the map's key type is not a key of this map (ranges type alike, so check the value).
+          if (keys && kv !== undefined && !keys.includes(kv)) this.err('PL1201', en.key, `${String(kv)} is not a key of ${tyToString(expected)}`);
           if (seen.includes(kv)) this.err('PL1502', en.key, `key ${String(kv)} is listed twice`);
           seen.push(kv);
           const vt = this.typeOf(en.value, scope, expected.value);

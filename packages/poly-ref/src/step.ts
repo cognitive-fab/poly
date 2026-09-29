@@ -1,6 +1,6 @@
 // Handlers denote functions (PS2) and the transition relation (PS3).
 import type * as A from '@poly/core';
-import type { RMachine } from './model.js';
+import type { RMachine, RType } from './model.js';
 import { inCheckDomain } from './model.js';
 import { evaluate, evaluateAt, EvalError, type Env, type Verdict } from './eval.js';
 import { isMap, isUnion, keyOf, mapSet, type State, type Value } from './values.js';
@@ -38,9 +38,13 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, M: RMachine, s
         break;
       case 'Reject':
         return { kind: 'reject', reason: st.reason };
-      case 'Let':
+      case 'Let': {
         env.locals.set(st.name, evaluate(st.expr, env));
+        const t = staticType(st.expr, env);
+        if (t) (env.localTypes ??= new Map()).set(st.name, t);
+        else env.localTypes?.delete(st.name);
         break;
+      }
       case 'Assign': {
         const f = M.fields.find((x) => x.name === st.field);
         if (!f) throw new EvalError(`poly-ref: write to undeclared field ${st.field}`);
@@ -62,12 +66,21 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, M: RMachine, s
       }
       case 'Match': {
         const v = evaluate(st.scrutinee, env);
-        const arm = st.arms.find((a) => matches(M, a.pattern, v));
+        // S21, S22: pattern names are read against the scrutinee's own union, which a constructor
+        // shared by two unions cannot tell; its static type can.
+        const st0 = staticType(st.scrutinee, env);
+        const union = st0?.k === 'union' ? st0.name : undefined;
+        const arm = st.arms.find((a) => matches(M, a.pattern, v, union));
         // The compiler requires exhaustive arms (PL1501), so a match never falls through.
         if (!arm) throw new EvalError(`poly-ref: no arm of a match covers ${keyOf(v)}`);
-        const armEnv: Env = { ...env, locals: new Map(env.locals) };
+        const armEnv: Env = { ...env, locals: new Map(env.locals), localTypes: new Map(env.localTypes ?? []) };
         if (arm.pattern.kind === 'PCtor' && isUnion(v)) {
-          for (const f of arm.pattern.fields) if (f.bind && patternName(M, v.ctor, f.name, f.bind) === 'bind') armEnv.locals.set(f.bind, v.payload[f.name]);
+          for (const f of arm.pattern.fields) {
+            if (!f.bind || patternName(M, union, v.ctor, f.name, f.bind) !== 'bind') continue;
+            armEnv.locals.set(f.bind, v.payload[f.name]);
+            const pt = payloadType(M, union, v.ctor, f.name);
+            if (pt) armEnv.localTypes!.set(f.bind, pt);
+          }
         }
         const r = block(arm.body, armEnv, w, M, s);
         if (r) return r;
@@ -89,20 +102,58 @@ function write(w: Map<string, Value>, field: string, v: Value): void {
  * What a name in a payload pattern means (PT2.4, S21): a constructor of the payload's type is a
  * literal, `_` ignores the payload, and any other name binds it.
  */
-function patternName(M: RMachine, ctor: string, payload: string, name: string): 'literal' | 'ignore' | 'bind' {
+function patternName(M: RMachine, union: string | undefined, ctor: string, payload: string, name: string): 'literal' | 'ignore' | 'bind' {
   if (name === '_') return 'ignore';
-  const t = M.unions.get(M.ctors.get(ctor) ?? '')?.ctors.find((c) => c.name === ctor)?.fields.find((f) => f.name === payload)?.type;
+  const t = payloadType(M, union, ctor, payload);
   if (t && t.k === 'union' && M.unions.get(t.name)?.ctors.some((c) => c.name === name)) return 'literal';
   return 'bind';
 }
 
-function matches(M: RMachine, p: A.Pattern, v: Value): boolean {
+/** The declared type of a constructor's payload, in the scrutinee's union when it is known. */
+function payloadType(M: RMachine, union: string | undefined, ctor: string, payload: string): RType | undefined {
+  const owner = union && M.unions.get(union)?.ctors.some((c) => c.name === ctor) ? union : M.ctors.get(ctor);
+  return M.unions.get(owner ?? '')?.ctors.find((c) => c.name === ctor)?.fields.find((f) => f.name === payload)?.type;
+}
+
+/**
+ * The declared type of an expression where the declarations say it: a field, a parameter, a typed
+ * local, `pre.f`, a map entry, or a qualified constructor. Enough to know a match scrutinee's union.
+ */
+function staticType(e: A.Expr, env: Env): RType | undefined {
+  const M = env.M;
+  switch (e.kind) {
+    case 'Name': {
+      if (env.locals.has(e.name)) return env.localTypes?.get(e.name);
+      const a = env.action ? M.actions.find((x) => x.name === env.action) : undefined;
+      const p = env.params ? a?.params.find((x) => x.name === e.name) : undefined;
+      if (p) return p.type;
+      return M.fields.find((f) => f.name === e.name)?.type;
+    }
+    case 'Member': {
+      if (e.object.kind === 'Name' && (e.object.name === 'pre' || e.object.name === 'post')) return M.fields.find((f) => f.name === e.prop)?.type;
+      if (e.object.kind === 'Name' && M.unions.has(e.object.name)) return { k: 'union', name: e.object.name };
+      return undefined;
+    }
+    case 'Index': {
+      const t = staticType(e.object, env);
+      return t?.k === 'map' ? t.value : undefined;
+    }
+    case 'CtorExpr': {
+      const dot = e.ctor.indexOf('.');
+      return dot >= 0 ? { k: 'union', name: e.ctor.slice(0, dot) } : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function matches(M: RMachine, p: A.Pattern, v: Value, union?: string): boolean {
   if (p.kind === 'PWild') return true;
   // S22: a qualified pattern `Type.C` matches the constructor C.
   if (!isUnion(v) || v.ctor !== p.ctor.slice(p.ctor.indexOf('.') + 1)) return false;
   return p.fields.every((f) => {
     if (f.literal !== null) return keyOf(v.payload[f.name]) === keyOf(literal(f.literal));
-    if (f.bind && patternName(M, v.ctor, f.name, f.bind) === 'literal') return keyOf(v.payload[f.name]) === keyOf({ ctor: f.bind, payload: {} });
+    if (f.bind && patternName(M, union, v.ctor, f.name, f.bind) === 'literal') return keyOf(v.payload[f.name]) === keyOf({ ctor: f.bind, payload: {} });
     return true;
   });
 }

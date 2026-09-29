@@ -201,4 +201,20 @@ test('finding 5: poly check builds under a --root outside any node_modules tree'
   }
 });
 
+// ── Polywatch, after the review fixes ──────────────────────────────────────
+
+test('polywatch 1: a pattern literal under a constructor two types share is read against the scrutinee type', async () => {
+  const r = await run('pw-shared-ctor-pattern.poly');
+  assert.ok(!codes(r).includes('PL2501'), codes(r).join(', '));
+  assert.equal(r.verdict, 'CLEAN', codes(r).join(', '));
+});
+
+test('polywatch 2 and 3: a qualified constructor payload and a map key are range-checked in initial values', () => {
+  const field = (decl, types = '') => compile(`module t\n${types}machine M {\n  state {\n    ${decl}\n  }\n  action A()\n  on A { reject "no" }\n}\n`).map((d) => d.code);
+  assert.deepEqual(field('v : Valve = Valve.Closed { turns: 7 }', 'type Valve = Open | Closed { turns: 0..2 }\n'), ['PL1201']);
+  assert.deepEqual(field('v : Valve = Valve.Closed { turns: 2 }', 'type Valve = Open | Closed { turns: 0..2 }\n'), []);
+  assert.deepEqual(field('m : map<0..1, 0..3> = { 0: 0, 1: 0, 2: 0 }'), ['PL1201']);
+  assert.deepEqual(field('m : map<0..1, 0..3> = { 0: 0, 1: 3 }'), []);
+});
+
 void readFileSync;

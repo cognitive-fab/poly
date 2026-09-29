@@ -32,6 +32,8 @@ export interface Env {
    * reject property only on the right of a conjunct `action == A` that holds.
    */
   params?: boolean;
+  /** Declared types of local names, where known: pattern binders and lets (for match scrutinees, S21, S22). */
+  localTypes?: Map<string, import('./model.js').RType>;
 }
 
 export class EvalError extends Error {}

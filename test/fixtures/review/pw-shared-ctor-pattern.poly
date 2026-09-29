@@ -1,0 +1,26 @@
+// Polywatch finding (after the review fixes): `Can` is a constructor of both Paint and Box (S22).
+// In `match b`, the payload pattern `Can { p: Small }` must be read against Box's payload type, where
+// Small is a constructor, so it is a literal. poly-ref looked the payload type up through the first
+// union that declares Can (Paint), read Small as a binder, and matched every Can value.
+module review
+
+enum Color { Red, Blue }
+enum Size { Big, Small }
+type Paint = Can { p: Color } | Dry
+type Box = Can { p: Size } | None
+
+machine M {
+  state {
+    b : Box = Box.Can { p: Big }
+    n : 0..2 = 0
+  }
+  action Go()
+  on Go {
+    match b {
+      Can { p: Small } => n' = 1
+      Can { p: Big } => n' = 2
+      None => n' = 0
+    }
+  }
+  invariant never-one: n != 1
+}
