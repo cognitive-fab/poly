@@ -5,7 +5,7 @@
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
 import { diag, digest, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
-import { layoutOf, prelude, isPayloadUnion, payloadTy, type Layout } from './layout.js';
+import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
 
 export interface LowerOptions {
@@ -33,7 +33,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const actions = m.items.filter((i): i is A.Action => i.kind === 'Action');
   for (const a of actions) {
     for (const p of a.params) {
-      const t = paramTy(p, check.env);
+      const t = tyOfTypeExpr(p.type);
       if (t.k === 'ref' || t.k === 'map' || isPayloadUnion(check.env, t)) {
         diagnostics.push(diag('PL0901', { module: module.name, machine: m.name, node: p.id, line: p.span?.line, col: p.span?.col }, `a parameter of type ${t.k === 'union' ? t.name : t.k} is lowered after milestone M0: ${a.name}.${p.name}`));
       }
@@ -106,7 +106,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const modelShape: Record<string, unknown> = {};
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
   const intentDecls = actions.map((a) => {
-    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(paramTy(p, env)), required: true }]));
+    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type)), required: true }]));
     return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(dataDomainOf(a, env))} },`;
   });
   const version = digest(module);
@@ -162,7 +162,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     machineVersion: version,
     stateKeys: layout.fields.flatMap((l) => l.flat.map((k) => ({ name: k, type: keyTypeText(l, k, env) }))),
     initState,
-    actions: Object.fromEntries(actions.map((a) => [a.name, { dataFields: Object.fromEntries(a.params.map((p) => [p.name, typeText(paramTy(p, env), env)])) }])),
+    actions: Object.fromEntries(actions.map((a) => [a.name, { dataFields: Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type), env)])) }])),
     terminalStates,
     dataDomain: Object.fromEntries(actions.filter((a) => a.params.length).map((a) => [a.name, Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env)]))])),
     invariants: 'invariants.mjs',
@@ -243,18 +243,6 @@ function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layou
 
 // ── domains and types, flat-encoded ─────────────────────────────────────────
 
-function paramTy(p: A.Param, env: TypeEnv): Ty {
-  const t = p.type;
-  switch (t.kind) {
-    case 'TBool': return { k: 'bool' };
-    case 'TInt': return { k: 'int', lo: -Infinity, hi: Infinity };
-    case 'TString': return { k: 'string' };
-    case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
-    case 'TName': return env.unions.has(t.name) ? { k: 'union', name: t.name } : { k: 'error' };
-    case 'TMap': return { k: 'map', key: { k: 'error' }, value: { k: 'error' }, array: false };
-    case 'TRef': return { k: 'ref' };
-  }
-}
 
 function valuesOfTy(t: Ty, env: TypeEnv): unknown[] {
   if (t.k === 'bool') return [false, true];
@@ -268,11 +256,7 @@ function valuesOfTy(t: Ty, env: TypeEnv): unknown[] {
 }
 
 function paramValues(p: A.Param, env: TypeEnv): unknown[] {
-  if (p.check) {
-    const d = p.check.domain;
-    return d.kind === 'DomainRange' ? Array.from({ length: d.hi - d.lo + 1 }, (_, i) => d.lo + i) : d.values.map((v) => (v.kind === 'Name' ? v.name : v.value));
-  }
-  return valuesOfTy(paramTy(p, env), env);
+  return p.check ? checkDomainValues(p.check) : valuesOfTy(tyOfTypeExpr(p.type), env);
 }
 
 /** D(a) as the intent's `domain`: every payload object (PS1.1). */
@@ -286,12 +270,7 @@ function dataDomainOf(a: A.Action, env: TypeEnv): Record<string, unknown>[] {
 }
 
 function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[] {
-  const t = facts.fieldTypes.get(f.name)!;
-  if (f.check) {
-    const d = f.check.domain;
-    return d.kind === 'DomainRange' ? Array.from({ length: d.hi - d.lo + 1 }, (_, i) => d.lo + i) : d.values.map((v) => (v.kind === 'Name' ? v.name : v.value));
-  }
-  return valuesOfTy(t, env);
+  return f.check ? checkDomainValues(f.check) : valuesOfTy(facts.fieldTypes.get(f.name)!, env);
 }
 
 function jsType(t: Ty): string {
@@ -315,7 +294,7 @@ function keyTypeText(l: import('./layout.js').FieldLayout, key: string, env: Typ
   const p = l.payloads!.find(([, k]) => k === key)![0];
   const decl = u.ctors.flatMap((c) => c.fields).find((x) => x.name === p)!;
   const owners = u.ctors.filter((c) => c.fields.some((x) => x.name === p)).map((c) => c.name);
-  const t = payloadTy(decl.type);
+  const t = tyOfTypeExpr(decl.type);
   return `${typeText(t, env)} | null (payload of ${owners.join(', ')})`;
 }
 

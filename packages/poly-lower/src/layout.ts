@@ -32,8 +32,11 @@ export interface Layout {
   flatKeys: string[];
 }
 
-/** The semantic type of a payload field's declared type (a payload has no check clause, PT2). */
-export function payloadTy(t: A.TypeExpr): Ty {
+/**
+ * The semantic type of a declared type, for a parameter or a payload field. The one mapping the
+ * lowering uses (review finding 9): the program was checked first, so every name is a known type.
+ */
+export function tyOfTypeExpr(t: A.TypeExpr): Ty {
   switch (t.kind) {
     case 'TBool': return { k: 'bool' };
     case 'TInt': return { k: 'int', lo: -Infinity, hi: Infinity };
@@ -41,8 +44,14 @@ export function payloadTy(t: A.TypeExpr): Ty {
     case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
     case 'TName': return { k: 'union', name: t.name };
     case 'TRef': return { k: 'ref' };
-    case 'TMap': return { k: 'error' };
+    case 'TMap': return { k: 'map', key: tyOfTypeExpr(t.key), value: tyOfTypeExpr(t.value), array: t.key.kind === 'TRange' };
   }
+}
+
+/** The values of a check clause, in declaration order (PT3.4): the one enumeration the lowering uses. */
+export function checkDomainValues(check: A.CheckClause): unknown[] {
+  const d = check.domain;
+  return d.kind === 'DomainRange' ? Array.from({ length: d.hi - d.lo + 1 }, (_, i) => d.lo + i) : d.values.map((v) => (v.kind === 'Name' ? v.name : v.value));
 }
 
 export function isPayloadUnion(env: TypeEnv, t: Ty): boolean {
@@ -80,7 +89,7 @@ export function layoutOf(m: A.Machine, facts: MachineFacts, env: TypeEnv, module
         ctors[c.name] = [];
         for (const pf of c.fields) {
           const key = `${f.name}_${pf.name}`;
-          const pty = payloadTy(pf.type);
+          const pty = tyOfTypeExpr(pf.type);
           if (pf.type.kind === 'TName' && !env.unions.get(pf.type.name)?.isEnum) refuse(f, `a payload that is itself a union with payloads is lowered after milestone M0: ${c.name}.${pf.name}`);
           if (pf.type.kind === 'TMap' || pf.type.kind === 'TRef') refuse(f, `a map or address payload is lowered after milestone M0: ${c.name}.${pf.name}`);
           ctors[c.name].push([pf.name, key]);
