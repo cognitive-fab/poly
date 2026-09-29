@@ -18,7 +18,7 @@ import { performance } from 'node:perf_hooks';
 import { parse } from '@poly/lang';
 import { checkModule, fold, verdictOf, diag, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { translationValidate, confirmWitness, stateDigestOf, keyOf, type MachineReport } from '@poly/ref';
+import { translationValidate, confirmWitness, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock';
@@ -155,16 +155,12 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 1: strict validate() ────────────────────────────────────────
   t0 = performance.now();
-  const req = createRequire(join(dir, 'next.cjs'));
+  // Finding 5: the lowered module is loaded with sam-pattern resolved from poly's own install, so any --root works.
   let mod: { instance: (o: object) => { validate: () => string[] } };
   try {
-    const path = req.resolve(join(dir, 'next.cjs'));
-    delete req.cache[path];
-    mod = req(path);
+    mod = loadLoweredModule(join(dir, 'next.cjs'));
   } catch (e) {
-    const msg = (e as Error).message;
-    if (/@cognitive-fab\/sam-pattern/.test(msg)) throw new Error(`cannot load the lowered module: @cognitive-fab/sam-pattern is not resolvable from ${dir}; install it in the project`);
-    throw new Error(`the lowered module does not load: ${msg}`);
+    throw new Error(`the lowered module does not load: ${(e as Error).message}`);
   }
   let problems: string[];
   try { problems = mod.instance({}).validate(); } catch (e) { problems = [(e as Error).message]; }

@@ -187,4 +187,18 @@ test('S22: Type.C formats and reparses to the same AST', () => {
   assert.equal(digest(parse(format(m)).module), digest(m));
 });
 
+// ── Finding 5: any --root works ────────────────────────────────────────────
+
+test('finding 5: poly check builds under a --root outside any node_modules tree', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const root = mkdtempSync(join(tmpdir(), 'poly-root-'));
+  try {
+    const r = await checkFile(join(ROOT, 'examples', 'hello', 'hello-empty.poly'), { root });
+    assert.equal(r.verdict, 'CLEAN', r.error ?? codes(r).join(', '));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 void readFileSync;

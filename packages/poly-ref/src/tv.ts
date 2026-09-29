@@ -8,10 +8,10 @@
 // and computes R_M with its own interpreter. Any difference is PL2501
 // LOWERING_MISMATCH, addressed to the toolchain; the verdict is REFUSED.
 import type { Diagnostic, Module, WitnessStep } from '@poly/core';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { checkMachine, ENGINE, type MachineReport } from './check.js';
+import { loadLoweredModule } from './load.js';
 import { pathTo, type Edge } from './explore.js';
 import { evaluate, type Verdict } from './eval.js';
 import { alpha, flatten, flattenData } from './alpha.js';
@@ -75,10 +75,8 @@ const verdictText = (v: Verdict) => (v.kind === 'rejected' ? `rejected(${v.reaso
 export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number } = {}): Promise<TvResult> {
   const report = checkMachine(module, machineName, opts);
   const { graph: g, model: M } = report;
-  const req = createRequire(join(buildDir, 'next.cjs'));
-  const modPath = req.resolve(join(buildDir, 'next.cjs'));
-  delete req.cache[modPath];
-  const mod = req(modPath) as SamModule;
+  // Finding 5: sam-pattern resolves from poly's own install, wherever the build directory is.
+  const mod = loadLoweredModule<SamModule>(join(buildDir, 'next.cjs'));
   const props = (await import(pathToFileURL(join(buildDir, 'invariants.mjs')).href + `?v=${Date.now()}-${Math.random()}`)) as PropertyModule;
 
   const mismatches: Diagnostic[] = [];
