@@ -9,7 +9,8 @@ import { buildMachine, dataDomain, valuesOf, type RMachine, type RType } from '.
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
 import { isTerminal } from './step.js';
-import { statePlain, toPlain, keyOf, type State } from './values.js';
+import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
+import { createHash } from 'node:crypto';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
 const CODE = {
@@ -53,10 +54,17 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   const g = explore(machineSystem(M), opts.maxStates);
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, machine: M.name, ...(node ? { node } : {}) });
-  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, trace: WitnessStep[]): Diagnostic => {
+  // Findings carry their property or field and a digest of the state they name (review finding 8).
+  const digestOf = (s: State) => 'sha256:' + createHash('sha256').update(stateKey(s, M.fieldNames)).digest('hex');
+  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, trace: WitnessStep[], about: { property?: string; field?: string; state?: State } = {}): Diagnostic => {
     const [name, severity, stage] = CODE[code];
     const witness: Witness = { id: '', length: trace.length, trace };
-    return { code, name, severity, stage, engine: ENGINE, at: at(node), message, witness };
+    return {
+      code, name, severity, stage, engine: ENGINE, at: at(node), message, witness,
+      ...(about.property ? { property: about.property } : {}),
+      ...(about.field ? { field: about.field } : {}),
+      ...(about.state ? { stateDigest: digestOf(about.state) } : {}),
+    };
   };
   const trace = (edges: Edge<State>[]): WitnessStep[] => edges.map((e) => ({
     pre: statePlain(g.states[e.from]),
@@ -69,20 +77,20 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   // Invariants: the first violating state in BFS order has the shortest witness.
   for (const p of M.invariants) {
     const i = g.states.findIndex((s) => evaluate(p.expr, { M, state: s, data: {}, locals: new Map() }) !== true);
-    if (i >= 0) findings.push(finding('PL3001', p.id, `invariant ${p.name} is violated in a reachable state`, trace(pathTo(g, i))));
+    if (i >= 0) findings.push(finding('PL3001', p.id, `invariant ${p.name} is violated in a reachable state`, trace(pathTo(g, i)), { property: p.name, state: g.states[i] }));
   }
   // Step and reject properties, over edges in BFS order of their source.
   for (const p of M.stepProperties) {
     const e = g.edges.find((x) => x.label.verdict.kind === 'accepted' && evaluate(p.expr, {
       M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action,
     }) !== true);
-    if (e) findings.push(finding('PL3002', p.id, `step property ${p.name} is violated by ${e.label.action}`, trace([...pathTo(g, e.from), e])));
+    if (e) findings.push(finding('PL3002', p.id, `step property ${p.name} is violated by ${e.label.action}`, trace([...pathTo(g, e.from), e]), { property: p.name, state: g.states[e.from] }));
   }
   for (const p of M.rejectProperties) {
     const e = g.edges.find((x) => evaluate(p.expr, {
       M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], action: x.label.action, verdict: x.label.verdict,
     }) !== true);
-    if (e) findings.push(finding('PL3003', p.id, `reject property ${p.name} is violated by ${e.label.action} (${e.label.verdict.kind}${e.label.verdict.reason ? ' ' + e.label.verdict.reason : ''})`, trace([...pathTo(g, e.from), e])));
+    if (e) findings.push(finding('PL3003', p.id, `reject property ${p.name} is violated by ${e.label.action} (${e.label.verdict.kind}${e.label.verdict.reason ? ' ' + e.label.verdict.reason : ''})`, trace([...pathTo(g, e.from), e]), { property: p.name, state: g.states[e.from] }));
   }
   // Leaving the instance (PS4.2a): one finding per field, the first in BFS order.
   const reported = new Set<string>();
@@ -94,9 +102,9 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     reported.add(key);
     const f = M.fields.find((x) => x.name === o.field)!;
     if (o.kind === 'escape') {
-      findings.push(finding('PL3102', undefined, `${o.field} can leave its type ${typeText(f.type, M)} (value ${keyOf(o.value)})`, trace([...pathTo(g, e.from), e])));
+      findings.push(finding('PL3102', undefined, `${o.field} can leave its type ${typeText(f.type, M)} (value ${keyOf(o.value)})`, trace([...pathTo(g, e.from), e]), { field: o.field, state: o.state }));
     } else {
-      findings.push(finding('PL3901', undefined, `${o.field} can leave its check domain ${domainText(f.check, f.type, M)} (value ${keyOf(o.value)}); the state is not explored`, trace([...pathTo(g, e.from), e])));
+      findings.push(finding('PL3901', undefined, `${o.field} can leave its check domain ${domainText(f.check, f.type, M)} (value ${keyOf(o.value)}); the state is not explored`, trace([...pathTo(g, e.from), e]), { field: o.field, state: o.state }));
     }
   }
   if (g.capHit) findings.push(finding('PL3901', undefined, `exploration stopped at ${g.states.length} states`, []));
@@ -108,7 +116,7 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
       if (isTerminal(M, s)) return;
       if (g.out[i].some((k) => g.edges[k].label.verdict.kind === 'accepted')) return;
       deadlocks.push(statePlain(s));
-      const f = finding('PL3201', undefined, 'no action is accepted in a reachable non-terminal state', trace(pathTo(g, i)));
+      const f = finding('PL3201', undefined, 'no action is accepted in a reachable non-terminal state', trace(pathTo(g, i)), { state: s });
       (f as Diagnostic & { rejections?: string[] }).rejections = g.out[i].map((k) => {
         const e = g.edges[k];
         return `${e.label.action}: ${e.label.verdict.kind === 'rejected' ? e.label.verdict.reason : e.label.verdict.kind}`;

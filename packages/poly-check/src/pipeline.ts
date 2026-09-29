@@ -18,7 +18,7 @@ import { performance } from 'node:perf_hooks';
 import { parse } from '@poly/lang';
 import { checkModule, fold, verdictOf, diag, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { translationValidate, confirmWitness, keyOf, type MachineReport } from '@poly/ref';
+import { translationValidate, confirmWitness, stateDigestOf, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock';
@@ -209,11 +209,17 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     stage2.push(diag('PL2501', { module: module.name, machine }, `polygraph explored ${pg.statesExplored} states of the lowered module and poly-ref ${ref.states}; with no state outside the instance they must agree`, { engine: `polygraph@${engines.polygraph}` }));
   }
   const at = { module: module.name, machine };
+  // A flat key of the lowered module names a field of the source (PS9.1b).
+  const fieldOf = (key: string) => lowered.layout.fields.find((l) => l.flat.includes(key))?.field ?? key;
   // Review finding 7: every polygraph finding is confirmed through poly-ref. It counts only if its
   // witness stays inside the checked instance (PS4.2); if the witness leaves the instance first, it is
   // a bound hit; if poly-ref disagrees inside the instance, the lowering is at fault (PL2501).
   for (const v of pg.violations) {
-    const d = fromPolygraph(v, at, engines.polygraph);
+    const d = fromPolygraph(v, at, engines.polygraph, fieldOf);
+    if (d.code === 'PL3001' || d.code === 'PL3002' || d.code === 'PL3003') {
+      const named = v.kind === 'state' ? v.path[v.path.length - 1] : v.path[v.path.length - 2];
+      if (named) d.stateDigest = stateDigestOf(ref, named.state);
+    }
     if (v.kind !== 'state' && v.kind !== 'transition' && v.kind !== 'rejection') { stage2.push(d); continue; }
     const c = confirmWitness(ref, { kind: v.kind, property: v.invariant, path: v.path });
     if (c.status === 'confirmed') stage2.push(d);
@@ -223,21 +229,9 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
       stage2.push(diag('PL2501', at, `polygraph reports ${v.invariant} violated, and poly-ref disagrees: ${c.reason} (addressed to the toolchain, not the author)`, { engine: d.engine, witness: d.witness }));
     }
   }
-  // poly-ref is authoritative inside Reach(I), which polygraph's cap may truncate (S5): its findings join
-  // polygraph's under their own codes when polygraph did not report the same property.
-  const seen = new Set(stage2.map((d) => `${d.code}:${d.message.split(' ')[1] ?? ''}`));
-  const pgNames = new Set(pg.violations.map((v) => v.invariant));
-  for (const f of ref.findings) {
-    if (f.code === 'PL3201') continue;
-    const name = /(?:invariant|property) (\S+)/.exec(f.message)?.[1];
-    if (f.code === 'PL3901' || f.code === 'PL3102') {
-      if (!stage2.some((d) => d.code === f.code)) stage2.push(f);
-      continue;
-    }
-    if (name && !pgNames.has(name) && !seen.has(`${f.code}:${name}`)) stage2.push({ ...f, message: `${f.message} (poly-ref; polygraph's exploration was capped at the bound)` });
-  }
-  mc.diagnostics.push(...stage2);
-  mc.stages.push({ stage: 'model-check', status: 'ran', engine: `polygraph@${engines.polygraph}`, verdict: verdictOf(stage2), ms: performance.now() - t0, note: `${pg.statesExplored} states explored${pg.capHit ? `, cap ${maxStates} hit` : ''}` });
+  const merged = mergeFindings(stage2, ref.findings);
+  mc.diagnostics.push(...merged);
+  mc.stages.push({ stage: 'model-check', status: 'ran', engine: `polygraph@${engines.polygraph}`, verdict: verdictOf(merged), ms: performance.now() - t0, note: `${pg.statesExplored} states explored${pg.capHit ? `, cap ${maxStates} hit` : ''}` });
 
   // ── stage 2b: deadlock (PS5.6) ────────────────────────────────────────
   t0 = performance.now();
@@ -246,23 +240,49 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   mc.stages.push({ stage: 'deadlock', status: 'ran', engine: 'poly-ref', verdict: verdictOf(dead), ms: performance.now() - t0, note: ref.model.service ? 'service: exempt (PS1.7)' : `${ref.states} states` });
 }
 
-function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string): Diagnostic {
+function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string, fieldOf: (flatKey: string) => string): Diagnostic {
   const engine = `polygraph@${version}`;
   const trace = v.path.slice(1).map((step, i) => ({ pre: v.path[i].state, action: String(step.action), data: step.data, post: step.state, ...(step.rejected ? { verdict: `rejected(${step.reason})` } : {}) }));
   const witness = { id: '', length: trace.length, trace };
   const name = v.invariant;
+  // Review finding 8: each diagnostic says which property or field it is about, as data.
   if (v.kind === 'state') {
-    if (name.startsWith('bound:')) return diag('PL3901', at, `${name.slice(6)} leaves its check domain (polygraph)`, { engine, witness });
-    if (name.startsWith('domain:') || name.startsWith('shape:')) return diag('PL3102', at, `${name} is violated: a value leaves its declared type`, { engine, witness });
-    return diag('PL3001', at, `invariant ${name} is violated in a reachable state`, { engine, witness });
+    const auto = /^(domain|shape|bound):(.*)$/.exec(name);
+    if (auto && auto[1] === 'bound') return diag('PL3901', at, `${auto[2]} leaves its check domain (polygraph)`, { engine, witness, field: fieldOf(auto[2]) });
+    if (auto) return diag('PL3102', at, `${name} is violated: a value leaves its declared type`, { engine, witness, field: fieldOf(auto[2]) });
+    return diag('PL3001', at, `invariant ${name} is violated in a reachable state`, { engine, witness, property: name });
   }
-  if (v.kind === 'transition') return diag('PL3002', at, `step property ${name} is violated`, { engine, witness });
-  if (v.kind === 'rejection') return diag('PL3003', at, `reject property ${name} is violated`, { engine, witness });
+  if (v.kind === 'transition') return diag('PL3002', at, `step property ${name} is violated`, { engine, witness, property: name });
+  if (v.kind === 'rejection') return diag('PL3003', at, `reject property ${name} is violated`, { engine, witness, property: name });
   return diag('PL2501', at, `polygraph: ${name}: ${v.detail ?? ''}`, { engine, witness });
 }
 
+const mergeKey = (d: Diagnostic) => `${d.code}:${d.property ?? d.field ?? '*'}`;
+
+/**
+ * Stage 2's findings: polygraph's (already confirmed through poly-ref), then poly-ref's for anything
+ * polygraph did not report. poly-ref is authoritative inside Reach(I), which polygraph's cap may
+ * truncate (S5). Results merge on (code, property or field), never on message text (finding 8).
+ */
+export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]): Diagnostic[] {
+  const out = [...fromPolygraph];
+  const have = new Set(out.map(mergeKey));
+  for (const f of fromRef) {
+    if (f.code === 'PL3201') continue; // stage 2b reports deadlocks
+    if (f.code === 'PL3901' || f.code === 'PL3102') {
+      if (!out.some((d) => d.code === f.code)) out.push(f);
+      continue;
+    }
+    if (!have.has(mergeKey(f))) {
+      out.push({ ...f, message: `${f.message} (poly-ref; polygraph's exploration was capped at the bound)` });
+      have.add(mergeKey(f));
+    }
+  }
+  return out;
+}
+
 function instanceRecord(ref: MachineReport, engines: Record<string, string>): InstanceRecord {
-  const bounds = [...new Set(ref.findings.filter((f) => f.code === 'PL3901').map((f) => f.message.split(' ')[0]))];
+  const bounds = [...new Set(ref.findings.filter((f) => f.code === 'PL3901').map((f) => f.field ?? 'exploration cap'))];
   return {
     domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`)],
     states: ref.states,

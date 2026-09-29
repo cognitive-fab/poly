@@ -11,6 +11,7 @@ import type { MachineReport } from './check.js';
 import { alpha, flattenData } from './alpha.js';
 import { evaluate } from './eval.js';
 import { stateKey } from './values.js';
+import { createHash } from 'node:crypto';
 
 /** One step of an engine witness, in the lowered module's flat encoding. */
 export interface FlatStep {
@@ -83,4 +84,10 @@ export function confirmWitness(report: MachineReport, w: WitnessToConfirm): Conf
     return holds ? { status: 'disagrees', reason: `reject property ${w.property} holds on that step by PS5.3` } : { status: 'confirmed' };
   }
   return { status: 'disagrees', reason: `unknown witness kind ${w.kind}` };
+}
+
+/** `sha256:` of a flat state, read through α: the same digest poly-ref's own findings carry. */
+export function stateDigestOf(report: MachineReport, flat: unknown): string {
+  const s = alpha(flat as Record<string, unknown>, report.model);
+  return 'sha256:' + createHash('sha256').update(stateKey(s, report.model.fieldNames)).digest('hex');
 }

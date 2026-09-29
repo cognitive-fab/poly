@@ -130,4 +130,24 @@ test('finding 7: a witness that poly-ref contradicts inside the instance is refu
   assert.equal(confirmWitness(report, truth).status, 'confirmed');
 });
 
+// ── Finding 8: diagnostics carry structure; the merge never parses messages ─
+
+test('finding 8: diagnostics carry the property, the field and the state digest', async () => {
+  const inv = await checkFile(join(ROOT, 'test', 'fixtures', 'cli', 'invariant.poly'), { root: OUT });
+  const d = inv.machines[0].diagnostics.find((x) => x.code === 'PL3001');
+  assert.equal(d.property, 'small');
+  assert.match(d.stateDigest ?? '', /^sha256:[0-9a-f]{64}$/);
+  const esc = await checkFile(join(ROOT, 'test', 'fixtures', 'cli', 'escape.poly'), { root: OUT });
+  const e = esc.machines[0].diagnostics.find((x) => x.code === 'PL3102');
+  assert.equal(e.field, 'intent');
+});
+
+test('finding 8: findings merge on (code, property or field), never on message text', async () => {
+  const { mergeFindings } = await import('@poly/check');
+  const pg = [{ code: 'PL3002', property: 'p', message: 'polygraph wording', at: {} }];
+  const ref = [{ code: 'PL3002', property: 'p', message: 'different wording entirely', at: {} }, { code: 'PL3003', property: 'q', message: 'x', at: {} }];
+  const merged = mergeFindings(pg, ref);
+  assert.deepEqual(merged.map((d) => `${d.code}:${d.property}`), ['PL3002:p', 'PL3003:q']);
+});
+
 void readFileSync;

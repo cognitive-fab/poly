@@ -94,6 +94,12 @@ export interface Diagnostic {
   message: string;
   witness?: Witness;
   fixes?: Fix[];
+  /** The property a finding is about (PL3001 to PL3003): results merge on it, never on message text. */
+  property?: string;
+  /** The field a finding is about (PL3102, PL3901). */
+  field?: string;
+  /** `sha256:` of the state the finding names. */
+  stateDigest?: string;
 }
 
 export function diag(code: string, at: NodeAt, message: string, extra: Partial<Diagnostic> = {}): Diagnostic {
