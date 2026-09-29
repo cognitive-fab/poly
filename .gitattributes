@@ -1,2 +1,4 @@
-# LF everywhere: the formatter prints LF, and the field-study copies are pinned by SHA-256 (PT17).
+# LF everywhere: the formatter prints LF.
 * text=auto eol=lf
+# The field-study copies are pinned by SHA-256 of their exact bytes (PT17): no end-of-line conversion.
+conformance/field-studies/** -text
