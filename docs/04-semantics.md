@@ -39,6 +39,7 @@ The definitions are mathematical and short. They are written so that a reference
   1. **Guards.** The guards in `G` are evaluated in declaration order. The first guard whose condition holds yields `reject(r)` with its reason.
   2. **Body.** Statements are evaluated in order:
      - `require c else reject r` yields `reject(r)` if `c` is false and continues otherwise;
+     - `reject r` yields `reject(r)`;
      - `let x = e` binds `x`;
      - `if c B1 else B2` evaluates the chosen branch;
      - `f' = e` adds `f ↦ value(e)` to `w`;
@@ -47,9 +48,9 @@ The definitions are mathematical and short. They are written so that a reference
      - `f' = C { q: e … }` writes a whole union value. A union field is always written as a whole value, never one payload field at a time;
      - `emit`, `after`, `cancel`, `spawn`, `signal` and `send` append an intent to `E`. `send r <- A(d)` appends a **message** to the instance at address `r`; `self` is the sending instance's own address. An effect is also a message: `emit k(d)` sends `d` to the host actor that performs kind `k`, whose address is the handler's capability (PS1.6, PT6.5).
   3. **End.** If the body completes without a rejection, the result is `accept(w, E)`.
-- **PS2.3** **Expressions read the pre-state only.** A primed field is write-only. Reading `f'` is a syntax error. So the order of assignments within a handler does not change the result.
+- **PS2.3** **Expressions read the pre-state only.** A primed field is write-only. Reading `f'` is a compile error (`PL1202 READ_OF_PRIMED_FIELD`). So the order of assignments within a handler does not change the result.
 - **PS2.4** A field written twice on one control path is `PL2102 DOUBLE_WRITE`. Therefore `w` is well defined.
-- **PS2.5** All expressions are total (PT2.2), so `h_a` is a total function. **A machine is deterministic in its inputs**: for each state and each input there is exactly one verdict.
+- **PS2.5** All expressions are total (PT2.2): integer division truncates toward zero, `%` takes the sign of the dividend, and a divisor that may be 0 is rejected at compile time (`PL1204`). So `h_a` is a total function. **A machine is deterministic in its inputs**: for each state and each input there is exactly one verdict.
 
 ## PS3. Steps and the transition relation
 
@@ -186,7 +187,7 @@ Children come in two kinds. The author chooses, and the verdict says which seman
   - writes to `next`, with the declared `unchanged`, give the next state;
   - the effects mapper applied to the step gives `E`.
 - **PS9.1a** The first two rows of the table in PS3.2 (terminal states and strict check domains) are applied by the runtime before it calls the module. `R_L` is therefore the module's relation with those two rules applied first, exactly as the runtime applies them.
-- **PS9.1b** **Flattening unions.** A union field `f` lowers to a tag field `f` plus one nullable field `f_<payload>` per payload field of any constructor, because the SAM sealed shape is flat. The abstraction function `α` maps a flat state back to a structured one. The lowering adds one automatic invariant per union field (`shape:f`): the payload fields of the current constructor are present, and all others are null. PS9.2 compares `R_M` with `R_L` through `α`.
+- **PS9.1b** **Flattening unions.** A union field `f` lowers to a tag field `f` plus one nullable field `f_<payload>` per payload name of any constructor, because the SAM sealed shape is flat. Constructors that share a payload name share its field, which requires the same type (`PL1601 PAYLOAD_TYPE_CONFLICT` otherwise). The abstraction function `α` maps a flat state back to a structured one. The lowering adds one automatic invariant per union field (`shape:f`): the payload fields of the current constructor are present, and all others are null. PS9.2 compares `R_M` with `R_L` through `α`.
 - **PS9.2** **The lowering is correct for `M` on `I`** iff `R_L` and `R_M` agree on every `(s, a, d)` with `s ∈ Reach(I)` and `d ∈ D(a)`. They must give the same verdict kind, the same reason, the same next state and the same intent sequence. The lowered property modules must also agree with PS5 on every reachable state and transition.
 - **PS9.3** **Translation validation on every check.** `poly check` runs `poly-ref`, poly's own model checker and reference interpreter, written directly from this document and sharing no code with the compiler. It explores `I` and compares every transition with the lowered module's. A difference is `PL2501 LOWERING_MISMATCH`. The verdict is `REFUSED`, and the diagnostic is addressed to the toolchain, not to the author. This makes the lowering's correctness a checked fact for each program, not a claim about the compiler.
 

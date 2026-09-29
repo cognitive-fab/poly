@@ -54,6 +54,7 @@ Handler     = "on" Ident [ "(" Ident { "," Ident } ")" ] Block ;
 Guard       = "guard" "all" "when" Expr "reject" String ;
 Block       = "{" { Stmt } "}" ;
 Stmt        = "require" Expr "else" "reject" String
+            | "reject" String
             | "let" Ident "=" Expr
             | Ident "'" "=" Expr
             | Ident "'" "=" Ident "with" "[" Expr "]" "=" Expr
@@ -96,7 +97,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
 - **PT2.1** Keywords are **contextual**: a keyword is reserved only in the grammar positions that use it, and anywhere an identifier is expected it is an ordinary identifier. So a field may be named `state`, `derived`, `internal`, `terminal` or `type`. The parser decides with at most two tokens of lookahead: after a field's initial expression, `derived` or `internal` followed by `:` begins the next field, and otherwise it is the modifier. Field and action names lower verbatim into `contract.json`, traces and diagnostics, so a corpus's own names are kept. There is no second, external name for a field. Identifiers follow TypeScript identifier rules. Rejection reasons and effect kinds are string literals, so agents can reuse the names already present in a system.
 - **PT2.2** The expression sublanguage (AD-2) is a total, side-effect-free subset of TypeScript expressions:
   - literals, field and parameter names, `pre.` and `post.` (in step properties), enum members;
-  - `== != < <= > >= && || !`, `+ - *`, and integer `/` and `%` (division by zero is a type error);
+  - `== != < <= > >= && || !`, `+ - *`, and integer `/` and `%`. Division truncates toward zero, and `%` takes the sign of the dividend, as in TypeScript with the quotient truncated (`Math.trunc(a / b)`). A divisor whose static range contains 0 is `PL1204 DIVISION_BY_ZERO`, so division is total;
   - `implies`;
   - `count(kind)` and `before(a, b)` (in emission invariants);
   - `in { … }`;
@@ -114,6 +115,8 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
 
   This follows the pattern of an option type, which agents know from TypeScript's `boolean | undefined`.
 - **PT2.4** `e is C` tests a union value's constructor and has type `Bool`; `e is C1 | C2` is short for `e is C1 || e is C2`. `C { q: e }` constructs a union value. `match` is exhaustive (`PL1501 NON_EXHAUSTIVE_MATCH`). Enums are unions without payloads, so `==` and `is` agree on them.
+  - **Constructors and blocks.** In the condition of an `if` and the scrutinee of a `match`, an identifier followed by `{` is never read as a constructor: the `{` opens the block. Parentheses restore a constructor there, as in `if intent == (Proposed { decision: 1 }) { … }`. This is the rule Rust uses for the same ambiguity.
+- **PT2.4a** **Handler parameters.** In `on A(x, y) { … }` the parameter list is optional. When present, it must repeat the action's declared parameter names in declaration order, otherwise it is `PL1201 TYPE_MISMATCH`. It neither renames nor selects parameters. The action's parameters are in scope in the body whether or not the list is written.
 
 - **PT2.5** **The embedded surface.** poly also has a surface embedded in TypeScript. It is valid TypeScript, type-checked by `tsc`, and it produces the same AST as the standalone syntax:
 
@@ -152,7 +155,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - `int`;
   - `string`;
   - `map<K, T>`, where the key type `K` is an enum or an integer range `0..n`. A map keyed by an enum lowers to a JSON object keyed by constructor name. A map keyed by `0..n` lowers to a JSON array of length `n + 1`. A range key that does not start at 0 is `PL1602 ARRAY_MAP_NOT_ZERO_BASED`. So a corpus field such as `taskStatuses: ["QUEUED", "RUNNING", "FAILED"]` is `map<0..2, Status>`;
-  - **tagged unions** `type U = C1 { … } | … | Cn { … }` (PS1.4), finite when their payload fields are. Handlers read a union with `match` or `is` and write it as a whole value. The lowering flattens it to a tag field and nullable payload fields, with an automatic `shape:` invariant (PS9.1b).
+  - **tagged unions** `type U = C1 { … } | … | Cn { … }` (PS1.4), finite when their payload fields are. Handlers read a union with `match` or `is` and write it as a whole value. The lowering flattens it to a tag field and nullable payload fields, with an automatic `shape:` invariant (PS9.1b). Constructors of one union may share a payload name only with the same type, and then share one flat field; the same name with two types is `PL1601 PAYLOAD_TYPE_CONFLICT`.
 - **PT3.2** Every field and parameter has a finite check domain (PF1.2). Enums, `bool`, ranges and maps over finite value types are finite by construction. `int` and `string` need an explicit `check` clause. Without one, the compiler reports `PL1101 UNBOUNDED_DOMAIN`.
 - **PT3.3** A `check` clause narrower than the runtime type is an assumption. It is written to `dataDomain` and to the certificate's `domains`, and it is graded by `poly grade` (polynv).
 - **PT3.4** Each `check` clause has a mode, and the mode decides what the runtime does with a value outside the check domain:
@@ -174,6 +177,7 @@ Each action has at most one handler. A handler lowers to one keyed acceptor in t
 1. **Guard phase.** Every `require` evaluates against the pre-state and the parameters.
    - The rule is per path. On every control path from the handler entry, every `require` on that path comes before the first write on that path. A `require` inside an `if` branch is legal when no write precedes it on that branch or before the `if`. A violation is `PL2101 WRITE_BEFORE_REQUIRE`, with the offending path.
    - A failing `require` calls `reject(reason)` before any write.
+   - A `reject "reason"` statement (used, for example, in a `match` arm) rejects unconditionally. It is subject to the same rule: a `reject` after a write on the same path is `PL2101`.
    - Agent-written code therefore cannot raise the `rejectAfterWrite` frame error.
 2. **Write phase.** Primed assignments write to `next`. `emit`, `after`, `cancel`, `spawn` and `signal` statements are collected as effect intents (PT6).
 
@@ -328,6 +332,16 @@ The five kinds and their meanings are defined in PS5. This section fixes how eac
 | (automatic) deadlock freedom | no reachable non-terminal state without an accepting action (PS5.6) | none | `poly-ref` over the explored graph |
 
 The engine formats keep their names (`transitionInvariants`, `effectInvariants`). Only the poly keywords changed, so each keyword now says what kind of property it is.
+
+**What a property may mention.**
+
+| Kind | Names in scope |
+|---|---|
+| `invariant` | the state's fields |
+| `step property` | `pre.f` and `post.f` for every field `f`; `action`, compared with `==` or `!=` to an action name; the parameters of the step's action |
+| `reject property` | `pre.f`, or the bare field `f`, for the state the step starts from; `action`; the parameters of the step's action; `rejected("reason")`, true iff the step's verdict is `rejected` with that reason |
+
+A parameter is in scope only on steps of an action that declares it, so a property that reads one must first compare `action`: in `(action == Pay && amount > 10) implies …`, `amount` is read only when `action == Pay` holds. A parameter read where no declaring action is established is `PL1201 TYPE_MISMATCH`, not `false`. Step and reject properties are lowered with the step's verdict as an extra argument, so a step property is evaluated on accepted steps only (PS5.2), even though the engine calls `transitionInvariants` on every step.
 
 **poly-ref is poly's model checker.** It is written from 04-semantics as a reference interpreter, and it explores the checked instance for translation validation. The same exploration yields the reachable graph, on which poly-ref checks deadlock freedom, liveness and configurations of communicating machines. No engine checks these today. The architecture states this plainly (PA0.1): poly has its own checker for everything that concerns how machines relate over time. It is also the part most likely to have bugs of its own, so its first acceptance tests are the evidence scripts in `reviews/evidence` (PT18, M0 and M1). If polygraph gains any of these checks, poly defers to it.
 
@@ -846,8 +860,8 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 
 | Range | Stage | Examples |
 |---|---|---|
-| PL0xxx | parse, format, fixes, embedded subset | `PL0001 SYNTAX`, `PL0201 STALE_FIX`, `PL0301 OUTSIDE_EMBEDDED_SUBSET` |
-| PL1xxx | types, domains | `PL1101 UNBOUNDED_DOMAIN`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD` |
+| PL0xxx | parse, format, fixes, embedded subset, milestone | `PL0001 SYNTAX`, `PL0201 STALE_FIX`, `PL0301 OUTSIDE_EMBEDDED_SUBSET`, `PL0901 NOT_IN_MILESTONE` |
+| PL1xxx | names, types, domains | `PL1001 UNKNOWN_NAME`, `PL1002 DUPLICATE_DECLARATION`, `PL1101 UNBOUNDED_DOMAIN`, `PL1201 TYPE_MISMATCH`, `PL1202 READ_OF_PRIMED_FIELD`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1204 DIVISION_BY_ZERO`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1502 INCOMPLETE_MAP_LITERAL`, `PL1601 PAYLOAD_TYPE_CONFLICT`, `PL1602 ARRAY_MAP_NOT_ZERO_BASED` |
 | PL2xxx | lowering, strict validate, translation validation | `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
@@ -856,6 +870,8 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
 | PL9xxx | replay | `PL9001 SPEC_DIVERGENCE`, `PL9101 CONTROL_FAILED` |
+
+`PL0901 NOT_IN_MILESTONE` refuses a construct that parses but is not lowered by the toolchain in use (in M0: `emit`, `send`, `spawn`, `signal`, timers, `Ref` fields, path, compose and liveness properties). It is a refusal, never a silent pass. `PL1202` is the code of the error PS2.3 describes, so a fix can address it.
 
 ### PT12.3 Verdicts and exit codes
 
