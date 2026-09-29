@@ -1,0 +1,67 @@
+// Shared by the gate tests: parse, check and lower a poly source, and write
+// its artefacts where Node can resolve @cognitive-fab/sam-pattern.
+import { readFileSync, readdirSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { parse } from '@poly/lang';
+import { checkModule } from '@poly/core';
+import { lowerMachine } from '@poly/lower';
+
+export const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+export const BUILD = join(ROOT, '.poly', 'test-build');
+
+export function polyFiles(dir) {
+  const out = [];
+  for (const e of readdirSync(dir)) {
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) { if (e !== 'errors') out.push(...polyFiles(p)); } else if (p.endsWith('.poly')) out.push(p);
+  }
+  return out.sort();
+}
+
+/**
+ * Parse and check a source. Liveness properties are refused until M2 (S13,
+ * PL0901); with `stripLiveness` they are removed first, and the removal is
+ * returned so a test can say so.
+ */
+export function load(file, { stripLiveness = false } = {}) {
+  const r = parse(readFileSync(file, 'utf8'));
+  if (!r.module) throw new Error(`${file}: ${r.diagnostics.map((d) => d.message).join('; ')}`);
+  const stripped = [];
+  if (stripLiveness) {
+    for (const d of r.module.decls) {
+      if (d.kind !== 'Machine') continue;
+      for (const it of d.items) if (it.kind === 'Liveness') stripped.push(`${d.name}.${it.name}`);
+      d.items = d.items.filter((it) => it.kind !== 'Liveness');
+    }
+  }
+  const check = checkModule(r.module);
+  const errors = [...r.diagnostics, ...check.diagnostics];
+  if (errors.length) throw new Error(`${file}: ${errors.map((d) => `${d.code} ${d.message}`).join('; ')}`);
+  return { module: r.module, check, stripped };
+}
+
+/** Lower every machine of a source and write each to BUILD/<name>/<module>.<Machine>/. */
+export function build(file, name, opts = {}) {
+  const { module, check, stripped } = load(file, opts);
+  const out = [];
+  for (const machine of check.machines.keys()) {
+    const { lowered, diagnostics } = lowerMachine(module, check, machine, opts);
+    if (!lowered) throw new Error(`${file}: ${diagnostics.map((d) => `${d.code} ${d.message}`).join('; ')}`);
+    // One directory per source file: several sources declare runtime.OutboxIntent.
+    const dir = join(BUILD, name, basename(file, '.poly'), `${module.name}.${machine}`);
+    mkdirSync(dir, { recursive: true });
+    for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);
+    out.push({ machine, dir, lowered, module, check, stripped });
+  }
+  return out;
+}
+
+/** A fresh require of a lowered next.cjs (the cache is cleared, so rebuilt files are reloaded). */
+export function requireModule(dir) {
+  const req = createRequire(join(dir, 'next.cjs'));
+  const path = req.resolve(join(dir, 'next.cjs'));
+  delete req.cache[path];
+  return req(path);
+}

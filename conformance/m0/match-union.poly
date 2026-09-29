@@ -1,0 +1,34 @@
+// Conformance: match with binds and literal payloads, union writes, is, and the shape of a flattened union (PS9.1b).
+module conf
+type Job = Idle | Queued { prio: 1..2 } | Running { prio: 1..2, tries: 0..2 } | Done { ok: bool }
+machine Worker {
+  state { job : Job = Idle }
+  terminal job is Done
+  action Enqueue(prio: 1..2)
+  action Run()
+  action Fail()
+  action Finish()
+  on Enqueue(prio) {
+    require job is Idle else reject "busy"
+    job' = Queued { prio: prio }
+  }
+  on Run {
+    match job {
+      Queued { prio: p } => job' = Running { prio: p, tries: 0 }
+      _ => reject "not-queued"
+    }
+  }
+  on Fail {
+    match job {
+      Running { prio: p, tries: 2 } => job' = Done { ok: false }
+      Running { prio: p, tries: t } => job' = Running { prio: p, tries: t + 1 }
+      _ => reject "not-running"
+    }
+  }
+  on Finish {
+    require job is Running else reject "not-running"
+    job' = Done { ok: true }
+  }
+  step property no-skip: (post.job is Running && !(pre.job is Running)) implies pre.job is Queued
+  reject property finish-needs-run: (action == Finish && !(pre.job is Running | Done)) implies rejected("not-running")
+}

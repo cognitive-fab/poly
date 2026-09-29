@@ -1,0 +1,28 @@
+// Conformance: if/else with different writes per branch: the frame is derived per path (PT4.2).
+module conf
+machine Split {
+  state {
+    a : 0..2 = 0
+    b : 0..2 = 0
+    c : bool = false
+  }
+  action Step(left: bool)
+  on Step(left) {
+    if left {
+      require a < 2 else reject "a-full"
+      a' = a + 1
+      if a == 1 { c' = true }
+      else { c' = false }
+    } else {
+      require b < 2 else reject "b-full"
+      b' = b + 1
+    }
+  }
+  action Clear()
+  on Clear {
+    require a + b > 0 else reject "empty"
+    a' = 0
+    b' = 0
+    c' = false
+  }
+}

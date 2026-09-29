@@ -186,7 +186,7 @@ The owner's rulings are in [`decisions-m0.md`](decisions-m0.md). S9 to S15 were 
 
 ## 7. Progress and measurements
 
-Steps 1 to 5 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
+Steps 1 to 6 are done. poly-ref reproduces every single-machine evidence number before any lowering exists (`test/evidence.test.mjs`), and each script still prints the number it is compared with.
 
 | Machine | poly-ref | Script | Check time |
 |---|---|---|---|
@@ -198,6 +198,8 @@ Steps 1 to 5 are done. poly-ref reproduces every single-machine evidence number 
 | `OutboxIntent`, v0.2 | 35 states, 40 accepted steps, `PL3201` at `(Allowed, 3, 1, T, F)` and `(Allowed, 3, 2, T, T)` | same | 3 ms |
 
 Times are single runs of `checkMachine` on Node 24.12, including exploration and every property.
+
+Step 6 is done. Every example and conformance source lowers to `contract.json`, `next.cjs` and `invariants.mjs`; each `next.cjs` passes strict `validate()` from `@cognitive-fab/sam-pattern` 2.2.1 (`test/validate.test.mjs`, 12 sources). As a probe before translation validation, polygraph's model check of each lowered module reached the same state count as poly-ref on all 12 (7, 7, 17, 33, 35, and 5 to 19 for the six conformance cases). The AC9 escape variant is the expected exception: polygraph explores past the out-of-type state until its cap (S5), which `poly check` will set from poly-ref's count at step 9. The probe found one lowering bug, a union tag read through `pre` inside a reject property, now fixed; step 7 makes such checks systematic.
 
 One consequence of S13 surfaced while checking the examples: the three `OutboxIntent` forms carry the `settles` liveness property as the spec writes it, so the checker refuses them with `PL0901` until M2. poly-ref ignores liveness and checks them. For steps 6 to 9, the lowering and `poly check` will see `PL0901` on these files; the gate items that need them lowered (translation validation) will use them with the liveness item removed, and the test says so.
 

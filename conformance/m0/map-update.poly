@@ -1,0 +1,22 @@
+// Conformance: enum-keyed and range-keyed maps, literals and one-entry updates (S4).
+module conf
+type Msg = M1 | M2
+type Status = Unsent | Sent | Acked
+machine Outbox {
+  state {
+    status : map<Msg, Status> = { M1: Unsent, M2: Unsent }
+    tries  : map<0..1, 0..2>  = [0, 0]
+  }
+  action Send(m: Msg)
+  action Ack(m: Msg)
+  on Send(m) {
+    require status[m] == Unsent else reject "sent"
+    status' = status with [m] = Sent
+  }
+  on Ack(m) {
+    require status[m] == Sent else reject "not-sent"
+    status' = status with [m] = Acked
+    if m == M1 { tries' = tries with [0] = 1 } else { tries' = tries with [1] = 1 }
+  }
+  invariant acked-tried: status[M1] == Acked implies tries[0] == 1
+}

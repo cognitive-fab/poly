@@ -1,0 +1,20 @@
+// Conformance: strict and disclosed check domains on int and string parameters (PT3.4).
+module conf
+machine Pay {
+  state {
+    paid   : int check { 0, 10, 20, 30 } = 0
+    method : string check { "none", "card", "cash" } = "none"
+  }
+  action Pay(amount: int check { 10, 20 } strict, how: string check { "card", "cash" })
+  on Pay(amount, how) {
+    require paid == 0 else reject "paid"
+    paid' = amount
+    method' = how
+  }
+  action Refund()
+  on Refund {
+    require paid > 0 else reject "nothing-paid"
+    paid' = 0
+    method' = "none"
+  }
+}

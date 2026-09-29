@@ -1,0 +1,27 @@
+// Conformance: guards before handlers (PT4.3), terminal as the first acceptor (S6), an unhandled action (PS3.2).
+module conf
+enum Door { Open, Closed, Locked, Broken }
+machine Room {
+  state {
+    door  : Door = Closed
+    alarm : bool = false
+  }
+  terminal door == Broken
+  guard all when alarm reject "alarm-on"
+  action OpenDoor()
+  action Lock()
+  action Trip()
+  action Smash()
+  action Knock()
+  on OpenDoor {
+    require door == Closed else reject "not-closed"
+    door' = Open
+  }
+  on Lock {
+    require door in { Closed } else reject "not-closed"
+    door' = Locked
+  }
+  on Trip { alarm' = true }
+  on Smash { door' = Broken }
+  reject property alarm-blocks: (pre.alarm && action == OpenDoor && pre.door != Broken) implies rejected("alarm-on")
+}
