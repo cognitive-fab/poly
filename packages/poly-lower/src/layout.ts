@@ -32,6 +32,19 @@ export interface Layout {
   flatKeys: string[];
 }
 
+/** The semantic type of a payload field's declared type (a payload has no check clause, PT2). */
+export function payloadTy(t: A.TypeExpr): Ty {
+  switch (t.kind) {
+    case 'TBool': return { k: 'bool' };
+    case 'TInt': return { k: 'int', lo: -Infinity, hi: Infinity };
+    case 'TString': return { k: 'string' };
+    case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
+    case 'TName': return { k: 'union', name: t.name };
+    case 'TRef': return { k: 'ref' };
+    case 'TMap': return { k: 'error' };
+  }
+}
+
 export function isPayloadUnion(env: TypeEnv, t: Ty): boolean {
   return t.k === 'union' && !env.unions.get(t.name)!.isEnum;
 }
@@ -67,7 +80,7 @@ export function layoutOf(m: A.Machine, facts: MachineFacts, env: TypeEnv, module
         ctors[c.name] = [];
         for (const pf of c.fields) {
           const key = `${f.name}_${pf.name}`;
-          const pty = pf.type.kind === 'TName' ? ({ k: 'union', name: pf.type.name } as Ty) : pf.type.kind === 'TBool' ? ({ k: 'bool' } as Ty) : ({ k: 'int', lo: 0, hi: 0 } as Ty);
+          const pty = payloadTy(pf.type);
           if (pf.type.kind === 'TName' && !env.unions.get(pf.type.name)?.isEnum) refuse(f, `a payload that is itself a union with payloads is lowered after milestone M0: ${c.name}.${pf.name}`);
           if (pf.type.kind === 'TMap' || pf.type.kind === 'TRef') refuse(f, `a map or address payload is lowered after milestone M0: ${c.name}.${pf.name}`);
           ctors[c.name].push([pf.name, key]);

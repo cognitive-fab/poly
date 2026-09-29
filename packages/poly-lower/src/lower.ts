@@ -5,7 +5,7 @@
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
 import { diag, digest, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
-import { layoutOf, prelude, isPayloadUnion, type Layout } from './layout.js';
+import { layoutOf, prelude, isPayloadUnion, payloadTy, type Layout } from './layout.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
 
 export interface LowerOptions {
@@ -23,6 +23,9 @@ export interface Lowered {
 }
 
 export function lowerMachine(module: A.Module, check: CheckResult, machineName: string, opts: LowerOptions = {}): { lowered: Lowered | null; diagnostics: Diagnostic[] } {
+  // Only a program the checker accepted is lowered: every later step relies on its guarantees (finite domains, typed names).
+  const refused = check.diagnostics.filter((d) => d.severity === 'error');
+  if (refused.length) return { lowered: null, diagnostics: refused };
   const facts = check.machines.get(machineName);
   if (!facts) throw new Error(`poly-lower: no checked machine ${machineName}`);
   const m = facts.machine;
@@ -251,7 +254,11 @@ function paramTy(p: A.Param, env: TypeEnv): Ty {
 
 function valuesOfTy(t: Ty, env: TypeEnv): unknown[] {
   if (t.k === 'bool') return [false, true];
-  if (t.k === 'int') return Array.from({ length: t.hi - t.lo + 1 }, (_, i) => t.lo + i);
+  if (t.k === 'int') {
+    // The checker refuses an int with no check domain (PL1101), so this is only reached by a caller that ignored it.
+    if (!Number.isFinite(t.lo) || !Number.isFinite(t.hi)) throw new Error('poly-lower: an unbounded int has no domain (PL1101)');
+    return Array.from({ length: t.hi - t.lo + 1 }, (_, i) => t.lo + i);
+  }
   if (t.k === 'union') return env.unions.get(t.name)!.ctors.map((c) => c.name);
   return [];
 }
@@ -304,7 +311,7 @@ function keyTypeText(l: import('./layout.js').FieldLayout, key: string, env: Typ
   const p = l.payloads!.find(([, k]) => k === key)![0];
   const decl = u.ctors.flatMap((c) => c.fields).find((x) => x.name === p)!;
   const owners = u.ctors.filter((c) => c.fields.some((x) => x.name === p)).map((c) => c.name);
-  const t: Ty = decl.type.kind === 'TRange' ? { k: 'int', lo: decl.type.lo, hi: decl.type.hi } : decl.type.kind === 'TBool' ? { k: 'bool' } : decl.type.kind === 'TName' ? { k: 'union', name: decl.type.name } : { k: 'error' };
+  const t = payloadTy(decl.type);
   return `${typeText(t, env)} | null (payload of ${owners.join(', ')})`;
 }
 
