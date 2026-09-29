@@ -1,0 +1,287 @@
+// The canonical formatter (PT1.4, PS12).
+//
+// Layout is a function of the AST alone: one AST, one text. Comments come
+// from the parser's side table (Trivia) keyed by node id and are printed at
+// their nodes; they never change the layout of the code around them.
+//
+// Parentheses are minimal, with one exception fixed by PS12: `implies` is
+// always parenthesised when it is mixed with `&&` or `||`, in either
+// direction, so no reader has to remember that it binds loosest.
+import type * as A from '@poly/core';
+import type { Trivia } from './parser.js';
+
+const INDENT = '  ';
+
+const PREC: Record<string, number> = {
+  '*': 3, '/': 3, '%': 3, '+': 4, '-': 4, '<': 5, '<=': 5, '>': 5, '>=': 5, '==': 6, '!=': 6, '&&': 7, '||': 8, implies: 9,
+};
+
+export function format(module: A.Module, trivia?: Trivia): string {
+  return new Printer(trivia).module(module);
+}
+
+class Printer {
+  private out: string[] = [];
+  constructor(private readonly trivia?: Trivia) {}
+
+  private lead(n: A.NodeBase, indent: string): void {
+    for (const c of this.trivia?.leading.get(n.id) ?? []) this.out.push(indent + '//' + c);
+  }
+  private trail(n: A.NodeBase): string {
+    const c = this.trivia?.trailing.get(n.id);
+    return c === undefined ? '' : '  //' + c;
+  }
+  /** Emits lines for a node: leading comments, the lines, the trailing comment on the last line. */
+  private emit(n: A.NodeBase, indent: string, lines: string[]): void {
+    this.lead(n, indent);
+    lines.forEach((l, k) => this.out.push(indent + l + (k === lines.length - 1 ? this.trail(n) : '')));
+  }
+
+  module(m: A.Module): string {
+    this.lead(m, '');
+    this.out.push(`module ${m.name}`);
+    for (const d of m.decls) {
+      this.out.push('');
+      this.decl(d);
+    }
+    for (const c of this.trivia?.end ?? []) this.out.push('//' + c);
+    return this.out.join('\n').replace(/[ \t]+$/gm, '') + '\n';
+  }
+
+  private decl(d: A.Decl): void {
+    switch (d.kind) {
+      case 'EnumDecl':
+        return this.emit(d, '', [`enum ${d.name} { ${d.members.join(', ')} }`]);
+      case 'TypeDecl': {
+        const ctors = d.ctors.map((c) => this.ctor(c));
+        const one = `type ${d.name} = ${ctors.join(' | ')}`;
+        const commented = d.ctors.some((c) => this.trivia?.leading.has(c.id) || this.trivia?.trailing.has(c.id));
+        if (one.length <= 100 && !commented) return this.emit(d, '', [one]);
+        this.emit(d, '', [`type ${d.name} =`]);
+        d.ctors.forEach((c, k) => this.emit(c, INDENT, [`| ${ctors[k]}`]));
+        return;
+      }
+      case 'Use':
+        return this.emit(d, '', [`use ${d.path.join('.')}`]);
+      case 'Machine':
+        return this.machine(d);
+    }
+  }
+
+  private ctor(c: A.Ctor): string {
+    if (c.fields.length === 0) return c.name;
+    return `${c.name} { ${c.fields.map((f) => `${f.name}: ${this.type(f.type)}`).join(', ')} }`;
+  }
+
+  type(t: A.TypeExpr): string {
+    switch (t.kind) {
+      case 'TBool': return 'bool';
+      case 'TInt': return 'int';
+      case 'TString': return 'string';
+      case 'TName': return t.name;
+      case 'TRange': return `${t.lo}..${t.hi}`;
+      case 'TMap': return `map<${this.type(t.key)}, ${this.type(t.value)}>`;
+      case 'TRef': return `Ref<${t.machine.join('.')}>`;
+    }
+  }
+
+  private check(c: A.CheckClause | null): string {
+    if (!c) return '';
+    const d = c.domain.kind === 'DomainRange' ? `${c.domain.lo}..${c.domain.hi}` : `{ ${c.domain.values.map((v) => this.expr(v, 0)).join(', ')} }`;
+    return ` check ${d}${c.mode ? ' ' + c.mode : ''}`;
+  }
+
+  private machine(m: A.Machine): void {
+    const head = `${m.service ? 'service ' : ''}machine ${m.name} {`;
+    this.emit(m, '', [head]);
+    const ind = INDENT;
+    if (m.version !== null) this.out.push(`${ind}version ${m.version}`);
+    this.out.push(`${ind}state {`);
+    const width = Math.max(0, ...m.fields.map((f) => f.name.length));
+    for (const f of m.fields) {
+      const line = `${f.name.padEnd(width)} : ${this.type(f.type)}${this.check(f.check)} = ${this.expr(f.init, 0)}${f.flag ? ' ' + f.flag : ''}`;
+      this.emit(f, ind + INDENT, [line]);
+    }
+    this.out.push(`${ind}}`);
+    let prev: A.MachineItem | null = null;
+    for (const it of m.items) {
+      const lines = this.item(it);
+      // A blank line between items, except between one-line items of the same kind.
+      const sameKind = prev && prev.kind === it.kind && (it.kind !== 'Property' || (prev as A.Property).form === it.form);
+      if (!(sameKind && lines.length === 1 && this.lastItemLines === 1)) this.out.push('');
+      this.emit(it, ind, lines);
+      this.lastItemLines = lines.length;
+      prev = it;
+    }
+    this.out.push('}');
+  }
+  private lastItemLines = 0;
+
+  private item(it: A.MachineItem): string[] {
+    switch (it.kind) {
+      case 'Terminal': return [`terminal ${this.expr(it.expr, 0)}`];
+      case 'Action': return [`action ${it.name}(${it.params.map((p) => this.param(p)).join(', ')})`];
+      case 'Guard': return [`guard all when ${this.expr(it.cond, 0)} reject ${JSON.stringify(it.reason)}`];
+      case 'Property': {
+        const kw = it.form === 'invariant' ? 'invariant' : it.form === 'compose' ? 'compose invariant' : `${it.form} property`;
+        return [`${kw} ${it.name}: ${this.expr(it.expr, 0)}`];
+      }
+      case 'Liveness': {
+        const body = it.from ? `${this.expr(it.from, 0)} leads to ${this.expr(it.expr, 0)}` : `eventually ${this.expr(it.expr, 0)}`;
+        const fair = it.fair.map((g) => g.members.map((m) => m.action + (m.perValue ? '(*)' : '')).join(' | ')).join(', ');
+        return [`liveness ${it.name}: ${body}`, `${INDENT}under fair { ${fair} }`];
+      }
+      case 'Handler': {
+        const head = `on ${it.action}${it.params ? `(${it.params.join(', ')})` : ''}`;
+        return this.blockLines(head, it.body);
+      }
+      case 'EffectDecl': {
+        const lines = [`effect ${it.name}(${it.params.map((p) => this.param(p)).join(', ')}) {`];
+        for (const e of it.items) lines.push(INDENT + this.effectItem(e));
+        lines.push('}');
+        return lines;
+      }
+    }
+  }
+
+  private effectItem(e: A.EffectItem): string {
+    switch (e.kind) {
+      case 'EffKind': return `kind ${JSON.stringify(e.value)}`;
+      case 'EffClass': return `class ${e.value}`;
+      case 'EffLabels': return `labels { ${e.labels.join(', ')} }`;
+      case 'EffRetry': return `retry { attempts ${e.attempts}, base ${e.base}, timeout ${e.timeout} }`;
+      case 'EffOutcome': return `${e.outcome} -> ${e.action}(${this.args(e.args)})`;
+    }
+  }
+
+  private param(p: A.Param): string {
+    return `${p.name}: ${this.type(p.type)}${this.check(p.check)}`;
+  }
+
+  // Statements print into a line list so comments can be placed per statement.
+  private blockLines(head: string, body: A.Stmt[]): string[] {
+    if (body.length === 0) return [`${head} {}`];
+    const lines = [`${head} {`];
+    for (const s of body) lines.push(...this.stmtLines(s, INDENT));
+    lines.push('}');
+    return lines;
+  }
+
+  private stmtLines(s: A.Stmt, indent: string): string[] {
+    const out: string[] = [];
+    for (const c of this.trivia?.leading.get(s.id) ?? []) out.push(indent + '//' + c);
+    const own = this.stmt(s);
+    own.forEach((l, k) => out.push(indent + l + (k === own.length - 1 ? this.trail(s) : '')));
+    return out;
+  }
+
+  private stmt(s: A.Stmt): string[] {
+    switch (s.kind) {
+      case 'Require': return [`require ${this.expr(s.cond, 0)} else reject ${JSON.stringify(s.reason)}`];
+      case 'Reject': return [`reject ${JSON.stringify(s.reason)}`];
+      case 'Let': return [`let ${s.name} = ${this.expr(s.expr, 0)}`];
+      case 'Assign': return [`${s.field}' = ${this.expr(s.expr, 0)}`];
+      case 'MapUpdate': return [`${s.field}' = ${s.base} with [${this.expr(s.key, 0)}] = ${this.expr(s.value, 0)}`];
+      case 'If': {
+        const lines = this.blockLines(`if ${this.expr(s.cond, 0, true)}`, s.then);
+        if (s.else) {
+          const els = this.blockLines('', s.else);
+          lines[lines.length - 1] = `} else${els[0]}`;
+          lines.push(...els.slice(1));
+        }
+        return lines;
+      }
+      case 'Match': {
+        const lines = [`match ${this.expr(s.scrutinee, 0, true)} {`];
+        for (const arm of s.arms) {
+          for (const c of this.trivia?.leading.get(arm.id) ?? []) lines.push(INDENT + '//' + c);
+          const pat = this.pattern(arm.pattern);
+          let armLines: string[];
+          if (arm.body.length === 1 && !this.trivia?.leading.has(arm.body[0].id)) {
+            const inner = this.stmt(arm.body[0]);
+            armLines = [`${pat} => ${inner[0]}`, ...inner.slice(1)];
+            const t = this.trail(arm.body[0]);
+            armLines[armLines.length - 1] += t;
+          } else {
+            armLines = this.blockLines(`${pat} =>`, arm.body);
+          }
+          armLines[armLines.length - 1] += this.trail(arm);
+          for (const l of armLines) lines.push(INDENT + l);
+        }
+        lines.push('}');
+        return lines;
+      }
+      case 'Intent': return [this.intent(s)];
+    }
+  }
+
+  private intent(s: A.IntentStmt): string {
+    const call = `${s.target}(${this.args(s.args)})`;
+    switch (s.op) {
+      case 'emit': return `emit ${call}`;
+      case 'after': return `after ${s.modifier} -> ${call} as ${s.as}`;
+      case 'cancel': return `cancel ${s.target}`;
+      case 'send': return `send ${this.expr(s.to!, 0)} <- ${call}${s.as ? ` as ${s.as}` : ''}`;
+      case 'signal': return `signal ${s.extra[0]} -> ${call}`;
+      case 'spawn': {
+        let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}(${this.args(s.args)})`;
+        for (let k = 0; k < s.extra.length; k += 2) w += s.extra[k] === 'complete' ? ` on complete -> ${s.extra[k + 1]}` : ` on parent terminal -> ${s.extra[k + 1]}`;
+        return w;
+      }
+    }
+  }
+
+  private args(args: A.NamedArg[]): string {
+    return args.map((a) => (a.name ? `${a.name}: ` : '') + this.expr(a.value, 0)).join(', ');
+  }
+
+  private pattern(p: A.Pattern): string {
+    if (p.kind === 'PWild') return '_';
+    if (p.fields.length === 0) return p.ctor;
+    return `${p.ctor} { ${p.fields.map((f) => `${f.name}: ${f.bind ?? this.expr(f.literal!, 0)}`).join(', ')} }`;
+  }
+
+  // ── expressions ─────────────────────────────────────────────────────────
+  /**
+   * `ctx` is the precedence level the surrounding position accepts (0: any).
+   * `noStruct` marks an `if` condition or `match` scrutinee (S10): a
+   * constructor with a payload, or a map literal, must be parenthesised there.
+   */
+  expr(e: A.Expr, ctx: number, noStruct = false, parentOp: string | null = null): string {
+    const wrap = (s: string, prec: number): string => {
+      const mixed = parentOp !== null && ((parentOp === 'implies' && (prec === 7 || prec === 8)) || (prec === 9 && (parentOp === '&&' || parentOp === '||')));
+      return (ctx !== 0 && prec > ctx) || mixed ? `(${s})` : s;
+    };
+    switch (e.kind) {
+      case 'Int': return String(e.value);
+      case 'Bool': return String(e.value);
+      case 'String': return JSON.stringify(e.value);
+      case 'Name': return e.name;
+      case 'Primed': return `${e.name}'`;
+      case 'Member': return `${this.expr(e.object, 1, noStruct)}.${e.prop}`;
+      case 'Index': return `${this.expr(e.object, 1, noStruct)}[${this.expr(e.index, 0)}]`;
+      case 'Call': return `${e.callee}(${e.args.map((a) => this.expr(a, 0)).join(', ')})`;
+      case 'Unary': return wrap(`${e.op}${this.expr(e.arg, 2, noStruct)}`, 2);
+      case 'Is': return wrap(`${this.expr(e.expr, 4, noStruct)} is ${e.ctors.join(' | ')}`, 5);
+      case 'In': return wrap(`${this.expr(e.expr, 4, noStruct)} in { ${e.set.map((x) => this.expr(x, 0)).join(', ')} }`, 5);
+      case 'Binary': {
+        const p = PREC[e.op];
+        // Left-associative levels accept their own level on the left; right-associative on the right; non-associative on neither.
+        const assoc = e.op === 'implies' ? 'right' : p === 5 || p === 6 ? 'none' : 'left';
+        const lctx = assoc === 'left' ? p : p - 1;
+        const rctx = assoc === 'right' ? p : p - 1;
+        const s = `${this.expr(e.left, lctx, noStruct, e.op)} ${e.op} ${this.expr(e.right, rctx, noStruct, e.op)}`;
+        return wrap(s, p);
+      }
+      case 'CtorExpr': {
+        const s = `${e.ctor} { ${e.fields.map((f) => `${f.name}: ${this.expr(f.value, 0)}`).join(', ')} }`;
+        return noStruct ? `(${s})` : s;
+      }
+      case 'MapLit': {
+        const s = `{ ${e.entries.map((x) => `${this.expr(x.key, 0)}: ${this.expr(x.value, 0)}`).join(', ')} }`;
+        return noStruct ? `(${s})` : s;
+      }
+      case 'ArrayLit': return `[${e.items.map((x) => this.expr(x, 0)).join(', ')}]`;
+    }
+  }
+}

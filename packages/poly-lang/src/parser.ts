@@ -1,0 +1,879 @@
+// The poly parser (PT2, PS12).
+//
+// Recursive descent for declarations and statements, precedence climbing for
+// expressions. Keywords are contextual (PT2.1): a word is a keyword only in a
+// position where the grammar expects one. Two rules need lookahead:
+//   - after a field's initial expression, `derived` or `internal` followed by
+//     `:` starts the next field; otherwise it is the field's modifier (PT2.1);
+//   - in the condition of an `if` and the scrutinee of a `match`, an
+//     identifier followed by `{` is never a constructor (PT2.4, S10).
+// Errors are PL0001 SYNTAX. Constructs that parse but belong to a later
+// milestone are kept in the AST; the checker refuses them (PL0901).
+import type * as A from '@poly/core';
+import { assignIds, diag, type Diagnostic } from '@poly/core';
+import { lex, LexError, type Comment, type Token } from './lexer.js';
+
+export interface Trivia {
+  /** Comments before a node, by node id. */
+  leading: Map<string, string[]>;
+  /** A comment after a node on its last line, by node id. */
+  trailing: Map<string, string>;
+  /** Comments after the last node. */
+  end: string[];
+}
+
+export interface ParseResult {
+  module: A.Module | null;
+  trivia: Trivia;
+  diagnostics: Diagnostic[];
+}
+
+class ParseError extends Error {
+  constructor(message: string, readonly tok: { line: number; col: number }) {
+    super(message);
+  }
+}
+
+type Span = A.Span;
+type Mk<T> = Omit<T, 'id' | 'span'>;
+
+const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }> = {
+  '*': { prec: 3, assoc: 'left' },
+  '/': { prec: 3, assoc: 'left' },
+  '%': { prec: 3, assoc: 'left' },
+  '+': { prec: 4, assoc: 'left' },
+  '-': { prec: 4, assoc: 'left' },
+  '<': { prec: 5, assoc: 'none' },
+  '<=': { prec: 5, assoc: 'none' },
+  '>': { prec: 5, assoc: 'none' },
+  '>=': { prec: 5, assoc: 'none' },
+  in: { prec: 5, assoc: 'none' },
+  is: { prec: 5, assoc: 'none' },
+  '==': { prec: 6, assoc: 'none' },
+  '!=': { prec: 6, assoc: 'none' },
+  '&&': { prec: 7, assoc: 'left' },
+  '||': { prec: 8, assoc: 'left' },
+  implies: { prec: 9, assoc: 'right' },
+};
+
+const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal']);
+const LATER_TOP_LEVEL = new Set(['configuration', 'policy', 'workflow', 'world']);
+
+export function parse(src: string): ParseResult {
+  const trivia: Trivia = { leading: new Map(), trailing: new Map(), end: [] };
+  let tokens: Token[];
+  let comments: Comment[];
+  try {
+    ({ tokens, comments } = lex(src));
+  } catch (e) {
+    const le = e as LexError;
+    return { module: null, trivia, diagnostics: [diag('PL0001', { line: le.line, col: le.col }, le.message)] };
+  }
+  const p = new Parser(tokens);
+  let module: A.Module;
+  try {
+    module = p.module();
+  } catch (e) {
+    if (!(e instanceof ParseError)) throw e;
+    return { module: null, trivia, diagnostics: [diag('PL0001', { line: e.tok.line, col: e.tok.col }, e.message)] };
+  }
+  assignIds(module as unknown as Record<string, unknown>);
+  attachComments(module, p.attachable, comments, trivia);
+  for (const d of p.laterDiagnostics) d.at.module = module.name;
+  return { module, trivia, diagnostics: p.laterDiagnostics };
+}
+
+class Parser {
+  private i = 0;
+  /** Nodes comments may attach to, in document order. */
+  readonly attachable: A.NodeBase[] = [];
+  readonly laterDiagnostics: Diagnostic[] = [];
+
+  constructor(private readonly t: Token[]) {}
+
+  // ── token helpers ─────────────────────────────────────────────────────────
+  private peek(k = 0): Token { return this.t[Math.min(this.i + k, this.t.length - 1)]; }
+  private at(text: string, k = 0): boolean {
+    const tok = this.peek(k);
+    return (tok.kind === 'punct' || tok.kind === 'ident') && tok.text === text;
+  }
+  private atPunct(text: string, k = 0): boolean { const tok = this.peek(k); return tok.kind === 'punct' && tok.text === text; }
+  private next(): Token { const tok = this.peek(); if (tok.kind !== 'eof') this.i++; return tok; }
+  private fail(msg: string, tok: Token = this.peek()): never {
+    throw new ParseError(`${msg}, found ${tok.kind === 'eof' ? 'end of file' : `'${tok.text}'`}`, tok);
+  }
+  private expect(text: string): Token {
+    if (!this.at(text)) this.fail(`expected '${text}'`);
+    return this.next();
+  }
+  private ident(what = 'a name'): string {
+    const tok = this.peek();
+    if (tok.kind !== 'ident') this.fail(`expected ${what}`);
+    this.i++;
+    return tok.text;
+  }
+  private str(what = 'a string'): string {
+    const tok = this.peek();
+    if (tok.kind !== 'string') this.fail(`expected ${what}`);
+    this.i++;
+    return tok.text;
+  }
+  private int(): number {
+    let neg = false;
+    if (this.atPunct('-')) { this.next(); neg = true; }
+    const tok = this.peek();
+    if (tok.kind !== 'int') this.fail('expected an integer');
+    this.i++;
+    return neg ? -(tok.value as number) : (tok.value as number);
+  }
+  private spanFrom(start: Token): Span {
+    const last = this.t[Math.max(0, this.i - 1)];
+    return { line: start.line, col: start.col, endLine: last.endLine, endCol: last.endCol };
+  }
+  private node<T extends A.NodeBase>(start: Token, fields: Mk<T>, attach = false): T {
+    const n = { id: '', ...fields, span: this.spanFrom(start) } as unknown as T;
+    if (attach) this.attachable.push(n);
+    return n;
+  }
+  /** A name that may contain adjacent hyphens: `locked-when-empty` (property names). */
+  private dashedName(): string {
+    let name = this.ident('a property name');
+    while (this.atPunct('-') && this.peek().start === this.t[this.i - 1].end && this.peek(1).start === this.peek().end && (this.peek(1).kind === 'ident' || this.peek(1).kind === 'int')) {
+      this.next();
+      name += '-' + this.next().text;
+    }
+    return name;
+  }
+  private skipBalanced(): void {
+    // Used for top-level constructs of later milestones: skip to the matching brace.
+    while (!this.atPunct('{')) { if (this.peek().kind === 'eof') this.fail("expected '{'"); this.next(); }
+    let depth = 0;
+    do {
+      const tok = this.next();
+      if (tok.kind === 'eof') this.fail("expected '}'");
+      if (tok.kind === 'punct' && tok.text === '{') depth++;
+      if (tok.kind === 'punct' && tok.text === '}') depth--;
+    } while (depth > 0);
+  }
+
+  // ── module and declarations ─────────────────────────────────────────────
+  module(): A.Module {
+    const start = this.peek();
+    this.expect('module');
+    const name = this.qualName().join('.');
+    const decls: A.Decl[] = [];
+    while (this.peek().kind !== 'eof') {
+      const d = this.decl();
+      if (d) decls.push(d);
+    }
+    return this.node<A.Module>(start, { kind: 'Module', name, decls }, true);
+  }
+
+  private qualName(): string[] {
+    const parts = [this.ident()];
+    while (this.atPunct('.') && this.peek(1).kind === 'ident') { this.next(); parts.push(this.ident()); }
+    return parts;
+  }
+
+  private decl(): A.Decl | null {
+    const start = this.peek();
+    if (this.at('type')) return this.typeDecl();
+    if (this.at('enum')) return this.enumDecl();
+    if (this.at('machine')) return this.machine(false);
+    if (this.at('service') && this.at('machine', 1)) { this.next(); return this.machine(true, start); }
+    if (this.at('use')) {
+      this.next();
+      return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
+    }
+    if (start.kind === 'ident' && LATER_TOP_LEVEL.has(start.text)) {
+      this.skipBalanced();
+      this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
+      return null;
+    }
+    this.fail('expected a declaration (type, enum, machine, use)');
+  }
+
+  private typeDecl(): A.TypeDecl {
+    const start = this.next();
+    const name = this.ident('a type name');
+    this.expect('=');
+    if (this.atPunct('|')) this.next();
+    const ctors = [this.ctor()];
+    while (this.atPunct('|')) { this.next(); ctors.push(this.ctor()); }
+    return this.node<A.TypeDecl>(start, { kind: 'TypeDecl', name, ctors }, true);
+  }
+
+  private ctor(): A.Ctor {
+    const start = this.peek();
+    const name = this.ident('a constructor name');
+    const fields: A.PayloadField[] = [];
+    if (this.atPunct('{')) {
+      this.next();
+      while (!this.atPunct('}')) {
+        const fs = this.peek();
+        const fname = this.ident('a payload field');
+        this.expect(':');
+        const type = this.type();
+        fields.push(this.node<A.PayloadField>(fs, { kind: 'PayloadField', name: fname, type }));
+        if (!this.atPunct('}')) this.expect(',');
+      }
+      this.next();
+    }
+    return this.node<A.Ctor>(start, { kind: 'Ctor', name, fields }, true);
+  }
+
+  private enumDecl(): A.EnumDecl {
+    const start = this.next();
+    const name = this.ident('an enum name');
+    this.expect('{');
+    const members = [this.ident('an enum member')];
+    while (this.atPunct(',')) { this.next(); if (this.atPunct('}')) break; members.push(this.ident('an enum member')); }
+    this.expect('}');
+    return this.node<A.EnumDecl>(start, { kind: 'EnumDecl', name, members }, true);
+  }
+
+  // ── types and domains ───────────────────────────────────────────────────
+  private type(): A.TypeExpr {
+    const start = this.peek();
+    if (start.kind === 'int' || this.atPunct('-')) {
+      const lo = this.int();
+      this.expect('..');
+      const hi = this.int();
+      return this.node<A.TRange>(start, { kind: 'TRange', lo, hi });
+    }
+    const name = this.ident('a type');
+    if (name === 'bool') return this.node<A.TBool>(start, { kind: 'TBool' });
+    if (name === 'int') return this.node<A.TInt>(start, { kind: 'TInt' });
+    if (name === 'string') return this.node<A.TString>(start, { kind: 'TString' });
+    if (name === 'map' && this.atPunct('<')) {
+      this.next();
+      const ks = this.peek();
+      let key: A.TName | A.TRange;
+      if (ks.kind === 'int' || this.atPunct('-')) {
+        const lo = this.int();
+        this.expect('..');
+        const hi = this.int();
+        key = this.node<A.TRange>(ks, { kind: 'TRange', lo, hi });
+      } else {
+        key = this.node<A.TName>(ks, { kind: 'TName', name: this.ident('a key type') });
+      }
+      this.expect(',');
+      const value = this.type();
+      this.closeAngle();
+      return this.node<A.TMap>(start, { kind: 'TMap', key, value });
+    }
+    if (name === 'Ref' && this.atPunct('<')) {
+      this.next();
+      const machine = this.qualName();
+      this.closeAngle();
+      return this.node<A.TRef>(start, { kind: 'TRef', machine });
+    }
+    return this.node<A.TName>(start, { kind: 'TName', name });
+  }
+
+  /** `>` closing a type argument list; `>=` is split so `map<A, B>= x` still parses. */
+  private closeAngle(): void {
+    const tok = this.peek();
+    if (tok.kind === 'punct' && tok.text === '>=') {
+      this.t.splice(this.i, 1,
+        { ...tok, text: '>', endCol: tok.col + 1, end: tok.start + 1 },
+        { ...tok, text: '=', col: tok.col + 1, start: tok.start + 1 });
+    }
+    this.expect('>');
+  }
+
+  private checkClause(): A.CheckClause | null {
+    if (!this.at('check')) return null;
+    const start = this.next();
+    let domain: A.Domain;
+    const ds = this.peek();
+    if (this.atPunct('{')) {
+      this.next();
+      const values: A.Literal[] = [];
+      while (!this.atPunct('}')) {
+        values.push(this.literal());
+        if (!this.atPunct('}')) this.expect(',');
+      }
+      this.next();
+      domain = this.node<A.DomainSet>(ds, { kind: 'DomainSet', values });
+    } else {
+      const lo = this.int();
+      this.expect('..');
+      const hi = this.int();
+      domain = this.node<A.DomainRange>(ds, { kind: 'DomainRange', lo, hi });
+    }
+    let mode: A.CheckMode | null = null;
+    if (this.at('strict') || this.at('disclosed')) mode = this.next().text as A.CheckMode;
+    return this.node<A.CheckClause>(start, { kind: 'Check', domain, mode });
+  }
+
+  private literal(): A.Literal {
+    const start = this.peek();
+    if (start.kind === 'string') { this.next(); return this.node<A.StringLit>(start, { kind: 'String', value: start.text }); }
+    if (start.kind === 'int' || this.atPunct('-')) return this.node<A.IntLit>(start, { kind: 'Int', value: this.int() });
+    if (this.at('true') || this.at('false')) { this.next(); return this.node<A.BoolLit>(start, { kind: 'Bool', value: start.text === 'true' }); }
+    return this.node<A.NameRef>(start, { kind: 'Name', name: this.ident('a literal') });
+  }
+
+  // ── machines ────────────────────────────────────────────────────────────
+  private machine(service: boolean, start: Token = this.peek()): A.Machine {
+    this.expect('machine');
+    const name = this.ident('a machine name');
+    this.expect('{');
+    let version: number | null = null;
+    if (this.at('version') && this.peek(1).kind === 'int') {
+      this.next();
+      version = this.int();
+      if (this.at('from')) {
+        // Migrations are PT11, after M0.
+        const tok = this.peek();
+        this.laterDiagnostics.push(diag('PL0901', { line: tok.line, col: tok.col }, 'migrations are not lowered in milestone M0'));
+        this.next();
+        this.int();
+        this.skipBalanced();
+      }
+    }
+    const fields: A.Field[] = [];
+    if (this.at('state') && this.atPunct('{', 1)) {
+      this.next();
+      this.next();
+      while (!this.atPunct('}')) fields.push(this.field());
+      this.next();
+    } else {
+      this.fail("expected the 'state { … }' block");
+    }
+    const items: A.MachineItem[] = [];
+    while (!this.atPunct('}')) items.push(this.item());
+    this.next();
+    return this.node<A.Machine>(start, { kind: 'Machine', name, service, version, fields, items }, true);
+  }
+
+  private field(): A.Field {
+    const start = this.peek();
+    const name = this.ident('a field name');
+    this.expect(':');
+    const type = this.type();
+    const check = this.checkClause();
+    this.expect('=');
+    const init = this.expr();
+    let flag: A.Field['flag'] = null;
+    // PT2.1: `derived` or `internal` followed by `:` starts the next field.
+    if ((this.at('derived') || this.at('internal')) && !this.atPunct(':', 1)) flag = this.next().text as A.Field['flag'];
+    return this.node<A.Field>(start, { kind: 'Field', name, type, check, init, flag }, true);
+  }
+
+  private item(): A.MachineItem {
+    const start = this.peek();
+    const w = start.kind === 'ident' ? start.text : '';
+    switch (w) {
+      case 'terminal':
+        this.next();
+        return this.node<A.Terminal>(start, { kind: 'Terminal', expr: this.expr() }, true);
+      case 'action': {
+        this.next();
+        const name = this.ident('an action name');
+        this.expect('(');
+        const params = this.params(')');
+        return this.node<A.Action>(start, { kind: 'Action', name, params }, true);
+      }
+      case 'on': {
+        this.next();
+        const action = this.ident('an action name');
+        let params: string[] | null = null;
+        if (this.atPunct('(')) {
+          this.next();
+          params = [];
+          while (!this.atPunct(')')) {
+            params.push(this.ident('a parameter name'));
+            if (!this.atPunct(')')) this.expect(',');
+          }
+          this.next();
+        }
+        const body = this.block();
+        return this.node<A.Handler>(start, { kind: 'Handler', action, params, body }, true);
+      }
+      case 'guard': {
+        this.next();
+        this.expect('all');
+        this.expect('when');
+        const cond = this.expr();
+        this.expect('reject');
+        const reason = this.str('a rejection reason');
+        return this.node<A.Guard>(start, { kind: 'Guard', cond, reason }, true);
+      }
+      case 'invariant':
+        this.next();
+        return this.property(start, 'invariant');
+      case 'step':
+      case 'reject':
+      case 'path':
+        if (this.at('property', 1)) {
+          this.next();
+          this.next();
+          return this.property(start, w as A.PropertyForm);
+        }
+        break;
+      case 'compose':
+        if (this.at('invariant', 1)) {
+          this.next();
+          this.next();
+          return this.property(start, 'compose');
+        }
+        break;
+      case 'liveness':
+        this.next();
+        return this.liveness(start);
+      case 'effect':
+        this.next();
+        return this.effect(start);
+    }
+    this.fail('expected a machine item (terminal, action, on, guard, a property, effect)');
+  }
+
+  private params(close: string): A.Param[] {
+    const params: A.Param[] = [];
+    while (!this.atPunct(close)) {
+      const ps = this.peek();
+      const name = this.ident('a parameter name');
+      this.expect(':');
+      const type = this.type();
+      const check = this.checkClause();
+      params.push(this.node<A.Param>(ps, { kind: 'Param', name, type, check }));
+      if (!this.atPunct(close)) this.expect(',');
+    }
+    this.next();
+    return params;
+  }
+
+  private property(start: Token, form: A.PropertyForm): A.Property {
+    const name = this.dashedName();
+    this.expect(':');
+    const expr = this.expr();
+    return this.node<A.Property>(start, { kind: 'Property', form, name, expr }, true);
+  }
+
+  private liveness(start: Token): A.Liveness {
+    const name = this.dashedName();
+    this.expect(':');
+    let from: A.Expr | null = null;
+    let expr: A.Expr;
+    if (this.at('eventually')) {
+      this.next();
+      expr = this.expr();
+    } else {
+      from = this.expr();
+      this.expect('leads');
+      this.expect('to');
+      expr = this.expr();
+    }
+    this.expect('under');
+    this.expect('fair');
+    this.expect('{');
+    const fair: A.FairGroup[] = [];
+    while (!this.atPunct('}')) {
+      const gs = this.peek();
+      const members = [this.fairMember()];
+      while (this.atPunct('|')) { this.next(); members.push(this.fairMember()); }
+      fair.push(this.node<A.FairGroup>(gs, { kind: 'FairGroup', members }));
+      if (!this.atPunct('}')) this.expect(',');
+    }
+    this.next();
+    return this.node<A.Liveness>(start, { kind: 'Liveness', name, from, expr, fair }, true);
+  }
+
+  private fairMember(): { action: string; perValue: boolean } {
+    const action = this.ident('an action name');
+    if (this.atPunct('(') && this.atPunct('*', 1) && this.atPunct(')', 2)) { this.next(); this.next(); this.next(); return { action, perValue: true }; }
+    return { action, perValue: false };
+  }
+
+  private effect(start: Token): A.EffectDecl {
+    const name = this.ident('an effect name');
+    this.expect('(');
+    const params = this.params(')');
+    this.expect('{');
+    const items: A.EffectItem[] = [];
+    while (!this.atPunct('}')) {
+      const is = this.peek();
+      const w = this.ident('an effect item');
+      if (w === 'kind') items.push(this.effItem(is, { kind: 'EffKind', value: this.str() }));
+      else if (w === 'class') items.push(this.effItem(is, { kind: 'EffClass', value: this.ident('an effect class') }));
+      else if (w === 'labels') {
+        this.expect('{');
+        const labels: string[] = [];
+        while (!this.atPunct('}')) {
+          let l = this.ident('a label');
+          if (this.atPunct(':')) { this.next(); l += ':' + this.ident('a label'); }
+          labels.push(l);
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+        items.push(this.effItem(is, { kind: 'EffLabels', labels }));
+      } else if (w === 'retry') {
+        this.expect('{');
+        this.expect('attempts');
+        const attempts = this.int();
+        this.expect(',');
+        this.expect('base');
+        const base = this.duration();
+        this.expect(',');
+        this.expect('timeout');
+        const timeout = this.duration();
+        this.expect('}');
+        items.push(this.effItem(is, { kind: 'EffRetry', attempts, base, timeout }));
+      } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
+        this.expect('->');
+        const action = this.ident('an action name');
+        const args = this.args();
+        items.push(this.effItem(is, { kind: 'EffOutcome', outcome: w, action, args }));
+      } else this.fail('expected kind, labels, class, retry, ok, failed or exhausted', is);
+    }
+    this.next();
+    return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);
+  }
+
+  private effItem(start: Token, fields: Record<string, unknown>): A.EffectItem {
+    return { id: '', ...fields, span: this.spanFrom(start) } as unknown as A.EffectItem;
+  }
+
+  private duration(): string {
+    const tok = this.peek();
+    if (tok.kind !== 'duration') this.fail('expected a duration such as 200ms');
+    this.next();
+    return tok.text;
+  }
+
+  // ── statements ──────────────────────────────────────────────────────────
+  private block(): A.Stmt[] {
+    this.expect('{');
+    const body: A.Stmt[] = [];
+    while (!this.atPunct('}')) body.push(this.stmt());
+    this.next();
+    return body;
+  }
+
+  private stmt(): A.Stmt {
+    const start = this.peek();
+    if (start.kind !== 'ident') this.fail('expected a statement');
+    // `f' = …` is an assignment even when f is spelled like a keyword (PT2.1).
+    if (this.atPunct("'", 1)) {
+      const field = this.next().text;
+      this.next();
+      this.expect('=');
+      // `f' = m with [k] = v`
+      if (this.peek().kind === 'ident' && this.at('with', 1) && this.atPunct('[', 2)) {
+        const base = this.next().text;
+        this.next();
+        this.next();
+        const key = this.expr();
+        this.expect(']');
+        this.expect('=');
+        const value = this.expr();
+        return this.node<A.MapUpdate>(start, { kind: 'MapUpdate', field, base, key, value }, true);
+      }
+      return this.node<A.Assign>(start, { kind: 'Assign', field, expr: this.expr() }, true);
+    }
+    if (!STMT_KEYWORDS.has(start.text)) this.fail("expected a statement (require, reject, let, if, match, an assignment f' = …)");
+    this.next();
+    switch (start.text) {
+      case 'require': {
+        const cond = this.expr();
+        this.expect('else');
+        this.expect('reject');
+        const reason = this.str('a rejection reason');
+        return this.node<A.Require>(start, { kind: 'Require', cond, reason }, true);
+      }
+      case 'reject':
+        return this.node<A.Reject>(start, { kind: 'Reject', reason: this.str('a rejection reason') }, true);
+      case 'let': {
+        const name = this.ident();
+        this.expect('=');
+        return this.node<A.Let>(start, { kind: 'Let', name, expr: this.expr() }, true);
+      }
+      case 'if': {
+        const cond = this.expr(true);
+        const then = this.block();
+        let els: A.Stmt[] | null = null;
+        if (this.at('else')) { this.next(); els = this.block(); }
+        return this.node<A.If>(start, { kind: 'If', cond, then, else: els }, true);
+      }
+      case 'match': {
+        const scrutinee = this.expr(true);
+        this.expect('{');
+        const arms: A.Arm[] = [];
+        while (!this.atPunct('}')) arms.push(this.arm());
+        this.next();
+        return this.node<A.Match>(start, { kind: 'Match', scrutinee, arms }, true);
+      }
+      default:
+        return this.intent(start);
+    }
+  }
+
+  private arm(): A.Arm {
+    const start = this.peek();
+    let pattern: A.Pattern;
+    if (this.at('_')) {
+      this.next();
+      pattern = this.node<A.PWild>(start, { kind: 'PWild' });
+    } else {
+      const ctor = this.ident('a constructor pattern');
+      const fields: A.PCtor['fields'] = [];
+      if (this.atPunct('{')) {
+        this.next();
+        while (!this.atPunct('}')) {
+          const name = this.ident('a payload field');
+          this.expect(':');
+          const tok = this.peek();
+          if (tok.kind === 'ident' && tok.text !== 'true' && tok.text !== 'false') {
+            this.next();
+            fields.push({ name, bind: tok.text, literal: null });
+          } else {
+            fields.push({ name, bind: null, literal: this.literal() });
+          }
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+      }
+      pattern = this.node<A.PCtor>(start, { kind: 'PCtor', ctor, fields });
+    }
+    this.expect('=>');
+    const body = this.atPunct('{') ? this.block() : [this.stmt()];
+    return this.node<A.Arm>(start, { kind: 'Arm', pattern, body }, true);
+  }
+
+  private intent(start: Token): A.IntentStmt {
+    const op = start.text as A.IntentStmt['op'];
+    const base: Mk<A.IntentStmt> = { kind: 'Intent', op, target: '', args: [], to: null, modifier: null, as: null, extra: [] };
+    switch (op) {
+      case 'emit':
+        base.target = this.ident('an effect name');
+        base.args = this.args();
+        break;
+      case 'after':
+        base.modifier = this.duration();
+        this.expect('->');
+        base.target = this.ident('an action name');
+        base.args = this.args();
+        this.expect('as');
+        base.as = this.ident('a timer key');
+        break;
+      case 'cancel':
+        base.target = this.ident('a timer key');
+        break;
+      case 'spawn':
+        if (this.at('detached')) { this.next(); base.modifier = 'detached'; }
+        base.target = this.qualName().join('.');
+        this.expect('as');
+        base.as = this.ident('a child key');
+        base.args = this.args();
+        if (this.at('on') && this.at('complete', 1)) {
+          this.next(); this.next(); this.expect('->');
+          base.extra.push('complete', this.ident());
+          if (this.at('on') && this.at('parent', 1)) {
+            this.next(); this.next(); this.expect('terminal'); this.expect('->');
+            base.extra.push('parent-terminal', this.ident());
+          }
+        }
+        break;
+      case 'send':
+        base.to = this.expr(false, true);
+        this.expect('<-');
+        base.target = this.ident('an action name');
+        base.args = this.args();
+        if (this.at('as')) { this.next(); base.as = this.ident(); }
+        break;
+      case 'signal':
+        base.extra.push(this.ident('a child key'));
+        this.expect('->');
+        base.target = this.ident('an action name');
+        base.args = this.args();
+        break;
+    }
+    return this.node<A.IntentStmt>(start, base, true);
+  }
+
+  private args(): A.NamedArg[] {
+    this.expect('(');
+    const args: A.NamedArg[] = [];
+    while (!this.atPunct(')')) {
+      if (this.peek().kind === 'ident' && this.atPunct(':', 1)) {
+        const name = this.next().text;
+        this.next();
+        args.push({ name, value: this.expr() });
+      } else args.push({ name: null, value: this.expr() });
+      if (!this.atPunct(')')) this.expect(',');
+    }
+    this.next();
+    return args;
+  }
+
+  // ── expressions (PS12) ──────────────────────────────────────────────────
+  /** noStruct: `Ident {` is not a constructor here (S10). arrow: stop at `<-` (send). */
+  expr(noStruct = false, arrow = false): A.Expr {
+    return this.binary(9, noStruct, arrow);
+  }
+
+  private opAt(arrow: boolean): string | null {
+    const tok = this.peek();
+    if (tok.kind === 'punct') {
+      if (tok.text === '<-' && !arrow) {
+        // `a <-1` is `a < -1`, outside a send.
+        this.t.splice(this.i, 1,
+          { ...tok, text: '<', endCol: tok.col + 1, end: tok.start + 1 },
+          { ...tok, text: '-', col: tok.col + 1, start: tok.start + 1 });
+        return '<';
+      }
+      return tok.text in BINARY ? tok.text : null;
+    }
+    if (tok.kind === 'ident' && (tok.text === 'implies' || tok.text === 'in' || tok.text === 'is')) return tok.text;
+    return null;
+  }
+
+  private binary(maxPrec: number, noStruct: boolean, arrow: boolean): A.Expr {
+    const start = this.peek();
+    let left = this.unary(noStruct, arrow);
+    let lastNonAssoc: number | null = null;
+    for (;;) {
+      const op = this.opAt(arrow);
+      if (!op) return left;
+      const info = BINARY[op];
+      if (info.prec > maxPrec) return left;
+      if (info.assoc === 'none' && lastNonAssoc === info.prec) this.fail(`'${op}' does not chain; add parentheses`);
+      this.next();
+      if (op === 'is') {
+        const ctors = [this.ident('a constructor')];
+        while (this.atPunct('|')) { this.next(); ctors.push(this.ident('a constructor')); }
+        left = this.node<A.Is>(start, { kind: 'Is', expr: left, ctors });
+      } else if (op === 'in') {
+        this.expect('{');
+        const set: A.Expr[] = [];
+        while (!this.atPunct('}')) {
+          set.push(this.expr());
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+        left = this.node<A.In>(start, { kind: 'In', expr: left, set });
+      } else {
+        const rightMax = info.assoc === 'right' ? info.prec : info.prec - 1;
+        const right = this.binary(rightMax, noStruct, arrow);
+        left = this.node<A.Binary>(start, { kind: 'Binary', op: op as A.BinaryOp, left, right });
+      }
+      lastNonAssoc = info.assoc === 'none' ? info.prec : null;
+    }
+  }
+
+  private unary(noStruct: boolean, arrow: boolean): A.Expr {
+    const start = this.peek();
+    if (this.atPunct('!') || this.atPunct('-')) {
+      const op = this.next().text as A.UnaryOp;
+      const arg = this.unary(noStruct, arrow);
+      return this.node<A.Unary>(start, { kind: 'Unary', op, arg });
+    }
+    return this.postfix(noStruct);
+  }
+
+  private postfix(noStruct: boolean): A.Expr {
+    const start = this.peek();
+    let e = this.primary(noStruct);
+    for (;;) {
+      if (this.atPunct('.') && this.peek(1).kind === 'ident') {
+        this.next();
+        e = this.node<A.Member>(start, { kind: 'Member', object: e, prop: this.ident() });
+      } else if (this.atPunct('[')) {
+        this.next();
+        const index = this.expr();
+        this.expect(']');
+        e = this.node<A.Index>(start, { kind: 'Index', object: e, index });
+      } else return e;
+    }
+  }
+
+  private primary(noStruct: boolean): A.Expr {
+    const start = this.peek();
+    if (start.kind === 'int') { this.next(); return this.node<A.IntLit>(start, { kind: 'Int', value: start.value as number }); }
+    if (start.kind === 'string') { this.next(); return this.node<A.StringLit>(start, { kind: 'String', value: start.text }); }
+    if (this.atPunct('(')) {
+      this.next();
+      const e = this.expr();
+      this.expect(')');
+      return e;
+    }
+    if (this.atPunct('[')) {
+      this.next();
+      const items: A.Expr[] = [];
+      while (!this.atPunct(']')) {
+        items.push(this.expr());
+        if (!this.atPunct(']')) this.expect(',');
+      }
+      this.next();
+      return this.node<A.ArrayLit>(start, { kind: 'ArrayLit', items });
+    }
+    if (this.atPunct('{')) {
+      if (noStruct) this.fail('a map literal here needs parentheses');
+      this.next();
+      const entries: A.MapLit['entries'] = [];
+      while (!this.atPunct('}')) {
+        const key = this.expr();
+        this.expect(':');
+        entries.push({ key, value: this.expr() });
+        if (!this.atPunct('}')) this.expect(',');
+      }
+      this.next();
+      return this.node<A.MapLit>(start, { kind: 'MapLit', entries });
+    }
+    if (start.kind === 'ident') {
+      this.next();
+      if (start.text === 'true' || start.text === 'false') return this.node<A.BoolLit>(start, { kind: 'Bool', value: start.text === 'true' });
+      if (this.atPunct("'")) {
+        this.next();
+        return this.node<A.PrimedRef>(start, { kind: 'Primed', name: start.text });
+      }
+      if (this.atPunct('(')) {
+        this.next();
+        const args: A.Expr[] = [];
+        while (!this.atPunct(')')) {
+          args.push(this.expr());
+          if (!this.atPunct(')')) this.expect(',');
+        }
+        this.next();
+        return this.node<A.Call>(start, { kind: 'Call', callee: start.text, args });
+      }
+      if (this.atPunct('{') && !noStruct) {
+        this.next();
+        const fields: A.CtorExpr['fields'] = [];
+        while (!this.atPunct('}')) {
+          const name = this.ident('a payload field');
+          this.expect(':');
+          fields.push({ name, value: this.expr() });
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+        return this.node<A.CtorExpr>(start, { kind: 'CtorExpr', ctor: start.text, fields });
+      }
+      return this.node<A.NameRef>(start, { kind: 'Name', name: start.text });
+    }
+    this.fail('expected an expression');
+  }
+}
+
+// ── comments to nodes (PT1.4a) ────────────────────────────────────────────
+function attachComments(module: A.Module, nodes: A.NodeBase[], comments: Comment[], trivia: Trivia): void {
+  const ordered = nodes.filter((n) => n.span).sort((a, b) => a.span!.line - b.span!.line || a.span!.col - b.span!.col);
+  for (const c of comments) {
+    if (c.trailing) {
+      // The node that ends last on this line, before the comment; innermost on a tie.
+      let best: A.NodeBase | null = null;
+      for (const n of ordered) {
+        const s = n.span!;
+        if (s.endLine === c.line && s.endCol <= c.col && (!best || s.endCol > best.span!.endCol || (s.endCol === best.span!.endCol && (s.line > best.span!.line || (s.line === best.span!.line && s.col > best.span!.col))))) best = n;
+      }
+      if (best && !trivia.trailing.has(best.id)) { trivia.trailing.set(best.id, c.text); continue; }
+      // No node ends before it on its line (a comment after an opening brace): lead the next node.
+    }
+    const next = ordered.find((n) => n.span!.line > c.line || (n.span!.line === c.line && n.span!.col > c.col));
+    if (next) trivia.leading.set(next.id, [...(trivia.leading.get(next.id) ?? []), c.text]);
+    else trivia.end.push(c.text);
+  }
+  void module;
+}
