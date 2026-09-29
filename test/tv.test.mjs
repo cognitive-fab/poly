@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { join, basename } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { translationValidate } from '@poly/ref';
-import { FAULTS } from '@poly/lower';
+import { DELIBERATELY_BROKEN_LOWERINGS } from './toolchain-faults.mjs';
 import { ROOT, polyFiles, build } from './helpers.mjs';
 
 const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0'))];
@@ -28,7 +28,8 @@ for (const file of SOURCES) {
 // effect on any transition of I (for example, a frame dropped after a
 // `return reject(...)`, which never runs): an equivalent mutant. Those are
 // listed, never counted as caught.
-for (const fault of FAULTS) {
+// Only the lowerings named in the explicit list may reach PL2501 (the standing rule's one exception).
+for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
   test(`a broken lowering is caught with PL2501: ${fault}`, async (t) => {
     let caught = 0;
     const equivalent = [];
