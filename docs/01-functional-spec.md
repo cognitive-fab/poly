@@ -1,8 +1,8 @@
 # poly · Functional specification
 
-*Cognitive Fab · September 2026 · draft v0.3 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.4 · specification only, no code*
 
-The meaning of every requirement below is defined in [`04-semantics.md`](04-semantics.md). v0.2 and v0.3 answer the two reviews in [`reviews/`](reviews/).
+The meaning of every requirement below is defined in [`04-semantics.md`](04-semantics.md). v0.2, v0.3 and v0.4 answer the three reviews in [`reviews/`](reviews/).
 
 Requirement ids (`PF1.1`) are cited by the architecture (`PA`) and technical (`PT`) specifications.
 
@@ -113,6 +113,7 @@ The nearest systems each cover part of the ground:
   - mined rules (Polyx);
   - proposed workflows (polyness);
   - twins (Polytrion), in v2.
+- **G6a.** One machine, three interpretations: the same program is checked, simulated (v2) and run, and only the environment's interpretation changes (PS4.1a).
 - **G7.** One language covers three kinds of program:
   - the application's stateful core;
   - the agent's own workflows;
@@ -142,6 +143,7 @@ The nearest systems each cover part of the ground:
   - A handler that writes nothing and does not reject is flagged.
   - Rejection is a result, never an exception.
 - **PF1.5** Fields a handler does not write are unchanged. The compiler derives the frame; the author never writes `unchanged(...)`.
+- **PF1.6** A field may have a **tagged union** type, with constructors that carry payloads. Handlers read unions with exhaustive `match` or `is`, and write them as whole values. States that the union cannot express need no invariant to rule them out.
 
 ### PF2 · Declaring what must hold
 
@@ -165,6 +167,7 @@ The nearest systems each cover part of the ground:
   - its **labels** from a closed vocabulary (for example `egress:external`, `read:private`).
 - **PF3.2** A machine may set and cancel named timers that fire actions.
 - **PF3.3** A machine may spawn and signal child machines. Children declare a completion action and a parent-terminal action.
+- **PF3.4** An effect declares its targets as well as its labels. Its handler receives only the capabilities those labels and targets grant, and a handler module that reaches for ambient authority is refused. Optionally, handlers run in a sandbox whose policy is generated from the labels and targets.
 
 ### PF4 · Declaring governance
 
@@ -173,7 +176,7 @@ The nearest systems each cover part of the ground:
   - machine obligations;
   - invariant obligations;
   - recalled text.
-- **PF4.2** Policy expressions are three-valued. An unknown value never satisfies a requirement, and a deny rule whose condition is unknown escalates unless the author states otherwise (PS8.2). In a scope with label-based rules, an unlabelled effect is refused at admission (PS8.4).
+- **PF4.2** Policy expressions have their own truth type, `Tri` (true, false, unknown), because policy inputs may be missing; machine expressions have type `Bool`. The type checker keeps them apart, and one set of operators serves both. Policy expressions are three-valued. An unknown value never satisfies a requirement, and a deny rule whose condition is unknown escalates unless the author states otherwise (PS8.2). In a scope with label-based rules, an unlabelled effect is refused at admission (PS8.4).
 - **PF4.3** A policy may reference effect labels and the program's own machine states. This is the link between governance and program semantics. A machine state is read as of the step that emitted the effect under decision, so every gate decision can be replayed.
 - **PF4.4** A rule mined by Polyx and adjudicated `real` can be emitted as a poly obligation.
 
@@ -227,6 +230,7 @@ The nearest systems each cover part of the ground:
 - **PF9.2** All output has a JSON form with a published schema. Human-readable output is a projection of it.
 - **PF9.3** `poly new "<description>"` drafts a machine from a feature description (polygen). The draft is not admitted until it passes `poly check`.
 - **PF9.4** `poly explain <code|witness>` returns the rule, the witness and the fixes in a form an agent can act on.
+- **PF9.4a** poly has two surfaces over one core: a standalone syntax and an embedded TypeScript surface that is valid TypeScript. Both produce the same AST and go through the same checks. The first experiment decides which is primary.
 - **PF9.5** Formatting is canonical. The content hash is taken over the AST; comments are trivia and do not change it.
 - **PF9.6** Accepting a finding and approving an escalation require a signature from a key registered to a person. An agent key cannot sign either record.
 
@@ -257,7 +261,10 @@ The first experiment (PT13) is milestone M3. It runs as soon as the language cor
 
 1. the host language alone;
 2. the host language plus polygraph after the fact;
-3. poly.
+3. poly, standalone syntax;
+4. poly, embedded in TypeScript.
+
+The comparison of arms 3 and 4 decides which surface is primary.
 
 The co-primary measures are:
 
@@ -266,8 +273,8 @@ The co-primary measures are:
 
 The decision rule is fixed before any run:
 
-- **Win:** at least a 30% reduction in mean escaped defects against both other arms, at no more than twice the tokens of arm 1.
-- **Stop:** the poly arm delivers an admitted program in fewer than 70% of its runs. The language surface is then revised before any runtime work.
+- **Win:** at least one poly arm reduces mean escaped defects by at least 30% against both non-poly arms, at no more than twice the tokens of arm 1.
+- **Stop:** neither poly arm delivers an admitted program in 70% of its runs. The language surface is then revised before any runtime work.
 
 A null result is reported with the same prominence as a positive one.
 
@@ -278,7 +285,7 @@ A null result is reported with the same prominence as a positive one.
 | Agents write poly less well than TypeScript, because there is little poly in training data. | Adoption stalls. | Keep the surface small and close to TypeScript expressions. Make diagnostics carry fixes. Measure this directly in the first experiment. |
 | Check domains are too narrow to find real defects. | False confidence. | Grade adequacy with polynv. Report domains as disclosed assumptions in every certificate. |
 | State explosion on realistic machines. | Checks hit bounds. | `INCONCLUSIVE` with the bound, never clean. Rely on composition semantics (atomic cascades) and small machines. |
-| Two expression semantics: two-valued in machines, three-valued in policies. | Author confusion. | Separate file types and separate operators (`==` in machines; `is`, `is not`, `unknown` in policies). The compiler rejects each in the other context. |
+| Two expression semantics: two-valued in machines, three-valued in policies. | Author confusion. | A separate truth type, `Tri`, for policy expressions; the type checker rejects a `Tri` where a `Bool` is expected (PS8.0). One operator set serves both. |
 | Engine licences differ (Apache-2.0, BUSL-1.1, private Polytrion). | Distribution friction. | The compiler emits all artefacts. Checks that need a private engine are reported as not run, never as clean. |
 
 ## 10. Conclusion

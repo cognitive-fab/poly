@@ -14,9 +14,72 @@ poly adds no new checking, simulation or governance engine. It is a compiler, a 
 | Learn | Polyx, polyness |
 | Simulate (v2) | Polytrion |
 
-> Status: specification, draft v0.3 (after two reviews). No code yet.
+> Status: specification, draft v0.4 (after three reviews). No code yet.
 
-## A first look
+## Hello, world
+
+A turnstile. Put a coin in, it unlocks; push it, it locks.
+
+```poly
+module hello
+
+type Mode = Locked | Unlocked
+
+machine Gate {
+  state {
+    mode  : Mode = Locked
+    coins : 0..3 = 0
+  }
+  action Coin()
+  action Push()
+
+  on Coin {
+    require coins < 3 else reject "coin-box-full"
+    coins' = coins + 1
+    mode' = Unlocked
+  }
+  on Push {
+    require mode is Unlocked else reject "locked"
+    mode' = Locked
+  }
+
+  invariant locked-when-empty: coins == 0 implies mode is Locked
+}
+```
+
+```
+$ poly check hello.poly
+hello.poly:5  PL3201 DEADLOCK  Gate
+  no action is accepted in a reachable non-terminal state
+  witness (4 steps):
+    Coin()   Locked/0   -> Unlocked/1
+    Coin()   Unlocked/1 -> Unlocked/2
+    Coin()   Unlocked/2 -> Unlocked/3
+    Push()   Unlocked/3 -> Locked/3      then Coin: coin-box-full, Push: locked
+verdict: FINDINGS (exit 1)  over coins ∈ 0..3; 7 states
+```
+
+The invariant holds. What `poly check` finds is that a full coin box locks the turnstile forever. Add an operator action and it is clean:
+
+```poly
+  action Empty()
+  on Empty {
+    require mode is Locked else reject "unlocked"
+    coins' = 0
+  }
+```
+
+Running it from TypeScript takes three lines:
+
+```ts
+const rt = await load('./.poly/build')
+const gate = await rt.create('hello.Gate')
+await rt.dispatch(gate.id, 'Coin', {}, { actionId: 'coin-1' })   // { stepKind: 'accepted', state: { mode: 'Unlocked', coins: 1 } }
+```
+
+Handlers are pure functions of the pre-state: a primed field is written, never read. That is why the order of lines inside a handler cannot change what it does. The same machine can also be written as TypeScript with the embedded surface (technical specification, PT2.5).
+
+## A second look: the double charge
 
 ```poly
 machine Order {
@@ -88,6 +151,7 @@ Each call is allowed; the sequence is not. That is the bug the Poly stack was bu
 ## Principles
 
 0. **The semantics is the definition.** 04-semantics says what a program means; every `poly check` validates the lowering against it.
+0a. **One program, three interpreters.** The same machine is checked (all inputs), simulated (sampled inputs, v2) and run (real inputs). Only the environment changes.
 1. **Lower, never reimplement.** Safety checking, governance, simulation and mining stay in the engines. The one exception is the reference interpreter, which checks lowering agreement, deadlock and liveness.
 2. **The checked program is the running program, over its check domains.** A certificate binds the source, the artefacts and the check results by digest. Out-of-domain inputs are rejected (`strict`) or journaled as drift (`disclosed`).
 3. **One source per machine.** Every engine artefact is derived.
@@ -115,6 +179,11 @@ The Poly stack already holds the primitives a coding agent needs to write statef
 | **Deadlock** | A reachable non-terminal state in which no action is accepted. Checked for every machine. |
 | **Checked instance** | The finite set of inputs and states a verdict covers. Every verdict is printed with it. |
 | **poly-ref** | The reference interpreter written from 04-semantics, used for translation validation, deadlock and liveness. |
+| **Tagged union** | A type whose values are one of several constructors, each with its own payload. Makes invalid states unrepresentable. |
+| **Tri** | The three-valued truth type of policy expressions (true, false, unknown). Machine expressions are `Bool`. |
+| **Capability** | An object passed to a handler that grants exactly the authority its effect's labels and targets declare. |
+| **Interpretation** | One of three ways to feed the same machine: check (all inputs), simulate (sampled inputs) or run (real inputs). |
+| **Embedded surface** | poly written as valid TypeScript with the `poly/embed` combinators; it produces the same AST as the standalone syntax. |
 | **Kernel assumption** | A property of the runtime (K1 to K7) that a guarantee about running programs depends on. |
 | **Witness** | The shortest concrete sequence that violates an invariant or reaches a forbidden region. It can be exported as a trace and as a test. |
 | **Effect** | A declared side effect emitted by an accepted step. It carries labels and a class, and passes the gate before it runs. |

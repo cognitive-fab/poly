@@ -1,6 +1,6 @@
 # poly · Semantics
 
-*Cognitive Fab · September 2026 · draft v0.3 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.4 · specification only, no code*
 
 This document defines what a poly program means. The functional (`PF`), architecture (`PA`) and technical (`PT`) specifications defer to it. Where they disagree with it, this document is right and they are wrong. Requirement ids here are `PS`.
 
@@ -16,6 +16,8 @@ The definitions are mathematical and short. They are written so that a reference
   - `G` is the ordered list of guards (`guard all when … reject …`).
   - `term` is the terminal predicate.
 - **PS1.2** A **state** is a function `s` from `F` to values with `s(f) ∈ T(f)` for every field. `S` is the set of states. The state contains the declared fields and nothing else: no verdict, no pending effects, no timers.
+- **PS1.4** **Types.** The value types are `bool`, integer ranges, `int`, `string`, finite maps with enum keys, and **tagged unions**. A tagged union `U = C1 { p1 } | … | Cn { pn }` has constructors `Ci`, each with a record of named payload fields `pi` (possibly empty). Its values are pairs `(Ci, r)` with `r` a record of the payload types of `Ci`. An enum is a tagged union whose constructors have no payload. A union is finite when every payload field's type or check domain is finite.
+- **PS1.5** **The control field may be a union.** `term` then depends only on its constructor. So `terminal intent is Done | Denied | Dead` is a predicate on the tag.
 - **PS1.3** `term(s)` depends only on `s(control field)` (PT4.4a).
 
 ## PS2. Handlers denote functions
@@ -39,6 +41,8 @@ The definitions are mathematical and short. They are written so that a reference
      - `if c B1 else B2` evaluates the chosen branch;
      - `f' = e` adds `f ↦ value(e)` to `w`;
      - `f' = f with [k] = v` adds `f ↦ s(f)[k := v]` to `w`;
+     - `match e { C1 {x…} => B1 … _ => Bn }` evaluates `e`, binds the payload of the first arm whose constructor (and literal payload, if written) matches, and evaluates that arm's block. The compiler requires the arms to be exhaustive (`PL1501 NON_EXHAUSTIVE_MATCH`). So `match` never falls through, and handlers stay total;
+     - `f' = C { q: e … }` writes a whole union value. A union field is always written as a whole value, never one payload field at a time;
      - `emit`, `after`, `cancel`, `spawn` and `signal` append an intent to `E`.
   3. **End.** If the body completes without a rejection, the result is `accept(w, E)`.
 - **PS2.3** **Expressions read the pre-state only.** A primed field is write-only. Reading `f'` is a syntax error. So the order of assignments within a handler does not change the result.
@@ -67,7 +71,25 @@ The definitions are mathematical and short. They are written so that a reference
 
 ## PS4. Behaviours and the checked instance
 
-- **PS4.1** The **environment** chooses each action and its data. A **path** is a finite sequence `s0 l0 s1 l1 … sn` with `s0 = init` and `(si, li, si+1) ∈ R_M` for every `i`. A **behaviour** is an infinite such sequence. The environment is unconstrained: every action, with every data value, may be offered in every state.
+- **PS4.1** The **environment** chooses each action and its data. A **path** is a finite sequence `s0 l0 s1 l1 … sn` with `s0 = init` and `(si, li, si+1) ∈ R_M` for every `i`. A **behaviour** is an infinite such sequence.
+- **PS4.1a** **One machine, three interpretations of the environment.** The machine is the pure transition relation `R_M`. The environment is an interface with two operations:
+
+  ```
+  Env = { offer   : History → (Action × Data)          -- what happens next
+          complete: Intent  → Completion               -- what the world does with an effect }
+  ```
+
+  Checking, simulation and running are three interpretations of `Env`, and nothing else:
+
+  | Interpretation | `offer` and `complete` | What it produces | Engine |
+  |---|---|---|---|
+  | **check** | every action and every data value in `D(a)`, in every state; every completion | the set of all paths of `I` (nondeterminism) | polygraph, polyrun `check-effects`, poly-ref |
+  | **simulate** | sampled from declared distributions and rates | a probability measure over paths (v2) | Polytrion |
+  | **run** | whatever the world sends; intents go to real handlers under the effect gate | the one path that happens (IO) | the runtime |
+
+- **PS4.1b** **Theorem (checked is running).** Every path produced by **run** whose inputs lie in the check domains is a path of **check**. *Proof:* the two interpretations apply the same `R_M` (PS2.5, and PS9 for the lowered module under K7), and **check** offers every input in `D(a)` in every state and every completion for every intent. For fields in `strict` mode, **run** cannot offer an input outside `D(a)`, because the runtime rejects it before the handler (PS3.2), so the condition holds by construction. For fields in `disclosed` mode, the theorem covers exactly the paths whose inputs stayed in the domain, and the others are journaled as drift. ∎ So every safety property that is `CLEAN` on **check** holds on every such **run** path.
+- **PS4.1c** A Polytrion world (v2) is a definition of **simulate** for a set of machines. The machines are unchanged. This is the formal content of the Polytrion principle "responders draw, machines decide, the kernel schedules".
+- **PS4.1d** In **check**, the environment is unconstrained: every action, with every data value in its domain, may be offered in every state.
 - **PS4.2** The **checked instance** `I` is the restriction to inputs in the check domains: every `d ∈ D(a)`. `Reach(I)` is the set of states on paths of `I`. It is finite, because every field type in a checked machine is finite or restricted to a finite check domain (PT3.2).
 - **PS4.3** **Every verdict is about `I`.** A `CLEAN` result states that a property holds on `Reach(I)` and on all paths of `I`. The instance is printed with the verdict (PT12.3a).
 - **PS4.4** **Completion actions are ordinary actions.** In `I`, a completion such as `PaymentOk` can be offered in any state, whether or not a charge was emitted. So `I` over-approximates the real system: every real behaviour is a behaviour of `I`, but not every behaviour of `I` is real. For safety properties this is sound: a clean result holds for the real system. A witness may be infeasible if it uses a completion with no matching intent. Such a witness is marked `environment: unconstrained`, and the matching path property check (PS5.4) is the place to rule it out.
@@ -92,6 +114,7 @@ There are five kinds of property. Each has its own keyword (PT5), and none is ca
 - **PS6.1** An action group `g` is a set of actions (written `A | B`). `g` is **enabled** in `s` iff some `a ∈ g` and some `d ∈ D(a)` give an accepted transition from `s`.
 - **PS6.2** A behaviour is **weakly fair for `g`**, written `WF(g)`, iff `g` is not enabled continuously from some point on without an accepted step of `g` being taken infinitely often. In words: an action group that stays enabled is eventually taken.
 - **PS6.3** A liveness property is always stated with its fairness assumption: `liveness n: eventually P under fair { g1, g2, … }`. It is checked only over behaviours that are weakly fair for every listed group. Actions not listed carry no assumption: the environment may never offer them. A person's approval, for example, is not listed.
+- **PS6.3a** Liveness under fairness is a game. The environment is an adversary that chooses inputs, constrained only by the stated fairness. A liveness property holds when the adversary has no strategy that avoids `P` forever. The lasso of PS6.4 is the adversary's winning strategy.
 - **PS6.4** **Check.** Over the finite graph of `Reach(I)`, `eventually P` fails iff there is a reachable strongly connected component `C` with all of the following properties:
   1. `C` contains no `P`-state.
   2. `C` contains at least one edge, where rejected and unhandled steps count as edges.
@@ -108,6 +131,7 @@ There are five kinds of property. Each has its own keyword (PT5), and none is ca
 
 ## PS8. Policies
 
+- **PS8.0** **Two truth types.** `Bool = {T, F}`. `Tri = {T, F, U}`, which is `Bool` lifted into an option type, with Kleene's rules for the missing case. The inputs a policy reads (the proposal, the action's labels, `machine(…)` fields, history) have **optional types**: any of them may be missing. A comparison or boolean operator applied to an optional operand has type `Tri`. Machine fields are never optional, so every machine expression has type `Bool`. `unknown(x)` has type `Bool`. A machine `require` demands `Bool`. A policy `when` or `require` accepts `Tri` and is evaluated by PS8.2. A `Tri` where a `Bool` is expected is a type error (`PL1203 TRI_WHERE_BOOL_EXPECTED`). The two logics are separated by type. One set of operators (`==`, `!=`, `&&`, `||`, `!`) serves both, and its meaning follows the operand types.
 - **PS8.1** Policy expressions take values in `{T, F, U}`, where `U` is unknown.
   - `not`, `and` and `or` follow Kleene's strong three-valued logic: `not U = U`; `F and U = F`; `T and U = U`; `T or U = T`; `F or U = U`.
   - A comparison with an unknown operand is `U`.
@@ -141,6 +165,7 @@ There are five kinds of property. Each has its own keyword (PT5), and none is ca
   - writes to `next`, with the declared `unchanged`, give the next state;
   - the effects mapper applied to the step gives `E`.
 - **PS9.1a** The first two rows of the table in PS3.2 (terminal states and strict check domains) are applied by the runtime before it calls the module. `R_L` is therefore the module's relation with those two rules applied first, exactly as the runtime applies them.
+- **PS9.1b** **Flattening unions.** A union field `f` lowers to a tag field `f` plus one nullable field `f_<payload>` per payload field of any constructor, because the SAM sealed shape is flat. The abstraction function `α` maps a flat state back to a structured one. The lowering adds one automatic invariant per union field (`shape:f`): the payload fields of the current constructor are present, and all others are null. PS9.2 compares `R_M` with `R_L` through `α`.
 - **PS9.2** **The lowering is correct for `M` on `I`** iff `R_L` and `R_M` agree on every `(s, a, d)` with `s ∈ Reach(I)` and `d ∈ D(a)`. They must give the same verdict kind, the same reason, the same next state and the same intent sequence. The lowered property modules must also agree with PS5 on every reachable state and transition.
 - **PS9.3** **Translation validation on every check.** `poly check` runs a reference interpreter, `poly-ref`, written directly from this document and sharing no code with the compiler. It explores `I` and compares every transition with the lowered module's. A difference is `PL2501 LOWERING_MISMATCH`. The verdict is `REFUSED`, and the diagnostic is addressed to the toolchain, not to the author. This makes the lowering's correctness a checked fact for each program, not a claim about the compiler.
 
@@ -163,6 +188,7 @@ The guarantees about running programs hold under these assumptions about the run
 - **PS11.1** Each gate session has a **session sequence** `sseq`. The gate assigns it on receipt of every proposal and every settle. Each ledger event carries its `sseq` and the digest of Σ before the event.
 - **PS11.2** **Replay of a session** re-applies its events in `sseq` order. It must reproduce every decision and every Σ digest. By K6, this reproduces the gate's behaviour exactly.
 - **PS11.3** **Replay of a run** reproduces every post-state from the run's own chain (K1, PS2.5). It reproduces gate decisions when the sessions the run touched are replayed with it.
+- **PS11.4** **Replay is a fold.** A run's state after `n` steps is `foldl δ init [l0 … ln-1]`, where `δ(s, (a, d, _))` is the next state given by `R_M`. The replay theorem is then one line: `δ` is a function (PS2.5), so the same journal gives the same fold. The runtime stores the journal, and the state is the fold's cache (the snapshot). A snapshot that disagrees with the fold is a kernel fault, not a program fault.
 
 ## PS12. Expression syntax: precedence
 
@@ -180,8 +206,8 @@ From tightest to loosest binding:
 | 8 | `\|\|` | left |
 | 9 | `implies` | right |
 
-The canonical formatter inserts parentheses whenever `implies` is mixed with `&&` or `||` in one expression. So `executed implies (decisions <= 1 || approved)` is the only printed form of that invariant, and neither the author nor a reader has to remember level 9. Policy operators (`is`, `is not`, `and`, `or`, `not`) follow levels 6, 7, 8 and 2 respectively.
+The canonical formatter inserts parentheses whenever `implies` is mixed with `&&` or `||` in one expression. So `executed implies (decisions <= 1 || approved)` is the only printed form of that invariant, and neither the author nor a reader has to remember level 9. `e is C` (constructor test, type `Bool`) binds at level 5. Policies use the same operators; their meaning follows the operand types (PS8.0).
 
 ## Conclusion
 
-A poly program denotes a deterministic, labelled transition relation over a finite checked instance. Rejections are labelled stuttering steps. Properties come in five kinds with distinct meanings. Liveness is stated only with its fairness assumptions. Policies have a total three-valued evaluation in which an unknown deny condition escalates. The lowering is correct when its transition relation equals this one, and every `poly check` verifies that for the program at hand. Every guarantee about a running program names the kernel assumptions it depends on.
+A poly program denotes a deterministic, labelled transition relation over a finite checked instance. Checking, simulation and running are three interpretations of one environment interface over that same relation, and the claim that the checked program is the running program is a theorem about two of them. States may be tagged unions, so invalid states are unrepresentable rather than merely unreachable. Policy logic has its own type. Rejections are labelled stuttering steps. Properties come in five kinds with distinct meanings. Liveness is stated only with its fairness assumptions. Policies have a total three-valued evaluation in which an unknown deny condition escalates. The lowering is correct when its transition relation equals this one, and every `poly check` verifies that for the program at hand. Every guarantee about a running program names the kernel assumptions it depends on.

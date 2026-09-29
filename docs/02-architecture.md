@@ -1,8 +1,8 @@
 # poly · Architecture
 
-*Cognitive Fab · September 2026 · draft v0.3 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.4 · specification only, no code*
 
-The meaning of poly programs is defined in [`04-semantics.md`](04-semantics.md). v0.2 and v0.3 answer the two reviews in [`reviews/`](reviews/).
+The meaning of poly programs is defined in [`04-semantics.md`](04-semantics.md). v0.2, v0.3 and v0.4 answer the three reviews in [`reviews/`](reviews/).
 
 This document describes how poly is built from the engines of the Poly stack. What poly must do is in [`01-functional-spec.md`](01-functional-spec.md) (`PF` ids). The grammar, semantics and formats are in [`03-technical-spec.md`](03-technical-spec.md) (`PT` ids). Facts about the existing engines come from [`research/primitive-inventory.md`](research/primitive-inventory.md).
 
@@ -15,6 +15,7 @@ A poly module is compiled to the artefact family the Poly engines already read. 
 | Id | Principle | Consequence |
 |---|---|---|
 | PA0.0 | **The semantics is the definition.** | 04-semantics defines what a program means. The lowering is correct when it agrees with it (PS9), and every `poly check` verifies that agreement for the program at hand. |
+| PA0.0a | **One program, three interpreters.** | A machine is a pure step function. Checking (polygraph, poly-ref), simulation (Polytrion, v2) and running (the runtime) are three interpretations of one environment interface over it: all inputs, sampled inputs, real inputs (PS4.1a). "The checked program is the running program" is a theorem about two of them (PS4.1b). |
 | PA0.1 | **Lower, never reimplement.** | Safety checking, simulation, governance and mining stay in the engines. A new semantic need is a change to an engine, made in that engine's repository. One stated exception: `poly-ref`, the reference interpreter, checks translation validation, deadlock freedom and liveness, which no engine checks today (section 2a). |
 | PA0.2 | **The checked program is the running program, over its check domains.** | The runtime executes the lowered `next.cjs` the checker checked. The certificate binds them by digest, and a digest mismatch refuses the load. Inputs outside a `strict` check domain are rejected at dispatch; inputs outside a `disclosed` domain are accepted and journaled as drift, and the certificate lists those fields (PT3.4). |
 | PA0.3 | **One source per machine.** | Contract, module, invariants, effects, manifest, emission invariants and migration are derived. None is edited by hand. |
@@ -29,7 +30,9 @@ poly adds no new checking, simulation or governance engine. It is still a substa
 
 | Category | Item | Size class |
 |---|---|---|
-| **New code** | Lexer, parser, canonical formatter, AST with node ids and digests | compiler front end |
+| **New code** | `poly-core`: AST with node ids and digests, types (with tagged unions and `Tri`), domains | compiler core |
+| | Two surfaces over `poly-core`: the standalone syntax (lexer, parser, canonical formatter) and the embedded TypeScript surface (`poly-embed`). The experiment decides which is primary; the other may leave v1 scope | compiler front ends |
+| | Handler capability objects and the handler lint (PT6.5); OpenShell policy generation from labels (opt-in) | runtime and toolchain |
 | | Type and domain checker, flow analysis for `strict` defaults | compiler |
 | | Lowering to seven artefact kinds (contract, module, invariants, effects mapper, manifest, emission and compose invariants, migration) plus policy and workflow descriptors | compiler back end |
 | | Verdict fold, diagnostic model, node-addressed fixes, witness export | toolchain |
@@ -198,7 +201,9 @@ This is the only engine integration poly requires that does not exist today. It 
 
 The gate also sees the program's own state, but only one snapshot of it: the post-state of the step that emitted the effect, carried with the proposal by `seq` and digest. The gate keeps no mirror of application state. This lets an obligation refer to machine states (PF4.3) while every decision stays a function of recorded inputs (kernel assumption K6). Because the gate's session state depends on the order of events across runs, each proposal and settle carries a session sequence number and the digest of the state before it, so a session replays exactly (PS11).
 
-The interleavings of retry, gate decision, handler and settle are themselves specified as a poly machine and model-checked (PT9.7). One rule matters most: once allowed, an intent is not proposed again for the same idempotency key.
+The interleavings of retry, gate decision, handler and settle are themselves specified as a poly machine and model-checked (PT9.7).
+
+Handlers receive **capabilities, not ambient authority** (PT6.5). An effect's labels and declared targets decide which capability objects its handler is given, and a lint rejects handler modules that reach for ambient authority. With the opt-in isolation mode, each effect kind's handlers run in an OpenShell sandbox whose policy is generated from the same labels and targets, so a wrong label fails closed. Labels therefore describe what a handler *can* do, which is what the gate reasons about. One rule matters most: once allowed, an intent is not proposed again for the same idempotency key.
 
 ### 7.3 One ledger
 
@@ -267,13 +272,15 @@ The Claude Code plugin packages this loop as a skill with commands (`/poly:new`,
 
 | Id | Decision | Options | Proposed |
 |---|---|---|---|
+| AD-10 | Surface | (a) standalone syntax; (b) TypeScript-embedded DSL over the same AST | Both are built to M2. The first experiment compares them (PT13, arm 4) and the result picks the primary. |
+| AD-11 | Handler authority | (a) labels as claims; (b) capability passing with a lint; (c) a generated OpenShell sandbox per effect kind | (b) by default, (c) opt-in. (a) is removed. |
 | AD-1 | Canonical form of source | (a) text canonical, AST derived; (b) AST canonical, text as projection, patched by hash-guarded operations as in Zero [1] | (a) for v1, with a canonical formatter and an exported AST. Revisit after the first experiment measures agent edit failures. |
 | AD-2 | Expression language inside handlers | (a) a total, side-effect-free subset of TypeScript expressions; (b) a new expression language | (a). It lowers directly to JavaScript, and agents already write it. |
 | AD-3 | Ledger | (a) one ledger in the polyflow platform format, chained per run with periodic anchors; (b) keep `pr_journal` and `px_window`, joined by digest | (a). It gives one replay path and one verification tool, with no global chain. |
 | AD-4 | Gate placement for application effects | (a) in the outbox worker, in process; (b) in a Polyaxion daemon over a socket | (a) for latency, with (b) available when the operator runs a shared daemon. |
 | AD-5 | Host languages | TypeScript first; Python through the existing polyflow platform Python ports | TypeScript for v1. |
 | AD-6 | Worlds | (a) in v1; (b) deferred to v2 | (b). They are not needed for the first experiment and add a fourth expression language. |
-| AD-8 | Where policies live | (a) in the same file as machines; (b) in `.policy.poly` files with their own operators (`is`, `is not`, `unknown`) | (b). The two expression semantics never share a file or an operator. |
+| AD-8 | How the two logics are kept apart | (a) separate files and operators (v0.2); (b) a separate truth type, `Tri`, checked by the type checker | (b), since v0.4. `.policy.poly` remains a reading convention. |
 | AD-9 | Out-of-domain inputs at runtime | (a) always accept and journal; (b) per-field `strict` or `disclosed`, `strict` by default where a value reaches an irreversible or compensable effect | (b). |
 | AD-7 | Licence | follow each engine's licence; the language and compiler under one licence | Open question for the owner (section 13). |
 

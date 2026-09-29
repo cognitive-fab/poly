@@ -1,8 +1,8 @@
 # poly · Technical specification
 
-*Cognitive Fab · September 2026 · draft v0.3 · specification only, no code*
+*Cognitive Fab · September 2026 · draft v0.4 · specification only, no code*
 
-The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2 answered [`reviews/review-2026-09-29-blunt.md`](reviews/review-2026-09-29-blunt.md) and v0.3 answers [`reviews/review-2026-09-29-formal.md`](reviews/review-2026-09-29-formal.md); the responses are in [`reviews/`](reviews/).
+The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2, v0.3 and v0.4 answer the three reviews in [`reviews/`](reviews/), with a response to each.
 
 This document fixes the grammar, the semantics and the formats. It covers the lowering of each construct to the Poly stack artefacts, the integration of the gate with the kernel, the diagnostics, the command surface, the implementation plan and the first experiment.
 
@@ -13,7 +13,7 @@ This document fixes the grammar, the semantics and the formats. It covers the lo
 ## PT1. Source files and modules
 
 - **PT1.1** A module is a file with the extension `.poly`. It starts with `module <name>` and holds `enum`, `machine` and `workflow` declarations.
-- **PT1.1a** A policy lives in its own file with the extension `.policy.poly` (PT8). Machines and policies never share a file, so the two expression semantics never share a file either.
+- **PT1.1a** By convention a policy lives in a `.policy.poly` file, because policies are read by different people. The convention is for readers. The two logics are separated by type (PS8.0), not by file.
 - **PT1.1b** Worlds are deferred to v2 (appendix A).
 - **PT1.2** A project is a directory with a `poly.json` manifest:
 
@@ -34,7 +34,9 @@ The core grammar in EBNF. Terminals are quoted. `Expr` is the expression sublang
 
 ```ebnf
 Module      = "module" Ident { Decl } ;
-Decl        = Machine | Workflow | Enum | Use ;
+Decl        = Machine | Workflow | Enum | TypeDecl | Policy | Use ;
+TypeDecl    = "type" Ident "=" [ "|" ] Ctor { "|" Ctor } ;
+Ctor        = Ident [ "{" Ident ":" Type { "," Ident ":" Type } "}" ] ;
 Use         = "use" QualIdent ;
 Enum        = "enum" Ident "{" Ident { "," Ident } "}" ;
 
@@ -56,12 +58,15 @@ Stmt        = "require" Expr "else" "reject" String
             | Ident "'" "=" Expr
             | Ident "'" "=" Ident "with" "[" Expr "]" "=" Expr
             | "if" Expr Block [ "else" Block ]
+            | "match" Expr "{" Arm { Arm } "}"
             | "emit" Ident "(" [ Args ] ")"
             | "after" Duration "->" Ident "(" [ Args ] ")" "as" Ident
             | "cancel" Ident
             | "spawn" QualIdent "as" Ident "(" [ Args ] ")" ChildWiring
             | "signal" Ident "->" Ident "(" [ Args ] ")" ;
 ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
+Arm         = Pattern "=>" ( Block | Stmt ) ;
+Pattern     = "_" | Ident [ "{" Ident ":" ( Literal | Ident ) { "," Ident ":" ( Literal | Ident ) } "}" ] ;
 Property    = "invariant" Ident ":" Expr
             | "step" "property" Ident ":" Expr
             | "reject" "property" Ident ":" Expr
@@ -93,11 +98,42 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
 
   It has no loops, no calls to host functions and no string operations beyond equality and membership. Every expression terminates by construction. Precedence and associativity are fixed in PS12; the formatter parenthesises any mix of `implies` with `&&` or `||`.
   Primed fields are write-only: an expression never reads `f'` (PS2.3), and a field written twice on one path is `PL2102 DOUBLE_WRITE` (PS2.4).
-- **PT2.3** Policies use PX, Polyaxion's three-valued (Kleene) language, and they live in `.policy.poly` files (PT1.1a). The difference is visible in the syntax, not only in the checker:
-  - policies compare with `is`, `is not` and `in`, and test for a missing value with `unknown(x)`;
-  - policies do not accept `==`, `!=` or `!`, and machines do not accept `is`, `is not` or `unknown`.
+- **PT2.3** Policies use PX, Polyaxion's three-valued (Kleene) language. The two logics are separated by **type**, not by syntax (PS8.0):
+  - machine expressions have type `Bool`; policy inputs are optional, so policy expressions have type `Tri`;
+  - one operator set (`==`, `!=`, `&&`, `||`, `!`, `in`) serves both, with its meaning given by the operand types;
+  - `unknown(x)` has type `Bool` and is legal anywhere an optional value is in scope;
+  - a `Tri` where a `Bool` is expected is `PL1203 TRI_WHERE_BOOL_EXPECTED`.
 
-  A machine-only operator in a policy file is `PL1201 POLICY_ONLY_CONSTRUCT`; the reverse is `PL1202 MACHINE_ONLY_CONSTRUCT`.
+  This follows the pattern of an option type, which agents know from TypeScript's `boolean | undefined`.
+- **PT2.4** `e is C` tests a union value's constructor and has type `Bool`; `e is C1 | C2` is short for `e is C1 || e is C2`. `C { q: e }` constructs a union value. `match` is exhaustive (`PL1501 NON_EXHAUSTIVE_MATCH`). Enums are unions without payloads, so `==` and `is` agree on them.
+
+- **PT2.5** **The embedded surface.** poly also has a surface embedded in TypeScript. It is valid TypeScript, type-checked by `tsc`, and it produces the same AST as the standalone syntax:
+
+  ```ts
+  import { machine, t, require, set, emit, invariant, pathProperty } from '@cognitive-fab/poly/embed'
+
+  export const Order = machine('orders.Order', {
+    state: { status: t.enum('Draft', 'Placed', 'Paid', 'Shipped', 'Cancelled'), items: t.range(0, 3) },
+    actions: { Place: {}, Pay: { amount: t.int.check([10, 20]) } },
+    on: {
+      Place: (s) => [require(s.status === 'Draft', 'not-draft'),
+                     require(s.items > 0, 'empty-order'),
+                     set({ status: 'Placed' })],
+      Pay:   (s, d) => [require(s.status === 'Placed', 'not-placed'), emit('charge', { amount: d.amount })],
+    },
+    properties: [pathProperty('charge-at-most-once', (p) => p.count('payment.charge') <= 1)],
+  })
+  ```
+
+  - **Front end.** `poly-embed` reads the module with the TypeScript compiler API and accepts only the PT2.2 subset inside handler and property bodies:
+    - arrow functions returning statement lists;
+    - no loops, calls to anything but the poly combinators, or mutation;
+    - no access beyond the handler's parameters.
+
+    Anything else is `PL0301 OUTSIDE_EMBEDDED_SUBSET`, with the offending node. The resulting AST goes through the same checks, lowering and translation validation as the standalone syntax.
+  - **What the embedded surface gives up:** primes (writes are `set({…})`), the canonical formatter (the host formatter applies; the AST digest is unaffected, PT1.4a), and some syntax for properties.
+  - **What it gains:** no training-data gap for agents, and the host's type checker, language server and package manager.
+  - **Which surface is primary** is decided by the first experiment (PT13, arm 4).
 
 ## PT3. Types and check domains
 
@@ -107,7 +143,8 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - integer ranges `a..b`;
   - `int`;
   - `string`;
-  - `map<E, T>`, where the key type `E` is an enum.
+  - `map<E, T>`, where the key type `E` is an enum;
+  - **tagged unions** `type U = C1 { … } | … | Cn { … }` (PS1.4), finite when their payload fields are. Handlers read a union with `match` or `is` and write it as a whole value. The lowering flattens it to a tag field and nullable payload fields, with an automatic `shape:` invariant (PS9.1b).
 - **PT3.2** Every field and parameter has a finite check domain (PF1.2). Enums, `bool`, ranges and maps over finite value types are finite by construction. `int` and `string` need an explicit `check` clause. Without one, the compiler reports `PL1101 UNBOUNDED_DOMAIN`.
 - **PT3.3** A `check` clause narrower than the runtime type is an assumption. It is written to `dataDomain` and to the certificate's `domains`, and it is graded by `poly grade` (polynv).
 - **PT3.4** Each `check` clause has a mode, and the mode decides what the runtime does with a value outside the check domain:
@@ -337,6 +374,39 @@ Timer keys are declared by use and scoped to the machine. Arming a key that may 
 
 `signal pay -> Refund()` lowers to `signalChild`. The child instance id is `hash(parentId, childKey, seq)`, as polyrun defines it.
 
+### PT6.5 Handlers receive capabilities, not ambient authority
+
+A label is a claim until the code is unable to exceed it. Two mechanisms make it so.
+
+**1. Capability passing (default, v1).** An effect declares its targets next to its labels:
+
+```poly
+effect charge(amount: int) {
+  kind "payment.charge"
+  labels { egress:external }
+  targets { egress: "https://api.psp.example/v1/charges" }
+  class irreversible
+  …
+}
+```
+
+The runtime passes the handler only the capabilities its labels and targets grant:
+
+| Label | Capability passed | Bound to |
+|---|---|---|
+| `egress:external`, `egress:public` | `egress.post / get` | the declared URL prefixes only |
+| `read:store`, `write:store` | `store.read / write` | the declared tables or keys |
+| `read:private` | `secrets.get` | the declared secret names |
+| `exec` | `exec.run` | the declared commands |
+| none of the above | nothing | none |
+
+- **Handler modules are checked by a lint pass** (`poly lint handlers`). It rejects imports of ambient-authority modules, such as `fs`, `net`, `http`, `child_process`, global `fetch` and `process.env`. A violation is `PL6401 AMBIENT_EFFECT_IN_HANDLER`, and the program is not admitted.
+- **This is a discipline, not a proof.** TypeScript cannot stop determined code from reaching ambient authority, for example through dynamic `import()` or `globalThis`. The lint rejects both forms, but only the sandbox below enforces the boundary.
+
+**2. Generated sandbox (opt-in, M5).** With `handlers: { isolation: "openshell" }` in `poly.json`, each effect kind's handlers run in an NVIDIA OpenShell sandbox. Its policy is **generated from the effect's labels and targets**: network egress only to the declared prefixes, no filesystem beyond a scratch directory, and secrets scoped to the declared names. A wrong or missing label then fails closed at the sandbox boundary instead of silently widening what the gate believes. The stack's existing polyaxion-openshell work supplies the integration.
+
+The principle, in both cases: **an effect's type is what it can do, not what it says it does.**
+
 ## PT7. Composition
 
 A machine that spawns children is checked with its children as a product:
@@ -360,7 +430,7 @@ The built-in doctrine findings are surfaced as poly diagnostics in the `PL5xxx` 
 
 A policy lowers to `polyaxion.policy.json` version 2. The document fields are `polyaxion`, `id`, `version`, `scope`, `description`, `vars` and `obligations`.
 
-The file is `repo-hygiene.policy.poly`. It uses the policy operators of PT2.3.
+The file is `repo-hygiene.policy.poly`. It uses the same operators as machines; its expressions have type `Tri` because its inputs are optional (PT2.3).
 
 ```poly
 policy repo-hygiene {
@@ -370,20 +440,20 @@ policy repo-hygiene {
   obligation tests-before-deploy "After changing source, run the tests before deploying." machine {
     states clean, dirty, tested
     initial clean
-    from * when action.kind is "fs.write" and glob(action.path, "src/**") -> dirty
-    from dirty when action.kind is "process.run" and action.target is "test" -> tested
-    deny in dirty when action.kind is "custom.deploy" reason "untested-changes"
+    from * when action.kind == "fs.write" && glob(action.path, "src/**") -> dirty
+    from dirty when action.kind == "process.run" && action.target == "test" -> tested
+    deny in dirty when action.kind == "custom.deploy" reason "untested-changes"
     end clean, tested
   }
 
   obligation no-egress-after-secret "Never send data out after reading a secret." rule {
     when action.effects has "egress:external"
-    require not history.any(a => a.effects has "read:private") else deny
+    require !history.any(a => a.effects has "read:private") else deny
     on unknown escalate
   }
 
   obligation orders-irreversible "No irreversible effect on a cancelled order." rule {
-    when effect.class is "irreversible" and machine("orders.Order").status is Cancelled
+    when effect.class == "irreversible" && machine("orders.Order").status == Cancelled
     require false else deny
   }
 
@@ -391,7 +461,7 @@ policy repo-hygiene {
 }
 ```
 
-In PX, `glob(action.path, …)` is unknown when `action.path` is missing, and an unknown value never satisfies a `when`. The v0.1 form `action.path ?? ""` is not needed and is not accepted.
+In PX, `glob(action.path, …)` is unknown when `action.path` is missing. What an unknown `when` does is fixed by the rule's `on unknown` (PS8.2), so no `?? ""` default is needed, and none is accepted.
 
 ### PT8.2 Lowering
 
@@ -446,74 +516,85 @@ This is the only new engine integration (architecture section 7.2).
   ```poly
   module runtime
 
-  enum IntentStatus { Pending, Proposed, Allowed, Running, Settled, Denied, Escalated, Dead, Done }
+  type Intent =
+    | Pending
+    | Proposed  { decision: 1..2 }        // 2 only for an approved re-proposal
+    | Escalated { approved: bool }
+    | Allowed   { attempts: 0..2 }        // attempts already made
+    | Running   { attempt: 1..3 }
+    | Settled   { attempt: 1..3 }
+    | Done | Denied | Dead
 
   machine OutboxIntent {
-    state {
-      status    : IntentStatus = Pending
-      attempts  : 0..3         = 0
-      decisions : 0..2         = 0     // gate decisions taken for this intent
-      executed  : bool         = false // the handler may have run (at-least-once)
-      approved  : bool         = false
-    }
-    terminal status in { Done, Denied, Dead }
+    state { intent: Intent = Pending }
+    terminal intent is Done | Denied | Dead
 
-    action Propose()
-    action GateAllow()
-    action GateDeny()
-    action GateEscalate()
-    action Approve()
-    action EscalationTimeout()
-    action Start()
-    action HandlerOk()
-    action HandlerFailed()
-    action SettleFailed()
-    action SettleOk()
+    action Propose()   action GateAllow()   action GateDeny()   action GateEscalate()
+    action Approve()   action EscalationTimeout()
+    action Start()     action HandlerOk()   action HandlerFailed()
+    action SettleOk()  action SettleFailed()
 
     on Propose {
-      require status in { Pending } || (status == Escalated && approved) else reject "not-proposable"
-      status' = Proposed
-      decisions' = decisions + 1
+      match intent {
+        Pending                      => intent' = Proposed { decision: 1 }
+        Escalated { approved: true } => intent' = Proposed { decision: 2 }
+        _                            => reject "not-proposable"
+      }
     }
-    on GateAllow    { require status == Proposed else reject "no-proposal"   status' = Allowed }
-    on GateDeny     { require status == Proposed else reject "no-proposal"
-                      require !executed          else reject "deny-after-execution"
-                      status' = Denied }
-    on GateEscalate { require status == Proposed else reject "no-proposal"
-                      require decisions == 1     else reject "escalate-once"
-                      status' = Escalated }
-    on Approve      { require status == Escalated else reject "not-escalated" approved' = true }
-    on EscalationTimeout { require status == Escalated && !approved else reject "not-waiting"
-                           status' = Denied }
-    on Start        { require status == Allowed  else reject "not-allowed"
-                      require attempts < 3       else reject "exhausted"
-                      status' = Running
-                      attempts' = attempts + 1
-                      executed' = true }
-    on HandlerOk    { require status == Running  else reject "not-running"   status' = Settled }
-    on HandlerFailed { require status == Running else reject "not-running"
-                       if attempts < 3 { status' = Allowed } else { status' = Dead } }
-    on SettleFailed { require status == Settled  else reject "not-settled"
-                      if attempts < 3 { status' = Allowed } else { status' = Dead } }
-    on SettleOk     { require status == Settled  else reject "not-settled"   status' = Done }
+    on GateAllow    { require intent is Proposed else reject "no-proposal"
+                      intent' = Allowed { attempts: 0 } }
+    on GateDeny     { require intent is Proposed else reject "no-proposal"
+                      intent' = Denied }
+    on GateEscalate { match intent {
+                        Proposed { decision: 1 } => intent' = Escalated { approved: false }
+                        _                        => reject "escalate-once" } }
+    on Approve      { match intent {
+                        Escalated { approved: false } => intent' = Escalated { approved: true }
+                        _                             => reject "not-waiting" } }
+    on EscalationTimeout { match intent {
+                        Escalated { approved: false } => intent' = Denied
+                        _                             => reject "not-waiting" } }
+    on Start        { match intent {
+                        Allowed { attempts: n } => intent' = Running { attempt: n + 1 }
+                        _                       => reject "not-allowed" } }
+    on HandlerOk    { match intent {
+                        Running { attempt: n } => intent' = Settled { attempt: n }
+                        _                      => reject "not-running" } }
+    on HandlerFailed { match intent {
+                        Running { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
+                                                  else     { intent' = Dead }
+                        _                      => reject "not-running" } }
+    on SettleOk     { require intent is Settled else reject "not-settled"
+                      intent' = Done }
+    on SettleFailed { match intent {
+                        Settled { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
+                                                  else     { intent' = Dead }
+                        _                      => reject "not-settled" } }
 
-    invariant one-decision-per-execution: executed implies (decisions <= 1 || approved)
     step property no-reproposal-after-allow:
-      pre.status in { Allowed, Running, Settled } implies post.status != Proposed
-    step property no-deny-after-run: pre.executed implies post.status != Denied
-    liveness settles: eventually status in { Done, Denied, Dead }
+      (pre.intent is Allowed || pre.intent is Running || pre.intent is Settled)
+        implies !(post.intent is Proposed)
+    liveness settles: eventually intent is Done | Denied | Dead
       under fair { Propose, GateAllow | GateDeny | GateEscalate, EscalationTimeout, Start,
                    HandlerOk | HandlerFailed, SettleOk | SettleFailed }
   }
   ```
 
+  The state has 17 representable values, and all 17 are reachable. The v0.3 encoding as five fields had 432 representable combinations, of which 33 were reachable, plus three invariants and two step properties whose job was to rule out the rest. With the union, those properties are types:
+
+  - a second gate decision after execution cannot be written, because `Allowed`, `Running` and `Settled` carry no decision;
+  - a deny after execution cannot be written, because `GateDeny` only matches `Proposed`;
+  - `executed` is not a field, because it is `intent is Running || intent is Settled || …`.
+
+  One step property is kept as a regression guard, and the liveness property is unchanged. An independent exploration ([`reviews/evidence/outbox_sum_check.py`](reviews/evidence/outbox_sum_check.py)) confirms 17 reachable states, no deadlock and no fair cycle outside the terminal states.
+
   Three rules follow from the machine and are normative:
 
-  1. **One decision per execution.** Once the gate allows an intent, a retry after a timeout or a failed settle goes back to `Allowed`, not to `Proposed`. The gate is not asked again for the same idempotency key, so "allowed, executed, then denied" cannot happen.
+  1. **One decision per execution.** Once the gate allows an intent, a retry after a timeout or a failed settle goes back to `Allowed`, not to `Proposed`. The gate is not asked again for the same idempotency key, so "allowed, executed, then denied" cannot happen. In v0.4 this is a consequence of the type.
   2. **Escalation happens once and has a timeout.** An approved re-proposal can be allowed or denied, never escalated again, so an intent takes at most two gate decisions. `escalation.timeoutMs` (the polyflow platform policy field) fires `EscalationTimeout`, which denies the intent.
   3. **Denial is final and only precedes execution.** A deny can only happen from `Proposed`, before any attempt ran.
 
-  The model check of this machine is gate M3b in PT18. Adding a state or a transition to the worker without changing this machine first is `PL2401 RUNTIME_MODEL_DRIFT` in the runtime's own CI.
+  The check of this machine is gate M4b in PT18. Adding a state or a transition to the worker without changing this machine first is `PL2401 RUNTIME_MODEL_DRIFT` in the runtime's own CI.
 
 ## PT10. Workflows
 
@@ -584,13 +665,13 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 
 | Range | Stage | Examples |
 |---|---|---|
-| PL0xxx | parse, format, fixes | `PL0001 SYNTAX`, `PL0201 STALE_FIX` |
-| PL1xxx | types, domains | `PL1101 UNBOUNDED_DOMAIN`, `PL1201 POLICY_ONLY_CONSTRUCT`, `PL1202 MACHINE_ONLY_CONSTRUCT`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD` |
+| PL0xxx | parse, format, fixes, embedded subset | `PL0001 SYNTAX`, `PL0201 STALE_FIX`, `PL0301 OUTSIDE_EMBEDDED_SUBSET` |
+| PL1xxx | types, domains | `PL1101 UNBOUNDED_DOMAIN`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD` |
 | PL2xxx | lowering, strict validate, translation validation | `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
 | PL5xxx | composition | `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH` |
-| PL6xxx | policy admission, labels | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE` |
+| PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
 | PL9xxx | replay | `PL9001 SPEC_DIVERGENCE`, `PL9101 CONTROL_FAILED` |
@@ -641,6 +722,7 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
   1. Can a coding agent reach an admitted poly program for a stateful feature within the same budget as a TypeScript implementation?
   2. Does it ship fewer escaped defects than the same agent writing TypeScript, with or without polygraph after the fact?
   3. At what cost in tokens and wall time?
+  4. Which surface works better for agents: the standalone syntax or poly embedded in TypeScript (PT2.5)?
 - **Tasks.** Ten stateful features, fixed before any run, drawn from three families:
   - order and payment lifecycles;
   - workflow status derivation (modelled on the hatchet study);
@@ -650,10 +732,11 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
 - **Arms.**
   1. TypeScript alone.
   2. TypeScript, then polygraph after the fact, with the agent allowed to fix findings.
-  3. poly.
+  3. poly, standalone syntax.
+  4. poly, embedded TypeScript surface (PT2.5). Same core, same checks, same lowering; only the front end differs.
 
   The same agent and model are used in every arm, with the same token budget and wall-time limit per run.
-- **Runs.** Five independent runs per task per arm: 150 runs in total.
+- **Runs.** Five independent runs per task per arm: 200 runs in total.
 - **Oracles.** Three, kept separate so the result cannot be an artefact of the formalism:
 
   | Oracle | Written by | Form | Role |
@@ -668,9 +751,10 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
   - **Co-primary:** escaped defects per delivered task (O1), and tokens per delivered task.
   - **Secondary:** wall time; delivery rate within budget; O2 and O3 findings; regressions introduced and caught; for arm 3, diagnostics by code and the share of typed fixes applied unchanged.
 - **Analysis, fixed before any run.**
-  - Per-task means over the five runs; paired comparisons across the ten tasks (arm 3 against arm 1, arm 3 against arm 2) with the Wilcoxon signed-rank test, Holm-corrected, at 0.05.
-  - **A win for poly:** at least a 30% reduction in mean escaped defects against both arms, with tokens per delivered task no more than twice arm 1's.
-  - **A stop for poly as specified:** arm 3 delivers an admitted program in fewer than 70% of its runs within budget. M4 and later are then not started; the language surface is revised first.
+  - Per-task means over the five runs. Paired comparisons across the ten tasks use the Wilcoxon signed-rank test, Holm-corrected over all comparisons, at 0.05. The comparisons are arm 3 and arm 4 each against arms 1 and 2, and arm 4 against arm 3.
+  - **A win for poly:** at least one poly arm reduces mean escaped defects by at least 30% against both arms 1 and 2, with tokens per delivered task no more than twice arm 1's.
+  - **The surface decision:** if arm 4 is not worse than arm 3 on escaped defects (difference within 10% of arm 3's mean) and uses fewer tokens, the embedded surface becomes the primary surface. The standalone syntax is then deferred, and the parser, formatter and language server leave the v1 scope. Otherwise the standalone syntax stays primary and the embedded surface remains supported.
+  - **A stop for poly as specified:** neither poly arm delivers an admitted program in 70% of its runs within budget. M4 and later are then not started; the language surface is revised first.
   - Anything between is reported as it is, with the effect sizes and intervals.
 - **Controls.** Each reference machine replays its own corpus at 100%, and a mutated reference fails. Each O1 suite passes on the reference implementation and fails on a mutated one. A task whose controls fail is removed before any arm is scored.
 - **Reporting rule.** Every arm and every measure is reported, including a null or negative result for poly. The raw journals, prompts and O1 suites are kept.
@@ -710,9 +794,11 @@ const rt = await load('./.poly/build', {
   ledger: { keyId: 'ops-2026', signer: kms('…') },
 })
 
-rt.handle('payment.charge', async (payload, ctx) => {
-  // runs only after the gate allows; ctx.idempotencyKey is stable across retries
-  return psp.charge(payload.amount, { idempotencyKey: ctx.idempotencyKey })
+rt.handle('payment.charge', async (payload, { egress }, ctx) => {
+  // runs only after the gate allows; receives only the capabilities its labels grant (PT6.5)
+  // ctx.idempotencyKey is stable across retries
+  return egress.post('https://api.psp.example/v1/charges',
+                     { amount: payload.amount }, { idempotencyKey: ctx.idempotencyKey })
 })
 
 const order = await rt.create('orders.Order')
@@ -728,6 +814,15 @@ The API is polyrun's `createRuntime` with three additions:
 - the ledger writer (PT16).
 
 `rt.getState`, `rt.getStateAt(id, seq)` and `rt.list(machine, filter, status)` are unchanged.
+
+**Streams.** The runtime is a stream transformer: inputs flow in, intents flow out, and the state is the fold of the step over the inputs (PS11.4). The API exposes both streams for host code that prefers that model:
+
+```ts
+rt.inputs(order.id).subscribe(step => log(step))          // every labelled step, in seq order
+rt.intents('payment.charge').subscribe(i => metrics(i))   // every intent of a kind, after the gate
+```
+
+Handlers remain the only way to execute an effect. The intent stream is for observation.
 
 ## PT16. The ledger
 
@@ -755,7 +850,10 @@ poly/
   README.md
   docs/                      01 functional · 02 architecture · 03 technical · research/
   packages/
-    poly-lang/               lexer, parser, formatter, AST, types, domains, diagnostics
+    poly-core/               AST, types (incl. unions), domains, diagnostics; the pivot every surface produces
+    poly-lang/               standalone surface: lexer, parser, formatter
+    poly-embed/              embedded TypeScript surface: subset checker, AST builder, combinators
+    poly-ref/                reference interpreter from 04-semantics: translation validation, deadlock, liveness
     poly-lower/              construct → artefact (one module per row of the lowering map)
     poly-check/              pipeline orchestration, verdict fold, certificate
     poly-runtime/            polyrun host with certificate, gate hook, ledger writer
@@ -784,9 +882,9 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 
 | Milestone | Scope | Gate |
 |---|---|---|
-| M0 · Language core | Parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). |
+| M0 · Language core | `poly-core` AST, parser, formatter with PS12 precedence, AST digest and node ids, types and domains (with `strict` / `disclosed`, tagged unions, `match`, `Tri`), lowering of `state`, `action`, `on`, `guard`, `terminal`, invariants, step properties and reject properties; `poly-ref` written from 04-semantics with translation validation (PS9.3) and the deadlock check (PS5.6) | The turnstile, raft-roles and hatchet-status machines, written in poly, replay their existing field-study corpora at 100%. Their negative controls fail. Lowered `next.cjs` passes strict `validate()`. Translation validation agrees on every transition of every conformance case, and a deliberately broken lowering is caught (`PL2501`). |
 | M1 · Effects and composition | `emit`, effect declarations, timers, children, emission and compose invariants, maps | The `polyrun-oms` order machine in poly gives the same `check-effects` and `check-product` results as the hand-written artefacts (AC1). |
-| M2 · Diagnostics | Diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. |
+| M2 · Diagnostics and second surface | `poly-embed` front end producing the same AST; handler capability lint (PT6.5); diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain and today's polyrun | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
 | M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. |
 | M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, escalation with timeout, person-key signatures (PT12.5) | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. |
@@ -809,7 +907,7 @@ Worlds (appendix A) are planned after M7 and are not part of v1.
 
 ## Conclusion
 
-The meaning of poly is fixed in 04-semantics. The technical core is a lowering table checked against that meaning on every run, and a verdict fold:
+The meaning of poly is fixed in 04-semantics: one machine, interpreted by checking, simulation and running. The technical core is a lowering table checked against that meaning on every run, and a verdict fold. Tagged unions make most invalid states unrepresentable, handlers receive capabilities rather than ambient authority, and which surface agents write (standalone or embedded TypeScript) is decided by the experiment:
 
 - Every construct maps to an artefact an existing engine reads.
 - Every engine result maps to a diagnostic with a stable code, a witness and typed fixes.
