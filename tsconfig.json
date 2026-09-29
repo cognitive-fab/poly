@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/poly-core" },
+    { "path": "packages/poly-lang" },
+    { "path": "packages/poly-lower" },
+    { "path": "packages/poly-ref" },
+    { "path": "packages/poly-check" }
+  ]
+}

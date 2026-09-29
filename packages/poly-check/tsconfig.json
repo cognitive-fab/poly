@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist"
+  },
+  "include": [
+    "src",
+    "test"
+  ],
+  "references": [
+    {
+      "path": "../poly-core"
+    },
+    {
+      "path": "../poly-lang"
+    },
+    {
+      "path": "../poly-lower"
+    },
+    {
+      "path": "../poly-ref"
+    }
+  ]
+}

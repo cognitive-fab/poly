@@ -1,0 +1,17 @@
+{
+  "name": "@poly/lang",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "poly standalone surface: lexer, parser, canonical formatter",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "dependencies": {
+    "@poly/core": "0.0.0"
+  }
+}

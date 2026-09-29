@@ -1,0 +1,27 @@
+{
+  "name": "poly",
+  "private": true,
+  "type": "module",
+  "description": "poly: a language and runtime for the stateful core of software written by coding agents",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/poly-core",
+    "packages/poly-lang",
+    "packages/poly-lower",
+    "packages/poly-ref",
+    "packages/poly-check"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "test": "npm run build && npm run check:boundaries && node --test \"packages/*/dist/test/*.test.js\" \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "~5.9.3"
+  }
+}

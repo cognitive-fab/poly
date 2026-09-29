@@ -1,0 +1,25 @@
+{
+  "name": "@poly/check",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "poly check pipeline, verdict fold and CLI",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "bin": {
+    "poly": "./dist/src/cli.js"
+  },
+  "dependencies": {
+    "@poly/core": "0.0.0",
+    "@poly/lang": "0.0.0",
+    "@poly/lower": "0.0.0",
+    "@poly/ref": "0.0.0",
+    "@cognitive-fab/polygraph": "~8.3.0",
+    "@cognitive-fab/sam-pattern": "~2.2.1"
+  }
+}
