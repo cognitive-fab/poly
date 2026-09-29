@@ -74,4 +74,6 @@ test('match exhaustiveness enumerates literal payloads (PS2.2)', () => {
   assert.deepEqual(codesOf(src("E { ok: true } => s' = D  E { ok: false } => s' = D  D => s' = E { ok: true }")), []);
   assert.deepEqual(codesOf(src("E { ok: true } => s' = D  D => s' = E { ok: true }")), ['PL1501']);
   assert.deepEqual(codesOf(src("E { ok: v } => s' = D  D => s' = E { ok: true }")), []);
+  // A literal on an undeclared payload is reported, not a crash in the coverage check.
+  assert.deepEqual([...new Set(codesOf(src("E { nope: true } => s' = D  D => s' = D")))].sort(), ['PL1001', 'PL1501']);
 });

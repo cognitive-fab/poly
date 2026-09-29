@@ -193,3 +193,10 @@ test('later-milestone top-level forms are refused with PL0901, not a syntax erro
   assert.ok(r.module);
   assert.deepEqual(r.diagnostics.map((d) => d.code), ['PL0901']);
 });
+
+test('an empty then-block with an else keeps its condition', () => {
+  const m = ok(`module t\nmachine M {\n  state { x : bool = false }\n  action A()\n  on A {\n    if x { } else { x' = true }\n  }\n}\n`);
+  const out = format(m);
+  assert.ok(out.includes('    if x {\n    } else {'), out);
+  assert.equal(digest(ok(out)), digest(m));
+});

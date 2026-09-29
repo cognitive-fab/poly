@@ -183,7 +183,9 @@ class Printer {
       case 'Assign': return [`${s.field}' = ${this.expr(s.expr, 0)}`];
       case 'MapUpdate': return [`${s.field}' = ${s.base} with [${this.expr(s.key, 0)}] = ${this.expr(s.value, 0)}`];
       case 'If': {
-        const lines = this.blockLines(`if ${this.expr(s.cond, 0, true)}`, s.then);
+        const head = `if ${this.expr(s.cond, 0, true)}`;
+        // An empty then-block prints as one line `if c {}`; with an else it must open and close on its own lines.
+        const lines = s.else && s.then.length === 0 ? [`${head} {`, '}'] : this.blockLines(head, s.then);
         if (s.else) {
           const els = this.blockLines('', s.else);
           lines[lines.length - 1] = `} else${els[0]}`;

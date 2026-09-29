@@ -402,7 +402,8 @@ class Checker {
       if (mine.some((p) => p.fields.every((f) => f.literal === null))) continue;
       if (mine.length === 0) { missing.push(c.name); continue; }
       // Literal patterns: enumerate the payload values the literals constrain.
-      const litFields = [...new Set(mine.flatMap((p) => p.fields.filter((f) => f.literal).map((f) => f.name)))];
+      // Undeclared payload names were reported by match() (PL1001); only declared ones constrain coverage.
+      const litFields = [...new Set(mine.flatMap((p) => p.fields.filter((f) => f.literal && c.fields.some((x) => x.name === f.name)).map((f) => f.name)))];
       const domains = litFields.map((n) => this.values(c.fields.find((f) => f.name === n)!.type));
       if (domains.some((d) => d === null)) { missing.push(`${c.name} { … }`); continue; }
       const combos = domains.reduce<unknown[][]>((acc, d) => acc.flatMap((x) => d!.map((v) => [...x, v])), [[]]);
