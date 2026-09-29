@@ -165,4 +165,26 @@ test('finding 6: poly-ref escapes and bounds on other fields, and its exploratio
   assert.deepEqual(merged.map((d) => `${d.code}:${d.field ?? '*'}`).sort(), ['PL3102:a', 'PL3102:b', 'PL3901:*', 'PL3901:x']);
 });
 
+// ── Finding 4, S22: constructors shared by two types ───────────────────────
+
+test('finding 4: a shared constructor resolves against the other side of ==, and Type.C is legal', async () => {
+  const r = await run('f4-shared-ctor.poly');
+  assert.deepEqual(codes(r), [], JSON.stringify(r.diagnostics.map((d) => d.message)));
+  assert.equal(r.verdict, 'CLEAN');
+});
+
+test('S22: a constructor still ambiguous after typing is PL1005, and the qualified form fixes it', () => {
+  const types = 'enum Door { Open, Shut }\nenum Valve { Open, Closed }\n';
+  const m = (stmt) => `module t\n${types}machine M {\n  state {\n    n : 0..3 = 0\n  }\n  action A()\n  on A {\n    ${stmt}\n    n' = 1\n  }\n}\n`;
+  assert.deepEqual(compile(m('let x = Open\n    require x == x else reject "no"')).map((d) => d.code), ['PL1005']);
+  assert.deepEqual(compile(m('let x = Door.Open\n    require x == x else reject "no"')), []);
+  assert.deepEqual(compile(m('require Door.Open != Door.Shut else reject "no"')), []);
+});
+
+test('S22: Type.C formats and reparses to the same AST', () => {
+  const src = readFileSync(join(FIX, 'f4-shared-ctor.poly'), 'utf8');
+  const m = parse(src).module;
+  assert.equal(digest(parse(format(m)).module), digest(m));
+});
+
 void readFileSync;

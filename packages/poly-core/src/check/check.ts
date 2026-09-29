@@ -435,7 +435,9 @@ class Checker {
       let constraint: { ctor: string; lits: Map<string, unknown> } | null = null;
       if (arm.pattern.kind === 'PCtor') {
         const pat = arm.pattern;
-        const c = u.ctors.find((x) => x.name === pat.ctor);
+        // S22: a qualified pattern must name the scrutinee's own type.
+        const dot = pat.ctor.indexOf('.');
+        const c = dot >= 0 && pat.ctor.slice(0, dot) !== u.name ? undefined : u.ctors.find((x) => x.name === pat.ctor.slice(dot + 1));
         if (!c) { this.err('PL1201', pat, `${pat.ctor} is not a constructor of ${u.name}`); constraints.push({ ctor: '', lits: new Map() }); continue; }
         constraint = { ctor: c.name, lits: new Map() };
         for (const pf of pat.fields) {
@@ -589,13 +591,28 @@ class Checker {
   }
 
   private ctorType(name: string, expected: Ty | undefined, at: A.NodeBase): { union: string; info: UnionInfo } | null {
+    // S22: `Type.C` names its type; an unqualified name resolves against the expected type.
+    const dot = name.indexOf('.');
+    if (dot >= 0) {
+      const union = name.slice(0, dot);
+      const info = this.env.unions.get(union);
+      if (!info || !info.ctors.some((c) => c.name === name.slice(dot + 1))) { this.err('PL1001', at, `${name}: ${info ? `${union} has no constructor ${name.slice(dot + 1)}` : `unknown type ${union}`}`); return null; }
+      return { union, info };
+    }
     const owners = this.env.ctorOwners.get(name) ?? [];
     let union: string | undefined;
     if (expected?.k === 'union' && owners.includes(expected.name)) union = expected.name;
     else if (owners.length === 1) union = owners[0];
-    else if (owners.length > 1) { this.err('PL1201', at, `${name} is a constructor of ${owners.join(' and ')}; the context does not say which`); return null; }
+    else if (owners.length > 1) { this.err('PL1005', at, `${name} is a constructor of ${owners.join(' and ')}; write ${owners.map((o) => `${o}.${name}`).join(' or ')} (S22)`); return null; }
     if (!union) return null;
     return { union, info: this.env.unions.get(union)! };
+  }
+
+  /** S22: an unqualified constructor name that more than one type declares, not hidden by a local, parameter or field. */
+  private ambiguousCtor(e: A.Expr, scope: Scope): boolean {
+    const name = e.kind === 'Name' ? e.name : e.kind === 'CtorExpr' && !e.ctor.includes('.') ? e.ctor : null;
+    if (!name || scope.locals.has(name) || scope.params.has(name) || this.facts?.fieldTypes.has(name)) return false;
+    return (this.env.ctorOwners.get(name)?.length ?? 0) > 1;
   }
 
   private typeOfInner(e: A.Expr, scope: Scope, expected?: Ty): Ty {
@@ -627,6 +644,8 @@ class Checker {
           this.resolve(e, { k: 'ctor', union: c.union, ctor: n });
           return { k: 'union', name: c.union };
         }
+        // A constructor of several types was reported ambiguous (PL1005): it is not also an unknown name.
+        if ((this.env.ctorOwners.get(n)?.length ?? 0) > 1) return ERR;
         if (this.actions.has(n) && (scope.ctx === 'step' || scope.ctx === 'reject' || scope.ctx === 'guard')) { this.resolve(e, { k: 'action', name: n }); return { k: 'action' }; }
         if (fields.has(n) && scope.ctx === 'step') { this.err('PL1201', e, `a step property reads pre.${n} or post.${n}, not ${n} (PT5)`); return ERR; }
         if ((scope.ctx === 'step' || scope.ctx === 'reject' || scope.ctx === 'guard') && this.isParamOfSomeAction(n)) {
@@ -637,7 +656,15 @@ class Checker {
         return ERR;
       }
       case 'Member': {
-        // S19 (proposed, awaiting the owner): in a handler, pre.f names the pre-state field f even where a parameter f shadows it.
+        // S22: `Type.C`, a constructor without payload named with its type.
+        if (e.object.kind === 'Name' && this.env.unions.has(e.object.name) && !scope.locals.has(e.object.name) && !scope.params.has(e.object.name) && !fields.has(e.object.name)) {
+          const c = this.ctorType(`${e.object.name}.${e.prop}`, expected, e);
+          if (!c) return ERR;
+          if (c.info.ctors.find((x) => x.name === e.prop)!.fields.length) this.err('PL1201', e, `${e.object.name}.${e.prop} carries a payload; write ${e.object.name}.${e.prop} { … }`);
+          this.resolve(e, { k: 'ctor', union: c.union, ctor: e.prop });
+          return { k: 'union', name: c.union };
+        }
+        // S19: in a handler, pre.f names the pre-state field f even where a parameter f shadows it. in a handler, pre.f names the pre-state field f even where a parameter f shadows it.
         const handlerPre = scope.ctx === 'handler' && e.object.kind === 'Name' && e.object.name === 'pre' && !scope.locals.has('pre') && !scope.params.has('pre');
         if (handlerPre || (e.object.kind === 'Name' && (e.object.name === 'pre' || e.object.name === 'post') && (scope.ctx === 'step' || scope.ctx === 'reject'))) {
           const obj = e.object as A.NameRef;
@@ -692,7 +719,7 @@ class Checker {
       case 'CtorExpr': {
         const c = this.ctorType(e.ctor, expected, e);
         if (!c) { this.err('PL1001', e, `unknown constructor ${e.ctor}`); return ERR; }
-        const ci = c.info.ctors.find((x) => x.name === e.ctor)!;
+        const ci = c.info.ctors.find((x) => x.name === e.ctor.slice(e.ctor.indexOf('.') + 1))!;
         const given = e.fields.map((f) => f.name);
         for (const f of ci.fields) if (!given.includes(f.name)) this.err('PL1201', e, `${e.ctor} needs its payload ${f.name}`);
         for (const f of e.fields) {
@@ -763,10 +790,16 @@ class Checker {
       }
       case '==':
       case '!=': {
-        const l = this.typeOf(e.left, scope);
-        const r = this.typeOf(e.right, scope, l);
-        // `Name == field`: retype the left with the right as context (a constructor on the left).
-        if (l.k === 'error' && e.left.kind === 'Name') return BOOL;
+        // S22: each side is typed first; an ambiguous constructor on either side takes the other side's type.
+        let l: Ty;
+        let r: Ty;
+        if (this.ambiguousCtor(e.left, scope) && !this.ambiguousCtor(e.right, scope)) {
+          r = this.typeOf(e.right, scope);
+          l = this.typeOf(e.left, scope, r);
+        } else {
+          l = this.typeOf(e.left, scope);
+          r = this.typeOf(e.right, scope, l);
+        }
         if (!same(l, r)) this.err('PL1201', e, `cannot compare ${tyToString(l)} with ${tyToString(r)}`);
         return BOOL;
       }

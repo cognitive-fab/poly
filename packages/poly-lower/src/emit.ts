@@ -35,7 +35,7 @@ function unionTag(cx: Cx, e: A.Expr, code: string): string {
     // A field read directly: its flat tag is the field itself.
     const r = e.kind === 'Name' ? cx.facts.resolutions.get(e.id) : undefined;
     if (r?.k === 'field') return `${cx.stateVar}[${q(r.name)}]`;
-    if (e.kind === 'Member' && e.object.kind === 'Name') return `${cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : e.object.name}[${q(e.prop)}]`;
+    if (e.kind === 'Member' && e.object.kind === 'Name' && cx.facts.resolutions.get(e.id)?.k !== 'ctor') return `${cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : e.object.name}[${q(e.prop)}]`;
     return `(${code}).$`;
   }
   return code;
@@ -72,6 +72,9 @@ export function expr(e: A.Expr, cx: Cx): string {
       throw new Error('poly-lower: unreachable');
     }
     case 'Member': {
+      // S22: `Type.C` resolved to a constructor.
+      const res = cx.facts.resolutions.get(e.id);
+      if (res?.k === 'ctor') return cx.env.unions.get(res.union)!.isEnum ? q(res.ctor) : `{ $: ${q(res.ctor)} }`;
       const obj = (e.object as A.NameRef).name;
       // Reject properties and handlers read pre.f from their state variable (PT5; S19 for handlers).
       const v = cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : obj;
@@ -108,7 +111,7 @@ export function expr(e: A.Expr, cx: Cx): string {
       const set = `[${e.set.map((x) => expr(x, cx)).join(', ')}]`;
       return structural ? `${set}.some((__x) => __eq(__x, ${v}))` : `${set}.includes(${v})`;
     }
-    case 'CtorExpr': return `{ $: ${q(e.ctor)}${e.fields.map((f) => `, ${f.name}: ${expr(f.value, cx)}`).join('')} }`;
+    case 'CtorExpr': return `{ $: ${q(e.ctor.slice(e.ctor.indexOf('.') + 1))}${e.fields.map((f) => `, ${f.name}: ${expr(f.value, cx)}`).join('')} }`;
     case 'MapLit': {
       const t = tyOf(cx, e);
       if (t?.k === 'map' && t.array) {
@@ -206,7 +209,7 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
         let cond = 'true';
         const binds: string[] = [];
         if (p.kind === 'PCtor') {
-          const parts = [`${v}t === ${q(p.ctor)}`];
+          const parts = [`${v}t === ${q(p.ctor.slice(p.ctor.indexOf('.') + 1))}`];
           for (const f of p.fields) {
             if (f.literal) parts.push(`${v}[${q(f.name)}] === ${f.literal.kind === 'Name' ? q(f.literal.name) : JSON.stringify(f.literal.value)}`);
             // S21: a name that is a constructor of the payload's type is a literal; `_` ignores the payload.

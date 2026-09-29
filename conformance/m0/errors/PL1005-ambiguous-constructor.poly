@@ -1,0 +1,17 @@
+// expect: PL1005 (a constructor two types declare, with nothing to say which: write Door.Open, S22)
+module errors
+
+enum Door { Open, Shut }
+enum Valve { Open, Closed }
+
+machine M {
+  state {
+    n : 0..3 = 0
+  }
+  action A()
+  on A {
+    let x = Open
+    require x == x else reject "no"
+    n' = 1
+  }
+}

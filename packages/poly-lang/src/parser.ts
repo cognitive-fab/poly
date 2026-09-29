@@ -617,7 +617,9 @@ class Parser {
       this.next();
       pattern = this.node<A.PWild>(start, { kind: 'PWild' });
     } else {
-      const ctor = this.ident('a constructor pattern');
+      let ctor = this.ident('a constructor pattern');
+      // S22: the qualified form Type.C is always legal.
+      if (this.atPunct('.') && this.peek(1).kind === 'ident') { this.next(); ctor += '.' + this.ident('a constructor'); }
       const fields: A.PCtor['fields'] = [];
       if (this.atPunct('{')) {
         this.next();
@@ -838,6 +840,21 @@ class Parser {
         }
         this.next();
         return this.node<A.Call>(start, { kind: 'Call', callee: start.text, args });
+      }
+      // S22: `Type.C { … }`, a qualified constructor with a payload. `Type.C` alone is a member access, resolved by the checker.
+      if (!noStruct && this.atPunct('.') && this.peek(1).kind === 'ident' && this.atPunct('{', 2)) {
+        this.next();
+        const ctor = start.text + '.' + this.next().text;
+        this.next();
+        const fields: A.CtorExpr['fields'] = [];
+        while (!this.atPunct('}')) {
+          const name = this.ident('a payload field');
+          this.expect(':');
+          fields.push({ name, value: this.expr() });
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+        return this.node<A.CtorExpr>(start, { kind: 'CtorExpr', ctor, fields });
       }
       if (this.atPunct('{') && !noStruct) {
         this.next();

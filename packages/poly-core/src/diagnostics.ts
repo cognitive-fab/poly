@@ -27,6 +27,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL0901: { name: 'NOT_IN_MILESTONE', stage: 'types', severity: 'error' },
   PL1001: { name: 'UNKNOWN_NAME', stage: 'types', severity: 'error' },
   PL1002: { name: 'DUPLICATE_DECLARATION', stage: 'types', severity: 'error' },
+  // S22: its fix is the qualified form Type.C.
+  PL1005: { name: 'AMBIGUOUS_CONSTRUCTOR', stage: 'types', severity: 'error' },
   PL1101: { name: 'UNBOUNDED_DOMAIN', stage: 'types', severity: 'error' },
   PL1201: { name: 'TYPE_MISMATCH', stage: 'types', severity: 'error' },
   PL1202: { name: 'READ_OF_PRIMED_FIELD', stage: 'types', severity: 'error' },

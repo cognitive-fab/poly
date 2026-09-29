@@ -55,6 +55,8 @@ export function evaluate(e: A.Expr, env: Env): Value {
     case 'Member': {
       if (e.object.kind === 'Name' && e.object.name === 'pre' && env.pre) return field(env.pre, e.prop);
       if (e.object.kind === 'Name' && e.object.name === 'post' && env.post) return field(env.post, e.prop);
+      // S22: `Type.C`, a constructor named with its type.
+      if (e.object.kind === 'Name' && env.M.unions.get(e.object.name)?.ctors.some((c) => c.name === e.prop)) return { ctor: e.prop, payload: {} };
       throw new EvalError(`poly-ref: .${e.prop} outside a step or reject property`);
     }
     case 'Index': {
@@ -86,7 +88,7 @@ export function evaluate(e: A.Expr, env: Env): Value {
     case 'CtorExpr': {
       const payload: Record<string, Value> = {};
       for (const f of e.fields) payload[f.name] = evaluate(f.value, env);
-      return { ctor: e.ctor, payload };
+      return { ctor: e.ctor.slice(e.ctor.indexOf('.') + 1), payload };
     }
     case 'MapLit':
     case 'ArrayLit':
@@ -106,11 +108,12 @@ export function evaluateAt(e: A.Expr, env: Env, type: import('./model.js').RType
     return { entries: keys.map((k, i) => [k, evaluateAt(e.items[i], env, type.value)] as [Value, Value]) };
   }
   if (e.kind === 'CtorExpr' && type.k === 'union') {
-    const c = env.M.unions.get(type.name)!.ctors.find((x) => x.name === e.ctor);
+    const name = e.ctor.slice(e.ctor.indexOf('.') + 1);
+    const c = env.M.unions.get(type.name)!.ctors.find((x) => x.name === name);
     if (c) {
       const payload: Record<string, Value> = {};
       for (const f of e.fields) payload[f.name] = evaluateAt(f.value, env, c.fields.find((x) => x.name === f.name)!.type);
-      return { ctor: e.ctor, payload };
+      return { ctor: name, payload };
     }
   }
   return evaluate(e, env);

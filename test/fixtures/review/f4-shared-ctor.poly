@@ -1,0 +1,33 @@
+// Review finding 4 (S22): `Open` is a constructor of both Door and Valve. It resolves against the other
+// side of ==, so `Open == door` and `door == Open` mean the same; `Valve.Open` is the qualified form.
+// Before the fix, `Open == door` was refused with PL1201 and PL1001.
+module review
+
+enum Door { Open, Shut }
+type Valve = Open | Closed { turns: 0..2 }
+
+machine Plant {
+  state {
+    door  : Door = Shut
+    valve : Valve = Closed { turns: 0 }
+  }
+  action OpenDoor()
+  action CloseDoor()
+  action OpenValve()
+  on OpenDoor {
+    require !(Open == door) else reject "open"
+    door' = Open
+  }
+  on CloseDoor {
+    require door == Open else reject "shut"
+    door' = Shut
+  }
+  on OpenValve {
+    require valve != Valve.Open else reject "open"
+    match valve {
+      Valve.Closed { turns: t } => if t < 2 { valve' = Valve.Closed { turns: t + 1 } } else { valve' = Valve.Open }
+      Valve.Open => reject "open"
+    }
+  }
+  invariant open-door-agrees: door == Open implies Open == door
+}

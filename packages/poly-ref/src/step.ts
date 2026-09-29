@@ -98,7 +98,8 @@ function patternName(M: RMachine, ctor: string, payload: string, name: string): 
 
 function matches(M: RMachine, p: A.Pattern, v: Value): boolean {
   if (p.kind === 'PWild') return true;
-  if (!isUnion(v) || v.ctor !== p.ctor) return false;
+  // S22: a qualified pattern `Type.C` matches the constructor C.
+  if (!isUnion(v) || v.ctor !== p.ctor.slice(p.ctor.indexOf('.') + 1)) return false;
   return p.fields.every((f) => {
     if (f.literal !== null) return keyOf(v.payload[f.name]) === keyOf(literal(f.literal));
     if (f.bind && patternName(M, v.ctor, f.name, f.bind) === 'literal') return keyOf(v.payload[f.name]) === keyOf({ ctor: f.bind, payload: {} });
