@@ -36,7 +36,8 @@ The definitions are mathematical and short. They are written so that a reference
   - `E` is a finite sequence of effect intents (effects, timer sets and cancels, spawns, signals), in statement order;
   - `r` is a reason, a string literal from the handler's text.
 - **PS2.2** A handler body is evaluated against the pre-state `s` and the data `d` as follows:
-  1. **Guards.** The guards in `G` are evaluated in declaration order. The first guard whose condition holds yields `reject(r)` with its reason.
+  0. **Names.** A bare name denotes the innermost binding: a local (`let` or a pattern binder), then a parameter of `a` (a component of `d`), then a field (a component of `s`). `pre.f` always denotes `s(f)`, so a field hidden by a parameter of the same name stays readable (S19).
+  1. **Guards.** The guards in `G` are evaluated in declaration order, against `s`, `a` and `d`. A guard sees the parameters of `a` only where `action == A` narrows the action; elsewhere a bare name is a field (S19). The first guard whose condition holds yields `reject(r)` with its reason.
   2. **Body.** Statements are evaluated in order:
      - `require c else reject r` yields `reject(r)` if `c` is false and continues otherwise;
      - `reject r` yields `reject(r)`;
@@ -108,8 +109,8 @@ The definitions are mathematical and short. They are written so that a reference
 There are five kinds of property. Each has its own keyword (PT5), and none is called an invariant unless it is one.
 
 - **PS5.1** An **invariant** is a predicate `P` on states. `M ⊨ invariant P` iff `P(s)` holds for every `s ∈ Reach(I)`. The automatic `domain:<field>` properties (PT3.5) are invariants.
-- **PS5.2** A **step property** is a predicate `Q(s, a, d, s')`. It holds iff `Q` holds for every **accepted** transition from a state in `Reach(I)`.
-- **PS5.3** A **reject property** is a predicate `J(s, a, d, v)`. It holds iff `J` holds for **every** transition from a state in `Reach(I)`, whatever its verdict. `rejected(r)` in `J` is true iff `v = rejected(r)`.
+- **PS5.2** A **step property** is a predicate `Q(s, a, d, s')`. It holds iff `Q` holds for every **accepted** transition from a state in `Reach(I)`. `Q` reads `d` only where `action == A` narrows the action, with the names of PS2.2 (S19).
+- **PS5.3** A **reject property** is a predicate `J(s, a, d, v)`. It holds iff `J` holds for **every** transition from a state in `Reach(I)`, whatever its verdict. `rejected(r)` in `J` is true iff `v = rejected(r)`. `J` reads `d` only where `action == A` narrows the action; elsewhere a bare name is a field of `s` (PS2.2, S19).
 - **PS5.4** A **path property** is a predicate `Φ(π)` on finite paths. It is evaluated through `emitted(π)`, the concatenation of the intent sequences of the accepted labels of `π`, and `actions(π)`, the sequence of actions. It holds iff `Φ(π)` holds for every path `π` of `I`. Path properties must be **prefix-closed**: if `Φ` holds of a path, it holds of every prefix. The compiler accepts only forms that are prefix-closed by construction (`count(k) <= n`, `before(a, b)`, and their conjunctions). So a path property is a safety property and has a finite witness.
 - **PS5.5** A **liveness property** has one of two forms:
   - `eventually P`: every fair behaviour of `I` reaches a state satisfying `P`;

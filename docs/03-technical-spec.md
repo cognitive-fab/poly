@@ -68,7 +68,8 @@ Stmt        = "require" Expr "else" "reject" String
             | "signal" Ident "->" Ident "(" [ Args ] ")" ;
 ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
 Arm         = Pattern "=>" ( Block | Stmt ) ;
-Pattern     = "_" | Ident [ "{" Ident ":" ( Literal | Ident ) { "," Ident ":" ( Literal | Ident ) } "}" ] ;
+Pattern     = "_" | CtorName [ "{" Ident ":" ( Literal | Ident | "_" ) { "," Ident ":" ( Literal | Ident | "_" ) } "}" ] ;
+CtorName    = Ident [ "." Ident ] ;
 Property    = "invariant" Ident ":" Expr
             | "step" "property" Ident ":" Expr
             | "reject" "property" Ident ":" Expr
@@ -97,6 +98,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
 - **PT2.1** Keywords are **contextual**: a keyword is reserved only in the grammar positions that use it, and anywhere an identifier is expected it is an ordinary identifier. So a field may be named `state`, `derived`, `internal`, `terminal` or `type`. The parser decides with at most two tokens of lookahead: after a field's initial expression, `derived` or `internal` followed by `:` begins the next field, and otherwise it is the modifier. Field and action names lower verbatim into `contract.json`, traces and diagnostics, so a corpus's own names are kept. There is no second, external name for a field. Identifiers follow TypeScript identifier rules. Rejection reasons and effect kinds are string literals, so agents can reuse the names already present in a system.
 - **PT2.2** The expression sublanguage (AD-2) is a total, side-effect-free subset of TypeScript expressions:
   - literals, field and parameter names, `pre.` and `post.` (in step properties), enum members;
+  - **name resolution (S19).** A bare name resolves to the innermost binding: a local (`let` or a pattern binder), then a parameter, then a field, as in TypeScript. `pre.f` always names the pre-state field `f`, in handlers as in properties, so a field hidden by a parameter of the same name stays readable. Parameters are visible only where the action is known: in a handler, and in a guard, step property or reject property only where `action == A` narrows it (PT5). With no narrowing, no parameter is in scope and a bare name is the field;
   - `== != < <= > >= && || !`, `+ - *`, and integer `/` and `%`. Division truncates toward zero, and `%` takes the sign of the dividend, as in TypeScript with the quotient truncated (`Math.trunc(a / b)`). A divisor whose static range contains 0 is `PL1204 DIVISION_BY_ZERO`, so division is total;
   - `implies`;
   - `count(kind)` and `before(a, b)` (in emission invariants);
@@ -115,6 +117,8 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
 
   This follows the pattern of an option type, which agents know from TypeScript's `boolean | undefined`.
 - **PT2.4** `e is C` tests a union value's constructor and has type `Bool`; `e is C1 | C2` is short for `e is C1 || e is C2`. `C { q: e }` constructs a union value. `match` is exhaustive (`PL1501 NON_EXHAUSTIVE_MATCH`). Enums are unions without payloads, so `==` and `is` agree on them.
+  - **Names in patterns (S21).** In a payload pattern `C { q: x }`, the name `x` is read by these rules, in order: (1) a constructor of the payload's type is a literal pattern; (2) a constructor of another type in scope is `PL1201 TYPE_MISMATCH`, not a binder; (3) any other name binds the payload value. A binder that shadows a constructor in scope is an error (`PL1002`). A binder its arm never reads is `PL1504 UNUSED_BINDER`: write `_` to ignore a payload. An arm that the arms before it always cover is `PL1503 UNREACHABLE_ARM`. So a misspelled constructor cannot become a silent catch-all.
+  - **Constructors shared by two types (S22).** A constructor name resolves against the expected type. In `a == b` (and `!=`), each side is typed first, and an ambiguous constructor on either side takes the other side's type, so `Open == s` and `s == Open` mean the same. The qualified form `Type.C` is always legal, in expressions and in patterns. A constructor still ambiguous after that is `PL1005 AMBIGUOUS_CONSTRUCTOR`, whose fix is the qualified form.
   - **Constructors and blocks.** In the condition of an `if` and the scrutinee of a `match`, an identifier followed by `{` is never read as a constructor: the `{` opens the block. Parentheses restore a constructor there, as in `if intent == (Proposed { decision: 1 }) { … }`. This is the rule Rust uses for the same ambiguity.
 - **PT2.4a** **Handler parameters.** In `on A(x, y) { … }` the parameter list is optional. When present, it must repeat the action's declared parameter names in declaration order, otherwise it is `PL1201 TYPE_MISMATCH`. It neither renames nor selects parameters. The action's parameters are in scope in the body whether or not the list is written.
 
@@ -187,7 +191,7 @@ The compiler computes the set of fields written on each path. It emits `unchange
 
 ### PT4.3 Cross-cutting vetoes
 
-`guard all when <expr> reject "<reason>"` lowers to a broadcast acceptor. The profile allows it: one acceptor may reject after another has written. Guards run before handlers.
+`guard all when <expr> reject "<reason>"` lowers to a broadcast acceptor. The profile allows it: one acceptor may reject after another has written. Guards run before handlers. A guard reads the pre-state and `action`; it reads an action's parameters only where `action == A` narrows the action, under the name resolution of PT2.2 (S19).
 
 ### PT4.4 Step classification
 
@@ -341,7 +345,7 @@ The engine formats keep their names (`transitionInvariants`, `effectInvariants`)
 | `step property` | `pre.f` and `post.f` for every field `f`; `action`, compared with `==` or `!=` to an action name; the parameters of the step's action |
 | `reject property` | `pre.f`, or the bare field `f`, for the state the step starts from; `action`; the parameters of the step's action; `rejected("reason")`, true iff the step's verdict is `rejected` with that reason |
 
-A parameter is in scope only on steps of an action that declares it, so a property that reads one must first compare `action`: in `(action == Pay && amount > 10) implies …`, `amount` is read only when `action == Pay` holds. A parameter read where no declaring action is established is `PL1201 TYPE_MISMATCH`, not `false`. Step and reject properties are lowered with the step's verdict as an extra argument, so a step property is evaluated on accepted steps only (PS5.2), even though the engine calls `transitionInvariants` on every step.
+Names resolve as in PT2.2 (S19): a bare name is a parameter where one is in scope and a field otherwise, and `pre.f` always names the field. A parameter is in scope only on steps of an action that declares it, so a property that reads one must first compare `action`: in `(action == Pay && amount > 10) implies …`, `amount` is read only when `action == Pay` holds. A parameter read where no declaring action is established is `PL1201 TYPE_MISMATCH`, not `false`. Step and reject properties are lowered with the step's verdict as an extra argument, so a step property is evaluated on accepted steps only (PS5.2), even though the engine calls `transitionInvariants` on every step.
 
 **poly-ref is poly's model checker.** It is written from 04-semantics as a reference interpreter, and it explores the checked instance for translation validation. The same exploration yields the reachable graph, on which poly-ref checks deadlock freedom, liveness and configurations of communicating machines. No engine checks these today. The architecture states this plainly (PA0.1): poly has its own checker for everything that concerns how machines relate over time. It is also the part most likely to have bugs of its own, so its first acceptance tests are the evidence scripts in `reviews/evidence` (PT18, M0 and M1). If polygraph gains any of these checks, poly defers to it.
 
@@ -861,8 +865,8 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | Range | Stage | Examples |
 |---|---|---|
 | PL0xxx | parse, format, fixes, embedded subset, milestone | `PL0001 SYNTAX`, `PL0201 STALE_FIX`, `PL0301 OUTSIDE_EMBEDDED_SUBSET`, `PL0901 NOT_IN_MILESTONE` |
-| PL1xxx | names, types, domains | `PL1001 UNKNOWN_NAME`, `PL1002 DUPLICATE_DECLARATION`, `PL1101 UNBOUNDED_DOMAIN`, `PL1201 TYPE_MISMATCH`, `PL1202 READ_OF_PRIMED_FIELD`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1204 DIVISION_BY_ZERO`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1502 INCOMPLETE_MAP_LITERAL`, `PL1601 PAYLOAD_TYPE_CONFLICT`, `PL1602 ARRAY_MAP_NOT_ZERO_BASED` |
-| PL2xxx | lowering, strict validate, translation validation | `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
+| PL1xxx | names, types, domains | `PL1001 UNKNOWN_NAME`, `PL1002 DUPLICATE_DECLARATION`, `PL1005 AMBIGUOUS_CONSTRUCTOR`, `PL1101 UNBOUNDED_DOMAIN`, `PL1201 TYPE_MISMATCH`, `PL1202 READ_OF_PRIMED_FIELD`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1204 DIVISION_BY_ZERO`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1502 INCOMPLETE_MAP_LITERAL`, `PL1503 UNREACHABLE_ARM`, `PL1504 UNUSED_BINDER`, `PL1601 PAYLOAD_TYPE_CONFLICT`, `PL1602 ARRAY_MAP_NOT_ZERO_BASED` |
+| PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
 | PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK` |
@@ -870,6 +874,8 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
 | PL9xxx | replay | `PL9001 SPEC_DIVERGENCE`, `PL9101 CONTROL_FAILED` |
+
+`PL2001 STRICT_VALIDATE` and `PL2501 LOWERING_MISMATCH` are addressed to the toolchain, never to the author: a lowered module that fails strict `validate()`, or that disagrees with poly-ref, is a toolchain fault, and the verdict is `REFUSED` (S20). A user error must be reported at its source line with a user-facing code; a user program that reaches either code is a checker bug.
 
 `PL0901 NOT_IN_MILESTONE` refuses a construct that parses but is not lowered by the toolchain in use (in M0: `emit`, `send`, `spawn`, `signal`, timers, `Ref` fields, path, compose and liveness properties). It is a refusal, never a silent pass. `PL1202` is the code of the error PS2.3 describes, so a fix can address it.
 
