@@ -1,0 +1,30 @@
+// Structured constants as completion data (S67): a union with payloads and a record, encoded as they are
+// everywhere else, and read back from the manifest by poly-ref (the standing rule).
+module completions
+
+type Job = Idle | Busy { n: 1..2 }
+type Box = { n: 0..2 }
+
+machine M {
+  state {
+    done : bool = false
+    sent : bool = false
+  }
+  terminal done
+  action Send()
+  action Done(j: Job, b: Box)
+  effect Ship() {
+    labels { egress:external }
+    ok -> Done(j: Busy { n: 1 }, b: { n: 1 })
+    failed -> Done(j: Job.Idle, b: { n: 2 - 2 })
+  }
+  on Send {
+    require !sent else reject "sent"
+    sent' = true
+    emit Ship()
+  }
+  on Done(j, b) {
+    require !done else reject "done"
+    done' = true
+  }
+}

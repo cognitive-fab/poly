@@ -627,6 +627,22 @@ class Checker {
     if (KERNEL_KINDS.has(kind)) this.err('PL1201', e, `effect ${e.name} has kind "${kind}", which is the kernel's own intent kind; choose another (PT6.1)`);
   }
 
+  /** A constant expression (S67): literals, constructors, none, and records, maps, payloads and arithmetic over them. */
+  private constant(e: A.Expr): boolean {
+    const r = this.facts?.resolutions.get(e.id);
+    switch (e.kind) {
+      case 'Int': case 'Bool': case 'String': return true;
+      case 'Name': return r?.k === 'ctor' || r?.k === 'none';
+      case 'Member': return r?.k === 'ctor';
+      case 'Unary': return this.constant(e.arg);
+      case 'Binary': return this.constant(e.left) && this.constant(e.right);
+      case 'CtorExpr': return e.fields.every((x) => this.constant(x.value));
+      case 'MapLit': return e.entries.every((x) => this.constant(x.value) && (x.key.kind === 'Name' || this.constant(x.key)));
+      case 'ArrayLit': return e.items.every((x) => this.constant(x));
+      default: return false;
+    }
+  }
+
   /** Whether a type is, or holds through record fields, a type the predicate names (S25, S65). */
   private holds(t: Ty, p: (x: Ty) => boolean, seen: Set<string> = new Set()): boolean {
     if (p(t)) return true;
@@ -651,7 +667,8 @@ class Checker {
       const pt = this.tyOf(p.type);
       const t = this.typeOf(a.value, this.scope('init'), pt);
       if (!same(t, pt)) { this.err('PL1201', a.value, `${it.action}.${a.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`); continue; }
-      if (this.fold(a.value) === undefined) this.err('PL1201', a.value, 'a completion argument is a constant: it is written into the effects manifest (PT6.1)');
+      // S67: any constant of a finite type, structured ones included; a field or a parameter is not one.
+      if (!this.constant(a.value)) this.err('PL1201', a.value, 'a completion argument is a constant, since a manifest cannot compute: not a field, a parameter or a local (PT6.1, S67)');
       else this.checkConst(a.value, pt, p.check, `${it.action}.${a.name}`);
     }
   }

@@ -9,7 +9,7 @@ import { translationValidate } from '@poly/ref';
 import { DELIBERATELY_BROKEN_LOWERINGS } from './toolchain-faults.mjs';
 import { ROOT, polyFiles, build } from './helpers.mjs';
 
-const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0')), ...polyFiles(join(ROOT, 'conformance', 'm1'))];
+const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0')), ...polyFiles(join(ROOT, 'conformance', 'm1')), ...polyFiles(join(ROOT, 'conformance', 'm2'))];
 
 for (const file of SOURCES) {
   test(`translation validation agrees: ${basename(file)}`, async (t) => {
