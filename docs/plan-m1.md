@@ -189,6 +189,10 @@ Step 8 (configurations) raised eight more, and step 9 (delivery) one. Each was r
 
 S56 to S65 are ruled in `decisions-m1.md` (748cd08), and their spec text is applied (62a2d84). S56, S58, S61 and S65 are accepted as proposed and built as proposed. S57 is accepted with one addition, built: for the machine's own type, `self` is one more distinct address. S59 is accepted with a correction: trust scopes and `SendDenied` arrive in M5. S60 is accepted and built in M2. S62 has its own code, `PL5303 CONFIGURATION_WITHOUT_BOUNDS`. S63 is accepted: `PL4002` does not count `send`, so the checkout file's verdict follows its configuration. S64 is accepted: `in-order` is `steps[M2] >= 1 implies steps[M1] >= 1`, and the fourth delivery variant reports `at-most-once` alone. The tests that recorded the behaviour before the rulings now assert the ruled behaviour.
 
+The M1 code review raised one more:
+
+- **S66. One step signals one child with one action twice (provisional).** polyrun's kernel poisons such a step (`kernel.mjs`, "duplicate signalChild … in one step"), and `check-product` does the same, but PS7.2 delivers every signal of a step in order, so poly-ref explored it as two deliveries and gave CLEAN while production poisons the parent. The analogous cases are refused statically: a timer key armed twice (`PL2301`) and a child spawned twice (`PL5101`). *Proposal:* PS7.2 says a step signals one child with one action at most once, and the checker refuses a second signal with that child and action on one path as `PL5105 DUPLICATE_SIGNAL`. Built provisionally, with its error source.
+
 ### Step 7, measured
 
 | Item | Result |
