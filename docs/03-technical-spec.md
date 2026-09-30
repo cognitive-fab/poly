@@ -62,11 +62,13 @@ Stmt        = "require" Expr "else" "reject" String
             | "if" Expr Block [ "else" Block ]
             | "match" Expr "{" Arm { Arm } "}"
             | "emit" Ident "(" [ Args ] ")"
-            | "after" Duration "->" Ident "(" [ Args ] ")" "as" Ident
-            | "cancel" Ident
-            | "spawn" [ "detached" ] QualIdent "as" Ident [ "->" Ident "(" [ Args ] ")" ] [ ChildWiring ]
+            | "after" Duration "->" Ident "(" [ Args ] ")" "as" Key
+            | "cancel" Key
+            | "spawn" [ "detached" ] QualIdent "as" Key [ "->" Ident "(" [ Args ] ")" ] [ ChildWiring ]
             | "send" Expr "<-" Ident "(" [ Args ] ")" [ "as" Ident ]
-            | "signal" Ident "->" Ident "(" [ Args ] ")" ;
+            | "signal" Key "->" Ident "(" [ Args ] ")"
+            | "for" Ident "in" Int ".." Expr Block ;
+Key         = Ident [ "[" Expr "]" ] ;
 ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
 Arm         = Pattern "=>" ( Block | Stmt ) ;
 Pattern     = "_" | CtorName [ "{" Ident ":" ( Literal | Ident | "_" ) { "," Ident ":" ( Literal | Ident | "_" ) } "}" ] ;
@@ -105,7 +107,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - `implies`;
   - `count(kind)` and `before(k1, k2)` (in path properties). Their arguments are effect kinds, string literals. `before("k1", "k2")` holds on a path iff every emission of `k2` is preceded by an emission of `k1` (S37);
   - `in { … }`;
-  - in configuration properties only: `forall i in g: …`, `exists i in g: …`, the aggregates `count`, `sum`, `all` and `any` over `g[*]`, and `init(e)` for the initial value of `e` (PS13.6);
+  - in configuration properties only: `forall i in g: …`, `exists i in g: …`, the aggregates `count`, `sum`, `all` and `any` over `g[*]`, and `init(e)` for the initial value of `e` (PS13.6). The same quantifiers and aggregates range over a child family `f` in a compose invariant (S49);
   - map indexing `m[k]`, where `k` is a value of the map's key type;
   - map literals `{ k1: v1, …, kn: vn }`, which must list every key of the map's key type exactly once (`PL1502 INCOMPLETE_MAP_LITERAL`), and, for maps keyed by an integer range, the array literal `[v0, v1, …, vn]`; map update is the statement form `m' = m with [k] = v`, which writes one entry and leaves the others unchanged.
 
@@ -368,7 +370,7 @@ A named invariant is a forbidden region when it carries `region "<name>"`. The n
 
 Each `effect` declaration lowers to one manifest kind. An effect with no `kind` has its name as its kind. polyrun keys handlers by kind, so two effect declarations in one project with the same kind and a different payload, completions or class are `PL1002 DUPLICATE_DECLARATION` (S41).
 
-A completion (`ok`, `failed`, `exhausted`) names an action with a handler. An action that is not declared is `PL1001 UNKNOWN_NAME`. A declared action with no handler is `PL6101 COMPLETION_WITHOUT_HANDLER`, at the completion's line: such an action is not in the lowered module (S35), and polyrun refuses a manifest whose completion action is outside the action surface. The fix is to add a handler (S40).
+A completion (`ok`, `failed`, `exhausted`) names an action with a handler. An action that is not declared is `PL1001 UNKNOWN_NAME`. A declared action with no handler is `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6102 SHARED_COMPLETION_ACTION`, at the completion's line: such an action is not in the lowered module (S35), and polyrun refuses a manifest whose completion action is outside the action surface. The fix is to add a handler (S40).
 
 The manifest for `charge` in PT4.5:
 
@@ -417,6 +419,12 @@ The runtime delivers a completion to the parent with the data `{ childKey, child
 
 `signal pay -> Refund()` lowers to `signalChild`. The child instance id is `hash(parentId, childKey, seq)`, as polyrun defines it.
 
+**Child families (S49).** A key may be indexed: `spawn Shipment as f[i] -> Start(…)` lowers to the key `f<i>` (`f0`, `f1`, …), and `signal f[i] -> A()`, `after … as t[i]` and `cancel t[i]` name keys the same way. `i` has an integer range type, and that range bounds the family, so the compiler knows every key. A loop `for i in 0..n { … }` is unrolled at compile time. `n` is an integer literal, or a field or parameter whose range type bounds it; when `n` is not a literal, the loop unrolls to the bound of its type and each copy is guarded by `i <= n`. Inside the loop, `i` is a local of type `0..K`. A loop body contains only `spawn`, `signal`, `emit`, `after` and `cancel` with keys indexed by `i`, and map-entry writes `m' = m with [i] = v`: any other write is refused by the existing rule on its second copy (`PL2102`), and a timer key not indexed by `i` is `PL2301`. Spawning `f[i]` twice for one `i` on one path is `PL5101 CHILDKEY_COLLISION`. There is no unbounded loop, and no key is built from a string at runtime.
+
+A completion action that declares `childKey: string` has as its check domain the keys of the families and single children whose completion names that action, computed by the compiler (S51).
+
+**One action, one source of delivery (S52).** The runtime delivers a child's completion and a parent-terminal cancel itself, and refuses them from outside (K9). An action that is both a child's completion or cancel action and an effect completion (`ok`, `failed`, `exhausted`) or a timer's action would then be refused when the effect or the timer delivers it. So it is `PL6102 SHARED_COMPLETION_ACTION`, at the second wiring.
+
 These are **attached** children: checked as a cascade (PT7) and co-located with their parent on one kernel shard (PS7.4). `spawn detached …` creates a separate actor instead. It returns the child's address to the parent (`as pay` binds a `Ref`). From then on the two communicate only by `send`, and they are checked together as a configuration (PT7a). A detached spawn takes no `on complete` wiring, because completion is a message the child sends.
 
 ### PT6.5 Handlers receive capabilities, not ambient authority
@@ -464,12 +472,13 @@ A machine that spawns children is checked with its children as a product:
 
 These rules are polyrun's composition semantics, unchanged, and they apply to **attached** children only. The compiler emits `invariants.compose.mjs` from `compose invariant` declarations. Joint state is addressed as `parent.<field>` and `children.<key>.<field>`. The runtime places an attached tree on the shard of its root and refuses to place a descendant elsewhere (`PL5202 ATTACHED_ACROSS_SHARDS`, PS7.4).
 
-A compose invariant reads `children.k.f` only under a `k spawned` narrowing, as `action == A` narrows parameters (S19): `k spawned implies children.k.shipState == Delivered`. A read without it is `PL5103 CHILD_READ_WITHOUT_SPAWNED`, and the fix is the narrowing (S48).
+A compose invariant reads `children.k.f` only under a `k spawned` narrowing, as `action == A` narrows parameters (S19): `k spawned implies children.k.shipState == Delivered`. A read without it is `PL5103 CHILD_READ_WITHOUT_SPAWNED`, and the fix is the narrowing (S48). A family is reached through `forall` and the aggregates: `forall i in f: f[i] spawned implies children.f[i].ship != Pending`, and `count(children.f[*].ship == Delivered)`, where an aggregate counts only the spawned members (S49).
 
 polyrun's built-in doctrine findings are surfaced as poly diagnostics (S47):
 
 - child-key collision: `PL5101 CHILDKEY_COLLISION`;
 - a cascade delivery (completion, cancel or signal) that reaches an action with no handler: `PL5102 UNHANDLED_CASCADE_DELIVERY`;
+- a signal to a child that is not spawned, on which the runtime halts the parent: `PL5104 SIGNAL_TO_ABSENT_CHILD`, a finding with its path (S50);
 - an unnamed reject, or the poison class: `PL2501 LOWERING_MISMATCH`, since every poly reject has a reason and only a lowering that lost something can reach either.
 
 ## PT7a. Configurations
@@ -891,7 +900,7 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` |
-| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
+| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
 | PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
