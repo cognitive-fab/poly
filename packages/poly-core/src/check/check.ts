@@ -767,9 +767,15 @@ class Checker {
             // A key outside the map's key type is not a key of this map (ranges type alike, so check the value).
             this.err('PL1201', en.key, `${String(kv)} is not a key of ${tyToString(expected)}`);
             everyKeyValid = false;
+          } else if (kv === undefined) {
+            // PT2.2 asks for every key exactly once, which is decidable only for constant keys (pre.k is not one).
+            this.err('PL1502', en.key, 'a map-literal key is not a constant, so the literal cannot be checked to list every key once (PT2.2)');
+            everyKeyValid = false;
           }
-          if (seen.includes(kv)) this.err('PL1502', en.key, `key ${String(kv)} is listed twice`);
-          seen.push(kv);
+          if (kv !== undefined) {
+            if (seen.includes(kv)) this.err('PL1502', en.key, `key ${String(kv)} is listed twice`);
+            seen.push(kv);
+          }
           const vt = this.typeOf(en.value, scope, expected.value);
           if (!same(vt, expected.value)) this.err('PL1201', en.value, `value has type ${tyToString(vt)}, the map's values are ${tyToString(expected.value)}`);
         }

@@ -89,3 +89,17 @@ test('polywatch: an unknown or non-constant map-literal key gets one diagnostic'
   assert.deepEqual(codes('{ Open: 1, Ajar: 2 }'), ['PL1001']);
   assert.deepEqual(codes('{ Open: 1, k: 2 }'), ['PL1001']);
 });
+
+test('polywatch: a map-literal key that is not a constant gets one diagnostic, not a missing or a duplicate key', () => {
+  // PT2.2: a map literal lists every key exactly once, which is decidable only when each key is a constant.
+  const src = (lit) => `module gen\nmachine M {\n  state {\n    k : 0..1 = 0\n    x : map<0..1, 0..3> = { 0: 0, 1: 0 }\n  }\n  action Go()\n  on Go {\n    require k < 1 else reject "done"\n    k' = 1\n    x' = ${lit}\n  }\n}\n`;
+  const diags = (lit) => checkModule(parse(src(lit)).module).diagnostics.map((d) => [d.code, d.message]);
+  const one = diags('{ 0: 1, pre.k: 2 }');
+  assert.equal(one.length, 1, JSON.stringify(one));
+  assert.equal(one[0][0], 'PL1502');
+  assert.match(one[0][1], /not a constant/);
+  const two = diags('{ pre.k: 1, 1 - pre.k: 2 }');
+  assert.deepEqual(two.map(([c]) => c), ['PL1502', 'PL1502'], JSON.stringify(two));
+  assert.ok(two.every(([, m]) => /not a constant/.test(m)), JSON.stringify(two));
+  assert.deepEqual(diags('{ 0 + 0: 1, 1: 2 }'), []);
+});
