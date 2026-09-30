@@ -1,0 +1,165 @@
+// The OMS order and its shipments (AC1), written in poly from the polyrun-oms example
+// (conformance/field-studies/order). Names, states, rejection reasons, effect kinds and domains are the
+// hand-written artefacts' own, so the corpora, check-effects and check-product compare one to one.
+// The mapper there emits on entering a state; here each handler that enters it emits. Two handlers enter
+// charging, so chargeCard and chargeTimeout are written in both (S54).
+module oms
+
+enum OrderState { pending, fraudCheck, awaitingAmend, charging, fulfilling, completed, partiallyDelivered, rejected, paymentFailed, cancelled }
+enum ShipState { preparing, inTransit, delivered, cancelledShipment }
+type ShipOutcome = { shipState: ShipState }
+
+machine Shipment {
+  state {
+    shipState : ShipState = preparing
+  }
+  terminal shipState in { delivered, cancelledShipment }
+
+  action SHIP()
+  action DELIVER()
+  action CANCEL_SHIPMENT()
+
+  on SHIP {
+    require shipState == preparing else reject "already-shipped"
+    shipState' = inTransit
+  }
+  on DELIVER {
+    require shipState == inTransit else reject "not-in-transit"
+    shipState' = delivered
+  }
+  on CANCEL_SHIPMENT {
+    require shipState == preparing else reject "cancel-too-late"
+    shipState' = cancelledShipment
+  }
+}
+
+machine Order {
+  state {
+    orderState         : OrderState = pending
+    fulfillments       : 0..2       = 0
+    shipmentsDelivered : 0..2       = 0
+    shipmentsFailed    : 0..2       = 0
+    totalCents         : int check { 0, 1900, 2500 } = 0
+    txId               : string check { "", "tx-1" } = ""
+    cancelReason       : string check { "", "suspicious", "amend-window-expired", "declined", "charge-timed-out", "customer-request" } = ""
+  }
+  terminal orderState in { completed, partiallyDelivered, rejected, paymentFailed, cancelled }
+
+  action SUBMIT(fulfillments: 1..2, totalCents: int check { 2500 })
+  action FRAUD_PASSED(itemsAvailable: bool)
+  action FRAUD_FAILED(reason: string check { "suspicious" })
+  action AMEND(fulfillments: 1..1, totalCents: int check { 1900 })
+  action AMEND_WINDOW_EXPIRED()
+  action CHARGE_SUCCEEDED(txId: string check { "tx-1" })
+  action CHARGE_FAILED(reason: string check { "declined" })
+  action CHARGE_TIMED_OUT()
+  action SHIPMENT_COMPLETED(childKey: string, childState: ShipOutcome)
+  action CANCEL(reason: string check { "customer-request" })
+
+  on SUBMIT(fulfillments, totalCents) {
+    require orderState == pending else reject "amend-resets-rollup"
+    fulfillments' = fulfillments
+    totalCents' = totalCents
+    shipmentsDelivered' = 0
+    shipmentsFailed' = 0
+    orderState' = fraudCheck
+    emit fraudCheck(totalCents: totalCents, fulfillments: fulfillments)
+  }
+  on FRAUD_PASSED(itemsAvailable) {
+    require orderState == fraudCheck else reject "stale-completions-reject"
+    if itemsAvailable {
+      orderState' = charging
+      emit chargeCard(amountCents: totalCents)
+      after 12s -> CHARGE_TIMED_OUT() as chargeTimeout
+    } else {
+      orderState' = awaitingAmend
+      after 8s -> AMEND_WINDOW_EXPIRED() as amendWindow
+    }
+  }
+  on FRAUD_FAILED(reason) {
+    require orderState == fraudCheck else reject "stale-completions-reject"
+    orderState' = rejected
+    cancelReason' = reason
+  }
+  on AMEND(fulfillments, totalCents) {
+    require orderState == awaitingAmend else reject "amend-resets-rollup"
+    fulfillments' = fulfillments
+    totalCents' = totalCents
+    shipmentsDelivered' = 0
+    shipmentsFailed' = 0
+    orderState' = charging
+    emit chargeCard(amountCents: totalCents)
+    after 12s -> CHARGE_TIMED_OUT() as chargeTimeout
+  }
+  on AMEND_WINDOW_EXPIRED {
+    require orderState == awaitingAmend else reject "stale-completions-reject"
+    orderState' = cancelled
+    cancelReason' = "amend-window-expired"
+  }
+  on CHARGE_SUCCEEDED(txId) {
+    require orderState == charging else reject "stale-completions-reject"
+    txId' = txId
+    orderState' = fulfilling
+    for i in 1..fulfillments {
+      spawn Shipment as f[i] on complete -> SHIPMENT_COMPLETED on parent terminal -> CANCEL_SHIPMENT
+    }
+  }
+  on CHARGE_FAILED(reason) {
+    require orderState == charging else reject "stale-completions-reject"
+    orderState' = paymentFailed
+    cancelReason' = reason
+  }
+  on CHARGE_TIMED_OUT {
+    require orderState == charging else reject "stale-completions-reject"
+    orderState' = paymentFailed
+    cancelReason' = "charge-timed-out"
+  }
+  on SHIPMENT_COMPLETED(childKey, childState) {
+    require orderState == fulfilling else reject "stale-completions-reject"
+    require shipmentsDelivered + shipmentsFailed < fulfillments else reject "rollup"
+    require childState.shipState in { delivered, cancelledShipment } else reject "rollup"
+    if childState.shipState == delivered {
+      shipmentsDelivered' = shipmentsDelivered + 1
+      if shipmentsDelivered + 1 + shipmentsFailed == fulfillments {
+        if shipmentsFailed == 0 {
+          orderState' = completed
+        } else {
+          orderState' = partiallyDelivered
+        }
+      }
+    } else {
+      shipmentsFailed' = shipmentsFailed + 1
+      if shipmentsDelivered + shipmentsFailed + 1 == fulfillments {
+        orderState' = partiallyDelivered
+      }
+    }
+  }
+  on CANCEL(reason) {
+    require orderState != charging else reject "cancel-blocked-while-charging"
+    require orderState != fulfilling else reject "fulfillment-in-progress"
+    require orderState in { pending, fraudCheck, awaitingAmend } else reject "cancel-not-applicable"
+    orderState' = cancelled
+    cancelReason' = reason
+  }
+
+  // The predicates of conformance/oms/invariants.compose.mjs (S27), stated in poly.
+  compose invariant completed-has-every-shipment-delivered: parent.orderState == completed implies count(children.f[*].shipState == delivered) == parent.fulfillments
+  compose invariant no-shipment-before-charge: forall i in f: f[i] spawned implies parent.txId != ""
+
+  effect fraudCheck(totalCents: int, fulfillments: 0..2) {
+    kind "fraudCheck"
+    labels { read:store }
+    retry { attempts 3, base 200ms, timeout 5s }
+    ok -> FRAUD_PASSED()
+    failed -> FRAUD_FAILED()
+  }
+  effect chargeCard(amountCents: int) {
+    kind "chargeCard"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 6, base 300ms, timeout 10s }
+    ok -> CHARGE_SUCCEEDED()
+    failed -> CHARGE_FAILED()
+    exhausted -> CHARGE_FAILED(reason: "declined")
+  }
+}
