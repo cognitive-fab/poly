@@ -44,13 +44,13 @@ The definitions are mathematical and short. They are written so that a reference
      - `let x = e` binds `x`;
      - `if c B1 else B2` evaluates the chosen branch;
      - `f' = e` adds `f ↦ value(e)` to `w`;
-     - `f' = f with [k] = v` adds `f ↦ s(f)[k := v]` to `w`;
+     - `f' = f with [k] = v` adds `f ↦ s(f)[k := v]` to `w`. Entry writes to one map on one path combine when their keys are distinct constants after unrolling (literals, constructors, or the index of different copies of a loop): `w(f) = s(f)[k1 := v1][k2 := v2]…` (S55);
      - `match e { C1 {x…} => B1 … _ => Bn }` evaluates `e`, binds the payload of the first arm whose constructor (and literal payload, if written) matches, and evaluates that arm's block. The compiler requires the arms to be exhaustive (`PL1501 NON_EXHAUSTIVE_MATCH`). So `match` never falls through, and handlers stay total;
      - `f' = C { q: e … }` writes a whole union value. A union field is always written as a whole value, never one payload field at a time;
      - `emit`, `after`, `cancel`, `spawn`, `signal` and `send` append an intent to `E`. `send r <- A(d)` appends a **message** to the instance at address `r`; `self` is the sending instance's own address. An effect is also a message: `emit k(d)` sends `d` to the host actor that performs kind `k`, whose address is the handler's capability (PS1.6, PT6.5).
   3. **End.** If the body completes without a rejection, the result is `accept(w, E)`.
 - **PS2.3** **Expressions read the pre-state only.** A primed field is write-only. Reading `f'` is a compile error (`PL1202 READ_OF_PRIMED_FIELD`). So the order of assignments within a handler does not change the result.
-- **PS2.4** A field written twice on one control path is `PL2102 DOUBLE_WRITE`. Therefore `w` is well defined.
+- **PS2.4** A field written twice on one control path is `PL2102 DOUBLE_WRITE`. A map is written twice when it is assigned twice, assigned and also written by entry, written twice at one constant key, or written at a key that is a field or a parameter on a path that writes another of its entries (S55). Therefore `w` is well defined.
 - **PS2.5** All expressions are total (PT2.2): integer division truncates toward zero, `%` takes the sign of the dividend, and a divisor that may be 0 is rejected at compile time (`PL1204`). So `h_a` is a total function. **A machine is deterministic in its inputs**: for each state and each input there is exactly one verdict.
 
 ## PS3. Steps and the transition relation
