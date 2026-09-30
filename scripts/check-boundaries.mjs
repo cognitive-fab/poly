@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const MODEL_SDKS = [/^@anthropic-ai\//, /^openai$/, /^@openai\//, /^@google\/genai$/, /^@google\/generative-ai$/, /^cohere-ai$/, /^@mistralai\//, /^ollama$/, /^langchain/, /^@langchain\//];
 const NETWORK_MODULES = ['node:http', 'node:https', 'node:net', 'node:tls', 'node:dgram', 'http', 'https', 'net', 'tls', 'dgram'];
+const PROCESS_MODULES = ['node:child_process', 'child_process', 'node:worker_threads', 'worker_threads'];
 const REF_ALLOWED = [/^node:/, /^@cognitive-fab\/sam-pattern$/];
 
 // Every static import, re-export, dynamic import and require, with whether it is type-only.
@@ -63,6 +64,21 @@ export function violationsOf(pkg, file, text) {
     }
   }
   if (/\bfetch\s*\(/.test(text)) v.push(`${file} calls fetch (no network or model call on a check path)`);
+  // Review finding P8: indirect routes. A subprocess or a computed global can reach the network, and a
+  // require made at run time, a template literal or a concatenated name can reach the compiler.
+  for (const imp of importsOf(text)) {
+    if (PROCESS_MODULES.includes(imp.spec)) v.push(`${file}:${imp.line} imports '${imp.spec}' (a subprocess can reach a model; no model call on a check path)`);
+  }
+  if (/\bglobalThis\s*\[/.test(text)) v.push(`${file} reads a global by a computed name (it can reach fetch)`);
+  if (pkg === 'poly-ref') {
+    const compiler = text.match(/['"`]@poly\/(lang|lower|check|embed)\b/g) ?? [];
+    if (compiler.length) v.push(`${file} names a compiler package in a string (${compiler[0].slice(1)}); poly-ref shares no code with the compiler`);
+    // Every static import of @poly/core is judged above; any other mention of it is a way around that check.
+    const staticCore = importsOf(text).filter((i) => i.spec === '@poly/core').length;
+    const coreNames = (text.match(/['"`]@poly\/core['"`]/g) ?? []).length;
+    if (coreNames > staticCore) v.push(`${file} names @poly/core outside a type-only import; poly-ref may import AST types only`);
+    if (/['"`]@poly\/['"`]\s*\+/.test(text)) v.push(`${file} builds a @poly package name at run time`);
+  }
   return v;
 }
 

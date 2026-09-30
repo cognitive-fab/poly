@@ -37,3 +37,18 @@ test('no package may reach a model or the network', () => {
   assert.ok(violationsOf('poly-check', 'a.ts', "import https from 'node:https'\n").length >= 1);
   assert.ok(violationsOf('poly-lang', 'a.ts', "const r = await fetch('http://x')\n").length >= 1);
 });
+
+// Review finding P8: the boundary cannot be passed by a require made at run time, a template literal,
+// a subprocess, or a computed name for fetch.
+test('P8: indirect routes across the boundary are violations too', () => {
+  for (const src of [
+    "import { createRequire } from 'node:module'\nconst lang = createRequire(import.meta.url)('@poly/lang')\n",
+    'const lower = await import(`@poly/lower`)\n',
+    "const core = await import('@poly/' + 'core')\n",
+  ]) assert.ok(violationsOf('poly-ref', 'a.ts', src).length >= 1, src);
+  for (const pkg of ['poly-ref', 'poly-check']) {
+    assert.ok(violationsOf(pkg, 'a.ts', "import { spawn } from 'node:child_process'\n").length >= 1);
+    assert.ok(violationsOf(pkg, 'a.ts', "const f = globalThis['fe' + 'tch']\n").length >= 1);
+  }
+  assert.deepEqual(violationsOf('poly-ref', 'a.ts', "import type { Machine } from '@poly/core'\nimport { createRequire } from 'node:module'\n"), []);
+});
