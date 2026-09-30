@@ -1,0 +1,91 @@
+# poly · Plan for milestone M1
+
+*Cognitive Fab · September 2026 · plan, written before any M1 code*
+
+This plan covers milestone M1 of PT18, as amended by `decisions-m1.md`: effects, composition and configurations, and nothing beyond them. It fixes the packages touched, the order of work and how each gate item is tested. The spec issues found while reading continue the M0 series at S23. Three of them block gate items as written, and one needs a change in polygraph that the handoff asks me to raise before making.
+
+## 1. What was read, and what was measured before planning
+
+The documents were read in the order of `handoff-m1.md`, and the engines and corpora from source: polyrun's `kernel.mjs`, `check-effects.mjs` and `check-product.mjs` (polygraph 8.3.0), and the `polyrun-oms` example. Baselines:
+
+| Item | Measured |
+|---|---|
+| `config_check.py`, optimistic order | `confirmed-within-stock` violated; witness `Place@order[0], Place@order[1], Query(order[0]) -> inv, Query(order[1]) -> inv, Available(1) -> order[0], Available(1) -> order[1]`; 30 states when the script stops at the violation |
+| `config_check.py`, waiting order | 44 states, invariant holds, no bound hit, no stuck state |
+| `delivery_check.py` | in-order, dedupe kept: 1,147 states; parallel, dedupe kept: 2,368 states; parallel with `in-order`: violated by `Emit(M1), Emit(M2), Send(M2), DeliverReq(M2)`; in-order, dedupe cleared: `at-most-once` violated by the 10-step witness `Emit(M1), Emit(M2), Send(M1), Resend(M1), DeliverReq(M1), DeliverAck(M1), Send(M2), DeliverReq(M2), Archive, DeliverReq(M1)` |
+| OMS order, hand-written module, polygraph replay | **53/81** windows |
+| OMS order, hand-written artefacts, `check-effects` | 45 paths, 33 states, 0 cycles pruned, not bounded, 0 violations |
+
+The OMS replay number contradicts AC1 as written (issue S24). The checkout and delivery numbers are the targets poly-ref must reproduce.
+
+## 2. The engine change first (decision M1-1)
+
+1. **sam-lib** (`C:\Users\jjdub\code\sam\sam-lib`): in `lastStep()`, a step with no rejection, no mutation and no write, whose frame was declared with `unchanged(...)`, classifies as `unchanged`. An empty frame stays `unhandled`. Tests for the three cases (`unchanged`, `unhandled`, and `identity-by-mutation` unaffected). Version 2.3.0. Committed there as kizo-core; not published, not pushed. poly uses it through `npm link`.
+2. **polygraph**: a polyrun test that an `unchanged` step is journaled `accepted` and derives its effects. The kernel already treats every classification other than `rejected` and `unhandled` as accepted (`kernel.mjs:455`), and so does `check-product` (`check-product.mjs:189`). **`check-effects` does not**: it accepts only `mutated` and `identity-by-mutation` (`check-effects.mjs:198`), so it would skip every emit-only step and derive none of its effects. That needs a one-line change in polygraph (issue S23). Per the handoff, I stop here and ask before making it.
+
+## 3. Packages and what changes in each
+
+| Package | M1 additions |
+|---|---|
+| `poly-core` | AST for configurations, instance references and group quantifiers; types for `Ref<M>`, records (S25) and union parameters; the checker for effects, timers, children, sends and configurations; codes `PL2301`, `PL5101`, `PL5201`, `PL5301`, `PL5302`, `PL5401`, `PL5402`, `PL5403`; the manifest reader (`poly.json`, PT1.2) |
+| `poly-lang` | Grammar and formatter for `configuration` (instances, `inputs`, `bounds`, properties), `forall`, `exists`, `count`, `sum`, `all`, `any`, `init(e)`, and the `InputRef` production (S31) |
+| `poly-lower` | `effects.cjs` (a pure mapper that re-runs each handler's control flow over the pre-state and data and collects its intents in statement order), `effects.manifest.json`, `effect-invariants.mjs` (path properties), `invariants.compose.mjs`; timers (`timer`, `cancelTimer`), `spawnChild`, `signalChild`, `sendTo`; the lowerings M0 refused (maps of payload unions, nested payload unions, union parameters); two new faults, `drop-effect` and `reorder-effects` |
+| `poly-ref` | Intents `E` in the handler semantics (PS2.1, PS2.2); translation validation of the effect sequence (PS9.2); path properties (PS5.4); the attached-children joint machine as a second `System` (PS7.1, PS7.2); configurations as a third `System` over `(σ, μ)` (PS13); stuck states; group quantifiers; confirmation of polyrun's findings (the M0 standing rule, extended to `check-effects` and `check-product`) |
+| `poly-check` | Project mode (`poly check <dir>`); liveness listed as not run (M1-2); stage 3 (`check-effects`), stage 4 (`check-product`), stage 4b (configurations) |
+
+The import boundary is unchanged: poly-ref imports only AST types from the compiler, and both new `System` implementations are written from 04-semantics.
+
+## 4. Order of work
+
+Each step ends with a commit; every defect found gets a regression test that fails first.
+
+1. **Engine** (section 2), up to the S23 question.
+2. **Manifest** (M1-6): `poly.json` read as PT1.2 states it; `poly check <dir>` checks every module matched by `modules`. Any field the build needs that PT1.2 lacks is raised first.
+3. **Liveness as not run** (M1-2): the checker accepts liveness; `poly check` lists each liveness property as not run ("M2") and folds to `INCONCLUSIVE` at best. The three `OutboxIntent` examples get their safety results.
+4. **Generated initial-value test** (M1-4): for every initial-value shape, one value inside and one outside its type; the outside one is `PL1201` at its line, the inside one lowers and passes strict `validate()`.
+5. **Effects**: `emit`, `effect` declarations, labels (`PL6301`), the three new artefacts, intents in poly-ref, the effect sequence in translation validation, path properties (`PL4001`) checked by polyrun `check-effects` and confirmed by poly-ref, and the two new faults in the explicit list.
+6. **Timers and attached children**: `after`, `cancel` (`PL2301`, S26), `spawn`, `signal`, `compose invariant` (`PL5001`), `PL5101`, `PL5201`; the joint-machine `System` in poly-ref; `check-product` as stage 4, its findings confirmed by poly-ref.
+7. **AC1**: the OMS order and shipment machines written in poly, the corpus copied with provenance (M1-5), the comparison with the hand-written artefacts (section 5, S24, S27).
+8. **Configurations**: `Ref<M>`, `self`, `none`, `send`, `spawn detached`, `SendDenied`; the configuration declaration; the `(σ, μ)` explorer with message identities, oldest-copy delivery, transit and instance bounds through `boundHits`, `PL5401`, `PL5402`, group quantifiers with `PL5403` and `init(e)`; stage 4b. The checkout evidence, both variants.
+9. **Delivery**: the four variants of PT9.8 as poly sources, safety only (M1-3); `exactly-once` listed as not run.
+10. **What M0 refused**: maps of payload unions, nested payload unions, union parameters, each with conformance cases through translation validation.
+11. **Record**: measurements in this document, then stop for the code review.
+
+## 5. How each gate item is tested
+
+| Gate item | Test | Pass condition |
+|---|---|---|
+| AC1, replay | `test/m1/oms.test.mjs`: polygraph `replaySpecResults` on the copied corpus | As ruled on S24 |
+| AC1, `check-effects` | polyrun's own `checkEffects` on the hand-written artefacts and on the lowered ones | Same verdict, violations, paths, states and cycle count (45 paths, 33 states, 0 violations today); machine ids normalised (S28) |
+| AC1, `check-product` | polyrun's own `checkProduct`, order with the shipment child, both artefact sets, the same invariants (S27) | Same verdict, violations and joint-state count |
+| AC10 and checkout | `test/m1/checkout.test.mjs`: `poly check` on PT7a's module, both order variants | Optimistic: `PL5401` with PT7a's six-step witness. Waiting: clean over 44 global states, no `PL5402`, `settle` listed as not run. Bounds `transit 4` |
+| Delivery, four variants | `test/m1/delivery.test.mjs` | 1,147 and 2,368 states with the invariants holding; the 4-step and 10-step witnesses exactly; `exactly-once` not run. When Python is present, the script is run and compared, as in M0 |
+| Translation validation | `tv.test.mjs`, extended to every M1 conformance case | Zero `PL2501` on post-states and effect sequences; every fault in the explicit list caught, including `drop-effect` and `reorder-effects` |
+| Strict validation | `validate.test.mjs` under sam-pattern 2.3.0 | `validate()` returns `[]` for every lowered module, and a probe over every emit-only handler finds none classified `unhandled` |
+| No regressions | the M0 tests, unchanged | Field-study windows, evidence results, and no user source reaching `PL2501` or `PL2001` |
+| One command | `npm test` | Exit 0 |
+
+## 6. Spec issues
+
+- **S23. `check-effects` does not accept an `unchanged` step (blocks the engine step).** Decision M1-1 says polyrun already treats every classification other than `rejected` and `unhandled` as accepted. The kernel and `check-product` do; `check-effects` lists `mutated` and `identity-by-mutation` explicitly (`check-effects.mjs:198`), so after 2.3.0 it would treat an emit-only step as a rejection and never count its effects. That silently weakens every path property over such a step. *Proposal:* in polygraph, change that line to "any classification other than `rejected` and `unhandled`", matching the kernel, with the polyrun test the handoff asks for. It is an engine change, so I wait for your approval.
+- **S24. The OMS corpus cannot replay at 100%, and tests almost nothing (blocks AC1's replay).** All 81 windows of `machines/order/traces` have `post == pre`: every trace starts in `pending` and never leaves it, although the contract moves `SUBMIT` from `pending` to `fraudCheck`. The hand-written module passes 53/81, exactly the windows whose action it rejects in `pending`. The corpus appears to predate the module's migration to next-state semantics (polygraph commit `22c676f`), when acceptor writes were lost. No module that follows the contract passes all 81. *Proposal:* (a) keep the copied corpus and gate it as S1 did for raft, window-by-window identity with the hand-written module (53/81); and (b) add a second, meaningful corpus, produced by running the hand-written OMS artefacts through polyrun's own kernel along the sixteen scenarios the file names describe and exporting the journal with `polyrun export-traces`, copied with provenance that says how it was made. Gate the poly order at 100% on (b). Alternatively, the corpus is regenerated upstream in polygraph, which is your change to make.
+- **S25. Action data that is an object without a tag (blocks the OMS rewrite).** polyrun delivers a child's completion as `{ childKey, childState }`, where `childState` is the child's terminal state object, such as `{ shipState: "delivered" }`. poly has no type for an untagged record: a union value always carries its constructor. *Proposal:* record types, `type ChildState = { shipState: ShipState }` (PT2 `TypeDecl`, PT3.1), finite when their fields are, lowered as a plain JSON object, compared field by field, and usable as a parameter type. PS1.4 already speaks of records as the payload of a constructor; this names them as a type.
+- **S26. When does `after` emit `cancelTimer` first?** PT6.3 says arming a key that "may already be armed" emits `cancelTimer` then `timer`. Timers are not state (PS1.2), so the compiler cannot know whether a key may be armed. *Proposal:* every `after` emits `cancelTimer` then `timer`, as the literal rule reads. The OMS hand-written mapper emits `timer` alone, so the AC1 comparison of `check-effects` results must not count `cancelTimer` intents; I confirm first that polyrun accepts a `cancelTimer` for an unarmed key without poisoning.
+- **S27. `check-product` needs invariants the OMS example does not have.** polyrun refuses a product check with no cross-machine invariants, and the OMS example ships none. *Proposal:* write the product invariants once, as `compose invariant`s in the poly source (for example: a completed order has as many delivered shipments as fulfillments; no shipment is spawned before the order is charged), hand-write the same predicates as an `invariants.compose.mjs` for the hand-written run, and compare the two `check-product` results.
+- **S28. Machine ids.** polyrun names machines by a `machineId` (`order`, `shipment` in the OMS config); poly names them `module.Machine`. *Proposal:* the lowering uses `<module>.<Machine>` as the machine id (the PT1.5 build directory name), and the AC1 comparison maps ids before comparing. No spec change unless you want PT1.5 to say so.
+- **S29. A send to `none`.** PS1.6 makes `none` the empty address, and PT7a's order starts with `inv: Ref<Inventory> = none`. Nothing says what `send none <- A()` means. *Proposal:* in a configuration it is a finding, `PL5404 SEND_TO_NONE`, with its path; in a single-machine check it is an ordinary intent, completed by the environment. This needs a new code.
+- **S30. What a single-machine check does with `send`.** PS13.3 defines sends inside a configuration; a machine checked alone (PS4) has no receivers. *Proposal:* a send is an intent in `E` like an effect; a machine checked alone treats it as the environment treats any intent (PS4.4), and its receiver's replies are ordinary actions offered in every state. No spec change: this is how I read PS4.4 and PS13.3 together. Stated here so it is agreed rather than assumed.
+- **S31. `InputRef` has no production.** PT2's `Inputs = "inputs" "{" InputRef { "," InputRef } "}"` never defines `InputRef`, and PT7a writes `order[*].Place`. *Proposal:* `InputRef = Ident [ "[" ( Int | "*" ) "]" ] "." Ident`.
+- **S32. How a configuration property names an instance's field.** PT7a writes `count(order[*] is Done)`, `init(inv.onHand)` and `order[i] is Asked`. That is, `order[*]` or `order[i]` stands for the instance's control field, and `inv.onHand` for a field. *Proposal:* in a configuration property, `g[i].f` and `x.f` name field `f` of an instance; `g[i]` alone, and `g[*]` inside an aggregate, stands for its control field, so `is` applies to it. A field access on an instance is legal only here, never inside a machine (PS1.6: nothing reads another instance's state).
+
+S23, S24, S25 and S26 need a ruling before the steps that depend on them: S23 before the engine step completes, S25 and S26 before step 6, S24 before step 7. The others can be decided as late as step 8.
+
+## 7. Risks
+
+- **Two new `System` implementations in poly-ref.** Configurations are M1's heart and the part of poly-ref most likely to have bugs. Its first tests are the checkout and delivery evidence, run before the configuration lowering and stage 4b exist, as M0 ran the evidence before any lowering.
+- **Faithful effect lowering.** `effects.cjs` re-runs the handler's control flow without its writes. A divergence from the acceptor would show as a translation-validation mismatch on the effect sequence, which is the point of adding it to PS9.2 in M1.
+- **`check-product` over the OMS product** may be large: two shipment children under an order. Its state count is measured and recorded; polyrun's child abstraction is not used, so the comparison stays exact.
+
+## Conclusion
+
+M1 is planned in eleven steps, starting with the engine's missing classification and ending with the code review. The checkout and delivery targets are measured and reproducible. Reading the engines turned up one engine change the decisions did not expect (S23), a corpus that cannot support AC1's replay as written (S24), and a missing record type that the OMS order needs (S25). Those three, and the timer rule (S26), wait for your ruling; the rest have proposals that can be settled on the way.
