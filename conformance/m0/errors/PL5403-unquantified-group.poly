@@ -1,0 +1,16 @@
+// expect: PL5403 (a group read outside a quantifier or an aggregate, PS13.6)
+module errors
+
+machine M {
+  state { done : bool = false }
+  terminal done == true
+  action Finish()
+  on Finish { done' = true }
+}
+
+configuration c {
+  g[2] : M
+  inputs { g[*].Finish }
+  bounds { transit 1 }
+  invariant p: g[*].done implies true
+}

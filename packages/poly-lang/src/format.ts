@@ -67,6 +67,8 @@ class Printer {
         return this.emit(d, '', [`use ${d.path.join('.')}`]);
       case 'Machine':
         return this.machine(d);
+      case 'Configuration':
+        return this.configuration(d);
     }
   }
 
@@ -128,11 +130,7 @@ class Printer {
         const kw = it.form === 'invariant' ? 'invariant' : it.form === 'compose' ? 'compose invariant' : `${it.form} property`;
         return [`${kw} ${it.name}: ${this.expr(it.expr, 0)}`];
       }
-      case 'Liveness': {
-        const body = it.from ? `${this.expr(it.from, 0)} leads to ${this.expr(it.expr, 0)}` : `eventually ${this.expr(it.expr, 0)}`;
-        const fair = it.fair.map((g) => g.members.map((m) => m.action + (m.perValue ? '(*)' : '')).join(' | ')).join(', ');
-        return [`liveness ${it.name}: ${body}`, `${INDENT}under fair { ${fair} }`];
-      }
+      case 'Liveness': return this.liveness(it);
       case 'Handler': {
         const head = `on ${it.action}${it.params ? `(${it.params.join(', ')})` : ''}`;
         return this.blockLines(head, it.body);
@@ -144,6 +142,33 @@ class Printer {
         return lines;
       }
     }
+  }
+
+  private liveness(it: A.Liveness): string[] {
+    const body = it.from ? `${this.expr(it.from, 0)} leads to ${this.expr(it.expr, 0)}` : `eventually ${this.expr(it.expr, 0)}`;
+    const q = it.quant ? `${it.quant.q} ${it.quant.var} in ${it.quant.group}: ` : '';
+    // S56: in a configuration the fairness clause may be left out.
+    if (!it.fair) return [`liveness ${it.name}: ${q}${body}`];
+    const fair = it.fair.map((g) => g.members.map((m) => m.action + (m.perValue ? '(*)' : '')).join(' | ')).join(', ');
+    return [`liveness ${it.name}: ${q}${body}`, `${INDENT}under fair { ${fair} }`];
+  }
+
+  /** PT7a: instances, inputs, bounds, then properties, each on its own line. */
+  private configuration(c: A.Configuration): void {
+    this.emit(c, '', [`configuration ${c.name} {`]);
+    const heads = c.instances.map((i) => `${i.name}${i.count !== null ? `[${i.count}]` : ''}`);
+    const width = Math.max(0, ...heads.map((h) => h.length));
+    c.instances.forEach((i, k) => {
+      const init = i.init.length ? ` { ${i.init.map((x) => `${x.field}: ${this.expr(x.value, 0)}`).join(', ')} }` : '';
+      this.emit(i, INDENT, [`${heads[k].padEnd(width)} : ${i.machine.join('.')}${init}`]);
+    });
+    if (c.inputs.length) {
+      const refs = c.inputs.map((r) => `${r.instance}${r.index === null ? '' : `[${r.index}]`}.${r.action}`);
+      this.out.push(`${INDENT}inputs { ${refs.join(', ')} }`);
+    }
+    if (c.bounds) this.emit(c.bounds, INDENT, [`bounds { transit ${c.bounds.transit}${c.bounds.instances !== null ? `, instances ${c.bounds.instances}` : ''} }`]);
+    for (const p of c.properties) this.emit(p, INDENT, p.kind === 'Liveness' ? this.liveness(p) : [`invariant ${p.name}: ${this.expr(p.expr, 0)}`]);
+    this.out.push('}');
   }
 
   private effectItem(e: A.EffectItem): string {

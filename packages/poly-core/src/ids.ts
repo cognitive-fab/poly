@@ -23,6 +23,8 @@ const NAMED: Record<string, string> = {
   Property: 'prop',
   Liveness: 'liveness',
   EffectDecl: 'effect',
+  Configuration: 'configuration',
+  ConfigInstance: 'instance',
 };
 
 function segmentOf(node: Obj, key: string, index: number): string {

@@ -10,6 +10,7 @@ export type Stage =
   | 'model-check'
   | 'effects'
   | 'composition'
+  | 'configuration'
   | 'deadlock';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
@@ -81,6 +82,17 @@ export const CODES: Record<string, CodeInfo> = {
   PL5104: { name: 'SIGNAL_TO_ABSENT_CHILD', stage: 'composition', severity: 'finding' },
   // PS7.2: a cascade deeper than 8.
   PL5201: { name: 'CASCADE_DEPTH', stage: 'composition', severity: 'finding' },
+  // PS13.5: a configuration's bounds, reported, never silently applied.
+  PL5301: { name: 'TRANSIT_BOUND_HIT', stage: 'configuration', severity: 'inconclusive' },
+  PL5302: { name: 'INSTANCE_BOUND_HIT', stage: 'configuration', severity: 'inconclusive' },
+  // PS13.6: a configuration invariant violated in a reachable global state.
+  PL5401: { name: 'CONFIGURATION_INVARIANT', stage: 'configuration', severity: 'finding' },
+  // PS13.6: a quiescent global state in which a non-service instance is not terminal.
+  PL5402: { name: 'STUCK', stage: 'configuration', severity: 'finding' },
+  // PS13.6: a group read outside a quantifier or an aggregate.
+  PL5403: { name: 'UNQUANTIFIED_GROUP', stage: 'types', severity: 'error' },
+  // S29: a step inside a configuration sends to none.
+  PL5404: { name: 'SEND_TO_NONE', stage: 'configuration', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.
   PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
@@ -104,6 +116,8 @@ export interface WitnessStep {
   verdict?: string;
   /** The kinds of the step's intents, in order, when it emits (PS2.1). */
   effects?: string[];
+  /** A global step of a configuration (PS13.3): an input or a delivery, at its instance. */
+  global?: { kind: 'input' | 'deliver'; instance: string; text: string };
 }
 
 export interface Witness {

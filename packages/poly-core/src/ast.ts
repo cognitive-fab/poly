@@ -27,7 +27,46 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration;
+
+/**
+ * `configuration c { … }` (PS13, PT7a): named instances of machines of this module, the inputs the
+ * environment may inject, the bounds, and properties over the global state.
+ */
+export interface Configuration extends NodeBase {
+  kind: 'Configuration';
+  name: string;
+  instances: ConfigInstance[];
+  inputs: InputRef[];
+  bounds: ConfigBounds | null;
+  properties: (Property | Liveness)[];
+}
+
+/** `x : M { f: e, … }`, or a group `g[n] : M { … }` of n instances g[0] … g[n-1] (PS13.1). */
+export interface ConfigInstance extends NodeBase {
+  kind: 'ConfigInstance';
+  name: string;
+  /** The group's size, or null for a single instance. */
+  count: number | null;
+  machine: string[];
+  /** Initial values that replace the machine's own, addresses included (PS13.1). */
+  init: { field: string; value: Expr }[];
+}
+
+/** `x.A`, `g[i].A` or `g[*].A` (S31): an action the environment may inject at those instances. */
+export interface InputRef extends NodeBase {
+  kind: 'InputRef';
+  instance: string;
+  index: number | '*' | null;
+  action: string;
+}
+
+/** `bounds { transit B, instances N }` (PS13.1, PS13.5). */
+export interface ConfigBounds extends NodeBase {
+  kind: 'ConfigBounds';
+  transit: number;
+  instances: number | null;
+}
 
 /** `type R = { f1: T1, …, fn: Tn }` (S25): a nominal record, every field present, no tag. */
 export interface RecordDecl extends NodeBase {
@@ -164,7 +203,10 @@ export interface Liveness extends NodeBase {
   /** `eventually P` has no `from`; `P leads to Q` has `from = P`, `expr = Q`. */
   from: Expr | null;
   expr: Expr;
-  fair: FairGroup[];
+  /** `under fair { … }`, or null where it is not written: only in a configuration (S56). */
+  fair: FairGroup[] | null;
+  /** `forall i in g:` before the property, scoping over the whole `leads to` (PS13.6, S56). */
+  quant: { q: 'forall' | 'exists'; var: string; group: string } | null;
 }
 
 export interface FairGroup extends NodeBase {
@@ -316,4 +358,4 @@ export interface MapLit extends NodeBase { kind: 'MapLit'; entries: { key: Expr;
 /** `[v0, …, vn]` for maps keyed by 0..n (PT2.2, S4). */
 export interface ArrayLit extends NodeBase { kind: 'ArrayLit'; items: Expr[] }
 
-export type AnyNode = Module | Decl | Ctor | PayloadField | TypeExpr | CheckClause | Domain | Field | MachineItem | EffectItem | Param | Stmt | Arm | Pattern | Expr | FairGroup;
+export type AnyNode = Module | Decl | Ctor | PayloadField | TypeExpr | CheckClause | Domain | Field | MachineItem | EffectItem | Param | Stmt | Arm | Pattern | Expr | FairGroup | ConfigInstance | InputRef | ConfigBounds;

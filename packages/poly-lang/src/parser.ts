@@ -57,7 +57,7 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
 };
 
 const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for']);
-const LATER_TOP_LEVEL = new Set(['configuration', 'policy', 'workflow', 'world']);
+const LATER_TOP_LEVEL = new Set(['policy', 'workflow', 'world']);
 
 export function parse(src: string): ParseResult {
   const trivia: Trivia = { leading: new Map(), trailing: new Map(), end: [] };
@@ -181,6 +181,7 @@ class Parser {
     if (this.at('enum')) return this.enumDecl();
     if (this.at('machine')) return this.machine(false);
     if (this.at('service') && this.at('machine', 1)) { this.next(); return this.machine(true, start); }
+    if (this.at('configuration') && this.peek(1).kind === 'ident') return this.configuration();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -191,6 +192,77 @@ class Parser {
       return null;
     }
     this.fail('expected a declaration (type, enum, machine, use)');
+  }
+
+  /** `configuration c { instances, inputs, bounds, properties }` (PT2, PT7a, S31). */
+  private configuration(): A.Configuration {
+    const start = this.next();
+    const name = this.dashedName();
+    this.expect('{');
+    const instances: A.ConfigInstance[] = [];
+    const inputs: A.InputRef[] = [];
+    let bounds: A.ConfigBounds | null = null;
+    const properties: (A.Property | A.Liveness)[] = [];
+    while (!this.atPunct('}')) {
+      const is = this.peek();
+      // Keywords are contextual (PT2.1): a word followed by `:` or `[` names an instance.
+      const instance = is.kind === 'ident' && (this.atPunct(':', 1) || this.atPunct('[', 1));
+      if (!instance && this.at('inputs')) {
+        this.next();
+        this.expect('{');
+        while (!this.atPunct('}')) {
+          const rs = this.peek();
+          const inst = this.ident('an instance');
+          let index: A.InputRef['index'] = null;
+          if (this.atPunct('[')) {
+            this.next();
+            if (this.atPunct('*')) { this.next(); index = '*'; } else index = this.int();
+            this.expect(']');
+          }
+          this.expect('.');
+          const action = this.ident('an action');
+          inputs.push(this.node<A.InputRef>(rs, { kind: 'InputRef', instance: inst, index, action }));
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+      } else if (!instance && this.at('bounds')) {
+        this.next();
+        this.expect('{');
+        this.expect('transit');
+        const transit = this.int();
+        let n: number | null = null;
+        if (this.atPunct(',')) { this.next(); this.expect('instances'); n = this.int(); }
+        this.expect('}');
+        if (bounds) this.fail('a configuration states its bounds once', is);
+        bounds = this.node<A.ConfigBounds>(is, { kind: 'ConfigBounds', transit, instances: n }, true);
+      } else if (!instance && this.at('invariant')) {
+        this.next();
+        properties.push(this.property(is, 'invariant'));
+      } else if (!instance && this.at('liveness')) {
+        this.next();
+        properties.push(this.liveness(is));
+      } else {
+        const iname = this.ident('an instance, inputs, bounds, invariant or liveness');
+        let count: number | null = null;
+        if (this.atPunct('[')) { this.next(); count = this.int(); this.expect(']'); }
+        this.expect(':');
+        const machine = this.qualName();
+        const init: A.ConfigInstance['init'] = [];
+        if (this.atPunct('{')) {
+          this.next();
+          while (!this.atPunct('}')) {
+            const field = this.ident('a field');
+            this.expect(':');
+            init.push({ field, value: this.expr() });
+            if (!this.atPunct('}')) this.expect(',');
+          }
+          this.next();
+        }
+        instances.push(this.node<A.ConfigInstance>(is, { kind: 'ConfigInstance', name: iname, count, machine, init }, true));
+      }
+    }
+    this.next();
+    return this.node<A.Configuration>(start, { kind: 'Configuration', name, instances, inputs, bounds, properties }, true);
   }
 
   private typeDecl(): A.TypeDecl | A.RecordDecl {
@@ -472,6 +544,16 @@ class Parser {
     this.expect(':');
     let from: A.Expr | null = null;
     let expr: A.Expr;
+    // S56, PS13.6: `forall i in g:` before the property scopes over the whole `leads to`.
+    let quant: A.Liveness['quant'] = null;
+    if ((this.at('forall') || this.at('exists')) && this.peek(1).kind === 'ident' && this.at('in', 2) && this.peek(3).kind === 'ident' && this.atPunct(':', 4)) {
+      const q = this.next().text as 'forall' | 'exists';
+      const v = this.ident();
+      this.next();
+      const group = this.ident();
+      this.next();
+      quant = { q, var: v, group };
+    }
     if (this.at('eventually')) {
       this.next();
       expr = this.expr();
@@ -481,6 +563,8 @@ class Parser {
       this.expect('to');
       expr = this.expr();
     }
+    // S56: the clause may be left out; the checker requires it in a machine.
+    if (!this.at('under')) return this.node<A.Liveness>(start, { kind: 'Liveness', name, from, expr, fair: null, quant }, true);
     this.expect('under');
     this.expect('fair');
     this.expect('{');
@@ -493,7 +577,7 @@ class Parser {
       if (!this.atPunct('}')) this.expect(',');
     }
     this.next();
-    return this.node<A.Liveness>(start, { kind: 'Liveness', name, from, expr, fair }, true);
+    return this.node<A.Liveness>(start, { kind: 'Liveness', name, from, expr, fair, quant }, true);
   }
 
   private fairMember(): { action: string; perValue: boolean } {

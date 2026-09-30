@@ -5,7 +5,7 @@
 // translation validation, and its absence is stated for any that did not.
 import { basename } from 'node:path';
 import type { Diagnostic } from '@poly/core';
-import type { CheckReport, MachineCheck } from './pipeline.js';
+import type { CheckReport, ConfigCheck, MachineCheck } from './pipeline.js';
 
 function value(v: unknown): string {
   if (v === null || v === undefined) return String(v);
@@ -34,7 +34,13 @@ export function renderDiagnostic(d: Diagnostic, file: string): string[] {
   // The header names what the finding is about: its property or field, else its machine (README).
   const about = d.property ?? d.field ?? d.at.machine;
   const lines = [`${where}  ${d.code} ${d.name}${about ? `  ${about}` : ''}`, `  ${d.message}`];
-  if (d.witness && d.witness.trace.length) {
+  if (d.witness && d.witness.trace.length && d.witness.trace.every((s) => s.global)) {
+    // PT7a: a configuration's witness is its global steps, each an input or a delivery at an instance.
+    lines.push(`  witness (${d.witness.length} global step${d.witness.length === 1 ? '' : 's'}):`);
+    const rows = d.witness.trace.map((s) => [`${s.global!.kind.padEnd(8)}${s.global!.text}`, s.verdict && s.verdict !== 'accepted' ? s.verdict : '']);
+    const w = Math.max(...rows.map((r) => r[0].length));
+    for (const r of rows) lines.push(`    ${r[1] ? `${r[0].padEnd(w)}   ${r[1]}` : r[0]}`);
+  } else if (d.witness && d.witness.trace.length) {
     lines.push(`  witness (${d.witness.length} step${d.witness.length === 1 ? '' : 's'}):`);
     const note = (s: { verdict?: string; effects?: string[] }) => [s.verdict && s.verdict !== 'accepted' ? s.verdict : '', s.effects?.length ? `emits ${s.effects.join(', ')}` : ''].filter(Boolean).join('   ');
     const rows = d.witness.trace.map((s) => [call(s.action, s.data), state(s.pre), state(s.post), note(s)]);
@@ -58,10 +64,17 @@ function instanceLine(m: MachineCheck, module: string | null): string {
   return `${module}.${m.machine}  over ${parts.join('; ')}`;
 }
 
+function configLine(c: ConfigCheck, module: string | null): string {
+  if (!c.instance) return `${module}.${c.configuration}: no checked instance (the configuration was not explored)`;
+  const i = c.instance;
+  return `${module}.${c.configuration}  over ${[i.instances.join(', '), ...i.bounds, `${i.states} global states`, `kernel assumptions ${i.kernelAssumptions.join(', ')}`].join('; ')}`;
+}
+
 export function render(r: CheckReport): string {
   const out: string[] = [];
   for (const d of r.diagnostics) out.push(...renderDiagnostic(d, r.file));
   for (const m of r.machines) for (const d of m.diagnostics) out.push(...renderDiagnostic(d, r.file));
+  for (const c of r.configurations ?? []) for (const d of c.diagnostics) out.push(...renderDiagnostic(d, r.file));
   if (r.error) out.push(`error: ${r.error}`);
   for (const m of r.machines) {
     const ran = m.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
@@ -71,7 +84,15 @@ export function render(r: CheckReport): string {
     for (const p of m.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
     for (const s of m.stages) for (const n of s.notes ?? []) out.push(`  note: ${n}`);
   }
-  const instances = r.machines.map((m) => instanceLine(m, r.module));
+  for (const c of r.configurations ?? []) {
+    const ran = c.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
+    const notRun = c.stages.filter((s) => s.status === 'not-run');
+    out.push(`configuration ${c.configuration}: ${ran.join(' · ')}`);
+    if (notRun.length) out.push(`  not run: ${notRun.map((s) => s.stage).join(', ')} (${notRun[0].reason})`);
+    for (const p of c.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
+    for (const s of c.stages) for (const n of s.notes ?? []) out.push(`  note: ${n}`);
+  }
+  const instances = [...r.machines.map((m) => instanceLine(m, r.module)), ...(r.configurations ?? []).map((c) => configLine(c, r.module))];
   out.push(`verdict: ${r.verdict} (exit ${r.exit})${instances.length ? `  ${instances[0]}` : ''}`);
   for (const line of instances.slice(1)) out.push(`         ${line}`);
   // S35: a reject property that names an action with no handler is decided by poly-ref alone, and says so.

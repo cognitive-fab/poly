@@ -114,7 +114,14 @@ export interface CheckResult {
 
 // ── scopes ────────────────────────────────────────────────────────────────
 
-type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'reject' | 'path' | 'compose';
+type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'reject' | 'path' | 'compose' | 'config';
+
+/** The instances of a configuration, by name, as its properties read them (PS13.6, S32). */
+interface ConfigScope {
+  instances: Map<string, { machine: A.Machine; facts: MachineFacts; count: number | null }>;
+  /** Inside `init(e)`: no second `init` (PS13.6). */
+  inInit?: boolean;
+}
 
 interface Scope {
   ctx: Ctx;
@@ -132,6 +139,8 @@ interface Scope {
   star?: boolean;
   /** The expression is a whole argument of a send, where `self` is legal (S58). */
   selfOk?: boolean;
+  /** In a configuration property: its instances (PS13.6). */
+  config?: ConfigScope;
 }
 
 export function checkModule(module: A.Module): CheckResult {
@@ -170,6 +179,13 @@ class Checker {
       machines.set(d.name, this.checkMachine(d));
     }
     this.sharedCompletions(machines);
+    const configs = new Set<string>();
+    for (const d of this.module.decls) {
+      if (d.kind !== 'Configuration') continue;
+      if (configs.has(d.name)) { this.err('PL1002', d, `configuration ${d.name} is declared twice`); continue; }
+      configs.add(d.name);
+      this.checkConfiguration(d, machines);
+    }
     // S41: polyrun keys handlers by kind, so effects that share a kind must declare the same payload,
     // completions and class. Identical declarations may share it. Across modules, poly-check compares
     // the signatures of a project's files.
@@ -183,6 +199,127 @@ class Checker {
       }
     }
     return { diagnostics: this.diags, env: this.env, machines };
+  }
+
+  // ── configurations (PS13, PT7a) ─────────────────────────────────────────
+  private checkConfiguration(c: A.Configuration, machines: Map<string, MachineFacts>): void {
+    this.machine = null;
+    this.facts = null;
+    const instances: ConfigScope['instances'] = new Map();
+    for (const i of c.instances) {
+      if (instances.has(i.name)) { this.err('PL1002', i, `instance ${i.name} is declared twice in ${c.name}`); continue; }
+      if (i.count !== null && i.count < 1) this.err('PL1201', i, `a group has at least one instance: ${i.name}[${i.count}]`);
+      if (i.machine.length > 1 && i.machine.slice(0, -1).join('.') !== this.module.name) { this.err('PL0901', i, `an instance of a machine of another module needs \`use\`, which is not lowered yet (${i.machine.join('.')})`); continue; }
+      const facts = machines.get(i.machine[i.machine.length - 1]);
+      if (!facts) { this.err('PL1001', i, `no machine ${i.machine.join('.')} in module ${this.module.name}`); continue; }
+      // S61: an instance with attached children would need its joint machine inside the configuration.
+      if (facts.children.size) this.err('PL0901', i, `${facts.machine.name} spawns attached children; a configuration of such a machine is checked from a later milestone (S61)`);
+      instances.set(i.name, { machine: facts.machine, facts, count: i.count });
+    }
+    const cfg: ConfigScope = { instances };
+    // PS13.1: an instance's initial state, its addresses included.
+    for (const i of c.instances) {
+      const inst = instances.get(i.name);
+      if (!inst) continue;
+      const given = new Set<string>();
+      for (const x of i.init) {
+        const ft = inst.facts.fieldTypes.get(x.field);
+        if (!ft) { this.err('PL1001', x.value, `${inst.machine.name} has no field ${x.field}`); continue; }
+        if (given.has(x.field)) this.err('PL1002', x.value, `${x.field} is given twice`);
+        given.add(x.field);
+        if (ft.k === 'ref') { this.address(x.value, ft.machine, cfg, `${i.name}.${x.field}`); continue; }
+        const vt = this.typeOf(x.value, this.scope('init'), ft);
+        if (!same(vt, ft)) { this.err('PL1201', x.value, `${i.name}.${x.field} is ${tyToString(ft)}, and the value is ${tyToString(vt)}`); continue; }
+        if (this.fold(x.value) === undefined && x.value.kind !== 'MapLit' && x.value.kind !== 'ArrayLit' && x.value.kind !== 'CtorExpr') { this.err('PL1201', x.value, 'an initial value in a configuration is a constant (PS13.1)'); continue; }
+        this.checkConst(x.value, ft, inst.machine.fields.find((f) => f.name === x.field)!.check, `${i.name}.${x.field}`);
+      }
+    }
+    // S31: inputs name an instance, a member or every member of a group, and an action of its machine.
+    const seen = new Set<string>();
+    for (const r of c.inputs) {
+      const inst = instances.get(r.instance);
+      if (!inst) { if (!c.instances.some((i) => i.name === r.instance)) this.err('PL1001', r, `no instance ${r.instance} in ${c.name}`); continue; }
+      if (inst.count === null && r.index !== null) this.err('PL1201', r, `${r.instance} is one instance, not a group; write ${r.instance}.${r.action}`);
+      if (inst.count !== null && r.index === null) this.err('PL5403', r, `${r.instance} is a group; write ${r.instance}[*].${r.action} or ${r.instance}[i].${r.action}`);
+      if (inst.count !== null && typeof r.index === 'number' && (r.index < 0 || r.index >= inst.count)) this.err('PL1201', r, `${r.instance}[${r.index}] is not a member of ${r.instance}[${inst.count}]`);
+      if (!inst.machine.items.some((it) => it.kind === 'Action' && it.name === r.action)) this.err('PL1001', r, `${inst.machine.name} has no action ${r.action}`);
+      const key = `${r.instance}[${r.index}].${r.action}`;
+      if (seen.has(key)) this.err('PL1002', r, `input ${r.instance}${r.index === null ? '' : `[${r.index}]`}.${r.action} is listed twice`);
+      seen.add(key);
+    }
+    // S62: the transit bound is what makes the exploration end.
+    if (!c.bounds) this.err('PL1201', c, `configuration ${c.name} declares no bounds; write bounds { transit n } (PS13.1)`);
+    else if (c.bounds.transit < 1 || (c.bounds.instances !== null && c.bounds.instances < c.instances.reduce((n, i) => n + (i.count ?? 1), 0))) this.err('PL1201', c.bounds, 'the transit bound is at least 1, and the instance bound at least the declared instances (PS13.1)');
+    const names = new Set<string>();
+    for (const p of c.properties) {
+      if (names.has(p.name)) this.err('PL1002', p, `property ${p.name} is declared twice`);
+      names.add(p.name);
+      const scope: Scope = { ...this.scope('config'), config: cfg };
+      if (p.kind === 'Property') { this.expectBool(p.expr, scope); continue; }
+      // M1-2: liveness is typed here and listed as not run; S56: its quantifier ranges over a group.
+      const inner: Scope = { ...scope, locals: new Map() };
+      if (p.quant) {
+        const g = instances.get(p.quant.group);
+        if (!g || g.count === null) this.err('PL1001', p, `${p.quant.group} is not a group of ${c.name}`);
+        else inner.locals.set(p.quant.var, { ty: { k: 'int', lo: 0, hi: g.count - 1 }, res: { k: 'let', name: p.quant.var } });
+      }
+      if (p.from) this.expectBool(p.from, inner);
+      this.expectBool(p.expr, inner);
+      for (const g of p.fair ?? []) {
+        for (const m of g.members) if (![...instances.values()].some((x) => x.machine.items.some((it) => it.kind === 'Action' && it.name === m.action))) this.err('PL1001', g, `fairness names ${m.action}, which is not an action of any machine of ${c.name}`);
+      }
+    }
+  }
+
+  /** An address in a configuration (PS1.6): `none`, an instance of machine M, or a member `g[k]` of a group of M. */
+  private address(e: A.Expr, machine: string | null, cfg: ConfigScope, what: string): void {
+    if (e.kind === 'Name' && e.name === 'none') return;
+    const name = e.kind === 'Name' ? e.name : e.kind === 'Index' && e.object.kind === 'Name' ? e.object.name : null;
+    const inst = name ? cfg.instances.get(name) : undefined;
+    if (!inst) { this.err('PL1201', e, `${what} is an address: none, an instance, or a member g[k] of a group`); return; }
+    if (e.kind === 'Name' && inst.count !== null) { this.err('PL5403', e, `${name} is a group; name one member, ${name}[k]`); return; }
+    if (e.kind === 'Index') {
+      if (inst.count === null) { this.err('PL1201', e, `${name} is one instance, not a group`); return; }
+      if (e.index.kind !== 'Int' || e.index.value < 0 || e.index.value >= inst.count) { this.err('PL1201', e, `${name}[…] takes a constant index from 0 to ${inst.count - 1}`); return; }
+    }
+    if (machine !== null && inst.machine.name !== machine) this.err('PL1201', e, `${what} is Ref<${machine}>, and ${name} is a ${inst.machine.name}`);
+  }
+
+  /**
+   * An instance form in a configuration property (S32): `x`, `g[i]` or, inside an aggregate, `g[*]`. Null when
+   * the expression is not one; otherwise the instance, with PL5403 for a `g[*]` outside an aggregate.
+   */
+  private instanceForm(e: A.Expr, scope: Scope): { machine: A.Machine; facts: MachineFacts; name: string } | 'error' | null {
+    const cfg = scope.config;
+    if (!cfg) return null;
+    if (e.kind === 'Name' && !scope.locals.has(e.name)) {
+      const inst = cfg.instances.get(e.name);
+      if (!inst) return null;
+      if (inst.count !== null) { this.err('PL5403', e, `${e.name} is a group; quantify it, forall i in ${e.name}: …, or aggregate it, count(${e.name}[*] …) (PS13.6)`); return 'error'; }
+      return { machine: inst.machine, facts: inst.facts, name: e.name };
+    }
+    if (e.kind === 'Index' && e.object.kind === 'Name') {
+      const inst = cfg.instances.get(e.object.name);
+      if (!inst) return null;
+      if (inst.count === null) { this.err('PL1201', e, `${e.object.name} is one instance, not a group`); return 'error'; }
+      if (e.index.kind === 'Star') {
+        if (!scope.star) { this.err('PL5403', e, `${e.object.name}[*] stands for every member only inside count, sum, all or any; elsewhere write forall i in ${e.object.name}: … (PS13.6)`); return 'error'; }
+      } else {
+        const it = this.typeOf(e.index, scope);
+        if (it.k !== 'int' && it.k !== 'error') { this.err('PL1201', e.index, `an index is an int, not ${tyToString(it)}`); return 'error'; }
+      }
+      return { machine: inst.machine, facts: inst.facts, name: e.object.name };
+    }
+    return null;
+  }
+
+  /** S32: `g[i] is C` tests the one field of the machine whose type has every constructor named. */
+  private configIs(e: A.Is, inst: { machine: A.Machine; facts: MachineFacts; name: string }): void {
+    const owners = e.ctors.map((c) => inst.machine.fields.filter((f) => { const t = inst.facts.fieldTypes.get(f.name)!; return t.k === 'union' && this.env.unions.get(t.name)!.ctors.some((x) => x.name === c); }).map((f) => f.name));
+    const field = owners[0]?.length === 1 ? owners[0][0] : null;
+    if (!field || owners.some((o) => o.length !== 1 || o[0] !== field)) {
+      this.err('PL1005', e, `${e.ctors.join(' | ')} names no single field of ${inst.machine.name}${owners.some((o) => o.length > 1) ? `; several fields have it, so write ${inst.name}[…].f is ${e.ctors[0]}` : ''} (S32)`);
+    }
   }
 
   // ── declarations ────────────────────────────────────────────────────────
@@ -404,7 +541,10 @@ class Checker {
           // not run by the pipeline, which folds the verdict to INCONCLUSIVE at best. It no longer refuses the program.
           if (it.from) this.expectBool(it.from, this.scope('invariant'));
           this.expectBool(it.expr, this.scope('invariant'));
-          for (const g of it.fair) {
+          // S56: the fairness clause may be left out, and a quantifier written, only in a configuration.
+          if (!it.fair) this.err('PL1201', it, `liveness ${it.name} of a machine states its fairness: under fair { … } (PS6)`);
+          if (it.quant) this.err('PL1201', it, `${it.quant.q} ${it.quant.var} in ${it.quant.group}: ranges over a group of a configuration, not over a machine's property (PS13.6)`);
+          for (const g of it.fair ?? []) {
             for (const m of g.members) if (!this.actions.has(m.action)) this.err('PL1001', g, `fairness names ${m.action}, which is not an action of ${this.machine!.name}`);
           }
           break;
@@ -1272,6 +1412,10 @@ class Checker {
         const n = e.name;
         const local = scope.locals.get(n);
         if (local) { if (local.mark) local.mark.used = true; this.resolve(e, local.res); return local.ty; }
+        // S32: an instance is read through its fields or tested with `is`.
+        const inf = this.instanceForm(e, scope);
+        if (inf === 'error') return ERR;
+        if (inf) { this.err('PL1201', e, `${n} is an instance; read a field, ${n}.f, or test it with is (S32)`); return ERR; }
         if (scope.params.has(n)) { this.resolve(e, { k: 'param', name: n }); return scope.params.get(n)!; }
         if (fields.has(n) && scope.ctx === 'compose') { this.err('PL1201', e, `a compose invariant reads the parent's field as parent.${n} (PT7)`); return ERR; }
         if (fields.has(n) && scope.ctx !== 'init' && scope.ctx !== 'step') {
@@ -1307,6 +1451,14 @@ class Checker {
         return ERR;
       }
       case 'Member': {
+        // S32: `x.f` and `g[i].f`, a field of an instance, only in a configuration property.
+        const inf = this.instanceForm(e.object, scope);
+        if (inf === 'error') return ERR;
+        if (inf) {
+          const t = inf.facts.fieldTypes.get(e.prop);
+          if (!t) { this.err('PL1001', e, `${inf.machine.name} has no field ${e.prop}`); return ERR; }
+          return t;
+        }
         // S22: `Type.C`, a constructor without payload named with its type.
         if (e.object.kind === 'Name' && this.env.unions.has(e.object.name) && !scope.locals.has(e.object.name) && !scope.params.has(e.object.name) && !fields.has(e.object.name)) {
           const c = this.ctorType(`${e.object.name}.${e.prop}`, expected, e);
@@ -1339,6 +1491,9 @@ class Checker {
         return ERR;
       }
       case 'Index': {
+        const inf = this.instanceForm(e, scope);
+        if (inf === 'error') return ERR;
+        if (inf) { this.err('PL1201', e, `${inf.name}[…] is an instance; read a field, ${inf.name}[i].f, or test it with is (S32)`); return ERR; }
         const mt = this.typeOf(e.object, scope);
         if (mt.k !== 'map') { if (mt.k !== 'error') this.err('PL1201', e, `indexing needs a map, not ${tyToString(mt)}`); this.typeOf(e.index, scope); return ERR; }
         const kt = this.typeOf(e.index, scope, mt.key);
@@ -1350,6 +1505,25 @@ class Checker {
           if (e.args.length !== 1 || e.args[0].kind !== 'String') { this.err('PL1201', e, 'rejected takes one reason string: rejected("reason")'); return ERR; }
           this.record(e.args[0], { k: 'string' });
           return BOOL;
+        }
+        // PS13.6: count, sum, all and any over the members of one group, and init(e), in a configuration property.
+        if (scope.config && ['count', 'sum', 'all', 'any'].includes(e.callee)) {
+          if (e.args.length !== 1) { this.err('PL1201', e, `${e.callee} takes one expression over a group's members, as in ${e.callee}(g[*] is C)`); return ERR; }
+          const groups = starGroups(e.args[0], scope.config);
+          if (groups.length !== 1) { this.err('PL1201', e, `${e.callee}(…) ranges over one group, written g[*] (PS13.6)`); return ERR; }
+          const inner: Scope = { ...scope, star: true };
+          if (e.callee === 'sum') {
+            const t = this.typeOf(e.args[0], inner);
+            if (t.k !== 'int' && t.k !== 'error') this.err('PL1201', e, `sum adds ints, not ${tyToString(t)}`);
+            return INT;
+          }
+          this.expectBool(e.args[0], inner);
+          return e.callee === 'count' ? { k: 'int', lo: 0, hi: scope.config.instances.get(groups[0])!.count! } : BOOL;
+        }
+        if (scope.config && e.callee === 'init') {
+          if (e.args.length !== 1) { this.err('PL1201', e, 'init takes one expression: init(x.f)'); return ERR; }
+          if (scope.config.inInit) { this.err('PL1201', e, 'init(…) inside init(…) says nothing more; write init once'); return ERR; }
+          return this.typeOf(e.args[0], { ...scope, config: { ...scope.config, inInit: true } }, expected);
         }
         // S49: count, sum, all and any over a family's spawned members, in a compose invariant.
         if (scope.ctx === 'compose' && ['count', 'sum', 'all', 'any'].includes(e.callee)) {
@@ -1387,6 +1561,15 @@ class Checker {
         return BOOL;
       }
       case 'Quant': {
+        // PS13.6: `forall i in g: e` and `exists i in g: e` over the members of a group of a configuration.
+        if (scope.config) {
+          const g = scope.config.instances.get(e.group);
+          if (!g || g.count === null) { this.err('PL1001', e, `${e.group} is not a group of this configuration`); return BOOL; }
+          const inner: Scope = { ...scope, locals: new Map(scope.locals) };
+          inner.locals.set(e.var, { ty: { k: 'int', lo: 0, hi: g.count - 1 }, res: { k: 'let', name: e.var } });
+          this.expectBool(e.body, inner);
+          return BOOL;
+        }
         // S49: `forall i in f: e` and `exists i in f: e` over the indices of a family, in a compose invariant.
         if (scope.ctx !== 'compose') { this.err('PL0901', e, `${e.q} over a group is checked in compose invariants now, and in configurations from plan step 8`); return BOOL; }
         const range = this.facts!.families.get(e.group);
@@ -1397,9 +1580,13 @@ class Checker {
         return BOOL;
       }
       case 'Star':
+        if (scope.config) { this.err('PL5403', e, '[*] stands for every member of a group only inside count, sum, all or any (PS13.6)'); return ERR; }
         this.err('PL1201', e, '[*] stands for the members of a family inside count, sum, all or any (S49)');
         return ERR;
       case 'Is': {
+        const inf = this.instanceForm(e.expr, scope);
+        if (inf === 'error') return BOOL;
+        if (inf) { this.configIs(e, inf); return BOOL; }
         const t = this.typeOf(e.expr, scope);
         if (t.k !== 'union') { if (t.k !== 'error') this.err('PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
         const u = this.env.unions.get(t.name)!;
@@ -1610,6 +1797,20 @@ function indexText(e: A.Expr): string {
   if (e.kind === 'Int') return String(e.value);
   if (e.kind === 'Binary' && e.right.kind === 'Int') return `${indexText(e.left)}${e.op}${e.right.value}`;
   return '?';
+}
+
+/** The groups of a configuration an aggregate's expression reads with `g[*]` (PS13.6). */
+function starGroups(e: A.Expr, cfg: ConfigScope): string[] {
+  const out = new Set<string>();
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== 'object') return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const n = x as A.Expr;
+    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Name' && cfg.instances.has(n.object.name)) out.add(n.object.name);
+    for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
+  };
+  walk(e);
+  return [...out];
 }
 
 /** The families an aggregate's expression reads with `[*]`. */

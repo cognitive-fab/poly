@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { digest, type Module, type Expr, type Handler, type Machine, type Property } from '@poly/core';
+import { digest, type Module, type Expr, type Handler, type Machine, type Property, type Configuration, type Liveness } from '@poly/core';
 import { parse, format } from '../src/index.js';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', '..');
@@ -189,9 +189,40 @@ test('syntax errors are PL0001 with a position', () => {
 });
 
 test('later-milestone top-level forms are refused with PL0901, not a syntax error', () => {
-  const r = parse('module m\nconfiguration c {\n  inv : Inventory\n  bounds { transit 4 }\n}\n');
+  const r = parse('module m\npolicy p {\n  rule r { when true then deny }\n}\n');
   assert.ok(r.module);
   assert.deepEqual(r.diagnostics.map((d) => d.code), ['PL0901']);
+});
+
+test('a configuration parses (PT2, PT7a, S31, S56) and formats back to itself', () => {
+  const src = `module m
+machine M {
+  state { x : bool = false }
+  action A()
+  on A { x' = true }
+}
+
+configuration c {
+  a    : M
+  g[2] : M { x: false }
+  inputs { a.A, g[*].A, g[1].A }
+  bounds { transit 3, instances 3 }
+  invariant p: (count(g[*].x) <= 2 && a.x) implies init(a.x) == false
+  liveness q: forall i in g: g[i].x == false leads to g[i].x
+}
+`;
+  const m = ok(src);
+  const c = m.decls[1] as Configuration;
+  assert.equal(c.kind, 'Configuration');
+  assert.deepEqual(c.instances.map((i) => [i.name, i.count, i.machine.join('.'), i.init.map((x) => x.field)]), [['a', null, 'M', []], ['g', 2, 'M', ['x']]]);
+  assert.deepEqual(c.inputs.map((r) => [r.instance, r.index, r.action]), [['a', null, 'A'], ['g', '*', 'A'], ['g', 1, 'A']]);
+  assert.deepEqual([c.bounds?.transit, c.bounds?.instances], [3, 3]);
+  const live = c.properties[1] as Liveness;
+  assert.deepEqual([live.quant, live.fair], [{ q: 'forall', var: 'i', group: 'g' }, null]);
+  const out = format(m);
+  assert.equal(out.slice(out.indexOf('configuration')), src.slice(src.indexOf('configuration')));
+  assert.equal(format(ok(out)), out);
+  assert.equal(digest(ok(out)), digest(m));
 });
 
 test('an empty then-block with an else keeps its condition', () => {

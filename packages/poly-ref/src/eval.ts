@@ -38,11 +38,49 @@ export interface Env {
   star?: number;
   /** A compose invariant's joint state (PS7.1, PT7): the parent's state and each spawned child's. */
   joint?: { parent: State; children: Map<string, State> };
+  /** A configuration property's global state σ (PS13.6). */
+  global?: GlobalView;
   /** Declared types of local names, where known: pattern binders and lets (for match scrutinees, S21, S22). */
   localTypes?: Map<string, import('./model.js').RType>;
 }
 
+/** σ as a configuration property reads it (PS13.6): each instance by name (`inv`, `order[0]`), and the groups. */
+export interface GlobalView {
+  instance(name: string): { M: RMachine; state: State } | undefined;
+  /** Each group's size: `order[2]` is `order` with 2. */
+  groups: Map<string, number>;
+  /** The initial global state, which `init(e)` reads. */
+  initial: GlobalView | null;
+}
+
 export class EvalError extends Error {}
+
+/** The instance a configuration expression names: `x`, `g[i]`, or `g[*]` inside an aggregate (S32). */
+function instanceOf(e: A.Expr, env: Env): { M: RMachine; state: State } | undefined {
+  const g = env.global;
+  if (!g) return undefined;
+  if (e.kind === 'Name' && !env.locals.has(e.name)) return g.instance(e.name);
+  if (e.kind === 'Index' && e.object.kind === 'Name' && g.groups.has(e.object.name)) {
+    const k = e.index.kind === 'Star' ? env.star : int(evaluate(e.index, env), 'an index');
+    if (k === undefined) throw new EvalError('poly-ref: g[*] outside an aggregate (PS13.6)');
+    return g.instance(`${e.object.name}[${k}]`);
+  }
+  return undefined;
+}
+
+/** The group an aggregate reads with `g[*]` (PS13.6). */
+function starGroup(e: A.Expr, g: GlobalView): string | null {
+  let found: string | null = null;
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== 'object' || found) return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const n = x as A.Expr;
+    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Name' && g.groups.has(n.object.name)) { found = n.object.name; return; }
+    for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
+  };
+  walk(e);
+  return found;
+}
 
 /** The family an aggregate's expression reads with `[*]` (S49). */
 function starFamily(e: A.Expr): string | null {
@@ -75,6 +113,9 @@ export function evaluate(e: A.Expr, env: Env): Value {
     case 'Primed': throw new EvalError(`poly-ref: ${e.name}' is write-only (PS2.3)`);
     case 'Name': return lookup(e.name, env);
     case 'Member': {
+      // S32: x.f and g[i].f, a field of an instance in σ.
+      const inst = instanceOf(e.object, env);
+      if (inst) return field(inst.state, e.prop);
       if (e.object.kind === 'Name' && e.object.name === 'pre' && env.pre) return field(env.pre, e.prop);
       if (e.object.kind === 'Name' && e.object.name === 'post' && env.post) return field(env.post, e.prop);
       // PT7: parent.f and children.k.f name fields of the joint state; S48 guarantees k is spawned.
@@ -112,6 +153,18 @@ export function evaluate(e: A.Expr, env: Env): Value {
         // PS5.3: `rejected(r)` is true iff the step's verdict is rejected(r).
         return env.verdict.kind === 'rejected' && env.verdict.reason === e.args[0].value;
       }
+      // PS13.6: count, sum, all and any over the members of one group; init(e) in the initial global state.
+      if (env.global && ['count', 'sum', 'all', 'any'].includes(e.callee)) {
+        const grp = starGroup(e.args[0], env.global);
+        if (!grp) throw new EvalError(`poly-ref: ${e.callee} over no group`);
+        const vals: Value[] = [];
+        for (let k = 0; k < env.global.groups.get(grp)!; k++) vals.push(evaluate(e.args[0], { ...env, star: k }));
+        if (e.callee === 'count') return vals.filter((v) => truth(v, 'count')).length;
+        if (e.callee === 'sum') return vals.reduce<number>((a, v) => a + int(v, 'sum'), 0);
+        if (e.callee === 'all') return vals.every((v) => truth(v, 'all'));
+        return vals.some((v) => truth(v, 'any'));
+      }
+      if (env.global && e.callee === 'init') return evaluate(e.args[0], { ...env, global: env.global.initial ?? env.global });
       // S49: count, sum, all and any over the spawned members of one family.
       if (env.joint && ['count', 'sum', 'all', 'any'].includes(e.callee)) {
         const fam = starFamily(e.args[0]);
@@ -131,6 +184,17 @@ export function evaluate(e: A.Expr, env: Env): Value {
       return env.joint.children.has(e.index ? `${e.key}${int(evaluate(e.index, env), 'an index')}` : e.key);
     }
     case 'Quant': {
+      // PS13.6: forall and exists over the members of a group of a configuration.
+      if (env.global?.groups.has(e.group)) {
+        for (let k = 0; k < env.global.groups.get(e.group)!; k++) {
+          const inner: Env = { ...env, locals: new Map(env.locals) };
+          inner.locals.set(e.var, k);
+          const v = truth(evaluate(e.body, inner), e.q);
+          if (e.q === 'forall' && !v) return false;
+          if (e.q === 'exists' && v) return true;
+        }
+        return e.q === 'forall';
+      }
       // S49: forall and exists over the indices of a family.
       const r = env.M.families.get(e.group);
       if (!r) throw new EvalError(`poly-ref: no family ${e.group}`);
@@ -151,6 +215,14 @@ export function evaluate(e: A.Expr, env: Env): Value {
     }
     case 'Binary': return binary(e, env);
     case 'Is': {
+      // S32: `g[i] is C` tests the one field of the instance's machine whose type has the constructor C.
+      const inst = instanceOf(e.expr, env);
+      if (inst) {
+        const f = inst.M.fields.find((x) => x.type.k === 'union' && inst.M.unions.get(x.type.name)!.ctors.some((c) => c.name === e.ctors[0]));
+        if (!f) throw new EvalError(`poly-ref: no field of ${inst.M.name} has the constructor ${e.ctors[0]}`);
+        const fv = inst.state[f.name];
+        return isUnion(fv) && e.ctors.includes(fv.ctor);
+      }
       const v = evaluate(e.expr, env);
       if (!isUnion(v)) throw new EvalError('poly-ref: `is` on a value that is not a union');
       return e.ctors.includes(v.ctor);

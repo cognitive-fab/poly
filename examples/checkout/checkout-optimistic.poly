@@ -1,0 +1,39 @@
+// PT7a's checkout with the optimistic order: on Available(n) with n > 0 it confirms at once and sends
+// Take afterwards. Each machine is correct on its own; the configuration confirms two orders against
+// one unit of stock (PL5401), a defect that lives in the arrival order.
+module checkout
+
+service machine Inventory {
+  state { onHand: 0..1 = 1 }
+  action Query(from: Ref<Order>)
+  action Take(from: Ref<Order>)
+
+  on Query(from) { send from <- Available(n: onHand) }
+  on Take(from) {
+    if onHand > 0 { onHand' = onHand - 1   send from <- Taken() }
+    else          { send from <- OutOfStock() }
+  }
+}
+
+type OrderState = Idle | Asked | Taking | Done | Refused
+
+machine Order {
+  state { st: OrderState = Idle   inv: Ref<Inventory> = none }
+  terminal st is Done | Refused
+  action Place()  action Available(n: 0..1)  action Taken()  action OutOfStock()
+
+  on Place      { require st is Idle   else reject "not-idle"    st' = Asked   send inv <- Query(from: self) }
+  on Available(n) { require st is Asked else reject "not-asked"
+                    if n > 0 { st' = Done   send inv <- Take(from: self) } else { st' = Refused } }
+  on Taken      { require st is Taking else reject "not-taking"  st' = Done }
+  on OutOfStock { require st is Taking else reject "not-taking"  st' = Refused }
+}
+
+configuration two-buyers {
+  inv       : Inventory
+  order[2]  : Order { inv: inv }
+  inputs    { order[*].Place }
+  bounds    { transit 4 }
+  invariant confirmed-within-stock: count(order[*] is Done) <= init(inv.onHand)
+  liveness  settle: forall i in order: order[i] is Asked leads to order[i] is Done | Refused
+}

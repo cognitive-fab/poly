@@ -21,12 +21,12 @@ import { parse } from '@poly/lang';
 import { checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
+import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'effects' | 'composition';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'effects' | 'composition' | 'configuration';
 
 export interface StageRecord {
   stage: StageName;
@@ -68,6 +68,24 @@ export interface InstanceRecord {
   compositionByRefOnly?: boolean;
 }
 
+/** Stage 4b for one configuration (PS13): poly-ref's exploration of its global states. */
+export interface ConfigCheck {
+  configuration: string;
+  stages: StageRecord[];
+  /** Liveness properties, listed as not run (M1-2). */
+  notRun: { property: string; reason: string }[];
+  diagnostics: Diagnostic[];
+  verdict: Verdict;
+  /** The checked instance (PT12.3a): the instances, the bounds, and what the verdict assumes. */
+  instance?: {
+    instances: string[];
+    states: number;
+    transitions: number;
+    bounds: string[];
+    kernelAssumptions: string[];
+  };
+}
+
 export interface CheckReport {
   file: string;
   module: string | null;
@@ -75,6 +93,8 @@ export interface CheckReport {
   exit: number;
   diagnostics: Diagnostic[];
   machines: MachineCheck[];
+  /** Stage 4b: each configuration of the module (PS13). */
+  configurations: ConfigCheck[];
   error?: string;
   engines: Record<string, string>;
   /** S41: each effect kind the module declares, with what must agree across the project's modules. */
@@ -118,7 +138,7 @@ export function engineVersions(): Record<string, string> {
 
 export async function checkFile(file: string, opts: CheckOptions = {}): Promise<CheckReport> {
   const src = readFileSync(file, 'utf8');
-  const report: CheckReport = { file, module: null, verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], engines: engineVersions() };
+  const report: CheckReport = { file, module: null, verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
 
   // ── stage 0: parse, type, domains ─────────────────────────────────────
   const parsed = parse(src);
@@ -155,6 +175,8 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       return report;
     }
   }
+  // ── stage 4b: configurations (PS13) ─────────────────────────────────────
+  for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push(configurationStage(module, d, refused));
   return finish(report, module);
 }
 
@@ -453,6 +475,44 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   mc.stages.push({ stage: 'effects', status: 'ran', engine: `${engine}, poly-ref`, verdict: verdictOf(out), ms: performance.now() - t0, note: `${r.pathsExplored} paths, ${r.statesSeen} states, ${coverage}`, notes });
 }
 
+/**
+ * Stage 4b (architecture §5, PT7a). poly-ref explores the configuration's global states with every input and
+ * every arrival order within its bounds (PS13) and checks its invariants, sends to none and stuck states. No
+ * engine checks configurations, so the stage is poly-ref's alone (PA0.1). Liveness is listed as not run (M1-2).
+ * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
+ */
+function configurationStage(module: Module, decl: A.Configuration, refused: boolean): ConfigCheck {
+  const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+  for (const p of decl.properties) if (p.kind === 'Liveness') cc.notRun.push({ property: p.name, reason: 'liveness is checked from milestone M2 (PS6, PS13.2b)' });
+  if (refused) {
+    cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
+    return cc;
+  }
+  const t0 = performance.now();
+  const r = checkConfiguration(module, decl.name);
+  cc.diagnostics.push(...r.findings);
+  const groups = new Map<string, { machine: string; n: number }>();
+  for (const i of r.instances) {
+    const key = i.group ?? i.name;
+    groups.set(key, { machine: i.machine.name, n: (groups.get(key)?.n ?? 0) + 1 });
+  }
+  cc.instance = {
+    instances: [...groups].map(([k, g]) => (r.instances.some((i) => i.group === k) ? `${k}[0..${g.n - 1}]: ${g.machine}` : `${k}: ${g.machine}`)),
+    states: r.states,
+    transitions: r.transitions,
+    bounds: [`transit ≤ ${decl.bounds?.transit}`, ...(decl.bounds?.instances != null ? [`instances ≤ ${decl.bounds.instances}`] : [])],
+    // PS13.7 rests on one step per message at its receiver (K4, K8), atomic single-writer steps (K1, K2) and the profile (K7).
+    kernelAssumptions: ['K1', 'K2', 'K4', 'K7', 'K8'],
+  };
+  const sender = r.instances.some((i) => sends(module, i.machine.name));
+  cc.stages.push({
+    stage: 'configuration', status: 'ran', engine: 'poly-ref', verdict: verdictOf(r.findings), ms: performance.now() - t0,
+    note: `${r.states} global states, ${r.transitions} global steps`,
+    notes: sender ? ['polyrun has no sendTo intent yet (S58): the configuration is checked from the semantics, and its machines do not run under polyrun until it has'] : undefined,
+  });
+  return cc;
+}
+
 /** Whether a machine's handlers send (PS2.2); polyrun has no sendTo intent yet (S58). */
 function sends(module: Module, machine: string): boolean {
   const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine);
@@ -567,9 +627,17 @@ function finish(report: CheckReport, module?: Module): CheckReport {
       if (span) d.at = { ...d.at, line: span.line, col: span.col };
     }
   }
+  for (const c of report.configurations) {
+    const decl = module?.decls.find((d): d is A.Configuration => d.kind === 'Configuration' && d.name === c.configuration);
+    for (const d of c.diagnostics) {
+      if (d.at.line !== undefined) continue;
+      const span = (d.at.node && spans.get(d.at.node)) || decl?.span;
+      if (span) d.at = { ...d.at, line: span.line, col: span.col };
+    }
+  }
   // A property not run keeps the verdict from CLEAN: INCONCLUSIVE at best, FINDINGS if a safety check failed (M1-2).
-  for (const m of report.machines) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length ? ['INCONCLUSIVE' as Verdict] : [])]);
-  const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict)]);
+  for (const m of [...report.machines, ...report.configurations]) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length ? ['INCONCLUSIVE' as Verdict] : [])]);
+  const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict), ...report.configurations.map((c) => c.verdict)]);
   report.verdict = v;
   report.exit = EXIT_CODES[v];
   return report;
