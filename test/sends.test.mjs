@@ -1,6 +1,6 @@
 // Plan step 8, addresses and messages (PS1.6, PS2.2): `Ref<M>`, `none`, `self` and `send` in a machine
 // checked alone. The domain of an address alone (S57), the sendTo intent and the self marker (S58), and
-// stage 3 when polyrun cannot read a send. Configurations are in checkout.test.mjs.
+// stage 3 of a sending machine, which polyrun reads since M3-2. Configurations are in checkout.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -81,7 +81,7 @@ test('the checker types sends against the receiver, and refuses self outside a s
   assert.deepEqual(swap('inv: Ref<Inventory> = none', 'inv: Ref<other.Inventory> = none'), ['PL0901']);
 });
 
-test('S58: a machine that sends and has a path property is poly-ref\'s alone at stage 3, and says so', async () => {
+test('M3-2: a machine that sends and has a path property runs polyrun\'s check-effects at stage 3', async () => {
   const dir = join(OUT, 'sources');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, 'path-and-send.poly');
@@ -90,8 +90,10 @@ test('S58: a machine that sends and has a path property is poly-ref\'s alone at 
   const r = await checkFile(file, { root: OUT });
   const order = r.machines.find((m) => m.machine === 'Order');
   const stage = order.stages.find((s) => s.stage === 'effects');
-  assert.equal(stage.engine, 'poly-ref');
-  assert.match(stage.note, /polyrun has no sendTo intent yet/);
+  // S58 kept it poly-ref's alone while polyrun had no sendTo; polygraph 8.3.2 has one (S89).
+  assert.match(stage.engine, /polyrun@8\.3\.2/);
+  assert.doesNotMatch(stage.note ?? '', /sendTo/);
+  assert.equal(order.instance.effectsByRefOnly, undefined);
   assert.equal(stage.verdict, 'CLEAN', render(r));
 });
 

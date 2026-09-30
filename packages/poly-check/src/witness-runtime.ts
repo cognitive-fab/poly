@@ -3,8 +3,9 @@
 // Until PT15's runtime API exists (M4), a witness is walked through the lowered artefacts the engines run:
 // the SAM module (next.cjs), the effects mapper, and the property modules the engines read (invariants.mjs,
 // effect-invariants.mjs, liveness.mjs). A configuration's instances are walked by a small harness that
-// delivers the witness's messages between the lowered modules, since polyrun has no sendTo yet (S58); its
-// properties, which have no engine artefact, are evaluated by poly-ref over the instances' states.
+// delivers the witness's messages between the lowered modules, without a store: polyrun has had sendTo since
+// 8.3.2 (M3-2), but no createInstance, which a detached child's witness needs (S60). Its properties, which
+// have no engine artefact, are evaluated by poly-ref over the instances' states.
 //
 // The rules, the same for every kind:
 //   - the build must be the build of the source as it is now (its machineVersion is the source's module

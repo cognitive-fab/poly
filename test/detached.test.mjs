@@ -42,7 +42,7 @@ test('S60: the conformance source checks clean at every stage, and the configura
   assert.deepEqual(d.stages.map((s) => `${s.stage}:${s.status}`), ['parse-type:ran', 'lower:ran', 'validate:ran', 'translation-validation:ran', 'model-check:ran', 'deadlock:ran', 'effects:ran']);
   const cfg = r.configurations[0];
   assert.equal(cfg.instance.states, 5);
-  assert.match(cfg.stages[0].notes.join(' '), /polyrun has no sendTo or createInstance intent yet \(S58, S60\)/);
+  assert.match(cfg.stages[0].notes.join(' '), /polyrun has no createInstance intent yet \(S60\)/);
   assert.deepEqual(cfg.instance.instances, ['d: Dispatcher', 'Worker[0..0]: Worker']);
 });
 

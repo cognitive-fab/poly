@@ -132,6 +132,19 @@ test('a parent with children and no compose invariant is checked by poly-ref alo
   assert.match(render(r), /Order: the joint machine decided by poly-ref alone/);
 });
 
+test('M3-2: a parent that sends has its joint machine checked by polyrun\'s check-product too', async () => {
+  // S58 kept a sending parent poly-ref's alone; polygraph 8.3.2 validates a sendTo and lets it leave the joint machine.
+  const file = write('sends-peer.poly', SRC
+    .replace("    hurried : bool        = false\n", "    hurried : bool        = false\n    peer    : Ref<Order>  = none\n")
+    .replace("    status' = Shipping\n", "    status' = Shipping\n    send peer <- Hurry()\n"));
+  const r = await checkFile(file, { root: OUT });
+  const order = r.machines.find((m) => m.machine === 'Order');
+  const stage = order.stages.find((s) => s.stage === 'composition');
+  assert.equal(order.instance.compositionByRefOnly, undefined, render(r));
+  assert.match(stage.engine, /polyrun/);
+  assert.equal(order.verdict, 'CLEAN', render(r));
+});
+
 test('polyrun runs the lowered parent and child: creation, signal and completion', async () => {
   const [ship, order] = build(CHILDREN, 'children-run');
   const rt = await createRuntime({

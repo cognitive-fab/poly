@@ -222,7 +222,7 @@ function byContent(dir: string, file: string): string {
 /** Stages 2c, 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
 function laterStages(checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
   const f = checked.machines.get(machine)!;
-  const mapper = f.effects.size > 0 || f.decisions.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || sends(f.machine);
+  const mapper = f.effects.size > 0 || f.decisions.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || kernelIntents(f.machine).length > 0;
   const live = f.machine.items.some((i) => i.kind === 'Liveness');
   return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.decisions.size ? ['decisions' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
 }
@@ -372,13 +372,14 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const out: Diagnostic[] = [];
   const facts = checked.machines.get(machine)!;
   const hasCompose = facts.machine.items.some((i) => i.kind === 'Property' && i.form === 'compose');
-  // S58, S60: check-product runs the parent's mapper, and polyrun has no sendTo or createInstance intent yet.
-  const sender = sends(facts.machine);
-  if (!hasCompose || sender) {
+  // S60: check-product runs the parent's mapper, and polyrun has no createInstance intent. A send it validates and
+  // lets leave the joint machine (M3-2, polygraph 8.3.2).
+  const missing = missingIntents(facts.machine);
+  if (!hasCompose || missing.length) {
     out.push(...joint.findings);
     mc.diagnostics.push(...out);
     mc.instance!.compositionByRefOnly = true;
-    mc.stages.push({ stage: 'composition', status: 'ran', engine: 'poly-ref', verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states; ${sender ? missingText(missingIntents(facts.machine)) : 'no compose invariant'}, so polyrun check-product did not run` });
+    mc.stages.push({ stage: 'composition', status: 'ran', engine: 'poly-ref', verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states; ${missing.length ? missingText(missing) : 'no compose invariant'}, so polyrun check-product did not run` });
     return;
   }
   // Each child machine is lowered where the engines read it (S28: <module>.<Machine>).
@@ -478,7 +479,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   const hasPath = existsSync(join(dir, 'effect-invariants.mjs'));
   const missing = missingIntents(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine));
   if (hasPath && missing.length) {
-    // S58, S60: check-effects would read the mapper's sendTo and createInstance intents as undeclared kinds.
+    // S60: check-effects would read the mapper's createInstance intents as an undeclared kind.
     mc.diagnostics.push(...fromRef);
     mc.stages.push({ stage: 'effects', status: 'ran', engine: 'poly-ref', verdict: verdictOf(fromRef), ms: performance.now() - t0, note: `${missingText(missing)}, so polyrun check-effects did not run; path properties and PL4002 decided by poly-ref alone` });
     mc.instance!.effectsByRefOnly = true;
@@ -588,8 +589,8 @@ export function configurationReports(module: Module, refused: boolean): { config
   return { configurations };
 }
 
-/** The kernel intents a machine's handlers use that polyrun does not have yet: sendTo (S58) and createInstance (S60). */
-function missingIntents(decl: A.Machine | undefined): string[] {
+/** The kernel intents for other instances a machine's handlers use: sendTo (S58) and createInstance (S60). */
+function kernelIntents(decl: A.Machine | undefined): string[] {
   const found = new Set<string>();
   const walk = (body: A.Stmt[]): void => {
     for (const s of body) {
@@ -603,8 +604,9 @@ function missingIntents(decl: A.Machine | undefined): string[] {
   for (const i of decl?.items ?? []) if (i.kind === 'Handler') walk(i.body);
   return [...found].sort().reverse();
 }
-const sends = (decl: A.Machine | undefined): boolean => missingIntents(decl).length > 0;
-const missingText = (names: string[]) => `polyrun has no ${names.join(' or ')} intent yet (${names.map((n) => (n === 'sendTo' ? 'S58' : 'S60')).join(', ')})`;
+/** Those polyrun does not have: createInstance (S60). sendTo is a kernel intent since polygraph 8.3.2 (M3-2, S89). */
+const missingIntents = (decl: A.Machine | undefined): string[] => kernelIntents(decl).filter((n) => n !== 'sendTo');
+const missingText = (names: string[]) => `polyrun has no ${names.join(' or ')} intent yet (S60)`;
 
 function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string, fieldOf: (flatKey: string) => string): Diagnostic {
   const engine = `polygraph@${version}`;
