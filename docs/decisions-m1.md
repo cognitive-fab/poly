@@ -101,6 +101,14 @@ The agent applies the spec text for S43 to S45, S47 and S48 in one commit, citin
 
 The agent applies the spec text for S49, S50 and S52 in one commit, citing the ids. Step 7 can start.
 
+## Ruling on S53 (from the review of step 7)
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S53** A parameter declared `strict` on an action with no handler | PS9.1a says row 2 of PS3.2 never applies to such an action, because a parameter becomes `strict` only by flowing into an effect. An explicit `strict` breaks that: the semantics would answer `rejected("outside-check-domain")` for data outside the domain, and the runtime answers `unhandled`, because the action is not in the module's surface (S35). **Refuse the declaration, and keep the table.** An explicit `strict` on a parameter of an action with no handler is `PL1302 STRICT_ON_UNHANDLED_ACTION`, at the declaration; the fixes it offers are to remove `strict` or to add a handler. PS9.1a's parenthetical then holds by construction, and PS3.2's row order stays as it is. Reordering the table was considered and rejected: it would change the semantics to fit one lowering choice. | PS9.1a (the parenthetical cites PL1302); PT3.4; PT12.2 |
+
+The agent applies the spec text in one commit, with a regression test that fails first, before families.
+
 ## Conclusion
 
 M1 starts with its three open questions settled. The emit-only step is fixed where it originates, in the engine. Liveness no longer blocks a safety result. The one gate item that needs liveness moves to the milestone that builds it. The configuration explorer is the main work, and its first targets (the checkout witness and the delivery variants) are already measured by independent scripts. The rulings on the plan add the record type the OMS order needs and fix the timer rule against polyrun's store.
