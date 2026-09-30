@@ -55,7 +55,7 @@ export interface CascadeStep {
 
 /** A doctrine finding of one cascade (S47). `halts` marks the classes after which the branch has no successor. */
 interface Doctrine {
-  code: 'PL5101' | 'PL5102' | 'PL5201';
+  code: 'PL5101' | 'PL5102' | 'PL5104' | 'PL5201';
   message: string;
   halts: boolean;
 }
@@ -94,8 +94,8 @@ export function jointStep(j0: Joint, stim: Stimulus, childMachines: Map<string, 
     }
     const inst = find(target);
     if (!inst) {
-      // S50 (provisional): a signal to a child that is not spawned; polyrun poisons the parent here.
-      doctrine.push({ code: 'PL5102', message: `${action} is signalled to child ${target}, which is not spawned, so the runtime halts the parent`, halts: true });
+      // S50: a signal to a child that is not spawned; polyrun poisons the parent here.
+      doctrine.push({ code: 'PL5104', message: `${action} is signalled to child ${target}, which is not spawned, so the runtime halts the parent`, halts: true });
       throw new Halt();
     }
     if (inst.status !== 'active') {
@@ -191,7 +191,7 @@ export interface JointReport {
 
 /**
  * Explores the joint machine of a parent and its attached children, and checks the compose invariants
- * (PS7.3, PL5001) and the doctrine classes (S47: PL5101, PL5102, PL5201). A joint state that leaves an
+ * (PS7.3, PL5001) and the doctrine classes (S47: PL5101, PL5102, PL5201; S50: PL5104). A joint state that leaves an
  * instance's type or check domain is not explored (PL3901); each machine's own check names the escape.
  */
 export function checkJoint(module: Module, parentName: string, opts: { maxStates?: number } = {}): JointReport {
@@ -232,7 +232,7 @@ export function checkJoint(module: Module, parentName: string, opts: { maxStates
     const witness: Witness = { id: '', length: steps.length, trace: steps };
     return { code, name, severity, stage: 'composition', engine: ENGINE, at, message, witness, ...(property ? { property } : {}) };
   };
-  const NAMES: Record<string, string> = { PL5101: 'CHILDKEY_COLLISION', PL5102: 'UNHANDLED_CASCADE_DELIVERY', PL5201: 'CASCADE_DEPTH' };
+  const NAMES: Record<string, string> = { PL5101: 'CHILDKEY_COLLISION', PL5102: 'UNHANDLED_CASCADE_DELIVERY', PL5104: 'SIGNAL_TO_ABSENT_CHILD', PL5201: 'CASCADE_DEPTH' };
   const checkInvariants = (i: number) => {
     const j = states[i];
     for (const p of invariants) {

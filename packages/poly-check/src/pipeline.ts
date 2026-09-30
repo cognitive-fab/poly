@@ -345,7 +345,7 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   /** The poly code of a check-product finding (S47). */
   function productCode(v: { invariant: string; kind: string; detail?: string }): string {
     if (v.kind === 'state' || v.kind === 'transition') return 'PL5001';
-    if (v.kind === 'poison') return /exceeded depth/.test(v.detail ?? '') ? 'PL5201' : /no child with key/.test(v.detail ?? '') ? 'PL5102' : 'PL2501';
+    if (v.kind === 'poison') return /exceeded depth/.test(v.detail ?? '') ? 'PL5201' : /no child with key/.test(v.detail ?? '') ? 'PL5104' : 'PL2501';
     if (v.invariant.startsWith('childkey-collision')) return 'PL5101';
     if (v.invariant.startsWith('unhandled-delivery')) return 'PL5102';
     return 'PL2501';

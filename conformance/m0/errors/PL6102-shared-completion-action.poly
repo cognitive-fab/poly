@@ -1,0 +1,17 @@
+// expect: PL6102 (Done completes the child and is also armed as a timer)
+module errors
+
+machine Job {
+  state { done : bool = false }
+  terminal done
+  action Finish()
+  on Finish { require !done else reject "done"  done' = true }
+}
+
+machine Boss {
+  state { started : bool = false }
+  action Start()
+  action Done()
+  on Start { require !started else reject "started"  started' = true  spawn Job as job on complete -> Done  after 1h -> Done() as late }
+  on Done { require started else reject "idle"  started' = false }
+}

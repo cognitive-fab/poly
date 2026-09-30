@@ -112,13 +112,14 @@ test('PL5101: a spawn that re-uses a live child key is found by both engines', a
   assert.deepEqual(steps(f[0]), ['Checkout', 'Hurry']);
 });
 
-test('S50: a signal to a child not yet spawned halts the parent, found by both engines as PL5102', async () => {
+test('S50: a signal to a child not yet spawned halts the parent, found by both engines as PL5104', async () => {
   const file = write('early-signal.poly', SRC.replace('    require status == Shipping else reject "not-shipping"\n    require !hurried', '    require status in { Open, Shipping } else reject "not-shipping"\n    require !hurried'));
   const r = await checkFile(file, { root: OUT });
-  const f = r.machines.find((m) => m.machine === 'Order').diagnostics.filter((d) => d.code === 'PL5102');
+  const f = r.machines.find((m) => m.machine === 'Order').diagnostics.filter((d) => d.code === 'PL5104');
   assert.equal(f.length, 1, render(r));
   assert.match(f[0].engine, /poly-ref.*polyrun/);
   assert.deepEqual(steps(f[0]), ['Hurry']);
+  assert.ok(!r.machines.flatMap((m) => m.diagnostics).some((d) => d.code === 'PL5102'));
 });
 
 test('a parent with children and no compose invariant is checked by poly-ref alone, and says so', async () => {
@@ -151,3 +152,14 @@ test('polyrun runs the lowered parent and child: creation, signal and completion
     await rt.close();
   }
 });
+
+test('S52: an action wired as a child completion and as an effect completion or a timer action is PL6102', () => {
+  const withEffect = SRC.replace('\n  compose invariant', '\n  effect notify(n: 0..1) {\n    labels { exec }\n    ok -> Shipped()\n  }\n  compose invariant');
+  assert.deepEqual(codes(withEffect), ['PL6102']);
+  const withTimer = SRC.replace('    signal box -> Send()', '    signal box -> Send()\n    after 5m -> Shipped() as late');
+  assert.deepEqual(codes(withTimer), ['PL6102']);
+  // The child's cancel action, also armed as a timer of the child.
+  const cancelTimer = SRC.replace("    ship' = Sent\n", "    ship' = Sent\n    after 1h -> Void(reason: \"parent-terminal\") as expiry\n");
+  assert.deepEqual(codes(cancelTimer), ['PL6102']);
+});
+

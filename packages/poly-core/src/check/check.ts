@@ -144,6 +144,7 @@ class Checker {
       if (machines.has(d.name)) { this.err('PL1002', d, `machine ${d.name} is declared twice`); continue; }
       machines.set(d.name, this.checkMachine(d));
     }
+    this.sharedCompletions(machines);
     // S41: polyrun keys handlers by kind, so effects that share a kind must declare the same payload,
     // completions and class. Identical declarations may share it. Across modules, poly-check compares
     // the signatures of a project's files.
@@ -392,6 +393,54 @@ class Checker {
       if (this.fold(a.value) === undefined) this.err('PL1201', a.value, 'a completion argument is a constant: it is written into the effects manifest (PT6.1)');
       else this.checkConst(a.value, pt, p.check, `${it.action}.${a.name}`);
     }
+  }
+
+  /**
+   * S52: the runtime delivers a child's completion and a parent-terminal cancel itself and refuses them from
+   * outside (K9), so an action that is also an effect completion or a timer's action would be refused when
+   * the effect or the timer delivers it. PL6102, at whichever wiring comes second in the source.
+   */
+  private sharedCompletions(machines: Map<string, MachineFacts>): void {
+    const kernel = new Map<string, Map<string, A.NodeBase>>(); // machine -> action -> spawn that wires it
+    const external = new Map<string, Map<string, A.NodeBase>>(); // machine -> action -> outcome or after
+    const add = (m: Map<string, Map<string, A.NodeBase>>, machine: string, action: string, at: A.NodeBase) => {
+      const byAction = m.get(machine) ?? new Map<string, A.NodeBase>();
+      if (!byAction.has(action)) byAction.set(action, at);
+      m.set(machine, byAction);
+    };
+    const walk = (body: A.Stmt[], f: (s: A.Stmt) => void): void => {
+      for (const s of body) {
+        f(s);
+        if (s.kind === 'If') { walk(s.then, f); walk(s.else ?? [], f); }
+        if (s.kind === 'Match') for (const a of s.arms) walk(a.body, f);
+      }
+    };
+    for (const facts of machines.values()) {
+      const m = facts.machine;
+      for (const it of m.items) {
+        if (it.kind === 'EffectDecl') for (const o of it.items) if (o.kind === 'EffOutcome') add(external, m.name, o.action, o);
+        if (it.kind !== 'Handler') continue;
+        walk(it.body, (s) => {
+          if (s.kind !== 'Intent') return;
+          if (s.op === 'after') add(external, m.name, s.target, s);
+          if (s.op === 'spawn' && s.modifier !== 'detached') {
+            const spec = childSpec(s, this.module.name);
+            if (spec.onComplete) add(kernel, m.name, spec.onComplete, s);
+            if (spec.onParentTerminal) add(kernel, spec.machine.split('.').pop()!, spec.onParentTerminal, s);
+          }
+        });
+      }
+    }
+    const later = (a: A.NodeBase, b: A.NodeBase) => ((a.span?.line ?? 0) > (b.span?.line ?? 0) || ((a.span?.line ?? 0) === (b.span?.line ?? 0) && (a.span?.col ?? 0) >= (b.span?.col ?? 0)) ? a : b);
+    for (const [machine, byAction] of kernel) {
+      for (const [action, wiredBy] of byAction) {
+        const other = external.get(machine)?.get(action);
+        if (!other) continue;
+        this.machine = machines.get(machine)?.machine ?? null;
+        this.err('PL6102', later(wiredBy, other), `${machine}.${action} is delivered by the runtime as a child's completion or cancel, and also by an effect or a timer, which the runtime would then refuse (S52, K9)`);
+      }
+    }
+    this.machine = null;
   }
 
   /** The machine an attached spawn names: one of this module (S28); another module's needs `use`. */

@@ -75,9 +75,13 @@ export const CODES: Record<string, CodeInfo> = {
   PL5102: { name: 'UNHANDLED_CASCADE_DELIVERY', stage: 'composition', severity: 'finding' },
   // S48: a compose invariant reads children.k.f without a `k spawned` narrowing.
   PL5103: { name: 'CHILD_READ_WITHOUT_SPAWNED', stage: 'types', severity: 'error' },
+  // S50: a signal to a child that is not spawned; the runtime halts the parent.
+  PL5104: { name: 'SIGNAL_TO_ABSENT_CHILD', stage: 'composition', severity: 'finding' },
   // PS7.2: a cascade deeper than 8.
   PL5201: { name: 'CASCADE_DEPTH', stage: 'composition', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
+  // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.
+  PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
   PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },
 };
