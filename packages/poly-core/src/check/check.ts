@@ -381,6 +381,12 @@ class Checker {
       }
     }
     facts.unhandled = [...this.actions.keys()].filter((a) => !handled.has(a));
+    // S53: an action with no handler is not in the lowered module (S35), so a strict check on it never runs.
+    for (const a of facts.unhandled) {
+      for (const p of this.actions.get(a)!.params) {
+        if (p.check?.mode === 'strict') this.err('PL1302', p.check, `${a}.${p.name} is strict, and ${a} has no handler, so the runtime answers it unhandled and never checks the domain; remove strict or add a handler (S53)`);
+      }
+    }
     this.strictFlow(m, facts);
     this.machine = null;
     return facts;

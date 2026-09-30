@@ -1,0 +1,9 @@
+// expect: PL1302 (Ping declares a strict parameter and has no handler)
+module errors
+
+machine M {
+  state { x : bool = false }
+  action A()
+  action Ping(n: int check { 1, 2 } strict)
+  on A { require !x else reject "done"  x' = true }
+}

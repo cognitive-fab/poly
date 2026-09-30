@@ -38,6 +38,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL1204: { name: 'DIVISION_BY_ZERO', stage: 'types', severity: 'error' },
   // PT3.4a: a finding a person must accept (PT12.5), not a refusal.
   PL1301: { name: 'DISCLOSED_IRREVERSIBLE_INPUT', stage: 'types', severity: 'finding' },
+  // S53: an explicit strict on a parameter of an action with no handler; the runtime never runs the check.
+  PL1302: { name: 'STRICT_ON_UNHANDLED_ACTION', stage: 'types', severity: 'error' },
   PL1401: { name: 'TERMINAL_NOT_ON_CONTROL_FIELD', stage: 'types', severity: 'error' },
   PL1501: { name: 'NON_EXHAUSTIVE_MATCH', stage: 'types', severity: 'error' },
   PL1502: { name: 'INCOMPLETE_MAP_LITERAL', stage: 'types', severity: 'error' },

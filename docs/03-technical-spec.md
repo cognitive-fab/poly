@@ -174,7 +174,9 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   | `strict` | `dispatch` rejects the action with the reason `outside-check-domain` before the handler runs. | The checked domain is the running domain. |
   | `disclosed` | The action is accepted and journaled with the flag `outsideCheckDomain`. `poly export traces` surfaces these windows as domain-drift evidence for polynv. | The field is listed under `disclosedDomains`. |
 
-- **PT3.4a** The default mode is `strict` for every parameter and field whose value can flow into the payload of an `irreversible` or `compensable` effect. The compiler computes this flow from the handlers. It is `disclosed` elsewhere. An explicit `disclosed` on a field that flows into an irreversible effect is `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, and a person must accept it (PT12.5).
+  An explicit `strict` on a parameter of an action with no handler is `PL1302 STRICT_ON_UNHANDLED_ACTION`, at the declaration: such an action is not in the lowered module (S35), so the runtime answers it `unhandled` and never runs the check. The fixes are to remove `strict` or to add a handler (S53).
+
+- **PT3.4a** The default mode is `strict` for every parameter and field whose value can flow into the payload of an `irreversible` or `compensable` effect. The compiler computes this flow from the handlers. It is `disclosed` elsewhere. An explicit `disclosed` on a field that flows into an irreversible effect is `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1302 STRICT_ON_UNHANDLED_ACTION`, and a person must accept it (PT12.5).
 - **PT3.5** An assignment that can produce a value outside a field's declared type (for example `items' = items + 1` with `items: 0..3`) is not a compile error. It lowers to an automatic state invariant, `domain:<field>`. The model check then reports the shortest path that overflows (`PL3102 DOMAIN_ESCAPE`) with a witness.
 
 ## PT4. Handlers and step semantics
