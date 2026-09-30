@@ -197,7 +197,14 @@ export type Stmt =
   | MapUpdate
   | If
   | Match
+  | For
   | IntentStmt;
+
+/**
+ * `for i in lo..n { … }` (S49): unrolled at compile time. `n` is an integer literal, or a field or
+ * parameter whose range type bounds it; the loop runs `i` from `lo` to that bound, each copy guarded by `i <= n`.
+ */
+export interface For extends NodeBase { kind: 'For'; var: string; lo: number; hi: Expr; body: Stmt[] }
 
 export interface Require extends NodeBase { kind: 'Require'; cond: Expr; reason: string }
 /** `reject "r"` (S11). */
@@ -239,6 +246,8 @@ export interface IntentStmt extends NodeBase {
   modifier: string | null;
   /** after/spawn/send: the `as` name. */
   as: string | null;
+  /** after/spawn: `as k[i]`; cancel: `cancel k[i]`; signal: `signal k[i]`: the index of a key family (S49). */
+  index: Expr | null;
   /** signal: the child key; spawn: the creation action ('create', A) and the completion wiring, as written (S43). */
   extra: string[];
 }
@@ -267,12 +276,19 @@ export type Expr =
   | CtorExpr
   | MapLit
   | ArrayLit
-  | Spawned;
+  | Spawned
+  | Star
+  | Quant;
+
+/** `g[*]` inside an aggregate: every member of a family (S49, PS13.6). */
+export interface Star extends NodeBase { kind: 'Star' }
+/** `forall i in g: e` and `exists i in g: e` over a family (S49) or a configuration group (PS13.6). */
+export interface Quant extends NodeBase { kind: 'Quant'; q: 'forall' | 'exists'; var: string; group: string; body: Expr }
 
 export type Literal = IntLit | BoolLit | StringLit | NameRef;
 
 /** `k spawned` (S48): true iff the attached child k exists; only in a compose invariant. */
-export interface Spawned extends NodeBase { kind: 'Spawned'; key: string }
+export interface Spawned extends NodeBase { kind: 'Spawned'; key: string; /** `f[i] spawned`: a member of a family (S49). */ index: Expr | null }
 export interface IntLit extends NodeBase { kind: 'Int'; value: number }
 export interface BoolLit extends NodeBase { kind: 'Bool'; value: boolean }
 export interface StringLit extends NodeBase { kind: 'String'; value: string }

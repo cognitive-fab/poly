@@ -56,7 +56,7 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
   implies: { prec: 9, assoc: 'right' },
 };
 
-const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal']);
+const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for']);
 const LATER_TOP_LEVEL = new Set(['configuration', 'policy', 'workflow', 'world']);
 
 export function parse(src: string): ParseResult {
@@ -605,6 +605,16 @@ class Parser {
         this.expect('=');
         return this.node<A.Let>(start, { kind: 'Let', name, expr: this.expr() }, true);
       }
+      case 'for': {
+        // S49: `for i in lo..n { … }`.
+        const v = this.ident('a loop variable');
+        this.expect('in');
+        const lo = this.int();
+        this.expect('..');
+        const hi = this.expr(true);
+        const body = this.block();
+        return this.node<A.For>(start, { kind: 'For', var: v, lo, hi, body }, true);
+      }
       case 'if': {
         const cond = this.expr(true);
         const then = this.block();
@@ -661,7 +671,15 @@ class Parser {
 
   private intent(start: Token): A.IntentStmt {
     const op = start.text as A.IntentStmt['op'];
-    const base: Mk<A.IntentStmt> = { kind: 'Intent', op, target: '', args: [], to: null, modifier: null, as: null, extra: [] };
+    const base: Mk<A.IntentStmt> = { kind: 'Intent', op, target: '', args: [], to: null, modifier: null, as: null, index: null, extra: [] };
+    // S49: a key may be indexed, `k[i]`.
+    const index = (): A.Expr | null => {
+      if (!this.atPunct('[')) return null;
+      this.next();
+      const e = this.expr();
+      this.expect(']');
+      return e;
+    };
     switch (op) {
       case 'emit':
         base.target = this.ident('an effect name');
@@ -674,15 +692,18 @@ class Parser {
         base.args = this.args();
         this.expect('as');
         base.as = this.ident('a timer key');
+        base.index = index();
         break;
       case 'cancel':
         base.target = this.ident('a timer key');
+        base.index = index();
         break;
       case 'spawn':
         if (this.at('detached')) { this.next(); base.modifier = 'detached'; }
         base.target = this.qualName().join('.');
         this.expect('as');
         base.as = this.ident('a child key');
+        base.index = index();
         // S43: an optional creation action, the child's first step.
         if (this.atPunct('->')) {
           this.next();
@@ -707,6 +728,7 @@ class Parser {
         break;
       case 'signal':
         base.extra.push(this.ident('a child key'));
+        base.index = index();
         this.expect('->');
         base.target = this.ident('an action name');
         base.args = this.args();
@@ -800,9 +822,12 @@ class Parser {
     let e = this.primary(noStruct);
     for (;;) {
       // S48: `k spawned`, in a compose invariant, says the child k exists.
-      if (e.kind === 'Name' && this.at('spawned') && this.peek().line === this.t[this.i - 1].endLine) {
+      if ((e.kind === 'Name' || (e.kind === 'Index' && e.object.kind === 'Name')) && this.at('spawned') && this.peek().line === this.t[this.i - 1].endLine) {
         this.next();
-        e = this.node<A.Spawned>(start, { kind: 'Spawned', key: e.name });
+        // S49: `f[i] spawned` names a member of the family f.
+        e = e.kind === 'Name'
+          ? this.node<A.Spawned>(start, { kind: 'Spawned', key: e.name, index: null })
+          : this.node<A.Spawned>(start, { kind: 'Spawned', key: (e.object as A.NameRef).name, index: e.index });
         continue;
       }
       if (this.atPunct('.') && this.peek(1).kind === 'ident') {
@@ -810,7 +835,10 @@ class Parser {
         e = this.node<A.Member>(start, { kind: 'Member', object: e, prop: this.ident() });
       } else if (this.atPunct('[')) {
         this.next();
-        const index = this.expr();
+        // S49: `g[*]`, every member of a family, inside an aggregate.
+        let index: A.Expr;
+        if (this.atPunct('*') && this.atPunct(']', 1)) { const st = this.next(); index = this.node<A.Star>(st, { kind: 'Star' }); }
+        else index = this.expr();
         this.expect(']');
         e = this.node<A.Index>(start, { kind: 'Index', object: e, index });
       } else return e;
@@ -849,6 +877,16 @@ class Parser {
       }
       this.next();
       return this.node<A.MapLit>(start, { kind: 'MapLit', entries });
+    }
+    // S49, PS13.6: `forall i in g: e` and `exists i in g: e`.
+    if (start.kind === 'ident' && (start.text === 'forall' || start.text === 'exists') && this.peek(1).kind === 'ident' && this.at('in', 2)) {
+      this.next();
+      const v = this.ident('a bound name');
+      this.expect('in');
+      const group = this.ident('a family or group');
+      this.expect(':');
+      const body = this.expr();
+      return this.node<A.Quant>(start, { kind: 'Quant', q: start.text as 'forall' | 'exists', var: v, group, body });
     }
     if (start.kind === 'ident') {
       this.next();

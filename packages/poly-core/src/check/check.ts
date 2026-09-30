@@ -64,7 +64,9 @@ export type Resolution =
   | { k: 'jointParent'; field: string }
   /** `r.f`, a field of a record value (S25). */
   | { k: 'recordField'; field: string }
-  | { k: 'jointChild'; key: string; field: string };
+  | { k: 'jointChild'; key: string; field: string }
+  /** `children.f[i].x`: field x of a member of the family f (S49). */
+  | { k: 'jointFamily'; family: string; field: string };
 
 /** An attached child of a machine, by its key (PT6.4): its machine and its wiring, as the spawn states them. */
 export interface ChildSpec {
@@ -94,6 +96,8 @@ export interface MachineFacts {
   children: Map<string, ChildSpec>;
   /** S51: for each completion action, the child keys whose completion names it: its `childKey` domain. */
   childKeyDomains: Map<string, string[]>;
+  /** S49: child families by name, with the indices their keys take (`f` with 1..2 has the keys f1 and f2). */
+  families: Map<string, { lo: number; hi: number }>;
 }
 
 export interface CheckResult {
@@ -116,8 +120,10 @@ interface Scope {
   knownAction: string | null;
   /** Names read, for PL1401. */
   reads?: Set<string>;
-  /** In a compose invariant, the child keys a `k spawned` conjunct establishes (S48). */
+  /** In a compose invariant, the child keys a `k spawned` conjunct establishes (S48), and `f[i]` for a family member (S49). */
   spawned?: Set<string>;
+  /** Inside an aggregate over a family, `[*]` stands for each spawned member (S49). */
+  star?: boolean;
 }
 
 export function checkModule(module: A.Module): CheckResult {
@@ -126,6 +132,8 @@ export function checkModule(module: A.Module): CheckResult {
 
 class Checker {
   private diags: Diagnostic[] = [];
+  /** The action of the handler whose paths are being read, for a loop's bound (S49). */
+  private handlerAction: A.Action | undefined;
   /** S25: records that refer to themselves, reported once at their declaration. */
   private recursive = new Set<string>();
   private env: TypeEnv;
@@ -258,7 +266,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map(), families: new Map() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -279,6 +287,7 @@ class Checker {
         if (s.kind === 'Intent' && s.op === 'spawn') { const i = s.extra.indexOf('complete'); if (i >= 0) completionActions.add(s.extra[i + 1]); }
         if (s.kind === 'If') { wired(s.then); wired(s.else ?? []); }
         if (s.kind === 'Match') for (const a of s.arms) wired(a.body);
+        if (s.kind === 'For') wired(s.body);
       }
     };
     for (const it of m.items) if (it.kind === 'Handler') wired(it.body);
@@ -304,28 +313,38 @@ class Checker {
     }
     const kinds = new Set([...facts.effects.values()].map(effectKind));
     // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
-    const armed = (body: A.Stmt[]): void => {
+    // Keys are declared by their use (PT6.3, PT6.4); an indexed key k[i] declares the family k (S49).
+    const loops: Loop[] = [];
+    const collect = (body: A.Stmt[], action: A.Action | undefined): void => {
       for (const s of body) {
-        if (s.kind === 'Intent' && s.op === 'after' && s.as) facts.timerKeys.add(s.as);
-        if (s.kind === 'If') { armed(s.then); armed(s.else ?? []); }
-        if (s.kind === 'Match') for (const a of s.arms) armed(a.body);
-      }
-    };
-    for (const it of m.items) if (it.kind === 'Handler') armed(it.body);
-    // PT6.4: child keys are declared by use too; one key names one machine and one wiring.
-    const spawns = (body: A.Stmt[]): void => {
-      for (const s of body) {
-        if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier !== 'detached' && s.as) {
-          const spec = childSpec(s, this.module.name);
-          const prev = facts.children.get(s.as);
-          if (prev && JSON.stringify(prev) !== JSON.stringify(spec)) this.err('PL1002', s, `child key ${s.as} is spawned as ${prev.machine} and as ${spec.machine}, or with different wiring; one key names one child (PT6.4)`);
-          else facts.children.set(s.as, spec);
+        if (s.kind === 'For') {
+          const bound = this.loopBound(s, action);
+          loops.push({ var: s.var, lo: s.lo, hi: bound ?? s.lo });
+          collect(s.body, action);
+          loops.pop();
+          continue;
         }
-        if (s.kind === 'If') { spawns(s.then); spawns(s.else ?? []); }
-        if (s.kind === 'Match') for (const a of s.arms) spawns(a.body);
+        if (s.kind === 'If') { collect(s.then, action); collect(s.else ?? [], action); }
+        if (s.kind === 'Match') for (const a of s.arms) collect(a.body, action);
+        if (s.kind !== 'Intent' || !s.as) continue;
+        if (s.op !== 'after' && !(s.op === 'spawn' && s.modifier !== 'detached')) continue;
+        const range = s.index ? indexRange(s.index, loops) : null;
+        if (s.index && !range) { this.err('PL1201', s.index, 'the index of a key is the loop variable, the loop variable plus or minus a constant, or a constant (S49)'); continue; }
+        const keys = range ? keysOf(s.as, range) : [s.as];
+        if (s.op === 'after') { for (const k of keys) facts.timerKeys.add(k); continue; }
+        if (range) {
+          const prev = facts.families.get(s.as);
+          facts.families.set(s.as, prev ? { lo: Math.min(prev.lo, range.lo), hi: Math.max(prev.hi, range.hi) } : range);
+        }
+        for (const k of keys) {
+          const spec = { ...childSpec(s, this.module.name), key: k };
+          const prev = facts.children.get(k);
+          if (prev && JSON.stringify(prev) !== JSON.stringify(spec)) this.err('PL1002', s, `child key ${k} is spawned as ${prev.machine} and as ${spec.machine}, or with different wiring; one key names one child (PT6.4)`);
+          else facts.children.set(k, spec);
+        }
       }
     };
-    for (const it of m.items) if (it.kind === 'Handler') spawns(it.body);
+    for (const it of m.items) if (it.kind === 'Handler') collect(it.body, this.actions.get(it.action));
     const handlerOf = new Set(m.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => h.action));
 
     const handled = new Set<string>();
@@ -470,6 +489,7 @@ class Checker {
         f(s);
         if (s.kind === 'If') { walk(s.then, f); walk(s.else ?? [], f); }
         if (s.kind === 'Match') for (const a of s.arms) walk(a.body, f);
+        if (s.kind === 'For') walk(s.body, f);
       }
     };
     for (const facts of machines.values()) {
@@ -603,6 +623,26 @@ class Checker {
       this.resolve(e, { k: 'jointParent', field: e.prop });
       return t;
     }
+    // S49: `children.f[i].x` and, inside an aggregate, `children.f[*].x`.
+    if (e.object.kind === 'Index' && e.object.object.kind === 'Member' && e.object.object.object.kind === 'Name' && e.object.object.object.name === 'children') {
+      const fam = e.object.object.prop;
+      const idx = e.object.index;
+      const range = this.facts!.families.get(fam);
+      if (!range) { this.err('PL1001', e, `${this.machine!.name} spawns no family ${fam}`); return ERR; }
+      if (idx.kind === 'Star') {
+        if (!scope.star) { this.err('PL1201', idx, `${fam}[*] stands for the members of a family inside count, sum, all or any (S49)`); return ERR; }
+      } else {
+        const it = this.typeOf(idx, scope);
+        if (it.k !== 'int' && it.k !== 'error') { this.err('PL1201', idx, `an index is an int, not ${tyToString(it)}`); return ERR; }
+        if (!scope.spawned?.has(`${fam}[${indexText(idx)}]`)) { this.err('PL5103', e, `children.${fam}[${indexText(idx)}].${e.prop} is read where ${fam}[${indexText(idx)}] may not be spawned; write ${fam}[${indexText(idx)}] spawned implies … (S48, S49)`); return ERR; }
+      }
+      const spec = [...this.facts!.children.values()].find((c) => c.key === `${fam}${range.lo}`);
+      const child = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec?.machine.split('.').pop());
+      const f = child?.fields.find((x) => x.name === e.prop);
+      if (!f) { this.err('PL1001', e, `${spec?.machine ?? fam} has no field ${e.prop}`); return ERR; }
+      this.resolve(e, { k: 'jointFamily', family: fam, field: e.prop });
+      return this.tyOf(f.type);
+    }
     if (e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'children') {
       const key = e.object.prop;
       const spec = this.facts!.children.get(key);
@@ -616,6 +656,33 @@ class Checker {
     }
     this.err('PL1201', e, 'a compose invariant reads parent.f and children.k.f (PT7)');
     return ERR;
+  }
+
+  /**
+   * S49: the largest index a loop `for i in lo..n` takes: n itself when it is a literal, and otherwise the
+   * upper bound of the range type of the field or parameter n names. Null when n is neither.
+   */
+  private loopBound(s: A.For, action: A.Action | undefined): number | null {
+    if (s.hi.kind === 'Int') return s.hi.value;
+    if (s.hi.kind !== 'Name') return null;
+    const p = action?.params.find((x) => x.name === (s.hi as A.NameRef).name);
+    const t = p ? this.tyOf(p.type) : this.facts?.fieldTypes.get(s.hi.name);
+    return t && t.k === 'int' && Number.isFinite(t.hi) ? t.hi : null;
+  }
+
+  /** `for i in lo..n { … }` (S49): a bound the checker can read, and a body of intents and map-entry writes. */
+  private forLoop(s: A.For, scope: Scope): void {
+    const bound = this.loopBound(s, this.handlerAction);
+    if (bound === null) { this.err('PL1201', s.hi, 'a loop runs to an integer literal, or to a field or parameter whose type is a range (S49)'); return; }
+    const ht = this.typeOf(s.hi, scope);
+    if (ht.k !== 'int' && ht.k !== 'error') this.err('PL1201', s.hi, `a loop's bound is an int, not ${tyToString(ht)}`);
+    if (scope.locals.has(s.var) || scope.params.has(s.var) || this.facts!.fieldTypes.has(s.var)) this.err('PL1002', s, `${s.var} is already a name here`);
+    for (const b of s.body) {
+      if (!loopStatement(b)) this.err('PL1201', b, 'a loop body holds spawn, signal, emit, after, cancel and map-entry writes (S49)');
+    }
+    const inner: Scope = { ...scope, locals: new Map(scope.locals) };
+    inner.locals.set(s.var, { ty: { k: 'int', lo: s.lo, hi: Math.max(s.lo, bound) }, res: { k: 'let', name: s.var } });
+    this.stmts(s.body, inner);
   }
 
   /** `after d -> A(args) as key` (PT6.3): a duration, an action of this machine and its typed arguments. */
@@ -704,6 +771,7 @@ class Checker {
           if (st.kind === 'Let') lets.set(st.name, readsOf(st.expr, lets));
           if (st.kind === 'If') { visit(st.then); visit(st.else ?? []); }
           if (st.kind === 'Match') for (const a of st.arms) visit(a.body);
+          if (st.kind === 'For') visit(st.body);
           if (st.kind !== 'Intent' || st.op !== 'emit') continue;
           const e = facts.effects.get(st.target);
           const cls = e ? effectClass(e) : 'none';
@@ -832,9 +900,11 @@ class Checker {
     }
     const scope = this.scope('handler');
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
+    this.handlerAction = act;
     this.stmts(h.body, scope);
     // Per-path rules (PT4.1, PS2.4, PT4.4).
     const ends = this.paths(h.body, [{ written: new Map(), done: false, emits: false, timers: new Map() }]);
+    this.handlerAction = undefined;
     for (const e of ends) {
       if (!e.done && e.written.size === 0 && !e.emits) {
         this.err('PL2201', h, `on ${h.action} can complete with no write, no effect and no rejection (PT4.4)`);
@@ -888,13 +958,21 @@ class Checker {
       case 'Match':
         this.match(s, scope);
         break;
+      case 'For':
+        this.forLoop(s, scope);
+        break;
       case 'Intent':
+        if (s.index) {
+          const it = this.typeOf(s.index, scope);
+          if (it.k !== 'int' && it.k !== 'error') this.err('PL1201', s.index, `a key's index is an int, not ${tyToString(it)} (S49)`);
+        }
         if (s.op === 'emit') this.emit(s, scope);
         else if (s.op === 'after') this.timer(s, scope);
         else if (s.op === 'spawn' && s.modifier !== 'detached') this.spawn(s, scope);
         else if (s.op === 'signal') this.signal(s, scope);
         else if (s.op === 'cancel') {
-          if (!this.facts!.timerKeys.has(s.target)) this.err('PL1001', s, `cancel ${s.target}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
+          const armedKey = s.index ? [...this.facts!.timerKeys].some((k) => k.startsWith(s.target) && /^\d+$/.test(k.slice(s.target.length))) : this.facts!.timerKeys.has(s.target);
+          if (!armedKey) this.err('PL1001', s, `cancel ${s.target}${s.index ? '[…]' : ''}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
         } else this.err('PL0901', s, `\`${s.op}\` is lowered from plan step ${s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached') ? 8 : 6} of milestone M1`);
         break;
     }
@@ -1030,19 +1108,40 @@ class Checker {
       }
       case 'Assign':
       case 'MapUpdate': {
-        const prev = p.written.get(s.field);
-        if (prev) this.errOnce('PL2102', s, `${s.field}' is written twice on one path (first at line ${prev.span?.line ?? '?'}) (PS2.4)`);
+        // S49: entry writes to distinct constant keys of one map compose, as the copies of a loop write them;
+        // a whole write, or two writes to one entry, is still written twice.
+        const k = s.kind === 'MapUpdate' ? constantKey(s.key) : null;
+        const slot = k === null ? s.field : `${s.field}[${k}]`;
+        const clash = [...p.written.entries()].find(([w]) => w === s.field || w === slot || (k === null && w.startsWith(`${s.field}[`)));
+        if (clash) this.errOnce('PL2102', s, `${s.field}' is written twice on one path (first at line ${clash[1].span?.line ?? '?'}) (PS2.4)`);
         const written = new Map(p.written);
-        written.set(s.field, s);
+        written.set(slot, s);
         return [{ ...p, written }];
       }
       case 'If':
         return [...this.paths(s.then, [p]), ...this.paths(s.else ?? [], [p])];
       case 'Match':
         return s.arms.flatMap((a) => this.paths(a.body, [p]));
+      case 'For': {
+        // S49: the copies i = lo..n run in order. With a literal n exactly those run; with n a field or a
+        // parameter, any prefix up to the bound of its type may run, so every prefix is a path.
+        const bound = this.loopBound(s, this.handlerAction) ?? s.lo;
+        const n = s.hi.kind === 'Int' ? s.hi.value : null;
+        const last = n === null ? bound : Math.min(n, bound);
+        let cur = [p];
+        const prefixes: PathState[] = n === null ? [p] : [];
+        for (let k = s.lo; k <= last; k++) {
+          // A statement the loop body may not hold is reported once, by forLoop, and not read for paths.
+          cur = this.paths(substitute(s.body.filter(loopStatement), s.var, k), cur);
+          if (n === null) prefixes.push(...cur);
+        }
+        return n === null ? prefixes : cur;
+      }
       case 'Intent': {
         if (s.op === 'spawn' && s.as) {
-          const key = `spawn:${s.as}`;
+          const idx = s.index ? constantIndex(s.index) : null;
+          if (s.index && idx === null) return [{ ...p, emits: true }];
+          const key = `spawn:${s.as}${idx ?? ''}`;
           const prev = p.timers.get(key);
           if (prev) this.errOnce('PL5101', s, `child ${s.as} is spawned twice on one path (first at line ${prev.span?.line ?? '?'}); the kernel would make a second instance behind one key (PS7.2)`);
           const timers = new Map(p.timers);
@@ -1050,11 +1149,15 @@ class Checker {
           return [{ ...p, emits: true, timers }];
         }
         if (s.op !== 'after' || !s.as) return [{ ...p, emits: true }];
+        // A timer key indexed by the loop variable names one key per copy (S49); a key not indexed is one key.
+        const tidx = s.index ? constantIndex(s.index) : null;
+        if (s.index && tidx === null) return [{ ...p, emits: true }];
+        const tkey = `${s.as}${tidx ?? ''}`;
         // PT6.3: arming one key twice on one path would leave only the second timer; say so.
-        const prev = p.timers.get(s.as);
-        if (prev) this.errOnce('PL2301', s, `timer ${s.as} is armed twice on one path (first at line ${prev.span?.line ?? '?'}) (PT6.3)`);
+        const prev = p.timers.get(tkey);
+        if (prev) this.errOnce('PL2301', s, `timer ${tkey} is armed twice on one path (first at line ${prev.span?.line ?? '?'}) (PT6.3)`);
         const timers = new Map(p.timers);
-        timers.set(s.as, s);
+        timers.set(tkey, s);
         return [{ ...p, emits: true, timers }];
       }
       default:
@@ -1205,6 +1308,21 @@ class Checker {
           this.record(e.args[0], { k: 'string' });
           return BOOL;
         }
+        // S49: count, sum, all and any over a family's spawned members, in a compose invariant.
+        if (scope.ctx === 'compose' && ['count', 'sum', 'all', 'any'].includes(e.callee)) {
+          if (e.args.length !== 1) { this.err('PL1201', e, `${e.callee} takes one expression over a family's members, as in ${e.callee}(children.f[*].x == V)`); return ERR; }
+          const fams = starFamilies(e.args[0]);
+          if (fams.length !== 1) { this.err('PL1201', e, `${e.callee}(…) ranges over one family, written children.f[*] (S49)`); return ERR; }
+          const inner: Scope = { ...scope, star: true };
+          if (e.callee === 'sum') {
+            const t = this.typeOf(e.args[0], inner);
+            if (t.k !== 'int' && t.k !== 'error') this.err('PL1201', e, `sum adds ints, not ${tyToString(t)}`);
+            return INT;
+          }
+          this.expectBool(e.args[0], inner);
+          const r = this.facts!.families.get(fams[0]);
+          return e.callee === 'count' ? { k: 'int', lo: 0, hi: r ? r.hi - r.lo + 1 : 0 } : BOOL;
+        }
         if (e.callee === 'count' || e.callee === 'before') { this.err('PL1201', e, `${e.callee}(…) is read only in a path property (PS5.4)`); return ERR; }
         this.err('PL1001', e, `unknown function ${e.callee}; expressions call no functions (PT2.2)`);
         return ERR;
@@ -1218,9 +1336,26 @@ class Checker {
       case 'Binary': return this.binary(e, scope);
       case 'Spawned': {
         if (scope.ctx !== 'compose') { this.err('PL1201', e, `${e.key} spawned is read only in a compose invariant (PT7)`); return BOOL; }
-        if (!this.facts!.children.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no attached child ${e.key}`);
+        if (e.index) {
+          if (!this.facts!.families.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no family ${e.key}`);
+          const it = this.typeOf(e.index, scope);
+          if (it.k !== 'int' && it.k !== 'error') this.err('PL1201', e.index, `an index is an int, not ${tyToString(it)}`);
+        } else if (!this.facts!.children.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no attached child ${e.key}`);
         return BOOL;
       }
+      case 'Quant': {
+        // S49: `forall i in f: e` and `exists i in f: e` over the indices of a family, in a compose invariant.
+        if (scope.ctx !== 'compose') { this.err('PL0901', e, `${e.q} over a group is checked in compose invariants now, and in configurations from plan step 8`); return BOOL; }
+        const range = this.facts!.families.get(e.group);
+        if (!range) { this.err('PL1001', e, `${this.machine!.name} spawns no family ${e.group}`); return BOOL; }
+        const inner: Scope = { ...scope, locals: new Map(scope.locals) };
+        inner.locals.set(e.var, { ty: { k: 'int', lo: range.lo, hi: range.hi }, res: { k: 'let', name: e.var } });
+        this.expectBool(e.body, inner);
+        return BOOL;
+      }
+      case 'Star':
+        this.err('PL1201', e, '[*] stands for the members of a family inside count, sum, all or any (S49)');
+        return ERR;
       case 'Is': {
         const t = this.typeOf(e.expr, scope);
         if (t.k !== 'union') { if (t.k !== 'error') this.err('PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
@@ -1426,6 +1561,78 @@ class Checker {
   }
 }
 
+/** An index as the narrowing records it: a name, a number, or the expression's shape (S49). */
+function indexText(e: A.Expr): string {
+  if (e.kind === 'Name') return e.name;
+  if (e.kind === 'Int') return String(e.value);
+  if (e.kind === 'Binary' && e.right.kind === 'Int') return `${indexText(e.left)}${e.op}${e.right.value}`;
+  return '?';
+}
+
+/** The families an aggregate's expression reads with `[*]`. */
+function starFamilies(e: A.Expr): string[] {
+  const out = new Set<string>();
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== 'object') return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const n = x as A.Expr;
+    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Member') out.add(n.object.prop);
+    for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
+  };
+  walk(e);
+  return [...out];
+}
+
+/** What a loop body may hold (S49): intents other than send, and writes (a whole write fails PL2102 on its second copy). */
+function loopStatement(b: A.Stmt): boolean {
+  return (b.kind === 'Intent' && b.op !== 'send') || b.kind === 'MapUpdate' || b.kind === 'Assign';
+}
+
+/** A map key that is a literal, as a loop copy writes it (S49). */
+function constantKey(e: A.Expr): string | null {
+  if (e.kind === 'Int') return String(e.value);
+  if (e.kind === 'String') return JSON.stringify(e.value);
+  return null;
+}
+
+/** An enclosing loop: its variable and the indices it takes (S49). */
+interface Loop { var: string; lo: number; hi: number }
+
+/** The indices an index expression takes inside the loops around it: the loop variable, it plus or minus a constant, or a constant. */
+function indexRange(e: A.Expr, loops: Loop[]): { lo: number; hi: number } | null {
+  if (e.kind === 'Int') return { lo: e.value, hi: e.value };
+  if (e.kind === 'Name') { const l = loops.find((x) => x.var === e.name); return l ? { lo: l.lo, hi: l.hi } : null; }
+  if (e.kind === 'Binary' && (e.op === '+' || e.op === '-') && e.right.kind === 'Int') {
+    const r = indexRange(e.left, loops);
+    const c = e.op === '+' ? e.right.value : -e.right.value;
+    return r ? { lo: r.lo + c, hi: r.hi + c } : null;
+  }
+  return null;
+}
+
+/** The keys of a family over a range: f with 1..2 is f1 and f2 (S49). */
+export function keysOf(name: string, r: { lo: number; hi: number }): string[] {
+  return Array.from({ length: Math.max(0, r.hi - r.lo + 1) }, (_, k) => `${name}${r.lo + k}`);
+}
+
+/** A key's index when it is a constant (inside an unrolled copy, the loop variable is one). */
+function constantIndex(e: A.Expr): number | null {
+  const r = indexRange(e, []);
+  return r && r.lo === r.hi ? r.lo : null;
+}
+
+/** A copy of a loop body with the loop variable replaced by an integer literal, for the per-path rules (S49). */
+function substitute(body: A.Stmt[], v: string, k: number): A.Stmt[] {
+  const walk = (x: unknown): unknown => {
+    if (Array.isArray(x)) return x.map(walk);
+    if (!x || typeof x !== 'object') return x;
+    const n = x as { kind?: string; name?: string };
+    if (n.kind === 'Name' && n.name === v) return { ...(x as object), kind: 'Int', value: k };
+    return Object.fromEntries(Object.entries(x).map(([key, val]) => [key, key === 'span' ? val : walk(val)]));
+  };
+  return walk(body) as A.Stmt[];
+}
+
 /** A spawn's child as a ChildSpec: its machine id `<module>.<Machine>` (S28), creation action and wiring. */
 export function childSpec(s: A.IntentStmt, module: string): ChildSpec {
   const pair = (tag: string) => { const i = s.extra.indexOf(tag); return i >= 0 ? s.extra[i + 1] : null; };
@@ -1434,13 +1641,13 @@ export function childSpec(s: A.IntentStmt, module: string): ChildSpec {
 }
 
 function spawnsOrSignals(m: A.Machine): boolean {
-  const walk = (body: A.Stmt[]): boolean => body.some((s) => (s.kind === 'Intent' && (s.op === 'spawn' || s.op === 'signal')) || (s.kind === 'If' && (walk(s.then) || walk(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => walk(a.body))));
+  const walk = (body: A.Stmt[]): boolean => body.some((s) => (s.kind === 'Intent' && (s.op === 'spawn' || s.op === 'signal')) || (s.kind === 'If' && (walk(s.then) || walk(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => walk(a.body))) || (s.kind === 'For' && walk(s.body)));
   return m.items.some((i) => i.kind === 'Handler' && walk(i.body));
 }
 
 /** The keys a conjunction of `k spawned` establishes (S48). */
 function spawnedKeys(e: A.Expr): string[] {
-  if (e.kind === 'Spawned') return [e.key];
+  if (e.kind === 'Spawned') return [e.index ? `${e.key}[${indexText(e.index)}]` : e.key];
   if (e.kind === 'Binary' && e.op === '&&') return [...spawnedKeys(e.left), ...spawnedKeys(e.right)];
   return [];
 }

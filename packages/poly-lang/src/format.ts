@@ -216,19 +216,21 @@ class Printer {
         return lines;
       }
       case 'Intent': return [this.intent(s)];
+      case 'For': return this.blockLines(`for ${s.var} in ${s.lo}..${this.expr(s.hi, 0)}`, s.body);
     }
   }
 
   private intent(s: A.IntentStmt): string {
     const call = `${s.target}(${this.args(s.args)})`;
+    const idx = s.index ? `[${this.expr(s.index, 0)}]` : '';
     switch (s.op) {
       case 'emit': return `emit ${call}`;
-      case 'after': return `after ${s.modifier} -> ${call} as ${s.as}`;
-      case 'cancel': return `cancel ${s.target}`;
+      case 'after': return `after ${s.modifier} -> ${call} as ${s.as}${idx}`;
+      case 'cancel': return `cancel ${s.target}${idx}`;
       case 'send': return `send ${this.expr(s.to!, 0)} <- ${call}${s.as ? ` as ${s.as}` : ''}`;
-      case 'signal': return `signal ${s.extra[0]} -> ${call}`;
+      case 'signal': return `signal ${s.extra[0]}${idx} -> ${call}`;
       case 'spawn': {
-        let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}`;
+        let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}${idx}`;
         for (let k = 0; k < s.extra.length; k += 2) {
           if (s.extra[k] === 'create') w += ` -> ${s.extra[k + 1]}(${this.args(s.args)})`;
           else w += s.extra[k] === 'complete' ? ` on complete -> ${s.extra[k + 1]}` : ` on parent terminal -> ${s.extra[k + 1]}`;
@@ -269,7 +271,9 @@ class Printer {
       case 'Index': return `${this.expr(e.object, 1, noStruct)}[${this.expr(e.index, 0)}]`;
       case 'Call': return `${e.callee}(${e.args.map((a) => this.expr(a, 0)).join(', ')})`;
       case 'Unary': return wrap(`${e.op}${this.expr(e.arg, 2, noStruct)}`, 2);
-      case 'Spawned': return `${e.key} spawned`;
+      case 'Spawned': return `${e.key}${e.index ? `[${this.expr(e.index, 0)}]` : ''} spawned`;
+      case 'Star': return '*';
+      case 'Quant': return wrap(`${e.q} ${e.var} in ${e.group}: ${this.expr(e.body, 0)}`, 0);
       case 'Is': return wrap(`${this.expr(e.expr, 4, noStruct)} is ${e.ctors.join(' | ')}`, 5);
       case 'In': return wrap(`${this.expr(e.expr, 4, noStruct)} in { ${e.set.map((x) => this.expr(x, 0)).join(', ')} }`, 5);
       case 'Binary': {

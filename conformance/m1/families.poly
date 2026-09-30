@@ -1,0 +1,69 @@
+// Conformance: child families and bounded loops (S49). A loop to a parameter's bound spawns t1 and t2,
+// arms one timer per child and writes one map entry per copy; a completion takes the child's key and
+// state (S44, S51); compose invariants read the family through count and forall.
+module fleet
+
+enum Phase { Idle, Busy, Done }
+enum Leg { Waiting, Moving, Arrived, Dropped }
+type LegState = { leg: Leg }
+
+machine Truck {
+  state {
+    leg : Leg = Waiting
+  }
+  terminal leg in { Arrived, Dropped }
+
+  action Go()
+  action Arrive()
+  action Drop()
+
+  on Go {
+    require leg == Waiting else reject "moving"
+    leg' = Moving
+  }
+  on Arrive {
+    require leg == Moving else reject "not-moving"
+    leg' = Arrived
+  }
+  on Drop {
+    require leg != Arrived else reject "arrived"
+    leg' = Dropped
+  }
+}
+
+machine Dispatch {
+  state {
+    phase  : Phase           = Idle
+    trucks : 0..2            = 0
+    landed : 0..2            = 0
+    marks  : map<0..2, bool> = [false, false, false]
+  }
+  terminal phase == Done
+
+  action Plan(n: 1..2)
+  action Landed(childKey: string, childState: LegState)
+  action Stop()
+
+  on Plan(n) {
+    require phase == Idle else reject "busy"
+    phase' = Busy
+    trucks' = n
+    for i in 1..n {
+      spawn Truck as t[i] on complete -> Landed on parent terminal -> Drop
+      after 1h -> Stop() as late[i]
+      marks' = marks with [i] = true
+    }
+  }
+  on Landed(childKey, childState) {
+    require phase == Busy else reject "idle"
+    require landed < trucks else reject "all-landed"
+    landed' = landed + 1
+  }
+  on Stop {
+    require phase == Busy else reject "idle"
+    phase' = Done
+  }
+
+  compose invariant landed-counts: count(children.t[*].leg == Arrived || children.t[*].leg == Dropped) >= parent.landed
+  compose invariant spawned-when-busy: forall i in t: t[i] spawned implies parent.phase != Idle
+}

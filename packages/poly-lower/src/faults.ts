@@ -20,6 +20,7 @@ export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {
       if (fault === 'off-by-one' && s.kind === 'Assign' && bumpInt(s.expr)) done = true;
       if (s.kind === 'If') { visitStmts(s.then); visitStmts(s.else ?? []); }
       if (s.kind === 'Match') for (const a of s.arms) visitStmts(a.body);
+      if (s.kind === 'For') visitStmts(s.body);
     }
   };
   if (fault === 'skip-guard') {

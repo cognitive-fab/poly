@@ -3,6 +3,11 @@ import type * as A from '@poly/core';
 import type { RMachine, RType } from './model.js';
 import { inCheckDomain } from './model.js';
 import { evaluate, evaluateAt, EvalError, type Env, type Verdict } from './eval.js';
+
+const int = (v: Value): number => {
+  if (typeof v !== 'number') throw new EvalError('poly-ref: an index is not an int');
+  return v;
+};
 import { isMap, isUnion, keyOf, mapSet, type State, type Value } from './values.js';
 
 /**
@@ -60,6 +65,18 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
         break;
       case 'Reject':
         return { kind: 'reject', reason: st.reason };
+      case 'For': {
+        // S49: the copies i = lo..bound run while i <= n; n is bounded by its type, so this is lo..n.
+        const n = int(evaluate(st.hi, env));
+        for (let k = st.lo; k <= n; k++) {
+          const inner: Env = { ...env, locals: new Map(env.locals), localTypes: new Map(env.localTypes ?? []) };
+          inner.locals.set(st.var, k);
+          inner.localTypes!.set(st.var, { k: 'int', lo: k, hi: k });
+          const r = block(st.body, inner, w, E, M, s);
+          if (r) return r;
+        }
+        break;
+      }
       case 'Let': {
         env.locals.set(st.name, evaluate(st.expr, env));
         const t = staticType(st.expr, env);
@@ -76,9 +93,10 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
       case 'MapUpdate': {
         // `f' = f with [k] = v` adds f ↦ s(f)[k := v] to w (PS2.2).
         const f = M.fields.find((x) => x.name === st.field)!;
-        const m = s[st.field];
+        // S49: entry writes to distinct keys, one per loop copy, compose onto the entries already written.
+        const m = w.has(st.field) ? w.get(st.field)! : s[st.field];
         if (!isMap(m) || f.type.k !== 'map') throw new EvalError(`poly-ref: ${st.field} is not a map`);
-        write(w, st.field, mapSet(m, evaluate(st.key, env), evaluateAt(st.value, env, f.type.value)));
+        w.set(st.field, mapSet(m, evaluate(st.key, env), evaluateAt(st.value, env, f.type.value)));
         break;
       }
       case 'If': {
@@ -126,16 +144,17 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
         } else if (st.op === 'after') {
           const act = M.actions.find((x) => x.name === st.target);
           if (!act || !st.as || !st.modifier) throw new EvalError(`poly-ref: after … -> ${st.target} is incomplete`);
-          E.push({ type: 'timer', kind: 'timer', key: st.as, action: st.target, ms: durationMs(st.modifier), data: args(act.params, st.target) });
+          E.push({ type: 'timer', kind: 'timer', key: `${st.as}${st.index ? int(evaluate(st.index, env)) : ''}`, action: st.target, ms: durationMs(st.modifier), data: args(act.params, st.target) });
         } else if (st.op === 'cancel') {
-          E.push({ type: 'cancel', kind: 'cancelTimer', key: st.target });
+          E.push({ type: 'cancel', kind: 'cancelTimer', key: `${st.target}${st.index ? int(evaluate(st.index, env)) : ''}` });
         } else if (st.op === 'spawn' && st.modifier !== 'detached') {
-          const c = M.children.get(st.as ?? '');
+          // S49: an indexed key k[i] is the key k<i>.
+          const c = M.children.get(`${st.as ?? ''}${st.index ? int(evaluate(st.index, env)) : ''}`);
           if (!c) throw new EvalError(`poly-ref: no child ${st.as}`);
           const params = c.create ? c.actions.find((a) => a.name === c.create)?.params ?? [] : [];
           E.push({ type: 'spawn', kind: 'spawnChild', key: c.key, machineId: c.machineId, create: c.create ? { action: c.create, data: args(params, c.create) } : null, onComplete: c.onComplete, onParentTerminal: c.onParentTerminal });
         } else if (st.op === 'signal') {
-          const c = M.children.get(st.extra[0]);
+          const c = M.children.get(`${st.extra[0]}${st.index ? int(evaluate(st.index, env)) : ''}`);
           if (!c) throw new EvalError(`poly-ref: no child ${st.extra[0]}`);
           const params = c.actions.find((a) => a.name === st.target)?.params ?? [];
           E.push({ type: 'signal', kind: 'signalChild', key: c.key, action: st.target, data: args(params, st.target) });

@@ -16,6 +16,20 @@ function moduleOf(cx: Cx): string {
   return cx.module;
 }
 
+/** The family an aggregate reads with `[*]` (S49). */
+function starFamilyOf(e: A.Expr): string | null {
+  let found: string | null = null;
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== 'object' || found) return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const n = x as A.Expr;
+    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Member') { found = n.object.prop; return; }
+    for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
+  };
+  walk(e);
+  return found;
+}
+
 /** An intent's arguments against declared parameters, as `"p": value` entries. */
 function argList(s: A.IntentStmt, params: A.Param[], cx: Cx): string[] {
   return s.args.map((a, i) => {
@@ -96,6 +110,7 @@ export function expr(e: A.Expr, cx: Cx): string {
         case 'jointParent':
         case 'jointChild':
         case 'recordField':
+        case 'jointFamily':
           throw new Error('poly-lower: pre/post outside a member access');
       }
       throw new Error('poly-lower: unreachable');
@@ -108,6 +123,10 @@ export function expr(e: A.Expr, cx: Cx): string {
       // S25: r.f reads a field of a record value, a plain object.
       if (res?.k === 'recordField') return `(${expr(e.object, cx)})[${q(res.field)}]`;
       if (res?.k === 'jointParent') return readField(cx, 'joint.parent.state', res.field);
+      if (res?.k === 'jointFamily') {
+        const ix = (e.object as A.Index).index;
+        return `joint.children[${q(res.family)} + (${expr(ix, cx)})].state[${q(res.field)}]`;
+      }
       if (res?.k === 'jointChild') return `joint.children[${q(res.key)}].state[${q(res.field)}]`;
       const obj = (e.object as A.NameRef).name;
       // Reject properties and handlers read pre.f from their state variable (PT5; S19 for handlers).
@@ -117,6 +136,16 @@ export function expr(e: A.Expr, cx: Cx): string {
     case 'Index': return `(${expr(e.object, cx)})[${expr(e.index, cx)}]`;
     case 'Call':
       if (e.callee === 'rejected') return `(!!(v && v.rejected && v.reason === ${q((e.args[0] as A.StringLit).value)}))`;
+      if (cx.mode === 'compose' && ['count', 'sum', 'all', 'any'].includes(e.callee)) {
+        // S49: an aggregate over the spawned members of one family; [*] is each member's index.
+        const fam = starFamilyOf(e.args[0]);
+        const r = fam ? cx.facts.families.get(fam) : undefined;
+        if (!fam || !r) throw new Error(`poly-lower: ${e.callee} over no family (the checker must refuse it)`);
+        const members = `[${Array.from({ length: r.hi - r.lo + 1 }, (_, k) => r.lo + k).join(', ')}].filter((__star) => joint.children[${q(fam)} + __star] !== undefined).map((__star) => ${expr(e.args[0], cx)})`;
+        if (e.callee === 'count') return `${members}.filter(Boolean).length`;
+        if (e.callee === 'sum') return `${members}.reduce((__a, __b) => __a + __b, 0)`;
+        return e.callee === 'all' ? `${members}.every(Boolean)` : `${members}.some(Boolean)`;
+      }
       throw new Error(`poly-lower: call ${e.callee} reached the lowering`);
     case 'Unary': return `(${e.op}${expr(e.arg, cx)})`;
     case 'Binary': {
@@ -156,7 +185,16 @@ export function expr(e: A.Expr, cx: Cx): string {
       return `{ ${e.entries.map((en) => `${q((en.key as A.NameRef).name)}: ${expr(en.value, cx)}`).join(', ')} }`;
     }
     case 'ArrayLit': return `[${e.items.map((x) => expr(x, cx)).join(', ')}]`;
-    case 'Spawned': return `(joint.children[${q(e.key)}] !== undefined)`;
+    case 'Spawned': return e.index ? `(joint.children[${q(e.key)} + (${expr(e.index, cx)})] !== undefined)` : `(joint.children[${q(e.key)}] !== undefined)`;
+    case 'Star': return '__star';
+    case 'Quant': {
+      // S49: forall and exists over a family's indices.
+      const r = cx.facts.families.get(e.group)!;
+      const v = `l_${e.var}`;
+      return e.q === 'forall'
+        ? `(() => { for (let ${v} = ${r.lo}; ${v} <= ${r.hi}; ${v}++) if (!${expr(e.body, cx)}) return false; return true; })()`
+        : `(() => { for (let ${v} = ${r.lo}; ${v} <= ${r.hi}; ${v}++) if (${expr(e.body, cx)}) return true; return false; })()`;
+    }
   }
 }
 
@@ -171,6 +209,7 @@ export function mayWrite(body: A.Stmt[], layout: Layout): Set<string> {
       if (s.kind === 'Assign' || s.kind === 'MapUpdate') add(s.field);
       if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); }
       if (s.kind === 'Match') for (const a of s.arms) walk(a.body);
+      if (s.kind === 'For') walk(s.body);
     }
   };
   walk(body);
@@ -186,6 +225,8 @@ export interface EmitOptions {
    * rejected step emits nothing, though the kernel calls the mapper on accepted steps only.
    */
   effects?: boolean;
+  /** S49: map fields a loop writes entry by entry; their writes gather in `__m_<field>` and land after the loop. */
+  mapAcc?: Set<string>;
   /** Test-only fault `unnamed-reject`: the first reject of the acceptors loses its reason (S47). */
   unnamedReject?: { done: boolean };
   /** Test-only fault `poison-step`: the first acceptor throws before it writes (S47). */
@@ -246,6 +287,14 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
     }
     case 'MapUpdate': {
       const l = cx.layout.byField.get(s.field)!;
+      if (opts.mapAcc?.has(s.field)) {
+        // S49: one entry per copy of the loop, onto the entries the earlier copies wrote.
+        const acc = `__m_${s.field}`;
+        const array = l.ty.k === 'map' && l.ty.array;
+        return array
+          ? [`${ind}{ const __key = ${expr(s.key, cx)}; const __val = ${expr(s.value, cx)}; ${acc} = ${acc}.map((__x, __i) => (__i === __key ? __val : __x)); }`]
+          : [`${ind}${acc} = { ...${acc}, [${expr(s.key, cx)}]: ${expr(s.value, cx)} };`];
+      }
       const m = `model[${q(s.field)}]`;
       const k = expr(s.key, cx);
       const v = expr(s.value, cx);
@@ -253,6 +302,19 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       return array
         ? [`${ind}{ const __key = ${k}; const __val = ${v}; next[${q(s.field)}] = ${m}.map((__x, __i) => (__i === __key ? __val : __x)); }`]
         : [`${ind}next[${q(s.field)}] = { ...${m}, [${k}]: ${v} };`];
+    }
+    case 'For': {
+      // S49: `for i in lo..n` runs i from lo while i <= n; n is bounded by its type, so this is the unrolled loop.
+      const v = `l_${s.var}`;
+      const maps = opts.effects ? [] : [...new Set(s.body.filter((b): b is A.MapUpdate => b.kind === 'MapUpdate').map((b) => b.field))];
+      const inner: EmitOptions = { ...opts, mapAcc: new Set([...(opts.mapAcc ?? []), ...maps]) };
+      return [
+        ...maps.map((f) => `${ind}let __m_${f} = model[${q(f)}];`),
+        `${ind}for (let ${v} = ${s.lo}; ${v} <= ${expr(s.hi, cx)}; ${v}++) {`,
+        ...stmts(s.body, cx, ind + '  ', inner),
+        `${ind}}`,
+        ...maps.map((f) => `${ind}next[${q(f)}] = __m_${f};`),
+      ];
     }
     case 'If': {
       const all = mayWrite([s], cx.layout);
@@ -292,12 +354,14 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       // The acceptor writes and frames; the intents are the mapper's (PT6.1).
       if (!opts.effects) return [];
       if (opts.dropEffect && !opts.dropEffect.done) { opts.dropEffect.done = true; return []; }
-      if (s.op === 'cancel') return [`${ind}__E.push({ kind: "cancelTimer", key: ${q(s.target)} });`];
+      // S49: an indexed key k[i] is the string k<i>.
+      const keyOf = (name: string) => (s.index ? `${q(name)} + (${expr(s.index, cx)})` : q(name));
+      if (s.op === 'cancel') return [`${ind}__E.push({ kind: "cancelTimer", key: ${keyOf(s.target)} });`];
       if (s.op === 'spawn') {
         // PT6.4, S43: spawnChild with the creation action and the wiring; absent parts are left out.
         const spec = childSpec(s, moduleOf(cx));
         const child = cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec.machine.split('.').pop());
-        const parts = [`kind: "spawnChild"`, `machineId: ${q(spec.machine)}`, `childKey: ${q(spec.key)}`];
+        const parts = [`kind: "spawnChild"`, `machineId: ${q(spec.machine)}`, `childKey: ${keyOf(spec.key)}`];
         if (spec.create) {
           const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === spec.create);
           if (!act) throw new Error(`poly-lower: no creation action ${spec.create} (the checker must refuse it)`);
@@ -308,11 +372,11 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
         return [`${ind}__E.push({ ${parts.join(', ')} });`];
       }
       if (s.op === 'signal') {
-        const spec = cx.facts.children.get(s.extra[0]);
+        const spec = s.index ? [...cx.facts.children.values()].find((c) => c.key.startsWith(s.extra[0]) && /^\d+$/.test(c.key.slice(s.extra[0].length))) : cx.facts.children.get(s.extra[0]);
         const child = cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec?.machine.split('.').pop());
         const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
         if (!spec || !act) throw new Error(`poly-lower: signal ${s.extra[0]} -> ${s.target} is unresolved (the checker must refuse it)`);
-        return [`${ind}__E.push({ kind: "signalChild", childKey: ${q(spec.key)}, action: ${q(s.target)}, data: { ${argList(s, act.params, cx).join(', ')} } });`];
+        return [`${ind}__E.push({ kind: "signalChild", childKey: ${keyOf(s.extra[0])}, action: ${q(s.target)}, data: { ${argList(s, act.params, cx).join(', ')} } });`];
       }
       if (s.op === 'after') {
         // PT6.3, S26: the compiler cannot know whether the key is armed, so it cancels, then arms.
@@ -323,8 +387,8 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
           return `${q(p.name)}: ${expr(a.value, cx)}`;
         });
         return [
-          `${ind}__E.push({ kind: "cancelTimer", key: ${q(s.as)} });`,
-          `${ind}__E.push({ kind: "timer", key: ${q(s.as)}, fireIn: ${q(isoDuration(durationMs(s.modifier)!))}, action: ${q(s.target)}, data: { ${data.join(', ')} } });`,
+          `${ind}__E.push({ kind: "cancelTimer", key: ${keyOf(s.as)} });`,
+          `${ind}__E.push({ kind: "timer", key: ${keyOf(s.as)}, fireIn: ${q(isoDuration(durationMs(s.modifier)!))}, action: ${q(s.target)}, data: { ${data.join(', ')} } });`,
         ];
       }
       const eff = cx.facts.effects.get(s.target);

@@ -120,6 +120,8 @@ export interface RMachine {
   id: string;
   service: boolean;
   children: Map<string, RChild>;
+  /** S49: child families by name, with the indices their keys take. */
+  families: Map<string, { lo: number; hi: number }>;
   effects: Map<string, REffect>;
   pathProperties: RPathProperty[];
   unions: Map<string, RUnion>;
@@ -195,24 +197,48 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   const guardedInputs = strictInputs(m, effects);
   // PT6.4: attached children, by the key their spawn names (declared by use, like timer keys).
   const children = new Map<string, RChild>();
-  const spawns = (body: A.Stmt[]): void => {
+  const families = new Map<string, { lo: number; hi: number }>();
+  // S49: a loop `for i in lo..n` runs i up to n, whose bound is n itself or the top of its range type.
+  const loopTop = (f: A.For, action: string): number => {
+    if (f.hi.kind === 'Int') return f.hi.value;
+    const name = f.hi.kind === 'Name' ? f.hi.name : '';
+    const decl = m.items.find((i): i is A.Action => i.kind === 'Action' && i.name === action)?.params.find((p) => p.name === name)?.type
+      ?? m.fields.find((x) => x.name === name)?.type;
+    const t = decl ? typeOf(decl) : null;
+    if (!t || t.k !== 'int' || !Number.isFinite(t.hi)) throw new Error(`poly-ref: the loop over ${f.var} has no bound`);
+    return t.hi;
+  };
+  const spawns = (body: A.Stmt[], action: string, loops: { v: string; lo: number; hi: number }[]): void => {
     for (const s of body) {
-      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier !== 'detached' && s.as && !children.has(s.as)) {
+      if (s.kind === 'For') { spawns(s.body, action, [...loops, { v: s.var, lo: s.lo, hi: loopTop(s, action) }]); continue; }
+      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier !== 'detached' && s.as) {
         const name = s.target.split('.').pop()!;
         const child = decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
         if (!child) throw new Error(`poly-ref: no machine ${s.target}`);
         const pair = (tag: string) => { const i = s.extra.indexOf(tag); return i >= 0 ? s.extra[i + 1] : null; };
-        children.set(s.as, {
-          key: s.as, machineId: `${module.name}.${name}`, machine: name,
-          create: pair('create'), onComplete: pair('complete'), onParentTerminal: pair('parent-terminal'),
-          actions: child.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) })),
-        });
+        // An indexed key k[i] is a family: one key per index the loop gives i (S49).
+        let keys = [s.as];
+        if (s.index) {
+          const r = indexRange(s.index, loops);
+          if (!r) throw new Error(`poly-ref: the index of ${s.as} is not the loop variable or a constant`);
+          keys = Array.from({ length: r.hi - r.lo + 1 }, (_, k) => `${s.as}${r.lo + k}`);
+          const prev = families.get(s.as);
+          families.set(s.as, prev ? { lo: Math.min(prev.lo, r.lo), hi: Math.max(prev.hi, r.hi) } : r);
+        }
+        for (const key of keys) {
+          if (children.has(key)) continue;
+          children.set(key, {
+            key, machineId: `${module.name}.${name}`, machine: name,
+            create: pair('create'), onComplete: pair('complete'), onParentTerminal: pair('parent-terminal'),
+            actions: child.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) })),
+          });
+        }
       }
-      if (s.kind === 'If') { spawns(s.then); spawns(s.else ?? []); }
-      if (s.kind === 'Match') for (const a of s.arms) spawns(a.body);
+      if (s.kind === 'If') { spawns(s.then, action, loops); spawns(s.else ?? [], action, loops); }
+      if (s.kind === 'Match') for (const a of s.arms) spawns(a.body, action, loops);
     }
   };
-  for (const it of m.items) if (it.kind === 'Handler') spawns(it.body);
+  for (const it of m.items) if (it.kind === 'Handler') spawns(it.body, it.action, []);
   for (const it of m.items) {
     if (it.kind === 'Action') {
       actions.push({
@@ -239,9 +265,21 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     for (const p of a.params) if (p.name === 'childKey' && p.type.k === 'string' && p.check === null && keys.length) p.check = keys;
   }
   return {
-    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, families, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties,
   };
+}
+
+/** The indices of a key's index: the loop variable, it plus or minus a constant, or a constant (S49). */
+function indexRange(e: A.Expr, loops: { v: string; lo: number; hi: number }[]): { lo: number; hi: number } | null {
+  if (e.kind === 'Int') return { lo: e.value, hi: e.value };
+  if (e.kind === 'Name') { const l = loops.find((x) => x.v === e.name); return l ? { lo: l.lo, hi: l.hi } : null; }
+  if (e.kind === 'Binary' && (e.op === '+' || e.op === '-') && e.right.kind === 'Int') {
+    const r = indexRange(e.left, loops);
+    const c = e.op === '+' ? e.right.value : -e.right.value;
+    return r ? { lo: r.lo + c, hi: r.hi + c } : null;
+  }
+  return null;
 }
 
 /** PS5.4, S37: a conjunction of `count("k") <= n`, `count("k") < n` and `before("k1", "k2")`; anything else is refused. */
@@ -282,6 +320,7 @@ function strictInputs(m: A.Machine, effects: Map<string, REffect>): Set<string> 
         if (st.kind === 'Let') lets.set(st.name, names(st.expr));
         else if (st.kind === 'If') { visit(st.then); visit(st.else ?? []); }
         else if (st.kind === 'Match') for (const a of st.arms) visit(a.body);
+        else if (st.kind === 'For') visit(st.body);
         else if (st.kind === 'Intent' && st.op === 'emit') {
           const cls = effects.get(st.target)?.cls;
           if (cls !== 'irreversible' && cls !== 'compensable') continue;

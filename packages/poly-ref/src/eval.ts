@@ -32,6 +32,8 @@ export interface Env {
    * reject property only on the right of a conjunct `action == A` that holds.
    */
   params?: boolean;
+  /** Inside an aggregate, the family index `[*]` stands for (S49). */
+  star?: number;
   /** A compose invariant's joint state (PS7.1, PT7): the parent's state and each spawned child's. */
   joint?: { parent: State; children: Map<string, State> };
   /** Declared types of local names, where known: pattern binders and lets (for match scrutinees, S21, S22). */
@@ -39,6 +41,20 @@ export interface Env {
 }
 
 export class EvalError extends Error {}
+
+/** The family an aggregate's expression reads with `[*]` (S49). */
+function starFamily(e: A.Expr): string | null {
+  let found: string | null = null;
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== 'object' || found) return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const n = x as A.Expr;
+    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Member') { found = n.object.prop; return; }
+    for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
+  };
+  walk(e);
+  return found;
+}
 
 const truth = (v: Value, what: string): boolean => {
   if (typeof v !== 'boolean') throw new EvalError(`poly-ref: ${what} is not a Bool`);
@@ -61,6 +77,14 @@ export function evaluate(e: A.Expr, env: Env): Value {
       if (e.object.kind === 'Name' && e.object.name === 'post' && env.post) return field(env.post, e.prop);
       // PT7: parent.f and children.k.f name fields of the joint state; S48 guarantees k is spawned.
       if (env.joint && e.object.kind === 'Name' && e.object.name === 'parent') return field(env.joint.parent, e.prop);
+      // S49: children.f[i].x, and children.f[*].x inside an aggregate.
+      if (env.joint && e.object.kind === 'Index' && e.object.object.kind === 'Member' && e.object.object.object.kind === 'Name' && e.object.object.object.name === 'children') {
+        const k = e.object.index.kind === 'Star' ? env.star : int(evaluate(e.object.index, env), 'an index');
+        if (k === undefined) throw new EvalError('poly-ref: [*] outside an aggregate');
+        const child = env.joint.children.get(`${e.object.object.prop}${k}`);
+        if (!child) throw new EvalError(`poly-ref: child ${e.object.object.prop}${k} is read before it is spawned (S48)`);
+        return field(child, e.prop);
+      }
       if (env.joint && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'children') {
         const child = env.joint.children.get(e.object.prop);
         if (!child) throw new EvalError(`poly-ref: child ${e.object.prop} is read before it is spawned (S48)`);
@@ -86,12 +110,39 @@ export function evaluate(e: A.Expr, env: Env): Value {
         // PS5.3: `rejected(r)` is true iff the step's verdict is rejected(r).
         return env.verdict.kind === 'rejected' && env.verdict.reason === e.args[0].value;
       }
+      // S49: count, sum, all and any over the spawned members of one family.
+      if (env.joint && ['count', 'sum', 'all', 'any'].includes(e.callee)) {
+        const fam = starFamily(e.args[0]);
+        const r = fam ? env.M.families.get(fam) : undefined;
+        if (!fam || !r) throw new EvalError(`poly-ref: ${e.callee} over no family`);
+        const vals: Value[] = [];
+        for (let k = r.lo; k <= r.hi; k++) if (env.joint.children.has(`${fam}${k}`)) vals.push(evaluate(e.args[0], { ...env, star: k }));
+        if (e.callee === 'count') return vals.filter((v) => truth(v, 'count')).length;
+        if (e.callee === 'sum') return vals.reduce<number>((a, v) => a + int(v, 'sum'), 0);
+        if (e.callee === 'all') return vals.every((v) => truth(v, 'all'));
+        return vals.some((v) => truth(v, 'any'));
+      }
       throw new EvalError(`poly-ref: no function ${e.callee} in this context`);
     }
     case 'Spawned': {
       if (!env.joint) throw new EvalError(`poly-ref: ${e.key} spawned outside a compose invariant`);
-      return env.joint.children.has(e.key);
+      return env.joint.children.has(e.index ? `${e.key}${int(evaluate(e.index, env), 'an index')}` : e.key);
     }
+    case 'Quant': {
+      // S49: forall and exists over the indices of a family.
+      const r = env.M.families.get(e.group);
+      if (!r) throw new EvalError(`poly-ref: no family ${e.group}`);
+      for (let k = r.lo; k <= r.hi; k++) {
+        const inner: Env = { ...env, locals: new Map(env.locals) };
+        inner.locals.set(e.var, k);
+        const v = truth(evaluate(e.body, inner), e.q);
+        if (e.q === 'forall' && !v) return false;
+        if (e.q === 'exists' && v) return true;
+      }
+      return e.q === 'forall';
+    }
+    case 'Star':
+      throw new EvalError('poly-ref: [*] outside an aggregate');
     case 'Unary': {
       const v = evaluate(e.arg, env);
       return e.op === '!' ? !truth(v, '!') : -int(v, 'unary -');
