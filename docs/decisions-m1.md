@@ -90,6 +90,17 @@ S45 was checked against polyrun before ruling. `kernel.mjs` delivers a child's c
 
 The agent applies the spec text for S43 to S45, S47 and S48 in one commit, citing the ids. Attached children can start.
 
+## Rulings before step 7 (S49 to S51, and one from K9)
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S49** The looped OMS shipments | **Accepted as proposed, with four limits.** (1) A child family is declared by an indexed key, `spawn Shipment as f[i]`, lowering to the key `f<i>`; `i` has an integer range type, and that range bounds the family. (2) `for i in 0..n { … }` is unrolled at compile time. `n` is a literal, or a field or parameter whose range type bounds it; when `n` is not a literal, the loop unrolls to the bound of its type and each copy is guarded by `i <= n`. (3) A loop body may contain `spawn`, `signal`, `emit`, `after` and `cancel` with keys indexed by `i`, and writes to `m'[i]` of a map. Any other write is refused by the existing rules (`PL2102` on the second copy), and a non-indexed timer key is `PL2301`. (4) Spawning `f[i]` twice for one `i` on one path is `PL5101`. Compose invariants reach a family through S32's `forall` and `count(children.f[*] …)`. The OMS joint state count is measured and recorded in `plan-m1.md`, since a family multiplies it. | PT2; PT6.4; PT7 |
+| **S50** A signal to a child not yet spawned | **Accepted:** `PL5104 SIGNAL_TO_ABSENT_CHILD`, with its path. polyrun poisons the parent, so this is a finding, not a note. | PT7; PT12.2 |
+| **S51** A completion's `childKey` needs a finite domain | **Covered by S49.** Its domain is the set of keys of the families and single children whose completion names that action. | PT6.4 |
+| **S52** (new, from the K9 note) One action wired to two sources | Once polyrun refuses a child's completion from outside, an effect completion or a timer wired to the same action would be refused too. **Refuse it at compile time:** an action that is both a child's completion or cancel action and an effect completion or timer action is `PL6102 SHARED_COMPLETION_ACTION`, at the second wiring. | PT6.4; PT12.2 |
+
+The agent applies the spec text for S49, S50 and S52 in one commit, citing the ids. Step 7 can start.
+
 ## Conclusion
 
 M1 starts with its three open questions settled. The emit-only step is fixed where it originates, in the engine. Liveness no longer blocks a safety result. The one gate item that needs liveness moves to the milestone that builds it. The configuration explorer is the main work, and its first targets (the checkout witness and the delivery variants) are already measured by independent scripts. The rulings on the plan add the record type the OMS order needs and fix the timer rule against polyrun's store.
