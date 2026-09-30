@@ -125,7 +125,7 @@ There are five kinds of property. Each has its own keyword (PT5), and none is ca
 - **PS6.2** A behaviour is **weakly fair for `g`**, written `WF(g)`, iff `g` is not enabled continuously from some point on without an accepted step of `g` being taken infinitely often. In words: an action group that stays enabled is eventually taken.
 - **PS6.3** A liveness property is always stated with its fairness assumption: `liveness n: eventually P under fair { g1, g2, … }`. It is checked only over behaviours that are weakly fair for every listed group. Actions not listed carry no assumption: the environment may never offer them. A person's approval, for example, is not listed.
 - **PS6.3a** Liveness under fairness is a game. The environment is an adversary that chooses inputs, constrained only by the stated fairness. A liveness property holds when the adversary has no strategy that avoids `P` forever. The lasso of PS6.4 is the adversary's winning strategy.
-- **PS6.4** **Check.** Over the finite graph of `Reach(I)`, `eventually P` fails iff there is a reachable strongly connected component `C` with all of the following properties:
+- **PS6.4** **Check.** Over the finite graph of `Reach(I)`, `eventually P` fails iff there is a strongly connected component `C`, of the states reachable from the initial state through states where `P` does not hold, with all of the following properties (S82):
   1. `C` contains no `P`-state.
   2. `C` contains at least one edge, where rejected and unhandled steps count as edges.
   3. For every listed group `g`, either some edge of `C` is an accepted step of `g`, or `g` is disabled in some state of `C`.
@@ -262,7 +262,7 @@ The canonical formatter inserts parentheses whenever `implies` is mixed with `&&
 
   In either case the target takes its step by `R_M` (PS3.2). The intents of an accepted step are handled as follows:
   - its `send` messages are added to `μ`; a send to `none` adds nothing and is a finding (`PL5404 SEND_TO_NONE`, S29);
-  - its detached `spawn` intents create new instances, each at the address `<parent address>/<k>`, in its machine's initial state, with its creation action as its first message; instances spawned from `M` join the group `M`, and `N` counts every instance (S60);
+  - its detached `spawn` intents create new instances, each at the address `<parent address>/<k>`, in its machine's initial state, with its creation action as its first message; instances spawned from `M` join the group `M`, and `N` counts every instance (S60). A spawn of a key whose instance already exists creates nothing and is `PL5101 CHILDKEY_COLLISION`, checked before the instance bound (S83);
   - its other effects and its timers are completed by the environment only through the configuration's declared inputs: a completion action not listed there is never offered (S61).
 
   A delivery to an instance that rejects the message is a rejected step: the message is consumed and the state is unchanged.
