@@ -224,7 +224,7 @@ One thing found in the hand-written example, reported rather than normalised: it
 | What M0 refused (`conformance/m1/unions.poly`) | a map of unions with payloads, a union payload inside a union, and a union parameter: CLEAN, 36 states, translation validation over 396 transitions and 468 property evaluations |
 | Sends alone (`conformance/m1/sends.poly`) | `Lock` explores a release by a client that does not hold the lock (S57), 3 states; translation validation compares every `sendTo` |
 | Translation validation | zero `PL2501` over the 35 example and conformance sources; each of the twelve deliberately broken lowerings caught |
-| `npm test` | 374 tests, all pass, none todo |
+| `npm test` | 374 tests at step 11; 444 after the rulings and the code review, all pass, none todo |
 
 What step 8 does not build: `spawn detached` and `SendDenied` wait for S60 and S59; `fifo` pairs (PS13.4) have no grammar yet and nothing in M1 needs them; message identities and oldest-copy delivery matter only for fairness (PS13.2b), so the explorer keeps PS13.2a's quotient, as the script does, and M2 adds them with liveness. `PL5302` cannot arise until detached spawns exist.
 
@@ -242,7 +242,47 @@ What step 8 does not build: `spawn detached` and `SendDenied` wait for S60 and S
 
 ### Spec issues at the close
 
-Every spec issue of M1, S23 to S65, is ruled and recorded above with its resolution. None is open.
+Every spec issue of M1 from S23 to S65 is ruled and recorded above with its resolution. S66, raised by the code review, is open and built provisionally.
+
+### The code review of M1
+
+The review ran over `ca2e6b2..122b520`, in four parts (checker and formatter, lowering, poly-ref, pipeline and tests), and found 30 defects. Two more came from polywatch on step 8. Each fix landed with a test that failed before it: `test/review-m1.test.mjs`, with the reviewers' programs in `test/fixtures/review-m1`, and `test/vendor.test.mjs` and `test/boundaries.test.mjs` for P1 and P8.
+
+| Finding | Defect | Fix | Commit |
+|---|---|---|---|
+| polywatch 1, 2 | A group index out of range passed the checker and crashed poly-ref; stage 4b ran outside the handler that makes a throw an ERROR report | Index ranges checked; `configurationReports` | `d2c04b1` |
+| C1 | An index outside a family (`signal t[0]`, `cancel late[5]`, `t[5] spawned`) was accepted: a crash, or a compose invariant vacuously clean | PL1201 at the index (S49) | `7157867` |
+| C2 | A map keyed by a record crashed the pipeline | PL1201 (PT3.1) | `7157867` |
+| C3 | A record parameter escaped the rules for what it holds: PL2501 or an empty domain | The rules reach into records | `7157867` |
+| C4 | A constant record literal was not range-checked | Checked field by field (PS4.2) | `7157867` |
+| C5 | `childState` ignored int ranges, so the domain missed values the runtime delivers | Exact field types (S44) | `7157867` |
+| C6 | A loop to a field whose range starts at or above `lo` had a false zero-copy path (PL2201) | Prefixes start at the bound's least value | `7157867` |
+| C7 | The formatter dropped a quantifier's parentheses and changed the meaning | Parenthesised unless it is the whole expression | `7157867` |
+| C8 | A record literal on the left of `!=` was PL1005; a recursion gave two diagnostics | Typed from the other side; one diagnostic | `7157867` |
+| P1 | The vendored `SAM.js` was ignored by git: a clone could not load a lowered module | Committed, and every pinned file must be tracked | `12a7cd0` |
+| P2 | A stale `effects.cjs` or `effect-invariants.mjs` from an earlier build was read as current | The build directory is cleared per check | `889d767` |
+| P3 | Two modules of one name shared build directories and machine ids | PL1002 in project mode | `889d767` |
+| P4 | A project-level PL1002 folded a file's ERROR away | ERROR stands | `889d767` |
+| P5 | A child that does not lower threw ERROR | The parent's composition is listed as not run | `889d767` |
+| P6 | Configuration diagnostics in `--json` had no schema | `poly.diagnostic/1` on each | `889d767` |
+| P7 | Early exits did not list stages 3 and 4 as not run | Listed where the machine has them | `889d767` |
+| P8 | The boundary check missed run-time requires, template imports, subprocesses and computed globals (predates M1) | Each is a violation | `20567ad` |
+| L1 | A completion's constant data held `"Fine"` and `"none"`, so polyrun's delivery failed the schema | The value the generated code builds | `e571c27` |
+| L2 | `terminalStates` was empty for a union control field | Its tags | `e571c27` |
+| L3 | An effect kind `timer` or `cancelTimer` was read by the kernel as its own intent | PL1201 | `e571c27` |
+| L4 | A map literal with `Slot.A` keys lowered to `undefined` | Keys by constructor | `e571c27` |
+| L5 | `r.f is C`, `parent.f is C` and a child's union field read the wrong value | The structured value, with the child's layout | `e571c27` |
+| L6 | A record payload crashed the lowering | Typed with the environment | `e571c27` |
+| L7 | A map inside a union parameter lost constructors from the domain | PL0901 (S65) | `e571c27` |
+| L8 | `__proto__` as a name set a prototype | PL1201 | `e571c27` |
+| L9 | A map key out of range crashed poly-ref | PL1201 | `e571c27` |
+| R1 | The same signal twice in one step was CLEAN, and the kernel poisons it | PL5105 (S66, provisional) | `e571c27` |
+| R2 | A declared-type escape through a cascade was a bound hit | PL3102 | `e571c27` |
+| R3 | Translation validation did not compare `terminalStates` with `term` | Compared on every reachable state | `e571c27` |
+| R4 | An engine's automatic invariant was confirmed by outcome kind alone, so a correct lowering was refused | Confirmed by its field | `e571c27` |
+| R5 | A type escape in a configuration was masked by the transit bound | Checked first | `e571c27` |
+
+What the review checked and found sound is in its reports: the joint cascade's order and depth against the kernel, the path-property monitor and its product search, the configuration's interleavings, rejected deliveries, stuck states and `none` sends, Node's module caches, and the evidence tests' handling of a missing Python.
 
 ### Changes for the owner
 
