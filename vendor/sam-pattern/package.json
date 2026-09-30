@@ -1,0 +1,8 @@
+{
+  "name": "@cognitive-fab/sam-pattern",
+  "version": "2.3.0",
+  "description": "Vendored unchanged from sam-lib; see PROVENANCE.md",
+  "main": "./dist/SAM.js",
+  "license": "ISC",
+  "private": true
+}

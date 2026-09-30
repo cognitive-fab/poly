@@ -13,6 +13,6 @@
   },
   "dependencies": {
     "@poly/core": "0.0.0",
-    "@cognitive-fab/sam-pattern": "~2.2.1"
+    "@cognitive-fab/sam-pattern": "2.3.0"
   }
 }

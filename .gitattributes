@@ -2,3 +2,5 @@
 * text=auto eol=lf
 # The field-study copies are pinned by SHA-256 of their exact bytes (PT17): no end-of-line conversion.
 conformance/field-studies/** -text
+# Vendored engines are pinned by SHA-256 of their exact bytes (vendor/*/PROVENANCE.md): no end-of-line conversion.
+vendor/** -text

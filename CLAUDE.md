@@ -22,14 +22,14 @@ Cite requirement ids in code comments and commit messages (`PS2.3`, `PT9.8`, `AC
 | Handlers are total and pure over the pre-state; primed fields are write-only (PS2.3); requires precede writes on every path (PT4.1). | the compiler, with diagnostic codes from PT12.2 |
 | No silent clean. A check that did not run, or hit a bound, is `INCONCLUSIVE` or listed as not run. Every verdict prints its checked instance (PT12.3a). | verdict-fold tests |
 | The evidence scripts in `docs/reviews/evidence/` are acceptance tests. poly-ref must reproduce every number and witness they print. | `test/evidence.test.*` |
-| Engines are dependencies, never forks. A change an engine needs is made in that engine's repository and released. | review |
+| Engines are vendored, never forked. poly relies on the Poly stack conceptually, not physically: the engine files it runs are copied unchanged into `vendor/`, each pinned by hash and commit in its `PROVENANCE.md`. A change an engine needs is made in that engine's repository and copied in again. | `test/vendor.test.mjs` |
 
 If you find yourself working around one of these rules, stop. The rule is the product.
 
 ## Engines and where they live
 
-- **SAM v2 strict profile:** `@cognitive-fab/sam-pattern` (v2.2.x). Local source: `C:\Users\jjdub\code\sam\sam-lib`.
-- **polygraph, polyrun, polyvers and polynv:** `@cognitive-fab/polygraph` (v8.3.x). Local source: `C:\Users\jjdub\code\polygraph`.
+- **SAM v2 strict profile:** `@cognitive-fab/sam-pattern` 2.3.0, vendored in `vendor/sam-pattern` from sam-lib 3047024. Local source: `C:\Users\jjdub\code\sam\sam-lib`.
+- **polygraph, polyrun, polyvers and polynv:** `@cognitive-fab/polygraph` 8.3.1; the files poly runs are vendored in `vendor/polygraph` from polygraph 583b82c. Local source: `C:\Users\jjdub\code\polygraph`.
 - **Polyaxion:** `C:\Users\jjdub\code\polyaxion`. Not needed before M5.
 - **Polytrion:** private and hosted. Not needed in v1 (worlds are deferred).
 
