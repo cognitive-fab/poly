@@ -1,0 +1,14 @@
+// polywatch 1: an exported lasso for `P leads to Q` needs P on its way to the cycle; once the program no
+// longer makes P true, the lasso is no counterexample and its test passes.
+module pw
+
+machine M {
+  state { flag : bool = false   x : 0..1 = 0   done : bool = false }
+  action Set()
+  action Tick()
+  action Finish()
+  on Set { require !flag else reject "set"   flag' = true }
+  on Tick { x' = 1 - x }
+  on Finish { require x > 1 else reject "never"   done' = true }
+  liveness fin: flag leads to done under fair { Tick, Finish }
+}

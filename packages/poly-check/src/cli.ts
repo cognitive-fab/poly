@@ -12,7 +12,7 @@ import { EXIT_CODES, ManifestError, loadProject, toJson } from '@poly/core';
 import { lintHandlers } from './lint.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
-import { exportWitness, findWitness } from './witness.js';
+import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
 import { applyFixById } from './fix.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
@@ -98,9 +98,9 @@ export async function main(argv: string[]): Promise<number> {
       const trace = args.includes('--trace');
       if (trace === args.includes('--test')) return usage();
       const base = root ?? process.cwd();
-      const found = findWitness(readReport(base), positional[1]);
-      if (!found) { process.stderr.write(`poly: no witness ${positional[1]} in the report\n`); return EXIT_CODES.USAGE; }
-      const written = exportWitness(found, { root: base, kind: trace ? 'trace' : 'test', out: out ?? undefined });
+      const looked = lookupWitness(readReport(base), positional[1]);
+      if (!('found' in looked)) { process.stderr.write(`poly: ${looked.reason}\n`); return EXIT_CODES.USAGE; }
+      const written = exportWitness(looked.found, { root: base, kind: trace ? 'trace' : 'test', out: out ?? undefined });
       process.stdout.write(`${written}\n`);
       return 0;
     }
@@ -124,7 +124,7 @@ export async function main(argv: string[]): Promise<number> {
   } catch (e) {
     const err = e as Error & { nondeterministic?: boolean };
     process.stderr.write(`poly: ${err.message}\n`);
-    if (err instanceof ManifestError || err instanceof UsageError) return EXIT_CODES.USAGE;
+    if (err instanceof ManifestError || err instanceof UsageError || err instanceof WitnessExportError) return EXIT_CODES.USAGE;
     return err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;
   }
 }

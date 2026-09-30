@@ -1,0 +1,20 @@
+// polywatch 1 and review D2, for a configuration: the lasso needs P on its way to the cycle, and a fair input
+// that is taken or disabled on it.
+module pw
+
+service machine A {
+  state { flag : bool = false   x : 0..1 = 0   done : bool = false }
+  action Set()
+  action Tick()
+  action Finish()
+  on Set { require !flag else reject "set"   flag' = true }
+  on Tick { x' = 1 - x }
+  on Finish { require x > 1 else reject "never"   done' = true }
+}
+
+configuration c {
+  a : A
+  inputs { a.Set, a.Tick, a.Finish }
+  bounds { transit 1 }
+  liveness fin: a.flag leads to a.done under fair { a.Tick, a.Finish }
+}

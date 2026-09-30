@@ -50,8 +50,10 @@ for (const [kind, code] of KINDS) {
     const before = await checkFile(file, { root: dir });
     const d = all(before).find((x) => x.code === code);
     assert.ok(d?.witness?.trace.length, `${kind}: no ${code} with a witness\n${render(before)}`);
-    // S69: the id is the digest of { moduleDigest, property, trace }.
-    assert.equal(d.witness.id, 'sha256:' + sha256Hex(canonicalize({ moduleDigest: digest(parse(readFileSync(file, 'utf8')).module), property: d.property ?? d.code, trace: d.witness.trace })));
+    // S69, S86: the id is the digest of { moduleDigest, scope, property, trace }, the scope being the machine or
+    // configuration the finding is about.
+    const scope = before.machines.find((m) => m.diagnostics.includes(d))?.machine ?? before.configurations.find((c) => c.diagnostics.includes(d))?.configuration ?? null;
+    assert.equal(d.witness.id, 'sha256:' + sha256Hex(canonicalize({ moduleDigest: digest(parse(readFileSync(file, 'utf8')).module), scope, property: d.property ?? d.code, trace: d.witness.trace })));
     const found = findWitness(JSON.parse(JSON.stringify(before)), d.witness.id);
     assert.ok(found);
     const exported = exportWitness(found, { root: dir, kind: 'test' });

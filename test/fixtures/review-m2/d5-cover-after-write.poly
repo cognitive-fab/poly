@@ -1,0 +1,18 @@
+// Review D5 and D6: a fix is offered only where it removes the diagnostic without making another.
+module d5
+
+type J = Idle | Busy | Done
+
+machine M {
+  state { n : 0..2 = 0   m : 0..1 = 0   j : J = Idle }
+  action A()
+  action B()
+  on A {
+    n' = 1
+    match j { Idle => j' = Busy   Busy => j' = Done }
+  }
+  on B {
+    n' = 1
+    if n < 2 { m' = 1   require n > 0 else reject "empty" }
+  }
+}

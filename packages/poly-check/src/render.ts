@@ -39,7 +39,11 @@ export function renderDiagnostic(d: Diagnostic, file: string): string[] {
     lines.push(`  witness (${d.witness.length} global step${d.witness.length === 1 ? '' : 's'}):`);
     const rows = d.witness.trace.map((s) => [`${s.global!.kind.padEnd(8)}${s.global!.text}`, s.verdict && s.verdict !== 'accepted' ? s.verdict : '']);
     const w = Math.max(...rows.map((r) => r[0].length));
-    for (const r of rows) lines.push(`    ${r[1] ? `${r[0].padEnd(w)}   ${r[1]}` : r[0]}`);
+    rows.forEach((r, i) => {
+      // A liveness lasso (S74): the prefix, then the cycle, as for a machine (review, minor).
+      if (i === d.witness!.cycle) lines.push(`    cycle, repeated for ever:`);
+      lines.push(`    ${r[1] ? `${r[0].padEnd(w)}   ${r[1]}` : r[0]}`);
+    });
   } else if (d.witness && d.witness.trace.length) {
     lines.push(`  witness (${d.witness.length} step${d.witness.length === 1 ? '' : 's'}):`);
     const note = (s: { verdict?: string; effects?: string[] }) => [s.verdict && s.verdict !== 'accepted' ? s.verdict : '', s.effects?.length ? `emits ${s.effects.join(', ')}` : ''].filter(Boolean).join('   ');

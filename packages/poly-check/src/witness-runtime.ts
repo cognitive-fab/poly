@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { digest, type Configuration, type Machine, type Module } from '@poly/core';
-import { alpha, buildConfiguration, buildMachine, detachedAlone, evaluate, flatten, flatValue, globalView, isTerminal, loadLoweredModule, valuesOf, type RMachine, type State } from '@poly/ref';
+import { alpha, buildConfiguration, buildMachine, detachedAlone, evaluate, flatten, flatValue, globalView, inputData, isTerminal, loadLoweredModule, valuesOf, type RMachine, type State } from '@poly/ref';
 
 export interface WitnessStepSpec {
   action: string;
@@ -133,7 +133,11 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
   const visited: Flat[] = [];
   const cycleSteps: { action: string; data: Flat; verdict: string }[] = [];
   let cycleStart: Flat | null = null;
-  const liveness = spec.code === 'PL3301' ? named(live.liveness as { name: string; goal: (s: Flat) => boolean; fair: { action: string; perValue: boolean }[][] }[]) : undefined;
+  const liveness = spec.code === 'PL3301' ? named(live.liveness as { name: string; goal: (s: Flat) => boolean; from: ((s: Flat) => boolean) | null; fair: { action: string; perValue: boolean }[][] }[]) : undefined;
+  // PS6.4: a lasso for `P leads to Q` needs a P-state, with no Q after it, on its way to the cycle; for
+  // `eventually Q` there is nothing to wait for (polywatch 1).
+  let started = !liveness?.from;
+  let lastPre: Flat = state;
   // A state property false in the initial state has a witness of no steps: it is judged before any step.
   if (spec.code === 'PL3001') {
     const p = named(props.stateInvariants as { name: string; pred: (s: Flat) => boolean }[]);
@@ -145,10 +149,12 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
     }
   }
   for (const [i, s] of spec.steps.entries()) {
+    if (liveness?.from && !cycleStart) { if (liveness.goal(state)) started = false; else if (liveness.from(state)) started = true; }
     if (liveness && i === spec.cycle) cycleStart = clone(state);
     if (liveness && cycleStart && liveness.goal(state)) return; // the goal now holds on the cycle
     if (cycleStart) visited.push(clone(state));
     const pre = state;
+    lastPre = pre;
     const r = step(l, pre, s.action, s.data);
     if (r.verdict !== s.verdict) return; // the program no longer takes this path
     const v = r.verdict.startsWith('rejected') ? { rejected: true, reason: r.verdict.slice(9, -1) } : { rejected: false, reason: null };
@@ -189,10 +195,27 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
     const terminal = l.contract.terminalStates.includes(state[l.contract.stateKeys[0].name]);
     assert.ok(terminal || offers(l).some((o) => step(l, state, o.action, o.data).verdict === 'accepted'), 'the state the witness reaches is a deadlock: not terminal, and no action accepts');
   }
+  if (spec.code === 'PL6201') {
+    // PD1.4d, S85: at the witness's state, every accepted completion with the witness's answer, at every interval
+    // the program tells apart, emits a compensable or irreversible effect. One interval that does not is a gate.
+    const last = spec.steps[spec.steps.length - 1];
+    const d = [...buildMachine(module, decl.name).decisions.values()].find((x) => x.ok?.action === last.action);
+    const classes = JSON.parse(readFileSync(join(l.dir, 'effects.manifest.json'), 'utf8')).effects as Record<string, { class?: string }>;
+    const risky = (kind: string) => classes[kind]?.class === 'compensable' || classes[kind]?.class === 'irreversible';
+    const same = (o: { data: Flat }) => (d?.ok?.answer ?? []).every((n) => stable(o.data[n]) === stable(last.data[n]));
+    const gate = offers(l).filter((o) => o.action === last.action && same(o)).some((o) => {
+      const r = step(l, lastPre, o.action, o.data);
+      if (r.verdict !== 'accepted') return true;
+      const intents = l.mapper ? l.mapper(clone(lastPre), o.action, clone(o.data), clone(r.post), 'accepted') ?? [] : [];
+      return !intents.some((x) => risky(x.kind));
+    });
+    assert.ok(gate, `decision ${d?.name ?? spec.property} is ungated: for this answer every accepted ${last.action} emits a compensable or irreversible effect (PD1.4d)`);
+  }
   if (liveness && cycleStart) {
     // S74: the cycle returns to its first state, the goal never holds on it, and every fair group is taken on it
     // or disabled somewhere on it. Anything else and the lasso is no longer a fair counterexample.
     if (stable(state) !== stable(cycleStart)) return;
+    if (!started) return; // P never held before the cycle: no counterexample to `P leads to Q` (polywatch 1)
     const all = offers(l);
     for (const grp of liveness.fair) {
       const plain = grp.filter((m) => !m.perValue).map((m) => m.action);
@@ -233,11 +256,14 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
   const visited: { sigma: Map<string, Flat>; mu: typeof mu }[] = [];
   const cycleSteps: { kind: string; target: string; action: string; data: Flat; verdict: string }[] = [];
   let start: string | null = null;
+  let started = !(prop?.kind === 'Liveness' && prop.from);
   const key = (sg: Map<string, Flat>, m: typeof mu) => stable([[...sg].sort(), m.map((x) => stable(x)).sort()]);
   // A configuration invariant false in the initial state has a witness of no steps.
   if (spec.code === 'PL5401' && prop?.kind === 'Property') assert.ok(holds(prop.expr, sigma), `configuration invariant ${spec.property} is violated in the initial state`);
   for (const [i, s] of spec.steps.entries()) {
     const g = s.global!;
+    // PS6.4: for `P leads to Q`, a P-state with no Q after it on the way to the cycle (polywatch 1).
+    if (prop?.kind === 'Liveness' && prop.from && start === null) { if (holds(prop.expr, sigma)) started = false; else if (holds(prop.from, sigma)) started = true; }
     if (prop?.kind === 'Liveness' && i === spec.cycle) start = key(sigma, mu);
     if (prop?.kind === 'Liveness' && start !== null) {
       if (holds(prop.expr, sigma)) return;
@@ -312,6 +338,26 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
       const taken = cycleSteps.some((c) => c.kind === 'deliver' && stable({ target: c.target, action: c.action, data: c.data }) === m);
       const absent = visited.some((v) => !v.mu.some((x) => plainMsg(x) === m));
       if (!taken && !absent) return;
+    }
+    if (!started) return; // P never held before the cycle: no counterexample to `P leads to Q` (polywatch 1)
+    // S73: an input the clause names is fair: taken on the cycle, or not accepted in some state of it (review D2).
+    for (const grp of prop.fair ?? []) {
+      for (const m of grp.members) {
+        if (!m.input) continue;
+        const names = m.input.index === null ? [m.input.instance] : m.input.index === '*' ? instances.filter((x) => x.group === m.input!.instance).map((x) => x.name) : [`${m.input.instance}[${m.input.index}]`];
+        for (const n of names) {
+          const inst = byName.get(n)!;
+          const params = inst.machine.actions.find((x) => x.name === m.action)!.params;
+          const flat = (d: Record<string, import('@poly/ref').Value>) => Object.fromEntries(params.map((p) => [p.name, flatValue(d[p.name], p.type, inst.machine)]));
+          const values = inputData(instances, inst.machine, m.action).map(flat);
+          const groups = m.perValue ? values.map((v) => [v]) : [values];
+          for (const g of groups) {
+            const taken = cycleSteps.some((c) => c.kind === 'input' && c.target === n && c.action === m.action && c.verdict === 'accepted' && g.some((v) => stable(v) === stable(c.data)));
+            const disabled = visited.some((v) => !v.sigma.has(n) || !g.some((d) => step(lowered.get(inst.machine.name)!, v.sigma.get(n)!, m.action, d).verdict === 'accepted'));
+            if (!taken && !disabled) return; // a fair input is enabled throughout and never taken: the cycle is unfair
+          }
+        }
+      }
     }
     void machines;
     assert.fail(`liveness ${spec.property} fails: the fair cycle of the witness still never reaches its goal`);

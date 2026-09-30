@@ -59,6 +59,21 @@ function namesIn(e: unknown, out = new Set<string>()): Set<string> {
 
 const firstWrite = (body: A.Stmt[]): number => body.findIndex(writes);
 
+/**
+ * Whether a write comes before this node on its path in its handler: an earlier statement of its own block, or of
+ * any enclosing block. The arms of a match are alternatives, not a sequence, so an earlier arm does not count.
+ */
+function writesBefore(place: Place, at: Map<string, Place>): boolean {
+  let cur: Place | undefined = place;
+  while (cur && cur.parent && cur.key) {
+    const list = cur.parent[cur.key];
+    if (Array.isArray(list) && cur.index !== null && cur.parent.kind !== 'Match' && (list as A.Stmt[]).slice(0, cur.index).some(writes)) return true;
+    if (cur.parent.kind === 'Handler') return false;
+    cur = at.get(cur.parent.id as string);
+  }
+  return false;
+}
+
 /** A proposed fix before its id: a name, a target node and an edit. */
 interface Proposal { name: string; target: Obj; edit: Obj }
 
@@ -85,6 +100,8 @@ function propose(d: Diagnostic, module: Module, at: Map<string, Place>, machine:
       if (node?.kind !== 'Match') return [];
       const m = node as unknown as A.Match;
       if (m.arms.some((a) => a.pattern.kind === 'PWild')) return [];
+      // A reject after a write is PL2101, so the arm is offered only where no write comes first (review D5).
+      if (writesBefore(p!, at)) return [];
       const arm = { kind: 'Arm', pattern: { kind: 'PWild' }, body: [{ kind: 'Reject', reason: 'unmatched' }] } as unknown as A.Arm;
       return [replace('cover-rest', node, 'stmt', printStmt({ ...m, arms: [...m.arms, arm] }))];
     }
@@ -93,6 +110,8 @@ function propose(d: Diagnostic, module: Module, at: Map<string, Place>, machine:
       const list = p.parent[p.key] as A.Stmt[];
       const i = firstWrite(list);
       if (i < 0 || i >= p.index) return [];
+      // Moving within the block cannot help when a write before the block also precedes it (review D6).
+      if (p.parent.kind !== 'Handler' && writesBefore(at.get(p.parent.id as string)!, at)) return [];
       // The moved statement must not read a name bound between its new place and its old one.
       const bound = new Set(list.slice(i, p.index).filter((s): s is A.Let => s.kind === 'Let').map((s) => s.name));
       if ([...namesIn(node)].some((n) => bound.has(n))) return [];

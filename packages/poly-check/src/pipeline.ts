@@ -143,7 +143,8 @@ export function engineVersions(): Record<string, string> {
 
 export async function checkFile(file: string, opts: CheckOptions = {}): Promise<CheckReport> {
   const src = readFileSync(file, 'utf8');
-  const report: CheckReport = { file, module: null, verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
+  // The source's absolute path, so a later `poly witness` or `poly fix` finds it from any directory (review D4).
+  const report: CheckReport = { file: resolve(file), module: null, verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
 
   // ── stage 0: parse, type, domains ─────────────────────────────────────
   // S71: a .ts module is read by poly-embed into the same AST; everything after this line is shared.
@@ -632,7 +633,7 @@ export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]
   const out = [...fromPolygraph];
   const have = new Set(out.map(mergeKey));
   for (const f of fromRef) {
-    if (f.code === 'PL3201' || f.code === 'PL3301' || f.code === 'PL4001' || f.code === 'PL4002') continue; // stages 2b and 2c report deadlocks and liveness, stage 3 path properties
+    if (f.code === 'PL3201' || f.code === 'PL3301' || f.code === 'PL4001' || f.code === 'PL4002' || f.code === 'PL6201') continue; // stages 2b and 2c report deadlocks and liveness, stage 3 path properties
     if (have.has(mergeKey(f))) continue;
     // Finding 6: an escape or bound is kept per field, and poly-ref's exploration cap (no field) on its own.
     if (f.code === 'PL3003' && f.property && refOnly.has(f.property)) {
@@ -690,14 +691,21 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
 
 function finish(report: CheckReport, module?: Module): CheckReport {
   // S69: a witness id is the digest of { moduleDigest, property, trace }, so the same trace in another version
-  // of the module is another witness.
+  // of the module is another witness. S86: the machine or configuration it is about is part of it too, so two
+  // machines with the same defect have two witnesses (review D8).
   if (module) {
     report.moduleDigest = digest(module);
-    for (const d of [...report.diagnostics, ...report.machines.flatMap((m) => m.diagnostics), ...report.configurations.flatMap((c) => c.diagnostics)]) {
-      if (d.witness) d.witness.id = 'sha256:' + sha256Hex(canonicalize({ moduleDigest: report.moduleDigest, property: d.property ?? d.code, trace: d.witness.trace }));
+    const scoped = [
+      ...report.diagnostics.map((d) => ({ d, scope: d.at.machine ?? null })),
+      ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, scope: m.machine }))),
+      ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, scope: c.configuration }))),
+    ];
+    for (const { d, scope } of scoped) {
+      if (d.witness) d.witness.id = 'sha256:' + sha256Hex(canonicalize({ moduleDigest: report.moduleDigest, scope, property: d.property ?? d.code, trace: d.witness.trace }));
     }
-    // S70: fixes are computed on the module this report checked; their ids carry its digest (S69).
-    attachFixes([
+    // S70: fixes are computed on the module this report checked; their ids carry its digest (S69). They apply to
+    // the standalone surface only, so an embedded module is offered none (review D7).
+    if (report.file.endsWith('.poly')) attachFixes([
       ...report.diagnostics.map((d) => ({ d, machine: d.at.machine ?? null })),
       ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, machine: m.machine }))),
       ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, machine: null }))),

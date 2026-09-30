@@ -1,0 +1,16 @@
+// Review D8: two machines with the same defect have two witnesses, each for its own machine.
+module d8
+
+type S = Idle | Busy
+
+machine A {
+  state { s : S = Idle }
+  action Go()
+  on Go { require s is Idle else reject "busy"   s' = Busy }
+}
+
+machine B {
+  state { s : S = Idle }
+  action Go()
+  on Go { require s is Idle else reject "busy"   s' = Busy }
+}

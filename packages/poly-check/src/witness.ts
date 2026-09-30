@@ -22,6 +22,13 @@ export interface FoundWitness {
 
 /** The witness with this id (or an unambiguous prefix of at least 12 hex digits) in a file or project report. */
 export function findWitness(report: unknown, id: string): FoundWitness | null {
+  const r = lookupWitness(report, id);
+  return 'found' in r ? r.found : null;
+}
+
+/** As findWitness, with the reason when there is none: a malformed id, no match, or an ambiguous prefix (review D9). */
+export function lookupWitness(report: unknown, id: string): { found: FoundWitness } | { reason: string } {
+  if (!/^(sha256:)?[0-9a-f]{12,64}$/.test(id)) return { reason: `${id || '(empty)'} is not a witness id: give the id, or at least its first 12 hex digits` };
   const files = ((report as { files?: FileReport[] }).files ?? [report as FileReport]);
   const want = id.startsWith('sha256:') ? id : `sha256:${id}`;
   const hits: FoundWitness[] = [];
@@ -29,8 +36,9 @@ export function findWitness(report: unknown, id: string): FoundWitness | null {
     for (const m of r.machines ?? []) for (const d of m.diagnostics) if (d.witness?.id?.startsWith(want)) hits.push({ report: r, machine: m.machine, configuration: null, diagnostic: d });
     for (const c of r.configurations ?? []) for (const d of c.diagnostics) if (d.witness?.id?.startsWith(want)) hits.push({ report: r, machine: null, configuration: c.configuration, diagnostic: d });
   }
-  if (want.length < 'sha256:'.length + 12 && hits.length > 1) return null;
-  return hits.length === 1 || (hits.length > 1 && hits.every((h) => h.diagnostic.witness!.id === hits[0].diagnostic.witness!.id)) ? hits[0] : null;
+  if (!hits.length) return { reason: `no witness ${id} in the report` };
+  if (hits.some((h) => h.diagnostic.witness!.id !== hits[0].diagnostic.witness!.id)) return { reason: `${id} is the prefix of several witnesses; give more of the id` };
+  return { found: hits[0] };
 }
 
 /** The exported spec a test walks (S68). */
@@ -51,8 +59,20 @@ export function witnessSpec(found: FoundWitness, root: string): WitnessSpec {
   };
 }
 
+/** The codes an exported test can judge: a machine's through its lowered module, a configuration's through its machines'. */
+const JUDGED = {
+  machine: new Set(['PL3001', 'PL3002', 'PL3003', 'PL3102', 'PL3901', 'PL3201', 'PL3301', 'PL4001', 'PL4002', 'PL6201']),
+  configuration: new Set(['PL5401', 'PL5402', 'PL5404', 'PL3301', 'PL5101']),
+};
+
+/** A witness no exported test can judge yet (review D1): it is refused, never exported as a test that passes. */
+export class WitnessExportError extends Error {}
+
 export function exportWitness(found: FoundWitness, opts: { root: string; kind: 'trace' | 'test'; out?: string }): string {
   const d = found.diagnostic;
+  if (opts.kind === 'test' && !JUDGED[found.configuration ? 'configuration' : 'machine'].has(d.code)) {
+    throw new WitnessExportError(`${d.code} has no exported test yet: the joint machine or the bound it is about is not walked by one; export its trace with --trace (PT12.4)`);
+  }
   const short = d.witness!.id.slice('sha256:'.length, 'sha256:'.length + 12);
   const out = resolve(opts.out ?? join(opts.root, '.poly', 'witness', `${short}.${opts.kind === 'trace' ? 'trace.json' : 'test.mjs'}`));
   mkdirSync(dirname(out), { recursive: true });
