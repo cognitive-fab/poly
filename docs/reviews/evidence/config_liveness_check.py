@@ -4,8 +4,15 @@
 #   liveness settle: forall i in order: order[i] is Asked leads to order[i] is Done | Refused
 # for the order that waits for Taken. No input is fair (the clause is empty); delivery is weakly fair per
 # message value (PS13.2b, PS14.2): a value in transit stays deliverable until it is delivered.
+#
+# Controls first (decisions-m2.md, S77): two mutants must violate settle before the real model is reported.
+# In one the inventory never answers OutOfStock, so an order can wait in Taking for ever; in the other the
+# fairness check is ignored. A step that exceeds the transit bound is dropped, and then settle is
+# INCONCLUSIVE, never holding. `--transit n` sets the bound (4 by default, as the configuration declares).
+import sys
 from collections import deque
-B = 4  # declared in-transit bound
+B = int(sys.argv[sys.argv.index('--transit') + 1]) if '--transit' in sys.argv else 4  # in-transit bound
+SILENT = False  # control: the inventory never answers OutOfStock
 TERMINAL = ('Done', 'Refused')
 
 def order_step(os, i, msg, optimistic):
@@ -23,7 +30,7 @@ def order_step(os, i, msg, optimistic):
 def inv_step(n, kind, frm):
     if kind == 'Query': return (n, [(('o', frm), 'Available', n)])
     if n > 0: return (n - 1, [(('o', frm), 'Taken', None)])
-    return (n, [(('o', frm), 'OutOfStock', None)])
+    return (n, [] if SILENT else [(('o', frm), 'OutOfStock', None)])
 
 def norm(t): return tuple(sorted(t, key=repr))
 
@@ -57,7 +64,8 @@ def successors(s, optimistic):
                 out.append((('deliver', m), f'deliver {m[1]}{arg} -> order[{i}]', (n, tuple(o), norm(rest + tuple(sent)))))
     return out
 
-def explore(optimistic):
+def explore(optimistic, bound=None):
+    bound = B if bound is None else bound
     init = (1, ('Idle', 'Idle'), ())
     seen = {init: None}; q = deque([init]); edges = {}; hit = False; bad = None
     confirmed_within_stock = lambda s: sum(o == 'Done' for o in s[1]) <= 1
@@ -66,7 +74,7 @@ def explore(optimistic):
         if bad is None and not confirmed_within_stock(s): bad = s
         edges[s] = []
         for group, label, t in successors(s, optimistic):
-            if len(t[2]) > B: hit = True; continue
+            if len(t[2]) > bound: hit = True; continue
             edges[s].append((group, label, t))
             if t not in seen: seen[t] = (s, label); q.append(t)
     witness = []
@@ -100,7 +108,7 @@ def sccs(nodes, adj):
                 out.append(c)
     return out
 
-def settle_violations(edges, i):
+def settle_violations(edges, i, fairness=True):
     """PS6.4 for `order[i] is Asked leads to order[i] is Done | Refused`: components of the states reached
     from an Asked state through states where order[i] is not settled, that have an edge and are fair for
     every message value's delivery."""
@@ -123,8 +131,23 @@ def settle_violations(edges, i):
             taken = any(g == ('deliver', m) for _, g, _ in inner)
             disabled = any(m not in s[2] for s in c)
             if not (taken or disabled): fair = False; break
-        if fair: bad.append(sorted(c))
+        if fair or not fairness: bad.append(sorted(c))
     return bad
+
+def control(name, silent, fairness):
+    global SILENT
+    SILENT = silent
+    _, edges, _, _ = explore(False, 4)  # the controls run at the declared bound, whatever --transit says
+    SILENT = False
+    counts = [len(settle_violations(edges, i, fairness)) for i in range(2)]
+    unit = 'fair component' if fairness else 'component'
+    if not all(counts):
+        print(f'control {name}: settle not violated; the check is not trusted, and nothing is reported')
+        sys.exit(1)
+    print(f'control {name}: settle VIOLATED for ' + ' and '.join(f'order[{i}] ({c} {unit}{"" if c == 1 else "s"})' for i, c in enumerate(counts)))
+
+control('inventory never answers OutOfStock', True, True)
+control('fairness ignored', False, False)
 
 for optimistic in (True, False):
     seen, edges, w, hit = explore(optimistic)
@@ -134,4 +157,5 @@ for optimistic in (True, False):
     if not optimistic:
         for i in range(2):
             v = settle_violations(edges, i)
-            print(f'    settle for order[{i}]:', 'holds' if not v else f'VIOLATED, {len(v)} fair component(s)')
+            verdict = f'VIOLATED, {len(v)} fair component(s)' if v else 'INCONCLUSIVE (bound hit)' if hit else 'holds'
+            print(f'    settle for order[{i}]:', verdict)

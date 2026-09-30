@@ -218,16 +218,30 @@ test('S73: an input named in the fairness clause is fair, and nothing else is', 
   assert.deepEqual(codes(base.replace('eventually order[i] is Done | Refused', 'eventually order[i] is Done | Refused under fair { buyer[*].Place }')), ['PL1001']);
 });
 
-test('S77: config_liveness_check.py reproduces config_check.py, and finds settle holding (pending the owner\'s review)', (t) => {
+test('S77: config_liveness_check.py runs its controls, reproduces config_check.py, and finds settle holding', (t) => {
   if (!PYTHON) { t.skip('Python 3 is not available: the evidence script was not run'); return; }
   const run = spawnSync(PYTHON, [join(ROOT, 'docs', 'reviews', 'evidence', 'config_liveness_check.py')], { encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
-  const [optimistic, waiting] = run.stdout.split(/\n(?=order waits)/);
+  // The owner's conditions (decisions-m2.md): both mutants are controls, run first and violated.
+  const [controls, rest] = run.stdout.split(/\n(?=optimistic order)/);
+  assert.match(controls, /control inventory never answers OutOfStock: settle VIOLATED for order\[0\] \(1 fair component\) and order\[1\] \(1 fair component\)/);
+  assert.match(controls, /control fairness ignored: settle VIOLATED for order\[0\] \(29 components\) and order\[1\] \(29 components\)/);
+  const [optimistic, waiting] = rest.split(/\n(?=order waits)/);
   assert.deepEqual(optimistic.split('\n').slice(1).map((l) => l.trim()).filter(Boolean).map((s) => s.replace(/\s+/, ' ')), steps(ref(readFileSync(OPTIMISTIC, 'utf8')).findings[0]).map((s) => s.replace(/\s+/, ' ')));
   assert.match(waiting, /states explored 44 \| confirmed-within-stock holds/);
   assert.match(waiting, /settle for order\[0\]: holds/);
   assert.match(waiting, /settle for order\[1\]: holds/);
   assert.deepEqual(ref(SRC).findings, []);
+});
+
+test('S77: with a bound hit, config_liveness_check.py reports settle INCONCLUSIVE, never holding', (t) => {
+  if (!PYTHON) { t.skip('Python 3 is not available: the evidence script was not run'); return; }
+  const run = spawnSync(PYTHON, [join(ROOT, 'docs', 'reviews', 'evidence', 'config_liveness_check.py'), '--transit', '1'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const waiting = run.stdout.slice(run.stdout.indexOf('order waits'));
+  assert.match(waiting, /bound hit True/);
+  assert.match(waiting, /settle for order\[0\]: INCONCLUSIVE \(bound hit\)/);
+  assert.doesNotMatch(waiting, /settle for order\[\d\]: holds/);
 });
 
 test('S73: a fairness InputRef formats back to itself', async () => {
