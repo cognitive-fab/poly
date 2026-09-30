@@ -139,6 +139,49 @@ Every step of section 4 is built, in the commits from 0e1325d to 7f7202b (the ra
 
 S81 to S85 are ruled in `decisions-m2.md` (aefd6a4) and accepted as proposed, with S84's form `lit({ … })`; their spec text is applied (bcbc5da), and S81, S83 and S84 are built as ruled (b48ef2c, 5ce26b2, 7459229). S82 and S85 were already built as ruled. The checkout liveness script (S77) is accepted as an acceptance test with three conditions, all met: its two mutants (an inventory that never answers `OutOfStock`, and the fairness check ignored) run first as controls, and the script refuses to report unless both violate `settle` (one fair component per order, and 29 components per order); a bound hit makes `settle` `INCONCLUSIVE`; and the optimistic count is explained here. `config_check.py` reports 30 states for the optimistic order because it stops its breadth-first search at the first state that violates `confirmed-within-stock`, and 30 is the number of states discovered by then. `config_liveness_check.py` explores every reachable state, 47, because a liveness check needs the whole graph. The gate numbers (the six-step witness and the 44 states of the waiting order) are the same in both. Its independence is limited, since its author also wrote poly-ref; the owner's reading, the two controls and its agreement with `config_check.py` are what it relies on. The fix, witness and embedded forms of PD1's constructs are the ones this milestone built; M3 decides which surface agents use.
 
+### The code review of M2
+
+The review ran over `9e1d045..0ed23c3`, in four parts (front ends and checker, lowering, poly-ref, pipeline with witnesses, fixes and the lint), after the rulings on S81 to S85 were applied. Each reviewer reproduced every finding it reports. They found 31 defects; polywatch found two more on the rulings' commits. Each fix landed with a test that failed before it, in `test/review-m2.test.mjs`, with the programs in `test/fixtures/review-m2`.
+
+| Finding | Defect | Fix | Commit |
+|---|---|---|---|
+| polywatch 1 | An exported lasso for `P leads to Q` never checked that `P` held before the cycle, so it could fail on a program that no longer makes `P` true | A `P`-state with no `Q` after it is required on the way to the cycle, in a machine and in a configuration | `0c4690b` |
+| polywatch 2 | A witness of no steps (an invariant false in the initial state) asserted nothing, so its test passed on the defective program | The initial state is judged before any step | `68fa9b7` |
+| A1 | A decimal ending in `.0` read from the embedded surface as an int, since TypeScript normalises the literal | The number is read from its source text; ints are decimal digits only | `68fa9b7` |
+| A2 | A decimal in a configuration property was accepted and evaluated as a number | PL1201 (S76) | `68fa9b7` |
+| A3 | A fair `InputRef` index outside its group was accepted | PL1201 (S31, S73) | `68fa9b7` |
+| A4, A5 | A Conf inside a map, a record, a payload, or on an ordinary action was accepted, and translation validation took the blame | PL1205: a Conf is only a completion parameter bound from a reply (PD1.3b, PD1.4b) | `68fa9b7` |
+| A6 | An effect could take a decision's kind | PL1002 (PD1.7, S41) | `68fa9b7` |
+| A7 | One key for an attached and a detached child was refused or not, by handler order | Checked after collection (S60) | `68fa9b7` |
+| A8 | Two diagnostics for a decimal beside an int, for `-conf`, and for a missing bound | One each | `68fa9b7` |
+| A9 | `Tri.Unknown` was unknown in a module that names no `Tri` type | `Tri` exists wherever the module names it (S76) | `68fa9b7` |
+| B1 | A record bound from a reply was checked at dispatch by identity, so every such completion was rejected | Compared by value (S79) | `de63a36` |
+| B2 | A Conf parameter on an ordinary action had a partitioned domain in the lowering and 0..1000 in poly-ref | Closed by A5 | `68fa9b7` |
+| B3 | poly-ref read `conf == 1` as 1, the lowering as 1000 | 1000 in both (PD1.3a) | `de63a36` |
+| B4 | An int constant passed as a Conf completion argument was not scaled | Scaled in the manifest and the read-back | `de63a36` |
+| B5 | A detached child's address compared in its creating step used the unresolved marker | Stored, sent to or passed on only (S78, PL0901) | `de63a36` |
+| B6 | A decision whose result is a record with a `Tri` field crashed the read-back | The result is typed as a record | `de63a36` |
+| C1 | An input could name a child not yet created, and a send to it crashed the check | An input's addresses are the instances that exist (PS1.6, S60) | `d736541` |
+| C2 | A property naming a spawned member at a fixed index crashed where it did not exist | PL1201: a spawned group is read through a quantifier or an aggregate | `d736541` |
+| C3 | An input reached a spawned child before its creation action | Not while the creation message waits (PS13.3) | `d736541` |
+| C4 | Per-value input fairness used a machine's symbolic addresses, giving a spurious lasso | The configuration's addresses (S73) | `d736541` |
+| C5 | The path-property read-back accepted a predicate that counts another kind or every emission | Every kind the machine can emit is tried | `d736541` |
+| C6 | Translation validation resolved a child marker on every step, not only the creating one | Only the creating step; an unreadable state is a mismatch, not a crash (S78) | `d736541` |
+| D1 | Exported tests for PL5001, PL5101, PL5104 and PL6201 passed on the defective program | PL6201 is judged; a code no walker judges is refused at export | `0c4690b` |
+| D2 | A configuration lasso ignored the fair inputs, so its test failed on the fixed program | Fair inputs are judged on the cycle | `0c4690b` |
+| D3 | PL6201 was reported twice, and made the model check read FINDINGS | Reported once, by the decisions stage | `0c4690b` |
+| D4 | The report kept the path as given, so witness and fix failed from another directory | The absolute path | `0c4690b` |
+| D5, D6 | `cover-rest` after a write made a PL2101; `move-require` was offered where an outer write still precedes | Offered only where they help | `0c4690b` |
+| D7 | Fixes were offered on embedded modules, where `poly fix` refuses them | None offered (S70) | `0c4690b` |
+| D8 | Two machines with one defect shared a witness id | The id includes the machine or configuration (S86) | `0c4690b` |
+| D9 | An empty or short witness id was accepted | At least 12 hex digits; an ambiguous prefix says so | `0c4690b` |
+| D10 | The handler lint missed aliases of ambient globals, `sqlite`, `eval` and `Function`, and flagged type imports and a local capability named `fetch` | Free ambient globals flagged; type imports and local names passed (PT6.5) | `0c4690b` |
+| minor | A configuration lasso was rendered without its cycle | Rendered | `0c4690b` |
+
+- **S86. A witness id names what it is about (open, built as proposed).** S69 makes a witness id the digest of `{ moduleDigest, property, trace }`. Two machines of one module with the same defect and trace then share one id, and `poly witness` exports only the first (review D8). *Proposal:* the id is the digest of `{ moduleDigest, scope, property, trace }`, where `scope` is the machine or configuration the finding is about. A trace is still one witness in one version of one machine.
+
+After the review and its fixes `npm test` runs 621 tests, all passing.
+
 ## 10. Appendix: the embedded surface as built
 
 PT2.5's table is built as written. Where it leaves a form open, these are the forms `poly-embed` prints and reads (S71).
@@ -163,4 +206,4 @@ The printer parenthesises by TypeScript's precedence, not poly's, so the tree ts
 
 ## Conclusion
 
-M2 was planned in nine steps, and all nine are built. Liveness, witnesses and fixes, detached children, the embedded surface, the handler lint and typed decisions each meet the gate item section 5 gives them, and `npm test` passes. No engine was changed: decisions reuse polyrun's completion maps, and detached spawns and sends stay semantics-only until the owner's polyrun changes land. The spec issues raised during M2 (S68 to S85) are ruled, and the checkout liveness script is an acceptance test with its controls.
+M2 was planned in nine steps, and all nine are built. Liveness, witnesses and fixes, detached children, the embedded surface, the handler lint and typed decisions each meet the gate item section 5 gives them, and `npm test` passes. No engine was changed: decisions reuse polyrun's completion maps, and detached spawns and sends stay semantics-only until the owner's polyrun changes land. The spec issues S68 to S85 are ruled; S86, raised by the code review, is open and built as proposed. The code review found 31 defects and polywatch two more, each fixed with a test that failed first, and the checkout liveness script is an acceptance test with its controls.
