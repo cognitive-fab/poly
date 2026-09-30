@@ -172,6 +172,30 @@ Families and loops are built (ed54ad8). `conformance/m1/families.poly` spawns `t
 
 - **S55. Entry writes to one map, one per loop copy.** S49's limit (3) lets a loop body write `m' = m with [i] = v`, and says any other write is refused on its second copy. So two copies write two entries of one map on one path, which PS2.4 calls a double write (`PL2102`), since PS2.2 gives each entry write its own `f ↦ s(f)[k := v]`. I built what the ruling intends: entry writes to distinct constant keys compose, `w(m) = s(m)[k1 := v1][k2 := v2]`, and a whole write, or two writes to one entry, is still `PL2102`. *Proposal:* PS2.2 gains that sentence, and PS2.4 says a field is written twice when it is assigned twice or one entry of it is written twice. That is a spec change, so I ask before writing it.
 
+S54 is ruled as proposed: the two copies are written, and no construct is added. **Entry effects** (one place for what entering a state emits) is recorded as a candidate, to be decided from the M3 data. S55 is ruled with a static rule and built (b351362, spec text 5782dee): entry writes combine only for keys that are distinct constants after unrolling (literals, constructors, or the index of different loop copies); a repeated constant key, a whole write with an entry write, and a field or parameter key beside another entry write are `PL2102`. Checking what was built against that rule found one gap: a constructor key counted as non-constant, so two distinct constructor keys were refused; fixed with a regression test.
+
+### Step 7, measured
+
+| Item | Result |
+|---|---|
+| Corpus (a), `conformance/field-studies/order` | 81 windows, all with post equal to pre (S24); the hand-written order passes 53 |
+| Corpus (b), `conformance/field-studies/order-kernel` | 58 windows over the 16 scenarios, recorded by polyrun's kernel from the hand-written artefacts (`scripts/record-oms-corpus.mjs`, byte-identical on every run); every window changes the state; the hand-written order passes 58 |
+| Hand-written `check-product` over `conformance/oms/invariants.compose.mjs` (S27, committed first, ef649e5) | 45 joint states, no violation |
+| Poly OMS, `examples/oms/oms.poly` | `poly check` CLEAN: the order 33 states, the shipment 4, the order with its shipment family **45 joint states** (poly-ref and `check-product` agree) |
+| AC1 replay, corpus (a) | poly 53/81, hand 53/81, no window differs |
+| AC1 replay, corpus (b) | poly 58/58 |
+| AC1 `check-effects`, same effect invariants | 45 paths, 33 states, 0 cycles pruned, not bounded, 0 violations, for both |
+| AC1 mappers, step by step | the same intents on every accepted step of every simple path, with machine ids mapped (S28) and a `cancelTimer` ignored only for a key not armed on the path (S26) |
+| AC1 `check-product` | 45 joint states, no violation, for both |
+
+One thing found in the hand-written example, reported rather than normalised: its manifest's `onExhausted` for `chargeCard` delivers `CHARGE_FAILED` with `reason: "provider-unavailable"`, a value outside that action's own domain (`{ "declined" }`). poly cannot write that completion (the argument is checked against the domain), so the poly manifest delivers `"declined"`. Neither comparison reads completion data, so the results agree; the example's manifest is yours to correct if you want the two to match.
+
+### Changes for the owner
+
+- **polyrun, K9 (S45):** refuse an external dispatch of an action wired as an active child's completion, or as a parent-terminal cancel; the detail is above.
+- **polyflow and Polyaxion:** the sam-pattern probe of the two shapes 2.3.0 changed, as polygraph 583b82c has it, in polyflow's `machine-host.mjs` (`fire`), and in Polyaxion's `makeMediator` and `polyman` `step`.
+- **The OMS example:** its `chargeCard` `onExhausted` data is outside `CHARGE_FAILED`'s domain (above).
+
 ## 7. Risks
 
 - **Two new `System` implementations in poly-ref.** Configurations are M1's heart and the part of poly-ref most likely to have bugs. Its first tests are the checkout and delivery evidence, run before the configuration lowering and stage 4b exist, as M0 ran the evidence before any lowering.
