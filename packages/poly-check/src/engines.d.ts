@@ -24,3 +24,32 @@ declare module '@cognitive-fab/polygraph/scripts/check.mjs' {
     maxStates?: number;
   }): PolygraphResult;
 }
+
+// polyrun's effect-emission checker, read from polyrun/src/check-effects.mjs of @cognitive-fab/polygraph 8.3.1.
+declare module '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs' {
+  export interface EffectsViolation {
+    invariant: string;
+    counterexample: string[];
+    emitted: { kind: string; payload: unknown; step: number }[];
+    finalState?: unknown;
+    detail?: string;
+  }
+  export interface EffectsResult {
+    violations: EffectsViolation[];
+    violationCounts: Record<string, number>;
+    pathsExplored: number;
+    statesSeen: number;
+    cyclesPruned: number;
+    bounded: boolean;
+    notes: string[];
+  }
+  export function checkEffects(options: {
+    module: string;
+    mapper: string;
+    manifest: string;
+    invariants: string;
+    contract?: unknown;
+    maxDepth?: number;
+    maxPaths?: number;
+  }): Promise<EffectsResult>;
+}

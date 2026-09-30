@@ -5,7 +5,7 @@
 // Liveness (PS6) and configurations (PS13) come in M1 and M2, as passes over
 // the same Graph.
 import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
-import { buildMachine, dataDomain, valuesOf, type RMachine, type RType } from './model.js';
+import { buildMachine, dataDomain, valuesOf, type RMachine, type RPathProperty, type RType } from './model.js';
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
 import { isTerminal } from './step.js';
@@ -20,6 +20,8 @@ const CODE = {
   PL3102: ['DOMAIN_ESCAPE', 'finding', 'model-check'],
   PL3201: ['DEADLOCK', 'finding', 'deadlock'],
   PL3901: ['BOUND_HIT', 'inconclusive', 'model-check'],
+  PL4001: ['PATH_PROPERTY', 'finding', 'effects'],
+  PL4002: ['EMIT_WITHOUT_STATE_CHANGE', 'finding', 'effects'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -43,6 +45,8 @@ export interface MachineReport {
   capHit: boolean;
   graph: Graph<State>;
   model: RMachine;
+  /** S33: every accepted edge that emits and leaves the state unchanged, the steps PL4002 is about. */
+  identityEmits: Edge<State>[];
 }
 
 export interface CheckOptions {
@@ -72,6 +76,7 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     data: Object.fromEntries(Object.entries(e.label.data).map(([k, v]) => [k, toPlain(v)])),
     post: statePlain(e.to !== null ? g.states[e.to] : e.outcome.state),
     verdict: e.label.verdict.kind === 'rejected' ? `rejected(${e.label.verdict.reason})` : e.label.verdict.kind,
+    ...(e.label.effects.length ? { effects: e.label.effects.map((x) => x.kind) } : {}),
   }));
 
   // Invariants: the first violating state in BFS order has the shortest witness.
@@ -109,6 +114,29 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   }
   if (g.capHit) findings.push(finding('PL3901', undefined, `exploration stopped at ${g.states.length} states`, []));
 
+  // Path properties (PS5.4) hold iff they hold on every path of I. Each is a conjunction of bounds on
+  // emission counts, so it is decided exactly on the product of the graph with a counter per bounded
+  // kind, saturated one above its bound: cycles included, no depth bound. BFS gives a shortest witness.
+  for (const p of M.pathProperties) {
+    const hit = pathViolation(g, p);
+    if (hit) {
+      const b = hit.bound;
+      findings.push(finding('PL4001', p.id, `path property ${p.name} is violated: count("${b.kind}") reaches ${b.max + 1} on this path, above ${b.max}`, trace(hit.path), { property: p.name, state: g.states[hit.path[hit.path.length - 1].from] }));
+    }
+  }
+
+  // S33: an accepted step that emits and leaves the state unchanged is enabled again after itself and
+  // repeats its effects without limit. One finding per action, at its first such step in BFS order; the
+  // witness is the path to that step followed by two repetitions.
+  const identityEmits = g.edges.filter((e) => e.label.verdict.kind === 'accepted' && e.label.effects.length > 0 && e.to === e.from);
+  const seenAction = new Set<string>();
+  for (const e of identityEmits) {
+    if (seenAction.has(e.label.action)) continue;
+    seenAction.add(e.label.action);
+    const kinds = [...new Set(e.label.effects.map((x) => x.kind))].join(', ');
+    findings.push(finding('PL4002', M.handlers.get(e.label.action)?.id, `${e.label.action} emits ${kinds} and leaves the state unchanged, so it can repeat its effect without limit`, trace([...pathTo(g, e.from), e, e]), { property: e.label.action, state: g.states[e.from] }));
+  }
+
   // Deadlock (PS5.6): reachable, not terminal, and no action accepts. A service is exempt (PS1.7).
   const deadlocks: Record<string, unknown>[] = [];
   if (!M.service) {
@@ -136,7 +164,43 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     capHit: g.capHit,
     graph: g,
     model: M,
+    identityEmits,
   };
+}
+
+/**
+ * The shortest path of I on which some bound of p is exceeded, or null (PS5.4). A node of the product is
+ * a state and the emission count of each bounded kind, capped at one above its bound. An edge that leaves
+ * the instance still emits on its step, so it can violate a bound; nothing is explored beyond it.
+ */
+export function pathViolation(g: Graph<State>, p: RPathProperty): { path: Edge<State>[]; bound: { kind: string; max: number } } | null {
+  const kinds = p.bounds.map((b) => b.kind);
+  const cap = p.bounds.map((b) => b.max + 1);
+  const key = (s: number, c: number[]) => `${s}|${c.join(',')}`;
+  const start = { s: 0, c: kinds.map(() => 0) };
+  const parent = new Map<string, { prev: string; edge: Edge<State> } | null>([[key(start.s, start.c), null]]);
+  const queue = [start];
+  const pathOf = (k: string, last: Edge<State>) => {
+    const out = [last];
+    for (let at = parent.get(k); at; at = parent.get(at.prev)) out.push(at.edge);
+    return out.reverse();
+  };
+  for (let head = 0; head < queue.length; head++) {
+    const { s, c } = queue[head];
+    const here = key(s, c);
+    for (const ei of g.out[s]) {
+      const e = g.edges[ei];
+      const next = c.map((n, i) => Math.min(cap[i], n + e.label.effects.filter((x) => x.kind === kinds[i]).length));
+      const broken = next.findIndex((n, i) => n > p.bounds[i].max);
+      if (broken >= 0) return { path: pathOf(here, e), bound: p.bounds[broken] };
+      if (e.to === null) continue;
+      const k = key(e.to, next);
+      if (parent.has(k)) continue;
+      parent.set(k, { prev: here, edge: e });
+      queue.push({ s: e.to, c: next });
+    }
+  }
+  return null;
 }
 
 function typeText(t: RType, M: RMachine): string {

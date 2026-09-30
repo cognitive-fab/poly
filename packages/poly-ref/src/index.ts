@@ -5,9 +5,9 @@ export { buildMachine, valuesOf, dataDomain, inType, inCheckDomain, type RMachin
 export { evaluate, type Env, type Verdict } from './eval.js';
 export { transition, runHandler, initialState, isTerminal, type Step } from './step.js';
 export { explore, machineSystem, pathTo, type System, type Graph, type Edge, type Label, type Outcome } from './explore.js';
-export { checkMachine, instanceOf, alphabetSize, ENGINE, type MachineReport, type InstanceLine } from './check.js';
+export { checkMachine, pathViolation, instanceOf, alphabetSize, ENGINE, type MachineReport, type InstanceLine } from './check.js';
 export { keyOf, stateKey, statePlain, toPlain, type Value, type State, type UnionValue, type MapValue } from './values.js';
 export { alpha, flatten, flattenData } from './alpha.js';
 export { translationValidate, type TvResult } from './tv.js';
 export { loadLoweredModule } from './load.js';
-export { confirmWitness, stateDigestOf, type Confirmation, type WitnessToConfirm, type FlatStep } from './confirm.js';
+export { confirmWitness, confirmEffectsWitness, stateDigestOf, type Confirmation, type WitnessToConfirm, type FlatStep } from './confirm.js';

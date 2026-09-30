@@ -5,13 +5,21 @@ import { inCheckDomain } from './model.js';
 import { evaluate, evaluateAt, EvalError, type Env, type Verdict } from './eval.js';
 import { isMap, isUnion, keyOf, mapSet, type State, type Value } from './values.js';
 
-/** h_a(s, d) = accept(w, E) | reject(r) (PS2.1). E is empty in M0: no intents are lowered yet. */
-export type HandlerResult = { kind: 'accept'; w: Map<string, Value> } | { kind: 'reject'; reason: string };
+/** An effect intent (PS2.1): the kind of the declared effect and its payload, in statement order in E. */
+export interface Intent {
+  kind: string;
+  payload: Record<string, Value>;
+}
+
+/** h_a(s, d) = accept(w, E) | reject(r) (PS2.1). */
+export type HandlerResult = { kind: 'accept'; w: Map<string, Value>; E: Intent[] } | { kind: 'reject'; reason: string };
 
 /** One labelled step of R_M (PS3.1, PS3.2). */
 export interface Step {
   verdict: Verdict;
   next: State;
+  /** E: the intents of an accepted step; empty for any other verdict (PS3.2, PT6.1). */
+  effects: Intent[];
 }
 
 /** PS2.2: guards in declaration order, then the body; the first failure rejects. */
@@ -24,12 +32,13 @@ export function runHandler(M: RMachine, h: A.Handler, s: State, d: Record<string
   // In the handler a bare name is local, then parameter, then field; pre.f names the field (S19).
   const env: Env = { M, state: s, data: d, locals: new Map(), pre: s, action: h.action, params: true };
   const w = new Map<string, Value>();
-  const r = block(h.body, env, w, M, s);
-  return r ?? { kind: 'accept', w };
+  const E: Intent[] = [];
+  const r = block(h.body, env, w, E, M, s);
+  return r ?? { kind: 'accept', w, E };
 }
 
 /** Runs a block; returns a rejection, or null when the block completes. */
-function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, M: RMachine, s: State): HandlerResult | null {
+function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M: RMachine, s: State): HandlerResult | null {
   const env: Env = { ...outer, locals: new Map(outer.locals) };
   for (const st of body) {
     switch (st.kind) {
@@ -60,7 +69,7 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, M: RMachine, s
         break;
       }
       case 'If': {
-        const r = block(evaluate(st.cond, env) === true ? st.then : st.else ?? [], env, w, M, s);
+        const r = block(evaluate(st.cond, env) === true ? st.then : st.else ?? [], env, w, E, M, s);
         if (r) return r;
         break;
       }
@@ -82,12 +91,24 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, M: RMachine, s
             if (pt) armEnv.localTypes!.set(f.bind, pt);
           }
         }
-        const r = block(arm.body, armEnv, w, M, s);
+        const r = block(arm.body, armEnv, w, E, M, s);
         if (r) return r;
         break;
       }
-      case 'Intent':
-        throw new EvalError(`poly-ref: \`${st.op}\` is not in milestone M0`);
+      case 'Intent': {
+        // `emit k(d)` appends an intent to E (PS2.2); the other intents come with plan steps 6 and 8.
+        if (st.op !== 'emit') throw new EvalError(`poly-ref: \`${st.op}\` is not lowered yet`);
+        const eff = M.effects.get(st.target);
+        if (!eff) throw new EvalError(`poly-ref: no effect ${st.target}`);
+        const payload: Record<string, Value> = {};
+        st.args.forEach((a, i) => {
+          const p = a.name === null ? eff.params[i] : eff.params.find((x) => x.name === a.name);
+          if (!p) throw new EvalError(`poly-ref: ${st.target} has no parameter ${a.name ?? i}`);
+          payload[p.name] = evaluateAt(a.value, env, p.type);
+        });
+        E.push({ kind: eff.kind, payload });
+        break;
+      }
     }
   }
   return null;
@@ -173,20 +194,20 @@ export function isTerminal(M: RMachine, s: State): boolean {
  * next state. The rows apply in the table's order.
  */
 export function transition(M: RMachine, s: State, action: string, d: Record<string, Value>): Step {
-  if (isTerminal(M, s)) return { verdict: { kind: 'rejected', reason: 'terminal' }, next: s };
+  if (isTerminal(M, s)) return { verdict: { kind: 'rejected', reason: 'terminal' }, next: s, effects: [] };
   const a = M.actions.find((x) => x.name === action);
   if (!a) throw new EvalError(`poly-ref: no action ${action}`);
   for (const p of a.params) {
-    if (p.strict && !inCheckDomain(d[p.name], p, M)) return { verdict: { kind: 'rejected', reason: 'outside-check-domain' }, next: s };
+    if (p.strict && !inCheckDomain(d[p.name], p, M)) return { verdict: { kind: 'rejected', reason: 'outside-check-domain' }, next: s, effects: [] };
   }
   const h = M.handlers.get(action);
-  if (!h) return { verdict: { kind: 'unhandled' }, next: s };
+  if (!h) return { verdict: { kind: 'unhandled' }, next: s, effects: [] };
   const r = runHandler(M, h, s, d);
-  if (r.kind === 'reject') return { verdict: { kind: 'rejected', reason: r.reason }, next: s };
+  if (r.kind === 'reject') return { verdict: { kind: 'rejected', reason: r.reason }, next: s, effects: [] };
   // s ⊕ w: every field not written is unchanged (the frame).
   const next: State = {};
   for (const f of M.fieldNames) next[f] = r.w.has(f) ? r.w.get(f)! : s[f];
-  return { verdict: { kind: 'accepted' }, next };
+  return { verdict: { kind: 'accepted' }, next, effects: r.E };
 }
 
 /** The initial state: each field's initial value (PS1.1). */

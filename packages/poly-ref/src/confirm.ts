@@ -8,6 +8,8 @@
 // is authoritative inside Reach(I), disagrees about a state inside the
 // instance, that is a lowering mismatch (PL2501).
 import type { MachineReport } from './check.js';
+import type { Edge } from './explore.js';
+import type { State } from './values.js';
 import { alpha, flattenData } from './alpha.js';
 import { evaluate } from './eval.js';
 import { stateKey } from './values.js';
@@ -84,6 +86,43 @@ export function confirmWitness(report: MachineReport, w: WitnessToConfirm): Conf
     return holds ? { status: 'disagrees', reason: `reject property ${w.property} holds on that step by PS5.3` } : { status: 'confirmed' };
   }
   return { status: 'disagrees', reason: `unknown witness kind ${w.kind}` };
+}
+
+/**
+ * A polyrun `check-effects` witness, confirmed against R_M (PS5.4, S33). polyrun names a path as its
+ * steps from the initial state, in the lowered module's flat encoding, `Action({json})`. For a path
+ * property the path must exceed one of its bounds; for `identity-accept-emits` its last step must be an
+ * accepted step that emits and leaves the state unchanged. A path that leaves the instance is a bound hit.
+ */
+export function confirmEffectsWitness(report: MachineReport, w: { kind: 'path' | 'identity'; property?: string; steps: string[] }): Confirmation {
+  const { graph: g, model: M } = report;
+  let at = 0;
+  const counts = new Map<string, number>();
+  let last: Edge<State> | undefined;
+  for (const [i, text] of w.steps.entries()) {
+    const open = text.indexOf('(');
+    const action = text.slice(0, open);
+    let data: unknown;
+    try { data = JSON.parse(text.slice(open + 1, -1) || '{}'); } catch { return { status: 'disagrees', reason: `cannot read step ${text}` }; }
+    const edge = g.out[at].map((k) => g.edges[k]).find((e) => e.label.action === action && stable(flattenData(e.label.data, action, M)) === stable(data));
+    if (!edge) return { status: 'disagrees', reason: `poly-ref has no step ${text} from ${stateKey(g.states[at], M.fieldNames)}` };
+    for (const x of edge.label.effects) counts.set(x.kind, (counts.get(x.kind) ?? 0) + 1);
+    last = edge;
+    if (edge.to === null) return i === w.steps.length - 1 && w.kind === 'path' ? verdictOnPath() : { status: 'outside', step: i };
+    at = edge.to;
+  }
+  return w.kind === 'path' ? verdictOnPath() : verdictOnIdentity();
+
+  function verdictOnPath(): Confirmation {
+    const p = M.pathProperties.find((x) => x.name === w.property);
+    if (!p) return { status: 'disagrees', reason: `poly-ref has no path property ${w.property}` };
+    const broken = p.bounds.find((b) => (counts.get(b.kind) ?? 0) > b.max);
+    return broken ? { status: 'confirmed' } : { status: 'disagrees', reason: `path property ${w.property} holds on that path by PS5.4` };
+  }
+  function verdictOnIdentity(): Confirmation {
+    if (!last) return { status: 'disagrees', reason: 'the witness has no step' };
+    return report.identityEmits.includes(last) ? { status: 'confirmed' } : { status: 'disagrees', reason: `poly-ref's last step ${last.label.action} is not an accepted step that emits and leaves the state unchanged` };
+  }
 }
 
 /** `sha256:` of a flat state, read through α: the same digest poly-ref's own findings carry. */

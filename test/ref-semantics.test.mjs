@@ -17,7 +17,7 @@ test('PS3.2: a terminal state rejects every action with "terminal", before any h
   const m = machine(`module t\ntype S = Open | Closed\nmachine M {\n  state { s : S = Open }\n  terminal s is Closed\n  action Close()\n  on Close { s' = Closed }\n}\n`);
   const M = buildMachine(m, 'M');
   const closed = transition(M, initialState(M), 'Close', {}).next;
-  assert.deepEqual(transition(M, closed, 'Close', {}), { verdict: { kind: 'rejected', reason: 'terminal' }, next: closed });
+  assert.deepEqual(transition(M, closed, 'Close', {}), { verdict: { kind: 'rejected', reason: 'terminal' }, next: closed, effects: [] });
   const r = checkMachine(m, 'M');
   assert.equal(r.states, 2);
   assert.deepEqual(codes(r), []); // Closed is terminal, so not a deadlock (PS5.6)

@@ -41,9 +41,29 @@ export interface RAction {
   params: RParam[];
 }
 
+/** An effect declaration (PT6.1): the kind its intents carry, its class, and its payload's parameters. */
+export interface REffect {
+  name: string;
+  kind: string;
+  cls: string;
+  params: { name: string; type: RType }[];
+}
+
+/**
+ * A path property (PS5.4) as a conjunction of bounds `count(kind) <= max`. The compiler accepts no other
+ * form yet (S37); poly-ref reads the form from the AST itself and refuses anything else.
+ */
+export interface RPathProperty {
+  name: string;
+  id: string;
+  bounds: { kind: string; max: number }[];
+}
+
 export interface RMachine {
   name: string;
   service: boolean;
+  effects: Map<string, REffect>;
+  pathProperties: RPathProperty[];
   unions: Map<string, RUnion>;
   /** Constructor name to its union. */
   ctors: Map<string, string>;
@@ -97,14 +117,34 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   const invariants: A.Property[] = [];
   const stepProperties: A.Property[] = [];
   const rejectProperties: A.Property[] = [];
+  const pathProperties: RPathProperty[] = [];
+  const effects = new Map<string, REffect>();
+  for (const it of m.items) {
+    if (it.kind !== 'EffectDecl') continue;
+    const kind = it.items.find((x) => x.kind === 'EffKind');
+    const cls = it.items.find((x) => x.kind === 'EffClass');
+    effects.set(it.name, {
+      name: it.name,
+      // PT6.1: the manifest is keyed by kind; S41 (provisional) makes the name the kind when none is given.
+      kind: kind && kind.kind === 'EffKind' ? kind.value : it.name,
+      cls: cls && cls.kind === 'EffClass' ? cls.value : 'none',
+      params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })),
+    });
+  }
+  const guardedInputs = strictInputs(m, effects);
   for (const it of m.items) {
     if (it.kind === 'Action') {
       actions.push({
         name: it.name,
-        // A check clause's mode defaults by PT3.4a; with no effects in M0 nothing flows into an irreversible payload, so the default is disclosed.
-        params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type), check: checkValues(p.check), strict: p.check?.mode === 'strict' })),
+        // PT3.4a: a check domain is strict when declared so, or when the parameter can flow into the payload of
+        // an irreversible or compensable effect; `disclosed` written out keeps it disclosed.
+        params: it.params.map((p) => ({
+          name: p.name, type: typeOf(p.type), check: checkValues(p.check),
+          strict: p.check?.mode === 'strict' || (p.check !== null && p.check.mode === null && guardedInputs.has(`${it.name}.${p.name}`)),
+        })),
       });
     }
+    if (it.kind === 'Property' && it.form === 'path') pathProperties.push({ name: it.name, id: it.id, bounds: pathBounds(it.expr) });
     if (it.kind === 'Handler') handlers.set(it.action, it);
     if (it.kind === 'Guard') guards.push(it);
     if (it.kind === 'Terminal') terminal = it.expr;
@@ -113,9 +153,56 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     if (it.kind === 'Property' && it.form === 'reject') rejectProperties.push(it);
   }
   return {
-    name: m.name, service: m.service, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: m.name, service: m.service, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties,
   };
+}
+
+/** PS5.4: a conjunction of `count("k") <= n` and `count("k") < n`, as bounds; anything else is refused. */
+function pathBounds(e: A.Expr): { kind: string; max: number }[] {
+  if (e.kind === 'Binary' && e.op === '&&') return [...pathBounds(e.left), ...pathBounds(e.right)];
+  if (e.kind === 'Binary') {
+    const count = (x: A.Expr) => (x.kind === 'Call' && x.callee === 'count' && x.args.length === 1 && x.args[0].kind === 'String' ? x.args[0].value : null);
+    const n = (x: A.Expr) => (x.kind === 'Int' ? x.value : null);
+    const flip: Record<string, string> = { '>=': '<=', '>': '<' };
+    const [k, lim, op] = count(e.left) !== null ? [count(e.left), n(e.right), e.op] : [count(e.right), n(e.left), flip[e.op]];
+    if (k !== null && lim !== null && (op === '<=' || op === '<')) return [{ kind: k, max: op === '<=' ? lim : lim - 1 }];
+  }
+  throw new Error('poly-ref: a path property is a conjunction of count("kind") <= n (PS5.4, S37)');
+}
+
+/**
+ * PT3.4a, read from the handlers: `Action.param` for each parameter an argument of an irreversible or
+ * compensable emit reads, directly or through a `let`.
+ */
+function strictInputs(m: A.Machine, effects: Map<string, REffect>): Set<string> {
+  const out = new Set<string>();
+  for (const h of m.items) {
+    if (h.kind !== 'Handler') continue;
+    const lets = new Map<string, Set<string>>();
+    const names = (x: unknown, acc = new Set<string>()): Set<string> => {
+      if (!x || typeof x !== 'object') return acc;
+      if (Array.isArray(x)) { for (const y of x) names(y, acc); return acc; }
+      const node = x as { kind?: string; name?: string };
+      if (node.kind === 'Name' && node.name) for (const n of lets.get(node.name) ?? [node.name]) acc.add(n);
+      for (const [k, v] of Object.entries(x)) if (k !== 'span') names(v, acc);
+      return acc;
+    };
+    const visit = (body: A.Stmt[]): void => {
+      for (const st of body) {
+        if (st.kind === 'Let') lets.set(st.name, names(st.expr));
+        else if (st.kind === 'If') { visit(st.then); visit(st.else ?? []); }
+        else if (st.kind === 'Match') for (const a of st.arms) visit(a.body);
+        else if (st.kind === 'Intent' && st.op === 'emit') {
+          const cls = effects.get(st.target)?.cls;
+          if (cls !== 'irreversible' && cls !== 'compensable') continue;
+          for (const a of st.args) for (const n of names(a.value)) out.add(`${h.action}.${n}`);
+        }
+      }
+    };
+    visit(h.body);
+  }
+  return out;
 }
 
 // ── domains (PS1.1, PS4.2) ─────────────────────────────────────────────────

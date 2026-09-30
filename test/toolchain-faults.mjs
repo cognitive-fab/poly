@@ -12,6 +12,8 @@ export const DELIBERATELY_BROKEN_LOWERINGS = [
   'skip-terminal',
   'drop-property',
   'drop-auto-invariant',
+  'drop-effect',
+  'reorder-effects',
 ];
 
 /** The toolchain-fault diagnostics among a list (S20: addressed to the toolchain, never to the author). */

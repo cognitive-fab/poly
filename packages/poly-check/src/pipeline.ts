@@ -6,6 +6,7 @@
 //   1b translation validation        @poly/ref (PS9.3)
 //   2  model check                   polygraph (invariants, step and reject properties)
 //   2b deadlock                      @poly/ref (PS5.6)
+//   3  effects                       polyrun check-effects, confirmed by @poly/ref (PS5.4, S33)
 //
 // A stage that cannot run because an earlier one refused is listed as not
 // run, with the reason; it never lowers the verdict (02 §5). No stage calls a
@@ -19,10 +20,11 @@ import { parse } from '@poly/lang';
 import { checkModule, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { translationValidate, confirmWitness, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
+import { translationValidate, confirmWitness, confirmEffectsWitness, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
+import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'effects';
 
 export interface StageRecord {
   stage: StageName;
@@ -54,6 +56,8 @@ export interface InstanceRecord {
   engines: Record<string, string>;
   /** S35: reject properties that name an action with no handler; polygraph never takes that step, so poly-ref alone decides them. */
   refOnly: { property: string; actions: string[] }[];
+  /** S38: the machine emits and has no path property, so PL4002 is decided by poly-ref alone. */
+  effectsByRefOnly?: boolean;
 }
 
 export interface CheckReport {
@@ -244,6 +248,66 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   const dead = ref.findings.filter((f) => f.code === 'PL3201');
   mc.diagnostics.push(...dead);
   mc.stages.push({ stage: 'deadlock', status: 'ran', engine: 'poly-ref', verdict: verdictOf(dead), ms: performance.now() - t0, note: ref.model.service ? 'service: exempt (PS1.7)' : `${ref.states} states` });
+
+  // ── stage 3: effects (PS5.4, S33) ─────────────────────────────────────
+  if (lowered.files['effects.cjs']) await effectsStage(module, machine, mc, dir, contract, ref, engines);
+}
+
+/**
+ * Stage 3. polyrun's `check-effects` explores the lowered module with its effects mapper and evaluates the
+ * path properties; every finding it reports is confirmed through poly-ref (review finding 7, extended to
+ * polyrun in M1). poly-ref decides the same questions exactly, over every path of I with cycles, so its
+ * findings stand where polyrun's simple-path exploration cannot see them. A disagreement inside the
+ * instance is the toolchain's (PL2501).
+ */
+async function effectsStage(module: Module, machine: string, mc: MachineCheck, dir: string, contract: unknown, ref: MachineReport, engines: Record<string, string>): Promise<void> {
+  const t0 = performance.now();
+  const at = { module: module.name, machine };
+  const engine = `polyrun@${engines.polygraph}`;
+  const fromRef = ref.findings.filter((f) => f.code === 'PL4001' || f.code === 'PL4002');
+  const hasPath = existsSync(join(dir, 'effect-invariants.mjs'));
+  if (!hasPath) {
+    // S38 (provisional): check-effects needs at least one path property, so PL4002 is poly-ref's alone.
+    mc.diagnostics.push(...fromRef);
+    mc.stages.push({ stage: 'effects', status: 'ran', engine: 'poly-ref', verdict: verdictOf(fromRef), ms: performance.now() - t0, note: 'no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38)' });
+    mc.instance!.effectsByRefOnly = true;
+    return;
+  }
+  const r = await checkEffects({
+    module: join(dir, 'next.cjs'), mapper: join(dir, 'effects.cjs'), manifest: join(dir, 'effects.manifest.json'), invariants: join(dir, 'effect-invariants.mjs'),
+    contract,
+    // A simple path visits each state at most once, so the reachable states bound its length.
+    maxDepth: Math.max(ref.states, 1),
+  });
+  const out: Diagnostic[] = [];
+  const notes: string[] = [];
+  const reported = new Set<string>();
+  const pathNames = new Set(ref.model.pathProperties.map((p) => p.name));
+  for (const v of r.violations) {
+    if (v.invariant === 'cycle-edge-emits') { notes.push(`polyrun reports cycle-edge-emits at ${v.counterexample.join(', ')}: not a poly property; path properties are decided over every path by poly-ref (S39)`); continue; }
+    const kind = v.invariant === 'identity-accept-emits' ? 'identity' : pathNames.has(v.invariant) && !v.detail ? 'path' : null;
+    if (!kind) {
+      out.push(diag('PL2501', at, `polyrun check-effects reports ${v.invariant}${v.detail ? `: ${v.detail}` : ''} at ${v.counterexample.join(', ')} (addressed to the toolchain, not the author)`, { engine }));
+      continue;
+    }
+    const c = confirmEffectsWitness(ref, { kind, property: v.invariant, steps: v.counterexample });
+    const code = kind === 'path' ? 'PL4001' : 'PL4002';
+    if (c.status === 'disagrees') { out.push(diag('PL2501', at, `polyrun reports ${v.invariant} at ${v.counterexample.join(', ')}, and poly-ref disagrees: ${c.reason} (addressed to the toolchain, not the author)`, { engine })); continue; }
+    if (c.status === 'outside') { out.push(diag('PL3901', at, `${v.invariant} is reported only on a path that leaves the checked instance at step ${c.step} (PS4.2a): a bound hit, not a finding`, { engine })); continue; }
+    reported.add(code);
+  }
+  // poly-ref's finding carries the shortest witness; polyrun's confirmed one says the engine agrees.
+  for (const f of fromRef) {
+    const seenByPolyrun = reported.has(f.code) && (f.code === 'PL4002' || r.violations.some((v) => v.invariant === f.property));
+    if (seenByPolyrun) out.push({ ...f, engine: `${f.engine}, ${engine}` });
+    else if (f.code === 'PL4002' && !r.bounded) out.push(diag('PL2501', at, `poly-ref finds ${f.property} emitting without a state change, and polyrun check-effects, which visits every reachable state, does not (addressed to the toolchain, not the author)`, { engine }));
+    // polyrun extends a path only by a step that changes the state, and only along simple paths, so a
+    // violation that needs a repeated or a state-preserving step is poly-ref's to find.
+    else out.push({ ...f, message: `${f.message} (poly-ref alone: polyrun check-effects explores simple paths and does not extend a path by a step that leaves the state unchanged)` });
+  }
+  mc.diagnostics.push(...out);
+  const coverage = r.bounded ? 'bounded' : r.cyclesPruned ? `simple paths, ${r.cyclesPruned} cycle edges pruned` : 'exhaustive';
+  mc.stages.push({ stage: 'effects', status: 'ran', engine: `${engine}, poly-ref`, verdict: verdictOf(out), ms: performance.now() - t0, note: [`${r.pathsExplored} paths, ${r.statesSeen} states, ${coverage}`, ...notes].join('; ') });
 }
 
 function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string, fieldOf: (flatKey: string) => string): Diagnostic {
@@ -274,7 +338,7 @@ export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]
   const out = [...fromPolygraph];
   const have = new Set(out.map(mergeKey));
   for (const f of fromRef) {
-    if (f.code === 'PL3201') continue; // stage 2b reports deadlocks
+    if (f.code === 'PL3201' || f.code === 'PL4001' || f.code === 'PL4002') continue; // stage 2b reports deadlocks, stage 3 path properties
     if (have.has(mergeKey(f))) continue;
     // Finding 6: an escape or bound is kept per field, and poly-ref's exploration cap (no field) on its own.
     if (f.code === 'PL3003' && f.property && refOnly.has(f.property)) {
@@ -331,10 +395,27 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
 }
 
 function finish(report: CheckReport, module?: Module): CheckReport {
-  // Engine diagnostics carry no source position; they point at the machine's declaration (display only, PT12.1).
+  // Engine diagnostics carry no source position. One that names a node (a property, a handler) points at
+  // that node's line; any other points at the machine's declaration (display only, PT12.1).
+  const spans = new Map<string, { line: number; col: number }>();
+  const index = (x: unknown): void => {
+    if (!x || typeof x !== 'object') return;
+    if (Array.isArray(x)) { x.forEach(index); return; }
+    const n = x as { id?: string; span?: { line: number; col: number } };
+    if (n.id && n.span) spans.set(n.id, n.span);
+    for (const [k, v] of Object.entries(x)) if (k !== 'span') index(v);
+  };
+  if (module) index(module.decls);
   for (const m of report.machines) {
     const decl = module?.decls.find((d) => d.kind === 'Machine' && d.name === m.machine);
-    for (const d of m.diagnostics) if (d.at.line === undefined && decl?.span) { d.at.line = decl.span.line; d.at.col = decl.span.col; }
+    for (const d of m.diagnostics) {
+      if (d.at.line !== undefined) continue;
+      // polygraph names a property but no node: the property's declaration is the place.
+      const prop = d.property ? decl?.kind === 'Machine' ? decl.items.find((i) => i.kind === 'Property' && i.name === d.property) : undefined : undefined;
+      const span = (d.at.node && spans.get(d.at.node)) || prop?.span || decl?.span;
+      // Diagnostics of one stage can share their `at` object, so each gets its own copy.
+      if (span) d.at = { ...d.at, line: span.line, col: span.col };
+    }
   }
   // A property not run keeps the verdict from CLEAN: INCONCLUSIVE at best, FINDINGS if a safety check failed (M1-2).
   for (const m of report.machines) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length ? ['INCONCLUSIVE' as Verdict] : [])]);

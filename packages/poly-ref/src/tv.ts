@@ -8,7 +8,7 @@
 // and computes R_M with its own interpreter. Any difference is PL2501
 // LOWERING_MISMATCH, addressed to the toolchain; the verdict is REFUSED.
 import type { Diagnostic, Module, WitnessStep } from '@poly/core';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { checkMachine, ENGINE, type MachineReport } from './check.js';
@@ -90,6 +90,9 @@ export async function translationValidate(module: Module, machineName: string, b
   const mod = loadLoweredModule<SamModule>(join(buildDir, 'next.cjs'));
   const contract = JSON.parse(readFileSync(join(buildDir, 'contract.json'), 'utf8')) as { stateKeys: { name: string }[]; terminalKey?: string; terminalStates?: unknown[] };
   const rt: RuntimeFacts = { terminalKey: contract.terminalKey ?? contract.stateKeys[0].name, terminalStates: contract.terminalStates ?? [] };
+  // A machine with no effect declarations has no mapper; its R_M emits nothing, which the comparison checks.
+  const mapperPath = join(buildDir, 'effects.cjs');
+  const mapper = existsSync(mapperPath) ? loadLoweredModule<{ effects: (pre: object, a: string, d: object, post: object, k: string) => unknown }>(mapperPath).effects : null;
   const props = (await import(pathToFileURL(join(buildDir, 'invariants.mjs')).href + `?v=${Date.now()}-${Math.random()}`)) as PropertyModule;
 
   const mismatches: Diagnostic[] = [];
@@ -131,7 +134,20 @@ export async function translationValidate(module: Module, machineName: string, b
     }
     if (stable(project(got.post, flatPre)) !== stable(flatten(expected, M))) {
       mismatch(`${what}: the flat next state differs where α cannot see it: lowered ${stable(got.post)}, expected ${stable(flatten(expected, M))}`, where);
+      continue;
     }
+    // The intent sequence (PS9.2, decisions-m1.md): the kernel calls the mapper on accepted steps only, so
+    // R_L's E is the mapper's output there and empty elsewhere, as R_M's is by PS3.2.
+    if (want.kind !== 'accepted') continue;
+    const wantE = e.label.effects.map((x) => ({ kind: x.kind, payload: Object.fromEntries(Object.entries(x.payload).map(([k, v]) => [k, toPlain(v)])) }));
+    let gotE: unknown;
+    try {
+      gotE = mapper ? mapper(structuredClone(flatPre), e.label.action, structuredClone(flatData), structuredClone(got.post), 'accepted') : [];
+    } catch (err) {
+      mismatch(`${what}: the effects mapper threw: ${(err as Error).message}; R_M emits ${stable(wantE)}`, where);
+      continue;
+    }
+    if (stable(gotE) !== stable(wantE)) mismatch(`${what}: the lowered effects are ${stable(gotE)}, R_M emits ${stable(wantE)}`, where);
   }
 
   // Property modules (PS9.2, last sentence). Every property must be present: the declared ones, and the

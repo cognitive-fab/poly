@@ -8,7 +8,7 @@
 // stutters included (PS3.3), because the fairness test counts them as edges.
 import type { RMachine } from './model.js';
 import { dataDomain, inCheckDomain, inType } from './model.js';
-import { transition, initialState } from './step.js';
+import { transition, initialState, type Intent } from './step.js';
 import type { Verdict } from './eval.js';
 import { stateKey, type State, type Value } from './values.js';
 
@@ -16,6 +16,8 @@ export interface Label {
   action: string;
   data: Record<string, Value>;
   verdict: Verdict;
+  /** E: the step's intents, in order; empty unless the step is accepted (PS2.1). */
+  effects: Intent[];
 }
 
 /**
@@ -101,7 +103,7 @@ export function machineSystem(M: RMachine): System<State> {
       for (const { a, ds } of domains) {
         for (const d of ds) {
           const st = transition(M, s, a.name, d);
-          const label: Label = { action: a.name, data: d, verdict: st.verdict };
+          const label: Label = { action: a.name, data: d, verdict: st.verdict, effects: st.effects };
           out.push({ label, outcome: classify(M, st.next) });
         }
       }

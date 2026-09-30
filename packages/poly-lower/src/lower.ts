@@ -4,7 +4,7 @@
 //                   schemas and domains, keyed acceptors, reject/next/unchanged
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
-import { diag, digest, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
+import { diag, digest, effectKind, effectClass, durationMs, countBound, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
 
@@ -13,11 +13,11 @@ export interface LowerOptions {
   fault?: Fault;
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -76,7 +76,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // contract's actions, so the runtime answers it before any acceptor runs (PS9.1a): terminal in a terminal
   // state, unhandled elsewhere. sam-pattern 2.3 throws for an intent no acceptor constrains (S34, option b).
   const lowerable = actions.filter((a) => handlers.has(a.name));
-  const strict = lowerable.flatMap((a) => a.params.filter((p) => p.check?.mode === 'strict').map((p) => ({ a: a.name, p: p.name, values: paramValues(p, env) })));
+  // PT3.4a: strict as declared, or by the flow of a parameter into an irreversible or compensable payload.
+  const strict = lowerable.flatMap((a) => a.params.filter((p) => facts.strictParams.has(`${a.name}.${p.name}`)).map((p) => ({ a: a.name, p: p.name, values: paramValues(p, env) })));
   const acceptors: string[] = [];
   if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length) {
     const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2. It runs for handled actions only: no other is an intent (S35).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
@@ -165,15 +166,114 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // ── invariants.mjs ───────────────────────────────────────────────────
   const invariants = invariantsModule(mutated, facts, env, layout, pre, actions.filter((a) => !handlers.has(a.name)).map((a) => a.name), opts.fault);
 
+  const files: Lowered['files'] = { 'contract.json': JSON.stringify(contract, null, 2) + '\n', 'next.cjs': next, 'invariants.mjs': invariants };
+  // ── effects (PT6.1, PT5): the mapper and manifest when the machine declares effects, the path properties' module when it has any ──
+  if (facts.effects.size) {
+    files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data' }, pre, opts.fault);
+    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts), null, 2) + '\n';
+  }
+  const pathProps = mutated.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'path');
+  if (pathProps.length) files['effect-invariants.mjs'] = effectInvariantsModule(m.name, pathProps);
+
   return {
     lowered: {
       machine: m.name,
-      files: { 'contract.json': JSON.stringify(contract, null, 2) + '\n', 'next.cjs': next, 'invariants.mjs': invariants },
+      files,
       contract,
       layout,
     },
     diagnostics: [],
   };
+}
+
+/**
+ * effects.cjs (PT6.1): `effects(pre, action, data, post, stepKind)` re-runs the accepted step's handler over
+ * the pre-state and the data, writes left out, and returns its intents in statement order. The state it
+ * reads is the flat snapshot the kernel passes. Rejected and unhandled steps emit nothing.
+ */
+function effectsModule(m: A.Machine, lowerable: A.Action[], handlers: Map<string, A.Handler>, cx: Cx, pre: string, fault?: Fault): string {
+  const dropEffect = fault === 'drop-effect' ? { done: false } : undefined;
+  const entries: string[] = [];
+  for (const a of lowerable) {
+    const h = handlers.get(a.name)!;
+    if (!emitsAny(h.body)) continue;
+    const body = stmts(h.body, cx, '    ', { effects: true, dropEffect });
+    // Test-only fault reorder-effects: the step's intents come back in reverse order.
+    const ret = fault === 'reorder-effects' ? '__E.reverse()' : '__E';
+    entries.push(`  ${JSON.stringify(a.name)}: (pre, data) => {\n    const __E = [];\n${body.join('\n')}\n    return ${ret};\n  },`);
+  }
+  return [
+    `'use strict';`,
+    `// Generated by poly-lower from ${m.name}: the effects mapper (PT6.1). Do not edit.`,
+    pre,
+    ``,
+    `const HANDLERS = {`,
+    ...entries,
+    `};`,
+    ``,
+    `function effects(pre, action, data, post, stepKind) {`,
+    `  if (stepKind !== 'accepted') return [];`,
+    `  const h = HANDLERS[action];`,
+    `  return h ? h(pre, data ?? {}) : [];`,
+    `}`,
+    ``,
+    `module.exports = { effects };`,
+    ``,
+  ].join('\n');
+}
+
+function emitsAny(body: A.Stmt[]): boolean {
+  return body.some((s) => (s.kind === 'Intent' && s.op === 'emit') || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))));
+}
+
+/** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */
+function manifestOf(facts: MachineFacts): { effects: Record<string, unknown> } {
+  const out: Record<string, unknown> = {};
+  for (const e of facts.effects.values()) {
+    const entry: Record<string, unknown> = {
+      payloadSchema: Object.fromEntries(e.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type)), required: true }])),
+    };
+    const hooks: Record<string, string> = { ok: 'onSuccess', failed: 'onFailure', exhausted: 'onExhausted' };
+    for (const it of e.items) {
+      if (it.kind === 'EffOutcome') {
+        const data = Object.fromEntries(it.args.map((a) => [a.name!, constValue(a.value)]));
+        entry[hooks[it.outcome]] = it.args.length ? { action: it.action, data } : { action: it.action };
+      }
+      if (it.kind === 'EffRetry') entry.retry = { maxAttempts: it.attempts, baseMs: durationMs(it.base), timeoutMs: durationMs(it.timeout) };
+      if (it.kind === 'EffLabels') entry.labels = it.labels;
+    }
+    // polyrun ignores fields it does not read, so labels and class stay in the manifest (PT6.1).
+    entry.class = effectClass(e);
+    out[effectKind(e)] = entry;
+  }
+  return { effects: out };
+}
+
+/** A completion argument as the manifest carries it: the checker proved it constant (PT6.1). */
+function constValue(e: A.Expr): unknown {
+  switch (e.kind) {
+    case 'Int': case 'Bool': case 'String': return e.value;
+    case 'Name': return e.name;
+    case 'Member': return e.prop;
+    case 'Unary': return e.op === '-' ? -(constValue(e.arg) as number) : !(constValue(e.arg) as boolean);
+    default: throw new Error('poly-lower: a completion argument is not a constant (the checker must refuse it)');
+  }
+}
+
+/** effect-invariants.mjs (PT5): each path property as a predicate over polyrun's Path, `p.count(kind)`. */
+function effectInvariantsModule(machine: string, props: A.Property[]): string {
+  const lines = props.map((p) => {
+    const conj: string[] = [];
+    const walk = (e: A.Expr): void => {
+      if (e.kind === 'Binary' && e.op === '&&') { walk(e.left); walk(e.right); return; }
+      const b = countBound(e);
+      if (!b) throw new Error(`poly-lower: path property ${p.name} is not a conjunction of count bounds (the checker must refuse it)`);
+      conj.push(`p.count(${JSON.stringify(b.kind)}) <= ${b.max}`);
+    };
+    walk(p.expr);
+    return `  { name: ${JSON.stringify(p.name)}, pred: (p) => ${conj.join(' && ')} },`;
+  });
+  return [`// Generated by poly-lower from ${machine}: path properties (PS5.4). Do not edit.`, `export const effectInvariants = [`, ...lines, `];`, ``].join('\n');
 }
 
 function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layout: Layout, pre: string, unhandled: string[], fault?: Fault): string {

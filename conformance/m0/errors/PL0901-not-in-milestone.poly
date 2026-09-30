@@ -1,8 +1,10 @@
-// expect: PL0901 (emit is lowered from M1)
+// expect: PL0901 (a timer is lowered from plan step 6 of M1)
 module errors
 
 machine M {
   state { x : bool = false }
   action A()
-  on A { x' = true  emit charge(1) }
+  action Tick()
+  on A { x' = true  after 5s -> Tick() as tick }
+  on Tick { x' = false }
 }

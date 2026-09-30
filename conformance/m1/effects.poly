@@ -1,0 +1,72 @@
+// Conformance: effects (PT6.1). Intents in statement order, one of them conditional (PS2.1);
+// a payload read from a parameter, a field and a constant;
+// path properties that hold (PS5.4); a parameter made strict by its flow into a compensable payload (PT3.4a).
+module effects
+
+enum Phase { Open, Billed, Closed }
+enum Tier { Basic, Gold }
+
+machine Account {
+  state {
+    phase   : Phase = Open
+    notices : 0..2  = 0
+  }
+  terminal phase == Closed
+
+  action Bill(tier: Tier)
+  action Notify()
+  action Remind(copies: int check { 1, 2 })
+  action Close()
+
+  on Bill(tier) {
+    require phase == Open else reject "not-open"
+    phase' = Billed
+    emit invoice(tier)
+    if tier == Gold {
+      emit perk(tier)
+    }
+    emit receipt(1)
+  }
+  on Notify {
+    require notices < 2 else reject "enough"
+    notices' = notices + 1
+    emit notice(notices)
+  }
+  on Remind(copies) {
+    require phase == Billed else reject "not-billed"
+    require notices < 2 else reject "enough"
+    notices' = notices + 1
+    emit reminder(copies)
+  }
+  on Close {
+    require phase == Billed else reject "not-billed"
+    phase' = Closed
+  }
+
+  path property one-invoice: count("billing.invoice") <= 1 && count("billing.perk") < 2
+  path property few-notices: count("mail.notice") < 3
+
+  effect invoice(tier: Tier) {
+    kind "billing.invoice"
+    labels { write:store }
+    class compensable
+  }
+  effect perk(tier: Tier) {
+    kind "billing.perk"
+    labels { write:store }
+    class reversible
+  }
+  effect receipt(copies: 0..1) {
+    kind "mail.receipt"
+    labels { egress:external }
+  }
+  effect notice(n: 0..2) {
+    kind "mail.notice"
+    labels { egress:external }
+  }
+  effect reminder(copies: int) {
+    kind "mail.reminder"
+    labels { egress:external }
+    class compensable
+  }
+}

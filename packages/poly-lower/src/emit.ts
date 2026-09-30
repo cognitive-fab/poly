@@ -8,6 +8,7 @@
 // the handler frames everything its body never writes.
 import type * as A from '@poly/core';
 import type { MachineFacts, Ty, TypeEnv } from '@poly/core';
+import { effectKind } from '@poly/core';
 import { isPayloadUnion, type Layout } from './layout.js';
 
 export type Mode = 'handler' | 'state' | 'step' | 'reject' | 'init';
@@ -145,6 +146,14 @@ export function mayWrite(body: A.Stmt[], layout: Layout): Set<string> {
 export interface EmitOptions {
   /** Test-only fault injection (faults.ts). */
   dropFrame?: boolean;
+  /**
+   * The effects mapper (PT6.1): the handler's control flow over the pre-state and the data, with its writes
+   * left out and each `emit` appended to `__E`. A failed require or a reject returns no intents: a
+   * rejected step emits nothing, though the kernel calls the mapper on accepted steps only.
+   */
+  effects?: boolean;
+  /** Test-only fault `drop-effect`: the first emit is left out of the mapper; `done` records that it was. */
+  dropEffect?: { done: boolean };
 }
 
 let matchCounter = 0;
@@ -162,7 +171,7 @@ export function stmts(body: A.Stmt[], cx: Cx, indent: string, opts: EmitOptions)
 
 function frame(keys: Iterable<string>, indent: string, opts: EmitOptions): string[] {
   const list = [...keys];
-  if (!list.length || opts.dropFrame) return [];
+  if (!list.length || opts.dropFrame || opts.effects) return [];
   return [`${indent}unchanged(${list.map(q).join(', ')});`];
 }
 
@@ -174,9 +183,17 @@ function branch(body: A.Stmt[], siblingsWrite: Set<string>, cx: Cx, indent: stri
 
 function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
   switch (s.kind) {
-    case 'Require': return [`${ind}if (!${expr(s.cond, cx)}) return reject(${q(s.reason)});`];
-    case 'Reject': return [`${ind}return reject(${q(s.reason)});`];
+    case 'Require': return [`${ind}if (!${expr(s.cond, cx)}) return ${opts.effects ? '[]' : `reject(${q(s.reason)})`};`];
+    case 'Reject': return [`${ind}return ${opts.effects ? '[]' : `reject(${q(s.reason)})`};`];
     case 'Let': return [`${ind}const l_${s.name} = ${expr(s.expr, cx)};`];
+    case 'Assign':
+    case 'MapUpdate':
+      if (opts.effects) return [];
+      break;
+    default:
+      break;
+  }
+  switch (s.kind) {
     case 'Assign': {
       const l = cx.layout.byField.get(s.field)!;
       if (l.kind === 'union') return [`${ind}__w(next, ${q(s.field)}, ${expr(s.expr, cx)});`];
@@ -225,7 +242,21 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       lines.push(`${ind}  } else {`, `${ind}    throw new Error('non-exhaustive match');`, `${ind}  }`, `${ind}}`);
       return lines;
     }
-    case 'Intent':
-      throw new Error(`poly-lower: ${s.op} reached the lowering (PL0901 must refuse it)`);
+    case 'Intent': {
+      if (s.op !== 'emit') throw new Error(`poly-lower: ${s.op} reached the lowering (PL0901 must refuse it)`);
+      // The acceptor writes and frames; the intents are the mapper's (PT6.1).
+      if (!opts.effects) return [];
+      if (opts.dropEffect && !opts.dropEffect.done) { opts.dropEffect.done = true; return []; }
+      const eff = cx.facts.effects.get(s.target);
+      if (!eff) throw new Error(`poly-lower: no effect ${s.target} (PL1001 must refuse it)`);
+      const kind = effectKind(eff);
+      const payload = s.args.map((a, i) => {
+        const p = a.name === null ? eff.params[i] : eff.params.find((x) => x.name === a.name)!;
+        return `${q(p.name)}: ${expr(a.value, cx)}`;
+      });
+      return [`${ind}__E.push({ kind: ${q(kind)}, payload: { ${payload.join(', ')} } });`];
+    }
+    default:
+      return [];
   }
 }

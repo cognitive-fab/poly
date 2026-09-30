@@ -4,12 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, basename } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { translationValidate } from '@poly/ref';
 import { DELIBERATELY_BROKEN_LOWERINGS } from './toolchain-faults.mjs';
 import { ROOT, polyFiles, build } from './helpers.mjs';
 
-const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0'))];
+const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0')), ...polyFiles(join(ROOT, 'conformance', 'm1'))];
 
 for (const file of SOURCES) {
   test(`translation validation agrees: ${basename(file)}`, async (t) => {
@@ -36,7 +36,9 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
       const good = build(file, 'tv-good');
       const bad = build(file, `tv-${fault}`, { fault });
       for (const [k, b] of bad.entries()) {
-        const changed = ['next.cjs', 'invariants.mjs'].some((f) => readFileSync(join(b.dir, f), 'utf8') !== readFileSync(join(good[k].dir, f), 'utf8'));
+        // The effects mapper is an artefact too (PS9.2): a fault that changes only it must be caught as well.
+        const read = (dir, f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null);
+        const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs'].some((f) => read(b.dir, f) !== read(good[k].dir, f));
         if (!changed) continue;
         const r = await translationValidate(b.module, b.machine, b.dir);
         if (r.mismatches.length === 0) { equivalent.push(basename(file)); continue; }

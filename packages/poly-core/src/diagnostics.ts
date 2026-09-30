@@ -8,6 +8,7 @@ export type Stage =
   | 'validate'
   | 'translation-validation'
   | 'model-check'
+  | 'effects'
   | 'deadlock';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
@@ -34,6 +35,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL1202: { name: 'READ_OF_PRIMED_FIELD', stage: 'types', severity: 'error' },
   PL1203: { name: 'TRI_WHERE_BOOL_EXPECTED', stage: 'types', severity: 'error' },
   PL1204: { name: 'DIVISION_BY_ZERO', stage: 'types', severity: 'error' },
+  // PT3.4a: a finding a person must accept (PT12.5), not a refusal.
+  PL1301: { name: 'DISCLOSED_IRREVERSIBLE_INPUT', stage: 'types', severity: 'finding' },
   PL1401: { name: 'TERMINAL_NOT_ON_CONTROL_FIELD', stage: 'types', severity: 'error' },
   PL1501: { name: 'NON_EXHAUSTIVE_MATCH', stage: 'types', severity: 'error' },
   PL1502: { name: 'INCOMPLETE_MAP_LITERAL', stage: 'types', severity: 'error' },
@@ -46,7 +49,7 @@ export const CODES: Record<string, CodeInfo> = {
   PL2102: { name: 'DOUBLE_WRITE', stage: 'types', severity: 'error' },
   // S20: addressed to the toolchain, like PL2501.
   PL2001: { name: 'STRICT_VALIDATE', stage: 'validate', severity: 'error' },
-  // An error in M0, where no step can be accepted by an effect alone (S7).
+  // A handler path with no write, no effect and no rejection (PT4.4).
   PL2201: { name: 'SILENT_NOOP', stage: 'types', severity: 'error' },
   PL2501: { name: 'LOWERING_MISMATCH', stage: 'translation-validation', severity: 'error' },
   PL3001: { name: 'INVARIANT_REACHABLE', stage: 'model-check', severity: 'finding' },
@@ -55,6 +58,11 @@ export const CODES: Record<string, CodeInfo> = {
   PL3102: { name: 'DOMAIN_ESCAPE', stage: 'model-check', severity: 'finding' },
   PL3201: { name: 'DEADLOCK', stage: 'deadlock', severity: 'finding' },
   PL3901: { name: 'BOUND_HIT', stage: 'model-check', severity: 'inconclusive' },
+  PL4001: { name: 'PATH_PROPERTY', stage: 'effects', severity: 'finding' },
+  // S33: an accepted step that emits and leaves the state unchanged.
+  PL4002: { name: 'EMIT_WITHOUT_STATE_CHANGE', stage: 'effects', severity: 'finding' },
+  // PT6.2: outside a labelled scope an unlabelled effect is a finding.
+  PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },
 };
 
 export interface NodeAt {
@@ -71,6 +79,8 @@ export interface WitnessStep {
   data: unknown;
   post: unknown;
   verdict?: string;
+  /** The kinds of the step's intents, in order, when it emits (PS2.1). */
+  effects?: string[];
 }
 
 export interface Witness {

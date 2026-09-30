@@ -31,10 +31,13 @@ function call(action: string, data: unknown): string {
 
 export function renderDiagnostic(d: Diagnostic, file: string): string[] {
   const where = `${basename(file)}${d.at.line ? `:${d.at.line}` : ''}`;
-  const lines = [`${where}  ${d.code} ${d.name}${d.at.machine ? `  ${d.at.machine}` : ''}`, `  ${d.message}`];
+  // The header names what the finding is about: its property or field, else its machine (README).
+  const about = d.property ?? d.field ?? d.at.machine;
+  const lines = [`${where}  ${d.code} ${d.name}${about ? `  ${about}` : ''}`, `  ${d.message}`];
   if (d.witness && d.witness.trace.length) {
     lines.push(`  witness (${d.witness.length} step${d.witness.length === 1 ? '' : 's'}):`);
-    const rows = d.witness.trace.map((s) => [call(s.action, s.data), state(s.pre), state(s.post), s.verdict && s.verdict !== 'accepted' ? s.verdict : '']);
+    const note = (s: { verdict?: string; effects?: string[] }) => [s.verdict && s.verdict !== 'accepted' ? s.verdict : '', s.effects?.length ? `emits ${s.effects.join(', ')}` : ''].filter(Boolean).join('   ');
+    const rows = d.witness.trace.map((s) => [call(s.action, s.data), state(s.pre), state(s.post), note(s)]);
     const w0 = Math.max(...rows.map((r) => r[0].length));
     const w1 = Math.max(...rows.map((r) => r[1].length));
     for (const r of rows) lines.push(`    ${r[0].padEnd(w0)}   ${r[1].padEnd(w1)} -> ${r[2]}${r[3] ? `   ${r[3]}` : ''}`);
@@ -71,6 +74,8 @@ export function render(r: CheckReport): string {
   for (const line of instances.slice(1)) out.push(`         ${line}`);
   // S35: a reject property that names an action with no handler is decided by poly-ref alone, and says so.
   for (const m of r.machines) for (const x of m.instance?.refOnly ?? []) out.push(`         ${m.machine}: ${x.property} decided by poly-ref alone (it names ${x.actions.join(', ')}, which has no handler; polygraph never takes that step)`);
+  // S38: with no path property, polyrun check-effects cannot run, and emission without a state change is poly-ref's alone.
+  for (const m of r.machines) if (m.instance?.effectsByRefOnly) out.push(`         ${m.machine}: emission without a state change (PL4002) decided by poly-ref alone (no path property, so polyrun check-effects did not run)`);
   out.push(`engines: ${Object.entries(r.engines).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   return out.join('\n') + '\n';
 }

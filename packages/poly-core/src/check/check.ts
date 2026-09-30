@@ -67,6 +67,10 @@ export interface MachineFacts {
   unhandled: string[];
   /** S21: pattern names that are constructors of the payload type, by `<arm id>:<payload>`, with the constructor. */
   patternLiterals: Map<string, string>;
+  /** The machine's effect declarations by name (PT6.1). */
+  effects: Map<string, A.EffectDecl>;
+  /** `Action.param` for every parameter whose check domain is strict, declared or by PT3.4a's flow rule. */
+  strictParams: Set<string>;
 }
 
 export interface CheckResult {
@@ -77,7 +81,7 @@ export interface CheckResult {
 
 // ── scopes ────────────────────────────────────────────────────────────────
 
-type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'reject';
+type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'reject' | 'path';
 
 interface Scope {
   ctx: Ctx;
@@ -183,7 +187,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -209,6 +213,20 @@ class Checker {
         this.checkDomain(`${it.name}.${p.name}`, p.type, this.tyOf(p.type), p.check, p);
       }
     }
+
+    // Effects are declared before the handlers that emit them are checked.
+    for (const it of m.items) {
+      if (it.kind !== 'EffectDecl') continue;
+      if (facts.effects.has(it.name)) { this.err('PL1002', it, `effect ${it.name} is declared twice`); continue; }
+      facts.effects.set(it.name, it);
+    }
+    const kinds = new Map<string, string>();
+    for (const e of facts.effects.values()) {
+      const k = effectKind(e);
+      if (kinds.has(k)) this.err('PL1002', e, `effects ${kinds.get(k)} and ${e.name} both have kind "${k}"`);
+      kinds.set(k, e.name);
+    }
+    const handlerOf = new Set(m.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => h.action));
 
     const handled = new Set<string>();
     const propNames = new Set<string>();
@@ -241,7 +259,8 @@ class Checker {
         case 'Property': {
           if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
           propNames.add(it.name);
-          if (it.form === 'path' || it.form === 'compose') { this.err('PL0901', it, `${it.form} properties are not checked in milestone M0`); break; }
+          if (it.form === 'compose') { this.err('PL0901', it, 'compose invariants are checked from plan step 6 of milestone M1'); break; }
+          if (it.form === 'path') { this.pathProperty(it, new Set(kinds.keys())); break; }
           this.expectBool(it.expr, this.scope(it.form === 'invariant' ? 'invariant' : it.form));
           break;
         }
@@ -257,13 +276,171 @@ class Checker {
           }
           break;
         case 'EffectDecl':
-          this.err('PL0901', it, 'effects are lowered from milestone M1');
+          this.effectDecl(it, handlerOf);
           break;
       }
     }
     facts.unhandled = [...this.actions.keys()].filter((a) => !handled.has(a));
+    this.strictFlow(m, facts);
     this.machine = null;
     return facts;
+  }
+
+  // ── effects (PT6.1, PT6.2, PT3.4a) ─────────────────────────────────────
+  private effectDecl(e: A.EffectDecl, handlers: Set<string>): void {
+    const pnames = new Set<string>();
+    for (const p of e.params) {
+      if (pnames.has(p.name)) this.err('PL1002', p, `parameter ${p.name} is declared twice`);
+      pnames.add(p.name);
+      const ty = this.tyOf(p.type);
+      // A payload is plain JSON (PT6.1); maps and payload unions are lowered from plan step 10, as for action parameters.
+      if (ty.k === 'map' || ty.k === 'ref' || (ty.k === 'union' && !this.env.unions.get(ty.name)!.isEnum)) this.err('PL0901', p, `an effect parameter of type ${tyToString(ty)} is lowered from plan step 10 of milestone M1`);
+      if (p.check) this.err('PL1201', p.check, 'an effect parameter takes its value from the handler; it has no check domain');
+    }
+    const seen = new Set<string>();
+    let labelled = false;
+    for (const it of e.items) {
+      const key = it.kind === 'EffOutcome' ? it.outcome : it.kind.slice(3).toLowerCase();
+      if (seen.has(key)) this.err('PL1002', it, `effect ${e.name} states ${key} twice`);
+      seen.add(key);
+      switch (it.kind) {
+        case 'EffLabels':
+          labelled = true;
+          for (const l of it.labels) if (!LABELS.has(l)) this.err('PL1001', it, `${l} is not a label of the closed vocabulary (PT6.2)`);
+          break;
+        case 'EffClass':
+          if (!CLASSES.has(it.value)) this.err('PL1001', it, `${it.value} is not an effect class: none, reversible, compensable or irreversible`);
+          break;
+        case 'EffRetry':
+          if (it.attempts < 1) this.err('PL1201', it, 'retry needs at least one attempt');
+          for (const d of [it.base, it.timeout]) if (durationMs(d) === null) this.err('PL1201', it, `${d} is not a duration`);
+          break;
+        case 'EffOutcome':
+          this.completion(it, handlers);
+          break;
+        default:
+          break;
+      }
+    }
+    if (!labelled) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
+  }
+
+  /** `ok -> A(p: v)`: a completion is an ordinary action (PS4.4) whose data the manifest carries as constants (PT6.1). */
+  private completion(it: A.EffectItem & { kind: 'EffOutcome' }, handlers: Set<string>): void {
+    const act = this.actions.get(it.action);
+    if (!act) { this.err('PL1001', it, `${it.outcome} -> ${it.action}: no action ${it.action}`); return; }
+    // S40 (provisional): polyrun refuses a manifest whose completion action is outside the lowered action surface (S35).
+    if (!handlers.has(it.action)) this.err('PL1001', it, `completion action ${it.action} has no handler, so it is not in the lowered module and the runtime cannot deliver it (S40)`);
+    const given = new Set<string>();
+    for (const a of it.args) {
+      if (a.name === null) { this.err('PL1201', a.value, `a completion names its arguments: ${it.action}(p: value)`); continue; }
+      const p = act.params.find((x) => x.name === a.name);
+      if (!p) { this.err('PL1001', a.value, `${it.action} has no parameter ${a.name}`); continue; }
+      if (given.has(a.name)) this.err('PL1002', a.value, `${a.name} is given twice`);
+      given.add(a.name);
+      const pt = this.tyOf(p.type);
+      const t = this.typeOf(a.value, this.scope('init'), pt);
+      if (!same(t, pt)) { this.err('PL1201', a.value, `${it.action}.${a.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`); continue; }
+      if (this.fold(a.value) === undefined) this.err('PL1201', a.value, 'a completion argument is a constant: it is written into the effects manifest (PT6.1)');
+      else this.checkConst(a.value, pt, p.check, `${it.action}.${a.name}`);
+    }
+  }
+
+  private emit(s: A.IntentStmt, scope: Scope): void {
+    const e = this.facts!.effects.get(s.target);
+    if (!e) {
+      this.err('PL1001', s, `${s.target} is not a declared effect`);
+      for (const a of s.args) this.typeOf(a.value, scope);
+      return;
+    }
+    const positional = s.args.every((a) => a.name === null);
+    if (!positional && !s.args.every((a) => a.name !== null)) {
+      this.err('PL1201', s, 'the arguments of an emit are all positional or all named');
+      for (const a of s.args) this.typeOf(a.value, scope);
+      return;
+    }
+    if (positional && s.args.length !== e.params.length) {
+      this.err('PL1201', s, `${s.target} takes ${e.params.length} argument${e.params.length === 1 ? '' : 's'} (${e.params.map((p) => p.name).join(', ')}), not ${s.args.length}`);
+      for (const a of s.args) this.typeOf(a.value, scope);
+      return;
+    }
+    const given = new Set<string>();
+    s.args.forEach((a, i) => {
+      const p = a.name === null ? e.params[i] : e.params.find((x) => x.name === a.name);
+      if (!p) { this.err('PL1001', a.value, `${s.target} has no parameter ${a.name}`); this.typeOf(a.value, scope); return; }
+      if (given.has(p.name)) this.err('PL1002', a.value, `${p.name} is given twice`);
+      given.add(p.name);
+      const pt = this.tyOf(p.type);
+      const t = this.typeOf(a.value, scope, pt);
+      if (!same(t, pt)) this.err('PL1201', a.value, `${s.target}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
+    });
+    const missing = e.params.filter((p) => !given.has(p.name)).map((p) => p.name);
+    if (!positional && missing.length) this.err('PL1201', s, `emit ${s.target} is missing ${missing.join(', ')}`);
+  }
+
+  /**
+   * PS5.4: the compiler accepts only path properties that are prefix-closed by construction. S37
+   * (provisional): a conjunction of `count("k") <= n` and `count("k") < n`; `before` waits for its ruling.
+   */
+  private pathProperty(p: A.Property, kinds: Set<string>): void {
+    const conjuncts: A.Expr[] = [];
+    const split = (e: A.Expr): void => {
+      if (e.kind === 'Binary' && e.op === '&&') { split(e.left); split(e.right); } else conjuncts.push(e);
+    };
+    split(p.expr);
+    for (const c of conjuncts) {
+      if (c.kind === 'Call' && c.callee === 'before') { this.err('PL0901', c, 'before(…) waits for the ruling on its meaning (S37)'); continue; }
+      const bound = countBound(c);
+      if (!bound) { this.err('PL1201', c, 'a path property is a conjunction of count("kind") <= n and count("kind") < n, so that it is prefix-closed (PS5.4, S37)'); continue; }
+      if (!kinds.has(bound.kind)) this.err('PL1001', bound.at, `no effect of machine ${this.machine!.name} has kind "${bound.kind}"`);
+    }
+  }
+
+  /**
+   * PT3.4a: a parameter whose value can flow into the payload of an irreversible or compensable effect is
+   * strict by default. The flow is read from each handler: a parameter flows when an argument of such an
+   * emit reads it, directly or through a `let`. An explicit `disclosed` on an input that flows into an
+   * irreversible payload is PL1301, a finding a person must accept (PT12.5).
+   */
+  private strictFlow(m: A.Machine, facts: MachineFacts): void {
+    for (const it of m.items) {
+      if (it.kind === 'Action') for (const p of it.params) if (p.check?.mode === 'strict') facts.strictParams.add(`${it.name}.${p.name}`);
+    }
+    for (const h of m.items) {
+      if (h.kind !== 'Handler') continue;
+      const act = this.actions.get(h.action);
+      if (!act) continue;
+      const guarded = new Set<string>();
+      const irreversible = new Set<string>();
+      const lets = new Map<string, Set<string>>();
+      const visit = (body: A.Stmt[]): void => {
+        for (const st of body) {
+          if (st.kind === 'Let') lets.set(st.name, readsOf(st.expr, lets));
+          if (st.kind === 'If') { visit(st.then); visit(st.else ?? []); }
+          if (st.kind === 'Match') for (const a of st.arms) visit(a.body);
+          if (st.kind !== 'Intent' || st.op !== 'emit') continue;
+          const e = facts.effects.get(st.target);
+          const cls = e ? effectClass(e) : 'none';
+          if (cls !== 'irreversible' && cls !== 'compensable') continue;
+          for (const a of st.args) {
+            for (const n of readsOf(a.value, lets)) {
+              guarded.add(n);
+              if (cls === 'irreversible') irreversible.add(n);
+            }
+          }
+        }
+      };
+      visit(h.body);
+      for (const p of act.params) {
+        if (!guarded.has(p.name) || !p.check) continue;
+        if (p.check.mode === 'disclosed') {
+          if (irreversible.has(p.name)) this.errOnce('PL1301', p.check, `${act.name}.${p.name} is disclosed, and it flows into an irreversible effect (PT3.4a)`);
+        } else facts.strictParams.add(`${act.name}.${p.name}`);
+      }
+      for (const f of m.fields) {
+        if (f.check?.mode === 'disclosed' && irreversible.has(f.name) && !act.params.some((p) => p.name === f.name)) this.errOnce('PL1301', f.check, `${f.name} is disclosed, and it flows into an irreversible effect (PT3.4a)`);
+      }
+    }
   }
 
   private checkDomain(what: string, t: A.TypeExpr, ty: Ty, check: A.CheckClause | null, at: A.NodeBase): void {
@@ -368,10 +545,10 @@ class Checker {
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
     this.stmts(h.body, scope);
     // Per-path rules (PT4.1, PS2.4, PT4.4).
-    const ends = this.paths(h.body, [{ written: new Map(), done: false }]);
+    const ends = this.paths(h.body, [{ written: new Map(), done: false, emits: false }]);
     for (const e of ends) {
-      if (!e.done && e.written.size === 0) {
-        this.err('PL2201', h, `on ${h.action} can complete with no write and no rejection; every accepted step must write (PT4.4, S7)`);
+      if (!e.done && e.written.size === 0 && !e.emits) {
+        this.err('PL2201', h, `on ${h.action} can complete with no write, no effect and no rejection (PT4.4)`);
         break;
       }
     }
@@ -423,7 +600,8 @@ class Checker {
         this.match(s, scope);
         break;
       case 'Intent':
-        this.err('PL0901', s, `\`${s.op}\` is lowered from milestone M1`);
+        if (s.op === 'emit') this.emit(s, scope);
+        else this.err('PL0901', s, `\`${s.op}\` is lowered from plan step ${s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached') ? 8 : 6} of milestone M1`);
         break;
     }
   }
@@ -568,6 +746,8 @@ class Checker {
         return [...this.paths(s.then, [p]), ...this.paths(s.else ?? [], [p])];
       case 'Match':
         return s.arms.flatMap((a) => this.paths(a.body, [p]));
+      case 'Intent':
+        return [{ ...p, emits: true }];
       default:
         return [p];
     }
@@ -705,7 +885,7 @@ class Checker {
           this.record(e.args[0], { k: 'string' });
           return BOOL;
         }
-        if (e.callee === 'count' || e.callee === 'before') { this.err('PL0901', e, `${e.callee}(…) belongs to path properties, checked from milestone M1`); return ERR; }
+        if (e.callee === 'count' || e.callee === 'before') { this.err('PL1201', e, `${e.callee}(…) is read only in a path property (PS5.4)`); return ERR; }
         this.err('PL1001', e, `unknown function ${e.callee}; expressions call no functions (PT2.2)`);
         return ERR;
       }
@@ -894,7 +1074,68 @@ class Checker {
   }
 }
 
+// PT6.2: the closed Polyaxion vocabulary.
+const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
+const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
+
+/** S41 (provisional): an effect with no `kind` has its name as its kind. */
+export function effectKind(e: A.EffectDecl): string {
+  for (const it of e.items) if (it.kind === 'EffKind') return it.value;
+  return e.name;
+}
+
+/** An effect with no `class` is class `none` (PT2, `Class`). */
+export function effectClass(e: A.EffectDecl): string {
+  for (const it of e.items) if (it.kind === 'EffClass') return it.value;
+  return 'none';
+}
+
+/** A duration literal in milliseconds: 200ms, 5s, 2m, 1h. */
+export function durationMs(text: string): number | null {
+  const m = /^(\d+)(ms|s|m|h)$/.exec(text);
+  if (!m) return null;
+  return Number(m[1]) * { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[m[2] as 'ms' | 's' | 'm' | 'h'];
+}
+
+/** `count("k") <= n` or `count("k") < n`, either way round: the kind and the largest count allowed. */
+export function countBound(e: A.Expr): { kind: string; max: number; at: A.NodeBase } | null {
+  if (e.kind !== 'Binary') return null;
+  const isCount = (x: A.Expr): x is A.Call => x.kind === 'Call' && x.callee === 'count' && x.args.length === 1 && x.args[0].kind === 'String';
+  const lit = (x: A.Expr) => (x.kind === 'Int' && x.value >= 0 ? x.value : null);
+  let call: A.Call;
+  let n: number | null;
+  let op: string;
+  if (isCount(e.left)) { call = e.left; n = lit(e.right); op = e.op; }
+  else if (isCount(e.right)) { call = e.right; n = lit(e.left); op = ({ '>=': '<=', '>': '<' } as Record<string, string>)[e.op] ?? ''; }
+  else return null;
+  if (n === null || (op !== '<=' && op !== '<')) return null;
+  const max = op === '<=' ? n : n - 1;
+  if (max < 0) return null;
+  const arg = call.args[0] as A.StringLit;
+  return { kind: arg.value, max, at: arg };
+}
+
+/** The names an expression reads, with each `let` name replaced by the names it reads. */
+function readsOf(e: A.Expr, lets: Map<string, Set<string>>): Set<string> {
+  const out = new Set<string>();
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== 'object') return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const n = x as { kind?: string; name?: string };
+    if (n.kind === 'Name' && n.name) {
+      const via = lets.get(n.name);
+      if (via) for (const v of via) out.add(v);
+      else out.add(n.name);
+    }
+    for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
+  };
+  walk(e);
+  return out;
+}
+
 interface PathState {
   written: Map<string, A.NodeBase>;
   done: boolean;
+  /** An intent was appended to E on this path (PS2.1). */
+  emits: boolean;
 }

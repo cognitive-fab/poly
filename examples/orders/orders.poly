@@ -1,0 +1,68 @@
+module orders
+
+enum Status { Draft, Placed, Paid, Shipped, Cancelled }
+enum Reason { Customer, Fraud }
+
+machine Order {
+  version 1
+  state {
+    status : Status = Draft
+    items  : 0..3   = 0
+    paid   : bool   = false
+  }
+  terminal status in { Shipped, Cancelled }
+
+  action AddItem()
+  action Place()
+  action Pay(amount: int check { 10, 20 })
+  action PaymentOk()
+  action PaymentFailed(code: string check { "declined", "exhausted", "denied" })
+  action Ship()
+  action Cancel(reason: Reason)
+
+  on AddItem {
+    require status == Draft else reject "not-draft"
+    items' = items + 1
+  }
+  on Place {
+    require status == Draft else reject "not-draft"
+    require items > 0      else reject "empty-order"
+    status' = Placed
+  }
+  on Pay(amount) {
+    require status == Placed else reject "not-placed"
+    emit charge(amount)
+  }
+  on PaymentOk {
+    require status == Placed else reject "not-placed"
+    status' = Paid
+    paid' = true
+  }
+  on PaymentFailed(code) {
+    require status == Placed else reject "not-placed"
+    status' = Cancelled
+  }
+  on Ship {
+    require status == Paid else reject "not-paid"
+    status' = Shipped
+  }
+  on Cancel(reason) {
+    require status in { Draft, Placed } else reject "too-late"
+    status' = Cancelled
+  }
+
+  invariant shipped-was-paid: status == Shipped implies paid
+  step property cancel-is-final: pre.status == Cancelled implies post.status == Cancelled
+  reject property place-empty: (action == Place && pre.items == 0) implies rejected("empty-order")
+
+  effect charge(amount: int) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 5s }
+    ok -> PaymentOk()
+    failed -> PaymentFailed(code: "declined")
+    exhausted -> PaymentFailed(code: "exhausted")
+  }
+  path property charge-at-most-once: count("payment.charge") <= 1
+}
