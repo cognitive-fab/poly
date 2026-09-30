@@ -176,7 +176,15 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     }
   }
   // ── stage 4b: configurations (PS13) ─────────────────────────────────────
-  for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push(configurationStage(module, d, refused));
+  const configs = configurationReports(module, refused);
+  report.configurations.push(...configs.configurations);
+  if (configs.error) {
+    // As for a machine's stages: a throw is an ERROR report, never a rejected check (review finding).
+    report.error = configs.error;
+    report.verdict = 'ERROR';
+    report.exit = EXIT_CODES.ERROR;
+    return report;
+  }
   return finish(report, module);
 }
 
@@ -511,6 +519,20 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
     notes: sender ? ['polyrun has no sendTo intent yet (S58): the configuration is checked from the semantics, and its machines do not run under polyrun until it has'] : undefined,
   });
   return cc;
+}
+
+/** Stage 4b for every configuration of a module; the first explorer throw stops the stage and is reported. */
+export function configurationReports(module: Module, refused: boolean): { configurations: ConfigCheck[]; error?: string } {
+  const configurations: ConfigCheck[] = [];
+  for (const d of module.decls) {
+    if (d.kind !== 'Configuration') continue;
+    try {
+      configurations.push(configurationStage(module, d, refused));
+    } catch (e) {
+      return { configurations, error: `configuration ${d.name}: ${(e as Error).message}` };
+    }
+  }
+  return { configurations };
 }
 
 /** Whether a machine's handlers send (PS2.2); polyrun has no sendTo intent yet (S58). */

@@ -11,7 +11,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from '@poly/lang';
 import { checkModule } from '@poly/core';
 import { checkConfiguration } from '@poly/ref';
-import { checkFile, render } from '@poly/check';
+import { checkFile, configurationReports, render } from '@poly/check';
 import { ROOT, BUILD } from './helpers.mjs';
 
 const WAITING = join(ROOT, 'examples', 'checkout', 'checkout.poly');
@@ -176,4 +176,20 @@ test('S61: a machine with attached children is refused in a configuration (PL090
   const src = SRC.replace('type OrderState', 'machine Note {\n  state { seen: bool = false }\n  action Seen()\n  on Seen { seen\' = true }\n}\n\ntype OrderState')
     .replace("on Taken      { require st is Taking else reject \"not-taking\"  st' = Done }", "on Taken      { require st is Taking else reject \"not-taking\"  st' = Done   spawn Note as note }");
   assert.deepEqual(codes(src), ['PL0901']);
+});
+
+// Review findings on step 8 (polywatch). Each test failed before its fix.
+test('an index of a group outside 0..n-1 is PL1201 at the checker, constant or quantified', () => {
+  const swap = (from, to) => { assert.ok(SRC.includes(from), from); return codes(SRC.replace(from, to)); };
+  assert.deepEqual(swap('count(order[*] is Done)', 'count(order[5] is Done)'), ['PL1201']);
+  assert.deepEqual(swap('count(order[*] is Done) <= init(inv.onHand)', '(forall i in order: order[i + 1] is Done) implies true'), ['PL1201']);
+  assert.deepEqual(swap('count(order[*] is Done) <= init(inv.onHand)', 'forall i in order: order[i] is Done | Refused | Idle | Asked | Taking'), []);
+});
+
+test('a configuration the explorer cannot follow is an ERROR report, not a rejected check', async () => {
+  // The checker refuses this source (no machine Warehouse); the stage is run as if it had not, to reach the explorer's throw.
+  const m = moduleOf(SRC.replace('inv       : Inventory', 'inv       : Warehouse'));
+  const r = configurationReports(m, false);
+  assert.equal(r.configurations.length, 0);
+  assert.match(r.error, /two-buyers: .*Warehouse/);
 });

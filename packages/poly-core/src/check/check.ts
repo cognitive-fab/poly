@@ -307,6 +307,8 @@ class Checker {
       } else {
         const it = this.typeOf(e.index, scope);
         if (it.k !== 'int' && it.k !== 'error') { this.err('PL1201', e.index, `an index is an int, not ${tyToString(it)}`); return 'error'; }
+        // The members are g[0] … g[n-1]; an index whose range leaves them names no instance (review finding).
+        if (it.k === 'int' && (it.lo < 0 || it.hi > inst.count - 1)) { this.err('PL1201', e.index, `${e.object.name}[…] takes an index in 0..${inst.count - 1}, and this one ranges over ${tyToString(it)}`); return 'error'; }
       }
       return { machine: inst.machine, facts: inst.facts, name: e.object.name };
     }
