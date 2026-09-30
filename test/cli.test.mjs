@@ -76,7 +76,9 @@ test('--json: the report, with every diagnostic in poly.diagnostic/1 form', () =
   assert.equal(d.schema, 'poly.diagnostic/1');
   assert.equal(d.code, 'PL3201');
   assert.equal(j.machines[0].instance.states, 7);
-  assert.equal(j.engines['polygraph sam-pattern (vendored)'], '2.2.0'); // S16: both SAM versions recorded
+  // S16: both SAM versions are recorded. S36: polygraph 8.3.1 vendors the same 2.3.0 that poly runs.
+  assert.equal(j.engines['sam-pattern'], '2.3.0');
+  assert.equal(j.engines['polygraph sam-pattern (vendored)'], '2.3.0');
 });
 
 test('usage errors exit 64', () => {

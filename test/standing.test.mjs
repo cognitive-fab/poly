@@ -10,17 +10,22 @@
 // poly-lower's own list, and are exercised only by test/tv.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join, relative, sep } from 'node:path';
+import { join, relative } from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
 import { checkFile } from '@poly/check';
 import { FAULTS } from '@poly/lower';
 import { ROOT } from './helpers.mjs';
 import { DELIBERATELY_BROKEN_LOWERINGS, toolchainFaults } from './toolchain-faults.mjs';
 
+// Build output and installed packages are not sources. Their directories are not entered at all: an
+// installed package may be a link to an engine's own checkout, with files a walk cannot stat.
+const NOT_SOURCES = new Set(['node_modules', '.poly', '.git']);
+
 function sources(dir) {
   const out = [];
   for (const e of readdirSync(dir)) {
     const p = join(dir, e);
+    if (NOT_SOURCES.has(e)) continue;
     if (statSync(p).isDirectory()) out.push(...sources(p));
     else if (p.endsWith('.poly')) out.push(p);
   }
@@ -36,9 +41,7 @@ test('the exception is an explicit list, equal to poly-lower\'s faults', () => {
 });
 
 test('the standing rule covers every source in the repository', () => {
-  // Build output and installed packages are not sources: their directories, not file names, are left out.
-  const skipDir = (p) => relative(ROOT, p).split(sep).some((seg) => seg === 'node_modules' || seg === '.poly' || seg === '.git');
-  const everywhere = sources(ROOT).filter((p) => !skipDir(p));
+  const everywhere = sources(ROOT);
   assert.deepEqual(everywhere.map((p) => relative(ROOT, p)).sort(), ALL.map((p) => relative(ROOT, p)).sort());
   assert.ok(ALL.length >= 49, `${ALL.length} sources`);
 });
