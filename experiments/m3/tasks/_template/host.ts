@@ -13,7 +13,7 @@ export interface Message {
 /** The network of a multi-machine task (S91): nothing is delivered until deliver or deliverAll is called. */
 export interface Network {
   /** Every message in transit, in no promised order. */
-  inFlight(): Message[];
+  inFlight(): Promise<Message[]>;
   /** Deliver one message in transit, by its id. */
   deliver(id: string): Promise<void>;
   /** Deliver every message in transit, and every message those deliveries send, until none is left. */
@@ -26,8 +26,8 @@ export type Outcome = { ok: true } | { ok: false; reason: string };
 export interface Host extends Network {
   /** An example command. */
   example(id: string): Promise<Outcome>;
-  /** An example query: plain JSON. */
-  status(id: string): { state: string };
+  /** An example query: plain JSON, or null for an id the host does not know. */
+  status(id: string): Promise<{ state: string } | null>;
 }
 
 /** Every arm's module default-exports a factory of a fresh host. */

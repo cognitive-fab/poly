@@ -24,16 +24,17 @@
     },
     "methods": {
       "type": "object",
-      "description": "Each host method: the instance it targets (by name, or by an argument naming it), the action it dispatches, and each action parameter's source argument.",
+      "description": "Each host method: the instance it targets, the action it dispatches, and each action parameter's source argument.",
       "additionalProperties": {
         "type": "object",
         "required": ["instance", "action"],
         "additionalProperties": false,
         "properties": {
-          "instance": { "type": "string", "description": "An instance name, or $arg:<name> for an argument that names it." },
+          "instance": { "type": "string", "description": "An instance name, or the name of a family of instances a method creates." },
+          "key": { "type": "string", "description": "For a family: $arg:<name>, the argument that names the member." },
           "action": { "type": "string" },
           "params": { "type": "object", "additionalProperties": { "type": "string", "description": "$arg:<name>, or a constant." } },
-          "returns": { "enum": ["verdict", "state", "nothing"] }
+          "returns": { "enum": ["verdict", "state", "nothing"], "description": "verdict (the default): { ok: true } or { ok: false, reason }." }
         }
       }
     },
@@ -45,7 +46,8 @@
         "required": ["instance", "fields"],
         "additionalProperties": false,
         "properties": {
-          "instance": { "type": "string" },
+          "instance": { "type": "string", "description": "An instance name, or the name of a family." },
+          "key": { "type": "string", "description": "For a family: $arg:<name>, the argument that names the member." },
           "fields": { "type": "object", "additionalProperties": { "type": "string" } }
         }
       }

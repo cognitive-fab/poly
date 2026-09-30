@@ -1,0 +1,14 @@
+{
+  "module": "checkout",
+  "instances": {
+    "inv": { "machine": "Inventory" },
+    "order": { "machine": "Order", "createdBy": "place", "keyArgument": "order", "init": { "inv": "inv" } }
+  },
+  "methods": {
+    "place": { "instance": "order", "key": "$arg:order", "action": "Place", "returns": "verdict" }
+  },
+  "queries": {
+    "order": { "instance": "order", "key": "$arg:order", "fields": { "status": "st" } },
+    "stock": { "instance": "inv", "fields": { "onHand": "onHand" } }
+  }
+}

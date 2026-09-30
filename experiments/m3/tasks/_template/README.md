@@ -15,7 +15,7 @@ Each task of the experiment is a directory `experiments/m3/tasks/<id>/` with the
 
 ## The host interface
 
-`host.ts` exports one interface, `Host`, and one factory type, `CreateHost`, which every arm's module default-exports. A query returns plain JSON. Every method is synchronous for the caller or returns a promise; the brief says which.
+`host.ts` exports one interface, `Host`, and one factory type, `CreateHost`, which every arm's module default-exports. A query returns plain JSON, or null for an id the host does not know. Every method and query returns a promise, in every arm: the poly arms' adapter reads polyrun's store, which is asynchronous, and the four arms implement one interface.
 
 A multi-machine task (S91) adds the network API to `Host`, in the brief and for all four arms:
 
@@ -25,7 +25,7 @@ export interface Message { id: string; from: string; to: string; action: string;
 
 export interface Network {
   /** Every message in transit, in no promised order. */
-  inFlight(): Message[];
+  inFlight(): Promise<Message[]>;
   /** Deliver one message in transit, by its id. */
   deliver(id: string): Promise<void>;
   /** Deliver every message in transit, and every message those deliveries send, until none is left. */
@@ -37,7 +37,7 @@ The brief of a multi-machine task says that messages may arrive in any order, an
 
 ## `host.map.json`, written by the poly arms (S90)
 
-In arms 3 and 4 the agent writes `host.map.json` as part of its solution. It says which machine, which instance and which action each host method drives, and which fields each query reads. The adapter generator (`experiments/m3/adapter/`) validates it against the agent's poly module: a map that names a machine, an action, a parameter or a field that does not exist is a failed build. Its schema is `host.map.schema.json`, given to the poly arms with the host interface. The task's own reference has its own map, which no arm sees.
+In arms 3 and 4 the agent writes `host.map.json` as part of its solution. It says which machine, which instance and which action each host method drives, and which fields each query reads. An instance is created with the host, or is one of a family a method creates, keyed by one of that method's arguments; a method or query on a family names the argument that keys it. The adapter generator (`experiments/m3/adapter/`) validates it against the host interface and the agent's poly module: a map that names a machine, an instance, an action, a parameter, an argument or a field that does not exist, or leaves a member of `Host` unmapped, is a failed build. Its schema is `host.map.schema.json`, given to the poly arms with the host interface. The task's own reference has its own map, which no arm sees.
 
 ## Evolution changes (S92)
 
