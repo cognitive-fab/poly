@@ -60,6 +60,19 @@ The agent applies the spec text for S33 in one commit, citing the id, before ste
 
 The agent applies the spec text for S35 in one commit, citing the id. Step 5 starts when S36's re-run is clean.
 
+## Rulings after step 5 (S37 to S42)
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S37** `before(a, b)`, and path properties outside the accepted forms | **Accepted, with its own code.** In M1, `before("k1", "k2")` ranges over effect kinds: it holds on a path iff every emission of `k2` is preceded by an emission of `k1`. It is prefix-closed. `count("k") < n` is accepted as `count("k") <= n - 1`. A form that is not a conjunction of these is refused with a **new code**, `PL1701 NOT_PREFIX_CLOSED`, whose message cites PS5.4. `PL1201` is rejected: the property may type-check perfectly, and the defect is its shape. `before` over actions is not added; it can come when a program needs it. | PS5.4; PT2.2; PT12.2 |
+| **S38** A machine that emits but has no path property | **Accepted.** Stage 3 runs only when the machine has a path property. Otherwise `PL4002` is decided by poly-ref alone, and the verdict record says so under the instance line, as for S35. The synthetic always-true invariant is rejected, for the reason given in the plan. | none |
+| **S39** polyrun's `cycle-edge-emits` | **Accepted as a note, printed in the output.** It is never dropped: the stage 3 section of the output lists each one with its edge, marked as a note. A `count` property over that kind is decided by poly-ref over every path, cycles included. | none |
+| **S40** A completion action with no handler | **Accepted, with its own code.** A completion (`ok`, `failed`, `exhausted`) that names an action which is not declared stays `PL1001`. One that names a declared action with no handler is **`PL6101 COMPLETION_WITHOUT_HANDLER`**, at the completion's line, because polyrun refuses to load such a manifest. The fix it offers is to add a handler. | PT6.1; PT12.2 |
+| **S41** An effect with no `kind` | **Accepted, with a collision check.** The kind defaults to the effect's name. Two effect declarations in one project with the same kind and different payloads, completions or class are `PL1002 DUPLICATE_DECLARATION`, since polyrun keys handlers by kind. | PT6.1 |
+| **S42** PT4.5 has four findings | **Narrow the property.** It is about the draft state: `(action == Place && pre.status == Draft && pre.items == 0) implies rejected("empty-order")`. Update PT4.5, its lowered excerpt (the `place-empty` predicate) and `examples/orders/orders.poly` together, so "three findings" stays true. | PT4.5 |
+
+The agent applies the spec text for S37 and S40 to S42 in one commit, citing the ids, and removes the provisional marks from S37 to S41. Step 6 can start.
+
 ## Conclusion
 
 M1 starts with its three open questions settled. The emit-only step is fixed where it originates, in the engine. Liveness no longer blocks a safety result. The one gate item that needs liveness moves to the milestone that builds it. The configuration explorer is the main work, and its first targets (the checkout witness and the delivery variants) are already measured by independent scripts. The rulings on the plan add the record type the OMS order needs and fix the timer rule against polyrun's store.
