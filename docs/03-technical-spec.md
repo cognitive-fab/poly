@@ -26,7 +26,7 @@ This document fixes the grammar, the semantics and the formats. It covers the lo
 - **PT1.3** Imports are by module name within a project: `use payments.Payment`. Cross-project imports are out of scope for v1 (open question 4 in the architecture).
 - **PT1.4** The canonical formatter defines one text per AST. The module digest is the SHA-256 of the RFC 8785 canonical JSON of the AST. This is the same canonicalisation the polyflow platform kernel uses. The digest becomes the `machineVersion` of each machine it contains.
 - **PT1.4a** Comments and blank lines are trivia. They are kept by the formatter but are not part of the AST, so they do not change the digest. Two sources with the same AST have the same digest, whatever their comments.
-- **PT1.5** Build output goes to `.poly/build/<machine>/`, one directory per machine, in the layout the engines already read (PT17).
+- **PT1.5** Build output goes to `.poly/build/<machine>/`, one directory per machine, in the layout the engines already read (PT17). The directory name `<module>.<Machine>` is also the machine's `machineId` in every engine artefact that names a machine, such as polyrun's configuration and `spawnChild` intents (S28).
 
 ## PT2. Grammar
 
@@ -35,7 +35,8 @@ The core grammar in EBNF. Terminals are quoted. `Expr` is the expression sublang
 ```ebnf
 Module      = "module" Ident { Decl } ;
 Decl        = [ "service" ] Machine | Workflow | Enum | TypeDecl | Policy | Configuration | Use ;
-TypeDecl    = "type" Ident "=" [ "|" ] Ctor { "|" Ctor } ;
+TypeDecl    = "type" Ident "=" ( [ "|" ] Ctor { "|" Ctor } | Record ) ;
+Record      = "{" Ident ":" Type { "," Ident ":" Type } "}" ;
 Ctor        = Ident [ "{" Ident ":" Type { "," Ident ":" Type } "}" ] ;
 Use         = "use" QualIdent ;
 Enum        = "enum" Ident "{" Ident { "," Ident } "}" ;
@@ -89,6 +90,7 @@ Type        = "bool" | "int" | "string" | Ident | Int ".." Int
 Configuration = "configuration" Ident "{" { Instance | Inputs | Bounds | Property } "}" ;
 Instance    = Ident [ "[" Int "]" ] ":" QualIdent [ "{" Ident ":" Expr { "," Ident ":" Expr } "}" ] ;
 Inputs      = "inputs" "{" InputRef { "," InputRef } "}" ;
+InputRef    = Ident [ "[" ( Int | "*" ) "]" ] "." Ident ;
 Bounds      = "bounds" "{" "transit" Int [ "," "instances" Int ] "}" ;
 Domain      = "{" Literal { "," Literal } "}" | Int ".." Int ;
 ```
@@ -160,6 +162,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - `string`;
   - `map<K, T>`, where the key type `K` is an enum or an integer range `0..n`. A map keyed by an enum lowers to a JSON object keyed by constructor name. A map keyed by `0..n` lowers to a JSON array of length `n + 1`. A range key that does not start at 0 is `PL1602 ARRAY_MAP_NOT_ZERO_BASED`. So a corpus field such as `taskStatuses: ["QUEUED", "RUNNING", "FAILED"]` is `map<0..2, Status>`;
   - **tagged unions** `type U = C1 { … } | … | Cn { … }` (PS1.4), finite when their payload fields are. Handlers read a union with `match` or `is` and write it as a whole value. The lowering flattens it to a tag field and nullable payload fields, with an automatic `shape:` invariant (PS9.1b). Constructors of one union may share a payload name only with the same type, and then share one flat field; the same name with two types is `PL1601 PAYLOAD_TYPE_CONFLICT`.
+  - **records** `type R = { f1: T1, …, fn: Tn }` (S25): a nominal type whose values have every field and no tag. A record is finite when its fields are; it has no optional fields and may not refer to itself, directly or through other types. It lowers to a plain JSON object and compares field by field. A record literal `{ f1: e1, … }` lists every field (`PL1502`). A literal `{ k: v, … }` is a map or a record according to its expected type, as S22 resolves constructors; with no expected type it is `PL1005`. A record may be used wherever a type may: as a field, a parameter, a payload, or a map value. `r.f` reads field `f` of a record value.
 - **PT3.2** Every field and parameter has a finite check domain (PF1.2). Enums, `bool`, ranges and maps over finite value types are finite by construction. `int` and `string` need an explicit `check` clause. Without one, the compiler reports `PL1101 UNBOUNDED_DOMAIN`.
 - **PT3.3** A `check` clause narrower than the runtime type is an assumption. It is written to `dataDomain` and to the certificate's `domains`, and it is graded by `poly grade` (polynv).
 - **PT3.4** Each `check` clause has a mode, and the mode decides what the runtime does with a value outside the check domain:
@@ -522,6 +525,10 @@ With the order waiting for `Taken`, the configuration is clean over 44 global st
 - A delivery the receiver rejects is a rejected step there. The sender is not notified unless the receiver sends a reply, which is the actor discipline.
 - `fifo` between a pair of instances is available only when they share a kernel shard, and it is checked with the narrower arrival order.
 
+**Names in configuration properties (S32).** In a configuration property, `x.f` and `g[i].f` name field `f` of instance `x` or `g[i]`. `g[i] is C` and `g[*] is C` resolve `C` against the machine's fields: the test is legal when exactly one field's type has the constructor `C`, and it then tests that field; otherwise it is `PL1005 AMBIGUOUS_CONSTRUCTOR`, whose fix is `g[i].f is C`. So `count(order[*] is Done)` tests `st`, the one field of `Order` whose type has `Done`, and `init(inv.onHand)` is the inventory's initial stock. A field access on an instance is legal only in configuration properties, never inside a machine (PS1.6).
+
+**A send to `none` (S29).** Inside a configuration, a step that sends to `none` is `PL5404 SEND_TO_NONE`, a finding with the path to the step; the message is not added to `μ`. In a single-machine check, the send is an ordinary intent (PS4.4).
+
 **Configurations in the pipeline.** Stage 4b of the check pipeline (architecture §5) explores every declared configuration. Every verdict carries the configuration's bounds (PT12.3a). A bound hit is `INCONCLUSIVE` (`PL5301`, `PL5302`), never `CLEAN`.
 
 ## PT8. Policies
@@ -869,7 +876,7 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
-| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK` |
+| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
 | PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |

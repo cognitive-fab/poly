@@ -102,7 +102,7 @@ The definitions are mathematical and short. They are written so that a reference
 
   Properties are still checked on every explored state, so a violation found inside the bound is still reported, and the fold of PT12.3 makes that verdict `FINDINGS`. A counter that grows without limit in the real system (a raft term, a coin count) is therefore checked up to its declared bound, and the verdict says so; it is never `CLEAN`.
 - **PS4.3** **Every verdict is about `I`.** A `CLEAN` result states that a property holds on `Reach(I)` and on all paths of `I`. The instance is printed with the verdict (PT12.3a).
-- **PS4.4** **Completion actions are ordinary actions.** In `I`, a completion such as `PaymentOk` can be offered in any state, whether or not a charge was emitted. So `I` over-approximates the real system: every real behaviour is a behaviour of `I`, but not every behaviour of `I` is real. For safety properties this is sound: a clean result holds for the real system. A witness may be infeasible if it uses a completion with no matching intent. Such a witness is marked `environment: unconstrained`, and the matching path property check (PS5.4) is the place to rule it out.
+- **PS4.4** **Completion actions are ordinary actions.** In `I`, a completion such as `PaymentOk` can be offered in any state, whether or not a charge was emitted. So `I` over-approximates the real system: every real behaviour is a behaviour of `I`, but not every behaviour of `I` is real. For safety properties this is sound: a clean result holds for the real system. A witness may be infeasible if it uses a completion with no matching intent. Such a witness is marked `environment: unconstrained`, and the matching path property check (PS5.4) is the place to rule it out. A `send` is an intent in `E` like any other: a machine checked alone has no receivers, so the replies its receivers would send are ordinary actions the environment may offer in any state. This over-approximates too, and the configuration check (PS13) is where the receivers' actual behaviour is used (S30).
 
 ## PS5. Properties
 
@@ -260,7 +260,7 @@ The canonical formatter inserts parentheses whenever `implies` is mixed with `&&
   - **delivery**: any one message in `μ` is removed and delivered to its target.
 
   In either case the target takes its step by `R_M` (PS3.2). The intents of an accepted step are handled as follows:
-  - its `send` messages are added to `μ`;
+  - its `send` messages are added to `μ`; a send to `none` adds nothing and is a finding (`PL5404 SEND_TO_NONE`, S29);
   - its detached `spawn` intents create new instances, with fresh addresses;
   - its other effects are completed by the environment, as in PS4.4.
 
@@ -270,6 +270,7 @@ The canonical formatter inserts parentheses whenever `implies` is mixed with `&&
 - **PS13.6** **Properties of a configuration.**
   - A **configuration invariant** is a predicate on `σ`.
   - **Instance groups and quantifiers.** `g[*]` may appear only as the argument of an aggregate: `count`, `sum`, `all` or `any`. Everywhere else a group must be quantified explicitly: `forall i in g: P(g[i])` or `exists i in g: P(g[i])`. An unquantified `g[*]` outside an aggregate is `PL5403 UNQUANTIFIED_GROUP`. In a liveness property, the quantifier scopes over the whole `leads to`: `forall i in order: order[i] is Asked leads to order[i] is Done | Refused` means that each asked order is eventually settled.
+  - **Instance fields (S32).** `x.f` and `g[i].f` denote field `f` of an instance in `σ`. `g[i] is C` denotes `g[i].f is C` for the one field `f` of the machine whose type has the constructor `C`; with none or several such fields it is `PL1005`. Only configuration properties read instances' fields (PS1.6).
   - **`init(e)`** is the value of `e` in the configuration's initial state. Properties refer to initial quantities through `init`, never through constants explained in comments.
   - A **quiescent** global state has `μ` empty and no declared input accepted.
   - A **stuck** state is a quiescent state in which some non-service instance is not terminal. It is reported as `PL5402 STUCK`, the configuration's form of deadlock.
