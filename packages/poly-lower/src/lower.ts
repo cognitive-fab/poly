@@ -399,13 +399,16 @@ function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layou
 
 /**
  * S57: alone, a Ref<M> ranges over none and n addresses M#1 … M#n, n being the machine's Ref<M> fields plus
- * the most Ref<M> parameters of one action, so every pattern of equalities between addresses is realised.
+ * the most Ref<M> parameters of one action, plus one for self when M is the machine itself, so every pattern of
+ * equalities between addresses is realised.
  */
 function refDomain(m: A.Machine, target: string): unknown[] {
   const isRef = (t: A.TypeExpr) => t.kind === 'TRef' && t.machine[t.machine.length - 1] === target;
   const fields = m.fields.filter((f) => isRef(f.type)).length;
   const params = Math.max(0, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.filter((p) => isRef(p.type)).length));
-  return [null, ...Array.from({ length: fields + params }, (_, i) => `${target}#${i + 1}`)];
+  // S57: for the machine's own type, self is one more distinct address.
+  const self = target === m.name ? 1 : 0;
+  return [null, ...Array.from({ length: fields + params + self }, (_, i) => `${target}#${i + 1}`)];
 }
 
 function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {

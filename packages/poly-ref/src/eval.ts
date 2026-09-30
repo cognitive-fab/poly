@@ -8,7 +8,7 @@
 import type * as A from '@poly/core';
 import type { RMachine } from './model.js';
 import { equal, isUnion, isMap, isRecord, keyOf, mapGet, type State, type Value } from './values.js';
-import { valuesOf } from './model.js';
+import { valuesOf, selfAlone } from './model.js';
 
 /** A step's verdict kind as a reject property sees it (PS5.3). */
 export interface Verdict {
@@ -302,7 +302,7 @@ function lookup(name: string, env: Env): Value {
   if (name in env.state) return env.state[name];
   if (env.M.ctors.has(name)) return { ctor: name, payload: {} };
   if (name === 'none') return null;
-  if (name === 'self') return env.self ?? 'self';
+  if (name === 'self') return env.self ?? selfAlone(env.M);
   throw new EvalError(`poly-ref: unknown name ${name}`);
 }
 

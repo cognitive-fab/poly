@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from '@poly/lang';
 import { checkModule } from '@poly/core';
+import { lowerMachine } from '@poly/lower';
 import { checkMachine, loadLoweredModule } from '@poly/ref';
 import { checkFile, render } from '@poly/check';
 import { ROOT, BUILD, build } from './helpers.mjs';
@@ -33,6 +34,24 @@ test('S57: alone, an address ranges over none and one address per Ref field plus
   assert.equal(lock.graph.states[other.from].owner === other.label.data.from, false);
   const inventory = checkMachine(m, 'Inventory');
   assert.deepEqual(inventory.instance.params.map((p) => p.domain), ['{none, Order#1}', '{none, Order#1}']);
+});
+
+test('S57: for the machine\'s own type, self is one more distinct address, in poly-ref and in the lowering', () => {
+  const src = `module peers
+machine Peer {
+  state { next: Ref<Peer> = none   linked: bool = false }
+  action Link(p: Ref<Peer>)
+  action Hello(from: Ref<Peer>)
+  on Link(p) { require !linked else reject "linked"   next' = p   linked' = true   send p <- Hello(from: self) }
+  on Hello(from) { require from != next else reject "loop"   linked' = true }
+}
+`;
+  const m = parse(src).module;
+  // One Ref<Peer> field, one Ref<Peer> parameter per action, and self: none and three addresses.
+  assert.deepEqual(checkMachine(m, 'Peer').instance.params.map((p) => p.domain), ['{none, Peer#1, Peer#2, Peer#3}', '{none, Peer#1, Peer#2, Peer#3}']);
+  const check = checkModule(m);
+  const { lowered } = lowerMachine(m, check, 'Peer');
+  assert.deepEqual(lowered.contract.dataDomain.Link.p, [null, 'Peer#1', 'Peer#2', 'Peer#3']);
 });
 
 test('S58: a send lowers to sendTo, an address to its string, none to null, and self to the kernel marker', () => {
@@ -76,9 +95,9 @@ test('S58: a machine that sends and has a path property is poly-ref\'s alone at 
   assert.equal(stage.verdict, 'CLEAN', render(r));
 });
 
-test('PT7a\'s inventory, checked alone, reports PL4002 on its replies (S33 as ruled; raised as S63)', async () => {
+test('S63: a reply that sends and writes nothing is not PL4002; an effect beside it still is', async () => {
   const r = await checkFile(SENDS, { root: OUT });
-  const inv = r.machines.find((m) => m.machine === 'Inventory');
-  assert.deepEqual(inv.diagnostics.map((d) => [d.code, d.property]), [['PL4002', 'Query'], ['PL4002', 'Take']]);
-  for (const m of r.machines.filter((x) => x.machine !== 'Inventory')) assert.equal(m.verdict, 'CLEAN', render(r));
+  for (const m of r.machines) assert.equal(m.verdict, 'CLEAN', render(r));
+  const m = parse(SRC.replace('on Query(from) { send from <- Available(n: onHand) }', 'on Query(from) { send from <- Available(n: onHand)   emit seen() }\n  effect seen() { labels { write:store } }')).module;
+  assert.deepEqual(checkMachine(m, 'Inventory').findings.map((d) => [d.code, d.property]), [['PL4002', 'Query']]);
 });

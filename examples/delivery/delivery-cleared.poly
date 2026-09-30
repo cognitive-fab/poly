@@ -63,7 +63,7 @@ service machine Delivery {
   }
 
   invariant at-most-once: steps[M1] <= 1 && steps[M2] <= 1
-  invariant in-order: steps[M2] == 1 implies steps[M1] == 1
+  invariant in-order: steps[M2] >= 1 implies steps[M1] >= 1      // M2 never steps before M1 (S64)
   liveness exactly-once:
     eventually (status[M1] == Acked && status[M2] == Acked && steps[M1] == 1 && steps[M2] == 1)
     under fair { Emit(*), Send(*), Resend(*), DeliverReq(*), DeliverAck(*) }

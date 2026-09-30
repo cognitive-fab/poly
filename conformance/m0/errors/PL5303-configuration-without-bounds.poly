@@ -1,0 +1,14 @@
+// expect: PL5303 (a configuration declares no bounds { transit n }, S62)
+module errors
+
+machine M {
+  state { done : bool = false }
+  terminal done == true
+  action Finish()
+  on Finish { done' = true }
+}
+
+configuration c {
+  g[2] : M
+  inputs { g[*].Finish }
+}

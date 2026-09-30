@@ -85,6 +85,8 @@ export const CODES: Record<string, CodeInfo> = {
   // PS13.5: a configuration's bounds, reported, never silently applied.
   PL5301: { name: 'TRANSIT_BOUND_HIT', stage: 'configuration', severity: 'inconclusive' },
   PL5302: { name: 'INSTANCE_BOUND_HIT', stage: 'configuration', severity: 'inconclusive' },
+  // S62: a configuration with no transit bound; the exploration need not end.
+  PL5303: { name: 'CONFIGURATION_WITHOUT_BOUNDS', stage: 'types', severity: 'error' },
   // PS13.6: a configuration invariant violated in a reachable global state.
   PL5401: { name: 'CONFIGURATION_INVARIANT', stage: 'configuration', severity: 'finding' },
   // PS13.6: a quiescent global state in which a non-service instance is not terminal.

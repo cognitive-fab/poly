@@ -348,10 +348,10 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
       return Array.from({ length: t.hi - t.lo + 1 }, (_, k) => t.lo + k);
     case 'string': throw new Error('poly-ref: a string has no enumeration; it needs a check domain (PT3.2)');
     case 'ref': {
-      // S57: alone, none and one address per Ref<M> field plus the most Ref<M> parameters of one action. Addresses
-      // are only compared and passed on (PS1.6), so these realise every pattern of equalities a state and a step hold.
-      const isRef = (x: RType) => x.k === 'ref' && x.machine === t.machine;
-      const n = M.fields.filter((f) => isRef(f.type)).length + Math.max(0, ...M.actions.map((a) => a.params.filter((p) => isRef(p.type)).length));
+      // S57, PS1.6: alone, none and one address per Ref<M> field plus the most Ref<M> parameters of one action, and
+      // self when M is the machine's own type. Addresses are only compared and passed on, so these realise every
+      // pattern of equalities a state and a step hold.
+      const n = refCount(M, t.machine);
       return [null, ...Array.from({ length: n }, (_, i) => `${t.machine}#${i + 1}`)];
     }
     case 'record': {
@@ -384,6 +384,17 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
       return maps.map((entries) => ({ entries }) satisfies MapValue);
     }
   }
+}
+
+/** S57: how many addresses a Ref<target> ranges over alone; the last is self's when target is M itself. */
+export function refCount(M: RMachine, target: string): number {
+  const isRef = (x: RType) => x.k === 'ref' && x.machine === target;
+  return M.fields.filter((f) => isRef(f.type)).length + Math.max(0, ...M.actions.map((a) => a.params.filter((p) => isRef(p.type)).length)) + (target === M.name ? 1 : 0);
+}
+
+/** A machine's own address when it is checked alone (S57): the last of its addresses. */
+export function selfAlone(M: RMachine): string {
+  return `${M.name}#${refCount(M, M.name)}`;
 }
 
 /** D(a): every data record of an action, the product of its parameters' check domains (PS1.1). */

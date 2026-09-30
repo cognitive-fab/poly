@@ -127,12 +127,13 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   // S33: an accepted step that emits and leaves the state unchanged is enabled again after itself and
   // repeats its effects without limit. One finding per action, at its first such step in BFS order; the
   // witness is the path to that step followed by two repetitions.
-  const identityEmits = g.edges.filter((e) => e.label.verdict.kind === 'accepted' && e.label.effects.length > 0 && e.to === e.from);
+  // S63: a send does not count; a reply is one step per request, checked where its receiver is (PS13.3, PS14.3).
+  const identityEmits = g.edges.filter((e) => e.label.verdict.kind === 'accepted' && e.label.effects.some((x) => x.type !== 'send') && e.to === e.from);
   const seenAction = new Set<string>();
   for (const e of identityEmits) {
     if (seenAction.has(e.label.action)) continue;
     seenAction.add(e.label.action);
-    const kinds = [...new Set(e.label.effects.map((x) => x.kind))].join(', ');
+    const kinds = [...new Set(e.label.effects.filter((x) => x.type !== 'send').map((x) => x.kind))].join(', ');
     findings.push(finding('PL4002', M.handlers.get(e.label.action)?.id, `${e.label.action} emits ${kinds} and leaves the state unchanged, so it can repeat its effect without limit`, trace([...pathTo(g, e.from), e, e]), { property: e.label.action, state: g.states[e.from] }));
   }
 

@@ -54,13 +54,11 @@ test('the parallel worker that still claims in-order: violated in 4 steps', asyn
   assert.equal(d.witness.length, 4);
 });
 
-test('the dedupe table cleared on archive: at-most-once violated in 10 steps (and in-order at the same state, S64)', () => {
+test('the dedupe table cleared on archive: at-most-once violated in 10 steps, and at-most-once alone (S64)', () => {
   const f = ref('delivery-cleared').findings;
-  const amo = f.find((d) => d.property === 'at-most-once');
-  assert.deepEqual(steps(amo), AT_MOST_ONCE);
-  // PT9.8's in-order reads `steps[M2] == 1 implies steps[M1] == 1`, which a second step of M1 also breaks.
-  assert.deepEqual(f.map((d) => [d.code, d.property]), [['PL3001', 'at-most-once'], ['PL3001', 'in-order']]);
-  assert.deepEqual(steps(f[1]), AT_MOST_ONCE);
+  // S64: in-order is steps[M2] >= 1 implies steps[M1] >= 1, which a second step of M1 does not break.
+  assert.deepEqual(f.map((d) => [d.code, d.property]), [['PL3001', 'at-most-once']]);
+  assert.deepEqual(steps(f[0]), AT_MOST_ONCE);
 });
 
 const PYTHON = ['python3', 'python', 'py'].find((cmd) => {

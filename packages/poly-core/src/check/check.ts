@@ -248,7 +248,7 @@ class Checker {
       seen.add(key);
     }
     // S62: the transit bound is what makes the exploration end.
-    if (!c.bounds) this.err('PL1201', c, `configuration ${c.name} declares no bounds; write bounds { transit n } (PS13.1)`);
+    if (!c.bounds) this.err('PL5303', c, `configuration ${c.name} declares no bounds; write bounds { transit n } (PS13.1)`);
     else if (c.bounds.transit < 1 || (c.bounds.instances !== null && c.bounds.instances < c.instances.reduce((n, i) => n + (i.count ?? 1), 0))) this.err('PL1201', c.bounds, 'the transit bound is at least 1, and the instance bound at least the declared instances (PS13.1)');
     const names = new Set<string>();
     for (const p of c.properties) {

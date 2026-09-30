@@ -65,8 +65,9 @@ test('AC10: the order that waits for Taken is clean over 44 global states, with 
   assert.deepEqual(c.notRun.map((p) => p.property), ['settle']);
   // M1-2: a property not run keeps the configuration from CLEAN.
   assert.equal(c.verdict, 'INCONCLUSIVE');
-  // S63 until ruled: the inventory alone still reports PL4002 on its replies (S33 as written).
-  assert.deepEqual(r.machines.flatMap((m) => m.diagnostics.map((d) => `${m.machine}:${d.code}:${d.property}`)), ['Inventory:PL4002:Query', 'Inventory:PL4002:Take']);
+  // S63: a reply is not PL4002, so the machines alone are clean and the file's verdict follows its configuration.
+  assert.deepEqual(r.machines.flatMap((m) => m.diagnostics), []);
+  assert.equal(r.verdict, 'INCONCLUSIVE');
 });
 
 const PYTHON = ['python3', 'python', 'py'].find((cmd) => {
@@ -166,8 +167,8 @@ test('the checker: groups, S32 names, init, inputs, addresses and bounds', () =>
   assert.deepEqual(swap('order[2]  : Order { inv: inv }', 'order[2]  : Order { inv: stock }'), ['PL1201']);
   assert.deepEqual(swap('order[2]  : Order { inv: inv }', 'order[2]  : Order { inv: inv, inv: none }'), ['PL1002']);
   assert.deepEqual(swap('inv       : Inventory', 'inv       : Inventory { onHand: 2 }'), ['PL1201']);
-  // S62: the transit bound is required.
-  assert.deepEqual(swap('  bounds    { transit 4 }\n', ''), ['PL1201']);
+  // S62: the transit bound is required, with its own code.
+  assert.deepEqual(swap('  bounds    { transit 4 }\n', ''), ['PL5303']);
   // S56: a machine's liveness states its fairness, and a quantifier ranges over a configuration's group.
   assert.deepEqual(swap("on OutOfStock {", "liveness done: st is Asked leads to st is Done\n  on OutOfStock {"), ['PL1201']);
 });
