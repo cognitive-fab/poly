@@ -22,6 +22,7 @@ Cite requirement ids in code comments and commit messages (`PS2.3`, `PT9.8`, `AC
 | Handlers are total and pure over the pre-state; primed fields are write-only (PS2.3); requires precede writes on every path (PT4.1). | the compiler, with diagnostic codes from PT12.2 |
 | No silent clean. A check that did not run, or hit a bound, is `INCONCLUSIVE` or listed as not run. Every verdict prints its checked instance (PT12.3a). | verdict-fold tests |
 | The evidence scripts in `docs/reviews/evidence/` are acceptance tests. poly-ref must reproduce every number and witness they print. | `test/evidence.test.*` |
+| Every artefact the runtime reads is checked: compared by translation validation, or read back and compared with the source (contract, effects manifest, path and compose invariant modules). A new artefact enters the build only with its round-trip check and a broken variant in the explicit list of toolchain faults. | `packages/poly-ref/src/artefacts.ts` inside translation validation, and `test/tv.test.mjs` over the faults in `test/toolchain-faults.mjs` |
 | Engines are vendored, never forked. poly relies on the Poly stack conceptually, not physically: the engine files it runs are copied unchanged into `vendor/`, each pinned by hash and commit in its `PROVENANCE.md`. A change an engine needs is made in that engine's repository and copied in again. | `test/vendor.test.mjs` |
 
 If you find yourself working around one of these rules, stop. The rule is the product.

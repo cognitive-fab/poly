@@ -29,7 +29,7 @@ function ctorOf(t: RType, M: RMachine, name: string) {
   return t.k === 'union' ? M.unions.get(t.name)!.ctors.find((c) => c.name === name) : undefined;
 }
 
-function flatValue(v: Value, t: RType, M: RMachine): unknown {
+export function flatValue(v: Value, t: RType, M: RMachine): unknown {
   // S65: below the top of a field, a union with payloads is one object { $: C, payloads }.
   if (t.k === 'union' && hasPayloads(t, M) && isUnion(v)) {
     const c = ctorOf(t, M, v.ctor)!;

@@ -13,7 +13,7 @@ export interface LowerOptions {
   fault?: Fault;
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant';
 
 export interface Lowered {
   machine: string;
@@ -199,6 +199,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     ].join('\n');
   }
 
+  if (opts.fault) breakArtefact(opts.fault, files, contract);
   return {
     lowered: {
       machine: m.name,
@@ -208,6 +209,29 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     },
     diagnostics: [],
   };
+}
+
+/**
+ * Test-only faults in the artefacts the engines read without running the module (the standing rule after the
+ * M1 review): each must be caught by poly-ref's read-back (artefacts.ts). Each changes one thing, if present.
+ */
+function breakArtefact(fault: Fault, files: Lowered['files'], contract: Record<string, unknown>): void {
+  const rewrite = (f: keyof Lowered['files'], from: RegExp, to: (m: string) => string) => { const t = files[f]; if (t) files[f] = t.replace(from, to); };
+  const recontract = () => { files['contract.json'] = JSON.stringify(contract, null, 2) + '\n'; };
+  if (fault === 'drop-terminal-state' && Array.isArray(contract.terminalStates) && contract.terminalStates.length) { contract.terminalStates = (contract.terminalStates as unknown[]).slice(1); recontract(); }
+  if (fault === 'contract-init') { const init = contract.initState as Record<string, unknown>; const k = Object.keys(init).find((x) => typeof init[x] === 'number' || typeof init[x] === 'boolean'); if (k) { init[k] = typeof init[k] === 'number' ? (init[k] as number) + 1 : !init[k]; recontract(); } }
+  if (fault === 'contract-domain') {
+    const dd = contract.dataDomain as Record<string, Record<string, unknown[]>>;
+    const a = Object.keys(dd).find((x) => Object.values(dd[x]).some((v) => v.length > 1));
+    if (a) { const p = Object.keys(dd[a]).find((x) => dd[a][x].length > 1)!; dd[a][p] = dd[a][p].slice(0, -1); recontract(); }
+  }
+  if (fault === 'manifest-data' && files['effects.manifest.json']) {
+    const man = JSON.parse(files['effects.manifest.json']) as { effects: Record<string, Record<string, { action: string }>> };
+    const entry = Object.values(man.effects).find((e) => e.onSuccess);
+    if (entry) { entry.onSuccess = { ...entry.onSuccess, action: `${entry.onSuccess.action}Broken` }; files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
+  }
+  if (fault === 'path-invariant') rewrite('effect-invariants.mjs', /<= (\d+)/, (m) => `<= ${Number(m.slice(3)) + 1}`);
+  if (fault === 'compose-invariant') rewrite('invariants.compose.mjs', /pred: \(joint\) => /, () => 'pred: (joint) => !');
 }
 
 /**

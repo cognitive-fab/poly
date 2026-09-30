@@ -16,6 +16,13 @@ export const DELIBERATELY_BROKEN_LOWERINGS = [
   'reorder-effects',
   'unnamed-reject',
   'poison-step',
+  // The standing rule after the M1 review: every artefact the runtime reads has a broken variant, caught by the read-back.
+  'manifest-data',
+  'drop-terminal-state',
+  'contract-domain',
+  'contract-init',
+  'path-invariant',
+  'compose-invariant',
 ];
 
 /** The toolchain-fault diagnostics among a list (S20: addressed to the toolchain, never to the author). */

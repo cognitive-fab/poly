@@ -20,6 +20,7 @@ import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './
 import type { Intent } from './step.js';
 import type { RMachine } from './model.js';
 import { isTerminal } from './step.js';
+import { readBack } from './artefacts.js';
 
 interface SamModule {
   instance: (o: object) => { lastStep: () => { intent?: string; classification: string; rejections: { reason?: string }[] } };
@@ -210,6 +211,8 @@ export async function translationValidate(module: Module, machineName: string, b
       if (got !== want) mismatch(`reject property ${p.name} is ${got} in the lowered module and ${want} by PS5.3`, [...pathTo(g, e.from), e]);
     }
   }
+  // The standing rule after the M1 review: the artefacts the engines read without running the module are read back.
+  for (const message of await readBack(module, M, buildDir)) mismatch(message, []);
   return { machine: M.name, transitions, propertyChecks, mismatches, report };
 }
 
