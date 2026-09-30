@@ -45,3 +45,14 @@ test('poly resolves the engines to the vendored copies', () => {
   assert.equal(req.resolve('@cognitive-fab/sam-pattern').split('\\').join('/'), join(ROOT, 'vendor', 'sam-pattern', 'dist', 'SAM.js').split('\\').join('/'));
   assert.ok(req.resolve('@cognitive-fab/polygraph/scripts/check.mjs').split('\\').join('/').startsWith(join(ROOT, 'vendor', 'polygraph').split('\\').join('/')));
 });
+
+// Review finding P1: a pinned file that is ignored by git exists only on the disk that vendored it.
+test('every vendored file is tracked by git, and none is ignored', () => {
+  for (const v of VENDORED) {
+    for (const { file } of table(v.dir)) {
+      const path = `vendor/${v.dir}/${file}`;
+      const tracked = execFileSync('git', ['-C', ROOT, 'ls-files', '--', path], { encoding: 'utf8' }).trim();
+      assert.equal(tracked, path, `${path} is not tracked`);
+    }
+  }
+});

@@ -2,3 +2,6 @@ node_modules/
 .poly/
 dist/
 *.tsbuildinfo
+
+# The vendored engines are sources of this repository, not build output (vendor/*/PROVENANCE.md).
+!vendor/sam-pattern/dist/
