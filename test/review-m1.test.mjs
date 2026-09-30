@@ -232,3 +232,9 @@ test('R5: in a configuration, a type escape is reported even when the step also 
     assert.ok(r.findings.some((d) => d.code === 'PL3102'), JSON.stringify(r.findings.map((d) => d.code)));
   });
 });
+
+// polywatch after the review: a family with a gap (t1 and t3, no t2) passed an index in its interval.
+test('C1b: an index that names no member of a family with a gap is PL1201, for signal and cancel', () => {
+  assert.deepEqual(codes(src('checker-gap')), ['PL1201', 'PL1201']);
+  assert.deepEqual(codes(src('checker-gap').replace('signal t[2]', 'signal t[3]').replace('cancel late[2]', 'cancel late[1]')), []);
+});

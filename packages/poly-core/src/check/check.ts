@@ -795,10 +795,16 @@ class Checker {
     if (kt.lo < key.lo || kt.hi > key.hi) this.err('PL1201', at, `the map's keys are ${tyToString(key)}, and this key ranges over ${tyToString(kt)}`);
   }
 
-  /** S49: an index whose range leaves its family names no member; PL1201 at the index. */
-  private inFamily(it: Ty, r: { lo: number; hi: number }, at: A.NodeBase, fam: string): boolean {
-    if (it.k !== 'int' || (it.lo >= r.lo && it.hi <= r.hi)) return true;
-    this.err('PL1201', at, `${fam}[…] has the members ${r.lo}..${r.hi}, and this index ranges over ${tyToString(it)} (S49)`);
+  /**
+   * S49: every index an index expression can take must name a member of its family; a family may have gaps
+   * (t1 and t3 with no t2), so the members are the declared keys, not an interval. PL1201 at the index.
+   */
+  private inFamily(it: Ty, keys: Iterable<string>, at: A.NodeBase, fam: string): boolean {
+    if (it.k !== 'int') return true;
+    const members = new Set([...keys].filter((k) => memberOf(k, fam)).map((k) => Number(k.slice(fam.length))));
+    const all = Number.isFinite(it.lo) && Number.isFinite(it.hi) && Array.from({ length: it.hi - it.lo + 1 }, (_, k) => it.lo + k).every((i) => members.has(i));
+    if (all) return true;
+    this.err('PL1201', at, `${fam}[…] has the members ${[...members].sort((a, b) => a - b).join(', ')}, and this index ranges over ${tyToString(it)} (S49)`);
     return false;
   }
 
@@ -835,7 +841,7 @@ class Checker {
       } else {
         const it = this.typeOf(idx, scope);
         if (it.k !== 'int' && it.k !== 'error') { this.err('PL1201', idx, `an index is an int, not ${tyToString(it)}`); return ERR; }
-        if (!this.inFamily(it, range, idx, fam)) return ERR;
+        if (!this.inFamily(it, this.facts!.children.keys(), idx, fam)) return ERR;
         if (!scope.spawned?.has(`${fam}[${indexText(idx)}]`)) { this.err('PL5103', e, `children.${fam}[${indexText(idx)}].${e.prop} is read where ${fam}[${indexText(idx)}] may not be spawned; write ${fam}[${indexText(idx)}] spawned implies … (S48, S49)`); return ERR; }
       }
       const spec = [...this.facts!.children.values()].find((c) => c.key === `${fam}${range.lo}`);
@@ -1206,8 +1212,8 @@ class Checker {
           if (it.k !== 'int' && it.k !== 'error') this.err('PL1201', s.index, `a key's index is an int, not ${tyToString(it)} (S49)`);
           // S49: signal and cancel name members a spawn or an after declared; their index must stay in that family.
           const fam = s.op === 'signal' ? s.extra[0] : s.op === 'cancel' ? s.target : null;
-          const range = s.op === 'signal' ? this.facts!.families.get(s.extra[0]) : s.op === 'cancel' ? timerFamily(this.facts!.timerKeys, s.target) : undefined;
-          if (fam && range) this.inFamily(it, range, s.index, fam);
+          const keys = s.op === 'signal' ? [...this.facts!.children.keys()] : [...this.facts!.timerKeys];
+          if (fam && keys.some((k) => memberOf(k, fam))) this.inFamily(it, keys, s.index, fam);
         }
         if (s.op === 'emit') this.emit(s, scope);
         else if (s.op === 'after') this.timer(s, scope);
@@ -1638,8 +1644,7 @@ class Checker {
           if (!this.facts!.families.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no family ${e.key}`);
           const it = this.typeOf(e.index, scope);
           if (it.k !== 'int' && it.k !== 'error') this.err('PL1201', e.index, `an index is an int, not ${tyToString(it)}`);
-          const range = this.facts!.families.get(e.key);
-          if (range) this.inFamily(it, range, e.index, e.key);
+          if (this.facts!.families.has(e.key)) this.inFamily(it, this.facts!.children.keys(), e.index, e.key);
         } else if (!this.facts!.children.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no attached child ${e.key}`);
         return BOOL;
       }
@@ -1924,12 +1929,6 @@ function constantKey(e: A.Expr, resolutions: Map<string, Resolution>): string | 
   const r = resolutions.get(e.id);
   if (r?.k === 'ctor') return `${r.union}.${r.ctor}`;
   return null;
-}
-
-/** The indices of a timer family: late with late1 and late2 armed is 1..2 (S49). */
-function timerFamily(keys: Set<string>, name: string): { lo: number; hi: number } | undefined {
-  const ix = [...keys].filter((k) => memberOf(k, name)).map((k) => Number(k.slice(name.length)));
-  return ix.length ? { lo: Math.min(...ix), hi: Math.max(...ix) } : undefined;
 }
 
 /** Whether a key is a member of a family: f1 of f (S49). */
