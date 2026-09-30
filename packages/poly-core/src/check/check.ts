@@ -558,8 +558,10 @@ class Checker {
       else {
         if (!handled(this.machine!, spec.onComplete)) this.err('PL6101', s, `completion action ${spec.onComplete} has no handler, so the runtime cannot deliver it; add a handler (S40)`);
         this.completionParams(act, child);
+        // S51: a family's completion takes every key of the family, not its name (S49).
         const keys = this.facts!.childKeyDomains.get(spec.onComplete) ?? [];
-        if (!keys.includes(spec.key)) this.facts!.childKeyDomains.set(spec.onComplete, [...keys, spec.key]);
+        const mine = s.index ? [...this.facts!.children.keys()].filter((k) => memberOf(k, spec.key)) : [spec.key];
+        this.facts!.childKeyDomains.set(spec.onComplete, [...keys, ...mine.filter((k) => !keys.includes(k))]);
       }
     }
     if (spec.onParentTerminal) {
@@ -604,7 +606,8 @@ class Checker {
   /** `signal k -> A(args)` (PT6.4): k is a child this machine spawns, A an action of that child with a handler. */
   private signal(s: A.IntentStmt, scope: Scope): void {
     const key = s.extra[0];
-    const spec = this.facts!.children.get(key);
+    // S49: `signal f[i]` names a member of the family f; they share one machine and wiring.
+    const spec = s.index ? [...this.facts!.children.values()].find((c) => memberOf(c.key, key)) : this.facts!.children.get(key);
     if (!spec) { this.err('PL1001', s, `signal ${key}: ${this.machine!.name} spawns no attached child ${key}`); for (const a of s.args) this.typeOf(a.value, scope); return; }
     const child = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec.machine.split('.').pop());
     const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
@@ -1110,7 +1113,7 @@ class Checker {
       case 'MapUpdate': {
         // S49: entry writes to distinct constant keys of one map compose, as the copies of a loop write them;
         // a whole write, or two writes to one entry, is still written twice.
-        const k = s.kind === 'MapUpdate' ? constantKey(s.key) : null;
+        const k = s.kind === 'MapUpdate' ? constantKey(s.key, this.facts!.resolutions) : null;
         const slot = k === null ? s.field : `${s.field}[${k}]`;
         const clash = [...p.written.entries()].find(([w]) => w === s.field || w === slot || (k === null && w.startsWith(`${s.field}[`)));
         if (clash) this.errOnce('PL2102', s, `${s.field}' is written twice on one path (first at line ${clash[1].span?.line ?? '?'}) (PS2.4)`);
@@ -1589,10 +1592,18 @@ function loopStatement(b: A.Stmt): boolean {
 }
 
 /** A map key that is a literal, as a loop copy writes it (S49). */
-function constantKey(e: A.Expr): string | null {
+function constantKey(e: A.Expr, resolutions: Map<string, Resolution>): string | null {
   if (e.kind === 'Int') return String(e.value);
   if (e.kind === 'String') return JSON.stringify(e.value);
+  // S55: a constructor is a constant key, written bare or with its type.
+  const r = resolutions.get(e.id);
+  if (r?.k === 'ctor') return `${r.union}.${r.ctor}`;
   return null;
+}
+
+/** Whether a key is a member of a family: f1 of f (S49). */
+function memberOf(key: string, family: string): boolean {
+  return key.startsWith(family) && /^\d+$/.test(key.slice(family.length));
 }
 
 /** An enclosing loop: its variable and the indices it takes (S49). */

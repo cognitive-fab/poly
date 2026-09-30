@@ -97,6 +97,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const h = handlers.get(a.name)!;
     const hcx: Cx = { ...base, mode: 'handler', stateVar: 'model', dataVar: 'proposal' };
     const body = stmts(h.body, hcx, '      ', emitOpts);
+    // S55: each map the handler writes entry by entry gathers its entries in an accumulator.
+    for (const f of mapUpdated(h.body)) body.unshift(`      let __m_${f} = model[${JSON.stringify(f)}];`);
     const written = mayWrite(h.body, layout);
     const rest = layout.flatKeys.filter((k) => !written.has(k));
     if (rest.length && !emitOpts.dropFrame) body.push(`      unchanged(${rest.map((k) => JSON.stringify(k)).join(', ')});`);
@@ -239,6 +241,21 @@ function effectsModule(m: A.Machine, lowerable: A.Action[], handlers: Map<string
     `module.exports = { effects };`,
     ``,
   ].join('\n');
+}
+
+/** The fields a handler writes with `m' = m with [k] = v`, anywhere in its body. */
+function mapUpdated(body: A.Stmt[]): Set<string> {
+  const out = new Set<string>();
+  const walk = (b: A.Stmt[]): void => {
+    for (const s of b) {
+      if (s.kind === 'MapUpdate') out.add(s.field);
+      if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); }
+      if (s.kind === 'Match') for (const a of s.arms) walk(a.body);
+      if (s.kind === 'For') walk(s.body);
+    }
+  };
+  walk(body);
+  return out;
 }
 
 function emitsAny(body: A.Stmt[]): boolean {

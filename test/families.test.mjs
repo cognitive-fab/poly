@@ -106,3 +106,31 @@ test('S49: under polyrun, Plan(2) spawns t1 and t2 and arms late1 and late2', as
     await rt.close();
   }
 });
+
+test('polywatch: a completion wired to a family takes the family\'s keys as its childKey domain in the lowered contract', () => {
+  const [, dispatch] = build(FAMILIES, 'families-domain');
+  assert.deepEqual(dispatch.lowered.contract.dataDomain.Landed.childKey, ['t1', 't2']);
+});
+
+test('polywatch: signal t[i] names one member of the family', async () => {
+  const src = SRC.replace('      marks\' = marks with [i] = true', '      marks\' = marks with [i] = true\n      signal t[i] -> Go()');
+  assert.deepEqual(codes(src), []);
+  const r = await checkFile(write('signal-family.poly', src), { root: OUT });
+  assert.ok(!r.machines.flatMap((m) => m.diagnostics).some((d) => d.code === 'PL2501'), render(r));
+});
+
+test('polywatch: an entry write outside the loop and the loop\'s entry writes both land', async () => {
+  const src = SRC.replace('    trucks\' = n\n', '    trucks\' = n\n    marks\' = marks with [0] = true\n');
+  assert.deepEqual(codes(src), []);
+  const r = await checkFile(write('map-both.poly', src), { root: OUT });
+  assert.ok(!r.machines.flatMap((m) => m.diagnostics).some((d) => d.code === 'PL2501'), render(r));
+});
+
+test('S55: entry writes combine only for distinct constant keys: literals, constructors, or loop indices', () => {
+  const m = (body) => `module t\nenum Door { Open, Shut }\nmachine M {\n  state {\n    k : 0..1 = 0\n    d : map<Door, 0..1> = { Open: 0, Shut: 0 }\n  }\n  action Go(x: Door)\n  on Go(x) {\n    require k == 0 else reject "done"\n    k' = 1\n${body}\n  }\n}\n`;
+  assert.deepEqual(codes(m('    d\' = d with [Open] = 1\n    d\' = d with [Shut] = 1')), [], 'two constructors');
+  assert.deepEqual(codes(m('    d\' = d with [Open] = 1\n    d\' = d with [Door.Open] = 0')), ['PL2102'], 'one constructor twice');
+  assert.deepEqual(codes(m('    d\' = d with [x] = 1\n    d\' = d with [Shut] = 1')), ['PL2102'], 'a parameter key with another entry');
+  assert.deepEqual(codes(m('    d\' = d with [x] = 1')), [], 'a parameter key alone');
+  assert.deepEqual(codes(m('    d\' = { Open: 1, Shut: 1 }\n    d\' = d with [Shut] = 0')), ['PL2102'], 'a whole write with an entry write');
+});

@@ -225,8 +225,6 @@ export interface EmitOptions {
    * rejected step emits nothing, though the kernel calls the mapper on accepted steps only.
    */
   effects?: boolean;
-  /** S49: map fields a loop writes entry by entry; their writes gather in `__m_<field>` and land after the loop. */
-  mapAcc?: Set<string>;
   /** Test-only fault `unnamed-reject`: the first reject of the acceptors loses its reason (S47). */
   unnamedReject?: { done: boolean };
   /** Test-only fault `poison-step`: the first acceptor throws before it writes (S47). */
@@ -287,13 +285,14 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
     }
     case 'MapUpdate': {
       const l = cx.layout.byField.get(s.field)!;
-      if (opts.mapAcc?.has(s.field)) {
-        // S49: one entry per copy of the loop, onto the entries the earlier copies wrote.
+      // S55: entry writes to distinct keys compose, so each builds on the entries written before it.
+      if (!opts.effects) {
         const acc = `__m_${s.field}`;
         const array = l.ty.k === 'map' && l.ty.array;
-        return array
-          ? [`${ind}{ const __key = ${expr(s.key, cx)}; const __val = ${expr(s.value, cx)}; ${acc} = ${acc}.map((__x, __i) => (__i === __key ? __val : __x)); }`]
-          : [`${ind}${acc} = { ...${acc}, [${expr(s.key, cx)}]: ${expr(s.value, cx)} };`];
+        const upd = array
+          ? `{ const __key = ${expr(s.key, cx)}; const __val = ${expr(s.value, cx)}; ${acc} = ${acc}.map((__x, __i) => (__i === __key ? __val : __x)); }`
+          : `${acc} = { ...${acc}, [${expr(s.key, cx)}]: ${expr(s.value, cx)} };`;
+        return [`${ind}${upd}`, `${ind}next[${q(s.field)}] = ${acc};`];
       }
       const m = `model[${q(s.field)}]`;
       const k = expr(s.key, cx);
@@ -306,12 +305,12 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
     case 'For': {
       // S49: `for i in lo..n` runs i from lo while i <= n; n is bounded by its type, so this is the unrolled loop.
       const v = `l_${s.var}`;
+      // The handler's map accumulators are declared at its top; a loop that runs no copy still writes its maps,
+      // so the frame the lowering derives (the field is written) holds on every path.
       const maps = opts.effects ? [] : [...new Set(s.body.filter((b): b is A.MapUpdate => b.kind === 'MapUpdate').map((b) => b.field))];
-      const inner: EmitOptions = { ...opts, mapAcc: new Set([...(opts.mapAcc ?? []), ...maps]) };
       return [
-        ...maps.map((f) => `${ind}let __m_${f} = model[${q(f)}];`),
         `${ind}for (let ${v} = ${s.lo}; ${v} <= ${expr(s.hi, cx)}; ${v}++) {`,
-        ...stmts(s.body, cx, ind + '  ', inner),
+        ...stmts(s.body, cx, ind + '  ', opts),
         `${ind}}`,
         ...maps.map((f) => `${ind}next[${q(f)}] = __m_${f};`),
       ];
