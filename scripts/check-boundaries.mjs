@@ -7,7 +7,7 @@
 //    its own files and @cognitive-fab/sam-pattern (to drive a lowered module).
 //    From @poly/core it may import types only (`import type`), which the
 //    compiler erases under verbatimModuleSyntax. Nothing from @poly/lang,
-//    @poly/lower or @poly/check, ever.
+//    @poly/lower, @poly/embed or @poly/check, ever.
 // 2. No language-model call on a check or decision path. No package may import
 //    a model SDK, and no check package may call fetch or open a socket.
 //
@@ -51,7 +51,7 @@ export function violationsOf(pkg, file, text) {
     if (pkg === 'poly-ref') {
       const relativeSpec = imp.spec.startsWith('./') || imp.spec.startsWith('../');
       if (relativeSpec) {
-        if (imp.spec.includes('poly-core') || imp.spec.includes('poly-lang') || imp.spec.includes('poly-lower') || imp.spec.includes('poly-check')) {
+        if (imp.spec.includes('poly-core') || imp.spec.includes('poly-lang') || imp.spec.includes('poly-lower') || imp.spec.includes('poly-check') || imp.spec.includes('poly-embed')) {
           v.push(`${file}:${imp.line} reaches into another package by relative path '${imp.spec}'`);
         }
         continue;

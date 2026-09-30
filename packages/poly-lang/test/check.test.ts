@@ -41,7 +41,8 @@ test('each error source raises exactly the code it names', () => {
   // PL1203 cannot: only policy inputs are optional, and policies are lowered from M5.
   // PL2501 and PL2001 are toolchain faults (S20), tested by tv.test.mjs and forbidden by standing.test.mjs.
   // PL0201 is raised by poly fix on a stale fix, never by a source (S70), tested by fixes.test.mjs.
-  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201').map(([c]) => c);
+  // PL0301 is raised by poly-embed on a .ts source (PT2.5, S71), tested by embed.test.mjs.
+  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301').map(([c]) => c);
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 

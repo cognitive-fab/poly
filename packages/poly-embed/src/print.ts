@@ -1,0 +1,287 @@
+// The printer (PT2.5, S71): any AST as the embedded TypeScript surface. Reading the text back with read.ts
+// gives the same AST, so the same digest (PT1.4); the test runs over every conformance source.
+//
+// Every AST node has exactly one embedded form, in the table of PT2.5 and the appendix of plan-m2. A name
+// is a property of the arrow's parameter, `$.x`. Operators keep TypeScript's precedence, so the printer
+// parenthesises by TypeScript's table, not poly's (PS12): the tree TypeScript parses is the AST printed.
+import type * as A from '@poly/core';
+
+const q = (s: string) => JSON.stringify(s);
+const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/** The functions of PT2.2 an expression may call by name; any other callee prints as call('f', …). */
+export const FUNCTIONS = new Set(['count', 'before', 'rejected', 'init', 'sum', 'all', 'any', 'unknown']);
+
+// TypeScript's binary precedence (higher binds tighter); every operator here is left-associative.
+const TS_PREC: Record<string, number> = { '*': 12, '/': 12, '%': 12, '+': 11, '-': 11, '<': 9, '<=': 9, '>': 9, '>=': 9, '==': 8, '!=': 8, '&&': 4, '||': 3 };
+const TS_OP: Record<string, string> = { '==': '===', '!=': '!==' };
+
+class Printer {
+  readonly used = new Set<string>();
+
+  private use(name: string): string { this.used.add(name); return name; }
+
+  module(m: A.Module): string {
+    const decls = m.decls.map((d) => this.decl(d, '  '));
+    const body = `export default ${this.use('module')}(${q(m.name)}, [\n${decls.map((d) => `  ${d},\n`).join('')}]);\n`;
+    return `import { ${[...this.used].sort().join(', ')} } from '@cognitive-fab/poly/embed';\n\n${body}`;
+  }
+
+  private decl(d: A.Decl, ind: string): string {
+    switch (d.kind) {
+      case 'EnumDecl': return `${this.use('enumType')}(${q(d.name)}, [${d.members.map(q).join(', ')}])`;
+      case 'TypeDecl': return `${this.use('union')}(${q(d.name)}, { ${d.ctors.map((c) => `${this.key(c.name)}: ${this.fields(c.fields)}`).join(', ')} })`;
+      case 'RecordDecl': return `${this.use('record')}(${q(d.name)}, ${this.fields(d.fields)})`;
+      case 'Use': return `${this.use('use')}(${q(d.path.join('.'))})`;
+      case 'Machine': return this.machine(d, ind);
+      case 'Configuration': return this.configuration(d, ind);
+    }
+  }
+
+  private key(name: string): string { return IDENT.test(name) ? name : q(name); }
+
+  private fields(fs: A.PayloadField[]): string {
+    return fs.length ? `{ ${fs.map((f) => `${this.key(f.name)}: ${this.type(f.type)}`).join(', ')} }` : '{}';
+  }
+
+  type(t: A.TypeExpr): string {
+    this.use('t');
+    switch (t.kind) {
+      case 'TBool': return 't.bool';
+      case 'TInt': return 't.int';
+      case 'TString': return 't.string';
+      case 'TRange': return `t.range(${t.lo}, ${t.hi})`;
+      case 'TName': return `t.named(${q(t.name)})`;
+      case 'TMap': return `t.map(${this.type(t.key)}, ${this.type(t.value)})`;
+      case 'TRef': return `t.ref(${q(t.machine.join('.'))})`;
+    }
+  }
+
+  private literal(l: A.Literal): string {
+    switch (l.kind) {
+      case 'Int': return String(l.value);
+      case 'Bool': return String(l.value);
+      case 'String': return q(l.value);
+      case 'Name': return `${this.use('name')}(${q(l.name)})`;
+    }
+  }
+
+  private domain(d: A.Domain): string {
+    return d.kind === 'DomainSet' ? `[${d.values.map((v) => this.literal(v)).join(', ')}]` : `{ lo: ${d.lo}, hi: ${d.hi} }`;
+  }
+
+  private param(p: A.Param): string {
+    let s = this.type(p.type);
+    if (p.check) {
+      const mode = p.check.mode ? `, ${q(p.check.mode)}` : '';
+      s += p.check.domain.kind === 'DomainSet' ? `.check(${this.domain(p.check.domain)}${mode})` : `.check(${p.check.domain.lo}, ${p.check.domain.hi}${mode})`;
+    }
+    return s;
+  }
+
+  private params(ps: A.Param[]): string {
+    return ps.length ? `{ ${ps.map((p) => `${this.key(p.name)}: ${this.param(p)}`).join(', ')} }` : '{}';
+  }
+
+  /** An arrow whose body is an expression; an object literal there would read as a block. */
+  private arrow(e: A.Expr): string { return `($) => ${e.kind === 'MapLit' ? `(${this.expr(e, 0)})` : this.expr(e, 0)}`; }
+
+  private machine(m: A.Machine, ind: string): string {
+    const inner = ind + '  ';
+    const parts: string[] = [];
+    if (m.service) parts.push(`${inner}service: true,`);
+    if (m.version !== null) parts.push(`${inner}version: ${m.version},`);
+    parts.push(`${inner}state: {${m.fields.length ? '\n' + m.fields.map((f) => `${inner}  ${this.key(f.name)}: ${this.field(f)},\n`).join('') + inner : ''}},`);
+    parts.push(`${inner}items: [${m.items.length ? '\n' + m.items.map((i) => `${inner}  ${this.item(i, inner + '  ')},\n`).join('') + inner : ''}],`);
+    return `${this.use('machine')}(${q(m.name)}, {\n${parts.join('\n')}\n${ind}})`;
+  }
+
+  private field(f: A.Field): string {
+    const opts: string[] = [];
+    if (f.check) {
+      opts.push(`check: ${this.domain(f.check.domain)}`);
+      if (f.check.mode) opts.push(`mode: ${q(f.check.mode)}`);
+    }
+    if (f.flag) opts.push(`flag: ${q(f.flag)}`);
+    return `${this.use('field')}(${this.type(f.type)}, ${this.arrow(f.init)}${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
+  }
+
+  private item(i: A.MachineItem, ind: string): string {
+    switch (i.kind) {
+      case 'Terminal': return `${this.use('terminal')}(${this.arrow(i.expr)})`;
+      case 'Action': return `${this.use('action')}(${q(i.name)}, ${this.params(i.params)})`;
+      case 'Handler': return `${this.use('on')}(${q(i.action)}, ($) => ${this.stmts(i.body, ind)}${i.params ? `, [${i.params.map(q).join(', ')}]` : ''})`;
+      case 'Guard': return `${this.use('guard')}(${this.arrow(i.cond)}, ${q(i.reason)})`;
+      case 'Property': return this.property(i);
+      case 'Liveness': return this.liveness(i);
+      case 'EffectDecl': return `${this.use('effect')}(${q(i.name)}, ${this.params(i.params)}, [${i.items.map((x) => this.effItem(x)).join(', ')}])`;
+    }
+  }
+
+  private property(p: A.Property): string {
+    const fn = { invariant: 'invariant', step: 'stepProperty', reject: 'rejectProperty', path: 'pathProperty', compose: 'composeInvariant' }[p.form];
+    return `${this.use(fn)}(${q(p.name)}, ${this.arrow(p.expr)})`;
+  }
+
+  private liveness(l: A.Liveness): string {
+    const goal = l.from ? `{ from: ${this.arrow(l.from)}, to: ${this.arrow(l.expr)} }` : `{ eventually: ${this.arrow(l.expr)} }`;
+    const opts: string[] = [];
+    if (l.quant) opts.push(`${l.quant.q}: [${q(l.quant.var)}, ${q(l.quant.group)}]`);
+    if (l.fair) opts.push(`fair: [${l.fair.map((g) => `[${g.members.map((m) => q(fairMember(m))).join(', ')}]`).join(', ')}]`);
+    return `${this.use('liveness')}(${q(l.name)}, ${goal}${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
+  }
+
+  private effItem(x: A.EffectItem): string {
+    switch (x.kind) {
+      case 'EffKind': return `${this.use('kind')}(${q(x.value)})`;
+      case 'EffLabels': return `${this.use('labels')}([${x.labels.map(q).join(', ')}])`;
+      case 'EffClass': return `${this.use('cls')}(${q(x.value)})`;
+      case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
+      // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
+      case 'EffOutcome': return `${this.use(x.outcome)}(${q(x.action)}, ${x.args.some((a) => readsName(a.value)) ? `($) => (${this.args(x.args)})` : this.args(x.args)})`;
+    }
+  }
+
+  private configuration(c: A.Configuration, ind: string): string {
+    const inner = ind + '  ';
+    const parts: string[] = [];
+    parts.push(`${inner}instances: [${c.instances.map((i) => this.instance(i)).join(', ')}],`);
+    parts.push(`${inner}inputs: [${c.inputs.map((r) => q(inputRef(r))).join(', ')}],`);
+    if (c.bounds) parts.push(`${inner}bounds: { transit: ${c.bounds.transit}${c.bounds.instances !== null ? `, instances: ${c.bounds.instances}` : ''} },`);
+    parts.push(`${inner}properties: [${c.properties.length ? '\n' + c.properties.map((p) => `${inner}  ${p.kind === 'Property' ? this.property(p) : this.liveness(p)},\n`).join('') + inner : ''}],`);
+    return `${this.use('configuration')}(${q(c.name)}, {\n${parts.join('\n')}\n${ind}})`;
+  }
+
+  private instance(i: A.ConfigInstance): string {
+    const opts: string[] = [];
+    if (i.count !== null) opts.push(`count: ${i.count}`);
+    if (i.init.length) opts.push(`init: ($) => ({ ${i.init.map((x) => `${this.key(x.field)}: ${this.expr(x.value, 0)}`).join(', ')} })`);
+    return `${this.use('instance')}(${q(i.name)}, ${q(i.machine.join('.'))}${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
+  }
+
+  // ── statements ───────────────────────────────────────────────────────────
+  private stmts(body: A.Stmt[], ind: string): string {
+    if (!body.length) return '[]';
+    return `[\n${body.map((s) => `${ind}  ${this.stmt(s, ind + '  ')},\n`).join('')}${ind}]`;
+  }
+
+  private stmt(s: A.Stmt, ind: string): string {
+    switch (s.kind) {
+      case 'Require': return `${this.use('require')}(${this.expr(s.cond, 0)}, ${q(s.reason)})`;
+      case 'Reject': return `${this.use('reject')}(${q(s.reason)})`;
+      case 'Let': return `${this.use('let_')}(${q(s.name)}, ${this.expr(s.expr, 0)})`;
+      case 'Assign': return `${this.use('set')}(${q(s.field)}, ${this.expr(s.expr, 0)})`;
+      case 'MapUpdate': return `${this.use('setEntry')}(${q(s.field)}, ${this.expr(s.key, 0)}, ${this.expr(s.value, 0)}${s.base !== s.field ? `, ${q(s.base)}` : ''})`;
+      case 'If': return `${this.use('when')}(${this.expr(s.cond, 0)}, ${this.stmts(s.then, ind)}${s.else ? `, ${this.stmts(s.else, ind)}` : ''})`;
+      case 'Match': return `${this.use('match')}(${this.expr(s.scrutinee, 0)}, [${s.arms.length ? '\n' + s.arms.map((a) => `${ind}  ${this.use('arm')}(${this.pattern(a.pattern)}, ${this.stmts(a.body, ind + '  ')}),\n`).join('') + ind : ''}])`;
+      case 'For': return `${this.use('forEach')}(${q(s.var)}, ${s.lo}, ${this.expr(s.hi, 0)}, ${this.stmts(s.body, ind)})`;
+      case 'Intent': return this.intent(s);
+    }
+  }
+
+  pattern(p: A.Pattern): string {
+    if (p.kind === 'PWild') return `'_'`;
+    const fs = p.fields.map((f) => `${this.key(f.name)}: ${f.bind !== null ? `${this.use('bind')}(${q(f.bind)})` : this.literal(f.literal!)}`);
+    return `${this.use('pattern')}(${q(p.ctor)}${fs.length ? `, { ${fs.join(', ')} }` : ''})`;
+  }
+
+  private args(args: A.NamedArg[]): string {
+    if (args.length && args.every((a) => a.name !== null)) return `{ ${args.map((a) => `${this.key(a.name!)}: ${this.expr(a.value, 0)}`).join(', ')} }`;
+    return `[${args.map((a) => (a.name === null ? this.expr(a.value, 0) : `${this.use('named')}(${q(a.name)}, ${this.expr(a.value, 0)})`)).join(', ')}]`;
+  }
+
+  private intent(s: A.IntentStmt): string {
+    const idx = s.index ? `, ${this.expr(s.index, 0)}` : '';
+    switch (s.op) {
+      case 'emit': return `${this.use('emit')}(${q(s.target)}, ${this.args(s.args)})`;
+      case 'after': return `${this.use('after')}(${q(s.modifier!)}, ${q(s.target)}, ${this.args(s.args)}, ${q(s.as!)}${idx})`;
+      case 'cancel': return `${this.use('cancel')}(${q(s.target)}${idx})`;
+      case 'send': return `${this.use('send')}(${this.expr(s.to!, 0)}, ${q(s.target)}, ${this.args(s.args)}${s.as ? `, ${q(s.as)}` : ''})`;
+      case 'signal': return `${this.use('signal')}(${q(s.extra[0])}, ${s.index ? this.expr(s.index, 0) : 'null'}, ${q(s.target)}, ${this.args(s.args)})`;
+      case 'spawn': {
+        const opts: string[] = [];
+        if (s.index) opts.push(`index: ${this.expr(s.index, 0)}`);
+        if (s.modifier === 'detached') opts.push('detached: true');
+        const pair = (tag: string) => { const i = s.extra.indexOf(tag); return i >= 0 ? s.extra[i + 1] : null; };
+        const create = pair('create');
+        if (create) opts.push(`create: [${q(create)}, ${this.args(s.args)}]`);
+        const complete = pair('complete');
+        if (complete) opts.push(`complete: ${q(complete)}`);
+        const parentTerminal = pair('parent-terminal');
+        if (parentTerminal) opts.push(`parentTerminal: ${q(parentTerminal)}`);
+        return `${this.use('spawn')}(${q(s.target)}, ${q(s.as!)}${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
+      }
+    }
+  }
+
+  // ── expressions ──────────────────────────────────────────────────────────
+  /** `ctx` is the TypeScript precedence the context requires; a lower one is parenthesised. */
+  expr(e: A.Expr, ctx: number): string {
+    switch (e.kind) {
+      case 'Int': return e.value < 0 ? `(${e.value})` : String(e.value);
+      case 'Bool': return String(e.value);
+      case 'String': return q(e.value);
+      case 'Name': return IDENT.test(e.name) ? `$.${e.name}` : `$[${q(e.name)}]`;
+      case 'Primed': return `${this.use('primed')}(${q(e.name)})`;
+      case 'Member': return `${this.postfixable(e.object)}.${e.prop}`;
+      case 'Index': return `${this.postfixable(e.object)}[${e.index.kind === 'Star' ? this.use('ALL') : this.expr(e.index, 0)}]`;
+      case 'Star': return this.use('ALL');
+      case 'Call': return FUNCTIONS.has(e.callee) ? `${this.use(e.callee)}(${e.args.map((a) => this.expr(a, 0)).join(', ')})` : `${this.use('call')}(${[q(e.callee), ...e.args.map((a) => this.expr(a, 0))].join(', ')})`;
+      case 'Unary': {
+        // `- -x` would read as a decrement, and `!` binds tighter than any binary operator.
+        const arg = e.arg.kind === 'Unary' || e.arg.kind === 'Binary' || (e.arg.kind === 'Int' && e.arg.value < 0) ? `(${this.expr(e.arg, 0)})` : this.expr(e.arg, 15);
+        return `${e.op}${arg}`;
+      }
+      case 'Binary': {
+        if (e.op === 'implies') return `${this.use('implies')}(${this.expr(e.left, 0)}, ${this.expr(e.right, 0)})`;
+        const p = TS_PREC[e.op];
+        const text = `${this.expr(e.left, p)} ${TS_OP[e.op] ?? e.op} ${this.expr(e.right, p + 1)}`;
+        return p < ctx ? `(${text})` : text;
+      }
+      case 'Is': return `${this.use('is')}(${[this.expr(e.expr, 0), ...e.ctors.map(q)].join(', ')})`;
+      case 'In': return `${this.use('isIn')}(${this.expr(e.expr, 0)}, [${e.set.map((x) => this.expr(x, 0)).join(', ')}])`;
+      case 'CtorExpr': return `${this.use('ctor')}(${q(e.ctor)}, ${e.fields.length ? `{ ${e.fields.map((f) => `${this.key(f.name)}: ${this.expr(f.value, 0)}`).join(', ')} }` : '{}'})`;
+      case 'MapLit': return `{ ${e.entries.map((x) => `${this.mapKey(x.key)}: ${this.expr(x.value, 0)}`).join(', ')} }`;
+      case 'ArrayLit': return `[${e.items.map((x) => this.expr(x, 0)).join(', ')}]`;
+      case 'Spawned': return `${this.use('spawned')}(${e.index ? `$.${e.key}[${this.expr(e.index, 0)}]` : `$.${e.key}`})`;
+      case 'Quant': return `${this.use(e.q)}(${q(e.var)}, ${q(e.group)}, ${this.arrow(e.body)})`;
+    }
+  }
+
+  /** The object of a member access or an index: a primary, or parenthesised. */
+  private postfixable(e: A.Expr): string {
+    const s = this.expr(e, 0);
+    return e.kind === 'Unary' || e.kind === 'Binary' || e.kind === 'MapLit' || (e.kind === 'Int') ? `(${s})` : s;
+  }
+
+  /** PT2.5: an identifier key is a name, a numeric key an int, a string key a string, `[e]` any other. */
+  private mapKey(k: A.Expr): string {
+    if (k.kind === 'Name' && IDENT.test(k.name)) return k.name;
+    if (k.kind === 'Int' && k.value >= 0) return String(k.value);
+    if (k.kind === 'String') return q(k.value);
+    return `[${this.expr(k, 0)}]`;
+  }
+}
+
+/** Whether an expression names something, so that it needs the arrow's `$`. */
+function readsName(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  if (Array.isArray(e)) return e.some(readsName);
+  const o = e as { kind?: string };
+  if (o.kind === 'Name' || o.kind === 'Spawned') return true;
+  return Object.entries(o).some(([k, v]) => k !== 'span' && readsName(v));
+}
+
+function fairMember(m: A.FairGroup['members'][number]): string {
+  const at = m.input ? `${m.input.instance}${m.input.index === null ? '' : `[${m.input.index}]`}.` : '';
+  return `${at}${m.action}${m.perValue ? '(*)' : ''}`;
+}
+
+function inputRef(r: A.InputRef): string {
+  return `${r.instance}${r.index === null ? '' : `[${r.index}]`}.${r.action}`;
+}
+
+/** A module as embedded TypeScript (PT2.5). */
+export function printModule(m: A.Module): string {
+  return new Printer().module(m);
+}

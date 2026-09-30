@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parse } from '@poly/lang';
+import { readEmbedded } from '@poly/embed';
 import { digest, type Configuration, type Machine, type Module } from '@poly/core';
 import { alpha, buildConfiguration, buildMachine, detachedAlone, evaluate, flatten, flatValue, globalView, isTerminal, loadLoweredModule, valuesOf, type RMachine, type State } from '@poly/ref';
 
@@ -108,7 +109,8 @@ function offers(l: Lowered): { action: string; data: Flat }[] {
 }
 
 export async function runWitness(spec: WitnessSpec): Promise<void> {
-  const parsed = parse(readFileSync(spec.source, 'utf8'));
+  const text = readFileSync(spec.source, 'utf8');
+  const parsed = spec.source.endsWith('.ts') ? readEmbedded(text, spec.source) : parse(text);
   if (!parsed.module) throw new Error(`${spec.source} does not parse: ${parsed.diagnostics.map((d) => d.message).join('; ')}`);
   const moduleDigest = digest(parsed.module);
   if (spec.configuration) return walkConfiguration(spec, parsed.module, moduleDigest);

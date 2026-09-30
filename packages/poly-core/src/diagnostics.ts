@@ -29,6 +29,7 @@ interface CodeInfo {
 export const CODES: Record<string, CodeInfo> = {
   PL0001: { name: 'SYNTAX', stage: 'parse', severity: 'error' },
   PL0201: { name: 'STALE_FIX', stage: 'parse', severity: 'error' },
+  PL0301: { name: 'OUTSIDE_EMBEDDED_SUBSET', stage: 'parse', severity: 'error' },
   PL0901: { name: 'NOT_IN_MILESTONE', stage: 'types', severity: 'error' },
   PL1001: { name: 'UNKNOWN_NAME', stage: 'types', severity: 'error' },
   PL1002: { name: 'DUPLICATE_DECLARATION', stage: 'types', severity: 'error' },

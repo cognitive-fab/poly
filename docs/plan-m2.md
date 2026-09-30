@@ -108,6 +108,8 @@ S68 to S80 are ruled in `decisions-m2.md` (24ee306, 1e1b98b), and their spec tex
 
 - **S83. A second spawn of one detached key (open, built as proposed).** S60 gives each key one address, `<parent>/<k>`, and says nothing of a parent that spawns the same key again while that instance exists. Alone the check cannot see it: both spawns yield the key's one symbolic address. *Proposal:* in a configuration a second spawn of a live key is `PL5101 CHILDKEY_COLLISION`, the code attached children already use, reported by the configuration stage with its witness. Until ruled, poly-ref stops the exploration with an error that names the key and the address, so the verdict is `ERROR`, never clean. It is checked before the instance bound, since the spawn makes no new instance.
 
+- **S84. tsc refuses an equality with an object literal (open, built as ruled).** PT2.5 writes `==` as `===` and a record or map literal as an object literal, so `box != { size: Small, count: 0 }` prints as `$.box !== { size: $.Small, count: 0 }`, which tsc rejects (`TS2839`: objects compare by reference). The reader accepts it and the AST is right, but such a module does not type-check. It happens in one conformance source, `records.poly`. *Proposal:* a record or map literal in an expression is `lit({ … })`, so tsc sees a call; the object literal keeps its role everywhere a literal is not an operand (initial values, arguments). Until ruled, the form is the object literal, and the test of the printed sources accepts `TS2839` there and nothing else.
+
 Step 5 reads PS13.3 and S60 as follows, each recorded here so the review can check it. The group of detached instances is named after the child's machine (`Worker[*]`); its potential members are every address a spawn can make within `instances n`, breadth first from the declared instances, and a property reads the members that exist. The creation action is the child's first message: while it is in transit, no other message to that child is delivered. A detached spawn takes neither `on complete` nor `on parent terminal` wiring (PT6.4, PS7.5), and a family of detached children (`as k[i]`) is `PL0901` in M2. A field that may hold a child's address admits the marker object in the sealed shape (sam-pattern 2.2's union types), so polygraph explores the lowered parent with the unresolved marker, which behaves as one more distinct address, as S78 gives it alone.
 
 ## 8. Risks
@@ -116,6 +118,27 @@ Step 5 reads PS13.3 and S60 as follows, each recorded here so the review can che
 - **The embedded surface's "same digest" is strict.** Any difference in how the two front ends fill optional fields (a handler's written parameter list, a qualified constructor) breaks it. The corpus is written in both surfaces from the start, and the digest comparison runs in `npm test`.
 - **The random-order fix test can pass vacuously** if few fixes overlap. The source is chosen so that at least a third of the orders refuse some fix as stale, and the test counts both outcomes.
 - **Suite length.** Narrowing the fault sweep (step 1) comes first, so the new tests do not push `npm test` past its current length.
+
+## 9. Appendix: the embedded surface as built
+
+PT2.5's table is built as written. Where it leaves a form open, these are the forms `poly-embed` prints and reads (S71).
+
+| AST node | Embedded form, where PT2.5 leaves it open |
+|---|---|
+| a field's check clause | `field(T, init, { check: [v, …] })` for a set, `{ check: { lo, hi } }` for a range, with `mode` beside it |
+| a parameter's check mode | the last argument of `.check`: `t.int.check([10, 20], 'strict')`, `t.int.check(0, 9, 'disclosed')` |
+| a constructor name in a check set | `name('C')` |
+| an effect outcome's arguments that name something | an arrow that gives them `$`: `ok('A', ($) => ({ j: $.Job.Idle }))`; plain arguments otherwise |
+| a mixed positional and named argument list | an array, each named argument `named('p', e)` |
+| `f' = m with [k] = v` when `m` is not `f` | `setEntry('f', k, v, 'm')` |
+| `send … as n` | `send(r, 'A', args, 'n')` |
+| a configuration instance's initial values | `instance('x', 'M', { init: ($) => ({ f: e, … }) })` |
+| a fair member of a configuration, and an input | the text of the standalone form: `'order[*].Place(*)'`, `'inv.Query'` |
+| a read of a primed field (always `PL1202`) | `primed('f')`, so an erroneous program keeps its AST |
+| a call to a function PT2.2 does not name | `call('f', …)`, refused by the checker as in the standalone syntax |
+| a name that is not an identifier | `$['x']` |
+
+The printer parenthesises by TypeScript's precedence, not poly's, so the tree tsc parses is the AST printed. An arrow is `($) => e` or `() => e`, and an object literal as an arrow's body is parenthesised. The combinators' declarations are `packages/poly-embed/embed/index.d.ts`; a module imports them from `@cognitive-fab/poly/embed`, which a project maps with `paths` until the package is published.
 
 ## Conclusion
 

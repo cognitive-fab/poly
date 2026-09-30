@@ -1,0 +1,69 @@
+// The embedded surface's third hand-written case (PT2.5, S71): a machine with effects, timers and attached
+// children, whose twin workshop.ts is written in the embedded surface by hand. Both give one AST digest.
+module workshop
+
+enum JobStatus { Idle, Running, Done, Failed }
+type Part = Blank | Cut { length: 1..3 }
+
+machine Drill {
+  state { bit : 0..2 = 0 }
+  terminal bit == 2
+  action Load(bit: 1..2)
+  action Finish()
+  on Load(bit) { require bit > 0 else reject "no-bit"   bit' = bit }
+  on Finish { bit' = 2 }
+}
+
+machine Job {
+  state {
+    status : JobStatus = Idle
+    part   : Part      = Blank
+    tries  : 0..2      = 0
+    notes  : map<JobStatus, bool> = { Idle: false, Running: false, Done: false, Failed: false }
+  }
+  terminal status in { Done, Failed }
+
+  action Start(length: 1..3)
+  action Charged()
+  action Declined(code: string check { "declined" })
+  action Timeout(reason: string check { "late" } strict)
+  action Drilled()
+
+  on Start(length) {
+    require status == Idle else reject "not-idle"
+    require !(tries >= 2) else reject "too-many"
+    status' = Running
+    part' = Cut { length: length }
+    tries' = tries + 1
+    notes' = notes with [Running] = true
+    emit charge(amount: length * 10)
+    after 5m -> Timeout(reason: "late") as watchdog
+    spawn Drill as drill -> Load(bit: 1) on complete -> Drilled
+  }
+  on Charged {
+    require status == Running else reject "not-running"
+    require !notes[Done] else reject "charged"
+    match part {
+      Cut { length: 3 } => { notes' = notes with [Done] = true   cancel watchdog }
+      Cut { length: n } => { require n < 3 else reject "long"   notes' = notes with [Done] = true   signal drill -> Finish() }
+      Blank => reject "blank"
+    }
+  }
+  on Declined(code) { require status == Running else reject "not-running"   status' = Failed   cancel watchdog }
+  on Timeout(reason) { status' = Failed }
+  on Drilled { require status == Running else reject "not-running"   status' = Done }
+
+  effect charge(amount: int) {
+    kind "workshop.charge"
+    labels { egress:external }
+    class compensable
+    retry { attempts 2, base 100ms, timeout 2s }
+    ok -> Charged()
+    failed -> Declined(code: "declined")
+  }
+
+  invariant tries-bounded: tries <= 2 && -tries <= 0
+  step property done-was-running: (post.status == Done) implies (pre.status == Running || pre.status == Done)
+  path property charge-once: count("workshop.charge") <= 1
+  compose invariant drill-loaded: drill spawned implies children.drill.bit >= 0
+}

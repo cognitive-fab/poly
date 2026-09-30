@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@poly/core": "0.0.0",
+    "@poly/embed": "0.0.0",
     "@poly/lang": "0.0.0",
     "@poly/lower": "0.0.0",
     "@poly/ref": "0.0.0",

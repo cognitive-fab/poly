@@ -12,6 +12,7 @@
     "packages/poly-lang",
     "packages/poly-lower",
     "packages/poly-ref",
+    "packages/poly-embed",
     "packages/poly-check",
     "vendor/sam-pattern",
     "vendor/polygraph"

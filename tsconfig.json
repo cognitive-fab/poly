@@ -5,6 +5,7 @@
     { "path": "packages/poly-lang" },
     { "path": "packages/poly-lower" },
     { "path": "packages/poly-ref" },
+    { "path": "packages/poly-embed" },
     { "path": "packages/poly-check" }
   ]
 }

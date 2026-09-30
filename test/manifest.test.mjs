@@ -44,7 +44,7 @@ test('a pattern that matches nothing, or matches a non-poly file, is refused', (
     writeFileSync(join(dir, 'poly.json'), '{ "poly": "1", "name": "x", "modules": ["src/*.poly"] }');
     assert.throws(() => loadProject(dir), /matches no file/);
     writeFileSync(join(dir, 'poly.json'), '{ "poly": "1", "name": "x", "modules": ["src/*"] }');
-    assert.throws(() => loadProject(dir), /not a \.poly file/);
+    assert.throws(() => loadProject(dir), /not a \.poly or \.ts module/);
     rmSync(join(dir, 'poly.json'));
     assert.throws(() => loadProject(dir), /no poly\.json/);
   } finally {

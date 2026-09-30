@@ -20,6 +20,9 @@
     },
     {
       "path": "../poly-ref"
+    },
+    {
+      "path": "../poly-embed"
     }
   ]
 }

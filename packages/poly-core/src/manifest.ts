@@ -89,7 +89,8 @@ export function loadProject(dir: string): { manifest: Manifest; files: string[] 
     const hits = every.filter((f) => re.test(f));
     if (hits.length === 0) throw new ManifestError(`${path}: module pattern "${pattern}" matches no file`);
     for (const h of hits) {
-      if (!h.endsWith('.poly')) throw new ManifestError(`${path}: module pattern "${pattern}" matches ${h}, which is not a .poly file`);
+      // S71: a module is a .poly file, or a .ts file in the embedded surface (PT2.5).
+      if (!h.endsWith('.poly') && !h.endsWith('.ts')) throw new ManifestError(`${path}: module pattern "${pattern}" matches ${h}, which is not a .poly or .ts module`);
       files.add(h);
     }
   }

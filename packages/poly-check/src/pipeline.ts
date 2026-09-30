@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse } from '@poly/lang';
+import { readEmbedded } from '@poly/embed';
 import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
@@ -144,7 +145,8 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const report: CheckReport = { file, module: null, verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
 
   // ── stage 0: parse, type, domains ─────────────────────────────────────
-  const parsed = parse(src);
+  // S71: a .ts module is read by poly-embed into the same AST; everything after this line is shared.
+  const parsed = file.endsWith('.ts') ? readEmbedded(src, file) : parse(src);
   report.diagnostics.push(...parsed.diagnostics);
   if (!parsed.module) return finish(report);
   const module = parsed.module;
