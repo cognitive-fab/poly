@@ -128,14 +128,20 @@ export async function translationValidate(module: Module, machineName: string, b
     // S78: the kernel resolves a detached child's marker at commit, and the comparison is after resolution. The
     // mapper reads the post-state as the acceptor wrote it, before the commit.
     const raw = got.post;
-    got.post = resolveChildren(raw, M) as Record<string, unknown>;
+    // Only the children this step creates are resolved: a marker written by any other step stays a marker, as
+    // the kernel leaves it, and the comparison sees it (review C6).
+    const created = new Set(e.label.effects.filter((x) => x.type === 'create').map((x) => (x as { key: string }).key));
+    got.post = resolveChildren(raw, M, created) as Record<string, unknown>;
     const want = e.label.verdict;
     if (got.verdict.kind !== want.kind || (want.kind === 'rejected' && got.verdict.reason !== want.reason)) {
       mismatch(`${what}: the lowered module gives ${verdictText(got.verdict)}, R_M gives ${verdictText(want)}`, where);
       continue;
     }
     const expected = e.outcome.state;
-    if (keyOf(alphaKey(alpha(got.post, M), M)) !== keyOf(alphaKey(expected, M))) {
+    // A lowered state α cannot read (an unresolved child marker, say) is a mismatch, not a crash (review C6).
+    let seen: string;
+    try { seen = keyOf(alphaKey(alpha(got.post, M), M)); } catch { seen = `unreadable ${stable(got.post)}`; }
+    if (seen !== keyOf(alphaKey(expected, M))) {
       mismatch(`${what}: next states differ through α: lowered ${stable(got.post)}, R_M ${stable(flatten(expected, M))}`, where);
       continue;
     }
@@ -149,7 +155,7 @@ export async function translationValidate(module: Module, machineName: string, b
     const wantE = e.label.effects.flatMap(loweredIntents);
     let gotE: unknown;
     try {
-      gotE = resolveChildren(mapper ? mapper(structuredClone(flatPre), e.label.action, structuredClone(flatData), structuredClone(raw), 'accepted') : [], M);
+      gotE = resolveChildren(mapper ? mapper(structuredClone(flatPre), e.label.action, structuredClone(flatData), structuredClone(raw), 'accepted') : [], M, created);
     } catch (err) {
       mismatch(`${what}: the effects mapper threw: ${(err as Error).message}; R_M emits ${stable(wantE)}`, where);
       continue;
@@ -288,12 +294,12 @@ function loweredIntents(x: Intent): unknown[] {
 }
 
 /** S78: every `{ $ref: "child", key }` marker replaced by the child's address, as the kernel does at commit. */
-function resolveChildren(v: unknown, M: RMachine): unknown {
-  if (Array.isArray(v)) return v.map((x) => resolveChildren(x, M));
+function resolveChildren(v: unknown, M: RMachine, created: Set<string>): unknown {
+  if (Array.isArray(v)) return v.map((x) => resolveChildren(x, M, created));
   if (v === null || typeof v !== 'object') return v;
   const o = v as Record<string, unknown>;
-  if (o.$ref === 'child' && typeof o.key === 'string' && M.detached.some((x) => x.key === o.key)) return detachedAlone(M, o.key);
-  return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, resolveChildren(x, M)]));
+  if (o.$ref === 'child' && typeof o.key === 'string' && created.has(o.key)) return detachedAlone(M, o.key);
+  return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, resolveChildren(x, M, created)]));
 }
 
 /** The flat keys the expected state has: the module may keep keys α ignores, which `shape:` covers. */

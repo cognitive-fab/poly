@@ -1,0 +1,30 @@
+// Review C1 and C3: an input names only instances that exist, and reaches a spawned child only after its
+// creation action (PS1.6, PS13.3, S60).
+module c1
+
+type WS = Idle | Ready
+
+machine Worker {
+  state { st : WS = Idle   poked : bool = false }
+  action Start()
+  action Hello()
+  action Poke()
+  on Start { require st is Idle else reject "started"   st' = Ready }
+  on Hello { poked' = true }
+  on Poke { poked' = true }
+}
+
+service machine Dispatcher {
+  state { started : bool = false }
+  action Go()
+  action Tell(to: Ref<Worker>)
+  on Go { require !started else reject "started"   spawn detached Worker as w -> Start()   started' = true }
+  on Tell(to) { require to != none else reject "nobody"   send to <- Hello() }
+}
+
+configuration pool {
+  d : Dispatcher
+  inputs { d.Go, d.Tell, Worker[*].Poke }
+  bounds { transit 2, instances 2 }
+  invariant start-first: forall i in Worker: Worker[i].poked implies Worker[i] is Ready
+}

@@ -122,7 +122,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
       for (const p of M.pathProperties) {
         const l = lowered.find((x) => x.name === p.name);
         if (!l) { out.push(`effect-invariants.mjs has no predicate ${p.name}`); continue; }
-        const bad = pathDisagreement(p, l.pred);
+        const bad = pathDisagreement(p, l.pred, [...[...M.effects.values()].map((e) => e.kind), ...[...M.decisions.values()].map((d) => d.kind), 'timer', 'cancelTimer', 'spawnChild', 'signalChild', 'sendTo', 'createInstance']);
         if (bad) out.push(`effect-invariants.mjs ${p.name} is ${bad.lowered} on the emissions ${stable(bad.kinds)}, and PS5.4 gives ${!bad.lowered}`);
       }
     }
@@ -184,9 +184,10 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
 /**
  * A sequence of emissions on which the lowered path property and PS5.4 disagree, or null. Every sequence of
  * up to four emissions over the property's kinds and one other kind is tried, which decides an order of two
- * kinds, and each counted kind is repeated up to two past its bound, which decides every count bound.
+ * kinds; each counted kind is repeated up to two past its bound, alone and beside each kind the machine can
+ * emit; and every kind the machine can emit is tried alone and in pairs.
  */
-function pathDisagreement(p: RPathProperty, pred: (path: unknown) => boolean): { kinds: string[]; lowered: boolean } | null {
+function pathDisagreement(p: RPathProperty, pred: (path: unknown) => boolean, machineKinds: string[]): { kinds: string[]; lowered: boolean } | null {
   const kinds = [...new Set(p.clauses.flatMap((c) => (c.k === 'count' ? [c.kind] : [c.first, c.then]))), '__other'];
   const sequences: string[][] = [];
   let frontier: string[][] = [[]];
@@ -195,6 +196,14 @@ function pathDisagreement(p: RPathProperty, pred: (path: unknown) => boolean): {
     frontier = frontier.flatMap((s) => kinds.map((k) => [...s, k]));
   }
   for (const c of p.clauses) if (c.k === 'count') for (let n = 0; n <= c.max + 2; n++) sequences.push(Array(n).fill(c.kind));
+  // Every kind the machine can emit, not one anonymous other kind, so a predicate that counts another real kind
+  // or every emission is told apart (review C5): each alone and in pairs, and beside each counted run.
+  const all = [...new Set([...kinds, ...machineKinds])];
+  for (const a of all) { sequences.push([a]); for (const b of all) sequences.push([a, b]); }
+  for (const c of p.clauses) {
+    if (c.k !== 'count') continue;
+    for (const o of all) for (let n = 0; n <= c.max + 2; n++) { sequences.push([o, ...Array(n).fill(c.kind)]); sequences.push([...Array(n).fill(c.kind), o]); }
+  }
   {
     for (const seq of sequences) {
       let m = monitorStart(p);

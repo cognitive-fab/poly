@@ -128,7 +128,7 @@ type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'r
 
 /** The instances of a configuration, by name, as its properties read them (PS13.6, S32). */
 interface ConfigScope {
-  instances: Map<string, { machine: A.Machine; facts: MachineFacts; count: number | null }>;
+  instances: Map<string, { machine: A.Machine; facts: MachineFacts; count: number | null; spawned?: boolean }>;
   /** Inside `init(e)`: no second `init` (PS13.6). */
   inInit?: boolean;
 }
@@ -330,7 +330,7 @@ class Checker {
       if (!facts) continue;
       if (instances.has(t)) { this.err('PL1002', c, `the detached ${t} instances form the group ${t}, and ${c.name} also declares an instance ${t} (S60)`); continue; }
       if (facts.children.size) this.err('PL0901', c, `${t} spawns attached children; a configuration of such a machine is checked from a later milestone (S61)`);
-      instances.set(t, { machine: facts.machine, facts, count });
+      instances.set(t, { machine: facts.machine, facts, count, spawned: true });
     }
   }
 
@@ -370,6 +370,9 @@ class Checker {
       } else {
         const it = this.typeOf(e.index, scope);
         if (it.k !== 'int' && it.k !== 'error') { this.err('PL1201', e.index, `an index is an int, not ${tyToString(it)}`); return 'error'; }
+        // S60: which spawned members exist depends on the state, so a spawned group is read through a quantifier
+        // or an aggregate, never at a fixed index (review C2).
+        if (inst.spawned && !(e.index.kind === 'Name' && scope.locals.has(e.index.name))) { this.err('PL1201', e, `${e.object.name} is a group of detached instances; read it with forall, exists or an aggregate (S60)`); return 'error'; }
         // The members are g[0] … g[n-1]; an index whose range leaves them names no instance (review finding).
         if (it.k === 'int' && (it.lo < 0 || it.hi > inst.count - 1)) { this.err('PL1201', e.index, `${e.object.name}[…] takes an index in 0..${inst.count - 1}, and this one ranges over ${tyToString(it)}`); return 'error'; }
       }

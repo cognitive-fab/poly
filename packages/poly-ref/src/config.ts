@@ -191,18 +191,11 @@ export function globalView(instances: ConfigInstance[], sigma: (State | null)[],
 export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[]): System<GlobalState> {
   const B = decl.bounds?.transit ?? Infinity;
   const index = new Map(instances.map((x, k) => [x.name, k]));
-  // PS1.6: in a configuration an address of M ranges over the addresses of M's instances, and none.
-  const addresses = (machine: string): Value[] => [null, ...instances.filter((x) => x.machine.name === machine).map((x) => x.name)];
   const N = decl.bounds?.instances ?? Infinity;
-  const dataOf = (M: RMachine, action: string): Record<string, Value>[] => {
-    const a = M.actions.find((x) => x.name === action)!;
-    let recs: Record<string, Value>[] = [{}];
-    for (const p of a.params) {
-      const vs = p.check ?? (p.type.k === 'ref' ? addresses(p.type.machine) : valuesOf(p.type, M));
-      recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
-    }
-    return recs;
-  };
+  const dataOf = (M: RMachine, action: string) => inputData(instances, M, action);
+  // PS1.6, S60: an input carries only addresses of instances that exist (review C1); a child created later is
+  // not yet known to the environment.
+  const refsExist = (M: RMachine, action: string, d: Record<string, Value>, s: GlobalState) => M.actions.find((x) => x.name === action)!.params.every((p) => p.type.k !== 'ref' || d[p.name] === null || s.sigma[index.get(d[p.name] as string)!] !== null);
   // S31: the inputs, instance by instance, in declaration order.
   const inputs: { instance: number; action: string; data: Record<string, Value>[] }[] = [];
   for (const r of decl.inputs) {
@@ -261,7 +254,12 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}`,
     successors: (s) => {
       const out: { label: GlobalLabel; outcome: Outcome<GlobalState> }[] = [];
-      for (const inp of inputs) if (s.sigma[inp.instance] !== null) for (const d of inp.data) out.push(step(s, inp.instance, inp.action, d, s.mu, 'input'));
+      // S60: a spawned child takes its creation action first, so no input reaches it while that waits (review C3).
+      const creating = new Set(s.mu.filter((m) => m.creation).map((m) => m.target));
+      for (const inp of inputs) {
+        if (s.sigma[inp.instance] === null || creating.has(inp.instance)) continue;
+        for (const d of inp.data) if (refsExist(instances[inp.instance].machine, inp.action, d, s)) out.push(step(s, inp.instance, inp.action, d, s.mu, 'input'));
+      }
       // PS13.3, PS13.4: any one message in transit may be delivered next; copies of one value are one choice.
       // S60: a child's creation message comes first, so nothing else is delivered to it while that one waits.
       const waiting = new Set(s.mu.filter((m) => m.creation).map((m) => m.target));
@@ -416,8 +414,8 @@ function inputGroups(fair: A.FairGroup[], instances: ConfigInstance[]): FairGrou
         const k = instances.findIndex((x) => x.name === n);
         const base = (e: Edge<unknown>) => { const l = e.label as GlobalLabel; return l.via === 'input' && l.instance === k && l.action === m.action && l.verdict.kind === 'accepted'; };
         if (!m.perValue) { out.push({ name: `${n}.${m.action}`, takes: base }); continue; }
-        const a = instances[k].machine.actions.find((x) => x.name === m.action)!;
-        for (const d of dataDomain(a, instances[k].machine)) {
+        // S73: one group per value the configuration offers, its instances' addresses among them (review C4).
+        for (const d of inputData(instances, instances[k].machine, m.action)) {
           const key = JSON.stringify(Object.keys(d).sort().map((x) => [x, keyOf(d[x])]));
           out.push({ name: `${n}.${m.action}(${key})`, takes: (e) => base(e) && JSON.stringify(Object.keys(e.label.data).sort().map((x) => [x, keyOf(e.label.data[x])])) === key });
         }
@@ -425,6 +423,17 @@ function inputGroups(fair: A.FairGroup[], instances: ConfigInstance[]): FairGrou
     }
   }
   return out;
+}
+
+/** PS1.6, S31: the data an input may carry: each parameter's check domain, or its type, an address ranging over none and the configuration's instances of its machine. */
+export function inputData(instances: ConfigInstance[], M: RMachine, action: string): Record<string, Value>[] {
+  const a = M.actions.find((x) => x.name === action)!;
+  let recs: Record<string, Value>[] = [{}];
+  for (const p of a.params) {
+    const vs = p.check ?? (p.type.k === 'ref' ? [null, ...instances.filter((x) => x.machine.name === (p.type as { machine: string }).machine).map((x) => x.name)] : valuesOf(p.type, M));
+    recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
+  }
+  return recs;
 }
 
 /** A global state as plain JSON: each instance's state, and the messages in transit. */

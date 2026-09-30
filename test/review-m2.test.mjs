@@ -124,3 +124,44 @@ test('B6: a decision whose result is a record with a Tri field is read back, not
   assert.notEqual(r.verdict, 'ERROR', render(r));
   assert.equal(r.verdict, 'CLEAN', render(r));
 });
+
+// ── poly-ref (C) ───────────────────────────────────────────────────────────
+
+test('C1, C3: an input names only instances that exist, and reaches a spawned child only after its creation action', async () => {
+  const { r } = await check('c1', src('c1-poke'));
+  assert.notEqual(r.verdict, 'ERROR', r.error);
+  // Tell may send without end, so the transit bound is hit (PL5301); nothing else is found, and no invariant fails.
+  assert.deepEqual(r.configurations[0].diagnostics.map((d) => d.code).filter((c) => c !== 'PL5301'), [], render(r));
+});
+
+test('C2: a spawned group is read through a quantifier or an aggregate, never by a constant index (S60)', () => {
+  const s = src('c1-poke').replace('  invariant start-first:', '  invariant direct: Worker[0].poked implies d.started\n  invariant start-first:');
+  assert.deepEqual(codes(s), ['PL1201']);
+});
+
+test('C4: per-value input fairness ranges over the configuration\'s addresses, so no spurious lasso (S73)', async () => {
+  const { r } = await check('c4', src('c4-ping'));
+  assert.deepEqual(r.configurations[0].diagnostics.filter((d) => d.code === 'PL3301'), [], render(r));
+});
+
+test('C5: the path-property read-back tells apart a predicate that counts another kind or every emission (PS5.4)', async () => {
+  const { translationValidate } = await import('@poly/ref');
+  const text = readFileSync(join(ROOT, 'conformance', 'm1', 'effects.poly'), 'utf8');
+  for (const [i, wrong] of ['p.emitted.length <= 2', 'p.count("mail.notice") <= 2 && p.count("mail.receipt") == 0'].entries()) {
+    const { dir } = await check(`c5-${i}`, text);
+    const file = join(dir, '.poly', 'build', 'effects.Account', 'effect-invariants.mjs');
+    writeFileSync(file, readFileSync(file, 'utf8').replace('p.count("mail.notice") <= 2', wrong));
+    const tv = await translationValidate(parse(text).module, 'Account', join(dir, '.poly', 'build', 'effects.Account'));
+    assert.ok(tv.mismatches.some((m) => /effect-invariants\.mjs few-notices/.test(m.message)), wrong);
+  }
+});
+
+test('C6: translation validation resolves a child marker only in the step that creates the child (S78)', async () => {
+  const { translationValidate } = await import('@poly/ref');
+  const { dir } = await check('c6', DETACHED);
+  const build = join(dir, '.poly', 'build', 'detached.Dispatcher');
+  const next = join(build, 'next.cjs');
+  writeFileSync(next, readFileSync(next, 'utf8').replace('next["done"] = 1;', 'next["done"] = 1; next["worker"] = ({ $ref: "child", key: "w" });'));
+  const tv = await translationValidate(parse(DETACHED).module, 'Dispatcher', build);
+  assert.ok(tv.mismatches.some((m) => /Done/.test(m.message)), JSON.stringify(tv.mismatches.map((m) => m.message)));
+});

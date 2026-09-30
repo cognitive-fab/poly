@@ -1,0 +1,24 @@
+// Review C4: per-value fairness of an input ranges over the values the configuration offers, its instances'
+// addresses among them (S73, PS6.4).
+module c4
+
+machine Target {
+  state { hit : bool = false }
+  terminal hit
+  action Hit()
+  on Hit { hit' = true }
+}
+
+service machine Pinger {
+  state { n : 0..1 = 0 }
+  action Ping(to: Ref<Target>)
+  on Ping(to) { require to != none else reject "none"   send to <- Hit() }
+}
+
+configuration c {
+  p : Pinger
+  t : Target
+  inputs { p.Ping }
+  bounds { transit 1 }
+  liveness hits: eventually t.hit under fair { p.Ping(*) }
+}
