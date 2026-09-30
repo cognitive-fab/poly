@@ -217,4 +217,14 @@ test('polywatch 2 and 3: a qualified constructor payload and a map key are range
   assert.deepEqual(field('m : map<0..1, 0..3> = { 0: 0, 1: 3 }'), []);
 });
 
+test('polywatch: a qualified enum constructor is a valid map-literal key', () => {
+  const src = 'module t\nenum Door { Open, Shut }\nmachine M {\n  state {\n    m : map<Door, 0..1> = { Door.Open: 0, Door.Shut: 1 }\n  }\n  action A()\n  on A { reject "no" }\n}\n';
+  assert.deepEqual(compile(src), []);
+});
+
+test('polywatch: a constructor with a payload is not a bare pattern literal', () => {
+  const src = "module t\ntype Inner = E { ok: bool } | D\ntype Outer = C { p: Inner } | N\nmachine M {\n  state {\n    o : Outer = N\n    n : 0..1 = 0\n  }\n  action A()\n  on A { match o { C { p: E } => n' = 1  _ => n' = 0 } }\n}\n";
+  assert.deepEqual(compile(src).map((d) => d.code), ['PL1201']);
+});
+
 void readFileSync;

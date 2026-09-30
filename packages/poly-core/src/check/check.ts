@@ -296,6 +296,8 @@ class Checker {
     switch (e.kind) {
       case 'Int': case 'Bool': case 'String': return e.value;
       case 'Name': return e.name;
+      // S22: `Type.C` folds to the constructor's name, like the bare `C`.
+      case 'Member': return e.object.kind === 'Name' && this.env.unions.has(e.object.name) ? e.prop : undefined;
       case 'Unary': {
         const v = this.fold(e.arg);
         if (e.op === '-' && typeof v === 'number') return -v;
@@ -449,7 +451,13 @@ class Checker {
           if (pf.bind) {
             // S21: (1) a constructor of the payload's type is a literal pattern;
             // (2) a constructor of another type is a type error; (3) any other name binds.
-            if (ty.k === 'union' && this.env.unions.get(ty.name)!.ctors.some((x) => x.name === pf.bind)) {
+            const named = ty.k === 'union' ? this.env.unions.get(ty.name)!.ctors.find((x) => x.name === pf.bind) : undefined;
+            if (named && named.fields.length) {
+              // A bare name stands for one value; a constructor with a payload has many, and patterns do not nest.
+              this.err('PL1201', pat, `${pf.bind} carries a payload, so a bare ${pf.bind} cannot match ${c.name}.${pf.name}; bind it and test it with \`is\` (S21)`);
+              continue;
+            }
+            if (named) {
               this.facts!.patternLiterals.set(`${arm.id}:${pf.name}`, pf.bind);
               constraint.lits.set(pf.name, pf.bind);
               continue;
