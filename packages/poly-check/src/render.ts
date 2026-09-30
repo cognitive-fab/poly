@@ -69,6 +69,8 @@ export function render(r: CheckReport): string {
   const instances = r.machines.map((m) => instanceLine(m, r.module));
   out.push(`verdict: ${r.verdict} (exit ${r.exit})${instances.length ? `  ${instances[0]}` : ''}`);
   for (const line of instances.slice(1)) out.push(`         ${line}`);
+  // S35: a reject property that names an action with no handler is decided by poly-ref alone, and says so.
+  for (const m of r.machines) for (const x of m.instance?.refOnly ?? []) out.push(`         ${m.machine}: ${x.property} decided by poly-ref alone (it names ${x.actions.join(', ')}, which has no handler; polygraph never takes that step)`);
   out.push(`engines: ${Object.entries(r.engines).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   return out.join('\n') + '\n';
 }

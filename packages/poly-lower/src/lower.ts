@@ -72,27 +72,24 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // ── acceptors ────────────────────────────────────────────────────────
   const handlers = new Map(mutated.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => [h.action, h]));
   const guards = mutated.items.filter((i): i is A.Guard => i.kind === 'Guard');
-  const handled = actions.filter((a) => handlers.has(a.name)).map((a) => a.name);
-  const strict = actions.flatMap((a) => a.params.filter((p) => p.check?.mode === 'strict').map((p) => ({ a: a.name, p: p.name, values: paramValues(p, env) })));
+  // S35: an action with no handler is not lowered. It is not an intent of the module and not in the
+  // contract's actions, so the runtime answers it before any acceptor runs (PS9.1a): terminal in a terminal
+  // state, unhandled elsewhere. sam-pattern 2.3 throws for an intent no acceptor constrains (S34, option b).
+  const lowerable = actions.filter((a) => handlers.has(a.name));
+  const strict = lowerable.flatMap((a) => a.params.filter((p) => p.check?.mode === 'strict').map((p) => ({ a: a.name, p: p.name, values: paramValues(p, env) })));
   const acceptors: string[] = [];
   if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length) {
-    const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2 (handled actions only).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
+    const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2. It runs for handled actions only: no other is an intent (S35).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
     if (terminal && opts.fault !== 'skip-terminal') lines.push(`      if (TERMINAL(model)) return reject('terminal');`);
     for (const s of strict) lines.push(`      if (action === ${JSON.stringify(s.a)} && !${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])) return reject('outside-check-domain');`);
     if (guards.length) {
-      lines.push(`      if (!HANDLED.has(action)) return;`);
       for (const g of guards) lines.push(`      if (${expr(g.cond, stateCx)}) return reject(${JSON.stringify(g.reason)});`);
     }
     lines.push(`    },`);
     acceptors.push(lines.join('\n'));
   }
-  for (const a of actions) {
-    const h = handlers.get(a.name);
-    if (!h) {
-      // S7: an action with no handler frames everything and writes nothing; SAM classifies the step unhandled (PS3.2).
-      acceptors.push(`    ${JSON.stringify(a.name)}: (model) => (proposal, { unchanged }) => {\n      unchanged('*');\n    },`);
-      continue;
-    }
+  for (const a of lowerable) {
+    const h = handlers.get(a.name)!;
     const hcx: Cx = { ...base, mode: 'handler', stateVar: 'model', dataVar: 'proposal' };
     const body = stmts(h.body, hcx, '      ', emitOpts);
     const written = mayWrite(h.body, layout);
@@ -104,7 +101,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // ── next.cjs ─────────────────────────────────────────────────────────
   const modelShape: Record<string, unknown> = {};
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
-  const intentDecls = actions.map((a) => {
+  const intentDecls = lowerable.map((a) => {
     const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type)), required: true }]));
     return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(dataDomainOf(a, env))} },`;
   });
@@ -119,10 +116,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     ``,
     `const INITIAL_STATE = ${JSON.stringify(initState)};`,
     `const TERMINAL = (model) => ${termCode};`,
-    `const HANDLED = new Set(${JSON.stringify(handled)});`,
-    `void HANDLED;`,
     ``,
-    `// Unhandled steps are steps (PS3.3), so SAM's development warning for them is off; strict-profile errors still throw.`,
+    `// SAM's development warnings are off; strict-profile errors still throw.`,
     `const instance = createInstance({ strict: true, devWarnings: false, hasAsyncActions: false, instanceName: ${JSON.stringify(`${module.name}.${m.name}`)} });`,
     ``,
     `const control = instance({`,
@@ -148,7 +143,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     `  setState(INITIAL_STATE);`,
     `};`,
     `const actions = {`,
-    ...actions.map((a) => `  ${JSON.stringify(a.name)}: (data = {}) => intents[${JSON.stringify(a.name)}](data),`),
+    ...lowerable.map((a) => `  ${JSON.stringify(a.name)}: (data = {}) => intents[${JSON.stringify(a.name)}](data),`),
     `};`,
     ``,
     `module.exports = { instance, init, actions, getState, setState };`,
@@ -161,9 +156,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     machineVersion: version,
     stateKeys: layout.fields.flatMap((l) => l.flat.map((k) => ({ name: k, type: keyTypeText(l, k, env) }))),
     initState,
-    actions: Object.fromEntries(actions.map((a) => [a.name, { dataFields: Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type), env)])) }])),
+    actions: Object.fromEntries(lowerable.map((a) => [a.name, { dataFields: Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type), env)])) }])),
     terminalStates,
-    dataDomain: Object.fromEntries(actions.filter((a) => a.params.length).map((a) => [a.name, Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env)]))])),
+    dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length).map((a) => [a.name, Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env)]))])),
     invariants: 'invariants.mjs',
   };
 

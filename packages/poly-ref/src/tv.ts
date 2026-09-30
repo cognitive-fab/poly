@@ -8,6 +8,7 @@
 // and computes R_M with its own interpreter. Any difference is PL2501
 // LOWERING_MISMATCH, addressed to the toolchain; the verdict is REFUSED.
 import type { Diagnostic, Module, WitnessStep } from '@poly/core';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { checkMachine, ENGINE, type MachineReport } from './check.js';
@@ -48,8 +49,17 @@ const stable = (v: unknown): string => {
   return '{' + Object.keys(v as object).sort().map((k) => JSON.stringify(k) + ':' + stable((v as Record<string, unknown>)[k])).join(',') + '}';
 };
 
+/** What the runtime reads from contract.json to answer an action before the module (PS9.1a). */
+interface RuntimeFacts { terminalKey: string; terminalStates: unknown[] }
+
 /** Runs one step of the lowered module and reads its verdict (PS9.1). */
-function stepModule(mod: SamModule, pre: Record<string, unknown>, action: string, data: Record<string, unknown>): { verdict: Verdict; post: Record<string, unknown> } | { error: string } {
+function stepModule(mod: SamModule, rt: RuntimeFacts, pre: Record<string, unknown>, action: string, data: Record<string, unknown>): { verdict: Verdict; post: Record<string, unknown> } | { error: string } {
+  // S35: an action outside the module's action surface never reaches the module. The runtime answers it
+  // as polyrun does: rejected("terminal") in a terminal state (row 1), unhandled elsewhere (row 3).
+  if (typeof mod.actions[action] !== 'function') {
+    const verdict: Verdict = rt.terminalStates.includes(pre[rt.terminalKey]) ? { kind: 'rejected', reason: 'terminal' } : { kind: 'unhandled' };
+    return { verdict, post: structuredClone(pre) };
+  }
   try {
     mod.init();
     mod.setState(structuredClone(pre));
@@ -61,7 +71,8 @@ function stepModule(mod: SamModule, pre: Record<string, unknown>, action: string
       case 'rejected': return { verdict: { kind: 'rejected', reason: step.rejections[0]?.reason }, post };
       case 'unhandled': return { verdict: { kind: 'unhandled' }, post };
       case 'mutated':
-      case 'identity-by-mutation': return { verdict: { kind: 'accepted' }, post };
+      case 'identity-by-mutation':
+      case 'unchanged': return { verdict: { kind: 'accepted' }, post }; // sam-pattern 2.3: framed, no write (M1-1)
       default: return { error: `unknown classification ${step.classification}` };
     }
   } catch (e) {
@@ -77,6 +88,8 @@ export async function translationValidate(module: Module, machineName: string, b
   const { graph: g, model: M } = report;
   // Finding 5: sam-pattern resolves from poly's own install, wherever the build directory is.
   const mod = loadLoweredModule<SamModule>(join(buildDir, 'next.cjs'));
+  const contract = JSON.parse(readFileSync(join(buildDir, 'contract.json'), 'utf8')) as { stateKeys: { name: string }[]; terminalKey?: string; terminalStates?: unknown[] };
+  const rt: RuntimeFacts = { terminalKey: contract.terminalKey ?? contract.stateKeys[0].name, terminalStates: contract.terminalStates ?? [] };
   const props = (await import(pathToFileURL(join(buildDir, 'invariants.mjs')).href + `?v=${Date.now()}-${Math.random()}`)) as PropertyModule;
 
   const mismatches: Diagnostic[] = [];
@@ -102,7 +115,7 @@ export async function translationValidate(module: Module, machineName: string, b
     const s = g.states[e.from];
     const flatPre = flatten(s, M);
     const flatData = flattenData(e.label.data, e.label.action, M);
-    const got = stepModule(mod, flatPre, e.label.action, flatData);
+    const got = stepModule(mod, rt, flatPre, e.label.action, flatData);
     const where = [...pathTo(g, e.from), e];
     const what = `${e.label.action}(${stable(flatData)}) from ${stateKey(s, M.fieldNames)}`;
     if ('error' in got) { mismatch(`the lowered module threw on ${what}: ${got.error}; R_M gives ${verdictText(e.label.verdict)}`, where); continue; }

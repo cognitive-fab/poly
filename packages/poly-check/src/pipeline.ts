@@ -52,6 +52,8 @@ export interface InstanceRecord {
   bounds: string[];
   kernelAssumptions: string[];
   engines: Record<string, string>;
+  /** S35: reject properties that name an action with no handler; polygraph never takes that step, so poly-ref alone decides them. */
+  refOnly: { property: string; actions: string[] }[];
 }
 
 export interface CheckReport {
@@ -185,7 +187,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   t0 = performance.now();
   const tv = await translationValidate(module, machine, dir);
   const ref: MachineReport = tv.report;
-  mc.instance = instanceRecord(ref, engines);
+  mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {
     mc.diagnostics.push(...tv.mismatches.slice(0, 20));
     mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'REFUSED', ms: performance.now() - t0, note: `${tv.mismatches.length} mismatches over ${tv.transitions} transitions` });
@@ -233,7 +235,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
       stage2.push(diag('PL2501', at, `polygraph reports ${v.invariant} violated, and poly-ref disagrees: ${c.reason} (addressed to the toolchain, not the author)`, { engine: d.engine, witness: d.witness }));
     }
   }
-  const merged = mergeFindings(stage2, ref.findings);
+  const merged = mergeFindings(stage2, ref.findings, new Set(mc.instance.refOnly.map((r) => r.property)));
   mc.diagnostics.push(...merged);
   mc.stages.push({ stage: 'model-check', status: 'ran', engine: `polygraph@${engines.polygraph}`, verdict: verdictOf(merged), ms: performance.now() - t0, note: `${pg.statesExplored} states explored${pg.capHit ? `, cap ${maxStates} hit` : ''}` });
 
@@ -268,13 +270,18 @@ const mergeKey = (d: Diagnostic) => `${d.code}:${d.property ?? d.field ?? '*'}`;
  * polygraph did not report. poly-ref is authoritative inside Reach(I), which polygraph's cap may
  * truncate (S5). Results merge on (code, property or field), never on message text (finding 8).
  */
-export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]): Diagnostic[] {
+export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[], refOnly: Set<string> = new Set()): Diagnostic[] {
   const out = [...fromPolygraph];
   const have = new Set(out.map(mergeKey));
   for (const f of fromRef) {
     if (f.code === 'PL3201') continue; // stage 2b reports deadlocks
     if (have.has(mergeKey(f))) continue;
     // Finding 6: an escape or bound is kept per field, and poly-ref's exploration cap (no field) on its own.
+    if (f.code === 'PL3003' && f.property && refOnly.has(f.property)) {
+      out.push({ ...f, message: `${f.message} (poly-ref alone: the property names an action with no handler, which polygraph never takes, S35)` });
+      have.add(mergeKey(f));
+      continue;
+    }
     const capped = f.code === 'PL3001' || f.code === 'PL3002' || f.code === 'PL3003';
     out.push(capped ? { ...f, message: `${f.message} (poly-ref; polygraph's exploration was capped at the bound)` } : f);
     have.add(mergeKey(f));
@@ -282,7 +289,34 @@ export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]
   return out;
 }
 
-function instanceRecord(ref: MachineReport, engines: Record<string, string>): InstanceRecord {
+/**
+ * S35: the reject properties that name an action with no handler. Such an action is not in the lowered
+ * module, so polygraph never takes its step and cannot check the property on it; poly-ref, which explores
+ * every action, decides it alone, and the verdict record says so.
+ */
+export function refOnlyProperties(module: Module, machine: string): { property: string; actions: string[] }[] {
+  const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine);
+  if (!decl) return [];
+  const handled = new Set(decl.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => h.action));
+  const handlerless = new Set(decl.items.filter((i): i is A.Action => i.kind === 'Action' && !handled.has(i.name)).map((a) => a.name));
+  const out: { property: string; actions: string[] }[] = [];
+  for (const p of decl.items) {
+    if (p.kind !== 'Property' || p.form !== 'reject') continue;
+    const named = new Set<string>();
+    const walk = (n: unknown): void => {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      const node = n as { kind?: string; name?: string };
+      if (node.kind === 'Name' && node.name && handlerless.has(node.name)) named.add(node.name);
+      for (const [k, v] of Object.entries(n)) if (k !== 'span') walk(v);
+    };
+    walk(p.expr);
+    if (named.size) out.push({ property: p.name, actions: [...named].sort() });
+  }
+  return out;
+}
+
+function instanceRecord(ref: MachineReport, engines: Record<string, string>, refOnly: { property: string; actions: string[] }[] = []): InstanceRecord {
   const bounds = [...new Set(ref.findings.filter((f) => f.code === 'PL3901').map((f) => f.field ?? 'exploration cap'))];
   return {
     domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`)],
@@ -292,6 +326,7 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>): In
     // M0 checks one machine's relation: K7 (profile fidelity) is the kernel assumption its guarantee uses (PS10).
     kernelAssumptions: ['K7'],
     engines,
+    refOnly,
   };
 }
 
