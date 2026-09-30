@@ -307,3 +307,18 @@ test('review, minor: a configuration lasso is rendered with its cycle (S74)', as
   const { r } = await check('lasso-render', src('pw-leads-to-config'));
   assert.match(render(r), /cycle, repeated for ever:/);
 });
+
+// ── polywatch, on the review's fixes ──────────────────────────────────────
+
+test('polywatch (review) 1: a local name shadows an ambient global only in its own scope (PT6.5)', async () => {
+  const { lintHandlerText } = await import('@poly/check');
+  const src2 = 'export function a() { const fetch = () => 1; return fetch(); }\nexport function b() { return fetch("https://x"); }\n';
+  assert.equal(lintHandlerText(src2, 'h.ts').length, 1);
+  assert.equal(lintHandlerText('export function a(fetch) { return fetch("/x"); }\n', 'h.ts').length, 0);
+  assert.equal(lintHandlerText('export function a() { const process = { env: {} }; return process.env.K; }\nexport const k = process.env.K;\n', 'h.ts').length, 1);
+});
+
+test('polywatch (review) 2: forall over a group of detached instances judges the members that exist (S60, PS13.6)', async () => {
+  const { r } = await check('pw-spawned-eventually', src('pw-spawned-eventually'));
+  assert.deepEqual(r.configurations[0].diagnostics.filter((d) => d.code === 'PL3301'), [], render(r));
+});

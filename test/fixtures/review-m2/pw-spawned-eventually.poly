@@ -1,0 +1,25 @@
+// polywatch (after the review) 2: `forall i in Worker: eventually …` quantifies over the workers that exist;
+// a dispatcher that is never asked to spawn leaves its worker uncreated, which is no counterexample (S60).
+module pwse
+
+type WS = Idle | Ready | Finished
+
+machine Worker {
+  state { st : WS = Idle }
+  terminal st is Finished
+  action Start()
+  on Start { require st is Idle else reject "started"   st' = Finished }
+}
+
+service machine Dispatcher {
+  state { started : bool = false }
+  action Go()
+  on Go { require !started else reject "started"   spawn detached Worker as w -> Start()   started' = true }
+}
+
+configuration pool {
+  d[2]    : Dispatcher
+  inputs  { d[*].Go }
+  bounds  { transit 2, instances 4 }
+  liveness done: forall i in Worker: eventually Worker[i] is Finished
+}

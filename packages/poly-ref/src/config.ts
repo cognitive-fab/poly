@@ -28,7 +28,7 @@
 import type * as A from '@poly/core';
 import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
 import { createHash } from 'node:crypto';
-import { buildMachine, dataDomain, inCheckDomain, inType, valuesOf, type RMachine } from './model.js';
+import { buildMachine, inCheckDomain, inType, valuesOf, type RMachine } from './model.js';
 import { fairCycles, type FairGroup } from './liveness.js';
 import { transition, initialState, isTerminal } from './step.js';
 import { AbsentInstance, evaluate, evaluateAt, type GlobalView } from './eval.js';
@@ -329,7 +329,11 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
         const env = (i: number) => { const e = envOf(g.states[i]); if (k !== null) e.locals.set(p.quant!.var, k); return e; };
         // S60: a property that names a detached instance not yet created is false in that state.
         const holds = (x: A.Expr) => (i: number) => { try { return evaluate(x, env(i)) === true; } catch (err) { if (absent(err)) return false; throw err; } };
-        return { k, lassos: fairCycles(g as Graph<unknown>, { goal: holds(p.expr), from: p.from ? holds(p.from) : null, groups }) };
+        // S60, PS13.6: a group of detached instances is quantified over the members that exist, so `eventually`
+        // for a member starts when it is created; one never created is no counterexample (polywatch, after the review).
+        const idx = k === null ? -1 : instances.map((x, j) => [x, j] as const).filter(([x]) => x.group === p.quant!.group)[k][1];
+        const born = idx >= 0 && instances[idx].spawned ? (i: number) => g.states[i].sigma[idx] !== null : null;
+        return { k, lassos: fairCycles(g as Graph<unknown>, { goal: holds(p.expr), from: p.from ? holds(p.from) : born, groups }) };
       });
       const failing = tried.filter((t) => t.lassos.length);
       const fails = p.quant?.q === 'exists' ? failing.length === tried.length : failing.length > 0;

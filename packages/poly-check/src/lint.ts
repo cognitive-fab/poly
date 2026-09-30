@@ -33,17 +33,30 @@ export function lintHandlerText(text: string, file: string): Diagnostic[] {
   const moduleSpec = (node: ts.Node, spec: string) => {
     if (AMBIENT.has(bare(spec))) report(node, `the handler imports ${spec}; a handler receives its capabilities from the runtime`);
   };
-  // Names the file declares: a local `fetch` bound to a capability is not the global one.
-  const declared = new Set<string>();
-  const bind = (b: ts.BindingName): void => { if (ts.isIdentifier(b)) declared.add(b.text); else for (const e of b.elements) if (!ts.isOmittedExpression(e)) bind(e.name); };
-  const collect = (n: ts.Node): void => {
-    if ((ts.isVariableDeclaration(n) || ts.isParameter(n)) && n.name) bind(n.name);
-    if ((ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) && n.name) declared.add(n.name.text);
-    if (ts.isImportClause(n) && n.name) declared.add(n.name.text);
-    if (ts.isImportSpecifier(n) || ts.isNamespaceImport(n)) declared.add(n.name.text);
-    ts.forEachChild(n, collect);
+  // A local `fetch` bound to a capability is not the global one, but only within its own scope: a name is
+  // declared for a use when a scope enclosing the use declares it (polywatch, after the review).
+  const declaresIn = (scope: ts.Node, name: string): boolean => {
+    const has = (b: ts.BindingName): boolean => (ts.isIdentifier(b) ? b.text === name : b.elements.some((e) => !ts.isOmittedExpression(e) && has(e.name)));
+    if (ts.isFunctionLike(scope) && scope.parameters.some((p) => has(p.name))) return true;
+    if (ts.isFunctionExpression(scope) && scope.name?.text === name) return true;
+    if ((ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) && scope.initializer && ts.isVariableDeclarationList(scope.initializer) && scope.initializer.declarations.some((d) => has(d.name))) return true;
+    if (ts.isCatchClause(scope) && scope.variableDeclaration && has(scope.variableDeclaration.name)) return true;
+    const statements = ts.isSourceFile(scope) || ts.isBlock(scope) || ts.isModuleBlock(scope) || ts.isCaseClause(scope) || ts.isDefaultClause(scope) ? scope.statements : null;
+    for (const st of statements ?? []) {
+      if (ts.isVariableStatement(st) && st.declarationList.declarations.some((d) => has(d.name))) return true;
+      if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name?.text === name) return true;
+      if (ts.isImportDeclaration(st) && st.importClause) {
+        const c = st.importClause;
+        const nb = c.namedBindings;
+        if (c.name?.text === name || (nb && (ts.isNamespaceImport(nb) ? nb.name.text === name : nb.elements.some((e) => e.name.text === name)))) return true;
+      }
+    }
+    return false;
   };
-  collect(sf);
+  const declared = (at: ts.Node, name: string): boolean => {
+    for (let a: ts.Node | undefined = at; a; a = a.parent) if (declaresIn(a, name)) return true;
+    return false;
+  };
   const reported = new Set<ts.Node>();
   const visit = (n: ts.Node): void => {
     // A type-only import or export grants nothing at run time.
@@ -52,23 +65,23 @@ export function lintHandlerText(text: string, file: string): Diagnostic[] {
     if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && ts.isStringLiteral(n.moduleReference.expression)) moduleSpec(n, n.moduleReference.expression.text);
     if (ts.isCallExpression(n)) {
       const dynamic = n.expression.kind === ts.SyntaxKind.ImportKeyword;
-      const required = ts.isIdentifier(n.expression) && n.expression.text === 'require' && !declared.has('require');
+      const required = ts.isIdentifier(n.expression) && n.expression.text === 'require' && !declared(n, 'require');
       if (dynamic || required) {
         const a = n.arguments[0];
         if (a && ts.isStringLiteral(a)) moduleSpec(n, a.text);
         else report(n, `the handler ${dynamic ? 'imports' : 'requires'} a module named at run time, which the lint cannot see`);
       }
       if (dynamic || required) reported.add(n.expression);
-      if (ts.isIdentifier(n.expression) && n.expression.text === 'fetch' && !declared.has('fetch')) { report(n, 'the handler calls the global fetch; egress is the egress capability its labels grant'); reported.add(n.expression); }
+      if (ts.isIdentifier(n.expression) && n.expression.text === 'fetch' && !declared(n, 'fetch')) { report(n, 'the handler calls the global fetch; egress is the egress capability its labels grant'); reported.add(n.expression); }
     }
     if (ts.isPropertyAccessExpression(n)) {
       const obj = n.expression;
-      if (ts.isIdentifier(obj) && obj.text === 'process' && n.name.text === 'env' && !declared.has('process')) { report(n, 'the handler reads process.env; a secret is the secrets capability its labels grant'); reported.add(obj); }
+      if (ts.isIdentifier(obj) && obj.text === 'process' && n.name.text === 'env' && !declared(n, 'process')) { report(n, 'the handler reads process.env; a secret is the secrets capability its labels grant'); reported.add(obj); }
       if (ts.isIdentifier(obj) && obj.text === 'globalThis' && ['fetch', 'process', 'require'].includes(n.name.text)) { report(n, `the handler reads globalThis.${n.name.text}`); reported.add(obj); }
     }
-    if (ts.isElementAccessExpression(n) && ts.isIdentifier(n.expression) && (n.expression.text === 'globalThis' || n.expression.text === 'process') && !declared.has(n.expression.text)) { report(n, `the handler reads ${n.expression.text} by a computed name`); reported.add(n.expression); }
+    if (ts.isElementAccessExpression(n) && ts.isIdentifier(n.expression) && (n.expression.text === 'globalThis' || n.expression.text === 'process') && !declared(n, n.expression.text)) { report(n, `the handler reads ${n.expression.text} by a computed name`); reported.add(n.expression); }
     // Any other use of an ambient global it does not declare: an alias, a destructuring, a bare reference.
-    if (ts.isIdentifier(n) && AMBIENT_GLOBALS.has(n.text) && !declared.has(n.text) && !reported.has(n) && isReference(n)) report(n, `the handler uses the global ${n.text}, which reaches ambient authority`);
+    if (ts.isIdentifier(n) && AMBIENT_GLOBALS.has(n.text) && !declared(n, n.text) && !reported.has(n) && isReference(n)) report(n, `the handler uses the global ${n.text}, which reaches ambient authority`);
     ts.forEachChild(n, visit);
   };
   visit(sf);
