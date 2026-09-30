@@ -151,6 +151,19 @@ poly now runs on sam-pattern 2.3.0 and polygraph 8.3.1, linked from their local 
 
 One contract's `actions` changed: `conformance/m0/guard-terminal.poly` (`conf.Room`) loses `Knock`, its one action with no handler. No field study, example or evidence source has such an action, so no other contract changed. Translation validation still compares `Knock` on all 7 states (35 transitions for the machine, as before): `rejected("terminal")` in `Broken` and `unhandled` elsewhere.
 
+**The engines are vendored** (2d91ba1), at the owner's direction that poly relies on the Poly stack conceptually, not physically. `vendor/sam-pattern` is sam-lib 3047024's build; `vendor/polygraph` is the closure of the polygraph files poly runs, from 583b82c. Each file is pinned by hash and commit in its `PROVENANCE.md` and compared with the commit by `test/vendor.test.mjs`, so a copy cannot become a fork. The version ranges question above is gone: poly names the vendored versions exactly.
+
+**Step 7, read before it is built.** The OMS order and shipment (`polygraph/examples/polyrun-oms`) need these, in this order:
+
+1. **Records (S25).** `SHIPMENT_COMPLETED` carries `childState`, the shipment's terminal state, `{ shipState: "delivered" }` or `{ shipState: "cancelledShipment" }` in the contract's domain. A completion action declares it as `childState: ShipOutcome` with `type ShipOutcome = { shipState: ShipState }` (S44).
+2. **Families and bounded loops (S49).** The hand-written mapper spawns `f1`, `f2`, … for `i` from 1 to `post.fulfillments` (`fulfillments : 0..2`), so the poly order writes `for i in 1..fulfillments { spawn Shipment as f[i] on complete -> SHIPMENT_COMPLETED on parent terminal -> CANCEL_SHIPMENT }`. The keys are 1-based, which PT2's `for i in Int ".." Expr` allows. `childKey`'s domain is `{ "f1", "f2" }` (S51).
+3. **String fields with check domains.** `txId` and `cancelReason` are strings the corpus fills from a one-value domain (`"tx-1"`, `"customer-request"`, …); `totalCents` is an int whose domain is `{ 0, 1900, 2500 }`. These are M0 constructs; the domains come from the contract's `dataDomain`.
+4. **The corpus, copied with provenance (M1-5).** Corpus (a), the 16 hand-written trace files, is gated window for window against the hand-written module (53/81, S24). Corpus (b) is recorded by polyrun's kernel from the hand-written artefacts along the sixteen scenarios named by (a)'s files, with the scenario script checked in, and the poly order must replay it at 100%.
+5. **The hand-written `invariants.compose.mjs`, committed first (S27),** in its own commit, before the poly order lowers: a completed order has as many delivered shipments as fulfillments, and no shipment is spawned before the order is charged. The poly `compose invariant`s then state the same predicates.
+6. **The poly OMS**, and the three comparisons of section 5: replay, `check-effects` (with the normalisations the rulings allow: the hand-written mapper arms timers with `fireInMs`, poly with `fireIn`; S26's cancel before each set is ignored only for a key that is not armed on the path; machine ids mapped by S28), and `check-product` over the same invariants.
+
+Two things to watch: the hand-written mapper emits on entering a state ("edge-triggered"), so a poly handler must emit exactly on the steps that enter that state; and the OMS joint state count with two shipment children is recorded when measured (S49).
+
 ## 7. Risks
 
 - **Two new `System` implementations in poly-ref.** Configurations are M1's heart and the part of poly-ref most likely to have bugs. Its first tests are the checkout and delivery evidence, run before the configuration lowering and stage 4b exist, as M0 ran the evidence before any lowering.
