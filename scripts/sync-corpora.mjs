@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The field-study corpora, copied into conformance/field-studies/ (PT17, S17).
 //
-//   node scripts/sync-corpora.mjs --copy     copy from the local sources and write PROVENANCE.md
+//   node scripts/sync-corpora.mjs --copy     copy from the local sources and write PROVENANCE.md (--only <name>: one study)
 //   node scripts/sync-corpora.mjs            verify: every copy matches the SHA-256 in its PROVENANCE.md,
 //                                            and, where the local source exists, the source still matches too
 //
@@ -47,6 +47,17 @@ export const STUDIES = [
     upstream: 'hatchet-dev/hatchet (https://github.com/hatchet-dev/hatchet), DeriveWorkflowRunStatus. The traces were captured through internal/statusutils/trace_capture_test.go added to a local clone (not upstream); see REPORT.md.',
     licence: 'MIT for hatchet-dev/hatchet (osssm/hatchet/LICENSE). The study directory carries no licence file of its own.',
     controls: { reference: 'specs/reference.js', broken: 'specs_broken/reference.js' },
+  },
+  {
+    name: 'order',
+    gate: 'M1',
+    source: 'polygraph/examples/polyrun-oms',
+    files: ['README.md', 'effects.cjs', 'effects.manifest.json', 'effect-invariants.mjs', 'machines/order-contract.json', 'machines/order/contract.json', 'machines/order/next.cjs', 'machines/order/invariants.mjs', 'machines/order/traces', 'machines/shipment/contract.json', 'machines/shipment/authoring-contract.json', 'machines/shipment/next.cjs', 'machines/shipment/invariants.mjs'],
+    sourceRepo: 'polygraph',
+    study: "The OMS reference application of polyrun: the order machine, its shipment child, the effect mapper, manifest and effect invariants, and the order's sixteen hand-written trace files (corpus (a) of S24).",
+    upstream: "cognitive-fab/polygraph (https://github.com/cognitive-fab/polygraph), examples/polyrun-oms. The traces are hand-written for the example and predate the module's migration to next-state semantics (polygraph 22c676f), so every window has post equal to pre (S24).",
+    licence: 'Apache-2.0 (polygraph/LICENSE)',
+    controls: { reference: 'machines/order/next.cjs', broken: 'none: AC1 compares the poly order with the hand-written one' },
   },
 ];
 
@@ -111,7 +122,7 @@ function copy(study) {
     `| Positive control | \`${study.controls.reference}\` |`,
     `| Negative control | \`${study.controls.broken}\` |`,
     '',
-    'These are data for the M0 gate (PT18): the traces, contract and hand-written controls of the study. No engine code is copied. `scripts/sync-corpora.mjs` re-verifies every hash below against the copies, and against the local source when it exists.',
+    `These are data for the ${study.gate ?? 'M0'} gate (PT18): the traces, contracts and hand-written controls of the study. No engine code is copied. \`scripts/sync-corpora.mjs\` re-verifies every hash below against the copies, and against the local source when it exists.`,
     '',
     '| File | SHA-256 |',
     '|---|---|',
@@ -156,7 +167,10 @@ export function verify({ sources = true } = {}) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (process.argv.includes('--copy')) {
-    for (const s of STUDIES) console.log(`${s.name}: copied ${copy(s)} files`);
+    // --only <name> copies one study, so the others keep their records.
+    const i = process.argv.indexOf('--only');
+    const only = i >= 0 ? process.argv[i + 1] : null;
+    for (const s of STUDIES) if (!only || s.name === only) console.log(`${s.name}: copied ${copy(s)} files`);
   }
   const { problems, notes } = verify();
   for (const n of notes) console.log(n);

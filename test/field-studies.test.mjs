@@ -31,7 +31,7 @@ function replay(specPath, windows) {
   return r.results.map((x) => x.status);
 }
 
-for (const study of STUDIES) {
+for (const study of STUDIES.filter((s) => !s.gate)) {
   test(`${study.name}: poly and its broken control replay window for window like the hand-written controls`, (t) => {
     const windows = loadWindows(join(CORPORA, study.name, 'traces'));
     const gate = GATE[study.name];
