@@ -45,6 +45,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL1504: { name: 'UNUSED_BINDER', stage: 'types', severity: 'error' },
   PL1601: { name: 'PAYLOAD_TYPE_CONFLICT', stage: 'types', severity: 'error' },
   PL1602: { name: 'ARRAY_MAP_NOT_ZERO_BASED', stage: 'types', severity: 'error' },
+  // S37: a path property whose shape is not prefix-closed by construction (PS5.4).
+  PL1701: { name: 'NOT_PREFIX_CLOSED', stage: 'types', severity: 'error' },
   PL2101: { name: 'WRITE_BEFORE_REQUIRE', stage: 'types', severity: 'error' },
   PL2102: { name: 'DOUBLE_WRITE', stage: 'types', severity: 'error' },
   // S20: addressed to the toolchain, like PL2501.
@@ -61,6 +63,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL4001: { name: 'PATH_PROPERTY', stage: 'effects', severity: 'finding' },
   // S33: an accepted step that emits and leaves the state unchanged.
   PL4002: { name: 'EMIT_WITHOUT_STATE_CHANGE', stage: 'effects', severity: 'finding' },
+  // S40: polyrun refuses a manifest whose completion action is outside the lowered action surface.
+  PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
   PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },
 };

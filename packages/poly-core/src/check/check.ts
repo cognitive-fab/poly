@@ -126,6 +126,18 @@ class Checker {
       if (machines.has(d.name)) { this.err('PL1002', d, `machine ${d.name} is declared twice`); continue; }
       machines.set(d.name, this.checkMachine(d));
     }
+    // S41: polyrun keys handlers by kind, so effects that share a kind must declare the same payload,
+    // completions and class. Identical declarations may share it. Across modules, poly-check compares
+    // the signatures of a project's files.
+    const byKind = new Map<string, A.EffectDecl>();
+    for (const facts of machines.values()) {
+      for (const e of facts.effects.values()) {
+        const k = effectKind(e);
+        const first = byKind.get(k);
+        if (!first) { byKind.set(k, e); continue; }
+        if (effectSignature(first) !== effectSignature(e)) this.err('PL1002', e, `effect ${e.name} has kind "${k}", which ${first.name} declares with a different payload, completions or class (S41)`);
+      }
+    }
     return { diagnostics: this.diags, env: this.env, machines };
   }
 
@@ -220,12 +232,7 @@ class Checker {
       if (facts.effects.has(it.name)) { this.err('PL1002', it, `effect ${it.name} is declared twice`); continue; }
       facts.effects.set(it.name, it);
     }
-    const kinds = new Map<string, string>();
-    for (const e of facts.effects.values()) {
-      const k = effectKind(e);
-      if (kinds.has(k)) this.err('PL1002', e, `effects ${kinds.get(k)} and ${e.name} both have kind "${k}"`);
-      kinds.set(k, e.name);
-    }
+    const kinds = new Set([...facts.effects.values()].map(effectKind));
     const handlerOf = new Set(m.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => h.action));
 
     const handled = new Set<string>();
@@ -260,7 +267,7 @@ class Checker {
           if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
           propNames.add(it.name);
           if (it.form === 'compose') { this.err('PL0901', it, 'compose invariants are checked from plan step 6 of milestone M1'); break; }
-          if (it.form === 'path') { this.pathProperty(it, new Set(kinds.keys())); break; }
+          if (it.form === 'path') { this.pathProperty(it, kinds); break; }
           this.expectBool(it.expr, this.scope(it.form === 'invariant' ? 'invariant' : it.form));
           break;
         }
@@ -329,8 +336,8 @@ class Checker {
   private completion(it: A.EffectItem & { kind: 'EffOutcome' }, handlers: Set<string>): void {
     const act = this.actions.get(it.action);
     if (!act) { this.err('PL1001', it, `${it.outcome} -> ${it.action}: no action ${it.action}`); return; }
-    // S40 (provisional): polyrun refuses a manifest whose completion action is outside the lowered action surface (S35).
-    if (!handlers.has(it.action)) this.err('PL1001', it, `completion action ${it.action} has no handler, so it is not in the lowered module and the runtime cannot deliver it (S40)`);
+    // S40: polyrun refuses a manifest whose completion action is outside the lowered action surface (S35).
+    if (!handlers.has(it.action)) this.err('PL6101', it, `completion action ${it.action} has no handler, so it is not in the lowered module and the runtime cannot deliver it; add a handler for ${it.action} (S40)`);
     const given = new Set<string>();
     for (const a of it.args) {
       if (a.name === null) { this.err('PL1201', a.value, `a completion names its arguments: ${it.action}(p: value)`); continue; }
@@ -379,8 +386,8 @@ class Checker {
   }
 
   /**
-   * PS5.4: the compiler accepts only path properties that are prefix-closed by construction. S37
-   * (provisional): a conjunction of `count("k") <= n` and `count("k") < n`; `before` waits for its ruling.
+   * PS5.4, S37: the compiler accepts only path properties that are prefix-closed by construction, a
+   * conjunction of `count("k") <= n`, `count("k") < n` and `before("k1", "k2")` over effect kinds.
    */
   private pathProperty(p: A.Property, kinds: Set<string>): void {
     const conjuncts: A.Expr[] = [];
@@ -389,10 +396,11 @@ class Checker {
     };
     split(p.expr);
     for (const c of conjuncts) {
-      if (c.kind === 'Call' && c.callee === 'before') { this.err('PL0901', c, 'before(…) waits for the ruling on its meaning (S37)'); continue; }
+      const order = beforeKinds(c);
       const bound = countBound(c);
-      if (!bound) { this.err('PL1201', c, 'a path property is a conjunction of count("kind") <= n and count("kind") < n, so that it is prefix-closed (PS5.4, S37)'); continue; }
-      if (!kinds.has(bound.kind)) this.err('PL1001', bound.at, `no effect of machine ${this.machine!.name} has kind "${bound.kind}"`);
+      const named = order ? [order.first, order.then] : bound ? [{ kind: bound.kind, at: bound.at }] : null;
+      if (!named) { this.err('PL1701', c, 'a path property is a conjunction of count("kind") <= n, count("kind") < n and before("k1", "k2"), so that it is prefix-closed (PS5.4)'); continue; }
+      for (const n of named) if (!kinds.has(n.kind)) this.err('PL1001', n.at, `no effect of machine ${this.machine!.name} has kind "${n.kind}"`);
     }
   }
 
@@ -1078,7 +1086,7 @@ class Checker {
 const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
 const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
 
-/** S41 (provisional): an effect with no `kind` has its name as its kind. */
+/** S41: an effect with no `kind` has its name as its kind. */
 export function effectKind(e: A.EffectDecl): string {
   for (const it of e.items) if (it.kind === 'EffKind') return it.value;
   return e.name;
@@ -1095,6 +1103,25 @@ export function durationMs(text: string): number | null {
   const m = /^(\d+)(ms|s|m|h)$/.exec(text);
   if (!m) return null;
   return Number(m[1]) * { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[m[2] as 'ms' | 's' | 'm' | 'h'];
+}
+
+/** S41: what must agree between effects that share a kind: the payload, the completions and the class. */
+export function effectSignature(e: A.EffectDecl): string {
+  const strip = (x: unknown): unknown => {
+    if (!x || typeof x !== 'object') return x;
+    if (Array.isArray(x)) return x.map(strip);
+    return Object.fromEntries(Object.entries(x).filter(([k]) => k !== 'id' && k !== 'span' && k !== 'comments').map(([k, v]) => [k, strip(v)]));
+  };
+  const outcomes = e.items.filter((i) => i.kind === 'EffOutcome').map(strip).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return JSON.stringify({ params: e.params.map((p) => [p.name, strip(p.type)]), outcomes, cls: effectClass(e) });
+}
+
+/** `before("k1", "k2")` (S37): the two kinds, in order. */
+export function beforeKinds(e: A.Expr): { first: { kind: string; at: A.NodeBase }; then: { kind: string; at: A.NodeBase } } | null {
+  if (e.kind !== 'Call' || e.callee !== 'before' || e.args.length !== 2) return null;
+  const [a, b] = e.args;
+  if (a.kind !== 'String' || b.kind !== 'String') return null;
+  return { first: { kind: a.value, at: a }, then: { kind: b.value, at: b } };
 }
 
 /** `count("k") <= n` or `count("k") < n`, either way round: the kind and the largest count allowed. */

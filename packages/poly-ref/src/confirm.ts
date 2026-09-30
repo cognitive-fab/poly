@@ -8,6 +8,7 @@
 // is authoritative inside Reach(I), disagrees about a state inside the
 // instance, that is a lowering mismatch (PL2501).
 import type { MachineReport } from './check.js';
+import { monitorStart, monitorStep } from './model.js';
 import type { Edge } from './explore.js';
 import type { State } from './values.js';
 import { alpha, flattenData } from './alpha.js';
@@ -97,7 +98,7 @@ export function confirmWitness(report: MachineReport, w: WitnessToConfirm): Conf
 export function confirmEffectsWitness(report: MachineReport, w: { kind: 'path' | 'identity'; property?: string; steps: string[] }): Confirmation {
   const { graph: g, model: M } = report;
   let at = 0;
-  const counts = new Map<string, number>();
+  const emitted: string[] = [];
   let last: Edge<State> | undefined;
   for (const [i, text] of w.steps.entries()) {
     const open = text.indexOf('(');
@@ -106,7 +107,7 @@ export function confirmEffectsWitness(report: MachineReport, w: { kind: 'path' |
     try { data = JSON.parse(text.slice(open + 1, -1) || '{}'); } catch { return { status: 'disagrees', reason: `cannot read step ${text}` }; }
     const edge = g.out[at].map((k) => g.edges[k]).find((e) => e.label.action === action && stable(flattenData(e.label.data, action, M)) === stable(data));
     if (!edge) return { status: 'disagrees', reason: `poly-ref has no step ${text} from ${stateKey(g.states[at], M.fieldNames)}` };
-    for (const x of edge.label.effects) counts.set(x.kind, (counts.get(x.kind) ?? 0) + 1);
+    for (const x of edge.label.effects) emitted.push(x.kind);
     last = edge;
     if (edge.to === null) return i === w.steps.length - 1 && w.kind === 'path' ? verdictOnPath() : { status: 'outside', step: i };
     at = edge.to;
@@ -116,8 +117,9 @@ export function confirmEffectsWitness(report: MachineReport, w: { kind: 'path' |
   function verdictOnPath(): Confirmation {
     const p = M.pathProperties.find((x) => x.name === w.property);
     if (!p) return { status: 'disagrees', reason: `poly-ref has no path property ${w.property}` };
-    const broken = p.bounds.find((b) => (counts.get(b.kind) ?? 0) > b.max);
-    return broken ? { status: 'confirmed' } : { status: 'disagrees', reason: `path property ${w.property} holds on that path by PS5.4` };
+    // PS5.4 is prefix-closed: the path breaks the property iff its monitor breaks on some prefix.
+    const { broken } = monitorStep(p, monitorStart(p), emitted);
+    return broken >= 0 ? { status: 'confirmed' } : { status: 'disagrees', reason: `path property ${w.property} holds on that path by PS5.4` };
   }
   function verdictOnIdentity(): Confirmation {
     if (!last) return { status: 'disagrees', reason: 'the witness has no step' };

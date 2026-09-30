@@ -1,0 +1,13 @@
+// expect: PL1701 (at least one charge is not prefix-closed: the empty path violates it)
+module errors
+
+machine M {
+  state { n : 0..1 = 0 }
+  action Pay()
+  on Pay { require n == 0 else reject "paid"  n' = 1  emit charge(1) }
+  path property charged: count("pay.charge") >= 1
+  effect charge(amount: 0..1) {
+    kind "pay.charge"
+    labels { egress:external }
+  }
+}

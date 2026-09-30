@@ -5,7 +5,7 @@
 // Liveness (PS6) and configurations (PS13) come in M1 and M2, as passes over
 // the same Graph.
 import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
-import { buildMachine, dataDomain, valuesOf, type RMachine, type RPathProperty, type RType } from './model.js';
+import { buildMachine, dataDomain, valuesOf, monitorStart, monitorStep, clauseText, type PathClause, type RMachine, type RPathProperty, type RType } from './model.js';
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
 import { isTerminal } from './step.js';
@@ -120,8 +120,7 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   for (const p of M.pathProperties) {
     const hit = pathViolation(g, p);
     if (hit) {
-      const b = hit.bound;
-      findings.push(finding('PL4001', p.id, `path property ${p.name} is violated: count("${b.kind}") reaches ${b.max + 1} on this path, above ${b.max}`, trace(hit.path), { property: p.name, state: g.states[hit.path[hit.path.length - 1].from] }));
+      findings.push(finding('PL4001', p.id, `path property ${p.name} is violated: ${clauseText(hit.clause)} on this path`, trace(hit.path), { property: p.name, state: g.states[hit.path[hit.path.length - 1].from] }));
     }
   }
 
@@ -169,15 +168,13 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
 }
 
 /**
- * The shortest path of I on which some bound of p is exceeded, or null (PS5.4). A node of the product is
- * a state and the emission count of each bounded kind, capped at one above its bound. An edge that leaves
- * the instance still emits on its step, so it can violate a bound; nothing is explored beyond it.
+ * The shortest path of I on which some clause of p breaks, or null (PS5.4). A node of the product is a
+ * state and the property's monitor (model.ts): finite, so the search ends, cycles included. An edge that
+ * leaves the instance still emits on its step, so it can break a clause; nothing is explored beyond it.
  */
-export function pathViolation(g: Graph<State>, p: RPathProperty): { path: Edge<State>[]; bound: { kind: string; max: number } } | null {
-  const kinds = p.bounds.map((b) => b.kind);
-  const cap = p.bounds.map((b) => b.max + 1);
+export function pathViolation(g: Graph<State>, p: RPathProperty): { path: Edge<State>[]; clause: PathClause } | null {
   const key = (s: number, c: number[]) => `${s}|${c.join(',')}`;
-  const start = { s: 0, c: kinds.map(() => 0) };
+  const start = { s: 0, c: monitorStart(p) };
   const parent = new Map<string, { prev: string; edge: Edge<State> } | null>([[key(start.s, start.c), null]]);
   const queue = [start];
   const pathOf = (k: string, last: Edge<State>) => {
@@ -190,9 +187,8 @@ export function pathViolation(g: Graph<State>, p: RPathProperty): { path: Edge<S
     const here = key(s, c);
     for (const ei of g.out[s]) {
       const e = g.edges[ei];
-      const next = c.map((n, i) => Math.min(cap[i], n + e.label.effects.filter((x) => x.kind === kinds[i]).length));
-      const broken = next.findIndex((n, i) => n > p.bounds[i].max);
-      if (broken >= 0) return { path: pathOf(here, e), bound: p.bounds[broken] };
+      const { next, broken } = monitorStep(p, c, e.label.effects.map((x) => x.kind));
+      if (broken >= 0) return { path: pathOf(here, e), clause: p.clauses[broken] };
       if (e.to === null) continue;
       const k = key(e.to, next);
       if (parent.has(k)) continue;

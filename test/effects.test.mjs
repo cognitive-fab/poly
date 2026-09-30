@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse } from '@poly/lang';
 import { checkModule } from '@poly/core';
 import { checkMachine } from '@poly/ref';
-import { checkFile, render } from '@poly/check';
+import { checkFile, checkProject, render } from '@poly/check';
 import { createRuntime } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import { ROOT, BUILD, build, requireModule } from './helpers.mjs';
 
@@ -43,19 +43,60 @@ test('PT4.5: the orders program has its three findings, with the witnesses the s
   assert.match(render(r), /Pay\(10\)\s+Placed\/1\/false -> Placed\/1\/false\s+emits payment\.charge/);
 });
 
-test('S42: the orders reject property place-empty is also violated, by Place in a cancelled order', async () => {
-  // PT4.5 says the program has three findings. Under PS3.2 the terminal row comes first, so Place in
-  // Cancelled with no items is rejected "terminal", not "empty-order". Raised as S42; this pins today's answer.
+test('S42: with place-empty narrowed to the draft state, PT4.5 has exactly its three findings', async () => {
   const r = await checkFile(ORDERS, { root: OUT });
-  const d = r.machines[0].diagnostics.find((x) => x.code === 'PL3003');
-  assert.equal(d.property, 'place-empty');
-  assert.deepEqual(steps(d), ['Cancel(Customer)', 'Place()']);
-  // polygraph names the property, so the finding points at its declaration. The escape names a field
-  // and stays at the machine: the two findings of one stage no longer share one position.
+  const m = r.machines[0];
+  assert.deepEqual([...new Set(m.diagnostics.map((d) => d.code))].sort(), ['PL3102', 'PL4001', 'PL4002']);
+  // The escape names a field and points at the machine; the findings of one stage do not share a position.
   const src = readFileSync(ORDERS, 'utf8').split('\n');
-  assert.match(src[d.at.line - 1], /reject property place-empty/);
-  const escape = r.machines[0].diagnostics.find((x) => x.code === 'PL3102');
+  const escape = m.diagnostics.find((x) => x.code === 'PL3102');
   assert.match(src[escape.at.line - 1], /machine Order/);
+});
+
+test('S42: a reject property polygraph reports points at its declaration', async () => {
+  // The narrowing S42 replaced: Place in a cancelled order with no items is rejected "terminal" (PS3.2, row 1).
+  const file = write('orders-wide.poly', readFileSync(ORDERS, 'utf8').replace('pre.status == Draft && pre.items == 0', 'pre.items == 0'));
+  const r = await checkFile(file, { root: OUT });
+  const d = r.machines[0].diagnostics.find((x) => x.code === 'PL3003');
+  assert.deepEqual(steps(d), ['Cancel(Customer)', 'Place()']);
+  assert.match(readFileSync(file, 'utf8').split('\n')[d.at.line - 1], /reject property place-empty/);
+});
+
+test('S41: effects that share a kind must agree; identical declarations may share it', () => {
+  const two = (a, b) => `module t\nmachine M {\n  state { n : 0..1 = 0 }\n  action Go()\n  on Go { require n == 0 else reject "done"  n' = 1  emit one(1) }\n  effect one(n: 0..1) {\n    kind "k.x"\n    labels { exec }\n${a}  }\n  effect two(n: 0..1) {\n    kind "k.x"\n    labels { exec }\n${b}  }\n}\n`;
+  assert.deepEqual(codes(two('', '')), []);
+  assert.deepEqual(codes(two('    class irreversible\n', '')), ['PL1002']);
+  // An effect with no kind has its name as its kind (S41).
+  const named = 'module t\nmachine M {\n  state { n : 0..1 = 0 }\n  action Go()\n  on Go { require n == 0 else reject "done"  n\' = 1  emit ping(1) }\n  effect ping(n: 0..1) {\n    labels { exec }\n  }\n  effect pong(m: bool) {\n    kind "ping"\n    labels { exec }\n  }\n}\n';
+  assert.deepEqual(codes(named), ['PL1002']);
+});
+
+test('S41: two modules of one project that declare one kind differently are PL1002', async () => {
+  const dir = join(OUT, 'project-kinds');
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  const mod = (name, cls) => `module ${name}\nmachine M {\n  state { n : 0..1 = 0 }\n  action Go()\n  on Go { require n == 0 else reject "done"  n' = 1  emit ping(1) }\n  effect ping(n: 0..1) {\n    kind "shared.ping"\n    labels { exec }\n    class ${cls}\n  }\n}\n`;
+  writeFileSync(join(dir, 'src', 'a.poly'), mod('a', 'none'));
+  writeFileSync(join(dir, 'src', 'b.poly'), mod('b', 'irreversible'));
+  writeFileSync(join(dir, 'poly.json'), '{ "poly": "1", "name": "kinds", "modules": ["src/*.poly"] }');
+  const p = await checkProject(dir, { root: OUT });
+  const all = p.files.flatMap((f) => f.diagnostics);
+  assert.ok(all.some((d) => d.code === 'PL1002' && /shared\.ping/.test(d.message)), JSON.stringify(all.map((d) => [d.code, d.message])));
+  assert.equal(p.verdict, 'REFUSED');
+  writeFileSync(join(dir, 'src', 'b.poly'), mod('b', 'none'));
+  const same = await checkProject(dir, { root: OUT });
+  assert.ok(!same.files.flatMap((f) => f.diagnostics).some((d) => d.code === 'PL1002'));
+});
+
+test('S37: before(k1, k2) is decided by poly-ref and by polyrun, and they agree', async () => {
+  // Ship must follow Pack: before("w.pack", "w.ship"). Ship without Pack violates it at once.
+  const file = write('before.poly', 'module bf\nenum P { Start, Packed, Shipped }\nmachine M {\n  state { p : P = Start }\n  terminal p == Shipped\n  action Pack()\n  action Ship()\n  on Pack { require p == Start else reject "no"  p\' = Packed  emit pack(1) }\n  on Ship { require p != Shipped else reject "no"  p\' = Shipped  emit ship(1) }\n  path property pack-first: before("w.pack", "w.ship")\n  effect pack(n: 0..1) {\n    kind "w.pack"\n    labels { write:store }\n  }\n  effect ship(n: 0..1) {\n    kind "w.ship"\n    labels { egress:external }\n  }\n}\n');
+  const r = await checkFile(file, { root: OUT });
+  const m = r.machines[0];
+  const f = m.diagnostics.filter((d) => d.code === 'PL4001');
+  assert.equal(f.length, 1);
+  assert.deepEqual(steps(f[0]), ['Ship()']);
+  assert.match(f[0].engine, /poly-ref.*polyrun/);
+  assert.ok(!m.diagnostics.some((d) => d.code === 'PL2501'));
 });
 
 test('PT6.1: the manifest is the one the specification shows, labels and class included', () => {
@@ -126,13 +167,15 @@ test('the checker: emit, effect declarations, labels and path properties', () =>
   assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1, 0) }', EFFECT)), ['PL1201']);
   assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(true) }', EFFECT)), ['PL1201']);
   assert.deepEqual(codes(machine('on Go { s\' = B }', 'effect ping(n: 0..1) {\n  labels { exec }\n  ok -> Nope()\n}')), ['PL1001']);
-  // S40 (provisional): a completion action must have a handler.
-  assert.deepEqual(codes(machine('on Go { s\' = B }', 'action Ack()\neffect ping(n: 0..1) {\n  labels { exec }\n  ok -> Ack()\n}')), ['PL1001']);
-  // S37 (provisional): only count bounds are prefix-closed forms.
+  // S40: a declared completion action with no handler has its own code.
+  assert.deepEqual(codes(machine('on Go { s\' = B }', 'action Ack()\neffect ping(n: 0..1) {\n  labels { exec }\n  ok -> Ack()\n}')), ['PL6101']);
+  // S37: count bounds and before(k1, k2) are the prefix-closed forms; any other shape is PL1701.
   assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: count("k.ping") <= 1 && count("k.ping") < 2`)), []);
-  assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: count("k.ping") >= 1`)), ['PL1201']);
+  assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: count("k.ping") >= 1`)), ['PL1701']);
+  assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: count("k.ping") <= 1 || count("k.ping") <= 2`)), ['PL1701']);
   assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: count("k.pong") <= 1`)), ['PL1001']);
-  assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: before("k.ping", "k.ping")`)), ['PL0901']);
+  assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: before("k.ping", "k.ping") && count("k.ping") < 3`)), []);
+  assert.deepEqual(codes(machine('on Go { s\' = B  emit ping(1) }', `${EFFECT}\npath property p: before("k.ping", "k.pong")`)), ['PL1001']);
   assert.deepEqual(codes(machine('on Go { s\' = B }', `invariant i: count("k.ping") <= 1\n${EFFECT}`)), ['PL1201'], 'count is read only in a path property');
 });
 
@@ -160,8 +203,10 @@ test('PS5.4: a path property violated only around a cycle is found by poly-ref; 
   assert.deepEqual(steps(f[0]), ['Retry()', 'Back()']);
   assert.match(f[0].message, /poly-ref alone/);
   assert.ok(!m.diagnostics.some((d) => d.code === 'PL2501'), JSON.stringify(m.diagnostics.map((d) => d.message)));
+  // S39: polyrun's cycle-edge-emits is a note, printed with its edge, never dropped.
   const stage = m.stages.find((s) => s.stage === 'effects');
-  assert.match(stage.note, /cycle-edge-emits.*not a poly property.*S39/);
+  assert.ok(stage.notes.some((n) => /cycle-edge-emits/.test(n) && /Back\(\{\}\)/.test(n)), JSON.stringify(stage.notes));
+  assert.match(render(r), /\n  note: polyrun reports cycle-edge-emits at Retry\(\{\}\), Back\(\{\}\)/);
 });
 
 test('S38: a machine that emits and has no path property is checked for PL4002 by poly-ref alone, and says so', async () => {

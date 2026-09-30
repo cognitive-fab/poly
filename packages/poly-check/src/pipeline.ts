@@ -17,7 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { parse } from '@poly/lang';
-import { checkModule, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
+import { checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { translationValidate, confirmWitness, confirmEffectsWitness, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
@@ -34,6 +34,8 @@ export interface StageRecord {
   reason?: string;
   ms?: number;
   note?: string;
+  /** Engine output that is not a finding and is printed as it is, never dropped (S39). */
+  notes?: string[];
 }
 
 export interface MachineCheck {
@@ -69,6 +71,8 @@ export interface CheckReport {
   machines: MachineCheck[];
   error?: string;
   engines: Record<string, string>;
+  /** S41: each effect kind the module declares, with what must agree across the project's modules. */
+  effectKinds?: { kind: string; signature: string; effect: string; line?: number; col?: number }[];
 }
 
 export interface CheckOptions {
@@ -118,6 +122,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   report.module = module.name;
   const checked = checkModule(module);
   report.diagnostics.push(...checked.diagnostics);
+  report.effectKinds = [...checked.machines.values()].flatMap((f) => [...f.effects.values()].map((e) => ({ kind: effectKind(e), signature: effectSignature(e), effect: `${f.machine.name}.${e.name}`, line: e.span?.line, col: e.span?.col })));
   const refused = report.diagnostics.some((d) => d.severity === 'error');
   const engines = report.engines;
 
@@ -267,7 +272,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   const fromRef = ref.findings.filter((f) => f.code === 'PL4001' || f.code === 'PL4002');
   const hasPath = existsSync(join(dir, 'effect-invariants.mjs'));
   if (!hasPath) {
-    // S38 (provisional): check-effects needs at least one path property, so PL4002 is poly-ref's alone.
+    // S38: check-effects needs at least one path property, so PL4002 is poly-ref's alone.
     mc.diagnostics.push(...fromRef);
     mc.stages.push({ stage: 'effects', status: 'ran', engine: 'poly-ref', verdict: verdictOf(fromRef), ms: performance.now() - t0, note: 'no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38)' });
     mc.instance!.effectsByRefOnly = true;
@@ -284,7 +289,11 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   const reported = new Set<string>();
   const pathNames = new Set(ref.model.pathProperties.map((p) => p.name));
   for (const v of r.violations) {
-    if (v.invariant === 'cycle-edge-emits') { notes.push(`polyrun reports cycle-edge-emits at ${v.counterexample.join(', ')}: not a poly property; path properties are decided over every path by poly-ref (S39)`); continue; }
+    if (v.invariant === 'cycle-edge-emits') {
+      const more = (r.violationCounts[v.invariant] ?? 1) - 1;
+      notes.push(`polyrun reports cycle-edge-emits at ${v.counterexample.join(', ')}${more > 0 ? ` (and ${more} more)` : ''}, emitting ${v.emitted.map((x) => x.kind).join(', ')}: a note, not a poly property; path properties are decided over every path, cycles included, by poly-ref (S39)`);
+      continue;
+    }
     const kind = v.invariant === 'identity-accept-emits' ? 'identity' : pathNames.has(v.invariant) && !v.detail ? 'path' : null;
     if (!kind) {
       out.push(diag('PL2501', at, `polyrun check-effects reports ${v.invariant}${v.detail ? `: ${v.detail}` : ''} at ${v.counterexample.join(', ')} (addressed to the toolchain, not the author)`, { engine }));
@@ -307,7 +316,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   }
   mc.diagnostics.push(...out);
   const coverage = r.bounded ? 'bounded' : r.cyclesPruned ? `simple paths, ${r.cyclesPruned} cycle edges pruned` : 'exhaustive';
-  mc.stages.push({ stage: 'effects', status: 'ran', engine: `${engine}, poly-ref`, verdict: verdictOf(out), ms: performance.now() - t0, note: [`${r.pathsExplored} paths, ${r.statesSeen} states, ${coverage}`, ...notes].join('; ') });
+  mc.stages.push({ stage: 'effects', status: 'ran', engine: `${engine}, poly-ref`, verdict: verdictOf(out), ms: performance.now() - t0, note: `${r.pathsExplored} paths, ${r.statesSeen} states, ${coverage}`, notes });
 }
 
 function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string, fieldOf: (flatKey: string) => string): Diagnostic {
@@ -446,6 +455,18 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
   const { manifest, files } = loadProject(dir);
   const reports: CheckReport[] = [];
   for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir }));
+  // S41: polyrun keys handlers by kind across the whole deployment, so effects of one kind must agree
+  // across the project's modules. A disagreement is reported in the later file and refuses it.
+  const first = new Map<string, { report: CheckReport; k: NonNullable<CheckReport['effectKinds']>[number] }>();
+  for (const report of reports) {
+    for (const k of report.effectKinds ?? []) {
+      const seen = first.get(k.kind);
+      if (!seen) { first.set(k.kind, { report, k }); continue; }
+      if (seen.report === report || seen.k.signature === k.signature) continue;
+      report.diagnostics.push(diag('PL1002', { module: report.module ?? undefined, line: k.line, col: k.col }, `effect ${k.effect} has kind "${k.kind}", which ${seen.report.module}.${seen.k.effect} declares with a different payload, completions or class (S41)`));
+      finish(report);
+    }
+  }
   const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');
   const verdict = special ? special.verdict : fold(reports.map((r) => r.verdict as Verdict));
   return { project: dir, name: manifest.name, files: reports, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict] };

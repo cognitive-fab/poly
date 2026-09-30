@@ -1,7 +1,7 @@
 // poly-ref: poly's model checker, a reference interpreter written from
 // docs/04-semantics.md. It shares no code with the compiler (PS9.3); the
 // import boundary is checked by scripts/check-boundaries.mjs.
-export { buildMachine, valuesOf, dataDomain, inType, inCheckDomain, type RMachine, type RType } from './model.js';
+export { buildMachine, valuesOf, dataDomain, inType, inCheckDomain, monitorStart, monitorStep, type RMachine, type RType, type RPathProperty, type PathClause } from './model.js';
 export { evaluate, type Env, type Verdict } from './eval.js';
 export { transition, runHandler, initialState, isTerminal, type Step } from './step.js';
 export { explore, machineSystem, pathTo, type System, type Graph, type Edge, type Label, type Outcome } from './explore.js';

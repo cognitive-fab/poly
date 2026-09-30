@@ -49,14 +49,49 @@ export interface REffect {
   params: { name: string; type: RType }[];
 }
 
+/** One conjunct of a path property (PS5.4, S37): a bound on a kind's count, or an order of two kinds. */
+export type PathClause = { k: 'count'; kind: string; max: number } | { k: 'before'; first: string; then: string };
+
 /**
- * A path property (PS5.4) as a conjunction of bounds `count(kind) <= max`. The compiler accepts no other
- * form yet (S37); poly-ref reads the form from the AST itself and refuses anything else.
+ * A path property (PS5.4) as a conjunction of clauses. These are the prefix-closed forms S37 admits; poly-ref
+ * reads them from the AST itself and refuses anything else.
  */
 export interface RPathProperty {
   name: string;
   id: string;
-  bounds: { kind: string; max: number }[];
+  clauses: PathClause[];
+}
+
+/**
+ * The monitor of a path property: one number per clause, the count so far (saturated one above its bound)
+ * or, for `before`, 1 once its first kind was emitted. A step's intents are read in order, so an intent
+ * of `then` in the same step as, but before, the first kind still breaks the order.
+ */
+export function monitorStart(p: RPathProperty): number[] {
+  return p.clauses.map(() => 0);
+}
+
+/** The monitor after one step's intents, and the first clause they break (-1 when none). */
+export function monitorStep(p: RPathProperty, m: number[], kinds: string[]): { next: number[]; broken: number } {
+  const next = [...m];
+  let broken = -1;
+  p.clauses.forEach((c, i) => {
+    for (const k of kinds) {
+      if (c.k === 'count') {
+        if (k === c.kind) next[i] = Math.min(c.max + 1, next[i] + 1);
+        if (next[i] > c.max && broken < 0) broken = i;
+      } else {
+        if (k === c.then && next[i] === 0 && broken < 0) broken = i;
+        if (k === c.first) next[i] = 1;
+      }
+    }
+  });
+  return { next, broken };
+}
+
+/** How a broken clause reads in a finding. */
+export function clauseText(c: PathClause): string {
+  return c.k === 'count' ? `count("${c.kind}") reaches ${c.max + 1}, above ${c.max}` : `"${c.then}" is emitted before any "${c.first}"`;
 }
 
 export interface RMachine {
@@ -125,7 +160,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     const cls = it.items.find((x) => x.kind === 'EffClass');
     effects.set(it.name, {
       name: it.name,
-      // PT6.1: the manifest is keyed by kind; S41 (provisional) makes the name the kind when none is given.
+      // PT6.1: the manifest is keyed by kind; S41 makes the name the kind when none is given.
       kind: kind && kind.kind === 'EffKind' ? kind.value : it.name,
       cls: cls && cls.kind === 'EffClass' ? cls.value : 'none',
       params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })),
@@ -144,7 +179,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
         })),
       });
     }
-    if (it.kind === 'Property' && it.form === 'path') pathProperties.push({ name: it.name, id: it.id, bounds: pathBounds(it.expr) });
+    if (it.kind === 'Property' && it.form === 'path') pathProperties.push({ name: it.name, id: it.id, clauses: pathClauses(it.expr) });
     if (it.kind === 'Handler') handlers.set(it.action, it);
     if (it.kind === 'Guard') guards.push(it);
     if (it.kind === 'Terminal') terminal = it.expr;
@@ -158,17 +193,20 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   };
 }
 
-/** PS5.4: a conjunction of `count("k") <= n` and `count("k") < n`, as bounds; anything else is refused. */
-function pathBounds(e: A.Expr): { kind: string; max: number }[] {
-  if (e.kind === 'Binary' && e.op === '&&') return [...pathBounds(e.left), ...pathBounds(e.right)];
+/** PS5.4, S37: a conjunction of `count("k") <= n`, `count("k") < n` and `before("k1", "k2")`; anything else is refused. */
+function pathClauses(e: A.Expr): PathClause[] {
+  if (e.kind === 'Binary' && e.op === '&&') return [...pathClauses(e.left), ...pathClauses(e.right)];
+  if (e.kind === 'Call' && e.callee === 'before' && e.args.length === 2 && e.args[0].kind === 'String' && e.args[1].kind === 'String') {
+    return [{ k: 'before', first: e.args[0].value, then: e.args[1].value }];
+  }
   if (e.kind === 'Binary') {
     const count = (x: A.Expr) => (x.kind === 'Call' && x.callee === 'count' && x.args.length === 1 && x.args[0].kind === 'String' ? x.args[0].value : null);
     const n = (x: A.Expr) => (x.kind === 'Int' ? x.value : null);
     const flip: Record<string, string> = { '>=': '<=', '>': '<' };
     const [k, lim, op] = count(e.left) !== null ? [count(e.left), n(e.right), e.op] : [count(e.right), n(e.left), flip[e.op]];
-    if (k !== null && lim !== null && (op === '<=' || op === '<')) return [{ kind: k, max: op === '<=' ? lim : lim - 1 }];
+    if (k !== null && lim !== null && (op === '<=' || op === '<')) return [{ k: 'count', kind: k, max: op === '<=' ? lim : lim - 1 }];
   }
-  throw new Error('poly-ref: a path property is a conjunction of count("kind") <= n (PS5.4, S37)');
+  throw new Error('poly-ref: a path property is a conjunction of count bounds and before (PS5.4, S37)');
 }
 
 /**

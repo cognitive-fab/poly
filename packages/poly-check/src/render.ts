@@ -68,6 +68,7 @@ export function render(r: CheckReport): string {
     out.push(`${m.machine}: ${ran.join(' · ')}`);
     if (notRun.length) out.push(`  not run: ${notRun.map((s) => s.stage).join(', ')} (${notRun[0].reason})`);
     for (const p of m.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
+    for (const s of m.stages) for (const n of s.notes ?? []) out.push(`  note: ${n}`);
   }
   const instances = r.machines.map((m) => instanceLine(m, r.module));
   out.push(`verdict: ${r.verdict} (exit ${r.exit})${instances.length ? `  ${instances[0]}` : ''}`);

@@ -53,7 +53,7 @@ machine Order {
 
   invariant shipped-was-paid: status == Shipped implies paid
   step property cancel-is-final: pre.status == Cancelled implies post.status == Cancelled
-  reject property place-empty: (action == Place && pre.items == 0) implies rejected("empty-order")
+  reject property place-empty: (action == Place && pre.status == Draft && pre.items == 0) implies rejected("empty-order")
 
   effect charge(amount: int) {
     kind "payment.charge"

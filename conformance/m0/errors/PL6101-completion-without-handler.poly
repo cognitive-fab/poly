@@ -1,0 +1,14 @@
+// expect: PL6101 (the completion names Paid, which has no handler)
+module errors
+
+machine M {
+  state { n : 0..1 = 0 }
+  action Pay()
+  action Paid()
+  on Pay { require n == 0 else reject "paid"  n' = 1  emit charge(1) }
+  effect charge(amount: 0..1) {
+    kind "pay.charge"
+    labels { egress:external }
+    ok -> Paid()
+  }
+}
