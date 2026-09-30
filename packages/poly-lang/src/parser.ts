@@ -156,6 +156,13 @@ class Parser {
     } while (depth > 0);
   }
 
+  /** A fragment for a typed edit (parseFragment): the whole input must be one node of the kind. */
+  fragment(kind: 'expr' | 'type' | 'stmt' | 'pattern'): A.Expr | A.TypeExpr | A.Stmt | A.Pattern {
+    const node = kind === 'expr' ? this.expr() : kind === 'type' ? this.type() : kind === 'stmt' ? this.stmt() : this.armPattern();
+    if (this.peek().kind !== 'eof') this.fail('expected the end of the fragment');
+    return node;
+  }
+
   // ── module and declarations ─────────────────────────────────────────────
   module(): A.Module {
     const start = this.peek();
@@ -735,6 +742,14 @@ class Parser {
 
   private arm(): A.Arm {
     const start = this.peek();
+    const pattern = this.armPattern();
+    this.expect('=>');
+    const body = this.atPunct('{') ? this.block() : [this.stmt()];
+    return this.node<A.Arm>(start, { kind: 'Arm', pattern, body }, true);
+  }
+
+  private armPattern(): A.Pattern {
+    const start = this.peek();
     let pattern: A.Pattern;
     if (this.at('_')) {
       this.next();
@@ -762,9 +777,7 @@ class Parser {
       }
       pattern = this.node<A.PCtor>(start, { kind: 'PCtor', ctor, fields });
     }
-    this.expect('=>');
-    const body = this.atPunct('{') ? this.block() : [this.stmt()];
-    return this.node<A.Arm>(start, { kind: 'Arm', pattern, body }, true);
+    return pattern;
   }
 
   private intent(start: Token): A.IntentStmt {
@@ -1055,4 +1068,16 @@ function attachComments(module: A.Module, nodes: A.NodeBase[], comments: Comment
     else trivia.end.push(c.text);
   }
   void module;
+}
+
+export type FragmentKind = 'expr' | 'type' | 'stmt' | 'pattern';
+
+/**
+ * One expression, type, statement or match-arm pattern, for typed edits (PT12.1, S70): a fix carries its
+ * replacement as text, parsed here in the grammar position of the node it replaces. Throws on a syntax error.
+ */
+export function parseFragment(kind: FragmentKind, text: string): A.Expr | A.TypeExpr | A.Stmt | A.Pattern {
+  const { tokens } = lex(text);
+  const p = new Parser(tokens) as unknown as { fragment(k: FragmentKind): A.Expr | A.TypeExpr | A.Stmt | A.Pattern };
+  return p.fragment(kind);
 }

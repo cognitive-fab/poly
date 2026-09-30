@@ -16,6 +16,12 @@ const PREC: Record<string, number> = {
   '*': 3, '/': 3, '%': 3, '+': 4, '-': 4, '<': 5, '<=': 5, '>': 5, '>=': 5, '==': 6, '!=': 6, '&&': 7, '||': 8, implies: 9,
 };
 
+/** One expression, type or pattern as the formatter prints it: the text of a typed edit (PT12.1, S70). */
+export function printExpr(e: A.Expr): string { return new Printer().expr(e, 0); }
+export function printType(t: A.TypeExpr): string { return new Printer().type(t); }
+export function printStmt(s: A.Stmt): string { return (new Printer() as unknown as { stmt(s: A.Stmt): string[] }).stmt(s).join('\n'); }
+export function printPattern(p: A.Pattern): string { return (new Printer() as unknown as { pattern(p: A.Pattern): string }).pattern(p); }
+
 export function format(module: A.Module, trivia?: Trivia): string {
   return new Printer(trivia).module(module);
 }

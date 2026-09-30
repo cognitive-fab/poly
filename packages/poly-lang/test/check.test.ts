@@ -40,7 +40,8 @@ test('each error source raises exactly the code it names', () => {
   // Every error code of the catalogue that a machine source can raise in M0 has a case.
   // PL1203 cannot: only policy inputs are optional, and policies are lowered from M5.
   // PL2501 and PL2001 are toolchain faults (S20), tested by tv.test.mjs and forbidden by standing.test.mjs.
-  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001').map(([c]) => c);
+  // PL0201 is raised by poly fix on a stale fix, never by a source (S70), tested by fixes.test.mjs.
+  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201').map(([c]) => c);
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 

@@ -28,6 +28,7 @@ interface CodeInfo {
 // constructor below throws, so a typo is caught in tests, not in the field.
 export const CODES: Record<string, CodeInfo> = {
   PL0001: { name: 'SYNTAX', stage: 'parse', severity: 'error' },
+  PL0201: { name: 'STALE_FIX', stage: 'parse', severity: 'error' },
   PL0901: { name: 'NOT_IN_MILESTONE', stage: 'types', severity: 'error' },
   PL1001: { name: 'UNKNOWN_NAME', stage: 'types', severity: 'error' },
   PL1002: { name: 'DUPLICATE_DECLARATION', stage: 'types', severity: 'error' },
@@ -156,6 +157,8 @@ export interface Diagnostic {
   property?: string;
   /** The field a finding is about (PL3102, PL3901). */
   field?: string;
+  /** The names a fix needs (S70): the unread binder (PL1504), the types that declare an ambiguous constructor (PL1005). */
+  names?: string[];
   /** `sha256:` of the state the finding names. */
   stateDigest?: string;
 }

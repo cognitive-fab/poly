@@ -165,8 +165,8 @@ class Checker {
   private at(n: A.NodeBase): NodeAt {
     return { module: this.module.name, machine: this.machine?.name, node: n.id, line: n.span?.line, col: n.span?.col };
   }
-  private err(code: string, n: A.NodeBase, msg: string): void {
-    this.diags.push(diag(code, this.at(n), msg));
+  private err(code: string, n: A.NodeBase, msg: string, extra: Partial<Diagnostic> = {}): void {
+    this.diags.push(diag(code, this.at(n), msg, extra));
   }
 
   run(): CheckResult {
@@ -1313,7 +1313,7 @@ class Checker {
       constraints.push(constraint);
       this.stmts(arm.body, armScope);
       // S21 (4): a binder its arm never reads is an error; `_` says so on purpose.
-      for (const { name, mark } of marks) if (!mark.used) this.err('PL1504', arm.pattern, `${name} is bound and never read; write \`_\` to ignore the payload (a misspelled constructor binds too)`);
+      for (const { name, mark } of marks) if (!mark.used) this.err('PL1504', arm.pattern, `${name} is bound and never read; write \`_\` to ignore the payload (a misspelled constructor binds too)`, { names: [name] });
     }
     this.coverage(u, s, constraints);
   }
@@ -1500,7 +1500,7 @@ class Checker {
     let union: string | undefined;
     if (expected?.k === 'union' && owners.includes(expected.name)) union = expected.name;
     else if (owners.length === 1) union = owners[0];
-    else if (owners.length > 1) { this.err('PL1005', at, `${name} is a constructor of ${owners.join(' and ')}; write ${owners.map((o) => `${o}.${name}`).join(' or ')} (S22)`); return null; }
+    else if (owners.length > 1) { this.err('PL1005', at, `${name} is a constructor of ${owners.join(' and ')}; write ${owners.map((o) => `${o}.${name}`).join(' or ')} (S22)`, { names: owners }); return null; }
     if (!union) return null;
     return { union, info: this.env.unions.get(union)! };
   }

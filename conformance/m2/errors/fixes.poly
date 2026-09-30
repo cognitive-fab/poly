@@ -1,0 +1,62 @@
+// expect: PL1202 PL1504 PL1005 PL1501 PL2101 (twelve fixable diagnostics for the random-order fix test, S70)
+module fixes
+
+enum Door { Open, Shut }
+enum Valve { Open, Closed }
+enum Prio { High, Low }
+type Job = Idle | Busy { prio: Prio } | Done { code: 0..3 }
+
+machine Desk {
+  state {
+    n : 0..3 = 0
+    m : 0..3 = 0
+    j : Job = Idle
+  }
+  action A()
+  action B()
+  action C()
+  action D()
+  action E()
+
+  // A reads a primed field twice, and requires after a write.
+  on A {
+    n' = 1
+    // the guard
+    require n' < 3 else reject "full"
+    m' = n' + 1
+  }
+  // B: two ambiguous constructors, and a binder no one reads.
+  on B {
+    let x = Open
+    let y = Open
+    require x == y else reject "no"
+    match j {
+      Busy { prio: Hgh } => n' = 1
+      Idle => n' = 2
+      Done { code: c } => n' = c
+    }
+  }
+  // C: a match that misses Done, and a primed read.
+  on C {
+    match j {
+      Idle => n' = m'
+      Busy { prio: q } => m' = 1
+    }
+  }
+  // D: a write, then two requires on one path.
+  on D {
+    m' = 2 // the write
+    require n > 0 else reject "empty"
+    require n < 3 else reject "full"
+  }
+  // E: a match that misses Busy, with a reject after a write inside an arm.
+  on E {
+    match j {
+      Idle => {
+        n' = 0
+        require m < 3 else reject "high"
+      }
+      Done { code: k } => n' = k
+    }
+  }
+}

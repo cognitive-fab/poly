@@ -54,6 +54,11 @@ export function renderDiagnostic(d: Diagnostic, file: string): string[] {
   }
   const rejections = (d as Diagnostic & { rejections?: string[] }).rejections;
   if (rejections?.length) lines.push(`  then ${rejections.join(', ')}`);
+  // PT12.1: each fix by its id, which `poly fix` takes, and what it does.
+  for (const f of d.fixes ?? []) {
+    const e = f.edit as { op: string; with?: string; stmt?: string };
+    lines.push(`  fix ${f.id}: ${e.op}${e.with ? ` with ${e.with.split('\n')[0]}${e.with.includes('\n') ? ' …' : ''}` : e.stmt ? ` ${e.stmt}` : ''}`);
+  }
   return lines;
 }
 

@@ -21,6 +21,7 @@ import { parse } from '@poly/lang';
 import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
+import { attachFixes } from './fixes.js';
 import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
@@ -671,6 +672,12 @@ function finish(report: CheckReport, module?: Module): CheckReport {
     for (const d of [...report.diagnostics, ...report.machines.flatMap((m) => m.diagnostics), ...report.configurations.flatMap((c) => c.diagnostics)]) {
       if (d.witness) d.witness.id = 'sha256:' + sha256Hex(canonicalize({ moduleDigest: report.moduleDigest, property: d.property ?? d.code, trace: d.witness.trace }));
     }
+    // S70: fixes are computed on the module this report checked; their ids carry its digest (S69).
+    attachFixes([
+      ...report.diagnostics.map((d) => ({ d, machine: d.at.machine ?? null })),
+      ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, machine: m.machine }))),
+      ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, machine: null }))),
+    ], module, report.moduleDigest);
   }
   // Engine diagnostics carry no source position. One that names a node (a property, a handler) points at
   // that node's line; any other points at the machine's declaration (display only, PT12.1).
