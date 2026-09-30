@@ -73,6 +73,23 @@ The agent applies the spec text for S35 in one commit, citing the id. Step 5 sta
 
 The agent applies the spec text for S37 and S40 to S42 in one commit, citing the ids, and removes the provisional marks from S37 to S41. Step 6 can start.
 
+## Rulings before attached children (S43 to S48)
+
+S45 was checked against polyrun before ruling. `kernel.mjs` delivers a child's completion and a parent-terminal cancel itself, but `dispatch` (and `http.mjs` behind it) accepts any action of the surface from outside, a child's completion action included. So check-product's rule matches the kernel's own deliveries, not everything the runtime accepts.
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S43** `spawn`'s arguments | **Accepted.** `spawn M as k -> Start(args)`: the child is created in its initial state and then takes `Start(args)` as its first step, as polyrun does. `spawn M as k` with no creation action is also legal. `initData` is removed from PT6.4. | PT6.4 |
+| **S44** Completion and cancel payloads | **Accepted, with exact types.** A completion action declares `(childKey: string, childState: R)`, where `R` is a record type whose fields match the child's state (S25), or declares no parameters. A cancel action declares `(reason: string check { "parent-terminal" })` or none. Any other parameter list is `PL1201` at the action, because polyrun will not supply it. | PT6.4 |
+| **S45** Which stimuli the parent is offered | **Accepted, as a kernel assumption.** PS7.1 adopts polyrun's rule: a child's completion action is offered to the parent only when that child is terminal, and a terminal instance is offered nothing. Because polyrun accepts that action from outside today, the rule is stated as **K9: a child-completion or cancel action is delivered only by the kernel**. poly-ref and check-product both assume it, and every verdict that relies on it lists K9 under the instance line. The runtime must enforce it: M4's gate checks that an external dispatch of such an action is refused. The polyrun change (refuse an external dispatch of an action wired as a child completion or cancel) is mine to make; list it for me. | PS7.1; PS10 (K9); PT18 M4 row |
+| **S46** Children of children | **Accepted.** `PL0901` in M1, and the plan lists it for a later milestone. | none |
+| **S47** Codes for polyrun's doctrine findings | **Accepted.** `PL5102 UNHANDLED_CASCADE_DELIVERY` is new. An unnamed reject or a poisoned lowered module means the lowering lost something, so each is `PL2501`, and each gets a deliberately broken lowering in the explicit list. | PT12.2 |
+| **S48** A compose invariant that reads a child not yet spawned | **Accepted, with its own code.** A read of `children.k.f` is legal only under a `k spawned` narrowing, as `action == A` narrows parameters (S19). An unnarrowed read is `PL5103 CHILD_READ_WITHOUT_SPAWNED`, and the fix it offers is the narrowing. | PT7; PT12.2 |
+
+**The OMS shipments spawned in a loop.** Raise it as S49 before step 7, with a proposal. My direction: keys indexed by a bounded range, `spawn Shipment as f[i]` lowering to the key `f<i>`, with `i` from a declared integer range, and a bounded `for i in 0..n` statement unrolled at compile time, where `n` is a constant or a field bounded by its type. No unbounded loop, and no key built from a string at runtime.
+
+The agent applies the spec text for S43 to S45, S47 and S48 in one commit, citing the ids. Attached children can start.
+
 ## Conclusion
 
 M1 starts with its three open questions settled. The emit-only step is fixed where it originates, in the engine. Liveness no longer blocks a safety result. The one gate item that needs liveness moves to the milestone that builds it. The configuration explorer is the main work, and its first targets (the checkout witness and the delivery variants) are already measured by independent scripts. The rulings on the plan add the record type the OMS order needs and fix the timer rule against polyrun's store.
