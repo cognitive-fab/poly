@@ -188,6 +188,11 @@ class Checker {
       if (machines.has(d.name)) { this.err('PL1002', d, `machine ${d.name} is declared twice`); continue; }
       machines.set(d.name, this.checkMachine(d));
     }
+    // PD1.3b: a record or a union payload cannot hold a Conf (review A4).
+    for (const d of this.module.decls) {
+      const fields = d.kind === 'RecordDecl' ? d.fields : d.kind === 'TypeDecl' ? d.ctors.flatMap((c) => c.fields) : [];
+      for (const f of fields) if (hasConf(f.type)) this.err('PL1205', f, `${(d as { name: string }).name}.${f.name} holds a Conf, and a Conf is only a completion parameter bound from a reply (PD1.3b)`);
+    }
     this.sharedCompletions(machines);
     const configs = new Set<string>();
     for (const d of this.module.decls) {
@@ -283,6 +288,7 @@ class Checker {
           const inst = instances.get(m.input.instance);
           if (!inst) { this.err('PL1001', g, `no instance ${m.input.instance} in ${c.name}`); continue; }
           if ((inst.count === null) !== (m.input.index === null)) this.err('PL1201', g, `${m.input.instance} is ${inst.count === null ? 'one instance' : 'a group'}; name it as in inputs (S31, S73)`);
+          else if (inst.count !== null && typeof m.input.index === 'number' && (m.input.index < 0 || m.input.index >= inst.count)) this.err('PL1201', g, `${m.input.instance}[${m.input.index}] is not a member of ${m.input.instance}[${inst.count}] (S31, S73)`);
           if (!inst.machine.items.some((it) => it.kind === 'Action' && it.name === m.action)) this.err('PL1001', g, `${inst.machine.name} has no action ${m.action}`);
         }
       }
@@ -310,7 +316,7 @@ class Checker {
       }
     }
     const limit = c.bounds?.instances;
-    if (limit === null || limit === undefined) this.err('PL5303', c, `${spawner} spawns detached children, so configuration ${c.name} needs an instance bound; write bounds { transit n, instances n } (S60, S62)`);
+    if ((limit === null || limit === undefined) && c.bounds) this.err('PL5303', c, `${spawner} spawns detached children, so configuration ${c.name} needs an instance bound; write bounds { transit n, instances n } (S60, S62)`);
     let level = declared;
     for (let depth = 1; limit !== null && limit !== undefined && depth <= limit - declared.length && level.length; depth++) {
       const next: string[] = [];
@@ -547,6 +553,8 @@ class Checker {
     }
     // PD1.7: a decision is an effect of kind decision.<name>.
     const kinds = new Set([...[...facts.effects.values()].map(effectKind), ...[...facts.decisions.keys()].map((d) => `decision.${d}`)]);
+    // PD1.7, S41: a decision's kind decision.<d> is its own; an effect declaring it would share a manifest entry (review A6).
+    for (const e of facts.effects.values()) if (facts.decisions.has(effectKind(e).replace(/^decision\./, '')) && effectKind(e).startsWith('decision.')) this.err('PL1002', e, `effect ${e.name} has kind "${effectKind(e)}", which is the kind of decision ${effectKind(e).slice(9)} (PD1.7, S41)`);
     // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
     // Keys are declared by their use (PT6.3, PT6.4); an indexed key k[i] declares the family k (S49).
     const loops: Loop[] = [];
@@ -567,7 +575,7 @@ class Checker {
           if (s.index) { this.err('PL0901', s, `spawn detached … as ${s.as}[…]: a family of detached children is checked from a later milestone (S60)`); continue; }
           const name = s.target.split('.').pop()!;
           const prev = facts.detached.get(s.as);
-          if (facts.children.has(s.as) || [...facts.families.keys()].includes(s.as) || (prev && prev !== name)) this.err('PL1002', s, `child key ${s.as} names two children; one key names one child (PT6.4, S60)`);
+          if (prev && prev !== name) this.err('PL1002', s, `child key ${s.as} names two children; one key names one child (PT6.4, S60)`);
           else facts.detached.set(s.as, name);
           continue;
         }
@@ -589,6 +597,8 @@ class Checker {
       }
     };
     for (const it of m.items) if (it.kind === 'Handler') collect(it.body, this.actions.get(it.action));
+    // PT6.4, S60: a key is attached or detached, never both, whatever the order of the handlers (review A7).
+    for (const k of facts.detached.keys()) if (facts.children.has(k) || facts.families.has(k)) this.err('PL1002', m, `child key ${k} names an attached and a detached child; one key names one child (PT6.4, S60)`);
     const handlerOf = new Set(m.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => h.action));
 
     const handled = new Set<string>();
@@ -828,7 +838,7 @@ class Checker {
     const [q, c, ct] = constant(e.right) && !constant(e.left) ? [e.left, e.right, r] : constant(e.left) && !constant(e.right) ? [e.right, e.left, l] : [null, null, null];
     if (!q || !c) { if (l.k !== 'error' && r.k !== 'error') this.err('PL1205', e, `a Conf is compared with a constant in [0, 1], not with ${constant(e.left) ? 'another constant' : 'a field, a parameter or another Conf'} (PD1.3b)`); return BOOL; }
     const qt = q === e.left ? l : r;
-    if (qt.k !== 'conf' && qt.k !== 'error') { this.err('PL1201', c, `${tyToString(qt)} is not a Conf; a decimal is legal only where a Conf is expected (S76)`); return BOOL; }
+    if (qt.k !== 'conf') return BOOL; // a decimal beside a non-Conf is PL1201, reported once by confUses (S76)
     if (c.kind === 'Decimal' && c.value > 1000) this.err('PL1201', c, 'a Conf constant is in [0, 1] (PD1.3a)');
     void ct;
     return BOOL;
@@ -861,12 +871,29 @@ class Checker {
       for (const [k, v] of Object.entries(o)) if (k !== 'span' && k !== 'id') visit(v, o);
     };
     for (const f of m.fields) {
-      if (f.type.kind === 'TConf') { this.err('PL1205', f, `${f.name} is a Conf, and a state field cannot hold one (PD1.3b)`); continue; }
+      if (hasConf(f.type)) { this.err('PL1205', f, `${f.name} holds a Conf, and a state field cannot hold one (PD1.3b)`); continue; }
       visit(f.init, null);
     }
+    // PD1.4b: a Conf quantity is a completion parameter bound from a reply, `ok(r) -> A(p: r.conf)`; the checker
+    // explores it by the intervals the program uses, so a Conf anywhere else has no domain (review A4, A5).
+    const bound = new Set<string>();
     for (const it of m.items) {
-      if (it.kind === 'Decision' || it.kind === 'Action') continue;
-      if (it.kind === 'EffectDecl') { for (const p of it.params) if (p.type.kind === 'TConf') this.err('PL1205', p, 'an effect payload cannot carry a Conf (PD1.3b)'); continue; }
+      if (it.kind !== 'EffectDecl' && it.kind !== 'Decision') continue;
+      for (const o of it.items) if (o.kind === 'EffOutcome' && o.bind !== undefined) for (const a of o.args) if (boundPath(a.value, o.bind)) bound.add(`${o.action}.${a.name}`);
+    }
+    for (const it of m.items) {
+      if (it.kind === 'Action') {
+        for (const p of it.params) {
+          if (p.type.kind === 'TConf' ? !bound.has(`${it.name}.${p.name}`) : hasConf(p.type)) this.err('PL1205', p, `${it.name}.${p.name} is a Conf, and a Conf is only a completion parameter bound from a reply: ok(r) -> ${it.name}(${p.name}: r.conf) (PD1.3b, PD1.4b)`);
+        }
+        continue;
+      }
+      if (it.kind === 'Decision') {
+        for (const p of it.params) if (hasConf(p.type)) this.err('PL1205', p, 'a decision parameter cannot carry a Conf (PD1.3b)');
+        if (hasConf(it.result)) this.err('PL1205', it.result, 'a decision answers a finite value; its confidence is r.conf (PD1.2b)');
+        continue;
+      }
+      if (it.kind === 'EffectDecl') { for (const p of it.params) if (hasConf(p.type)) this.err('PL1205', p, 'an effect payload cannot carry a Conf (PD1.3b)'); continue; }
       visit(it, null);
     }
   }
@@ -1731,7 +1758,10 @@ class Checker {
     const fields = this.facts?.fieldTypes ?? new Map<string, Ty>();
     switch (e.kind) {
       case 'Int': return { k: 'int', lo: e.value, hi: e.value };
-      case 'Decimal': return { k: 'conf' };
+      case 'Decimal':
+        // S76: a decimal is the constant a Conf is compared with; outside a machine there is no Conf (review A2).
+        if (!this.facts) { this.err('PL1201', e, 'a decimal literal is legal only as the constant a Conf is compared with (S76)'); return ERR; }
+        return { k: 'conf' };
       case 'Bool': return BOOL;
       case 'String': return { k: 'string' };
       case 'Primed':
@@ -1877,7 +1907,7 @@ class Checker {
       case 'Unary': {
         if (e.op === '!') { this.expectBool(e.arg, scope); return BOOL; }
         const t = this.typeOf(e.arg, scope);
-        if (t.k !== 'int') { if (t.k !== 'error') this.err('PL1201', e, `unary - needs an int, not ${tyToString(t)}`); return ERR; }
+        if (t.k !== 'int') { if (t.k !== 'error' && t.k !== 'conf') this.err('PL1201', e, `unary - needs an int, not ${tyToString(t)}`); return ERR; }
         return { k: 'int', lo: -t.hi, hi: -t.lo };
       }
       case 'Binary': return this.binary(e, scope);
@@ -2338,6 +2368,11 @@ interface PathState {
 }
 
 /** PD1.2b, S79: `r.x.y` as the path [x, y] when it is rooted at the bound name r; null for any other expression. */
+/** Whether a type is Conf or holds one in a map (PD1.3b). Records and unions are judged at their declaration. */
+function hasConf(t: A.TypeExpr): boolean {
+  return t.kind === 'TConf' || (t.kind === 'TMap' && (hasConf(t.key) || hasConf(t.value)));
+}
+
 export function boundPath(e: A.Expr, bind: string): string[] | null {
   const path: string[] = [];
   let x = e;

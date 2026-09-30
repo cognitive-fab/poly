@@ -1,0 +1,9 @@
+// polywatch 2: an invariant false in the initial state has a witness of no steps.
+module pw
+
+machine Gate {
+  state { n : 0..2 = 0 }
+  action Up()
+  on Up { require n < 2 else reject "top"   n' = n + 1 }
+  invariant positive: n > 0
+}

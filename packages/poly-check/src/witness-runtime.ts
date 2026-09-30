@@ -134,6 +134,16 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
   const cycleSteps: { action: string; data: Flat; verdict: string }[] = [];
   let cycleStart: Flat | null = null;
   const liveness = spec.code === 'PL3301' ? named(live.liveness as { name: string; goal: (s: Flat) => boolean; fair: { action: string; perValue: boolean }[][] }[]) : undefined;
+  // A state property false in the initial state has a witness of no steps: it is judged before any step.
+  if (spec.code === 'PL3001') {
+    const p = named(props.stateInvariants as { name: string; pred: (s: Flat) => boolean }[]);
+    assert.ok(!p || p.pred(state), `invariant ${spec.property} is violated in the initial state`);
+  }
+  if (spec.code === 'PL3102' || spec.code === 'PL3901') {
+    for (const inv of (props.stateInvariants ?? []) as { name: string; pred: (s: Flat) => boolean }[]) {
+      if (/^(domain|shape|bound):/.test(inv.name)) assert.ok(inv.pred(state), `${inv.name} is violated in the initial state`);
+    }
+  }
   for (const [i, s] of spec.steps.entries()) {
     if (liveness && i === spec.cycle) cycleStart = clone(state);
     if (liveness && cycleStart && liveness.goal(state)) return; // the goal now holds on the cycle
@@ -224,6 +234,8 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
   const cycleSteps: { kind: string; target: string; action: string; data: Flat; verdict: string }[] = [];
   let start: string | null = null;
   const key = (sg: Map<string, Flat>, m: typeof mu) => stable([[...sg].sort(), m.map((x) => stable(x)).sort()]);
+  // A configuration invariant false in the initial state has a witness of no steps.
+  if (spec.code === 'PL5401' && prop?.kind === 'Property') assert.ok(holds(prop.expr, sigma), `configuration invariant ${spec.property} is violated in the initial state`);
   for (const [i, s] of spec.steps.entries()) {
     const g = s.global!;
     if (prop?.kind === 'Liveness' && i === spec.cycle) start = key(sigma, mu);

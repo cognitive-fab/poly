@@ -123,6 +123,8 @@ class Reader {
   }
 
   private integer(node: ts.Node, v: number): number {
+    // As the standalone lexer reads them: decimal digits only, so `1e3` and `0x10` are not ints here.
+    if (ts.isNumericLiteral(node) && !/^\d+$/.test(node.getText(this.sf))) this.fail(node, 'an integer is written in decimal digits');
     if (!Number.isSafeInteger(v)) this.fail(node, 'poly numbers are safe integers');
     return v;
   }
@@ -365,8 +367,10 @@ class Reader {
   /** A decimal literal (S76), in thousandths. */
   private decimal(node: ts.Expression): number {
     const n = this.unparen(node);
-    if (!ts.isNumericLiteral(n) || !/^\d+\.\d{1,3}$/.test(n.text)) this.fail(n, 'expected a decimal such as 0.3, with at most three digits after the point');
-    const [w, f] = n.text.split('.');
+    // The source text, not TypeScript's normalised value: `1.0` is the decimal 1.0, not the int 1 (review A1).
+    const raw = ts.isNumericLiteral(n) ? n.getText(this.sf) : '';
+    if (!/^\d+\.\d{1,3}$/.test(raw)) this.fail(n, 'expected a decimal such as 0.3, with at most three digits after the point');
+    const [w, f] = raw.split('.');
     return Number(w) * 1000 + Number(f.padEnd(3, '0'));
   }
 
@@ -580,7 +584,7 @@ class Reader {
 
   expr(node: ts.Expression): A.Expr {
     const n = this.unparen(node);
-    if (ts.isNumericLiteral(n) && n.text.includes('.')) return this.mk<A.DecimalLit>(n, { kind: 'Decimal', value: this.decimal(n) });
+    if (ts.isNumericLiteral(n) && n.getText(this.sf).includes('.')) return this.mk<A.DecimalLit>(n, { kind: 'Decimal', value: this.decimal(n) });
     if (ts.isNumericLiteral(n)) return this.mk<A.IntLit>(n, { kind: 'Int', value: this.integer(n, Number(n.text)) });
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return this.mk<A.StringLit>(n, { kind: 'String', value: n.text });
     if (n.kind === ts.SyntaxKind.TrueKeyword || n.kind === ts.SyntaxKind.FalseKeyword) return this.mk<A.BoolLit>(n, { kind: 'Bool', value: n.kind === ts.SyntaxKind.TrueKeyword });

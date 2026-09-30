@@ -545,7 +545,10 @@ function mentionsType(n: unknown, name: string): boolean {
   if (!n || typeof n !== 'object') return false;
   if (Array.isArray(n)) return n.some((x) => mentionsType(x, name));
   const o = n as { kind?: string; name?: string };
-  if (o.kind === 'TName' && o.name === name) return true;
+  // S76: `Tri.Unknown` names Tri as well as a type does.
+  const c = (o as { ctor?: string }).ctor;
+  if ((o.kind === 'TName' || o.kind === 'Name') && o.name === name) return true;
+  if ((o.kind === 'PCtor' || o.kind === 'CtorExpr') && typeof c === 'string' && c.startsWith(`${name}.`)) return true;
   return Object.entries(o).some(([k, v]) => k !== 'span' && mentionsType(v, name));
 }
 

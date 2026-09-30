@@ -142,6 +142,9 @@ function namesType(n: unknown, name: string): boolean {
   if (!n || typeof n !== 'object') return false;
   if (Array.isArray(n)) return n.some((x) => namesType(x, name));
   const o = n as { kind?: string; name?: string };
-  if (o.kind === 'TName' && o.name === name) return true;
+  // S76: `Tri.Unknown` names Tri too, so it is always legal (review A9).
+  const p = o as { ctor?: string };
+  if ((o.kind === 'TName' || o.kind === 'Name') && o.name === name) return true;
+  if ((o.kind === 'PCtor' || o.kind === 'CtorExpr') && typeof p.ctor === 'string' && p.ctor.startsWith(`${name}.`)) return true;
   return Object.entries(o).some(([k, v]) => k !== 'span' && namesType(v, name));
 }
