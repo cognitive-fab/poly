@@ -757,7 +757,10 @@ class Checker {
         for (const en of e.entries) {
           const kt = this.typeOf(en.key, scope, expected.key);
           const kv = this.fold(en.key);
-          if (!same(kt, expected.key)) {
+          if (kt.k === 'error') {
+            // The key's own mistake is already reported (an unknown name, say); it is not reported again as a wrong key.
+            everyKeyValid = false;
+          } else if (!same(kt, expected.key)) {
             this.err('PL1201', en.key, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(expected.key)}`);
             everyKeyValid = false;
           } else if (keys && kv !== undefined && !keys.includes(kv)) {

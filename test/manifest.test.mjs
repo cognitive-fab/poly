@@ -75,3 +75,29 @@ test('the CLI takes a directory, and a bad manifest is a usage error', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('polywatch: --root needs a value; an option in its place is a usage error', () => {
+  const cli = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
+  const r = spawnSync(process.execPath, [cli, 'check', join(ROOT, 'examples', 'hello', 'hello.poly'), '--root', '--json'], { encoding: 'utf8' });
+  assert.equal(r.status, 64, r.stdout + r.stderr);
+});
+
+test('polywatch: a symlinked directory is not followed out of the project, and a link loop ends', async () => {
+  const { symlinkSync } = await import('node:fs');
+  const outside = mkdtempSync(join(tmpdir(), 'poly-outside-'));
+  const dir = mkdtempSync(join(tmpdir(), 'poly-links-'));
+  try {
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'a.poly'), 'module a\n');
+    writeFileSync(join(outside, 'b.poly'), 'module b\n');
+    // 'junction' needs no privilege on Windows and is ignored elsewhere.
+    symlinkSync(outside, join(dir, 'src', 'out'), 'junction');
+    symlinkSync(dir, join(dir, 'src', 'loop'), 'junction');
+    writeFileSync(join(dir, 'poly.json'), '{ "poly": "1", "name": "x", "modules": ["src/**/*.poly"] }');
+    const { files } = loadProject(dir);
+    assert.deepEqual(files.map((f) => relative(dir, f).split('\\').join('/')), ['src/a.poly']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});

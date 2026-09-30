@@ -82,3 +82,10 @@ for (const [shape, type, inside, outside] of SHAPES) {
     assert.deepEqual(mod.getState(), b.lowered.contract.initState);
   });
 }
+
+test('polywatch: an unknown or non-constant map-literal key gets one diagnostic', () => {
+  const src = (lit) => `module gen\n${TYPES}\nmachine M {\n  state {\n    k : 0..1 = 0\n    x : map<Door, 0..3> = ${lit}\n  }\n  action Go()\n  on Go {\n    require k < 1 else reject "done"\n    k' = 1\n  }\n}\n`;
+  const codes = (lit) => checkModule(parse(src(lit)).module).diagnostics.map((d) => d.code);
+  assert.deepEqual(codes('{ Open: 1, Ajar: 2 }'), ['PL1001']);
+  assert.deepEqual(codes('{ Open: 1, k: 2 }'), ['PL1001']);
+});

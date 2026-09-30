@@ -26,7 +26,7 @@ export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
   const rootAt = args.indexOf('--root');
-  const root = rootAt >= 0 ? args[rootAt + 1] : undefined;
+  const root = rootAt >= 0 && args[rootAt + 1] !== undefined && !args[rootAt + 1].startsWith('--') ? args[rootAt + 1] : undefined;
   const positional = args.filter((a, i) => !a.startsWith('--') && (rootAt < 0 || i !== rootAt + 1));
   if (positional[0] !== 'check' || positional.length !== 2 || (rootAt >= 0 && !root)) {
     process.stderr.write(USAGE + '\n');

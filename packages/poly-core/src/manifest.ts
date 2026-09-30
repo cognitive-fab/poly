@@ -7,7 +7,7 @@
 // Only the fields PT1.2 states are read. A field the build needs that PT1.2
 // does not have is a spec issue, raised before it is used (M1-6), so an
 // unknown field is refused here rather than silently ignored.
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 export interface Manifest {
@@ -66,12 +66,13 @@ function patternToRegExp(pattern: string): RegExp {
   return new RegExp(`^${re}$`);
 }
 
+// Links are not followed: a module is a file inside the project directory, and a link can lead out of it or loop.
 function allFiles(dir: string, root: string, out: string[]): void {
-  for (const e of readdirSync(dir)) {
-    if (e === 'node_modules' || e === '.poly' || e === '.git') continue;
-    const p = join(dir, e);
-    if (statSync(p).isDirectory()) allFiles(p, root, out);
-    else out.push(relative(root, p).split(sep).join('/'));
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name === '.poly' || e.name === '.git' || e.isSymbolicLink()) continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) allFiles(p, root, out);
+    else if (e.isFile()) out.push(relative(root, p).split(sep).join('/'));
   }
 }
 
