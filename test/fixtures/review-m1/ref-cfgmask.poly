@@ -1,0 +1,28 @@
+module cfgmask
+
+service machine Recv {
+  state { x : 0..1 = 0 }
+  action Set(v: int check { 0, 1 }, from: Ref<Send>)
+  on Set(v, from) { x' = v  send from <- Ack()  send from <- Ack2() }
+}
+
+enum S { Idle, Sent, Done }
+
+machine Send {
+  state { s : S = Idle   r : Ref<Recv> = none }
+  terminal s == Done
+  action Go()
+  action Ack()
+  action Ack2()
+  on Go { require s == Idle else reject "sent"  s' = Sent  send r <- Set(v: 2, from: self) }
+  on Ack { s' = Done }
+  on Ack2 { s' = Done }
+}
+
+configuration pair {
+  rc : Recv
+  sd : Send { r: rc }
+  inputs { sd.Go }
+  bounds { transit 1 }
+  invariant ok: rc.x <= 1
+}

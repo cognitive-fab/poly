@@ -1,0 +1,16 @@
+module recpay
+
+type Pt = { x: 0..1, y: 0..1 }
+type U = None | At { p: Pt }
+
+service machine M {
+  state {
+    u : U = None
+  }
+
+  action Go(p: Pt)
+
+  on Go(p) {
+    u' = At { p: p }
+  }
+}

@@ -1,0 +1,31 @@
+module man3
+
+enum Phase { Open, Sent, Done }
+
+machine Acct {
+  state {
+    phase : Phase = Open
+    peer  : Ref<Acct> = none
+  }
+  terminal phase == Done
+
+  action Go()
+  action Ok(p: Ref<Acct>)
+
+  on Go {
+    require phase == Open else reject "not-open"
+    phase' = Sent
+    emit ping(1)
+  }
+  on Ok(p) {
+    require phase == Sent else reject "not-sent"
+    phase' = Done
+    peer' = p
+  }
+
+  effect ping(x: 0..1) {
+    kind "net.ping"
+    labels { egress:external }
+    ok -> Ok(p: none)
+  }
+}

@@ -1,0 +1,41 @@
+module man1
+
+enum Phase { Open, Sent, Done }
+type Why = Fine | Bad { code: 0..1 }
+
+machine Acct {
+  state {
+    phase : Phase = Open
+    why   : Why = Fine
+    n     : 0..3 = 0
+  }
+  terminal phase == Done
+
+  action Go()
+  action Ok(w: Why, k: 0..3)
+  action Fail(w: Why)
+
+  on Go {
+    require phase == Open else reject "not-open"
+    phase' = Sent
+    emit ping(1)
+  }
+  on Ok(w, k) {
+    require phase == Sent else reject "not-sent"
+    phase' = Done
+    why' = w
+    n' = k
+  }
+  on Fail(w) {
+    require phase == Sent else reject "not-sent"
+    phase' = Done
+    why' = w
+  }
+
+  effect ping(x: 0..1) {
+    kind "net.ping"
+    labels { egress:external }
+    ok -> Ok(w: Fine, k: 1 + 2)
+    failed -> Fail(w: Why.Fine)
+  }
+}

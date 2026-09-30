@@ -1,0 +1,19 @@
+module recinv
+
+type Job = Idle | Busy { n: 1..2 }
+type Req = { job: Job, k: 0..1 }
+
+service machine R {
+  state {
+    job : Job = Busy { n: 1 }
+    cur : Req = { job: Idle, k: 0 }
+  }
+
+  action Put(r: Req)
+
+  on Put(r) {
+    cur' = r
+  }
+
+  invariant cur-idle: cur.job is Idle
+}

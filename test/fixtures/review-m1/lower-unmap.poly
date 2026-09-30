@@ -1,0 +1,19 @@
+module unmap
+
+enum Slot { A, B }
+type U = Nil | Has { m: map<Slot, bool> }
+
+service machine M {
+  state {
+    n : 0..1 = 0
+  }
+
+  action Put(u: U)
+
+  on Put(u) {
+    match u {
+      Nil => n' = 0
+      Has { m: _ } => n' = 1
+    }
+  }
+}

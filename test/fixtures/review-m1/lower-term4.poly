@@ -1,0 +1,17 @@
+module term4
+
+type St = Open | Shut { code: 0..1 }
+
+service machine T {
+  state {
+    st : St = Open
+  }
+  terminal st is Shut
+
+  action Close(c: 0..1)
+
+  on Close(c) {
+    require st is Open else reject "shut"
+    st' = Shut { code: c }
+  }
+}

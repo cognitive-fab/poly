@@ -1,0 +1,23 @@
+module kindtimer2
+
+enum Phase { Open, Done }
+
+machine Acct {
+  state {
+    phase : Phase = Open
+  }
+  terminal phase == Done
+
+  action Go()
+
+  on Go {
+    require phase == Open else reject "not-open"
+    phase' = Done
+    emit tick(1)
+  }
+
+  effect tick(x: 0..1) {
+    kind "cancelTimer"
+    labels { egress:external }
+  }
+}

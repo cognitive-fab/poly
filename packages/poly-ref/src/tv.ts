@@ -19,6 +19,7 @@ import { alpha, flatten, flattenData } from './alpha.js';
 import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
 import type { Intent } from './step.js';
 import type { RMachine } from './model.js';
+import { isTerminal } from './step.js';
 
 interface SamModule {
   instance: (o: object) => { lastStep: () => { intent?: string; classification: string; rejections: { reason?: string }[] } };
@@ -149,6 +150,14 @@ export async function translationValidate(module: Module, machineName: string, b
       continue;
     }
     if (stable(gotE) !== stable(wantE)) mismatch(`${what}: the lowered effects are ${stable(gotE)}, R_M emits ${stable(wantE)}`, where);
+  }
+
+  // The runtime applies row 1 from contract.json (PS9.1a), and the module keeps its own guard for polygraph (S6),
+  // which hides a wrong list from the transitions above: a missing terminal state still keeps completions and
+  // cancels from firing. So the list must agree with term on every reachable state (review finding R3).
+  for (const [i, s] of g.states.entries()) {
+    const listed = rt.terminalStates.includes(flatten(s, M)[rt.terminalKey]);
+    if (listed !== isTerminal(M, s)) mismatch(`contract.json ${listed ? 'lists' : 'does not list'} the control value of ${stateKey(s, M.fieldNames)} as terminal, and term gives ${!listed} (PS1.3)`, pathTo(g, i));
   }
 
   // Property modules (PS9.2, last sentence). Every property must be present: the declared ones, and the

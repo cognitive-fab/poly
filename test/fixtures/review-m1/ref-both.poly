@@ -1,0 +1,10 @@
+module both
+
+machine M {
+  state {
+    a : 0..1 = 0
+    b : int check 0..1 = 0
+  }
+  action Bump()
+  on Bump { a' = a + 1  b' = b + 1 }
+}

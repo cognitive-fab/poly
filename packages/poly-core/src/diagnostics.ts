@@ -80,6 +80,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL5103: { name: 'CHILD_READ_WITHOUT_SPAWNED', stage: 'types', severity: 'error' },
   // S50: a signal to a child that is not spawned; the runtime halts the parent.
   PL5104: { name: 'SIGNAL_TO_ABSENT_CHILD', stage: 'composition', severity: 'finding' },
+  // S66 (provisional): one step signals one child with one action twice; the kernel poisons the step.
+  PL5105: { name: 'DUPLICATE_SIGNAL', stage: 'types', severity: 'error' },
   // PS7.2: a cascade deeper than 8.
   PL5201: { name: 'CASCADE_DEPTH', stage: 'composition', severity: 'finding' },
   // PS13.5: a configuration's bounds, reported, never silently applied.

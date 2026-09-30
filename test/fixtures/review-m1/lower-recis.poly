@@ -1,0 +1,18 @@
+module recis
+
+type Job = Idle | Busy { n: 1..2 }
+type Req = { job: Job, k: 0..1 }
+
+service machine R {
+  state {
+    job : Job = Idle
+    got : 0..1 = 0
+  }
+
+  action Put(r: Req)
+
+  on Put(r) {
+    require r.job is Busy else reject "idle-job"
+    got' = r.k
+  }
+}

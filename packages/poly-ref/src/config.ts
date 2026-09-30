@@ -172,9 +172,12 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone };
     const g: GlobalState = { sigma, mu: sortMu(next) };
     // PS13.5: a step that would exceed B messages in transit is not explored.
-    if (g.mu.length > B) return { label, outcome: { kind: 'bound', state: g, field: 'transit', value: g.mu.length } };
+    // PS4.2a before PS13.5: a post-state outside a declared type is no state at all, however many messages it sends.
     for (const f of inst.machine.fields) {
       if (!inType(st.next[f.name], f.type, inst.machine)) return { label, outcome: { kind: 'escape', state: g, field: `${inst.name}.${f.name}`, value: st.next[f.name] } };
+    }
+    if (g.mu.length > B) return { label, outcome: { kind: 'bound', state: g, field: 'transit', value: g.mu.length } };
+    for (const f of inst.machine.fields) {
       if (!inCheckDomain(st.next[f.name], f, inst.machine)) return { label, outcome: { kind: 'bound', state: g, field: `${inst.name}.${f.name}`, value: st.next[f.name] } };
     }
     return { label, outcome: { kind: 'state', state: g } };

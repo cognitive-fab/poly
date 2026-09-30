@@ -8,7 +8,7 @@
 // is authoritative inside Reach(I), disagrees about a state inside the
 // instance, that is a lowering mismatch (PL2501).
 import type { MachineReport } from './check.js';
-import { monitorStart, monitorStep } from './model.js';
+import { monitorStart, monitorStep, inType, inCheckDomain } from './model.js';
 import type { Edge } from './explore.js';
 import type { State } from './values.js';
 import { alpha, flattenData } from './alpha.js';
@@ -69,8 +69,13 @@ export function confirmWitness(report: MachineReport, w: WitnessToConfirm): Conf
   const edge = g.out[from].map((k) => g.edges[k]).find((e) => e.label.action === last.action && stable(flattenData(e.label.data, e.label.action, M)) === stable(last.data));
   if (!edge) return { status: 'disagrees', reason: `poly-ref has no step ${last.action} ${stable(last.data)} from that state` };
   if (automatic) {
-    const kind = w.property.startsWith('bound:') ? 'bound' : 'escape';
-    return edge.outcome.kind === kind ? { status: 'confirmed' } : { status: 'disagrees', reason: `poly-ref's step leads to a ${edge.outcome.kind}, not a ${kind}` };
+    const bound = w.property.startsWith('bound:');
+    const key = w.property.slice(w.property.indexOf(':') + 1);
+    const f = M.fields.find((x) => x.name === key) ?? M.fields.find((x) => key.startsWith(`${x.name}_`));
+    if (!f) return { status: 'disagrees', reason: `poly-ref has no field for ${w.property}` };
+    const v = edge.outcome.state[f.name];
+    const left = bound ? !inCheckDomain(v, f, M) : !inType(v, f.type, M);
+    return left ? { status: 'confirmed' } : { status: 'disagrees', reason: `poly-ref's step keeps ${f.name} inside its ${bound ? 'check domain' : 'type'}` };
   }
   const s = g.states[from];
   if (w.kind === 'transition') {

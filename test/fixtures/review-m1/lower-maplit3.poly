@@ -1,0 +1,16 @@
+module maplit3
+
+enum Slot { A, B }
+
+service machine M {
+  state {
+    m : map<Slot, bool> = { Slot.A: false, Slot.B: false }
+  }
+
+  action Set(s: Slot)
+
+  on Set(s) {
+    m' = m with [s] = true
+  }
+
+}

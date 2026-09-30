@@ -1,0 +1,40 @@
+module term5
+
+type St = Open | Shut { code: 0..1 }
+enum P { Idle, Waiting, Done }
+
+machine Kid {
+  state {
+    st : St = Open
+  }
+  terminal st is Shut
+
+  action Close(c: 0..1)
+
+  on Close(c) {
+    require st is Open else reject "shut"
+    st' = Shut { code: c }
+  }
+}
+
+machine Par {
+  state {
+    p : P = Idle
+  }
+  terminal p == Done
+
+  action Go()
+  action Fin()
+
+  on Go {
+    require p == Idle else reject "busy"
+    p' = Waiting
+    spawn Kid as box on complete -> Fin
+  }
+  on Fin {
+    require p == Waiting else reject "no"
+    p' = Done
+  }
+
+  compose invariant done-means-kid-shut: parent.p == Done implies (box spawned && children.box.st is Shut)
+}

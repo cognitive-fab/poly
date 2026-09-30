@@ -1,0 +1,34 @@
+module jesc
+
+enum PS { Open, Going, Done }
+enum CS { Idle, Set, Fin }
+
+machine Kid {
+  state {
+    c    : CS   = Idle
+    size : 0..1 = 0
+  }
+  terminal c == Fin
+  action Start(n: int check { 0, 1 })
+  action Finish()
+  on Start(n) { require c == Idle else reject "started"  c' = Set  size' = n }
+  on Finish { c' = Fin }
+}
+
+machine Parent {
+  state {
+    p : PS   = Open
+    k : 0..2 = 0
+  }
+  terminal p == Done
+  action Bump()
+  action Go()
+  action End()
+  on Bump { require p == Open else reject "not-open"  require k < 2 else reject "max"  k' = k + 1 }
+  on Go {
+    require p == Open else reject "not-open"
+    p' = Going
+    spawn Kid as kid -> Start(n: k)
+  }
+  on End { require p == Going else reject "not-going"  p' = Done }
+}

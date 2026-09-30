@@ -1,0 +1,31 @@
+// expect: PL5105 (one step signals one child with one action twice; the kernel poisons it, S66)
+module dupsig
+
+enum PS { Open, Going, Done }
+enum CS { Idle, Busy, Fin }
+
+machine Child {
+  state { c : CS = Idle   n : 0..2 = 0 }
+  terminal c == Fin
+  action Poke()
+  action Finish()
+  on Poke { require n < 2 else reject "full"  n' = n + 1  c' = Busy }
+  on Finish { c' = Fin }
+}
+
+machine Parent {
+  state { p : PS = Open }
+  terminal p == Done
+  action Go()
+  action End()
+  action ChildDone()
+  on Go {
+    require p == Open else reject "not-open"
+    p' = Going
+    spawn Child as kid on complete -> ChildDone
+    signal kid -> Poke()
+    signal kid -> Poke()
+  }
+  on End { require p == Going else reject "not-going"  p' = Done }
+  on ChildDone { require p == Going else reject "nope"  p' = Done }
+}

@@ -1,0 +1,44 @@
+module comp2
+
+type Res = None | Got { code: 0..1 }
+enum K { Open, Closed }
+enum P { Idle, Waiting, Done }
+
+machine Kid {
+  state {
+    k   : K = Open
+    res : Res = None
+  }
+  terminal k == Closed
+
+  action Close(c: 0..1)
+
+  on Close(c) {
+    require k == Open else reject "shut"
+    k' = Closed
+    res' = Got { code: c }
+  }
+}
+
+machine Par {
+  state {
+    p : P = Idle
+    r : Res = None
+  }
+  terminal p == Done
+
+  action Go()
+  action Fin()
+
+  on Go {
+    require p == Idle else reject "busy"
+    p' = Waiting
+    spawn Kid as box on complete -> Fin
+  }
+  on Fin {
+    require p == Waiting else reject "no"
+    p' = Done
+  }
+
+  compose invariant par-none: parent.r is None
+}

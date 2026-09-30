@@ -1,0 +1,13 @@
+module oob
+
+service machine M {
+  state {
+    m : map<0..2, bool> = [false, false, false]
+  }
+
+  action Set(k: 0..3)
+
+  on Set(k) {
+    m' = m with [k] = true
+  }
+}

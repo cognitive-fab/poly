@@ -1,0 +1,15 @@
+module proto
+
+enum Slot { __proto__, B }
+
+service machine M {
+  state {
+    m : map<Slot, 0..1> = { __proto__: 0, B: 1 }
+  }
+
+  action Flip(s: Slot)
+
+  on Flip(s) {
+    m' = m with [s] = 1 - m[s]
+  }
+}

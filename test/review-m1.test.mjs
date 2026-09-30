@@ -132,3 +132,103 @@ test('P6: the JSON form gives every diagnostic its schema, configurations includ
   const j = JSON.parse(r.stdout);
   assert.deepEqual(j.configurations.flatMap((c) => c.diagnostics.map((d) => d.schema)), ['poly.diagnostic/1']);
 });
+
+// ── the lowering ──────────────────────────────────────────────────────────
+
+const lowered = (name, machine) => {
+  const p = parse(src(name));
+  const check = checkModule(p.module);
+  assert.deepEqual(check.diagnostics.map((d) => d.code), [], name);
+  const r = lowerMachine(p.module, check, machine);
+  assert.ok(r.lowered, JSON.stringify(r.diagnostics.map((d) => d.message)));
+  return r.lowered;
+};
+
+test('L1: a completion\'s constant data is written as the value poly-ref assumes (PT6.1, S58, S65)', () => {
+  const m2 = JSON.parse(lowered('lower-man2', 'Acct').files['effects.manifest.json']).effects['net.ping'];
+  assert.deepEqual([m2.onSuccess.data, m2.onFailure.data], [{ w: { $: 'Fine' }, k: 3 }, { w: { $: 'Fine' } }]);
+  const m3 = JSON.parse(lowered('lower-man3', 'Acct').files['effects.manifest.json']).effects;
+  assert.equal(Object.values(m3)[0].onSuccess.data.p, null);
+  const m1 = JSON.parse(lowered('lower-man1', 'Acct').files['effects.manifest.json']).effects;
+  assert.equal(Object.values(m1)[0].onSuccess.data.k, 3);
+});
+
+test('L2: terminalStates lists the tags of a control field that is a union with payloads', () => {
+  assert.deepEqual(lowered('lower-term4', 'T').contract.terminalStates, ['Shut']);
+});
+
+test('L3: an effect kind that is a kernel intent name is refused (PT6.1)', () => {
+  assert.deepEqual(codes(src('lower-kindtimer2')), ['PL1201']);
+});
+
+test('L4: a map literal with qualified keys lowers its keys by name (S22)', () => {
+  assert.deepEqual(lowered('lower-maplit3', 'M').contract.initState.m, { A: false, B: false });
+});
+
+test('L5: `is` on a record field, a parent field and a child field reads the structured value (PS5.1, PS7.3)', async () => {
+  for (const name of ['lower-recis', 'lower-recinv', 'lower-comp2']) {
+    const r = await checkFile(join(FIX, `${name}.poly`), { root: join(OUT, name) });
+    assert.ok(!JSON.stringify(r).includes('PL2501'), render(r));
+  }
+  const r = await checkFile(join(FIX, 'lower-comp1.poly'), { root: join(OUT, 'comp1') });
+  const f = r.machines.find((m) => m.machine === 'Par').diagnostics.find((d) => d.code === 'PL5001');
+  assert.match(f.engine, /polyrun/, render(r));
+});
+
+test('L6: a union payload of record type lowers', () => {
+  assert.ok(lowered('lower-recpay', 'M'));
+});
+
+test('L7: a parameter whose union payload holds a map is PL0901, as a map parameter is (S65)', () => {
+  assert.deepEqual(lowerCodes(src('lower-unmap'), 'M'), ['PL0901']);
+});
+
+test('L8: __proto__ as a name is refused, since it cannot be lowered to a JSON key safely', () => {
+  assert.deepEqual(codes(src('lower-proto')), ['PL1201']);
+});
+
+test('L9: a map key whose range leaves the map\'s keys is PL1201, not a crash in poly-ref', () => {
+  assert.deepEqual(codes(src('lower-oob')), ['PL1201']);
+});
+
+// ── poly-ref ──────────────────────────────────────────────────────────────
+
+test('R1: the same signal twice in one step is refused, as the kernel poisons it (S66)', () => {
+  assert.deepEqual(codes(src('ref-dupsig')), ['PL5105']);
+});
+
+test('R2: a declared-type escape reached through a cascade is PL3102, not a bound hit (PS4.2a)', async () => {
+  const r = await checkFile(join(FIX, 'ref-jesc.poly'), { root: join(OUT, 'jesc') });
+  assert.ok(r.machines.some((m) => m.diagnostics.some((d) => d.code === 'PL3102')), render(r));
+  assert.equal(r.verdict, 'FINDINGS');
+});
+
+test('R3: translation validation applies the runtime\'s terminal row from contract.json to every action (PS9.1a)', async () => {
+  const { translationValidate } = await import('@poly/ref');
+  const { cpSync } = await import('node:fs');
+  const [b] = (await import('./helpers.mjs')).build(join(FIX, 'ref-dupsig.poly').replace('ref-dupsig', 'lower-term4'), 'review-m1-tv');
+  const dir = join(OUT, 'tv-bad');
+  cpSync(b.dir, dir, { recursive: true });
+  const c = JSON.parse(readFileSync(join(dir, 'contract.json'), 'utf8'));
+  for (const wrong of [[], ['Open'], ['Open', 'Shut']]) {
+    writeFileSync(join(dir, 'contract.json'), JSON.stringify({ ...c, terminalStates: wrong }));
+    const tv = await translationValidate(b.module, 'T', dir);
+    assert.ok(tv.mismatches.length > 0, JSON.stringify(wrong));
+  }
+  writeFileSync(join(dir, 'contract.json'), JSON.stringify(c));
+  assert.deepEqual((await translationValidate(b.module, 'T', dir)).mismatches, []);
+});
+
+test('R4: an engine\'s automatic invariant is confirmed by its field, when one step leaves the instance twice', async () => {
+  const r = await checkFile(join(FIX, 'ref-both.poly'), { root: join(OUT, 'both') });
+  assert.ok(!JSON.stringify(r).includes('PL2501'), render(r));
+});
+
+test('R5: in a configuration, a type escape is reported even when the step also passes the transit bound', () => {
+  const p = parse(src('ref-cfgmask'));
+  const decl = p.module.decls.find((d) => d.kind === 'Configuration');
+  return import('@poly/ref').then(({ checkConfiguration }) => {
+    const r = checkConfiguration(p.module, decl.name);
+    assert.ok(r.findings.some((d) => d.code === 'PL3102'), JSON.stringify(r.findings.map((d) => d.code)));
+  });
+});

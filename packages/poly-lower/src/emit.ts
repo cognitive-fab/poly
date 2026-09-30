@@ -75,10 +75,23 @@ function unionTag(cx: Cx, e: A.Expr, code: string): string {
     // A field read directly: its flat tag is the field itself.
     const r = e.kind === 'Name' ? cx.facts.resolutions.get(e.id) : undefined;
     if (r?.k === 'field') return `${cx.stateVar}[${q(r.name)}]`;
-    if (e.kind === 'Member' && e.object.kind === 'Name' && cx.facts.resolutions.get(e.id)?.k !== 'ctor') return `${cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : e.object.name}[${q(e.prop)}]`;
+    if (e.kind === 'Member' && e.object.kind === 'Name' && (e.object.name === 'pre' || e.object.name === 'post') && cx.facts.resolutions.get(e.object.id)?.k === (e.object.name === 'pre' ? 'pre' : 'post')) return `${cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : e.object.name}[${q(e.prop)}]`;
     return `(${code}).$`;
   }
   return code;
+}
+
+/**
+ * A child's field in a joint state, whose snapshot is the child's flat state (PS9.1b): a union with payloads
+ * is rebuilt from its tag and its flat payload fields, with the child's own layout (review finding L5).
+ */
+function childRead(cx: Cx, state: string, machineId: string | undefined, field: string): string {
+  const child = cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machineId?.split('.').pop());
+  const f = child?.fields.find((x) => x.name === field);
+  const u = f?.type.kind === 'TName' ? cx.env.unions.get(f.type.name) : undefined;
+  if (!u || u.isEnum) return `${state}[${q(field)}]`;
+  const ctors = Object.fromEntries(u.ctors.map((c) => [c.name, c.fields.map((p) => [p.name, `${field}_${p.name}`])]));
+  return `((__s) => { const __o = { $: __s[${q(field)}] }; for (const [__p, __k] of (${JSON.stringify(ctors)}[__s[${q(field)}]] || [])) __o[__p] = __s[__k]; return __o; })(${state})`;
 }
 
 function readField(cx: Cx, stateVar: string, name: string): string {
@@ -127,9 +140,10 @@ export function expr(e: A.Expr, cx: Cx): string {
       if (res?.k === 'jointParent') return readField(cx, 'joint.parent.state', res.field);
       if (res?.k === 'jointFamily') {
         const ix = (e.object as A.Index).index;
-        return `joint.children[${q(res.family)} + (${expr(ix, cx)})].state[${q(res.field)}]`;
+        const spec = [...cx.facts.children.values()].find((c) => c.key.startsWith(res.family) && /^\d+$/.test(c.key.slice(res.family.length)));
+        return childRead(cx, `joint.children[${q(res.family)} + (${expr(ix, cx)})].state`, spec?.machine, res.field);
       }
-      if (res?.k === 'jointChild') return `joint.children[${q(res.key)}].state[${q(res.field)}]`;
+      if (res?.k === 'jointChild') return childRead(cx, `joint.children[${q(res.key)}].state`, cx.facts.children.get(res.key)?.machine, res.field);
       const obj = (e.object as A.NameRef).name;
       // Reject properties and handlers read pre.f from their state variable (PT5; S19 for handlers).
       const v = cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : obj;
@@ -184,7 +198,8 @@ export function expr(e: A.Expr, cx: Cx): string {
         const key = t.key as { lo: number; hi: number };
         return `[${Array.from({ length: key.hi - key.lo + 1 }, (_, i) => expr(byKey.get(key.lo + i)!, cx)).join(', ')}]`;
       }
-      return `{ ${e.entries.map((en) => `${q((en.key as A.NameRef).name)}: ${expr(en.value, cx)}`).join(', ')} }`;
+      const keyName = (k: A.Expr) => { const r = cx.facts.resolutions.get(k.id); return r?.k === 'ctor' ? r.ctor : k.kind === 'Member' ? k.prop : (k as A.NameRef).name; };
+      return `{ ${e.entries.map((en) => `[${q(keyName(en.key))}]: ${expr(en.value, cx)}`).join(', ')} }`;
     }
     case 'ArrayLit': return `[${e.items.map((x) => expr(x, cx)).join(', ')}]`;
     case 'Spawned': return e.index ? `(joint.children[${q(e.key)} + (${expr(e.index, cx)})] !== undefined)` : `(joint.children[${q(e.key)}] !== undefined)`;

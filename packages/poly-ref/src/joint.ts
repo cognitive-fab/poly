@@ -163,11 +163,16 @@ export function stimuliAt(j: Joint): Stimulus[] {
   return out;
 }
 
-/** The first field of an instance that leaves its type or check domain, if any (PS4.2a). */
-function outside(j: Joint): string | null {
+/** The first field of an instance that leaves its type (escape) or its check domain (bound), if any (PS4.2a). */
+function outside(j: Joint): { field: string; escape: boolean } | null {
   for (const [who, i] of [[PARENT, j.parent] as const, ...j.children]) {
     for (const f of i.machine.fields) {
-      if (!inType(i.state[f.name], f.type, i.machine) || !inCheckDomain(i.state[f.name], f, i.machine)) return `${who}.${f.name}`;
+      if (!inType(i.state[f.name], f.type, i.machine)) return { field: `${who}.${f.name}`, escape: true };
+    }
+  }
+  for (const [who, i] of [[PARENT, j.parent] as const, ...j.children]) {
+    for (const f of i.machine.fields) {
+      if (!inCheckDomain(i.state[f.name], f, i.machine)) return { field: `${who}.${f.name}`, escape: false };
     }
   }
   return null;
@@ -261,9 +266,12 @@ export function checkJoint(module: Module, parentName: string, opts: { maxStates
       if (doctrine.some((d) => d.halts)) continue;
       const left = outside(joint);
       if (left) {
-        if (!seen.has(`PL3901:${left}`)) {
-          seen.add(`PL3901:${left}`);
-          findings.push(finding('PL3901', 'BOUND_HIT', 'inconclusive', `the joint machine leaves the checked instance at ${left}; that state is not explored`, trace(pathTo(head), { edge, post: joint })));
+        // A value outside its declared type can arrive by cascade data the machine alone never sees (review finding R2).
+        const code = left.escape ? 'PL3102' : 'PL3901';
+        if (!seen.has(`${code}:${left.field}`)) {
+          seen.add(`${code}:${left.field}`);
+          if (left.escape) findings.push(finding('PL3102', 'DOMAIN_ESCAPE', 'finding', `the joint machine puts a value outside its declared type into ${left.field}`, trace(pathTo(head), { edge, post: joint })));
+          else findings.push(finding('PL3901', 'BOUND_HIT', 'inconclusive', `the joint machine leaves the checked instance at ${left.field}; that state is not explored`, trace(pathTo(head), { edge, post: joint })));
         }
         continue;
       }

@@ -326,6 +326,15 @@ class Checker {
 
   // ── declarations ────────────────────────────────────────────────────────
   private declarations(): void {
+    // A declared name becomes a JSON key and a property of generated objects; __proto__ would set a prototype (review finding L8).
+    const proto = (x: unknown): void => {
+      if (!x || typeof x !== 'object') return;
+      if (Array.isArray(x)) { x.forEach(proto); return; }
+      const n = x as { kind?: string; name?: string; members?: string[]; id?: string };
+      if (n.kind && n.kind !== 'Name' && (n.name === '__proto__' || n.members?.includes('__proto__'))) this.err('PL1201', n as A.NodeBase, '__proto__ cannot be a name: it is not a safe JSON key');
+      for (const [k, v] of Object.entries(x)) if (k !== 'span') proto(v);
+    };
+    proto(this.module.decls);
     const seen = new Set<string>();
     for (const d of this.module.decls) {
       if (d.kind === 'RecordDecl') {
@@ -613,6 +622,9 @@ class Checker {
       }
     }
     if (!labelled) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
+    // polyrun reads timer, cancelTimer, spawnChild and signalChild before its manifest, and PT7a adds sendTo (review finding L3).
+    const kind = effectKind(e);
+    if (KERNEL_KINDS.has(kind)) this.err('PL1201', e, `effect ${e.name} has kind "${kind}", which is the kernel's own intent kind; choose another (PT6.1)`);
   }
 
   /** Whether a type is, or holds through record fields, a type the predicate names (S25, S65). */
@@ -777,6 +789,12 @@ class Checker {
   }
 
   /** `signal k -> A(args)` (PT6.4): k is a child this machine spawns, A an action of that child with a handler. */
+  /** A key of an int-keyed map whose range leaves the map's keys names no entry (review finding L9). */
+  private keyInRange(kt: Ty, key: Ty, at: A.NodeBase): void {
+    if (kt.k !== 'int' || key.k !== 'int') return;
+    if (kt.lo < key.lo || kt.hi > key.hi) this.err('PL1201', at, `the map's keys are ${tyToString(key)}, and this key ranges over ${tyToString(kt)}`);
+  }
+
   /** S49: an index whose range leaves its family names no member; PL1201 at the index. */
   private inFamily(it: Ty, r: { lo: number; hi: number }, at: A.NodeBase, fam: string): boolean {
     if (it.k !== 'int' || (it.lo >= r.lo && it.hi <= r.hi)) return true;
@@ -1166,6 +1184,7 @@ class Checker {
         if (ft.k !== 'map') { this.err('PL1201', s, `${s.field} is not a map`); break; }
         const kt = this.typeOf(s.key, scope, ft.key);
         if (!same(kt, ft.key)) this.err('PL1201', s.key, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(ft.key)}`);
+        else this.keyInRange(kt, ft.key, s.key);
         const vt = this.typeOf(s.value, scope, ft.value);
         if (!same(vt, ft.value)) this.err('PL1201', s.value, `value has type ${tyToString(vt)}, the map's values are ${tyToString(ft.value)}`);
         break;
@@ -1375,6 +1394,17 @@ class Checker {
           timers.set(key, s);
           return [{ ...p, emits: true, timers }];
         }
+        if (s.op === 'signal') {
+          // S66: the kernel poisons a step that signals one child with one action twice (kernel.mjs, check-product.mjs).
+          const sidx = s.index ? constantIndex(s.index) : null;
+          if (s.index && sidx === null) return [{ ...p, emits: true }];
+          const skey = `signal:${s.extra[0]}${sidx ?? ''}:${s.target}`;
+          const prev = p.timers.get(skey);
+          if (prev) this.errOnce('PL5105', s, `${s.extra[0]}${sidx ?? ''} is signalled with ${s.target} twice on one path (first at line ${prev.span?.line ?? '?'}); the kernel poisons such a step (S66)`);
+          const timers = new Map(p.timers);
+          timers.set(skey, s);
+          return [{ ...p, emits: true, timers }];
+        }
         if (s.op !== 'after' || !s.as) return [{ ...p, emits: true }];
         // A timer key indexed by the loop variable names one key per copy (S49); a key not indexed is one key.
         const tidx = s.index ? constantIndex(s.index) : null;
@@ -1548,6 +1578,7 @@ class Checker {
         if (mt.k !== 'map') { if (mt.k !== 'error') this.err('PL1201', e, `indexing needs a map, not ${tyToString(mt)}`); this.typeOf(e.index, scope); return ERR; }
         const kt = this.typeOf(e.index, scope, mt.key);
         if (!same(kt, mt.key)) this.err('PL1201', e.index, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(mt.key)}`);
+        else this.keyInRange(kt, mt.key, e.index);
         return mt.value;
       }
       case 'Call': {
@@ -1962,6 +1993,9 @@ function spawnedKeys(e: A.Expr): string[] {
   if (e.kind === 'Binary' && e.op === '&&') return [...spawnedKeys(e.left), ...spawnedKeys(e.right)];
   return [];
 }
+
+/** The intent kinds the kernel reads itself (PT6.3, PT6.4, PT7a). */
+const KERNEL_KINDS = new Set(['timer', 'cancelTimer', 'spawnChild', 'signalChild', 'sendTo']);
 
 // PT6.2: the closed Polyaxion vocabulary.
 const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
