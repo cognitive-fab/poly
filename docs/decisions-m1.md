@@ -109,6 +109,15 @@ The agent applies the spec text for S49, S50 and S52 in one commit, citing the i
 
 The agent applies the spec text in one commit, with a regression test that fails first, before families.
 
+## Rulings on S54 and S55, and when the model-decisions proposal enters
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S54** The OMS enters `charging` from two handlers | **Accepted: two copies in M1, no new construct.** `FRAUD_PASSED` and `AMEND` each emit `chargeCard` and arm `chargeTimeout`; in `AMEND` the payload is the `totalCents` parameter, since expressions read the pre-state. The AC1 comparison with the hand-written mapper catches the copies drifting apart. An entry construct is recorded as a candidate, to be decided from the M3 experiment's data, not from one example. | none (candidate listed in `plan-m1.md`) |
+| **S55** Entry writes to one map from the copies of a loop | **Accepted, with the rule made static.** Writes to entries of one map on one control path combine when their keys are **distinct constants after unrolling** (literals, constructors, or the index of different loop copies). A whole write together with any entry write, or two entry writes whose keys are the same constant or are not both constants, is `PL2102`. The checker never reasons about runtime key values: a write `m'[k]` with `k` a field or parameter may not share a path with another entry write to `m`. | PS2.2, PS2.4 (one sentence each) |
+
+**The model-decisions proposal** (`docs/proposals/pd-model-decisions.md`, v0.2, with its review and response in `docs/reviews/`) is not part of M1. It is ruled at M1's close, after the M1 code review and before the M2 handoff. If ruled as proposed, PD1 joins M2's scope and gate (PD1-A1 to A4), PD2 and PD3 join M4 with K10, and PD4 joins M5. Nothing in M1 reads it or builds toward it.
+
 ## Conclusion
 
 M1 starts with its three open questions settled. The emit-only step is fixed where it originates, in the engine. Liveness no longer blocks a safety result. The one gate item that needs liveness moves to the milestone that builds it. The configuration explorer is the main work, and its first targets (the checkout witness and the delivery variants) are already measured by independent scripts. The rulings on the plan add the record type the OMS order needs and fix the timer rule against polyrun's store.
