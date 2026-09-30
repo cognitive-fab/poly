@@ -51,6 +51,15 @@ Conditions:
 
 Its independence is limited, as the agent says, because the same agent wrote poly-ref. My reading, the two mutants, and its agreement with `config_check.py` are what it relies on.
 
+## Rulings after the M2 code review (S86, and the refused exports)
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S86** Two machines with the same defect got the same witness id | **Accepted.** A witness id is the SHA-256 of the RFC 8785 canonical JSON of `{ moduleDigest, subject, property, trace }`, where `subject` is the machine or configuration the witness is about. S69 is amended accordingly. | PT12.4 |
+| **Refused exports** (from the review) | **Accepted as the right interim behaviour.** For `PL5001`, `PL5101`, `PL5104` and a configuration's `PL3102`, `poly witness --test` refuses and says why; it never writes a test that passes on a broken program. The report marks these findings "no test export until M4". None is in AC3's seeded set, so the M2 gate is unaffected. M4's plan lists them: its runtime API drives children and configurations directly, and each gets an exported test there. | PT12.4 |
+
+M2 is closed.
+
 ## Conclusion
 
 The plan can proceed as written, with five changes: witness and fix ids that include the module digest (S69), an AST printer that turns the surface-equality test into a test over every conformance source (S71), liveness predicates in their own module (S74), an independently written evidence script for the checkout's `settle` (S77), and detached addresses resolved at commit rather than at delivery (S78).
