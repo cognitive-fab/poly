@@ -246,13 +246,13 @@ class Printer {
       case 'Call': return FUNCTIONS.has(e.callee) ? `${this.use(e.callee)}(${e.args.map((a) => this.expr(a, 0)).join(', ')})` : `${this.use('call')}(${[q(e.callee), ...e.args.map((a) => this.expr(a, 0))].join(', ')})`;
       case 'Unary': {
         // `- -x` would read as a decrement, and `!` binds tighter than any binary operator.
-        const arg = e.arg.kind === 'Unary' || e.arg.kind === 'Binary' || (e.arg.kind === 'Int' && e.arg.value < 0) ? `(${this.expr(e.arg, 0)})` : this.expr(e.arg, 15);
+        const arg = e.arg.kind === 'Unary' || e.arg.kind === 'Binary' || (e.arg.kind === 'Int' && e.arg.value < 0) ? `(${this.expr(e.arg, 0)})` : this.operand(e.arg, 15);
         return `${e.op}${arg}`;
       }
       case 'Binary': {
         if (e.op === 'implies') return `${this.use('implies')}(${this.expr(e.left, 0)}, ${this.expr(e.right, 0)})`;
         const p = TS_PREC[e.op];
-        const text = `${this.expr(e.left, p)} ${TS_OP[e.op] ?? e.op} ${this.expr(e.right, p + 1)}`;
+        const text = `${this.operand(e.left, p)} ${TS_OP[e.op] ?? e.op} ${this.operand(e.right, p + 1)}`;
         return p < ctx ? `(${text})` : text;
       }
       case 'Is': return `${this.use('is')}(${[this.expr(e.expr, 0), ...e.ctors.map(q)].join(', ')})`;
@@ -263,6 +263,11 @@ class Printer {
       case 'Spawned': return `${this.use('spawned')}(${e.index ? `$.${e.key}[${this.expr(e.index, 0)}]` : `$.${e.key}`})`;
       case 'Quant': return `${this.use(e.q)}(${q(e.var)}, ${q(e.group)}, ${this.arrow(e.body)})`;
     }
+  }
+
+  /** S84: a record or map literal as an operand is lit({ … }), since tsc refuses `===` with an object literal. */
+  private operand(e: A.Expr, ctx: number): string {
+    return e.kind === 'MapLit' || e.kind === 'ArrayLit' ? `${this.use('lit')}(${this.expr(e, 0)})` : this.expr(e, ctx);
   }
 
   /** The object of a member access or an index: a primary, or parenthesised. */

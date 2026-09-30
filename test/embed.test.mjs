@@ -53,7 +53,7 @@ test(`S71: every conformance and example source (${SOURCES.length}) prints as Ty
   assert.ok(compared >= 80, `${compared} sources compared`);
 });
 
-test('S71: the printed sources type-check against the declarations; the one class of error is S84 (open)', () => {
+test('S71, S84: every printed source passes tsc --noEmit against the declarations', () => {
   const dir = join(BUILD, 'embed', 'printed');
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -62,10 +62,19 @@ test('S71: the printed sources type-check against the declarations; the one clas
     if (p.module) writeFileSync(join(dir, `${String(i).padStart(3, '0')}-${basename(f, '.poly')}.ts`), printModule(p.module));
   });
   const r = tsc(tsconfig(dir, ['*.ts']));
-  // S84: tsc refuses `===` with an object literal operand (TS2839), which is how a record literal is compared.
-  const errors = r.stdout.split('\n').filter((l) => /error TS\d+/.test(l));
-  assert.deepEqual(errors.filter((l) => !/error TS2839/.test(l)), []);
-  assert.deepEqual(errors.map((l) => /-(\w+)\.ts/.exec(l)[1]), ['records']);
+  // S84: a record or map literal as an operand is lit({ … }), so no exemption is needed.
+  assert.equal(r.status, 0, r.stdout);
+});
+
+test('S84: a record literal as an operand is lit({ … }), and only there', () => {
+  const src = readFileSync(join(ROOT, 'conformance', 'm1', 'records.poly'), 'utf8');
+  const ts = printModule(parse(src).module);
+  assert.match(ts, /\$\.box !== lit\(\{ size: \$\.Small, count: 0 \}\)/);
+  assert.equal(digest(readEmbedded(ts).module), digest(parse(src).module));
+  // A bare object literal as an operand, and lit() anywhere else, are outside the subset.
+  const bare = readEmbedded(ts.replace('$.box !== lit({ size: $.Small, count: 0 })', '$.box !== { size: $.Small, count: 0 }'));
+  assert.equal(bare.diagnostics[0]?.code, 'PL0301');
+  assert.match(bare.diagnostics[0].message, /lit\(/);
 });
 
 for (const [ts, poly] of TWINS) {

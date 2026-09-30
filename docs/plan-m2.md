@@ -157,6 +157,7 @@ PT2.5's table is built as written. Where it leaves a form open, these are the fo
 | a read of a primed field (always `PL1202`) | `primed('f')`, so an erroneous program keeps its AST |
 | a call to a function PT2.2 does not name | `call('f', …)`, refused by the checker as in the standalone syntax |
 | a name that is not an identifier | `$['x']` |
+| a record or map literal as an operand of an operator | `lit({ … })` or `lit([ … ])`; a bare literal there, and `lit` anywhere else, is PL0301 (S84) |
 
 The printer parenthesises by TypeScript's precedence, not poly's, so the tree tsc parses is the AST printed. An arrow is `($) => e` or `() => e`, and an object literal as an arrow's body is parenthesised. The combinators' declarations are `packages/poly-embed/embed/index.d.ts`; a module imports them from `@cognitive-fab/poly/embed`, which a project maps with `paths` until the package is published.
 

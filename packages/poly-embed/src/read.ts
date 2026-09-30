@@ -599,12 +599,12 @@ class Reader {
     if (ts.isPrefixUnaryExpression(n)) {
       const op = n.operator === ts.SyntaxKind.ExclamationToken ? '!' : n.operator === ts.SyntaxKind.MinusToken ? '-' : null;
       if (!op) this.fail(n, 'only ! and - are unary operators here');
-      return this.mk<A.Unary>(n, { kind: 'Unary', op, arg: this.expr(n.operand) });
+      return this.mk<A.Unary>(n, { kind: 'Unary', op, arg: this.operand(n.operand) });
     }
     if (ts.isBinaryExpression(n)) {
       const op = BINARY[n.operatorToken.kind];
       if (!op) this.fail(n.operatorToken, `${n.operatorToken.getText(this.sf)} is outside the embedded subset; equality is === and !==`);
-      return this.mk<A.Binary>(n, { kind: 'Binary', op, left: this.expr(n.left), right: this.expr(n.right) });
+      return this.mk<A.Binary>(n, { kind: 'Binary', op, left: this.operand(n.left), right: this.operand(n.right) });
     }
     if (ts.isObjectLiteralExpression(n)) {
       return this.mk<A.MapLit>(n, {
@@ -628,6 +628,19 @@ class Reader {
     }
     if (ts.isCallExpression(n)) return this.callExpr(n);
     this.fail(n, 'outside the expression subset of PT2.2');
+  }
+
+  /** S84: an operand; a record or map literal there is lit({ … }), and a bare one is refused, as tsc refuses it. */
+  private operand(node: ts.Expression): A.Expr {
+    const n = this.unparen(node);
+    if (ts.isObjectLiteralExpression(n) || ts.isArrayLiteralExpression(n)) this.fail(n, 'a record or map literal as an operand is written lit({ … }) (S84)');
+    if (ts.isCallExpression(n) && this.combinator(n.expression) === 'lit') {
+      const [v] = this.argsOf({ name: 'lit', node: n }, 1, 1);
+      const inner = this.unparen(v);
+      if (!ts.isObjectLiteralExpression(inner) && !ts.isArrayLiteralExpression(inner)) this.fail(v, 'lit takes a record or map literal (S84)');
+      return this.expr(inner);
+    }
+    return this.expr(n);
   }
 
   private callExpr(n: ts.CallExpression): A.Expr {
@@ -664,6 +677,7 @@ class Reader {
         return this.mk<A.Quant>(n, { kind: 'Quant', q: name, var: this.str(v), group: this.str(g), body: this.arrow(body, (b) => this.expr(b)) });
       }
       case 'primed': return this.mk<A.PrimedRef>(n, { kind: 'Primed', name: this.str(this.argsOf(c, 1, 1)[0]) });
+      case 'lit': this.fail(n, 'lit({ … }) is written only as an operand of an operator; elsewhere a literal is plain (S84)');
       case 'call': {
         const [callee, ...args] = this.argsOf(c, 1, 64);
         return this.mk<A.Call>(n, { kind: 'Call', callee: this.str(callee), args: args.map((a) => this.expr(a)) });

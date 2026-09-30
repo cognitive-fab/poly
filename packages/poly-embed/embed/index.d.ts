@@ -107,6 +107,8 @@ export declare function named(param: string, e: Expr): Expr;
 
 // ── expressions ────────────────────────────────────────────────────────────
 export declare const ALL: Expr;
+/** S84: a record or map literal as an operand of an operator. */
+export declare function lit(literal: { [key: string]: Expr } | Expr[]): Expr;
 export declare function implies(a: Expr, b: Expr): Expr;
 export declare function is(e: Expr, ...ctors: string[]): Expr;
 export declare function isIn(e: Expr, set: Expr[]): Expr;
