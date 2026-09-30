@@ -1,0 +1,94 @@
+// T1 reference after change 2: a placed order can be cancelled; the provider's answer decides the refund.
+module orders
+
+enum Status { unset, draft, placed, paid, shipped, cancelling, cancelled, declined, failed }
+
+machine Order {
+  state {
+    status  : Status = unset
+    items   : 0..3   = 0
+    charges : 0..2   = 0
+    refunds : 0..1   = 0
+  }
+  terminal status in { shipped, cancelled, failed }
+
+  action Create()
+  action AddItem()
+  action RemoveItem()
+  action Place()
+  action PaymentSucceeded()
+  action PaymentFailed()
+  action Ship()
+  action Cancel()
+  action RetryPayment()
+
+  on Create {
+    require status == unset else reject "exists"
+    status' = draft
+  }
+  on AddItem {
+    require status == draft else reject "not-draft"
+    require items < 3 else reject "full"
+    items' = items + 1
+  }
+  on RemoveItem {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    items' = items - 1
+  }
+  on Place {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    status' = placed
+    charges' = charges + 1
+  }
+  on PaymentSucceeded {
+    require status in { placed, cancelling } else reject "not-placed"
+    if status == cancelling {
+      status' = cancelled
+      refunds' = refunds + 1
+    } else {
+      status' = paid
+    }
+  }
+  on PaymentFailed {
+    require status in { placed, cancelling } else reject "not-placed"
+    if status == cancelling {
+      status' = cancelled
+    } else {
+      if charges == 1 {
+        status' = declined
+      } else {
+        status' = failed
+      }
+    }
+  }
+  on RetryPayment {
+    require status == declined else reject "not-declined"
+    require charges < 2 else reject "no-retry-left"
+    status' = placed
+    charges' = charges + 1
+  }
+  on Ship {
+    require status == paid else reject "not-paid"
+    status' = shipped
+  }
+  on Cancel {
+    require status != unset else reject "unknown"
+    require status in { draft, placed, paid } else reject "closed"
+    if status == placed {
+      status' = cancelling
+    } else {
+      if status == paid {
+        refunds' = refunds + 1
+      }
+      status' = cancelled
+    }
+  }
+
+  invariant charged-at-most-twice: charges <= 2
+  invariant refund-only-when-cancelled: refunds == 1 implies status == cancelled && charges >= 1
+  invariant shipped-was-paid: status == shipped implies charges >= 1 && refunds == 0
+  invariant placed-orders-hold-items: status in { placed, paid, shipped, cancelling, declined, failed } implies items >= 1
+  invariant no-refund-while-cancelling: status == cancelling implies refunds == 0
+}

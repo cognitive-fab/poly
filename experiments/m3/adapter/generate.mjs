@@ -9,7 +9,7 @@
 // the instance's flat state, and the network methods drive polyrun's message worker one message at a time
 // (S89, S91). The machines are lowered beside it, in build/.
 //
-// Usage: node generate.mjs --map host.map.json --host host.ts --module <file.poly|file.ts> --out <dir>
+// Usage: node generate.mjs --map host.map.json --host host.ts --module <file.poly|file.ts> --out <dir> [--polyrun <specifier>]
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -276,13 +276,13 @@ export function generate({ mapFile, hostFile, moduleFile, out, polyrun = '@cogni
 
 const flag = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : undefined; };
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  const [mapFile, hostFile, moduleFile, out] = ['map', 'host', 'module', 'out'].map(flag);
+  const [mapFile, hostFile, moduleFile, out, polyrun] = ['map', 'host', 'module', 'out', 'polyrun'].map(flag);
   if (!mapFile || !hostFile || !moduleFile || !out) {
     console.error(`usage: node ${basename(process.argv[1])} --map host.map.json --host host.ts --module <file.poly|file.ts> --out <dir>`);
     process.exit(64);
   }
   mkdirSync(out, { recursive: true });
-  const r = generate({ mapFile, hostFile, moduleFile, out });
+  const r = generate({ mapFile, hostFile, moduleFile, out, ...(polyrun ? { polyrun } : {}) });
   if (r.errors) {
     console.error(`host.map.json: failed build (S90)\n${r.errors.map((e) => `  ${e}`).join('\n')}`);
     process.exit(1);

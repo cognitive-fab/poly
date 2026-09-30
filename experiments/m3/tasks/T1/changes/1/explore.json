@@ -1,0 +1,17 @@
+{
+  "calls": {
+    "create": [["a"]],
+    "addItem": [["a"]],
+    "removeItem": [["a"]],
+    "place": [["a"]],
+    "paymentSucceeded": [["a"]],
+    "paymentFailed": [["a"]],
+    "retryPayment": [["a"], ["b"]],
+    "ship": [["a"]],
+    "cancel": [["a"]]
+  },
+  "observe": { "order": [["a"], ["b"]] },
+  "network": false,
+  "maxDepth": 14,
+  "maxTraces": 600
+}
