@@ -11,7 +11,8 @@ export type Stage =
   | 'effects'
   | 'composition'
   | 'configuration'
-  | 'deadlock';
+  | 'deadlock'
+  | 'liveness';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
 export type DiagSeverity = 'error' | 'finding' | 'inconclusive' | 'warning';
@@ -65,6 +66,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL3003: { name: 'REJECT_PROPERTY', stage: 'model-check', severity: 'finding' },
   PL3102: { name: 'DOMAIN_ESCAPE', stage: 'model-check', severity: 'finding' },
   PL3201: { name: 'DEADLOCK', stage: 'deadlock', severity: 'finding' },
+  // PS6.4: a fair cycle that never reaches the goal, with its lasso.
+  PL3301: { name: 'LIVENESS_LASSO', stage: 'liveness', severity: 'finding' },
   PL3901: { name: 'BOUND_HIT', stage: 'model-check', severity: 'inconclusive' },
   PL4001: { name: 'PATH_PROPERTY', stage: 'effects', severity: 'finding' },
   // S33: an accepted step that emits and leaves the state unchanged.
@@ -128,6 +131,8 @@ export interface Witness {
   id: string;
   length: number;
   trace: WitnessStep[];
+  /** A liveness lasso (S74): the index in trace where the cycle begins; the trace is the prefix, then the cycle. */
+  cycle?: number;
 }
 
 /** A typed edit addressed to an AST node, applied only if the node still has digest `pre` (PT12.1). */

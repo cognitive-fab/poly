@@ -58,11 +58,11 @@ test('REFUSED, exit 2: a type error stops at stage 0 and lists what did not run'
   assert.match(r.out, /verdict: REFUSED \(exit 2\)/);
 });
 
-test('INCONCLUSIVE, exit 2: a liveness property is listed as not run, and the safety results stand (M1-2)', () => {
+test('CLEAN, exit 0: a liveness property is checked, with the safety results (PS6, M2)', () => {
   const r = poly('check', src('examples/evidence/outbox-union.poly'));
-  assert.equal(r.code, 2);
-  assert.match(r.out, /not run: settles, liveness is checked from milestone M2/);
-  assert.match(r.out, /verdict: INCONCLUSIVE \(exit 2\)  runtime\.OutboxIntent  over 17 states/);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /liveness CLEAN \(1 property under weak fairness \(PS6\.4\)\)/);
+  assert.match(r.out, /verdict: CLEAN \(exit 0\)  runtime\.OutboxIntent  over 17 states/);
   assert.doesNotMatch(r.out, /PL0901/);
 });
 

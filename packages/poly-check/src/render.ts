@@ -46,7 +46,11 @@ export function renderDiagnostic(d: Diagnostic, file: string): string[] {
     const rows = d.witness.trace.map((s) => [call(s.action, s.data), state(s.pre), state(s.post), note(s)]);
     const w0 = Math.max(...rows.map((r) => r[0].length));
     const w1 = Math.max(...rows.map((r) => r[1].length));
-    for (const r of rows) lines.push(`    ${r[0].padEnd(w0)}   ${r[1].padEnd(w1)} -> ${r[2]}${r[3] ? `   ${r[3]}` : ''}`);
+    // A liveness lasso (S74): the prefix, then the cycle, which returns to its first state.
+    rows.forEach((r, i) => {
+      if (i === d.witness!.cycle) lines.push(`    cycle, repeated for ever:`);
+      lines.push(`    ${r[0].padEnd(w0)}   ${r[1].padEnd(w1)} -> ${r[2]}${r[3] ? `   ${r[3]}` : ''}`);
+    });
   }
   const rejections = (d as Diagnostic & { rejections?: string[] }).rejections;
   if (rejections?.length) lines.push(`  then ${rejections.join(', ')}`);

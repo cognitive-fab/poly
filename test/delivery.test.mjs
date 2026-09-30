@@ -25,15 +25,16 @@ const steps = (d) => d.witness.trace.map((s) => `${s.action}${Object.values(s.da
 const IN_ORDER = ['Emit(M1)', 'Emit(M2)', 'Send(M2)', 'DeliverReq(M2)'];
 const AT_MOST_ONCE = ['Emit(M1)', 'Emit(M2)', 'Send(M1)', 'Resend(M1)', 'DeliverReq(M1)', 'DeliverAck(M1)', 'Send(M2)', 'DeliverReq(M2)', 'Archive', 'DeliverReq(M1)'];
 
-test('the in-order worker with the dedupe table kept: 1,147 states, safety clean, exactly-once not run', async () => {
+test('the in-order worker with the dedupe table kept: 1,147 states, clean, exactly-once holding', async () => {
   assert.equal(ref('delivery').states, 1147);
   const r = await checkFile(join(DIR, 'delivery.poly'), { root: OUT });
   const m = r.machines[0];
   assert.deepEqual(m.diagnostics, [], render(r));
   assert.equal(m.instance.states, 1147);
   assert.match(m.stages.find((s) => s.stage === 'model-check').note, /^1147 states explored/);
-  assert.deepEqual(m.notRun.map((p) => p.property), ['exactly-once']);
-  assert.equal(r.verdict, 'INCONCLUSIVE');
+  assert.deepEqual(m.notRun, []);
+  assert.equal(m.stages.find((s) => s.stage === 'liveness').verdict, 'CLEAN');
+  assert.equal(r.verdict, 'CLEAN');
 });
 
 test('the parallel worker with the dedupe table kept: 2,368 states, at-most-once holds', async () => {
@@ -57,7 +58,8 @@ test('the parallel worker that still claims in-order: violated in 4 steps', asyn
 test('the dedupe table cleared on archive: at-most-once violated in 10 steps, and at-most-once alone (S64)', () => {
   const f = ref('delivery-cleared').findings;
   // S64: in-order is steps[M2] >= 1 implies steps[M1] >= 1, which a second step of M1 does not break.
-  assert.deepEqual(f.map((d) => [d.code, d.property]), [['PL3001', 'at-most-once']]);
+  // exactly-once cannot hold once M1 has stepped twice, and it is reported as the liveness finding it is.
+  assert.deepEqual(f.map((d) => [d.code, d.property]), [['PL3001', 'at-most-once'], ['PL3301', 'exactly-once']]);
   assert.deepEqual(steps(f[0]), AT_MOST_ONCE);
 });
 

@@ -26,7 +26,7 @@ import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'effects' | 'composition' | 'configuration';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'composition' | 'configuration';
 
 export interface StageRecord {
   stage: StageName;
@@ -154,11 +154,6 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
 
   for (const machine of checked.machines.keys()) {
     const mc: MachineCheck = { machine, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
-    // M1-2: liveness is checked from M2; each property is listed, never silently dropped (no silent clean).
-    const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine);
-    for (const it of decl?.items ?? []) {
-      if (it.kind === 'Liveness') mc.notRun.push({ property: it.name, reason: 'liveness is checked from milestone M2 (PS6)' });
-    }
     report.machines.push(mc);
     mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
     if (refused) {
@@ -216,11 +211,12 @@ function byContent(dir: string, file: string): string {
   return copy;
 }
 
-/** Stages 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
+/** Stages 2c, 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
 function laterStages(checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
   const f = checked.machines.get(machine)!;
   const mapper = f.effects.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || sends(f.machine);
-  return [...(mapper ? ['effects' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
+  const live = f.machine.items.some((i) => i.kind === 'Liveness');
+  return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
 }
 
 function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
@@ -326,6 +322,14 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   const dead = ref.findings.filter((f) => f.code === 'PL3201');
   mc.diagnostics.push(...dead);
   mc.stages.push({ stage: 'deadlock', status: 'ran', engine: 'poly-ref', verdict: verdictOf(dead), ms: performance.now() - t0, note: ref.model.service ? 'service: exempt (PS1.7)' : `${ref.states} states` });
+
+  // ── stage 2c: liveness (PS6) ──────────────────────────────────────────
+  if (ref.model.liveness.length) {
+    t0 = performance.now();
+    const live = ref.findings.filter((f) => f.code === 'PL3301');
+    mc.diagnostics.push(...live);
+    mc.stages.push({ stage: 'liveness', status: 'ran', engine: 'poly-ref', verdict: verdictOf(live), ms: performance.now() - t0, note: `${ref.model.liveness.length} propert${ref.model.liveness.length === 1 ? 'y' : 'ies'} under weak fairness (PS6.4)` });
+  }
 
   // ── stage 3: effects (PS5.4, S33) ─────────────────────────────────────
   if (lowered.files['effects.cjs']) await effectsStage(module, machine, mc, dir, contract, ref, engines);
@@ -602,7 +606,7 @@ export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]
   const out = [...fromPolygraph];
   const have = new Set(out.map(mergeKey));
   for (const f of fromRef) {
-    if (f.code === 'PL3201' || f.code === 'PL4001' || f.code === 'PL4002') continue; // stage 2b reports deadlocks, stage 3 path properties
+    if (f.code === 'PL3201' || f.code === 'PL3301' || f.code === 'PL4001' || f.code === 'PL4002') continue; // stages 2b and 2c report deadlocks and liveness, stage 3 path properties
     if (have.has(mergeKey(f))) continue;
     // Finding 6: an escape or bound is kept per field, and poly-ref's exploration cap (no field) on its own.
     if (f.code === 'PL3003' && f.property && refOnly.has(f.property)) {

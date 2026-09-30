@@ -139,6 +139,8 @@ export interface RMachine {
   invariants: A.Property[];
   stepProperties: A.Property[];
   rejectProperties: A.Property[];
+  /** Liveness properties (PS5.5), checked under their fairness (PS6). */
+  liveness: A.Liveness[];
 }
 
 export function buildMachine(module: A.Module, machineName: string): RMachine {
@@ -183,6 +185,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   const invariants: A.Property[] = [];
   const stepProperties: A.Property[] = [];
   const rejectProperties: A.Property[] = [];
+  const liveness: A.Liveness[] = [];
   const pathProperties: RPathProperty[] = [];
   const effects = new Map<string, REffect>();
   for (const it of m.items) {
@@ -262,6 +265,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     if (it.kind === 'Property' && it.form === 'invariant') invariants.push(it);
     if (it.kind === 'Property' && it.form === 'step') stepProperties.push(it);
     if (it.kind === 'Property' && it.form === 'reject') rejectProperties.push(it);
+    if (it.kind === 'Liveness') liveness.push(it);
   }
   // S51: a completion's childKey ranges over the keys whose spawn names that action as its completion.
   for (const a of actions) {
@@ -270,7 +274,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   }
   return {
     name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, families, effects, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
-    actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties,
+    actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties, liveness,
   };
 }
 

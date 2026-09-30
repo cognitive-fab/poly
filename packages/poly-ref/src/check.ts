@@ -4,13 +4,14 @@
 //   - deadlock (PS5.6).
 // Liveness (PS6) and configurations (PS13) come in M1 and M2, as passes over
 // the same Graph.
-import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
+import type { Diagnostic, Expr, FairGroup as AstFairGroup, Module, Witness, WitnessStep } from '@poly/core';
 import { buildMachine, dataDomain, valuesOf, monitorStart, monitorStep, clauseText, type PathClause, type RMachine, type RPathProperty, type RType } from './model.js';
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
 import { isTerminal } from './step.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
+import { fairCycles, type FairGroup } from './liveness.js';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
 const CODE = {
@@ -19,6 +20,7 @@ const CODE = {
   PL3003: ['REJECT_PROPERTY', 'finding', 'model-check'],
   PL3102: ['DOMAIN_ESCAPE', 'finding', 'model-check'],
   PL3201: ['DEADLOCK', 'finding', 'deadlock'],
+  PL3301: ['LIVENESS_LASSO', 'finding', 'liveness'],
   PL3901: ['BOUND_HIT', 'inconclusive', 'model-check'],
   PL4001: ['PATH_PROPERTY', 'finding', 'effects'],
   PL4002: ['EMIT_WITHOUT_STATE_CHANGE', 'finding', 'effects'],
@@ -60,9 +62,9 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   const at = (node?: string) => ({ module: module.name, machine: M.name, ...(node ? { node } : {}) });
   // Findings carry their property or field and a digest of the state they name (review finding 8).
   const digestOf = (s: State) => 'sha256:' + createHash('sha256').update(stateKey(s, M.fieldNames)).digest('hex');
-  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, trace: WitnessStep[], about: { property?: string; field?: string; state?: State } = {}): Diagnostic => {
+  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, trace: WitnessStep[], about: { property?: string; field?: string; state?: State; cycle?: number } = {}): Diagnostic => {
     const [name, severity, stage] = CODE[code];
-    const witness: Witness = { id: '', length: trace.length, trace };
+    const witness: Witness = { id: '', length: trace.length, trace, ...(about.cycle !== undefined ? { cycle: about.cycle } : {}) };
     return {
       code, name, severity, stage, engine: ENGINE, at: at(node), message, witness,
       ...(about.property ? { property: about.property } : {}),
@@ -135,6 +137,22 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     seenAction.add(e.label.action);
     const kinds = [...new Set(e.label.effects.filter((x) => x.type !== 'send').map((x) => x.kind))].join(', ');
     findings.push(finding('PL4002', M.handlers.get(e.label.action)?.id, `${e.label.action} emits ${kinds} and leaves the state unchanged, so it can repeat its effect without limit`, trace([...pathTo(g, e.from), e, e]), { property: e.label.action, state: g.states[e.from] }));
+  }
+
+  // Liveness (PS6.4): each fair component that never reaches the goal, with its lasso.
+  for (const p of M.liveness) {
+    if (p.quant || !p.fair) continue; // refused by the checker in a machine (S56)
+    const holds = (e: Expr) => (i: number) => evaluate(e, { M, state: g.states[i], data: {}, locals: new Map() }) === true;
+    const lassos = fairCycles(g, { goal: holds(p.expr), from: p.from ? holds(p.from) : null, groups: machineGroups(M, p.fair) });
+    // One finding per property (one mistake, one diagnostic): the lasso of the first fair component reached,
+    // and every fair component's states, so each can be read without a second finding.
+    if (lassos.length) {
+      const l = lassos[0];
+      const edges = [...l.prefix, ...l.cycle] as Edge<State>[];
+      const f = finding('PL3301', p.id, `liveness ${p.name} fails: ${lassos.length} fair component${lassos.length === 1 ? '' : 's'} never reach${lassos.length === 1 ? 'es' : ''} its goal; the witness is a lasso through the first`, trace(edges), { property: p.name, state: g.states[l.component[0]], cycle: l.prefix.length });
+      (f as Diagnostic & { components?: unknown[][] }).components = lassos.map((x) => x.component.map((i) => statePlain(g.states[i])));
+      findings.push(f);
+    }
   }
 
   // Deadlock (PS5.6): reachable, not terminal, and no action accepts. A service is exempt (PS1.7).
@@ -225,6 +243,29 @@ export function instanceOf(M: RMachine): InstanceLine {
     fields: M.fields.filter((f) => f.check || f.type.k === 'int').map((f) => ({ name: f.name, domain: domainText(f.check, f.type, M) })),
     params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'record' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) }))),
   };
+}
+
+/**
+ * The fairness groups of a machine's liveness property (PS6.1). `A` is one group; `A(*)` is one group per data
+ * value of A; in a group written `A(*) | B`, each value of A forms a group with B.
+ */
+export function machineGroups(M: RMachine, fair: AstFairGroup[]): FairGroup[] {
+  const out: FairGroup[] = [];
+  for (const grp of fair) {
+    const plain = grp.members.filter((m) => !m.perValue).map((m) => m.action);
+    const starred = grp.members.filter((m) => m.perValue);
+    const accepted = (e: Edge<unknown>) => e.label.verdict.kind === 'accepted';
+    if (!starred.length) { out.push({ name: plain.join(' | '), takes: (e) => accepted(e) && plain.includes(e.label.action) }); continue; }
+    for (const m of starred) {
+      const a = M.actions.find((x) => x.name === m.action);
+      for (const d of a ? dataDomain(a, M) : []) {
+        const key = JSON.stringify(Object.keys(d).sort().map((k) => [k, keyOf(d[k])]));
+        const same = (e: Edge<unknown>) => JSON.stringify(Object.keys(e.label.data).sort().map((k) => [k, keyOf(e.label.data[k])])) === key;
+        out.push({ name: `${m.action}(${key})`, takes: (e) => accepted(e) && (plain.includes(e.label.action) || (e.label.action === m.action && same(e))) });
+      }
+    }
+  }
+  return out;
 }
 
 /** How many data records each action is offered in every state: |D(a)|. */

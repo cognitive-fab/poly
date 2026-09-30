@@ -95,7 +95,8 @@ test('OutboxIntent, v0.2 form (AC9): 35 states, deadlocked at (Allowed, 3, 1, T,
   const r = ref('examples/evidence/outbox-v02.poly', 'OutboxIntent');
   assert.equal(r.states, 35);
   assert.equal(r.accepted, 40);
-  assert.deepEqual(codes(r), ['PL3201', 'PL3201']);
+  // The safety half of the evidence; settles is checked in liveness.test.mjs.
+  assert.deepEqual(codes(r).filter((c) => c !== 'PL3301'), ['PL3201', 'PL3201']);
   const tuples = r.deadlocks.map((s) => [s.status, s.attempts, s.decisions, s.executed, s.approved]).sort();
   assert.deepEqual(tuples, [['Allowed', 3, 1, true, false], ['Allowed', 3, 2, true, true]]);
 });
