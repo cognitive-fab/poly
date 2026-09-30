@@ -322,3 +322,12 @@ test('polywatch (review) 2: forall over a group of detached instances judges the
   const { r } = await check('pw-spawned-eventually', src('pw-spawned-eventually'));
   assert.deepEqual(r.configurations[0].diagnostics.filter((d) => d.code === 'PL3301'), [], render(r));
 });
+
+test('ruling on the refused exports: the report marks a finding with no test export until M4', async () => {
+  const children = readFileSync(join(ROOT, 'conformance', 'm1', 'children.poly'), 'utf8');
+  const { r } = await check('m4-mark', children.replace('children.box.ship in { Delivered, Voided }', 'children.box.ship == Delivered'));
+  const d = all(r).find((x) => x.code === 'PL5001');
+  assert.equal(d.testExport, 'no test export until M4');
+  assert.match(render(r), /no test export until M4/);
+  assert.equal(all(r).filter((x) => x.witness && x.code !== 'PL5001').every((x) => x.testExport === undefined), true);
+});

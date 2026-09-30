@@ -56,6 +56,7 @@ export function renderDiagnostic(d: Diagnostic, file: string): string[] {
       lines.push(`    ${r[0].padEnd(w0)}   ${r[1].padEnd(w1)} -> ${r[2]}${r[3] ? `   ${r[3]}` : ''}`);
     });
   }
+  if (d.testExport) lines.push(`  ${d.testExport}`);
   const rejections = (d as Diagnostic & { rejections?: string[] }).rejections;
   if (rejections?.length) lines.push(`  then ${rejections.join(', ')}`);
   // PT12.1: each fix by its id, which `poly fix` takes, and what it does.

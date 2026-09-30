@@ -167,6 +167,8 @@ export interface Diagnostic {
   names?: string[];
   /** `sha256:` of the state the finding names. */
   stateDigest?: string;
+  /** A witness no exported test can judge yet: "no test export until M4" (ruling after the M2 review). */
+  testExport?: string;
 }
 
 export function diag(code: string, at: NodeAt, message: string, extra: Partial<Diagnostic> = {}): Diagnostic {
