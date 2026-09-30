@@ -23,6 +23,7 @@ import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignatu
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
+import { lintHandlers } from './lint.js';
 import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
@@ -739,6 +740,8 @@ export interface ProjectReport {
   project: string;
   name: string;
   files: CheckReport[];
+  /** S72: the handler lint (PT6.5): ran over the files poly.json names, or not run, and why. */
+  handlers: { status: 'ran'; files: number; diagnostics: Diagnostic[] } | { status: 'not-run'; reason: string } | null;
   verdict: CheckReport['verdict'];
   exit: number;
 }
@@ -773,7 +776,7 @@ function refold(report: CheckReport): void {
 }
 
 export async function checkProject(dir: string, opts: CheckOptions = {}): Promise<ProjectReport> {
-  const { manifest, files } = loadProject(dir);
+  const { manifest, files, handlers: handlerFiles } = loadProject(dir);
   const reports: CheckReport[] = [];
   for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir }));
   projectKindConflicts(reports);
@@ -787,7 +790,14 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
     report.diagnostics.push(diag('PL1002', { module: report.module, line: 1, col: 1 }, `module ${report.module} is also declared in ${prev.file}; a project names each module once (PT1.3)`));
     refold(report);
   }
+  // S72, PT6.5: the handler lint. A violation is not admitted (REFUSED); a project with effects and no handlers
+  // field lists the lint as not run, never as clean.
+  const hasEffects = reports.some((r) => (r.effectKinds ?? []).length > 0);
+  let handlers: ProjectReport['handlers'] = null;
+  if (handlerFiles) handlers = { status: 'ran', files: handlerFiles.length, diagnostics: lintHandlers(handlerFiles) };
+  else if (hasEffects) handlers = { status: 'not-run', reason: 'the project has effects, and poly.json names no handlers (S72)' };
+  const lintVerdict: Verdict[] = handlers?.status === 'ran' ? [verdictOf(handlers.diagnostics)] : [];
   const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');
-  const verdict = special ? special.verdict : fold(reports.map((r) => r.verdict as Verdict));
-  return { project: dir, name: manifest.name, files: reports, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict] };
+  const verdict = special ? special.verdict : fold([...reports.map((r) => r.verdict as Verdict), ...lintVerdict]);
+  return { project: dir, name: manifest.name, files: reports, handlers, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict] };
 }

@@ -17,22 +17,27 @@ export interface Manifest {
   host?: 'typescript';
   require?: { grade?: boolean };
   engines?: Record<string, string>;
+  /** S72: the effect handler modules `poly lint handlers` reads (PT6.5). */
+  handlers?: string[];
 }
 
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers']);
 
 export function parseManifest(text: string, where = 'poly.json'): Manifest {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch (e) { throw new ManifestError(`${where}: not JSON (${(e as Error).message})`); }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ManifestError(`${where}: expected an object`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers)`);
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
   if (!Array.isArray(m.modules) || m.modules.length === 0 || !m.modules.every((x) => typeof x === 'string' && x)) {
     throw new ManifestError(`${where}: "modules" must be a non-empty list of paths or patterns`);
+  }
+  if (m.handlers !== undefined && (!Array.isArray(m.handlers) || m.handlers.length === 0 || !m.handlers.every((x) => typeof x === 'string' && x))) {
+    throw new ManifestError(`${where}: "handlers" must be a non-empty list of paths or patterns (S72)`);
   }
   if (m.host !== undefined && m.host !== 'typescript') throw new ManifestError(`${where}: "host" must be "typescript"`);
   if (m.require !== undefined) {
@@ -77,7 +82,7 @@ function allFiles(dir: string, root: string, out: string[]): void {
 }
 
 /** The project directory's manifest and the module files it names, sorted. */
-export function loadProject(dir: string): { manifest: Manifest; files: string[] } {
+export function loadProject(dir: string): { manifest: Manifest; files: string[]; handlers: string[] | null } {
   const path = join(dir, 'poly.json');
   if (!existsSync(path)) throw new ManifestError(`${dir}: no poly.json (a project directory needs its manifest, PT1.2)`);
   const manifest = parseManifest(readFileSync(path, 'utf8'), path);
@@ -94,5 +99,20 @@ export function loadProject(dir: string): { manifest: Manifest; files: string[] 
       files.add(h);
     }
   }
-  return { manifest, files: [...files].sort().map((f) => join(dir, f)) };
+  // S72: the handler modules, when the manifest names them.
+  let handlers: string[] | null = null;
+  if (manifest.handlers) {
+    const hs = new Set<string>();
+    for (const pattern of manifest.handlers) {
+      const re = patternToRegExp(pattern);
+      const hits = every.filter((f) => re.test(f));
+      if (hits.length === 0) throw new ManifestError(`${path}: handler pattern "${pattern}" matches no file`);
+      for (const h of hits) {
+        if (!/\.(ts|js|mjs|cjs)$/.test(h)) throw new ManifestError(`${path}: handler pattern "${pattern}" matches ${h}, which is not a TypeScript or JavaScript module`);
+        hs.add(h);
+      }
+    }
+    handlers = [...hs].sort().map((f) => join(dir, f));
+  }
+  return { manifest, files: [...files].sort().map((f) => join(dir, f)), handlers };
 }

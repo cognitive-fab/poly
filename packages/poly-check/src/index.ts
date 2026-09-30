@@ -3,3 +3,4 @@ export { checkFile, checkProject, configurationReports, projectKindConflicts, en
 export { render, renderDiagnostic } from './render.js';
 export { applyFix, attachFixes, fixId, type FixOutcome } from './fixes.js';
 export { applyFixById, findFix, type FixResult } from './fix.js';
+export { lintHandlers, lintHandlerText } from './lint.js';

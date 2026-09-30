@@ -12,7 +12,8 @@ export type Stage =
   | 'composition'
   | 'configuration'
   | 'deadlock'
-  | 'liveness';
+  | 'liveness'
+  | 'lint';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
 export type DiagSeverity = 'error' | 'finding' | 'inconclusive' | 'warning';
@@ -103,6 +104,7 @@ export const CODES: Record<string, CodeInfo> = {
   // S29: a step inside a configuration sends to none.
   PL5404: { name: 'SEND_TO_NONE', stage: 'configuration', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
+  PL6401: { name: 'AMBIENT_EFFECT_IN_HANDLER', stage: 'lint', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.
   PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
