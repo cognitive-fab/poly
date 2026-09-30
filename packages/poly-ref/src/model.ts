@@ -114,6 +114,15 @@ export interface RRecord {
   fields: { name: string; type: RType }[];
 }
 
+/** `spawn detached M as k -> A(…)` (PS7.5, S60). */
+export interface RDetached {
+  key: string;
+  machine: string;
+  machineId: string;
+  create: string | null;
+  createParams: { name: string; type: RType }[];
+}
+
 export interface RMachine {
   name: string;
   records: Map<string, RRecord>;
@@ -121,6 +130,8 @@ export interface RMachine {
   id: string;
   service: boolean;
   children: Map<string, RChild>;
+  /** S60: detached children by key, in the order of their first spawn; each is a separate actor. */
+  detached: RDetached[];
   /** S49: child families by name, with the indices their keys take. */
   families: Map<string, { lo: number; hi: number }>;
   effects: Map<string, REffect>;
@@ -204,6 +215,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   const receivers = new Map(decls.filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [d.name, d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) }))]));
   // PT6.4: attached children, by the key their spawn names (declared by use, like timer keys).
   const children = new Map<string, RChild>();
+  const detached: RDetached[] = [];
   const families = new Map<string, { lo: number; hi: number }>();
   // S49: a loop `for i in lo..n` runs i up to n, whose bound is n itself or the top of its range type.
   const loopTop = (f: A.For, action: string): number => {
@@ -218,6 +230,15 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   const spawns = (body: A.Stmt[], action: string, loops: { v: string; lo: number; hi: number }[]): void => {
     for (const s of body) {
       if (s.kind === 'For') { spawns(s.body, action, [...loops, { v: s.var, lo: s.lo, hi: loopTop(s, action) }]); continue; }
+      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier === 'detached' && s.as && !detached.some((x) => x.key === s.as)) {
+        const name = s.target.split('.').pop()!;
+        const child = decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
+        if (!child) throw new Error(`poly-ref: no machine ${s.target}`);
+        const i = s.extra.indexOf('create');
+        const create = i >= 0 ? s.extra[i + 1] : null;
+        const act = create ? child.items.find((x): x is A.Action => x.kind === 'Action' && x.name === create) : undefined;
+        detached.push({ key: s.as, machine: name, machineId: `${module.name}.${name}`, create, createParams: (act?.params ?? []).map((p) => ({ name: p.name, type: typeOf(p.type) })) });
+      }
       if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier !== 'detached' && s.as) {
         const name = s.target.split('.').pop()!;
         const child = decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
@@ -273,7 +294,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     for (const p of a.params) if (p.name === 'childKey' && p.type.k === 'string' && p.check === null && keys.length) p.check = keys;
   }
   return {
-    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, families, effects, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties, liveness,
   };
 }
@@ -390,10 +411,25 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
   }
 }
 
-/** S57: how many addresses a Ref<target> ranges over alone; the last is self's when target is M itself. */
+/**
+ * S57: how many addresses a Ref<target> ranges over alone; the last is self's when target is M itself. S78: each
+ * key of a detached spawn of target is one more, after those of the fields and parameters.
+ */
 export function refCount(M: RMachine, target: string): number {
+  return plainRefs(M, target) + M.detached.filter((x) => x.machine === target).length + (target === M.name ? 1 : 0);
+}
+
+function plainRefs(M: RMachine, target: string): number {
   const isRef = (x: RType) => x.k === 'ref' && x.machine === target;
-  return M.fields.filter((f) => isRef(f.type)).length + Math.max(0, ...M.actions.map((a) => a.params.filter((p) => isRef(p.type)).length)) + (target === M.name ? 1 : 0);
+  return M.fields.filter((f) => isRef(f.type)).length + Math.max(0, ...M.actions.map((a) => a.params.filter((p) => isRef(p.type)).length));
+}
+
+/** S78: a detached child's address when its parent is checked alone: its own symbolic address. */
+export function detachedAlone(M: RMachine, key: string): string {
+  const d = M.detached.find((x) => x.key === key);
+  if (!d) throw new Error(`poly-ref: no detached child ${key} in ${M.name}`);
+  const same = M.detached.filter((x) => x.machine === d.machine);
+  return `${d.machine}#${plainRefs(M, d.machine) + same.indexOf(d) + 1}`;
 }
 
 /** A machine's own address when it is checked alone (S57): the last of its addresses. */

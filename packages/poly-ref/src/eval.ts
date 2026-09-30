@@ -46,24 +46,33 @@ export interface Env {
 
 /** σ as a configuration property reads it (PS13.6): each instance by name (`inv`, `order[0]`), and the groups. */
 export interface GlobalView {
-  instance(name: string): { M: RMachine; state: State } | undefined;
-  /** Each group's size: `order[2]` is `order` with 2. */
-  groups: Map<string, number>;
+  /** undefined for no such instance; null for a detached instance not yet created (S60). */
+  instance(name: string): { M: RMachine; state: State } | null | undefined;
+  /** Each group's members that exist, by index: `order[2]` is `order` with 2. */
+  groups: Map<string, number[]>;
   /** The initial global state, which `init(e)` reads. */
   initial: GlobalView | null;
 }
 
 export class EvalError extends Error {}
 
+/** A property read a detached instance that does not exist in this state (S60). */
+export class AbsentInstance extends EvalError {}
+
 /** The instance a configuration expression names: `x`, `g[i]`, or `g[*]` inside an aggregate (S32). */
 function instanceOf(e: A.Expr, env: Env): { M: RMachine; state: State } | undefined {
   const g = env.global;
   if (!g) return undefined;
-  if (e.kind === 'Name' && !env.locals.has(e.name)) return g.instance(e.name);
+  const present = (name: string) => {
+    const x = g.instance(name);
+    if (x === null) throw new AbsentInstance(`poly-ref: ${name} does not exist in this state (S60)`);
+    return x;
+  };
+  if (e.kind === 'Name' && !env.locals.has(e.name)) return present(e.name);
   if (e.kind === 'Index' && e.object.kind === 'Name' && g.groups.has(e.object.name)) {
     const k = e.index.kind === 'Star' ? env.star : int(evaluate(e.index, env), 'an index');
     if (k === undefined) throw new EvalError('poly-ref: g[*] outside an aggregate (PS13.6)');
-    return g.instance(`${e.object.name}[${k}]`);
+    return present(`${e.object.name}[${k}]`);
   }
   return undefined;
 }
@@ -158,7 +167,7 @@ export function evaluate(e: A.Expr, env: Env): Value {
         const grp = starGroup(e.args[0], env.global);
         if (!grp) throw new EvalError(`poly-ref: ${e.callee} over no group`);
         const vals: Value[] = [];
-        for (let k = 0; k < env.global.groups.get(grp)!; k++) vals.push(evaluate(e.args[0], { ...env, star: k }));
+        for (const k of env.global.groups.get(grp)!) vals.push(evaluate(e.args[0], { ...env, star: k }));
         if (e.callee === 'count') return vals.filter((v) => truth(v, 'count')).length;
         if (e.callee === 'sum') return vals.reduce<number>((a, v) => a + int(v, 'sum'), 0);
         if (e.callee === 'all') return vals.every((v) => truth(v, 'all'));
@@ -186,7 +195,7 @@ export function evaluate(e: A.Expr, env: Env): Value {
     case 'Quant': {
       // PS13.6: forall and exists over the members of a group of a configuration.
       if (env.global?.groups.has(e.group)) {
-        for (let k = 0; k < env.global.groups.get(e.group)!; k++) {
+        for (const k of env.global.groups.get(e.group)!) {
           const inner: Env = { ...env, locals: new Map(env.locals) };
           inner.locals.set(e.var, k);
           const v = truth(evaluate(e.body, inner), e.q);

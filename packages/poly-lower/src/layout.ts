@@ -9,7 +9,7 @@ import type * as A from '@poly/core';
 import { diag, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 
 export interface ShapeSpec {
-  type: 'boolean' | 'number' | 'string' | 'object' | 'array';
+  type: 'boolean' | 'number' | 'string' | 'object' | 'array' | ('string' | 'object')[];
   nullable?: boolean;
 }
 
@@ -105,7 +105,10 @@ export function layoutOf(m: A.Machine, facts: MachineFacts, env: TypeEnv, module
       fields.push({ field: f.name, ty, kind: 'union', flat: [f.name, ...payloads.map(([, k]) => k)], shapes, ctors, payloads });
       continue;
     }
-    const shape = scalarShape(ty, env)!;
+    let shape = scalarShape(ty, env)!;
+    // S78: a field that may hold a detached child's address holds the marker { $ref: "child", key } between the
+    // acceptor's write and the kernel's commit, so the sealed shape admits an object there (sam-pattern 2.2, #35).
+    if (ty.k === 'ref' && [...facts.detached.values()].includes(ty.machine ?? '')) shape = { type: ['string', 'object'], nullable: true };
     const kind = ty.k === 'map' ? 'map' : ty.k === 'union' ? 'enum' : 'scalar';
     fields.push({ field: f.name, ty, kind, flat: [f.name], shapes: { [f.name]: shape } });
   }

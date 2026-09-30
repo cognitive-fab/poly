@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parse } from '@poly/lang';
 import { digest, type Configuration, type Machine, type Module } from '@poly/core';
-import { alpha, buildConfiguration, evaluate, flatten, flatValue, globalView, isTerminal, loadLoweredModule, valuesOf, type RMachine, type State } from '@poly/ref';
+import { alpha, buildConfiguration, buildMachine, detachedAlone, evaluate, flatten, flatValue, globalView, isTerminal, loadLoweredModule, valuesOf, type RMachine, type State } from '@poly/ref';
 
 export interface WitnessStepSpec {
   action: string;
@@ -74,6 +74,15 @@ function load(root: string, module: string, machine: string, moduleDigest: strin
 const esm = async (dir: string, file: string) => (existsSync(join(dir, file)) ? await import(pathToFileURL(join(dir, file)).href + `?v=${Date.now()}-${Math.random()}`) : {});
 
 /** One step of R_L (PS9.1a): the runtime's terminal row, an action outside the module, then the module. */
+/** S78: the kernel's commit: every detached child's marker becomes that child's address. */
+function commit<T>(v: T, address: (key: string) => string): T {
+  if (Array.isArray(v)) return v.map((x) => commit(x, address)) as T;
+  if (v === null || typeof v !== 'object') return v;
+  const o = v as Record<string, unknown>;
+  if (o.$ref === 'child' && typeof o.key === 'string') return address(o.key) as T;
+  return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, commit(x, address)])) as T;
+}
+
 function step(l: Lowered, pre: Flat, action: string, data: Flat): { verdict: string; post: Flat } {
   if (l.contract.terminalStates.includes(pre[l.contract.stateKeys[0].name])) return { verdict: 'rejected(terminal)', post: pre };
   if (typeof l.mod.actions[action] !== 'function' || !Object.hasOwn(l.mod.actions, action)) return { verdict: 'unhandled', post: pre };
@@ -115,6 +124,9 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
   const live = await esm(l.dir, 'liveness.mjs');
   const named = <T extends { name: string }>(list: T[] | undefined) => list?.find((x) => x.name === spec.property);
   let state: Flat = clone(l.contract.initState);
+  // S78: alone, a detached child's address is the key's own symbolic address (PS1.6).
+  const R = decl.items.some((i) => i.kind === 'Handler') ? buildMachine(module, decl.name) : null;
+  const alone = (key: string) => detachedAlone(R!, key);
   const emitted: { kind: string; payload: unknown }[] = [];
   const visited: Flat[] = [];
   const cycleSteps: { action: string; data: Flat; verdict: string }[] = [];
@@ -133,9 +145,9 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
       assert.ok(p?.pred(pre, s.action, s.data, v) !== false, `reject property ${spec.property} is violated at step ${i + 1}, ${s.action}`);
     }
     if (cycleStart) cycleSteps.push({ action: s.action, data: s.data, verdict: r.verdict });
-    state = r.post;
+    state = commit(r.post, alone);
     if (r.verdict !== 'accepted') continue;
-    const intents = l.mapper ? l.mapper(clone(pre), s.action, clone(s.data), clone(r.post), 'accepted') ?? [] : [];
+    const intents = commit(l.mapper ? l.mapper(clone(pre), s.action, clone(s.data), clone(r.post), 'accepted') ?? [] : [], alone);
     if (spec.code === 'PL3001') {
       const p = named(props.stateInvariants as { name: string; pred: (s: Flat) => boolean }[]);
       assert.ok(!p || p.pred(state), `invariant ${spec.property} is violated after step ${i + 1}, ${s.action}`);
@@ -189,15 +201,16 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
 async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest: string): Promise<void> {
   const decl = module.decls.find((d): d is Configuration => d.kind === 'Configuration' && d.name === spec.configuration);
   if (!decl) return;
-  const { instances } = buildConfiguration(module, decl.name);
+  const { instances, groups } = buildConfiguration(module, decl.name);
   const lowered = new Map<string, Lowered>();
   for (const i of instances) if (!lowered.has(i.machine.name)) lowered.set(i.machine.name, load(spec.buildRoot, spec.module, i.machine.name, moduleDigest));
   const byName = new Map(instances.map((x) => [x.name, x]));
-  let sigma = new Map(instances.map((x) => [x.name, flatten(x.init, x.machine)]));
-  let mu: { target: string; action: string; data: Flat }[] = [];
+  // S60: an instance a detached spawn creates has no state until then.
+  let sigma = new Map(instances.filter((x) => !x.spawned).map((x) => [x.name, flatten(x.init, x.machine)]));
+  let mu: { target: string; action: string; data: Flat; creation?: boolean }[] = [];
   const machines = new Map<string, RMachine>(instances.map((x) => [x.machine.name, x.machine]));
-  const initial = globalView(instances, instances.map((x) => x.init), null);
-  const view = (sg: Map<string, Flat>) => globalView(instances, instances.map((x) => alpha(sg.get(x.name)!, x.machine)), initial);
+  const initial = globalView(instances, instances.map((x) => (x.spawned ? null : x.init)), null, groups);
+  const view = (sg: Map<string, Flat>) => globalView(instances, instances.map((x) => (sg.has(x.name) ? alpha(sg.get(x.name)!, x.machine) : null)), initial, groups);
   const holds = (e: import('@poly/core').Expr, sg: Map<string, Flat>) => {
     const locals = new Map<string, import('@poly/ref').Value>();
     const p = decl.properties.find((x) => x.name === spec.property);
@@ -218,9 +231,12 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
     }
     const inst = byName.get(g.instance)!;
     const l = lowered.get(inst.machine.name)!;
+    if (!sigma.has(g.instance)) return; // that instance is no longer created
     if (g.kind === 'deliver') {
       const at = mu.findIndex((m) => m.target === g.instance && m.action === s.action && stable(m.data) === stable(s.data));
       if (at < 0) return; // that message is no longer sent
+      // S60: while a child's creation message waits, nothing else is delivered to it.
+      if (!mu[at].creation && mu.some((m) => m.creation && m.target === g.instance)) return;
       mu = [...mu.slice(0, at), ...mu.slice(at + 1)];
     }
     const pre = sigma.get(g.instance)!;
@@ -229,8 +245,20 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
     if (start !== null) cycleSteps.push({ kind: g.kind, target: g.instance, action: s.action, data: s.data, verdict: r.verdict });
     let toNone = false;
     if (r.verdict === 'accepted') {
-      sigma = new Map(sigma).set(g.instance, r.post);
-      for (const x of l.mapper ? l.mapper(clone(pre), s.action, clone(s.data), clone(r.post), 'accepted') ?? [] : []) {
+      // S78: the commit resolves a detached child's marker to <sender>/<k>, in the state and in the intents.
+      const child = (k: string) => `${g.instance}/${k}`;
+      sigma = new Map(sigma).set(g.instance, commit(r.post, child));
+      for (const x of commit(l.mapper ? l.mapper(clone(pre), s.action, clone(s.data), clone(r.post), 'accepted') ?? [] : [], child)) {
+        if (x.kind === 'createInstance') {
+          // S60: the child starts in its machine's initial state, with its creation action as its first message.
+          const address = child((x as { childKey?: string }).childKey!);
+          const made = byName.get(address);
+          if (!made || sigma.has(address)) return; // outside the bound, or a second spawn of the key: the check reported it
+          sigma.set(address, flatten(made.init, made.machine));
+          const creation = (x as { creation?: { action: string; data: Flat } }).creation;
+          if (creation) mu.push({ target: address, action: creation.action, data: creation.data, creation: true });
+          continue;
+        }
         if (x.kind !== 'sendTo') continue;
         if (x.target === null) { toNone = true; continue; }
         // S58: the kernel's self marker is the sender's address.
@@ -245,7 +273,7 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
     // PS13.6: quiescent (no message, no input accepted) with a non-service instance not terminal.
     const accepted = decl.inputs.some((r) => {
       const names = r.index === null ? [r.instance] : r.index === '*' ? instances.filter((x) => x.group === r.instance).map((x) => x.name) : [`${r.instance}[${r.index}]`];
-      return names.some((n) => {
+      return names.filter((n) => sigma.has(n)).some((n) => {
         const inst = byName.get(n)!;
         const a = inst.machine.actions.find((x) => x.name === r.action)!;
         let recs: Flat[] = [{}];
@@ -256,16 +284,17 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
         return recs.some((d) => step(lowered.get(inst.machine.name)!, sigma.get(n)!, r.action, d).verdict === 'accepted');
       });
     });
-    const waiting = instances.filter((x) => !x.machine.service && !isTerminal(x.machine, alpha(sigma.get(x.name)!, x.machine)));
+    const waiting = instances.filter((x) => sigma.has(x.name) && !x.machine.service && !isTerminal(x.machine, alpha(sigma.get(x.name)!, x.machine)));
     assert.ok(accepted || waiting.length === 0, `the configuration is stuck: ${waiting.map((x) => x.name).join(', ')} not terminal, nothing in transit, no input accepted`);
   }
   if (prop?.kind === 'Liveness' && start !== null) {
     if (key(sigma, mu) !== start) return;
     // Delivery is fair per message value (PS13.2b): each value in transit on the cycle is delivered on it, or absent somewhere.
-    const values = new Set(visited.flatMap((v) => v.mu.map((m) => stable(m))));
+    const plainMsg = (m: typeof mu[number]) => stable({ target: m.target, action: m.action, data: m.data });
+    const values = new Set(visited.flatMap((v) => v.mu.map(plainMsg)));
     for (const m of values) {
       const taken = cycleSteps.some((c) => c.kind === 'deliver' && stable({ target: c.target, action: c.action, data: c.data }) === m);
-      const absent = visited.some((v) => !v.mu.some((x) => stable(x) === m));
+      const absent = visited.some((v) => !v.mu.some((x) => plainMsg(x) === m));
       if (!taken && !absent) return;
     }
     void machines;

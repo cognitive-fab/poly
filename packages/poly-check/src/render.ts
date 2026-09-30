@@ -107,9 +107,9 @@ export function render(r: CheckReport): string {
   // S35: a reject property that names an action with no handler is decided by poly-ref alone, and says so.
   for (const m of r.machines) for (const x of m.instance?.refOnly ?? []) out.push(`         ${m.machine}: ${x.property} decided by poly-ref alone (it names ${x.actions.join(', ')}, which has no handler; polygraph never takes that step)`);
   // S38: with no path property, polyrun check-effects cannot run, and emission without a state change is poly-ref's alone.
-  for (const m of r.machines) if (m.instance?.effectsByRefOnly) out.push(`         ${m.machine}: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine sends, S58)`);
+  for (const m of r.machines) if (m.instance?.effectsByRefOnly) out.push(`         ${m.machine}: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine sends or spawns detached children, S58, S60)`);
   // A parent with attached children and no compose invariant: check-product needs one, so the joint check is poly-ref's.
-  for (const m of r.machines) if (m.instance?.compositionByRefOnly) out.push(`         ${m.machine}: the joint machine decided by poly-ref alone (polyrun check-product did not run: no compose invariant, or the parent sends, S58)`);
+  for (const m of r.machines) if (m.instance?.compositionByRefOnly) out.push(`         ${m.machine}: the joint machine decided by poly-ref alone (polyrun check-product did not run: no compose invariant, or the parent sends or spawns detached children, S58, S60)`);
   out.push(`engines: ${Object.entries(r.engines).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   return out.join('\n') + '\n';
 }

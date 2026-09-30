@@ -120,6 +120,8 @@ export function expr(e: A.Expr, cx: Cx): string {
         case 'none': return 'null';
         // S58: the kernel replaces the marker with the sender's instance id when it writes the message.
         case 'self': return '({ $ref: "self" })';
+        // S78: the kernel resolves the marker to <parent>/<k> when it commits the step, in the post-state and the intents.
+        case 'child': return `({ $ref: "child", key: ${q(r.key)} })`;
         case 'pre':
         case 'post':
         case 'jointParent':
@@ -366,7 +368,6 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       return lines;
     }
     case 'Intent': {
-      if (s.op === 'spawn' && s.modifier === 'detached') throw new Error('poly-lower: spawn detached reached the lowering (PL0901 must refuse it, S60)');
       // The acceptor writes and frames; the intents are the mapper's (PT6.1).
       if (!opts.effects) return [];
       if (opts.dropEffect && !opts.dropEffect.done) { opts.dropEffect.done = true; return []; }
@@ -381,6 +382,18 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       // S49: an indexed key k[i] is the string k<i>.
       const keyOf = (name: string) => (s.index ? `${q(name)} + (${expr(s.index, cx)})` : q(name));
       if (s.op === 'cancel') return [`${ind}__E.push({ kind: "cancelTimer", key: ${keyOf(s.target)} });`];
+      if (s.op === 'spawn' && s.modifier === 'detached') {
+        // S60, PT6.4: createInstance, with the creation action as the child's first message; no wiring.
+        const spec = childSpec(s, moduleOf(cx));
+        const child = cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec.machine.split('.').pop());
+        const parts = [`kind: "createInstance"`, `machineId: ${q(spec.machine)}`, `childKey: ${q(spec.key)}`];
+        if (spec.create) {
+          const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === spec.create);
+          if (!act) throw new Error(`poly-lower: no creation action ${spec.create} (the checker must refuse it)`);
+          parts.push(`creation: { action: ${q(spec.create)}, data: { ${argList(s, act.params, cx).join(', ')} } }`);
+        }
+        return [`${ind}__E.push({ ${parts.join(', ')} });`];
+      }
       if (s.op === 'spawn') {
         // PT6.4, S43: spawnChild with the creation action and the wiring; absent parts are left out.
         const spec = childSpec(s, moduleOf(cx));

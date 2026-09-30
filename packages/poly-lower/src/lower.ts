@@ -434,16 +434,27 @@ function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layou
 
 /**
  * S57: alone, a Ref<M> ranges over none and n addresses M#1 … M#n, n being the machine's Ref<M> fields plus
- * the most Ref<M> parameters of one action, plus one for self when M is the machine itself, so every pattern of
- * equalities between addresses is realised.
+ * the most Ref<M> parameters of one action, plus one per key of a detached spawn of M (S78), plus one for self when
+ * M is the machine itself, so every pattern of equalities between addresses is realised.
  */
 function refDomain(m: A.Machine, target: string): unknown[] {
   const isRef = (t: A.TypeExpr) => t.kind === 'TRef' && t.machine[t.machine.length - 1] === target;
   const fields = m.fields.filter((f) => isRef(f.type)).length;
   const params = Math.max(0, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.filter((p) => isRef(p.type)).length));
+  // S78: each key of a detached spawn of the target is one more distinct address.
+  const keys = new Set<string>();
+  const walk = (body: A.Stmt[]): void => {
+    for (const s of body) {
+      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier === 'detached' && s.as && s.target.split('.').pop() === target) keys.add(s.as);
+      if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); }
+      if (s.kind === 'Match') for (const a of s.arms) walk(a.body);
+      if (s.kind === 'For') walk(s.body);
+    }
+  };
+  for (const i of m.items) if (i.kind === 'Handler') walk(i.body);
   // S57: for the machine's own type, self is one more distinct address.
   const self = target === m.name ? 1 : 0;
-  return [null, ...Array.from({ length: fields + params + self }, (_, i) => `${target}#${i + 1}`)];
+  return [null, ...Array.from({ length: fields + params + keys.size + self }, (_, i) => `${target}#${i + 1}`)];
 }
 
 /** Whether a parameter's type is a map or holds one through record fields (S65, review finding C3). */

@@ -1,7 +1,7 @@
 // Handlers denote functions (PS2) and the transition relation (PS3).
 import type * as A from '@poly/core';
 import type { RMachine, RType } from './model.js';
-import { inCheckDomain } from './model.js';
+import { detachedAlone, inCheckDomain } from './model.js';
 import { evaluate, evaluateAt, EvalError, type Env, type Verdict } from './eval.js';
 
 const int = (v: Value): number => {
@@ -21,6 +21,8 @@ export type Intent =
   | { type: 'cancel'; kind: 'cancelTimer'; key: string }
   | { type: 'spawn'; kind: 'spawnChild'; key: string; machineId: string; create: { action: string; data: Record<string, Value> } | null; onComplete: string | null; onParentTerminal: string | null }
   | { type: 'signal'; kind: 'signalChild'; key: string; action: string; data: Record<string, Value> }
+  /** `spawn detached M as k -> A(d)` (PS7.5, S60): a new instance at `address`, with A(d) as its first message. */
+  | { type: 'create'; kind: 'createInstance'; key: string; machine: string; machineId: string; address: string; create: { action: string; data: Record<string, Value> } | null }
   /** `send r <- A(d)` (PS2.2): a message to the address r; `selfArgs` are the arguments written as `self` (S58). */
   | { type: 'send'; kind: 'sendTo'; target: Value; action: string; data: Record<string, Value>; selfArgs: string[] };
 
@@ -167,7 +169,16 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
           if (!act) throw new EvalError(`poly-ref: send … <- ${st.target} has no receiver action`);
           const selfArgs = st.args.flatMap((a, i) => (a.value.kind === 'Name' && a.value.name === 'self' ? [a.name ?? act.params[i].name] : []));
           E.push({ type: 'send', kind: 'sendTo', target: evaluate(st.to!, env), action: st.target, data: args(act.params, st.target), selfArgs });
-        } else throw new EvalError('poly-ref: spawn detached is not built (S60)');
+        } else if (st.op === 'spawn') {
+          // S60, S78: the address is <parent>/<k> in a configuration, and alone the key's own symbolic address;
+          // `as k` binds it for the rest of the block.
+          const d = M.detached.find((x) => x.key === st.as);
+          if (!d) throw new EvalError(`poly-ref: no detached child ${st.as}`);
+          const address = env.self !== undefined ? `${env.self}/${d.key}` : detachedAlone(M, d.key);
+          env.locals.set(d.key, address);
+          (env.localTypes ??= new Map()).set(d.key, { k: 'ref', machine: d.machine });
+          E.push({ type: 'create', kind: 'createInstance', key: d.key, machine: d.machine, machineId: d.machineId, address, create: d.create ? { action: d.create, data: args(d.createParams, d.create) } : null });
+        } else throw new EvalError(`poly-ref: no intent ${st.op}`);
         break;
       }
     }

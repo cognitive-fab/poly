@@ -359,13 +359,13 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const out: Diagnostic[] = [];
   const facts = checked.machines.get(machine)!;
   const hasCompose = facts.machine.items.some((i) => i.kind === 'Property' && i.form === 'compose');
-  // S58: check-product runs the parent's mapper, and polyrun has no sendTo intent yet.
+  // S58, S60: check-product runs the parent's mapper, and polyrun has no sendTo or createInstance intent yet.
   const sender = sends(facts.machine);
   if (!hasCompose || sender) {
     out.push(...joint.findings);
     mc.diagnostics.push(...out);
     mc.instance!.compositionByRefOnly = true;
-    mc.stages.push({ stage: 'composition', status: 'ran', engine: 'poly-ref', verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states; ${sender ? 'the parent sends, and polyrun has no sendTo intent yet (S58)' : 'no compose invariant'}, so polyrun check-product did not run` });
+    mc.stages.push({ stage: 'composition', status: 'ran', engine: 'poly-ref', verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states; ${sender ? missingText(missingIntents(facts.machine)) : 'no compose invariant'}, so polyrun check-product did not run` });
     return;
   }
   // Each child machine is lowered where the engines read it (S28: <module>.<Machine>).
@@ -463,10 +463,11 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   const engine = `polyrun@${engines.polygraph}`;
   const fromRef = ref.findings.filter((f) => f.code === 'PL4001' || f.code === 'PL4002');
   const hasPath = existsSync(join(dir, 'effect-invariants.mjs'));
-  if (hasPath && sends(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine))) {
-    // S58: polyrun has no sendTo intent yet, so check-effects would read the mapper's sends as undeclared kinds.
+  const missing = missingIntents(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine));
+  if (hasPath && missing.length) {
+    // S58, S60: check-effects would read the mapper's sendTo and createInstance intents as undeclared kinds.
     mc.diagnostics.push(...fromRef);
-    mc.stages.push({ stage: 'effects', status: 'ran', engine: 'poly-ref', verdict: verdictOf(fromRef), ms: performance.now() - t0, note: 'the machine sends, and polyrun has no sendTo intent yet, so polyrun check-effects did not run; path properties and PL4002 decided by poly-ref alone (S58)' });
+    mc.stages.push({ stage: 'effects', status: 'ran', engine: 'poly-ref', verdict: verdictOf(fromRef), ms: performance.now() - t0, note: `${missingText(missing)}, so polyrun check-effects did not run; path properties and PL4002 decided by poly-ref alone` });
     mc.instance!.effectsByRefOnly = true;
     return;
   }
@@ -551,11 +552,11 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
     // PS13.7 rests on one step per message at its receiver (K4, K8), atomic single-writer steps (K1, K2) and the profile (K7).
     kernelAssumptions: ['K1', 'K2', 'K4', 'K7', 'K8'],
   };
-  const sender = r.instances.some((i) => sends(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === i.machine.name)));
+  const missing = [...new Set(r.instances.flatMap((i) => missingIntents(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === i.machine.name))))].sort().reverse();
   cc.stages.push({
     stage: 'configuration', status: 'ran', engine: 'poly-ref', verdict: verdictOf(r.findings), ms: performance.now() - t0,
     note: `${r.states} global states, ${r.transitions} global steps${r.liveness.length ? `; liveness under delivery fairness per message value (PS13.2b, PS14.2)` : ''}`,
-    notes: sender ? ['polyrun has no sendTo intent yet (S58): the configuration is checked from the semantics, and its machines do not run under polyrun until it has'] : undefined,
+    notes: missing.length ? [`${missingText(missing)}: the configuration is checked from the semantics, and its machines do not run under polyrun until it has`] : undefined,
   });
   return cc;
 }
@@ -574,11 +575,23 @@ export function configurationReports(module: Module, refused: boolean): { config
   return { configurations };
 }
 
-/** Whether a machine's handlers send (PS2.2); polyrun has no sendTo intent yet (S58). */
-function sends(decl: A.Machine | undefined): boolean {
-  const walk = (body: A.Stmt[]): boolean => body.some((s) => (s.kind === 'Intent' && s.op === 'send') || (s.kind === 'If' && (walk(s.then) || walk(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => walk(a.body))) || (s.kind === 'For' && walk(s.body)));
-  return !!decl?.items.some((i) => i.kind === 'Handler' && walk(i.body));
+/** The kernel intents a machine's handlers use that polyrun does not have yet: sendTo (S58) and createInstance (S60). */
+function missingIntents(decl: A.Machine | undefined): string[] {
+  const found = new Set<string>();
+  const walk = (body: A.Stmt[]): void => {
+    for (const s of body) {
+      if (s.kind === 'Intent' && s.op === 'send') found.add('sendTo');
+      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier === 'detached') found.add('createInstance');
+      if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); }
+      if (s.kind === 'Match') for (const a of s.arms) walk(a.body);
+      if (s.kind === 'For') walk(s.body);
+    }
+  };
+  for (const i of decl?.items ?? []) if (i.kind === 'Handler') walk(i.body);
+  return [...found].sort().reverse();
 }
+const sends = (decl: A.Machine | undefined): boolean => missingIntents(decl).length > 0;
+const missingText = (names: string[]) => `polyrun has no ${names.join(' or ')} intent yet (${names.map((n) => (n === 'sendTo' ? 'S58' : 'S60')).join(', ')})`;
 
 function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string, fieldOf: (flatKey: string) => string): Diagnostic {
   const engine = `polygraph@${version}`;

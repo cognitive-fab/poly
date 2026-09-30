@@ -65,7 +65,9 @@ test('S43 to S48: the checker', () => {
   const swap = (a, b) => codes(base.replace(a, b));
   assert.deepEqual(codes(base), []);
   assert.deepEqual(swap('spawn Shipment as box', 'spawn Parcel as box'), ['PL1001']);
-  assert.deepEqual(swap('spawn Shipment as box', 'spawn detached Shipment as box'), ['PL0901', 'PL1001']);
+  // S60 (built in M2): a detached child takes no on complete and no on parent terminal wiring, and is no
+  // attached child a signal can name.
+  assert.deepEqual(swap('spawn Shipment as box', 'spawn detached Shipment as box'), ['PL1201', 'PL1201', 'PL1001']);
   assert.deepEqual(swap('spawn Shipment as box', 'spawn Shipment as parent').filter((c) => c !== 'PL1001'), ['PL1201']);
   assert.deepEqual(swap('Start(size: 1)', 'Start(size: true)'), ['PL1201']);
   assert.deepEqual(swap('as box -> Start(size: 1)', 'as box -> Begin(size: 1)'), ['PL1001']);

@@ -1,0 +1,41 @@
+// Detached children (PS7.5, PS13.3, S60, S78): a dispatcher spawns one worker as a separate actor, stores its
+// address, and greets it. The worker answers with a message. Alone, the address `w` is one more symbolic
+// address of Ref<Worker>; in the configuration it is `d/w`, and the worker joins the group Worker.
+module detached
+
+type WorkerState = Idle | Ready | Finished
+
+machine Worker {
+  state { st: WorkerState = Idle   boss: Ref<Dispatcher> = none   size: 0..2 = 0 }
+  terminal st is Finished
+  action Start(n: 1..2)
+  action Hello(from: Ref<Dispatcher>)
+
+  on Start(n)    { require st is Idle else reject "started"     st' = Ready   size' = n }
+  on Hello(from) { require st is Ready else reject "not-ready"  boss' = from  st' = Finished  send from <- Done() }
+}
+
+service machine Dispatcher {
+  state { worker: Ref<Worker> = none   started: bool = false   done: 0..1 = 0 }
+  action Go()
+  action Done()
+
+  on Go {
+    require !started else reject "started"
+    spawn detached Worker as w -> Start(n: 1)
+    started' = true
+    worker' = w
+    send w <- Hello(from: self)
+  }
+  on Done { require worker != none else reject "idle"   done' = 1 }
+
+  invariant done-after-start: done == 1 implies started
+}
+
+configuration pool {
+  d       : Dispatcher
+  inputs  { d.Go }
+  bounds  { transit 2, instances 2 }
+  invariant one-worker: count(Worker[*] is Finished) <= 1
+  liveness  finishes: d.started leads to d.done == 1
+}

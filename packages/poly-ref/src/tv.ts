@@ -18,7 +18,7 @@ import { evaluate, type Verdict } from './eval.js';
 import { alpha, flatten, flattenData } from './alpha.js';
 import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
 import type { Intent } from './step.js';
-import type { RMachine } from './model.js';
+import { detachedAlone, type RMachine } from './model.js';
 import { isTerminal } from './step.js';
 import { readBack } from './artefacts.js';
 
@@ -125,6 +125,10 @@ export async function translationValidate(module: Module, machineName: string, b
     const where = [...pathTo(g, e.from), e];
     const what = `${e.label.action}(${stable(flatData)}) from ${stateKey(s, M.fieldNames)}`;
     if ('error' in got) { mismatch(`the lowered module threw on ${what}: ${got.error}; R_M gives ${verdictText(e.label.verdict)}`, where); continue; }
+    // S78: the kernel resolves a detached child's marker at commit, and the comparison is after resolution. The
+    // mapper reads the post-state as the acceptor wrote it, before the commit.
+    const raw = got.post;
+    got.post = resolveChildren(raw, M) as Record<string, unknown>;
     const want = e.label.verdict;
     if (got.verdict.kind !== want.kind || (want.kind === 'rejected' && got.verdict.reason !== want.reason)) {
       mismatch(`${what}: the lowered module gives ${verdictText(got.verdict)}, R_M gives ${verdictText(want)}`, where);
@@ -145,7 +149,7 @@ export async function translationValidate(module: Module, machineName: string, b
     const wantE = e.label.effects.flatMap(loweredIntents);
     let gotE: unknown;
     try {
-      gotE = mapper ? mapper(structuredClone(flatPre), e.label.action, structuredClone(flatData), structuredClone(got.post), 'accepted') : [];
+      gotE = resolveChildren(mapper ? mapper(structuredClone(flatPre), e.label.action, structuredClone(flatData), structuredClone(raw), 'accepted') : [], M);
     } catch (err) {
       mismatch(`${what}: the effects mapper threw: ${(err as Error).message}; R_M emits ${stable(wantE)}`, where);
       continue;
@@ -271,6 +275,8 @@ function loweredIntents(x: Intent): unknown[] {
       ...(x.onParentTerminal ? { onParentTerminal: x.onParentTerminal } : {}),
     }];
   }
+  // S60: createInstance carries no address; the kernel makes it <parent>/<k>.
+  if (x.type === 'create') return [{ kind: 'createInstance', machineId: x.machineId, childKey: x.key, ...(x.create ? { creation: { action: x.create.action, data: plainRecord(x.create.data) } } : {}) }];
   if (x.type === 'signal') return [{ kind: 'signalChild', childKey: x.key, action: x.action, data: plainRecord(x.data) }];
   // PT7a, S58: an address is its string, none is null, and an argument written `self` is the kernel's marker.
   if (x.type === 'send') {
@@ -279,6 +285,15 @@ function loweredIntents(x: Intent): unknown[] {
     return [{ kind: 'sendTo', target: toPlain(x.target), action: x.action, data }];
   }
   return [{ kind: 'cancelTimer', key: x.key }, { kind: 'timer', key: x.key, fireIn: isoDuration(x.ms), action: x.action, data: plainRecord(x.data) }];
+}
+
+/** S78: every `{ $ref: "child", key }` marker replaced by the child's address, as the kernel does at commit. */
+function resolveChildren(v: unknown, M: RMachine): unknown {
+  if (Array.isArray(v)) return v.map((x) => resolveChildren(x, M));
+  if (v === null || typeof v !== 'object') return v;
+  const o = v as Record<string, unknown>;
+  if (o.$ref === 'child' && typeof o.key === 'string' && M.detached.some((x) => x.key === o.key)) return detachedAlone(M, o.key);
+  return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, resolveChildren(x, M)]));
 }
 
 /** The flat keys the expected state has: the module may keep keys α ignores, which `shape:` covers. */

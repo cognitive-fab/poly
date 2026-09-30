@@ -64,6 +64,8 @@ export type Resolution =
   | { k: 'none' }
   /** `self`, the sending instance's address: only a whole argument of a send in M1 (S58). */
   | { k: 'self' }
+  /** `k` after `spawn detached M as k`: the child's address, `<parent>/<k>` from the step's commit (S60, S78). */
+  | { k: 'child'; key: string; machine: string }
   | { k: 'pre' }
   | { k: 'post' }
   /** In a compose invariant: parent.f, and children.k.f of the child k (PT7). */
@@ -104,6 +106,8 @@ export interface MachineFacts {
   childKeyDomains: Map<string, string[]>;
   /** S49: child families by name, with the indices their keys take (`f` with 1..2 has the keys f1 and f2). */
   families: Map<string, { lo: number; hi: number }>;
+  /** S60: the detached children the machine spawns, key to machine name, in the order of their first spawn. */
+  detached: Map<string, string>;
 }
 
 export interface CheckResult {
@@ -216,6 +220,7 @@ class Checker {
       if (facts.children.size) this.err('PL0901', i, `${facts.machine.name} spawns attached children; a configuration of such a machine is checked from a later milestone (S61)`);
       instances.set(i.name, { machine: facts.machine, facts, count: i.count });
     }
+    this.spawnedGroups(c, instances, machines);
     const cfg: ConfigScope = { instances };
     // PS13.1: an instance's initial state, its addresses included.
     for (const i of c.instances) {
@@ -275,6 +280,45 @@ class Checker {
           if (!inst.machine.items.some((it) => it.kind === 'Action' && it.name === m.action)) this.err('PL1001', g, `${inst.machine.name} has no action ${m.action}`);
         }
       }
+    }
+  }
+
+  /**
+   * S60, PS13.3: detached spawns create instances at `<parent>/<k>`, and those of machine T join the group T. Its
+   * potential members are every such address reachable within `instances n`, breadth first from the declared
+   * instances; properties and inputs read the members that exist. `instances n` is required once a machine of the
+   * configuration spawns detached children (PT7a).
+   */
+  private spawnedGroups(c: A.Configuration, instances: ConfigScope['instances'], machines: Map<string, MachineFacts>): void {
+    const declared: string[] = [];
+    for (const i of c.instances) { const inst = instances.get(i.name); if (inst) for (let k = 0; k < (i.count ?? 1); k++) declared.push(inst.machine.name); }
+    const spawner = declared.find((m) => machines.get(m)?.detached.size);
+    if (!spawner) return;
+    // Every machine a spawn can reach has its group, empty when the bound admits none of its instances.
+    const counts = new Map<string, number>();
+    const reach = [...new Set(declared)];
+    for (let i = 0; i < reach.length; i++) {
+      for (const t of machines.get(reach[i])?.detached.values() ?? []) {
+        if (!counts.has(t)) counts.set(t, 0);
+        if (!reach.includes(t)) reach.push(t);
+      }
+    }
+    const limit = c.bounds?.instances;
+    if (limit === null || limit === undefined) this.err('PL5303', c, `${spawner} spawns detached children, so configuration ${c.name} needs an instance bound; write bounds { transit n, instances n } (S60, S62)`);
+    let level = declared;
+    for (let depth = 1; limit !== null && limit !== undefined && depth <= limit - declared.length && level.length; depth++) {
+      const next: string[] = [];
+      for (const m of level) for (const t of machines.get(m)?.detached.values() ?? []) next.push(t);
+      for (const t of next) counts.set(t, (counts.get(t) ?? 0) + 1);
+      if ([...counts.values()].reduce((a, b) => a + b, 0) > 256) { this.err('PL0901', c, `configuration ${c.name} has more than 256 potential detached instances within instances ${limit}; checked from a later milestone (S60)`); return; }
+      level = next;
+    }
+    for (const [t, count] of counts) {
+      const facts = machines.get(t);
+      if (!facts) continue;
+      if (instances.has(t)) { this.err('PL1002', c, `the detached ${t} instances form the group ${t}, and ${c.name} also declares an instance ${t} (S60)`); continue; }
+      if (facts.children.size) this.err('PL0901', c, `${t} spawns attached children; a configuration of such a machine is checked from a later milestone (S61)`);
+      instances.set(t, { machine: facts.machine, facts, count });
     }
   }
 
@@ -444,7 +488,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map(), families: new Map() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map(), families: new Map(), detached: new Map() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -505,6 +549,15 @@ class Checker {
         if (s.kind === 'If') { collect(s.then, action); collect(s.else ?? [], action); }
         if (s.kind === 'Match') for (const a of s.arms) collect(a.body, action);
         if (s.kind !== 'Intent' || !s.as) continue;
+        if (s.op === 'spawn' && s.modifier === 'detached') {
+          // S60: one key, one address <parent>/<k>; a family of detached children is not in M2.
+          if (s.index) { this.err('PL0901', s, `spawn detached … as ${s.as}[…]: a family of detached children is checked from a later milestone (S60)`); continue; }
+          const name = s.target.split('.').pop()!;
+          const prev = facts.detached.get(s.as);
+          if (facts.children.has(s.as) || [...facts.families.keys()].includes(s.as) || (prev && prev !== name)) this.err('PL1002', s, `child key ${s.as} names two children; one key names one child (PT6.4, S60)`);
+          else facts.detached.set(s.as, name);
+          continue;
+        }
         if (s.op !== 'after' && !(s.op === 'spawn' && s.modifier !== 'detached')) continue;
         const range = s.index ? indexRange(s.index, loops) : null;
         if (s.index && !range) { this.err('PL1201', s.index, 'the index of a key is the loop variable, the loop variable plus or minus a constant, or a constant (S49)'); continue; }
@@ -784,6 +837,32 @@ class Checker {
         this.cancelParams(act, child);
       }
     }
+  }
+
+  /**
+   * `spawn detached M as k -> A(args)` (PS7.5, S60, PT6.4): a separate actor at `<parent>/<k>`. `as k` binds `k`,
+   * a local of type Ref<M> the handler may store or send to (S78). The child's completion is a message it sends,
+   * so there is no `on complete` wiring; it is not part of the parent's cascade, so no `on parent terminal` either.
+   */
+  private detachedSpawn(s: A.IntentStmt, scope: Scope): void {
+    const spec = childSpec(s, this.module.name);
+    const child = this.childMachine(s);
+    if (spec.onComplete) this.err('PL1201', s, `a detached child takes no on complete wiring: its completion is a message it sends (PT6.4, S60)`);
+    if (spec.onParentTerminal) this.err('PL1201', s, `a detached child is a separate actor, not part of its parent's cascade, so it takes no on parent terminal wiring (PS7.5)`);
+    if (child && spec.create) {
+      const act = child.items.find((i): i is A.Action => i.kind === 'Action' && i.name === spec.create);
+      if (!act) { this.err('PL1001', s, `${child.name} has no action ${spec.create}`); for (const a of s.args) this.typeOf(a.value, scope); }
+      else {
+        if (!child.items.some((i) => i.kind === 'Handler' && i.action === spec.create)) this.err('PL6101', s, `creation action ${child.name}.${spec.create} has no handler, so the child cannot take its first message; add a handler (S43, S60)`);
+        this.intentArgs(s, act.params, `${child.name}.${spec.create}`, scope);
+      }
+    } else if (!child || s.args.length) {
+      if (child && s.args.length) this.err('PL1201', s, `a spawn passes arguments only to a creation action: spawn detached ${s.target} as ${s.as} -> A(…) (S43)`);
+      for (const a of s.args) this.typeOf(a.value, scope);
+    }
+    if (!child || !s.as || s.index) return;
+    if (scope.locals.has(s.as) || scope.params.has(s.as) || this.facts!.fieldTypes.has(s.as)) { this.err('PL1002', s, `${s.as} is already a name here`); return; }
+    scope.locals.set(s.as, { ty: { k: 'ref', machine: child.name }, res: { k: 'child', key: s.as, machine: child.name } });
   }
 
   /**
@@ -1245,12 +1324,13 @@ class Checker {
         if (s.op === 'emit') this.emit(s, scope);
         else if (s.op === 'after') this.timer(s, scope);
         else if (s.op === 'spawn' && s.modifier !== 'detached') this.spawn(s, scope);
+        else if (s.op === 'spawn') this.detachedSpawn(s, scope);
         else if (s.op === 'signal') this.signal(s, scope);
         else if (s.op === 'send') this.send(s, scope);
         else if (s.op === 'cancel') {
           const armedKey = s.index ? [...this.facts!.timerKeys].some((k) => k.startsWith(s.target) && /^\d+$/.test(k.slice(s.target.length))) : this.facts!.timerKeys.has(s.target);
           if (!armedKey) this.err('PL1001', s, `cancel ${s.target}${s.index ? '[…]' : ''}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
-        } else this.err('PL0901', s, 'spawn detached waits for the ruling on S60: what `as k` binds, and where the new address comes from');
+        }
         break;
     }
   }
@@ -2024,7 +2104,7 @@ function spawnedKeys(e: A.Expr): string[] {
 }
 
 /** The intent kinds the kernel reads itself (PT6.3, PT6.4, PT7a). */
-const KERNEL_KINDS = new Set(['timer', 'cancelTimer', 'spawnChild', 'signalChild', 'sendTo']);
+const KERNEL_KINDS = new Set(['timer', 'cancelTimer', 'spawnChild', 'signalChild', 'sendTo', 'createInstance']);
 
 // PT6.2: the closed Polyaxion vocabulary.
 const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
