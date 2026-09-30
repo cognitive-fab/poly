@@ -104,6 +104,15 @@ CREATE TABLE IF NOT EXISTS pr_timer (
   status      text NOT NULL CHECK (status IN ('scheduled','fired','cancelled'))
 );
 CREATE INDEX IF NOT EXISTS pr_timer_due ON pr_timer (status, fire_at) WHERE status = 'scheduled';
+CREATE TABLE IF NOT EXISTS pr_audit (
+  audit_id    BIGSERIAL PRIMARY KEY,
+  at          BIGINT NOT NULL,
+  instance_id TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  action_id   TEXT NOT NULL,
+  rule        TEXT NOT NULL,
+  reason      TEXT NOT NULL
+);
 `;
 
 const num = (v) => (v === null || v === undefined ? v : Number(v));
@@ -335,13 +344,40 @@ export class PgStore {
       `UPDATE pr_outbox SET status = 'inflight', claimed_until = $1
        WHERE intent_id IN (
          SELECT intent_id FROM pr_outbox
-         WHERE status = 'pending' AND next_attempt_at <= $2
+         WHERE status = 'pending' AND next_attempt_at <= $2 AND kind <> 'sendTo'
          ORDER BY next_attempt_at LIMIT $3
          FOR UPDATE SKIP LOCKED
        )
        RETURNING *`,
       [now + leaseMs, now, limit]);
     return rows.map((r) => this._outboxRow(r));
+  }
+
+  /** poly S89: the messages in transit, pending delivery, in no promised order. */
+  async pendingMessages() {
+    const { rows } = await this._q(`SELECT * FROM pr_outbox WHERE kind = 'sendTo' AND status = 'pending' ORDER BY intent_id`);
+    return rows.map((r) => this._outboxRow(r));
+  }
+
+  /** Claims one message by its id for delivery; null when it is not pending. */
+  async claimMessage(intentId, now, leaseMs) {
+    const { rows } = await this._q(
+      `UPDATE pr_outbox SET status = 'inflight', claimed_until = $1
+       WHERE intent_id = $2 AND kind = 'sendTo' AND status = 'pending' RETURNING *`,
+      [now + leaseMs, intentId]);
+    return rows.length ? this._outboxRow(rows[0]) : null;
+  }
+
+  /** poly S88: an audit record, for what is observable without being a step (a K9 refusal). */
+  async insertAudit({ at, instanceId, action, actionId, rule, reason }) {
+    await this._q(`INSERT INTO pr_audit (at, instance_id, action, action_id, rule, reason) VALUES ($1, $2, $3, $4, $5, $6)`, [at, instanceId, action, actionId, rule, reason]);
+  }
+
+  async listAudit(instanceId) {
+    const { rows } = instanceId
+      ? await this._q(`SELECT * FROM pr_audit WHERE instance_id = $1 ORDER BY audit_id`, [instanceId])
+      : await this._q(`SELECT * FROM pr_audit ORDER BY audit_id`);
+    return rows.map((r) => ({ ...r, at: Number(r.at), audit_id: Number(r.audit_id) }));
   }
 
   async markEffectDone(intentId) {

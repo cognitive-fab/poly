@@ -484,6 +484,13 @@ export function productStep(joint, stim, ctx) {
           // key simply cancels nothing) — claiming a poison here would report
           // a halt production never performs. check-effects covers the
           // mapper-hygiene side of a keyless cancelTimer.
+        } else if (intent.kind === 'sendTo') {
+          // Kernel parity (poly S89): a message to another instance leaves the joint machine through the outbox, as
+          // an effect does: validated, not executed. A malformed one poisons, as in the kernel.
+          const tg = intent.target;
+          const ok = tg === null || (typeof tg === 'string' && tg) || (tg && typeof tg === 'object' && (tg.$ref === 'self' || tg.$ref === 'child'));
+          if (!ok) throw new PoisonDefect(tgt, 'sendTo: target is an instance id or null');
+          if (typeof intent.action !== 'string' || !intent.action) throw new PoisonDefect(tgt, 'sendTo: action is required');
         } else if (declaredKinds.has(intent.kind)) {
           // outbox effect: acts on the outside world — validated, not executed
         } else {

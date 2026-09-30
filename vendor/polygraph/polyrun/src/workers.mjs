@@ -25,11 +25,56 @@ export class Workers {
     this._timers = [];
   }
 
-  start({ effectPollMs = 250, timerPollMs = 250 } = {}) {
+  start({ effectPollMs = 250, timerPollMs = 250, messagePollMs = 250 } = {}) {
     const effectLoop = setInterval(() => { this.tickEffects().catch((e) => this._report(e)); }, effectPollMs);
     const timerLoop = setInterval(() => { this.tickTimers().catch((e) => this._report(e)); }, timerPollMs);
-    effectLoop.unref?.(); timerLoop.unref?.();
-    this._timers.push(effectLoop, timerLoop);
+    const messageLoop = setInterval(() => { this.tickMessages().catch((e) => this._report(e)); }, messagePollMs);
+    effectLoop.unref?.(); timerLoop.unref?.(); messageLoop.unref?.();
+    this._timers.push(effectLoop, timerLoop, messageLoop);
+  }
+
+  // ---- messages (poly PT7a, S89) ----------------------------------------------
+
+  /** The messages in transit: { id, from, to, action, data }, in no promised order. */
+  async pendingMessages() {
+    return (await this.rt.store.pendingMessages()).map((r) => ({ id: r.intent_id, from: r.instance_id, to: r.payload.target, action: r.payload.action, data: r.payload.data }));
+  }
+
+  /** Delivers one message in transit, by its id; false when it is not pending. */
+  async deliverMessage(id, now = this.rt.now()) {
+    const row = await this.rt.store.claimMessage(id, now, this.leaseMs);
+    if (!row) return false;
+    await this._deliver(row, now);
+    return true;
+  }
+
+  /** Delivers every message in transit, in the store's order; returns how many. */
+  async tickMessages(now = this.rt.now()) {
+    let n = 0;
+    for (const m of await this.pendingMessages()) if (await this.deliverMessage(m.id, now)) n += 1;
+    return n;
+  }
+
+  async _deliver(row, now) {
+    const { target, action, data } = row.payload;
+    if (!(await this.rt.store.getInstance(target))) {
+      // S89: an unknown target is dead-lettered, and journaled on the sender's run.
+      await this.rt.recordUndeliverable(row.instance_id, row.intent_id, target, action);
+      await this.rt.store.markEffectDead(row.intent_id, row.attempts + 1, `no instance '${target}'`);
+      return;
+    }
+    try {
+      // The message's identity is its action id: a redelivery is deduplicated by the receiver (K4).
+      await this.rt.dispatch(target, action, data ?? {}, row.intent_id);
+      await this.rt.store.markEffectDone(row.intent_id);
+    } catch (err) {
+      const message = String((err && err.message) || err);
+      if (err && (err.name === 'RefusedError' || err.name === 'PoisonedError')) {
+        await this.rt.store.markEffectDead(row.intent_id, row.attempts + 1, message);
+        return;
+      }
+      await this.rt.store.markEffectRetry(row.intent_id, row.attempts + 1, now + this._backoff(this.defaultRetry, row.attempts + 1), message);
+    }
   }
 
   stop() { for (const t of this._timers) clearInterval(t); this._timers = []; }

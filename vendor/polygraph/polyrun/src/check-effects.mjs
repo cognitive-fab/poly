@@ -91,6 +91,16 @@ function validateIntents(intents, manifest, violations, pathDescr) {
       } else {
         out.push({ kind: 'signalChild', payload: { childKey: intent.childKey, action: intent.action } });
       }
+    } else if (intent.kind === 'sendTo') {
+      // poly PT7a, S89: a message to another instance, a kernel intent like signalChild. Its target is an instance
+      // id, null (none: nothing is sent), or an address marker the kernel resolves at commit (S58, S78).
+      const t = intent.target;
+      const targetOk = t === null || (typeof t === 'string' && t) || (t && typeof t === 'object' && (t.$ref === 'self' || t.$ref === 'child'));
+      if (!targetOk || typeof intent.action !== 'string' || !intent.action) {
+        violations.push({ invariant: 'mapper-defect:sendTo-shape', counterexample: pathDescr(), emitted: [], detail: JSON.stringify(intent) });
+      } else if (t !== null) {
+        out.push({ kind: 'sendTo', payload: { target: t, action: intent.action } });
+      }
     } else if (declared[intent.kind]) {
       out.push(intent);
     } else {

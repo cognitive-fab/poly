@@ -31,8 +31,8 @@ import { resolveFireAt } from './duration.mjs';
 // constants.mjs (store-free) so check-product.mjs, simulate.mjs, and
 // polyvers can share them without importing the kernel's sqlite-backed
 // module graph; re-exported here for kernel consumers.
-export { CREATE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
-import { CREATE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
+export { CREATE_ACTION, UNDELIVERABLE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
+import { CREATE_ACTION, UNDELIVERABLE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
 
 function isSamV2Module(mod) {
   return !!mod
@@ -54,6 +54,22 @@ export class PoisonedError extends Error {
 
 export class ConflictError extends Error {
   constructor(message) { super(message); this.name = 'ConflictError'; }
+}
+
+/** K9 (poly S45, S80, S88): an outside dispatch of an action wired as a live child's completion is refused
+ *  before any step. Nothing is journaled, since no step exists; the refusal is written to the audit log. */
+export class RefusedError extends Error {
+  constructor(message) { super(message); this.name = 'RefusedError'; this.rule = 'K9'; }
+}
+
+/** poly S58, S78: replaces the kernel's address markers at commit. `{ $ref: 'self' }` is the sender's id, and
+ *  `{ $ref: 'child', key }` its detached child's address `<sender>/<key>`. */
+export function resolveAddresses(value, instanceId) {
+  if (Array.isArray(value)) return value.map((v) => resolveAddresses(v, instanceId));
+  if (value === null || typeof value !== 'object') return value;
+  if (value.$ref === 'self' && Object.keys(value).length === 1) return instanceId;
+  if (value.$ref === 'child' && typeof value.key === 'string' && Object.keys(value).length === 2) return `${instanceId}/${value.key}`;
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolveAddresses(v, instanceId)]));
 }
 
 /** Internal sentinel: thrown inside the dispatch transaction to request
@@ -312,6 +328,23 @@ export class Runtime {
     return { created: true, state };
   }
 
+  /**
+   * poly S89: a message whose target does not exist is dead-lettered by the worker and journaled on the
+   * sender's run, as a rejected `$undeliverable` row that changes nothing; its action id dedupes a repeat.
+   */
+  async recordUndeliverable(senderId, messageId, target, action) {
+    const now = this.now();
+    await this.store.txn(async () => {
+      const inst = await this.store.getInstanceForUpdate(senderId);
+      if (!inst) return;
+      const aid = `${messageId}:undeliverable`;
+      if (await this.store.getJournalByActionId(senderId, aid)) return;
+      const machine = this.machines.get(inst.machine_id);
+      const journal = { action: UNDELIVERABLE_ACTION, data: { message: messageId, target, action }, pre: inst.state, post: inst.state, stepKind: 'rejected', rejectReason: `no instance '${target}'`, actionId: aid };
+      await this.store.commitStep({ instanceId: senderId, machineVersion: machine ? machine.version : inst.machine_version, seq: inst.seq + 1, journal, outboxRows: [], timerRows: [], cancelTimerKeys: [], cancelAllTimers: false, now });
+    });
+  }
+
   async getState(instanceId) {
     const inst = await this.store.getInstance(instanceId);
     if (!inst) throw new Error(`unknown instance '${instanceId}'`);
@@ -355,6 +388,12 @@ export class Runtime {
         for (const e of events) this.events.emit('step', e);
         return result;
       } catch (err) {
+        if (err instanceof RefusedError) {
+          // K9: the transaction rolled back, so nothing of the attempt is journaled; the refusal gets its own
+          // durable audit record, and the caller gets the error (S88).
+          await this.store.insertAudit({ at: now, instanceId, action, actionId: aid, rule: 'K9', reason: err.message });
+          throw err;
+        }
         if (err instanceof PoisonRequest) {
           // The step's transaction has rolled back; the poison mark gets its
           // own durable transaction so it cannot be lost with the step. The
@@ -403,6 +442,17 @@ export class Runtime {
       // event consumers and journal pollers would see different histories.
       events.push({ instanceId, machineId: inst.machine_id, seq: inst.seq + 1, action, data, stepKind: 'rejected', rejectReason: inst.status, pre: inst.state, post: inst.state, at: now });
       return { seq: inst.seq + 1, stepKind: 'rejected', rejectReason: inst.status, state: inst.state, terminal: false };
+    }
+
+    // K9 (S45, S80, S88): at the root of a dispatch, which is always from outside the kernel's cascade (a caller,
+    // an effect completion, a timer or a message), an action wired as the completion of a live child is not
+    // offered: only the cascade delivers it, once the child is terminal.
+    if (depth === 0) {
+      for (const child of await this.store.listChildren(instanceId)) {
+        if (child.status === 'active' && child.on_complete === action) {
+          throw new RefusedError(`K9: '${action}' completes the live child '${child.child_key}' of '${instanceId}', and only the kernel delivers it`);
+        }
+      }
     }
 
     // ---- the SAM step (pure, in-memory) ----
@@ -466,8 +516,12 @@ export class Runtime {
     const cancelTimerKeys = [];
     const spawns = [];
     const signals = [];
+    // S78: the mapper reads the post-state as the acceptor wrote it; the commit resolves its address markers,
+    // in the persisted state and in every intent.
+    const rawPost = post;
+    if (stepKind === 'accepted') post = resolveAddresses(post, instanceId);
     if (stepKind === 'accepted' && machine.mapper) {
-      const intents = machine.mapper(pre, action, data, post, stepKind) || [];
+      const intents = resolveAddresses(machine.mapper(pre, action, data, rawPost, stepKind) || [], instanceId);
       let ordinal = 0;
       const timerKeysThisStep = new Set();
       const childKeysThisStep = new Set();
@@ -531,6 +585,13 @@ export class Runtime {
           timerRows.push({ timerId: sha(instanceId, intent.key, String(seq)), key: intent.key, fireAt, action: intent.action, data: intent.data ?? {} });
         } else if (intent.kind === 'cancelTimer') {
           cancelTimerKeys.push(intent.key);
+        } else if (intent.kind === 'sendTo') {
+          // poly PT7a, S89: a message is an outbox row keyed <sender>:<seq>:<position> (PS13.2's identity), written
+          // with the step; the message worker delivers it with that key as its action id, so the receiver dedupes
+          // a redelivery (K4). A send to null (none) writes nothing.
+          if (intent.target !== null && (typeof intent.target !== 'string' || !intent.target)) throw new PoisonRequest('sendTo: target is an instance id or null', instanceId);
+          if (typeof intent.action !== 'string' || !intent.action) throw new PoisonRequest('sendTo: action is required', instanceId);
+          if (intent.target !== null) outboxRows.push({ intentId: `${instanceId}:${seq}:${intents.indexOf(intent)}`, kind: 'sendTo', payload: { target: intent.target, action: intent.action, data: intent.data ?? {} } });
         } else if (machine.manifest && machine.manifest.effects && machine.manifest.effects[intent.kind]) {
           outboxRows.push({ intentId: sha(instanceId, String(seq), intent.kind, String(ordinal++)), kind: intent.kind, payload: intent.payload ?? {} });
         } else {

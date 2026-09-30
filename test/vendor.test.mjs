@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { ROOT } from './helpers.mjs';
 
 const VENDORED = [
-  { dir: 'polygraph', source: 'C:/Users/jjdub/code/polygraph', commit: '583b82c' },
+  { dir: 'polygraph', source: 'C:/Users/jjdub/code/polygraph', commit: '4949de4' },
   { dir: 'sam-pattern', source: 'C:/Users/jjdub/code/sam/sam-lib', commit: '3047024' },
 ];
 

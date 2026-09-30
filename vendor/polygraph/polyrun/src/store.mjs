@@ -78,6 +78,15 @@ CREATE TABLE IF NOT EXISTS pr_timer (
   status      TEXT NOT NULL CHECK (status IN ('scheduled','fired','cancelled'))
 );
 CREATE INDEX IF NOT EXISTS pr_timer_due ON pr_timer (status, fire_at);
+CREATE TABLE IF NOT EXISTS pr_audit (
+  audit_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  at          INTEGER NOT NULL,
+  instance_id TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  action_id   TEXT NOT NULL,
+  rule        TEXT NOT NULL,
+  reason      TEXT NOT NULL
+);
 `;
 
 class Mutex {
@@ -429,8 +438,9 @@ export class Store {
 
   async claimEffects(now, limit, leaseMs) {
     return this.txn(() => {
+      // Messages (kind sendTo, poly S89) have their own worker, which may deliver them one at a time.
       const rows = this.db.prepare(
-        `SELECT * FROM pr_outbox WHERE status = 'pending' AND next_attempt_at <= ?
+        `SELECT * FROM pr_outbox WHERE status = 'pending' AND next_attempt_at <= ? AND kind <> 'sendTo'
          ORDER BY next_attempt_at LIMIT ?`
       ).all(now, limit);
       const claim = this.db.prepare(
@@ -439,6 +449,36 @@ export class Store {
       for (const r of rows) claim.run(now + leaseMs, r.intent_id);
       return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload) }));
     });
+  }
+
+  /** poly S89: the messages in transit, pending delivery, in no promised order. */
+  async pendingMessages() {
+    return this._run(() => this.db.prepare(
+      `SELECT * FROM pr_outbox WHERE kind = 'sendTo' AND status = 'pending' ORDER BY intent_id`
+    ).all().map((r) => ({ ...r, payload: JSON.parse(r.payload) })));
+  }
+
+  /** Claims one message by its id for delivery; null when it is not pending. */
+  async claimMessage(intentId, now, leaseMs) {
+    return this.txn(() => {
+      const r = this.db.prepare(`SELECT * FROM pr_outbox WHERE intent_id = ? AND kind = 'sendTo' AND status = 'pending'`).get(intentId);
+      if (!r) return null;
+      this.db.prepare(`UPDATE pr_outbox SET status = 'inflight', claimed_until = ? WHERE intent_id = ?`).run(now + leaseMs, intentId);
+      return { ...r, payload: JSON.parse(r.payload) };
+    });
+  }
+
+  /** poly S88: an audit record, for what is observable without being a step (a K9 refusal). */
+  async insertAudit({ at, instanceId, action, actionId, rule, reason }) {
+    return this._run(() => this.db.prepare(
+      `INSERT INTO pr_audit (at, instance_id, action, action_id, rule, reason) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(at, instanceId, action, actionId, rule, reason));
+  }
+
+  async listAudit(instanceId) {
+    return this._run(() => (instanceId
+      ? this.db.prepare(`SELECT * FROM pr_audit WHERE instance_id = ? ORDER BY audit_id`).all(instanceId)
+      : this.db.prepare(`SELECT * FROM pr_audit ORDER BY audit_id`).all()));
   }
 
   // Fenced on status='inflight': a stale lease-expired worker must not

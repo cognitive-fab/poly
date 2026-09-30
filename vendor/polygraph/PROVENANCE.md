@@ -1,10 +1,10 @@
 # polygraph, vendored
 
-The files of `@cognitive-fab/polygraph` 8.3.1 that poly imports, and nothing else, copied unchanged. poly relies on the Poly stack conceptually, not physically: the engines are read here, and a change an engine needs is made in its own repository and then copied in again.
+The files of `@cognitive-fab/polygraph` 8.3.2 that poly imports, and nothing else, copied unchanged. poly relies on the Poly stack conceptually, not physically: the engines are read here, and a change an engine needs is made in its own repository and then copied in again.
 
-- Source: `C:/Users/jjdub/code/polygraph`, commit `583b82c` ("8.3.1: vendor sam-pattern 2.3.0, and pin the two shapes it changed"), not published.
+- Source: `C:/Users/jjdub/code/polygraph`, branch `m3-sendto` (cut from `583b82c`), commit `4949de4` ("polyrun: messages between instances, and the K9 refusal"), not published and not yet merged into polygraph's main (S87). The branch carries the polyrun change of M3-2: `sendTo` messages between instances and the K9 refusal.
 - Selection: the relative-import closure of the five entry points poly uses (`scripts/check.mjs`, `scripts/replay.mjs`, `polyrun/src/check-effects.mjs`, `polyrun/src/check-product.mjs`, `polyrun/src/index.mjs`), with `scripts/sam-tv.mjs`, which `replay.mjs` runs as a child process. `store-pg.mjs` requires `pg` only when a Postgres store is asked for; poly never asks.
-- Each file is taken from the commit with `git show 583b82c:<path>`, so uncommitted work in that checkout is not included.
+- Each file is taken from the commit with `git show 4949de4:<path>`, so uncommitted work in that checkout is not included.
 - Licence: Apache-2.0, in `LICENSE`.
 - `package.json` is written for poly (name, version, module type) and is not a copy.
 
@@ -13,15 +13,15 @@ The files of `@cognitive-fab/polygraph` 8.3.1 that poly imports, and nothing els
 | File | sha256 |
 |---|---|
 | `LICENSE` | `71436dfeb742f9358c98a81da67d39d6c64a02964bfeeafdd399ed52c2583634` |
-| `polyrun/src/check-effects.mjs` | `19e40a5c3940df591f3f60a34bb95b87d9ad80a00365d9ef4122fe3586d158f9` |
-| `polyrun/src/check-product.mjs` | `76d92abca245cf9e4864fe81146bb5f9980a25e950e3a357bee32a0dc5610d0f` |
-| `polyrun/src/constants.mjs` | `ef60f4ae71f6889fa6c0012acfa1784f46604e59987d4b6bbc107ce8b3c3b6c8` |
+| `polyrun/src/check-effects.mjs` | `ebe42031d565284af684c34a4a549256149f6d774aec1416eb5c1b2e55b7dfa8` |
+| `polyrun/src/check-product.mjs` | `1352acea9bf5691c4bb94cebe8a881623d225086a3c8e052803bea355ab10e8e` |
+| `polyrun/src/constants.mjs` | `d28bbd5ace3438d39663245f53b7d58764c237a353cc9ef0cea71f419393325b` |
 | `polyrun/src/duration.mjs` | `60a50c1dd2353ad6a96ef2bbf30ee93f751f604ffe509d505b178a00869757c4` |
-| `polyrun/src/index.mjs` | `777ede8ff136dd347c5447c6c808bb7bb65d8483667b7ae40ed4d22eca0cd78c` |
-| `polyrun/src/kernel.mjs` | `c364d169f081da2926f040dc0368035d39cb97283d475b5544bfa53bc89f4912` |
-| `polyrun/src/store-pg.mjs` | `cf54daae7d8e5e2a6d1147db2a61c68351313491423ed12a87f656e471bd69d3` |
-| `polyrun/src/store.mjs` | `efbb3624db53703dc7a145c4e1d4217adfeb9be8e2f732f7ec0577d1cc9687b6` |
-| `polyrun/src/workers.mjs` | `5b59b88891dec01241c880335b57849e8b7b323b0a5ddb41b2bc8cd33981aec0` |
+| `polyrun/src/index.mjs` | `ca610be9d4dc2ee619eda90bb0a5ba01474e3f977bdd29da68b5baa8275473cd` |
+| `polyrun/src/kernel.mjs` | `dc92916249a7e72616b29ca648bd5a78cd62d2cb9995352df1afc8f7e6e878ad` |
+| `polyrun/src/store-pg.mjs` | `e75f229537735415b710833d493d84cd9acff42a6f12403ca8ee96dd1f97fc07` |
+| `polyrun/src/store.mjs` | `4b9ee537505d120ea3dc81328d93c4f978f6767c90a93527120a34a77be75613` |
+| `polyrun/src/workers.mjs` | `742f2644eed061bc9531479a786a00ab708c52a8068e3ee6e9cdd17051179638` |
 | `scripts/check.mjs` | `9792aad60f7c4608678b86fc0031a223c8f40f43b3de8ba8d7ac054ebf99fcdd` |
 | `scripts/load-spec.mjs` | `6775799e3b810ba10f1aba7493ed97e217eb6bf28d3fc445033deeb3ec91b5e7` |
 | `scripts/replay.mjs` | `193bda2a9c164f7578de58d9d0794208a9c0322919e605832798539194381923` |
@@ -32,4 +32,4 @@ The files of `@cognitive-fab/polygraph` 8.3.1 that poly imports, and nothing els
 
 ## Conclusion
 
-These files are polygraph at 583b82c, byte for byte. To take a newer polygraph, copy the same closure from the new commit and update this table in the same commit.
+These files are polygraph at 4949de4, byte for byte. To take a newer polygraph, copy the same closure from the new commit and update this table in the same commit.

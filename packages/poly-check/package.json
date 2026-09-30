@@ -20,7 +20,7 @@
     "@poly/lang": "0.0.0",
     "@poly/lower": "0.0.0",
     "@poly/ref": "0.0.0",
-    "@cognitive-fab/polygraph": "8.3.1",
+    "@cognitive-fab/polygraph": "8.3.2",
     "@cognitive-fab/sam-pattern": "2.3.0",
     "typescript": "~5.9.3"
   }

@@ -13,6 +13,10 @@
 // never contain them — kernel parity of SHAPE, not just state).
 export const CREATE_ACTION = '$create';
 
+// The synthetic journal action for a message that could not be delivered (poly S89): journaled on the
+// sender's run as a rejected row, never an accepted step, so replay and trace export skip it.
+export const UNDELIVERABLE_ACTION = '$undeliverable';
+
 // Which step classifications are ACCEPTED steps: every one except 'rejected'
 // and 'unhandled' ('mutated', 'identity-by-mutation', and sam-pattern 2.3.0's
 // 'unchanged', an explicitly framed step that writes nothing but may emit).

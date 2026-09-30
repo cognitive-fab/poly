@@ -9,12 +9,12 @@
 // See docs/polyrun-spec.md for the full functional/technical specification.
 'use strict';
 
-import { Runtime, PoisonedError, ConflictError } from './kernel.mjs';
+import { Runtime, PoisonedError, ConflictError, RefusedError, resolveAddresses } from './kernel.mjs';
 import { Workers } from './workers.mjs';
 import { Store } from './store.mjs';
 import { PgStore } from './store-pg.mjs';
 
-export { Runtime, Workers, Store, PgStore, PoisonedError, ConflictError };
+export { Runtime, Workers, Store, PgStore, PoisonedError, ConflictError, RefusedError, resolveAddresses };
 
 export async function createStore(config = {}) {
   if (config.postgres) return new PgStore(config.postgres, config.poolOptions, config.schema).init();
