@@ -1718,7 +1718,10 @@ class Checker {
         let everyKeyValid = true;
         for (const en of e.entries) {
           const kt = this.typeOf(en.key, scope, expected.key);
-          const kv = this.fold(en.key);
+          // A bare name is a constant key only when it resolved to a constructor; a parameter, a local or a field
+          // spelled like one is a value, not a key the literal can be checked against (polywatch).
+          const res = en.key.kind === 'Name' ? this.facts?.resolutions.get(en.key.id) : undefined;
+          const kv = res && res.k !== 'ctor' ? undefined : this.fold(en.key);
           if (kt.k === 'error') {
             // The key's own mistake is already reported (an unknown name, say); it is not reported again as a wrong key.
             everyKeyValid = false;

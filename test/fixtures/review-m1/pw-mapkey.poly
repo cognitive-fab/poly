@@ -1,0 +1,13 @@
+module a
+enum Door { Open, Shut }
+service machine M {
+  state {
+    m : map<Door, 0..2> = { Open: 0, Shut: 0 }
+    k : 0..1 = 0
+    z : map<0..1, 0..2> = [0, 0]
+  }
+  action Set(Open: Door)
+  action Put()
+  on Set(Open) { m' = { Open: 1, Shut: 2 } }
+  on Put { z' = { k: 1, 1: 2 } }
+}

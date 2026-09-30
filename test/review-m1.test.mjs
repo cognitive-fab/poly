@@ -238,3 +238,9 @@ test('C1b: an index that names no member of a family with a gap is PL1201, for s
   assert.deepEqual(codes(src('checker-gap')), ['PL1201', 'PL1201']);
   assert.deepEqual(codes(src('checker-gap').replace('signal t[2]', 'signal t[3]').replace('cancel late[2]', 'cancel late[1]')), []);
 });
+
+// polywatch (an earlier review, rated at M2's start): a map-literal key that is a parameter or a field is not
+// a constant, whatever its spelling; one named like a constructor was taken for the constructor.
+test('W1: a map-literal key that names a parameter or a field is PL1502, not a constructor or a wrong key', () => {
+  assert.deepEqual(codes(src('pw-mapkey')), ['PL1502', 'PL1502']);
+});
