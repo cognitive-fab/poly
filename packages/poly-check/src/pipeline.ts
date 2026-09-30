@@ -286,7 +286,8 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   });
   const out: Diagnostic[] = [];
   const notes: string[] = [];
-  const reported = new Set<string>();
+  // What polyrun confirmed, finding by finding: PL4001 by property, PL4002 by the action of its step.
+  const agreed = new Set<string>();
   const pathNames = new Set(ref.model.pathProperties.map((p) => p.name));
   for (const v of r.violations) {
     if (v.invariant === 'cycle-edge-emits') {
@@ -303,13 +304,17 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
     const code = kind === 'path' ? 'PL4001' : 'PL4002';
     if (c.status === 'disagrees') { out.push(diag('PL2501', at, `polyrun reports ${v.invariant} at ${v.counterexample.join(', ')}, and poly-ref disagrees: ${c.reason} (addressed to the toolchain, not the author)`, { engine })); continue; }
     if (c.status === 'outside') { out.push(diag('PL3901', at, `${v.invariant} is reported only on a path that leaves the checked instance at step ${c.step} (PS4.2a): a bound hit, not a finding`, { engine })); continue; }
-    reported.add(code);
+    const lastStep = v.counterexample[v.counterexample.length - 1] ?? '';
+    agreed.add(`${code}:${kind === 'path' ? v.invariant : lastStep.slice(0, lastStep.indexOf('('))}`);
   }
   // poly-ref's finding carries the shortest witness; polyrun's confirmed one says the engine agrees.
   for (const f of fromRef) {
-    const seenByPolyrun = reported.has(f.code) && (f.code === 'PL4002' || r.violations.some((v) => v.invariant === f.property));
-    if (seenByPolyrun) out.push({ ...f, engine: `${f.engine}, ${engine}` });
-    else if (f.code === 'PL4002' && !r.bounded) out.push(diag('PL2501', at, `poly-ref finds ${f.property} emitting without a state change, and polyrun check-effects, which visits every reachable state, does not (addressed to the toolchain, not the author)`, { engine }));
+    if (agreed.has(`${f.code}:${f.property}`)) { out.push({ ...f, engine: `${f.engine}, ${engine}` }); continue; }
+    // polyrun keeps one example per finding kind, so another action's identity-accept-emits may stand
+    // behind the one it printed; only no report at all, from an unbounded run, is a disagreement.
+    const polyrunIdle = r.violations.some((v) => v.invariant === 'identity-accept-emits');
+    if (f.code === 'PL4002' && !polyrunIdle && !r.bounded) out.push(diag('PL2501', at, `poly-ref finds ${f.property} emitting without a state change, and polyrun check-effects, which visits every reachable state, does not (addressed to the toolchain, not the author)`, { engine }));
+    else if (f.code === 'PL4002') out.push({ ...f, message: `${f.message} (poly-ref: polyrun check-effects prints one identity-accept-emits example, for another action)` });
     // polyrun extends a path only by a step that changes the state, and only along simple paths, so a
     // violation that needs a repeated or a state-preserving step is poly-ref's to find.
     else out.push({ ...f, message: `${f.message} (poly-ref alone: polyrun check-effects explores simple paths and does not extend a path by a step that leaves the state unchanged)` });

@@ -226,3 +226,24 @@ test('poly-ref: E is in statement order, and a conditional emit appears only on 
   assert.deepEqual(bill('Gold').label.effects.map((x) => x.kind), ['billing.invoice', 'billing.perk', 'mail.receipt']);
   assert.ok(r.graph.edges.every((e) => e.label.verdict.kind === 'accepted' || e.label.effects.length === 0), 'only accepted steps emit');
 });
+
+test('polywatch: each PL4002 says polyrun agreed only for the action polyrun named', async () => {
+  // Two actions emit without changing the state; polyrun reports one identity-accept-emits example per run.
+  const file = write('two-idle.poly', 'module ti\nmachine M {\n  state { n : 0..1 = 0 }\n  action A()\n  action B()\n  action Go()\n  on A { emit ping(1) }\n  on B { emit ping(0) }\n  on Go { require n == 0 else reject "done"  n\' = 1 }\n  path property few: count("k.ping") <= 5\n  effect ping(v: 0..1) {\n    kind "k.ping"\n    labels { exec }\n  }\n}\n');
+  const r = await checkFile(file, { root: OUT });
+  const idle = r.machines[0].diagnostics.filter((d) => d.code === 'PL4002');
+  assert.deepEqual(idle.map((d) => d.property).sort(), ['A', 'B']);
+  assert.equal(idle.filter((d) => /polyrun/.test(d.engine)).length, 1, JSON.stringify(idle.map((d) => [d.property, d.engine])));
+});
+
+test('polywatch: a disclosed field read as pre.f in an irreversible payload is PL1301', () => {
+  const src = 'module t\nmachine M {\n  state {\n    n : 0..1 = 0\n    amount : int check { 1, 2 } disclosed = 1\n  }\n  action Pay()\n  on Pay { require n == 0 else reject "done"  n\' = 1  emit charge(pre.amount) }\n  effect charge(a: int) {\n    labels { egress:external }\n    class irreversible\n  }\n}\n';
+  assert.deepEqual(codes(src), ['PL1301']);
+});
+
+test('polywatch: an effect kind that is a JavaScript prototype name still lowers into the manifest', () => {
+  const file = write('proto.poly', 'module pr\nmachine M {\n  state { n : 0..1 = 0 }\n  action Go()\n  on Go { require n == 0 else reject "done"  n\' = 1  emit ping(1) }\n  effect ping(v: 0..1) {\n    kind "__proto__"\n    labels { exec }\n  }\n}\n');
+  const [b] = build(file, 'proto');
+  const manifest = JSON.parse(readFileSync(join(b.dir, 'effects.manifest.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.effects), ['__proto__']);
+});

@@ -470,7 +470,8 @@ class Checker {
         } else facts.strictParams.add(`${act.name}.${p.name}`);
       }
       for (const f of m.fields) {
-        if (f.check?.mode === 'disclosed' && irreversible.has(f.name) && !act.params.some((p) => p.name === f.name)) this.errOnce('PL1301', f.check, `${f.name} is disclosed, and it flows into an irreversible effect (PT3.4a)`);
+        const read = irreversible.has(`pre.${f.name}`) || (irreversible.has(f.name) && !act.params.some((p) => p.name === f.name));
+        if (f.check?.mode === 'disclosed' && read) this.errOnce('PL1301', f.check, `${f.name} is disclosed, and it flows into an irreversible effect (PT3.4a)`);
       }
     }
   }
@@ -1176,13 +1177,17 @@ export function countBound(e: A.Expr): { kind: string; max: number; at: A.NodeBa
   return { kind: arg.value, max, at: arg };
 }
 
-/** The names an expression reads, with each `let` name replaced by the names it reads. */
+/**
+ * The names an expression reads, with each `let` name replaced by the names it reads. `pre.f` always
+ * names the field (S19), so it is recorded as `pre.f`, apart from a bare `f` a parameter may shadow.
+ */
 function readsOf(e: A.Expr, lets: Map<string, Set<string>>): Set<string> {
   const out = new Set<string>();
   const walk = (x: unknown): void => {
     if (!x || typeof x !== 'object') return;
     if (Array.isArray(x)) { x.forEach(walk); return; }
-    const n = x as { kind?: string; name?: string };
+    const n = x as { kind?: string; name?: string; object?: { kind?: string; name?: string }; prop?: string };
+    if (n.kind === 'Member' && n.object?.kind === 'Name' && n.object.name === 'pre' && n.prop) { out.add(`pre.${n.prop}`); return; }
     if (n.kind === 'Name' && n.name) {
       const via = lets.get(n.name);
       if (via) for (const v of via) out.add(v);

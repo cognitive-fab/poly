@@ -229,7 +229,9 @@ function emitsAny(body: A.Stmt[]): boolean {
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */
 function manifestOf(facts: MachineFacts): { effects: Record<string, unknown> } {
-  const out: Record<string, unknown> = {};
+  // Kinds are the author's strings, so the manifest is built from entries: an assignment to a key such
+  // as "__proto__" would set a prototype instead of adding the kind.
+  const out: [string, unknown][] = [];
   for (const e of facts.effects.values()) {
     const entry: Record<string, unknown> = {
       payloadSchema: Object.fromEntries(e.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type)), required: true }])),
@@ -245,9 +247,9 @@ function manifestOf(facts: MachineFacts): { effects: Record<string, unknown> } {
     }
     // polyrun ignores fields it does not read, so labels and class stay in the manifest (PT6.1).
     entry.class = effectClass(e);
-    out[effectKind(e)] = entry;
+    out.push([effectKind(e), entry]);
   }
-  return { effects: out };
+  return { effects: Object.fromEntries(out) };
 }
 
 /** A completion argument as the manifest carries it: the checker proved it constant (PT6.1). */
