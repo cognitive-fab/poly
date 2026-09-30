@@ -164,6 +164,10 @@ One contract's `actions` changed: `conformance/m0/guard-terminal.poly` (`conf.Ro
 
 Two things to watch: the hand-written mapper emits on entering a state ("edge-triggered"), so a poly handler must emit exactly on the steps that enter that state; and the OMS joint state count with two shipment children is recorded when measured (S49).
 
+S53 is ruled and built (a7d4dd1): an explicit `strict` on a parameter of an action with no handler is `PL1302`.
+
+- **S54. One entry emission, written in two handlers.** The OMS order enters `charging` from two handlers, `FRAUD_PASSED` (when the items are available) and `AMEND`, and the hand-written mapper emits on entry: `chargeCard` with the post-state total, and the `chargeTimeout` timer. poly emits in handlers, so the poly order must write `emit chargeCard(…)` and `after 12s -> CHARGE_TIMED_OUT() as chargeTimeout` in both. The other entries have one handler each (`fraudCheck` from `SUBMIT`, `awaitingAmend` from `FRAUD_PASSED`, `fulfilling` from `CHARGE_SUCCEEDED`), so this is the only duplication in the OMS. The payload must be the value the step writes: in `AMEND` that is the parameter `totalCents`, not the field, since expressions read the pre-state (PS2.3). *Proposal:* for M1, write the two copies; nothing in the language changes. The copies can drift apart, and the AC1 `check-effects` comparison with the hand-written mapper is what catches a drift in the OMS. Whether poly should have one place for what a state's entry emits is a language question for after M1 (an entry block would move emissions from steps to states, which PS2 does not have). As instructed, no construct is added; I build the two copies unless you rule otherwise.
+
 ## 7. Risks
 
 - **Two new `System` implementations in poly-ref.** Configurations are M1's heart and the part of poly-ref most likely to have bugs. Its first tests are the checkout and delivery evidence, run before the configuration lowering and stage 4b exist, as M0 ran the evidence before any lowering.
