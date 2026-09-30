@@ -260,6 +260,12 @@ function loweredIntents(x: Intent): unknown[] {
     }];
   }
   if (x.type === 'signal') return [{ kind: 'signalChild', childKey: x.key, action: x.action, data: plainRecord(x.data) }];
+  // PT7a, S58: an address is its string, none is null, and an argument written `self` is the kernel's marker.
+  if (x.type === 'send') {
+    const data = plainRecord(x.data);
+    for (const k of x.selfArgs) data[k] = { $ref: 'self' };
+    return [{ kind: 'sendTo', target: toPlain(x.target), action: x.action, data }];
+  }
   return [{ kind: 'cancelTimer', key: x.key }, { kind: 'timer', key: x.key, fireIn: isoDuration(x.ms), action: x.action, data: plainRecord(x.data) }];
 }
 

@@ -105,6 +105,8 @@ export function expr(e: A.Expr, cx: Cx): string {
         case 'action': return q(r.name);
         case 'actionVar': return 'action';
         case 'none': return 'null';
+        // S58: the kernel replaces the marker with the sender's instance id when it writes the message.
+        case 'self': return '({ $ref: "self" })';
         case 'pre':
         case 'post':
         case 'jointParent':
@@ -349,10 +351,18 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       return lines;
     }
     case 'Intent': {
-      if (s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached')) throw new Error(`poly-lower: ${s.op} reached the lowering (PL0901 must refuse it)`);
+      if (s.op === 'spawn' && s.modifier === 'detached') throw new Error('poly-lower: spawn detached reached the lowering (PL0901 must refuse it, S60)');
       // The acceptor writes and frames; the intents are the mapper's (PT6.1).
       if (!opts.effects) return [];
       if (opts.dropEffect && !opts.dropEffect.done) { opts.dropEffect.done = true; return []; }
+      if (s.op === 'send') {
+        // PT7a, S58: sendTo { target, action, data }; the target is an address, a string, or null for none.
+        const t = cx.facts.types.get(s.to!.id);
+        const receiver = t?.k === 'ref' ? cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === t.machine) : undefined;
+        const act = receiver?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
+        if (!act) throw new Error(`poly-lower: send … <- ${s.target} is unresolved (the checker must refuse it)`);
+        return [`${ind}__E.push({ kind: "sendTo", target: ${expr(s.to!, cx)}, action: ${q(s.target)}, data: { ${argList(s, act.params, cx).join(', ')} } });`];
+      }
       // S49: an indexed key k[i] is the string k<i>.
       const keyOf = (name: string) => (s.index ? `${q(name)} + (${expr(s.index, cx)})` : q(name));
       if (s.op === 'cancel') return [`${ind}__E.push({ kind: "cancelTimer", key: ${keyOf(s.target)} });`];

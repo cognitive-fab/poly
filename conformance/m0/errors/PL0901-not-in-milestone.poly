@@ -1,4 +1,4 @@
-// expect: PL0901 (a send is lowered from plan step 8 of M1)
+// expect: PL0901 (self is legal only as a whole argument of a send in M1, S58; a send to self waits for the kernel to resolve it)
 module errors
 
 machine M {

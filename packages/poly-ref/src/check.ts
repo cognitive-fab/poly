@@ -211,6 +211,8 @@ function typeText(t: RType, M: RMachine): string {
 
 function domainText(check: unknown[] | null, t: RType, M: RMachine): string {
   if (!check) return typeText(t, M);
+  // S57: the addresses a Ref ranges over, and none.
+  if (t.k === 'ref') return `{${check.map((v) => (v === null ? 'none' : String(v))).join(', ')}}`;
   const nums = check.every((v) => typeof v === 'number') ? (check as number[]) : null;
   if (nums && nums.length > 2 && nums.every((v, i) => i === 0 || v === nums[i - 1] + 1)) return `${nums[0]}..${nums[nums.length - 1]}`;
   return `{${check.map((v) => (typeof v === 'string' ? JSON.stringify(v) : String(v))).join(', ')}}`;

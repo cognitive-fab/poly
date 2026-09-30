@@ -20,7 +20,9 @@ export type Intent =
   | { type: 'timer'; kind: 'timer'; key: string; action: string; ms: number; data: Record<string, Value> }
   | { type: 'cancel'; kind: 'cancelTimer'; key: string }
   | { type: 'spawn'; kind: 'spawnChild'; key: string; machineId: string; create: { action: string; data: Record<string, Value> } | null; onComplete: string | null; onParentTerminal: string | null }
-  | { type: 'signal'; kind: 'signalChild'; key: string; action: string; data: Record<string, Value> };
+  | { type: 'signal'; kind: 'signalChild'; key: string; action: string; data: Record<string, Value> }
+  /** `send r <- A(d)` (PS2.2): a message to the address r; `selfArgs` are the arguments written as `self` (S58). */
+  | { type: 'send'; kind: 'sendTo'; target: Value; action: string; data: Record<string, Value>; selfArgs: string[] };
 
 /** A duration literal in milliseconds: 200ms, 5s, 2m, 1h (PT2). */
 export function durationMs(text: string): number {
@@ -41,14 +43,14 @@ export interface Step {
 }
 
 /** PS2.2: guards in declaration order, then the body; the first failure rejects. */
-export function runHandler(M: RMachine, h: A.Handler, s: State, d: Record<string, Value>): HandlerResult {
+export function runHandler(M: RMachine, h: A.Handler, s: State, d: Record<string, Value>, self?: string): HandlerResult {
   // Guards see the state and the action; parameters only where `action == A` narrows it (PS2.2, S19).
   const guardEnv: Env = { M, state: s, data: d, locals: new Map(), pre: s, action: h.action, params: false };
   for (const g of M.guards) {
     if (evaluate(g.cond, guardEnv) === true) return { kind: 'reject', reason: g.reason };
   }
   // In the handler a bare name is local, then parameter, then field; pre.f names the field (S19).
-  const env: Env = { M, state: s, data: d, locals: new Map(), pre: s, action: h.action, params: true };
+  const env: Env = { M, state: s, data: d, locals: new Map(), pre: s, action: h.action, params: true, self };
   const w = new Map<string, Value>();
   const E: Intent[] = [];
   const r = block(h.body, env, w, E, M, s);
@@ -158,7 +160,14 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
           if (!c) throw new EvalError(`poly-ref: no child ${st.extra[0]}`);
           const params = c.actions.find((a) => a.name === st.target)?.params ?? [];
           E.push({ type: 'signal', kind: 'signalChild', key: c.key, action: st.target, data: args(params, st.target) });
-        } else throw new EvalError(`poly-ref: \`${st.op}\` is not lowered yet`);
+        } else if (st.op === 'send') {
+          // PS2.2: the receiver is the machine the target's declared type names (PS1.6).
+          const receiver = staticType(st.to!, env);
+          const act = receiver?.k === 'ref' ? M.receivers.get(receiver.machine)?.find((x) => x.name === st.target) : undefined;
+          if (!act) throw new EvalError(`poly-ref: send … <- ${st.target} has no receiver action`);
+          const selfArgs = st.args.flatMap((a, i) => (a.value.kind === 'Name' && a.value.name === 'self' ? [a.name ?? act.params[i].name] : []));
+          E.push({ type: 'send', kind: 'sendTo', target: evaluate(st.to!, env), action: st.target, data: args(act.params, st.target), selfArgs });
+        } else throw new EvalError('poly-ref: spawn detached is not built (S60)');
         break;
       }
     }
@@ -245,7 +254,7 @@ export function isTerminal(M: RMachine, s: State): boolean {
  * R_M (PS3.2): for a state s, an action a and data d, the verdict and the
  * next state. The rows apply in the table's order.
  */
-export function transition(M: RMachine, s: State, action: string, d: Record<string, Value>): Step {
+export function transition(M: RMachine, s: State, action: string, d: Record<string, Value>, self?: string): Step {
   if (isTerminal(M, s)) return { verdict: { kind: 'rejected', reason: 'terminal' }, next: s, effects: [] };
   const a = M.actions.find((x) => x.name === action);
   if (!a) throw new EvalError(`poly-ref: no action ${action}`);
@@ -254,7 +263,7 @@ export function transition(M: RMachine, s: State, action: string, d: Record<stri
   }
   const h = M.handlers.get(action);
   if (!h) return { verdict: { kind: 'unhandled' }, next: s, effects: [] };
-  const r = runHandler(M, h, s, d);
+  const r = runHandler(M, h, s, d, self);
   if (r.kind === 'reject') return { verdict: { kind: 'rejected', reason: r.reason }, next: s, effects: [] };
   // s ⊕ w: every field not written is unchanged (the frame).
   const next: State = {};

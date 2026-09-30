@@ -32,6 +32,8 @@ export interface Env {
    * reject property only on the right of a conjunct `action == A` that holds.
    */
   params?: boolean;
+  /** The instance's own address, `self` (PS2.2): its name in a configuration, "self" for a machine checked alone. */
+  self?: string;
   /** Inside an aggregate, the family index `[*]` stands for (S49). */
   star?: number;
   /** A compose invariant's joint state (PS7.1, PT7): the parent's state and each spawned child's. */
@@ -228,6 +230,7 @@ function lookup(name: string, env: Env): Value {
   if (name in env.state) return env.state[name];
   if (env.M.ctors.has(name)) return { ctor: name, payload: {} };
   if (name === 'none') return null;
+  if (name === 'self') return env.self ?? 'self';
   throw new EvalError(`poly-ref: unknown name ${name}`);
 }
 

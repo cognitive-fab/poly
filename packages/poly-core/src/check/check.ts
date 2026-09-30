@@ -19,7 +19,8 @@ export type Ty =
   /** A record type (S25): nominal, every field present. */
   | { k: 'record'; name: string }
   | { k: 'map'; key: Ty; value: Ty; array: boolean }
-  | { k: 'ref' }
+  /** `Ref<M>` (PS1.6): an address of an instance of machine M of this module; `none` has machine null. */
+  | { k: 'ref'; machine: string | null }
   | { k: 'action' }
   | { k: 'error' };
 
@@ -33,6 +34,7 @@ export function tyToString(t: Ty): string {
     case 'union': return t.name;
     case 'record': return t.name;
     case 'map': return `map<${tyToString(t.key)}, ${tyToString(t.value)}>`;
+    case 'ref': return t.machine === null ? 'none' : `Ref<${t.machine}>`;
     default: return t.k;
   }
 }
@@ -41,6 +43,8 @@ function same(a: Ty, b: Ty): boolean {
   if (a.k === 'error' || b.k === 'error') return true;
   if (a.k !== b.k) return false;
   if (a.k === 'union' || a.k === 'record') return a.name === (b as { name: string }).name;
+  // `none` is an address of every machine (PS1.6).
+  if (a.k === 'ref') { const m = (b as { machine: string | null }).machine; return a.machine === null || m === null || a.machine === m; }
   if (a.k === 'map') {
     const m = b as typeof a;
     return same(a.key, m.key) && same(a.value, m.value);
@@ -58,6 +62,8 @@ export type Resolution =
   | { k: 'action'; name: string }
   | { k: 'actionVar' }
   | { k: 'none' }
+  /** `self`, the sending instance's address: only a whole argument of a send in M1 (S58). */
+  | { k: 'self' }
   | { k: 'pre' }
   | { k: 'post' }
   /** In a compose invariant: parent.f, and children.k.f of the child k (PT7). */
@@ -124,6 +130,8 @@ interface Scope {
   spawned?: Set<string>;
   /** Inside an aggregate over a family, `[*]` stands for each spawned member (S49). */
   star?: boolean;
+  /** The expression is a whole argument of a send, where `self` is legal (S58). */
+  selfOk?: boolean;
 }
 
 export function checkModule(module: A.Module): CheckResult {
@@ -189,7 +197,7 @@ class Checker {
         if (fdup) this.err('PL1002', d, `field ${fdup} is declared twice in ${d.name}`);
         if (this.refersTo(d.name, d.fields.map((f) => f.type), new Set())) { this.recursive.add(d.name); this.err('PL1201', d, `record ${d.name} refers to itself; a record is finite and not recursive (S25)`); continue; }
         for (const f of d.fields) {
-          this.tyOf(f.type);
+          if (this.tyOf(f.type).k === 'ref') this.err('PL0901', f, `an address inside a record is lowered after milestone M1: ${d.name}.${f.name}`);
           if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `field ${d.name}.${f.name} has no finite domain; give it a range or an enum type`);
         }
         continue;
@@ -243,7 +251,13 @@ class Checker {
       case 'TRange':
         if (t.lo > t.hi) { this.errOnce('PL1201', t, `empty range ${t.lo}..${t.hi}`); return ERR; }
         return { k: 'int', lo: t.lo, hi: t.hi };
-      case 'TRef': return { k: 'ref' };
+      case 'TRef': {
+        // PS1.6: an address of a machine of this module; another module's needs `use`.
+        if (t.machine.length > 1 && t.machine.slice(0, -1).join('.') !== this.module.name) { this.errOnce('PL0901', t, `an address of a machine of another module needs \`use\`, which is not lowered yet (${t.machine.join('.')})`); return ERR; }
+        const name = t.machine[t.machine.length - 1];
+        if (!this.module.decls.some((d) => d.kind === 'Machine' && d.name === name)) { this.errOnce('PL1001', t, `Ref<${t.machine.join('.')}>: no machine ${name} in module ${this.module.name}`); return ERR; }
+        return { k: 'ref', machine: name };
+      }
       case 'TName':
         // A recursive record was reported at its declaration; its uses say nothing more (one mistake, one diagnostic).
         if (this.recursive.has(t.name)) return ERR;
@@ -716,11 +730,30 @@ class Checker {
       if (given.has(p.name)) this.err('PL1002', a.value, `${p.name} is given twice`);
       given.add(p.name);
       const pt = this.tyOf(p.type);
-      const t = this.typeOf(a.value, scope, pt);
+      const whole = s.op === 'send' && a.value.kind === 'Name' && a.value.name === 'self';
+      const t = this.typeOf(a.value, whole ? { ...scope, selfOk: true } : scope, pt);
       if (!same(t, pt)) this.err('PL1201', a.value, `${what}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
     });
     const missing = params.filter((p) => !given.has(p.name)).map((p) => p.name);
     if (!positional && missing.length) this.err('PL1201', s, `${what} is missing ${missing.join(', ')}`);
+  }
+
+  /**
+   * `send r <- A(args)` (PS2.2, PS13.3): r is an address of a machine T of this module, A an action of T, and
+   * the arguments are typed against A's parameters. `as n` names nothing in PS or PT yet (S58).
+   */
+  private send(s: A.IntentStmt, scope: Scope): void {
+    if (s.as) this.err('PL0901', s, `send … as ${s.as} names nothing in the semantics yet (S58)`);
+    const tt = this.typeOf(s.to!, scope);
+    // One mistake, one diagnostic: an argument written `self` is still a whole argument of the send.
+    const rest = () => { for (const a of s.args) this.typeOf(a.value, a.value.kind === 'Name' && a.value.name === 'self' ? { ...scope, selfOk: true } : scope); };
+    if (tt.k === 'error') { rest(); return; }
+    if (tt.k !== 'ref') { this.err('PL1201', s.to!, `a send's target is an address, Ref<M>, not ${tyToString(tt)}`); rest(); return; }
+    if (tt.machine === null) { this.err('PL1201', s.to!, "a send's target is none here, so it names no machine and no action; send to a field or parameter of type Ref<M>"); rest(); return; }
+    const receiver = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === tt.machine);
+    const act = receiver?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
+    if (!act) { this.err('PL1001', s, `send … <- ${s.target}: ${tt.machine} has no action ${s.target}`); rest(); return; }
+    this.intentArgs(s, act.params, `${tt.machine}.${s.target}`, scope);
   }
 
   private emit(s: A.IntentStmt, scope: Scope): void {
@@ -973,10 +1006,11 @@ class Checker {
         else if (s.op === 'after') this.timer(s, scope);
         else if (s.op === 'spawn' && s.modifier !== 'detached') this.spawn(s, scope);
         else if (s.op === 'signal') this.signal(s, scope);
+        else if (s.op === 'send') this.send(s, scope);
         else if (s.op === 'cancel') {
           const armedKey = s.index ? [...this.facts!.timerKeys].some((k) => k.startsWith(s.target) && /^\d+$/.test(k.slice(s.target.length))) : this.facts!.timerKeys.has(s.target);
           if (!armedKey) this.err('PL1001', s, `cancel ${s.target}${s.index ? '[…]' : ''}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
-        } else this.err('PL0901', s, `\`${s.op}\` is lowered from plan step ${s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached') ? 8 : 6} of milestone M1`);
+        } else this.err('PL0901', s, 'spawn detached waits for the ruling on S60: what `as k` binds, and where the new address comes from');
         break;
     }
   }
@@ -1247,7 +1281,13 @@ class Checker {
         }
         if (n === 'action' && (scope.ctx === 'step' || scope.ctx === 'reject' || scope.ctx === 'guard')) { this.resolve(e, { k: 'actionVar' }); return { k: 'action' }; }
         if (expected?.k === 'action' && this.actions.has(n)) { this.resolve(e, { k: 'action', name: n }); return { k: 'action' }; }
-        if (n === 'none') { this.resolve(e, { k: 'none' }); return { k: 'ref' }; }
+        if (n === 'none') { this.resolve(e, { k: 'none' }); return { k: 'ref', machine: null }; }
+        if (n === 'self' && this.machine && scope.ctx === 'handler') {
+          // S58: the mapper has no instance id, so `self` lowers to a marker the kernel resolves in a send's data.
+          if (!scope.selfOk) { this.err('PL0901', e, 'self is legal only as a whole argument of a send in milestone M1 (S58)'); return ERR; }
+          this.resolve(e, { k: 'self' });
+          return { k: 'ref', machine: this.machine.name };
+        }
         const c = this.ctorType(n, expected, e);
         if (c) {
           const ci = c.info.ctors.find((x) => x.name === n)!;

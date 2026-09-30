@@ -43,7 +43,7 @@ export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
     case 'TString': return { k: 'string' };
     case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
     case 'TName': return env?.records.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
-    case 'TRef': return { k: 'ref' };
+    case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
     case 'TMap': return { k: 'map', key: tyOfTypeExpr(t.key, env), value: tyOfTypeExpr(t.value, env), array: t.key.kind === 'TRange' };
   }
 }
@@ -67,6 +67,8 @@ function scalarShape(t: Ty): ShapeSpec | null {
     case 'map': return { type: t.array ? 'array' : 'object' };
     // S25: a record lowers to a plain JSON object.
     case 'record': return { type: 'object' };
+    // S58: an address is the target instance's id; none is null.
+    case 'ref': return { type: 'string', nullable: true };
     default: return null;
   }
 }
@@ -77,7 +79,6 @@ export function layoutOf(m: A.Machine, facts: MachineFacts, env: TypeEnv, module
   const fields: FieldLayout[] = [];
   for (const f of m.fields) {
     const ty = facts.fieldTypes.get(f.name)!;
-    if (ty.k === 'ref') { refuse(f, `Ref fields are lowered from milestone M1 (S18): ${f.name}`); continue; }
     if (ty.k === 'map' && (isPayloadUnion(env, ty.value) || ty.value.k === 'map' || ty.value.k === 'ref')) {
       refuse(f, `a map whose values are unions with payloads, maps or addresses is lowered after milestone M0: ${f.name}`);
       continue;

@@ -1,0 +1,55 @@
+// Addresses and messages (PS1.6, PS2.2, S57, S58): the two machines of PT7a's checkout, each checked alone,
+// and a lock that compares the addresses it is given. Alone, a Ref<M> ranges over none and one address per
+// Ref<M> field plus the most Ref<M> parameters of one action (S57), so Release sees an owner that is the
+// sender and one that is not.
+module sends
+
+service machine Inventory {
+  state { onHand: 0..1 = 1 }
+  action Query(from: Ref<Order>)
+  action Take(from: Ref<Order>)
+
+  on Query(from) { send from <- Available(n: onHand) }
+  on Take(from) {
+    if onHand > 0 { onHand' = onHand - 1   send from <- Taken() }
+    else          { send from <- OutOfStock() }
+  }
+}
+
+type OrderState = Idle | Asked | Taking | Done | Refused
+
+machine Order {
+  state { st: OrderState = Idle   inv: Ref<Inventory> = none }
+  terminal st is Done | Refused
+  action Place()  action Available(n: 0..1)  action Taken()  action OutOfStock()
+
+  on Place      { require st is Idle   else reject "not-idle"    st' = Asked   send inv <- Query(from: self) }
+  on Available(n) { require st is Asked else reject "not-asked"
+                    if n > 0 { st' = Taking   send inv <- Take(from: self) } else { st' = Refused } }
+  on Taken      { require st is Taking else reject "not-taking"  st' = Done }
+  on OutOfStock { require st is Taking else reject "not-taking"  st' = Refused }
+}
+
+service machine Lock {
+  state { owner: Ref<Client> = none }
+  action Acquire(from: Ref<Client>)
+  action Release(from: Ref<Client>)
+
+  on Acquire(from) {
+    require from != none else reject "no-sender"
+    require owner == none else reject "held"
+    owner' = from
+    send from <- Granted()
+  }
+  on Release(from) {
+    require owner == from else reject "not-owner"
+    owner' = none
+  }
+}
+
+machine Client {
+  state { granted: bool = false }
+  terminal granted == true
+  action Granted()
+  on Granted { granted' = true }
+}

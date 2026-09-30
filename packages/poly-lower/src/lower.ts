@@ -34,7 +34,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   for (const a of actions) {
     for (const p of a.params) {
       const t = tyOfTypeExpr(p.type, check.env);
-      if (t.k === 'ref' || t.k === 'map' || isPayloadUnion(check.env, t)) {
+      if (t.k === 'map' || isPayloadUnion(check.env, t)) {
         diagnostics.push(diag('PL0901', { module: module.name, machine: m.name, node: p.id, line: p.span?.line, col: p.span?.col }, `a parameter of type ${t.k === 'union' ? t.name : t.k} is lowered after milestone M0: ${a.name}.${p.name}`));
       }
     }
@@ -109,7 +109,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const modelShape: Record<string, unknown> = {};
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
   const intentDecls = lowerable.map((a) => {
-    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env)), required: true }]));
+    // S58: an address is a string, and none is null.
+    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env)), required: true, ...(p.type.kind === 'TRef' ? { nullable: true } : {}) }]));
     return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(dataDomainOf(a, env, facts))} },`;
   });
   const version = digest(module);
@@ -175,7 +176,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const files: Lowered['files'] = { 'contract.json': JSON.stringify(contract, null, 2) + '\n', 'next.cjs': next, 'invariants.mjs': invariants };
   // ── effects (PT6.1, PT5): the mapper and manifest when the machine declares effects, the path properties' module when it has any ──
   // A machine that arms timers needs the mapper too: a timer is an intent (PT6.3).
-  if (facts.effects.size || facts.timerKeys.size || facts.children.size) {
+  // A machine that sends needs it too (S58): a send is an intent.
+  if (facts.effects.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls }, pre, opts.fault);
     files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env), null, 2) + '\n';
   }
@@ -259,7 +261,7 @@ function mapUpdated(body: A.Stmt[]): Set<string> {
 }
 
 function emitsAny(body: A.Stmt[]): boolean {
-  return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel' || s.op === 'spawn' || s.op === 'signal')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))) || (s.kind === 'For' && emitsAny(s.body)));
+  return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel' || s.op === 'spawn' || s.op === 'signal' || s.op === 'send')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))) || (s.kind === 'For' && emitsAny(s.body)));
 }
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */
@@ -394,7 +396,22 @@ function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layou
 // ── domains and types, flat-encoded ─────────────────────────────────────────
 
 
-function valuesOfTy(t: Ty, env: TypeEnv): unknown[] {
+/**
+ * S57: alone, a Ref<M> ranges over none and n addresses M#1 … M#n, n being the machine's Ref<M> fields plus
+ * the most Ref<M> parameters of one action, so every pattern of equalities between addresses is realised.
+ */
+function refDomain(m: A.Machine, target: string): unknown[] {
+  const isRef = (t: A.TypeExpr) => t.kind === 'TRef' && t.machine[t.machine.length - 1] === target;
+  const fields = m.fields.filter((f) => isRef(f.type)).length;
+  const params = Math.max(0, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.filter((p) => isRef(p.type)).length));
+  return [null, ...Array.from({ length: fields + params }, (_, i) => `${target}#${i + 1}`)];
+}
+
+function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
+  if (t.k === 'ref') {
+    if (!m || t.machine === null) throw new Error('poly-lower: an address domain needs its machine (S57)');
+    return refDomain(m, t.machine);
+  }
   if (t.k === 'bool') return [false, true];
   if (t.k === 'int') {
     // The checker refuses an int with no check domain (PL1101), so this is only reached by a caller that ignored it.
@@ -418,7 +435,7 @@ function valuesOfTy(t: Ty, env: TypeEnv): unknown[] {
 function paramValues(p: A.Param, env: TypeEnv, facts?: MachineFacts, action?: string): unknown[] {
   const keys = action ? facts?.childKeyDomains.get(action) : undefined;
   if (keys && p.name === 'childKey' && !p.check) return keys;
-  return p.check ? checkDomainValues(p.check) : valuesOfTy(tyOfTypeExpr(p.type, env), env);
+  return p.check ? checkDomainValues(p.check) : valuesOfTy(tyOfTypeExpr(p.type, env), env, facts?.machine);
 }
 
 /** D(a) as the intent's `domain`: every payload object (PS1.1). */
@@ -432,7 +449,7 @@ function dataDomainOf(a: A.Action, env: TypeEnv, facts?: MachineFacts): Record<s
 }
 
 function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[] {
-  return f.check ? checkDomainValues(f.check) : valuesOfTy(facts.fieldTypes.get(f.name)!, env);
+  return f.check ? checkDomainValues(f.check) : valuesOfTy(facts.fieldTypes.get(f.name)!, env, facts.machine);
 }
 
 function jsType(t: Ty): string {
@@ -447,6 +464,7 @@ function typeText(t: Ty, env: TypeEnv): string {
     case 'union': return env.unions.get(t.name)!.ctors.map((c) => `'${c.name}'`).join(' | ');
     case 'record': return `{ ${env.records.get(t.name)!.fields.map((f) => `${f.name}: ${typeText(tyOfTypeExpr(f.type, env), env)}`).join(', ')} }`;
     case 'map': return t.array ? `array of ${typeText(t.value, env)}, indexed ${typeText(t.key, env)}` : `object of ${typeText(t.value, env)}, keyed ${typeText(t.key, env)}`;
+    case 'ref': return `address of ${t.machine} | null`;
     default: return t.k;
   }
 }

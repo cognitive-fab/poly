@@ -15,7 +15,8 @@ export type RType =
   | { k: 'union'; name: string }
   | { k: 'record'; name: string }
   | { k: 'map'; key: RType; value: RType }
-  | { k: 'ref' };
+  /** An address of an instance of machine `machine` (PS1.6); `none` is null. */
+  | { k: 'ref'; machine: string };
 
 export interface RUnion {
   name: string;
@@ -124,6 +125,8 @@ export interface RMachine {
   families: Map<string, { lo: number; hi: number }>;
   effects: Map<string, REffect>;
   pathProperties: RPathProperty[];
+  /** Every machine of the module by name, with its actions: what a send may name (PS2.2). */
+  receivers: Map<string, { name: string; params: { name: string; type: RType }[] }[]>;
   unions: Map<string, RUnion>;
   /** Constructor name to its union. */
   ctors: Map<string, string>;
@@ -153,7 +156,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
       case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
       case 'TName': return recordNames.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
       case 'TMap': return { k: 'map', key: typeOf(t.key), value: typeOf(t.value) };
-      case 'TRef': return { k: 'ref' };
+      case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
     }
   };
   for (const d of decls) {
@@ -195,6 +198,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     });
   }
   const guardedInputs = strictInputs(m, effects);
+  const receivers = new Map(decls.filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [d.name, d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) }))]));
   // PT6.4: attached children, by the key their spawn names (declared by use, like timer keys).
   const children = new Map<string, RChild>();
   const families = new Map<string, { lo: number; hi: number }>();
@@ -265,7 +269,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     for (const p of a.params) if (p.name === 'childKey' && p.type.k === 'string' && p.check === null && keys.length) p.check = keys;
   }
   return {
-    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, families, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, families, effects, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties,
   };
 }
@@ -343,7 +347,13 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
       if (!Number.isFinite(t.lo) || !Number.isFinite(t.hi)) throw new Error('poly-ref: an unbounded int has no enumeration; it needs a check domain (PT3.2)');
       return Array.from({ length: t.hi - t.lo + 1 }, (_, k) => t.lo + k);
     case 'string': throw new Error('poly-ref: a string has no enumeration; it needs a check domain (PT3.2)');
-    case 'ref': return [null]; // `none` only: a single machine holds no other address (PS1.6)
+    case 'ref': {
+      // S57: alone, none and one address per Ref<M> field plus the most Ref<M> parameters of one action. Addresses
+      // are only compared and passed on (PS1.6), so these realise every pattern of equalities a state and a step hold.
+      const isRef = (x: RType) => x.k === 'ref' && x.machine === t.machine;
+      const n = M.fields.filter((f) => isRef(f.type)).length + Math.max(0, ...M.actions.map((a) => a.params.filter((p) => isRef(p.type)).length));
+      return [null, ...Array.from({ length: n }, (_, i) => `${t.machine}#${i + 1}`)];
+    }
     case 'record': {
       // S25: every combination of field values, in declaration order.
       let recs: Record<string, Value>[] = [{}];
@@ -404,7 +414,7 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     case 'bool': return typeof v === 'boolean';
     case 'int': return typeof v === 'number' && Number.isInteger(v) && v >= t.lo && v <= t.hi;
     case 'string': return typeof v === 'string';
-    case 'ref': return v === null;
+    case 'ref': return v === null || typeof v === 'string';
     case 'record': {
       if (!isRecord(v)) return false;
       const fs = M.records.get(t.name)!.fields;

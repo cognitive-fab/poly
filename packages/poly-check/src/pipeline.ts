@@ -297,11 +297,13 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const out: Diagnostic[] = [];
   const facts = checked.machines.get(machine)!;
   const hasCompose = facts.machine.items.some((i) => i.kind === 'Property' && i.form === 'compose');
-  if (!hasCompose) {
+  // S58: check-product runs the parent's mapper, and polyrun has no sendTo intent yet.
+  const sender = sends(module, machine);
+  if (!hasCompose || sender) {
     out.push(...joint.findings);
     mc.diagnostics.push(...out);
     mc.instance!.compositionByRefOnly = true;
-    mc.stages.push({ stage: 'composition', status: 'ran', engine: 'poly-ref', verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states; no compose invariant, so polyrun check-product did not run` });
+    mc.stages.push({ stage: 'composition', status: 'ran', engine: 'poly-ref', verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states; ${sender ? 'the parent sends, and polyrun has no sendTo intent yet (S58)' : 'no compose invariant'}, so polyrun check-product did not run` });
     return;
   }
   // Each child machine is lowered where the engines read it (S28: <module>.<Machine>).
@@ -391,6 +393,13 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   const engine = `polyrun@${engines.polygraph}`;
   const fromRef = ref.findings.filter((f) => f.code === 'PL4001' || f.code === 'PL4002');
   const hasPath = existsSync(join(dir, 'effect-invariants.mjs'));
+  if (hasPath && sends(module, machine)) {
+    // S58: polyrun has no sendTo intent yet, so check-effects would read the mapper's sends as undeclared kinds.
+    mc.diagnostics.push(...fromRef);
+    mc.stages.push({ stage: 'effects', status: 'ran', engine: 'poly-ref', verdict: verdictOf(fromRef), ms: performance.now() - t0, note: 'the machine sends, and polyrun has no sendTo intent yet, so polyrun check-effects did not run; path properties and PL4002 decided by poly-ref alone (S58)' });
+    mc.instance!.effectsByRefOnly = true;
+    return;
+  }
   if (!hasPath) {
     // S38: check-effects needs at least one path property, so PL4002 is poly-ref's alone.
     mc.diagnostics.push(...fromRef);
@@ -442,6 +451,13 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   mc.diagnostics.push(...out);
   const coverage = r.bounded ? 'bounded' : r.cyclesPruned ? `simple paths, ${r.cyclesPruned} cycle edges pruned` : 'exhaustive';
   mc.stages.push({ stage: 'effects', status: 'ran', engine: `${engine}, poly-ref`, verdict: verdictOf(out), ms: performance.now() - t0, note: `${r.pathsExplored} paths, ${r.statesSeen} states, ${coverage}`, notes });
+}
+
+/** Whether a machine's handlers send (PS2.2); polyrun has no sendTo intent yet (S58). */
+function sends(module: Module, machine: string): boolean {
+  const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine);
+  const walk = (body: A.Stmt[]): boolean => body.some((s) => (s.kind === 'Intent' && s.op === 'send') || (s.kind === 'If' && (walk(s.then) || walk(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => walk(a.body))) || (s.kind === 'For' && walk(s.body)));
+  return !!decl?.items.some((i) => i.kind === 'Handler' && walk(i.body));
 }
 
 function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string, fieldOf: (flatKey: string) => string): Diagnostic {
