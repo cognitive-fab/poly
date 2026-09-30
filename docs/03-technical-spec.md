@@ -307,6 +307,8 @@ acceptors: {
 }
 ```
 
+Every action of `Order` has a handler. An action with no handler is not lowered: it is not an intent of `next.cjs` and not in the `actions` of `contract.json` (S35). The runtime reports it `unhandled` before any acceptor runs, after the terminal test (PS3.2, PS9.1a), and the broadcast acceptor for guards (PT4.3) never runs for it. polygraph explores only the module's intents, so a reject property that names such an action is decided by poly-ref alone, and the verdict record says so under its instance line.
+
 The invariants lower to `invariants.mjs`:
 
 ```js
