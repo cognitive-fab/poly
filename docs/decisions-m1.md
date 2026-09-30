@@ -142,6 +142,16 @@ The agent applies the spec text in one commit, with a regression test that fails
 
 **Next.** The M1 code review runs over `ca2e6b2..122b520`, as M0's did. The agent applies the spec text for S56 to S65 in one commit citing the ids, fixes the review's findings with regression tests that fail first, then stops for the M2 handoff.
 
+## Rulings after the M1 code review (S66, S67, and one standing rule)
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S66** The same signal twice in one step | **Accepted:** `PL5105 DUPLICATE_SIGNAL`, on the second copy, beside `PL2301` (timers) and `PL5101` (spawns). The kernel poisons such a step, so it is a compile error, not a finding. | PT6.4; PT12.2 |
+| **S67** A structured constant as a completion argument | **Allowed.** An effects manifest's completion `data` may hold any constant of a finite type, encoded as a value of that type is encoded everywhere else: an enum or a union with no payload as its constructor's name (PT3.1), a union with payloads as `{ "$": "C", … }` (S65), a record as a plain object (S25). The message "a completion argument is a constant" goes away. A completion argument that is not a constant (a field or a parameter) stays refused, because a manifest cannot compute. | PT6.1 |
+| **Standing rule** Every artefact the runtime reads is checked | The review found four wrong artefacts that still gave `CLEAN`, because translation validation compares only `next.cjs` and the effect mapper. From M2 on, **every artefact the runtime reads is either compared by translation validation or read back and compared with the source**: the effects manifest (kinds, completions and their data, labels, class), `terminalStates`, the contract's actions and domains, and the timer and child wiring. A new artefact enters the build only with its round-trip check, and a broken variant of it joins the explicit list of toolchain faults. | CLAUDE.md standing rules; PT9.3 |
+
+M1 is closed.
+
 ## Conclusion
 
 M1 starts with its three open questions settled. The emit-only step is fixed where it originates, in the engine. Liveness no longer blocks a safety result. The one gate item that needs liveness moves to the milestone that builds it. The configuration explorer is the main work, and its first targets (the checkout witness and the delivery variants) are already measured by independent scripts. The rulings on the plan add the record type the OMS order needs and fix the timer rule against polyrun's store.
