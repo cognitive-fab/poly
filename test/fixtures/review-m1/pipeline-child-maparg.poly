@@ -1,0 +1,76 @@
+// Conformance: attached children (PT6.4, PS7). A spawn with a creation action (S43), a completion
+// and a parent-terminal cancel with the payloads the runtime supplies (S44), a signal, and a compose
+// invariant that reads the child only where it is spawned (S48).
+module shop
+
+enum OrderStatus { Open, Shipping, Done, Cancelled }
+enum ShipStatus { Pending, Sent, Delivered, Voided }
+
+machine Shipment {
+  state {
+    ship : ShipStatus = Pending
+    size : 0..2       = 0
+  }
+  terminal ship in { Delivered, Voided }
+
+  action Start(size: 0..2)
+  action Send()
+  action Deliver()
+  action Tag(m: map<0..1, bool>)
+  on Tag(m) { require ship == Sent else reject "x"
+    ship' = Delivered }
+  action Void(reason: string check { "parent-terminal" })
+
+  on Start(size) {
+    require ship == Pending else reject "started"
+    size' = size
+  }
+  on Send {
+    require ship == Pending else reject "not-pending"
+    ship' = Sent
+  }
+  on Deliver {
+    require ship == Sent else reject "not-sent"
+    ship' = Delivered
+  }
+  on Void(reason) {
+    require ship != Delivered else reject "delivered"
+    ship' = Voided
+  }
+}
+
+machine Order {
+  state {
+    status  : OrderStatus = Open
+    hurried : bool        = false
+  }
+  terminal status in { Done, Cancelled }
+
+  action Checkout()
+  action Hurry()
+  action Shipped()
+  action Cancel()
+
+  on Checkout {
+    require status == Open else reject "not-open"
+    status' = Shipping
+    spawn Shipment as box -> Start(size: 1) on complete -> Shipped on parent terminal -> Void
+  }
+  on Hurry {
+    require status == Shipping else reject "not-shipping"
+    require !hurried else reject "hurried"
+    hurried' = true
+    signal box -> Send()
+  }
+  on Shipped {
+    require status == Shipping else reject "not-shipping"
+    status' = Done
+  }
+  on Cancel {
+    require status in { Open, Shipping } else reject "too-late"
+    status' = Cancelled
+  }
+
+  compose invariant done-means-settled: parent.status == Done implies (box spawned && children.box.ship in { Delivered, Voided })
+  compose invariant cancelled-means-no-live-box: (parent.status == Cancelled && box spawned) implies children.box.ship in { Voided, Delivered }
+}

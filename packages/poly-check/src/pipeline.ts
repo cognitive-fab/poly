@@ -11,7 +11,7 @@
 // A stage that cannot run because an earlier one refused is listed as not
 // run, with the reason; it never lowers the verdict (02 §5). No stage calls a
 // language model.
-import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -162,7 +162,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     report.machines.push(mc);
     mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
     if (refused) {
-      notRun(mc, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock'], 'the program was refused at stage 0');
+      notRun(mc, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)], 'the program was refused at stage 0');
       continue;
     }
     try {
@@ -200,6 +200,13 @@ function byContent(dir: string, file: string): string {
   return copy;
 }
 
+/** Stages 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
+function laterStages(checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
+  const f = checked.machines.get(machine)!;
+  const mapper = f.effects.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || sends(f.machine);
+  return [...(mapper ? ['effects' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
+}
+
 function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
   for (const stage of stages) mc.stages.push({ stage, status: 'not-run', engine: '', reason });
 }
@@ -211,10 +218,12 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
-    notRun(mc, ['validate', 'translation-validation', 'model-check', 'deadlock'], 'the lowering refused the machine');
+    notRun(mc, ['validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)], 'the lowering refused the machine');
     return;
   }
   const dir = join(resolve(opts.root ?? process.cwd()), '.poly', 'build', `${module.name}.${machine}`);
+  // A file left by an earlier build (effects.cjs, effect-invariants.mjs) would be read as this program's (review finding P2).
+  rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);
   mc.buildDir = dir;
@@ -235,7 +244,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     // S20: a lowered module that fails strict validation is a toolchain fault, PL2001, never the author's.
     mc.diagnostics.push(diag('PL2001', { module: module.name, machine }, `the lowered module fails strict validate(): ${problems.join('; ')} (addressed to the toolchain, not the author)`, { engine: `sam-pattern@${engines['sam-pattern']}` }));
     mc.stages.push({ stage: 'validate', status: 'ran', engine: `sam-pattern@${engines['sam-pattern']}`, verdict: 'REFUSED', ms: performance.now() - t0 });
-    notRun(mc, ['translation-validation', 'model-check', 'deadlock'], 'strict validate() refused the lowered module (PL2001)');
+    notRun(mc, ['translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)], 'strict validate() refused the lowered module (PL2001)');
     return;
   }
   mc.stages.push({ stage: 'validate', status: 'ran', engine: `sam-pattern@${engines['sam-pattern']}`, verdict: 'CLEAN', ms: performance.now() - t0 });
@@ -248,7 +257,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   if (tv.mismatches.length) {
     mc.diagnostics.push(...tv.mismatches.slice(0, 20));
     mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'REFUSED', ms: performance.now() - t0, note: `${tv.mismatches.length} mismatches over ${tv.transitions} transitions` });
-    notRun(mc, ['model-check', 'deadlock'], 'translation validation refused the lowering (PL2501)');
+    notRun(mc, ['model-check', 'deadlock', ...laterStages(checked, machine)], 'translation validation refused the lowering (PL2501)');
     return;
   }
   mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'CLEAN', ms: performance.now() - t0, note: `${tv.transitions} transitions and ${tv.propertyChecks} property evaluations agree` });
@@ -328,7 +337,7 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const facts = checked.machines.get(machine)!;
   const hasCompose = facts.machine.items.some((i) => i.kind === 'Property' && i.form === 'compose');
   // S58: check-product runs the parent's mapper, and polyrun has no sendTo intent yet.
-  const sender = sends(module, machine);
+  const sender = sends(facts.machine);
   if (!hasCompose || sender) {
     out.push(...joint.findings);
     mc.diagnostics.push(...out);
@@ -338,13 +347,21 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   }
   // Each child machine is lowered where the engines read it (S28: <module>.<Machine>).
   const root = join(resolve(opts.root ?? process.cwd()), '.poly', 'build');
-  const children = [...new Set([...facts.children.values()].map((c) => c.machine))].map((id) => {
+  const ids = [...new Set([...facts.children.values()].map((c) => c.machine))];
+  const refusedChild = ids.find((id) => !lowerMachine(module, checked, id.split('.').pop()!).lowered);
+  if (refusedChild) {
+    // The child's own stages report its refusal; the joint check cannot run without its artefacts (review finding P5).
+    mc.diagnostics.push(...joint.findings);
+    mc.stages.push({ stage: 'composition', status: 'not-run', engine: '', reason: `the child machine ${refusedChild} was refused at lowering, so polyrun check-product cannot run; poly-ref's joint findings are listed` });
+    return;
+  }
+  const children = ids.map((id) => {
     const name = id.split('.').pop()!;
     const { lowered } = lowerMachine(module, checked, name);
-    if (!lowered) throw new Error(`the child machine ${id} does not lower`);
     const cdir = join(root, id);
+    rmSync(cdir, { recursive: true, force: true });
     mkdirSync(cdir, { recursive: true });
-    for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(cdir, f), text);
+    for (const [f, text] of Object.entries(lowered!.files)) writeFileSync(join(cdir, f), text);
     return { machineId: id, module: join(cdir, 'next.cjs'), contract: join(cdir, 'contract.json') };
   });
   const r = await checkProduct({
@@ -423,7 +440,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
   const engine = `polyrun@${engines.polygraph}`;
   const fromRef = ref.findings.filter((f) => f.code === 'PL4001' || f.code === 'PL4002');
   const hasPath = existsSync(join(dir, 'effect-invariants.mjs'));
-  if (hasPath && sends(module, machine)) {
+  if (hasPath && sends(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine))) {
     // S58: polyrun has no sendTo intent yet, so check-effects would read the mapper's sends as undeclared kinds.
     mc.diagnostics.push(...fromRef);
     mc.stages.push({ stage: 'effects', status: 'ran', engine: 'poly-ref', verdict: verdictOf(fromRef), ms: performance.now() - t0, note: 'the machine sends, and polyrun has no sendTo intent yet, so polyrun check-effects did not run; path properties and PL4002 decided by poly-ref alone (S58)' });
@@ -512,7 +529,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
     // PS13.7 rests on one step per message at its receiver (K4, K8), atomic single-writer steps (K1, K2) and the profile (K7).
     kernelAssumptions: ['K1', 'K2', 'K4', 'K7', 'K8'],
   };
-  const sender = r.instances.some((i) => sends(module, i.machine.name));
+  const sender = r.instances.some((i) => sends(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === i.machine.name)));
   cc.stages.push({
     stage: 'configuration', status: 'ran', engine: 'poly-ref', verdict: verdictOf(r.findings), ms: performance.now() - t0,
     note: `${r.states} global states, ${r.transitions} global steps`,
@@ -536,8 +553,7 @@ export function configurationReports(module: Module, refused: boolean): { config
 }
 
 /** Whether a machine's handlers send (PS2.2); polyrun has no sendTo intent yet (S58). */
-function sends(module: Module, machine: string): boolean {
-  const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine);
+function sends(decl: A.Machine | undefined): boolean {
   const walk = (body: A.Stmt[]): boolean => body.some((s) => (s.kind === 'Intent' && s.op === 'send') || (s.kind === 'If' && (walk(s.then) || walk(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => walk(a.body))) || (s.kind === 'For' && walk(s.body)));
   return !!decl?.items.some((i) => i.kind === 'Handler' && walk(i.body));
 }
@@ -682,12 +698,11 @@ export interface ProjectReport {
  * otherwise (PT1.5). The project verdict is the fold of the files' verdicts;
  * an error or a nondeterminism in any file decides it.
  */
-export async function checkProject(dir: string, opts: CheckOptions = {}): Promise<ProjectReport> {
-  const { manifest, files } = loadProject(dir);
-  const reports: CheckReport[] = [];
-  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir }));
-  // S41: polyrun keys handlers by kind across the whole deployment, so effects of one kind must agree
-  // across the project's modules. A disagreement is reported in the later file and refuses it.
+/**
+ * S41: polyrun keys handlers by kind across the whole deployment, so effects of one kind must agree across
+ * the project's modules. A disagreement is reported in the later file and refuses it.
+ */
+export function projectKindConflicts(reports: CheckReport[]): void {
   const first = new Map<string, { report: CheckReport; k: NonNullable<CheckReport['effectKinds']>[number] }>();
   for (const report of reports) {
     for (const k of report.effectKinds ?? []) {
@@ -695,8 +710,31 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
       if (!seen) { first.set(k.kind, { report, k }); continue; }
       if (seen.report === report || seen.k.signature === k.signature) continue;
       report.diagnostics.push(diag('PL1002', { module: report.module ?? undefined, line: k.line, col: k.col }, `effect ${k.effect} has kind "${k.kind}", which ${seen.report.module}.${seen.k.effect} declares with a different payload, completions or class (S41)`));
-      finish(report);
+      refold(report);
     }
+  }
+}
+
+/** Folds a report again after a project-level diagnostic; an ERROR or a NONDETERMINISM stands (review finding P4). */
+function refold(report: CheckReport): void {
+  if (report.verdict === 'ERROR' || report.verdict === 'NONDETERMINISM') return;
+  finish(report);
+}
+
+export async function checkProject(dir: string, opts: CheckOptions = {}): Promise<ProjectReport> {
+  const { manifest, files } = loadProject(dir);
+  const reports: CheckReport[] = [];
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir }));
+  projectKindConflicts(reports);
+  // PT1.3, PT1.5: a module is named once in a project; two modules of one name would share their build
+  // directory and their machine ids (review finding P3).
+  const named = new Map<string, CheckReport>();
+  for (const report of reports) {
+    if (!report.module) continue;
+    const prev = named.get(report.module);
+    if (!prev) { named.set(report.module, report); continue; }
+    report.diagnostics.push(diag('PL1002', { module: report.module, line: 1, col: 1 }, `module ${report.module} is also declared in ${prev.file}; a project names each module once (PT1.3)`));
+    refold(report);
   }
   const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');
   const verdict = special ? special.verdict : fold(reports.map((r) => r.verdict as Verdict));

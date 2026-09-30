@@ -1,0 +1,10 @@
+module effects
+enum Phase { Open, Billed, Closed }
+machine Account {
+  state { phase : Phase = Open }
+  terminal phase == Closed
+  action Bill()
+  action Close()
+  on Bill { require phase == Open else reject "no"  phase' = Billed }
+  on Close { require phase == Billed else reject "no"  phase' = Closed }
+}

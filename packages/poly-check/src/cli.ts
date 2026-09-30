@@ -20,7 +20,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
 exit codes: 0 CLEAN, 1 FINDINGS, 2 REFUSED / INCONCLUSIVE, 3 nondeterminism, 4 error, 64 usage`;
 
 // Every diagnostic in the JSON form carries its schema, poly.diagnostic/1 (PT12.1).
-const asJson = (r: CheckReport) => ({ ...r, diagnostics: r.diagnostics.map(toJson), machines: r.machines.map((m) => ({ ...m, diagnostics: m.diagnostics.map(toJson) })) });
+const asJson = (r: CheckReport) => ({ ...r, diagnostics: r.diagnostics.map(toJson), machines: r.machines.map((m) => ({ ...m, diagnostics: m.diagnostics.map(toJson) })), configurations: (r.configurations ?? []).map((c) => ({ ...c, diagnostics: c.diagnostics.map(toJson) })) });
 
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];

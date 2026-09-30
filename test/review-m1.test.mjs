@@ -3,11 +3,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { parse, format } from '@poly/lang';
 import { checkModule } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { checkFile, render } from '@poly/check';
+import { checkFile, checkProject, projectKindConflicts, render } from '@poly/check';
 import { ROOT, BUILD } from './helpers.mjs';
 
 const FIX = join(ROOT, 'test', 'fixtures', 'review-m1');
@@ -73,3 +74,61 @@ test('C8: a record literal compares on either side, and one recursion is one dia
   assert.deepEqual(codes(src('checker-mut')), ['PL1201']);
 });
 
+
+// ── the pipeline ──────────────────────────────────────────────────────────
+
+test('P2: a check reads only this check\'s artefacts, not a previous build left in the same root', async () => {
+  const root = join(OUT, 'stale');
+  assert.equal((await checkFile(join(ROOT, 'conformance', 'm1', 'effects.poly'), { root })).verdict, 'CLEAN');
+  for (const name of ['pipeline-stale-no-path', 'pipeline-stale-no-effects']) {
+    const again = await checkFile(join(FIX, `${name}.poly`), { root });
+    const fresh = await checkFile(join(FIX, `${name}.poly`), { root: join(OUT, `fresh-${name}`) });
+    assert.equal(again.verdict, fresh.verdict, render(again));
+    assert.ok(!again.machines.some((m) => m.diagnostics.some((d) => d.code === 'PL2501')), render(again));
+  }
+});
+
+test('P3: a project refuses two modules with one name, which would share one build directory', async () => {
+  const dir = join(OUT, 'dup-project');
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  writeFileSync(join(dir, 'poly.json'), '{ "poly": "1", "name": "dup", "modules": ["src/*.poly"] }');
+  const hello = readFileSync(join(ROOT, 'examples', 'hello', 'hello-empty.poly'), 'utf8');
+  writeFileSync(join(dir, 'src', 'a.poly'), hello);
+  writeFileSync(join(dir, 'src', 'b.poly'), hello);
+  const p = await checkProject(dir, { root: join(OUT, 'dup-root') });
+  assert.deepEqual(p.files[1].diagnostics.map((d) => d.code), ['PL1002']);
+  assert.equal(p.verdict, 'REFUSED');
+});
+
+test('P4: a project never folds a file\'s ERROR away', () => {
+  const report = (verdict, kinds) => ({ file: 'x', module: 'm', verdict, exit: verdict === 'ERROR' ? 4 : 0, diagnostics: [], machines: [], configurations: [], engines: {}, effectKinds: kinds });
+  const a = report('CLEAN', [{ kind: 'k', signature: 'one', effect: 'M.e' }]);
+  const b = report('ERROR', [{ kind: 'k', signature: 'two', effect: 'N.e' }]);
+  projectKindConflicts([a, b]);
+  assert.deepEqual([b.verdict, b.exit], ['ERROR', 4]);
+  assert.deepEqual(b.diagnostics.map((d) => d.code), ['PL1002']);
+});
+
+test('P5, P7: a child that does not lower refuses the file, and the parent lists composition as not run', async () => {
+  const r = await checkFile(join(FIX, 'pipeline-child-maparg.poly'), { root: join(OUT, 'child') });
+  assert.equal(r.verdict, 'REFUSED', render(r));
+  assert.equal(r.exit, 2);
+  const order = r.machines.find((m) => m.machine === 'Order');
+  assert.deepEqual(order.stages.filter((s) => s.stage === 'composition').map((s) => s.status), ['not-run']);
+  assert.equal(r.machines.find((m) => m.machine === 'Shipment').verdict, 'REFUSED');
+  // P7: an early exit lists every stage the machine would have run, effects and composition included.
+  const dir = join(OUT, 'p7');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'refused.poly');
+  writeFileSync(file, readFileSync(join(FIX, 'pipeline-child-maparg.poly'), 'utf8').replace('module shop', 'module shop\nmachine Broken { state { x: bool = 1 } }'));
+  const refused = await checkFile(file, { root: dir });
+  const parent = refused.machines.find((m) => m.machine === 'Order');
+  assert.deepEqual(parent.stages.filter((s) => s.status === 'not-run').map((s) => s.stage), ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', 'effects', 'composition']);
+});
+
+test('P6: the JSON form gives every diagnostic its schema, configurations included', () => {
+  const cli = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
+  const r = spawnSync(process.execPath, [cli, 'check', join(ROOT, 'examples', 'checkout', 'checkout-optimistic.poly'), '--json', '--root', join(OUT, 'json')], { encoding: 'utf8' });
+  const j = JSON.parse(r.stdout);
+  assert.deepEqual(j.configurations.flatMap((c) => c.diagnostics.map((d) => d.schema)), ['poly.diagnostic/1']);
+});
