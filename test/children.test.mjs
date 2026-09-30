@@ -160,8 +160,9 @@ test('S52: an action wired as a child completion and as an effect completion or 
   assert.deepEqual(codes(withEffect), ['PL6102']);
   const withTimer = SRC.replace('    signal box -> Send()', '    signal box -> Send()\n    after 5m -> Shipped() as late');
   assert.deepEqual(codes(withTimer), ['PL6102']);
-  // The child's cancel action, also armed as a timer of the child.
+  // S81: the child's cancel action, also armed as a timer of the child, is legal: the runtime accepts a
+  // cancel action from outside, since K9 names completions only (S80).
   const cancelTimer = SRC.replace("    ship' = Sent\n", "    ship' = Sent\n    after 1h -> Void(reason: \"parent-terminal\") as expiry\n");
-  assert.deepEqual(codes(cancelTimer), ['PL6102']);
+  assert.deepEqual(codes(cancelTimer), []);
 });
 

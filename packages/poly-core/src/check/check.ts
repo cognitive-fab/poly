@@ -872,9 +872,9 @@ class Checker {
   }
 
   /**
-   * S52: the runtime delivers a child's completion and a parent-terminal cancel itself and refuses them from
-   * outside (K9), so an action that is also an effect completion or a timer's action would be refused when
-   * the effect or the timer delivers it. PL6102, at whichever wiring comes second in the source.
+   * S52, S81: the runtime delivers a child's completion itself and refuses it from outside (K9, S80), so an
+   * action that is also an effect completion or a timer's action would be refused when the effect or the timer
+   * delivers it. PL6102, at whichever wiring comes second. A parent-terminal cancel is accepted from outside.
    */
   private sharedCompletions(machines: Map<string, MachineFacts>): void {
     const kernel = new Map<string, Map<string, A.NodeBase>>(); // machine -> action -> spawn that wires it
@@ -903,7 +903,6 @@ class Checker {
           if (s.op === 'spawn' && s.modifier !== 'detached') {
             const spec = childSpec(s, this.module.name);
             if (spec.onComplete) add(kernel, m.name, spec.onComplete, s);
-            if (spec.onParentTerminal) add(kernel, spec.machine.split('.').pop()!, spec.onParentTerminal, s);
           }
         });
       }
@@ -914,7 +913,7 @@ class Checker {
         const other = external.get(machine)?.get(action);
         if (!other) continue;
         this.machine = machines.get(machine)?.machine ?? null;
-        this.err('PL6102', later(wiredBy, other), `${machine}.${action} is delivered by the runtime as a child's completion or cancel, and also by an effect or a timer, which the runtime would then refuse (S52, K9)`);
+        this.err('PL6102', later(wiredBy, other), `${machine}.${action} is delivered by the runtime as a child's completion, and also by an effect or a timer, which the runtime would then refuse (S52, S81, K9)`);
       }
     }
     this.machine = null;
