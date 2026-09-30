@@ -203,6 +203,7 @@ class Reader {
       if (w === 'bool') return this.mk<A.TBool>(n, { kind: 'TBool' });
       if (w === 'int') return this.mk<A.TInt>(n, { kind: 'TInt' });
       if (w === 'string') return this.mk<A.TString>(n, { kind: 'TString' });
+      if (w === 'conf') return this.mk<A.TConf>(n, { kind: 'TConf' });
     }
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && this.combinator(n.expression.expression) === 't') {
       const w = n.expression.name.text;
@@ -294,7 +295,7 @@ class Reader {
   }
 
   private item(node: ts.Expression): A.MachineItem {
-    const c = this.call(node, 'terminal', 'action', 'on', 'guard', 'invariant', 'stepProperty', 'rejectProperty', 'pathProperty', 'composeInvariant', 'liveness', 'effect');
+    const c = this.call(node, 'terminal', 'action', 'on', 'guard', 'invariant', 'stepProperty', 'rejectProperty', 'pathProperty', 'composeInvariant', 'liveness', 'effect', 'decision');
     switch (c.name) {
       case 'terminal': {
         const [e] = this.argsOf(c, 1, 1);
@@ -313,6 +314,10 @@ class Reader {
         return this.mk<A.Guard>(c.node, { kind: 'Guard', cond: this.arrow(cond, (b) => this.expr(b)), reason: this.str(reason) });
       }
       case 'liveness': return this.liveness(c);
+      case 'decision': {
+        const [name, params, result, items] = this.argsOf(c, 4, 4);
+        return this.mk<A.Decision>(c.node, { kind: 'Decision', name: this.str(name), params: this.paramList(params), result: this.type(result), items: this.arr(items).map((i) => this.decisionItem(i)) });
+      }
       case 'effect': {
         const [name, params, items] = this.argsOf(c, 3, 3);
         return this.mk<A.EffectDecl>(c.node, { kind: 'EffectDecl', name: this.str(name), params: this.paramList(params), items: this.arr(items).map((i) => this.effItem(i)) });
@@ -357,8 +362,25 @@ class Reader {
     return { action, perValue, input: { instance: m[1], index: m[2] === undefined ? null : m[2] === '*' ? '*' : Number(m[2]) } };
   }
 
+  /** A decimal literal (S76), in thousandths. */
+  private decimal(node: ts.Expression): number {
+    const n = this.unparen(node);
+    if (!ts.isNumericLiteral(n) || !/^\d+\.\d{1,3}$/.test(n.text)) this.fail(n, 'expected a decimal such as 0.3, with at most three digits after the point');
+    const [w, f] = n.text.split('.');
+    return Number(w) * 1000 + Number(f.padEnd(3, '0'));
+  }
+
+  private decisionItem(node: ts.Expression): A.DecisionItem {
+    const c = this.call(node, 'provider', 'labels', 'timeout', 'band', 'ok', 'okWith', 'failed', 'exhausted');
+    const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.DecisionItem;
+    if (c.name === 'provider') return mk({ kind: 'DecProvider', value: this.str(this.argsOf(c, 1, 1)[0]) });
+    if (c.name === 'timeout') return mk({ kind: 'DecTimeout', value: this.str(this.argsOf(c, 1, 1)[0]) });
+    if (c.name === 'band') { const [lo, hi] = this.argsOf(c, 2, 2); return mk({ kind: 'DecBand', lo: this.decimal(lo), hi: this.decimal(hi) }); }
+    return this.effItem(node) as A.DecisionItem;
+  }
+
   private effItem(node: ts.Expression): A.EffectItem {
-    const c = this.call(node, 'kind', 'labels', 'cls', 'retry', 'ok', 'failed', 'exhausted');
+    const c = this.call(node, 'kind', 'labels', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.EffectItem;
     switch (c.name) {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
@@ -369,10 +391,13 @@ class Reader {
         return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });
       }
       default: {
-        const [action, args] = this.argsOf(c, 2, 2);
+        // `okWith('r', 'A', args)` is `ok(r) -> A(args)` (PD1.2b, S79).
+        const bound = c.name === 'okWith';
+        const a = this.argsOf(c, bound ? 3 : 2, bound ? 3 : 2);
+        const [action, args] = bound ? a.slice(1) : a;
         // The arguments, or an arrow that gives them `$` (PT2.5, plan-m2 appendix).
         const read = ts.isArrowFunction(this.unparen(args)) ? this.arrow(args, (b) => this.args(b)) : this.args(args);
-        return mk({ kind: 'EffOutcome', outcome: c.name, action: this.str(action), args: read });
+        return mk({ kind: 'EffOutcome', outcome: bound ? 'ok' : c.name, action: this.str(action), args: read, ...(bound ? { bind: this.str(a[0]) } : {}) });
       }
     }
   }
@@ -414,7 +439,7 @@ class Reader {
   }
 
   private stmt(node: ts.Expression): A.Stmt {
-    const c = this.call(node, 'require', 'reject', 'let_', 'set', 'setEntry', 'when', 'match', 'forEach', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal');
+    const c = this.call(node, 'require', 'reject', 'let_', 'set', 'setEntry', 'when', 'match', 'forEach', 'emit', 'decide', 'after', 'cancel', 'spawn', 'send', 'signal');
     const n = c.node;
     switch (c.name) {
       case 'require': {
@@ -483,7 +508,8 @@ class Reader {
   private intent(c: { name: string; node: ts.CallExpression }): A.IntentStmt {
     const base: Omit<A.IntentStmt, 'id' | 'span'> = { kind: 'Intent', op: c.name as A.IntentStmt['op'], target: '', args: [], to: null, modifier: null, as: null, index: null, extra: [] };
     switch (c.name) {
-      case 'emit': {
+      case 'emit':
+      case 'decide': {
         const [k, args] = this.argsOf(c, 2, 2);
         base.target = this.str(k);
         base.args = this.args(args);
@@ -554,6 +580,7 @@ class Reader {
 
   expr(node: ts.Expression): A.Expr {
     const n = this.unparen(node);
+    if (ts.isNumericLiteral(n) && n.text.includes('.')) return this.mk<A.DecimalLit>(n, { kind: 'Decimal', value: this.decimal(n) });
     if (ts.isNumericLiteral(n)) return this.mk<A.IntLit>(n, { kind: 'Int', value: this.integer(n, Number(n.text)) });
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return this.mk<A.StringLit>(n, { kind: 'String', value: n.text });
     if (n.kind === ts.SyntaxKind.TrueKeyword || n.kind === ts.SyntaxKind.FalseKeyword) return this.mk<A.BoolLit>(n, { kind: 'Bool', value: n.kind === ts.SyntaxKind.TrueKeyword });

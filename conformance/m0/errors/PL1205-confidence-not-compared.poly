@@ -1,0 +1,23 @@
+// expect: PL1205 (a Conf used in arithmetic: it may only be compared with a constant, PD1.3b)
+module errors
+enum Branch { Yes, No }
+enum S { Waiting, Sure, Unsure }
+
+machine M {
+  state { s : S = Waiting }
+  action Ask()
+  action Answered(b: Branch, conf: Conf)
+  action Failed()
+  on Ask { decide pick(1) }
+  on Answered(b, conf) {
+    if conf + conf >= 1 { s' = Sure } else { s' = Unsure }
+  }
+  on Failed { s' = Unsure }
+  decision pick(n: 0..1) -> Branch {
+    provider "jev"
+    labels { egress:external }
+    timeout 500ms
+    ok(r) -> Answered(b: r.answer, conf: r.conf)
+    failed -> Failed()
+  }
+}

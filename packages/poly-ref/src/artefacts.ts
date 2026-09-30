@@ -13,7 +13,7 @@ import type * as A from '@poly/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { valuesOf, monitorStart, monitorStep, type RMachine, type RPathProperty } from './model.js';
+import { valuesOf, monitorStart, monitorStep, replyPath, type RMachine, type RPathProperty, type RType } from './model.js';
 import { initialState, durationMs } from './step.js';
 import { evaluate, evaluateAt } from './eval.js';
 import { flatten, flatValue } from './alpha.js';
@@ -50,35 +50,64 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
 
   // ── effects.manifest.json ──
   const effects = decl.items.filter((i): i is A.EffectDecl => i.kind === 'EffectDecl');
+  const decisions = decl.items.filter((i): i is A.Decision => i.kind === 'Decision');
   const manifestPath = join(dir, 'effects.manifest.json');
-  if (effects.length || existsSync(manifestPath)) {
+  // A completion: its constant data (S67), and the reply's paths it binds as `map` (PD1.7, S79).
+  const outcome = (it: A.EffOutcomeItem): unknown => {
+    const target = M.actions.find((x) => x.name === it.action);
+    const data: [string, unknown][] = [];
+    const map: [string, string][] = [];
+    for (const arg of it.args) {
+      const path = it.bind !== undefined ? replyPath(arg.value, it.bind) : null;
+      if (path) { map.push([arg.name!, ['$.result', ...path].join('.')]); continue; }
+      const p = target?.params.find((x) => x.name === arg.name)!;
+      const v: Value = evaluateAt(arg.value, { M, state: {}, data: {}, locals: new Map() }, p.type);
+      data.push([arg.name!, flatValue(v, p.type, M)]);
+    }
+    return { action: it.action, ...(data.length ? { data: Object.fromEntries(data) } : {}), ...(map.length ? { map: Object.fromEntries(map) } : {}) };
+  };
+  if (effects.length || decisions.length || existsSync(manifestPath)) {
     if (!existsSync(manifestPath)) out.push('effects.manifest.json is missing, and the machine declares effects');
     else {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { effects: Record<string, Record<string, unknown>> };
       const byKind = new Map(effects.map((e) => [M.effects.get(e.name)!.kind, e]));
-      differ('effects.manifest.json kinds', Object.keys(manifest.effects).sort(), [...byKind.keys()].sort());
+      differ('effects.manifest.json kinds', Object.keys(manifest.effects).sort(), [...byKind.keys(), ...decisions.map((d) => M.decisions.get(d.name)!.kind)].sort());
       for (const [kind, e] of byKind) {
         const entry = manifest.effects[kind];
         if (!entry) continue;
         differ(`effects.manifest.json ${kind}.payloadSchema`, Object.keys((entry.payloadSchema as object) ?? {}), e.params.map((p) => p.name));
         const hooks = { ok: 'onSuccess', failed: 'onFailure', exhausted: 'onExhausted' } as const;
-        for (const [outcome, hook] of Object.entries(hooks)) {
-          const it = e.items.find((x): x is A.EffectItem & { kind: 'EffOutcome' } => x.kind === 'EffOutcome' && x.outcome === outcome);
+        for (const [which, hook] of Object.entries(hooks)) {
+          const it = e.items.find((x): x is A.EffOutcomeItem => x.kind === 'EffOutcome' && x.outcome === which);
           if (!it) { differ(`effects.manifest.json ${kind}.${hook}`, entry[hook] ?? null, null); continue; }
-          // S67: a completion's constant data, encoded as the value is everywhere else.
-          const target = M.actions.find((x) => x.name === it.action);
-          const data = Object.fromEntries(it.args.map((arg) => {
-            const p = target?.params.find((x) => x.name === arg.name)!;
-            const v: Value = evaluateAt(arg.value, { M, state: {}, data: {}, locals: new Map() }, p.type);
-            return [arg.name!, flatValue(v, p.type, M)];
-          }));
-          differ(`effects.manifest.json ${kind}.${hook}`, entry[hook], it.args.length ? { action: it.action, data } : { action: it.action });
+          differ(`effects.manifest.json ${kind}.${hook}`, entry[hook], outcome(it));
         }
         const retry = e.items.find((x): x is A.EffectItem & { kind: 'EffRetry' } => x.kind === 'EffRetry');
         differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, retry ? { maxAttempts: retry.attempts, baseMs: durationMs(retry.base), timeoutMs: durationMs(retry.timeout) } : null);
         const labels = e.items.find((x): x is A.EffectItem & { kind: 'EffLabels' } => x.kind === 'EffLabels');
         differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, labels ? labels.labels : null);
         differ(`effects.manifest.json ${kind}.class`, entry.class, M.effects.get(e.name)!.cls);
+      }
+      // PD1.7: a decision, tried once within its timeout, class none; a timeout is its failure.
+      for (const d of decisions) {
+        const kind = M.decisions.get(d.name)!.kind;
+        const entry = manifest.effects[kind];
+        if (!entry) continue;
+        differ(`effects.manifest.json ${kind}.payloadSchema`, Object.keys((entry.payloadSchema as object) ?? {}), d.params.map((p) => p.name));
+        const timeout = d.items.find((x) => x.kind === 'DecTimeout') as { value: string } | undefined;
+        differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, { maxAttempts: 1, timeoutMs: timeout ? durationMs(timeout.value) : 0 });
+        const ok = d.items.find((x): x is A.EffOutcomeItem => x.kind === 'EffOutcome' && x.outcome === 'ok');
+        const failed = d.items.find((x): x is A.EffOutcomeItem => x.kind === 'EffOutcome' && x.outcome === 'failed');
+        differ(`effects.manifest.json ${kind}.onSuccess`, entry.onSuccess ?? null, ok ? outcome(ok) : null);
+        differ(`effects.manifest.json ${kind}.onFailure`, entry.onFailure ?? null, failed ? outcome(failed) : null);
+        differ(`effects.manifest.json ${kind}.onExhausted`, entry.onExhausted ?? null, failed ? outcome(failed) : null);
+        const labels = d.items.find((x) => x.kind === 'EffLabels') as { labels: string[] } | undefined;
+        differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, labels ? labels.labels : null);
+        differ(`effects.manifest.json ${kind}.class`, entry.class, 'none');
+        const provider = d.items.find((x) => x.kind === 'DecProvider') as { value: string } | undefined;
+        const band = d.items.find((x) => x.kind === 'DecBand') as { lo: number; hi: number } | undefined;
+        const answers = (t: RType): unknown => (t.k === 'record' ? Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, answers(f.type)])) : valuesOf(t, M).map((v) => flatValue(v, t, M)));
+        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, result: answers(resultType(d.result)), ...(band ? { band: [band.lo, band.hi] } : {}) });
       }
     }
   }
@@ -181,4 +210,14 @@ function pathDisagreement(p: RPathProperty, pred: (path: unknown) => boolean): {
     }
   }
   return null;
+}
+
+/** A decision's result type as poly-ref reads types (PD1.2a). */
+function resultType(t: A.TypeExpr): RType {
+  switch (t.kind) {
+    case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
+    case 'TBool': return { k: 'bool' };
+    case 'TName': return { k: 'union', name: t.name };
+    default: throw new Error(`poly-ref: a decision's result is finite, not ${t.kind} (PD1.2a)`);
+  }
 }

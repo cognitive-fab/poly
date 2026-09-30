@@ -46,6 +46,12 @@ export function buildTypeEnv(module: Module): TypeEnv {
     unions.set(info.name, info);
     for (const c of info.ctors) ctorOwners.set(c.name, [...(ctorOwners.get(c.name) ?? []), info.name]);
   }
+  // S76: Tri is usable in machines, as the enum True | False | Unknown, when the module names it and declares no Tri.
+  if (!unions.has('Tri') && !records.has('Tri') && namesType(module.decls, 'Tri')) {
+    const tri: UnionInfo = { name: 'Tri', ctors: ['True', 'False', 'Unknown'].map((name) => ({ name, fields: [] })), isEnum: true };
+    unions.set('Tri', tri);
+    for (const c of tri.ctors) ctorOwners.set(c.name, [...(ctorOwners.get(c.name) ?? []), 'Tri']);
+  }
   return { unions, ctorOwners, records };
 }
 
@@ -58,6 +64,7 @@ export function typeToString(t: TypeExpr): string {
     case 'TRange': return `${t.lo}..${t.hi}`;
     case 'TMap': return `map<${typeToString(t.key)}, ${typeToString(t.value)}>`;
     case 'TRef': return `Ref<${t.machine.join('.')}>`;
+    case 'TConf': return 'Conf';
   }
 }
 
@@ -91,6 +98,7 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
       return null;
     case 'TRange': return Math.max(0, t.hi - t.lo + 1);
     case 'TRef': return 1; // `none` alone in a single-machine check (PS1.6)
+    case 'TConf': return 1001; // 0..1000 at runtime; explored by the intervals the program uses (PD1.4b)
     case 'TName': {
       // A type that refers to itself has no finite domain; the checker reports the recursion (S25).
       if (visiting.has(t.name)) return null;
@@ -127,4 +135,13 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
       return vals ** keys;
     }
   }
+}
+
+/** Whether a TName of this name appears anywhere below the node. */
+function namesType(n: unknown, name: string): boolean {
+  if (!n || typeof n !== 'object') return false;
+  if (Array.isArray(n)) return n.some((x) => namesType(x, name));
+  const o = n as { kind?: string; name?: string };
+  if (o.kind === 'TName' && o.name === name) return true;
+  return Object.entries(o).some(([k, v]) => k !== 'span' && namesType(v, name));
 }

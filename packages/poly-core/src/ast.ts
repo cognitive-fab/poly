@@ -108,7 +108,9 @@ export interface UseDecl extends NodeBase {
 
 // ── Types and check domains (PT3) ──────────────────────────────────────────
 
-export type TypeExpr = TBool | TInt | TString | TName | TRange | TMap | TRef;
+export type TypeExpr = TBool | TInt | TString | TName | TRange | TMap | TRef | TConf;
+/** `Conf` (PD1.3): a calibrated confidence, 0..1000 at runtime, compared only with constants. */
+export interface TConf extends NodeBase { kind: 'TConf' }
 export interface TBool extends NodeBase { kind: 'TBool' }
 export interface TInt extends NodeBase { kind: 'TInt' }
 export interface TString extends NodeBase { kind: 'TString' }
@@ -153,7 +155,27 @@ export interface Field extends NodeBase {
   flag: 'internal' | 'derived' | null;
 }
 
-export type MachineItem = Terminal | Action | Handler | Guard | Property | Liveness | EffectDecl;
+export type MachineItem = Terminal | Action | Handler | Guard | Property | Liveness | EffectDecl | Decision;
+
+/**
+ * `decision d(params) -> R { … }` (PD1.2, S76): a model call whose answer is a finite typed value. It lowers to an
+ * effect of kind `decision.<d>` (PD1.7).
+ */
+export interface Decision extends NodeBase {
+  kind: 'Decision';
+  name: string;
+  params: Param[];
+  result: TypeExpr;
+  items: DecisionItem[];
+}
+
+export type DecisionItem =
+  | (NodeBase & { kind: 'DecProvider'; value: string })
+  | (NodeBase & { kind: 'EffLabels'; labels: string[] })
+  | (NodeBase & { kind: 'DecTimeout'; value: string })
+  /** `band 0.3..0.7` for a Tri result (PD1.2d), in thousandths. */
+  | (NodeBase & { kind: 'DecBand'; lo: number; hi: number })
+  | EffOutcomeItem;
 
 export interface Terminal extends NodeBase {
   kind: 'Terminal';
@@ -228,7 +250,10 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffLabels'; labels: string[] })
   | (NodeBase & { kind: 'EffClass'; value: string })
   | (NodeBase & { kind: 'EffRetry'; attempts: number; base: string; timeout: string })
-  | (NodeBase & { kind: 'EffOutcome'; outcome: 'ok' | 'failed' | 'exhausted'; action: string; args: NamedArg[] });
+  | EffOutcomeItem;
+
+/** `ok -> A(args)`, or `ok(r) -> A(p: r.x)`, which binds the handler's result (PD1.2b, PD1.2g, S79). */
+export type EffOutcomeItem = NodeBase & { kind: 'EffOutcome'; outcome: 'ok' | 'failed' | 'exhausted'; action: string; args: NamedArg[]; bind?: string };
 
 // ── Statements (PS2.2) ─────────────────────────────────────────────────────
 
@@ -279,8 +304,8 @@ export interface PCtor extends NodeBase {
 /** emit, after, cancel, spawn, send, signal (PS2.2, PT6). Parsed in M0, lowered from M1 (PL0901). */
 export interface IntentStmt extends NodeBase {
   kind: 'Intent';
-  op: 'emit' | 'after' | 'cancel' | 'spawn' | 'send' | 'signal';
-  /** emit/after/send/signal: the action or effect name; spawn: the machine; cancel: the timer key. */
+  op: 'emit' | 'after' | 'cancel' | 'spawn' | 'send' | 'signal' | 'decide';
+  /** emit/after/send/signal: the action or effect name; spawn: the machine; cancel: the timer key; decide: the decision. */
   target: string;
   args: NamedArg[];
   /** send: the address expression. */
@@ -305,6 +330,7 @@ export interface NamedArg {
 
 export type Expr =
   | IntLit
+  | DecimalLit
   | BoolLit
   | StringLit
   | NameRef
@@ -333,6 +359,8 @@ export type Literal = IntLit | BoolLit | StringLit | NameRef;
 /** `k spawned` (S48): true iff the attached child k exists; only in a compose invariant. */
 export interface Spawned extends NodeBase { kind: 'Spawned'; key: string; /** `f[i] spawned`: a member of a family (S49). */ index: Expr | null }
 export interface IntLit extends NodeBase { kind: 'Int'; value: number }
+/** `0.8` (S76): legal only as the constant a `Conf` is compared with; its value is in thousandths. */
+export interface DecimalLit extends NodeBase { kind: 'Decimal'; value: number }
 export interface BoolLit extends NodeBase { kind: 'Bool'; value: boolean }
 export interface StringLit extends NodeBase { kind: 'String'; value: string }
 /** A field, parameter, let binding, constructor without payload, action name, `none` or `self`. */

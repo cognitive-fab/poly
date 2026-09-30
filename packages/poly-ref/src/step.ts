@@ -141,7 +141,12 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
           });
           return out;
         };
-        if (st.op === 'emit') {
+        if (st.op === 'decide') {
+          // PD1.7: an effect intent of kind decision.<d>, its payload the decision's arguments.
+          const d = M.decisions.get(st.target);
+          if (!d) throw new EvalError(`poly-ref: no decision ${st.target}`);
+          E.push({ type: 'effect', kind: d.kind, payload: args(d.params, st.target) });
+        } else if (st.op === 'emit') {
           const eff = M.effects.get(st.target);
           if (!eff) throw new EvalError(`poly-ref: no effect ${st.target}`);
           E.push({ type: 'effect', kind: eff.kind, payload: args(eff.params, st.target) });

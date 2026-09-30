@@ -92,6 +92,7 @@ class Printer {
       case 'TRange': return `${t.lo}..${t.hi}`;
       case 'TMap': return `map<${this.type(t.key)}, ${this.type(t.value)}>`;
       case 'TRef': return `Ref<${t.machine.join('.')}>`;
+      case 'TConf': return 'Conf';
     }
   }
 
@@ -147,6 +148,12 @@ class Printer {
         lines.push('}');
         return lines;
       }
+      case 'Decision': {
+        const lines = [`decision ${it.name}(${it.params.map((p) => this.param(p)).join(', ')}) -> ${this.type(it.result)} {`];
+        for (const e of it.items) lines.push(INDENT + this.decisionItem(e));
+        lines.push('}');
+        return lines;
+      }
     }
   }
 
@@ -183,7 +190,16 @@ class Printer {
       case 'EffClass': return `class ${e.value}`;
       case 'EffLabels': return `labels { ${e.labels.join(', ')} }`;
       case 'EffRetry': return `retry { attempts ${e.attempts}, base ${e.base}, timeout ${e.timeout} }`;
-      case 'EffOutcome': return `${e.outcome} -> ${e.action}(${this.args(e.args)})`;
+      case 'EffOutcome': return `${e.outcome}${e.bind !== undefined ? `(${e.bind})` : ''} -> ${e.action}(${this.args(e.args)})`;
+    }
+  }
+
+  private decisionItem(e: A.DecisionItem): string {
+    switch (e.kind) {
+      case 'DecProvider': return `provider ${JSON.stringify(e.value)}`;
+      case 'DecTimeout': return `timeout ${e.value}`;
+      case 'DecBand': return `band ${decimalText(e.lo)}..${decimalText(e.hi)}`;
+      default: return this.effectItem(e);
     }
   }
 
@@ -260,6 +276,7 @@ class Printer {
       case 'cancel': return `cancel ${s.target}${idx}`;
       case 'send': return `send ${this.expr(s.to!, 0)} <- ${call}${s.as ? ` as ${s.as}` : ''}`;
       case 'signal': return `signal ${s.extra[0]}${idx} -> ${call}`;
+      case 'decide': return `decide ${call}`;
       case 'spawn': {
         let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}${idx}`;
         for (let k = 0; k < s.extra.length; k += 2) {
@@ -294,6 +311,7 @@ class Printer {
     };
     switch (e.kind) {
       case 'Int': return String(e.value);
+      case 'Decimal': return decimalText(e.value);
       case 'Bool': return String(e.value);
       case 'String': return JSON.stringify(e.value);
       case 'Name': return e.name;
@@ -327,4 +345,11 @@ class Printer {
       case 'ArrayLit': return `[${e.items.map((x) => this.expr(x, 0)).join(', ')}]`;
     }
   }
+}
+
+/** A decimal literal (S76) from thousandths: 800 is 0.8, 1000 is 1.0, 50 is 0.05. */
+export function decimalText(v: number): string {
+  const whole = Math.trunc(v / 1000);
+  const frac = String(v % 1000).padStart(3, '0').replace(/0+$/, '');
+  return `${whole}.${frac || '0'}`;
 }

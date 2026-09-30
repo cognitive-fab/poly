@@ -45,6 +45,7 @@ export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
     case 'TName': return env?.records.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
     case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
     case 'TMap': return { k: 'map', key: tyOfTypeExpr(t.key, env), value: tyOfTypeExpr(t.value, env), array: t.key.kind === 'TRange' };
+    case 'TConf': return { k: 'conf' };
   }
 }
 

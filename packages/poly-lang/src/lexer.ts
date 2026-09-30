@@ -5,7 +5,7 @@
 // Comments are trivia (PT1.4a): they are returned beside the tokens with their
 // positions, never inside the token stream, so they cannot reach the AST.
 
-export type TokKind = 'ident' | 'int' | 'string' | 'duration' | 'punct' | 'eof';
+export type TokKind = 'ident' | 'int' | 'decimal' | 'string' | 'duration' | 'punct' | 'eof';
 
 export interface Token {
   kind: TokKind;
@@ -95,6 +95,19 @@ export function lex(src: string): { tokens: Token[]; comments: Comment[] } {
         const text = src.slice(i, k);
         advance(k - i);
         push('duration', text, sl, sc, s0);
+        continue;
+      }
+      // S76: `0.8`, at most three digits after the point, in thousandths; `0..3` stays a range.
+      if (src[j] === '.' && /[0-9]/.test(src[j + 1] ?? '')) {
+        let k = j + 1;
+        while (k < src.length && /[0-9]/.test(src[k])) k++;
+        const frac = src.slice(j + 1, k);
+        if (frac.length > 3) throw new LexError(`a decimal has at most three digits after the point: ${src.slice(i, k)}`, sl, sc);
+        const text = src.slice(i, k);
+        const thousandths = Number(src.slice(i, j)) * 1000 + Number(frac.padEnd(3, '0'));
+        if (!Number.isSafeInteger(thousandths)) throw new LexError(`decimal ${text} is out of range`, sl, sc);
+        advance(k - i);
+        push('decimal', text, sl, sc, s0, thousandths);
         continue;
       }
       const text = src.slice(i, j);

@@ -22,6 +22,8 @@ export type Ty =
   /** `Ref<M>` (PS1.6): an address of an instance of machine M of this module; `none` has machine null. */
   | { k: 'ref'; machine: string | null }
   | { k: 'action' }
+  /** `Conf` (PD1.3): a confidence, and the type of a decimal literal (S76). */
+  | { k: 'conf' }
   | { k: 'error' };
 
 const BOOL: Ty = { k: 'bool' };
@@ -41,6 +43,8 @@ export function tyToString(t: Ty): string {
 
 function same(a: Ty, b: Ty): boolean {
   if (a.k === 'error' || b.k === 'error') return true;
+  // PD1.3b: a Conf where it does not belong is PL1205, reported once by confUses, not also a type mismatch.
+  if (a.k === 'conf' || b.k === 'conf') return true;
   if (a.k !== b.k) return false;
   if (a.k === 'union' || a.k === 'record') return a.name === (b as { name: string }).name;
   // `none` is an address of every machine (PS1.6).
@@ -108,6 +112,8 @@ export interface MachineFacts {
   families: Map<string, { lo: number; hi: number }>;
   /** S60: the detached children the machine spawns, key to machine name, in the order of their first spawn. */
   detached: Map<string, string>;
+  /** PD1: the machine's decisions by name. */
+  decisions: Map<string, A.Decision>;
 }
 
 export interface CheckResult {
@@ -451,6 +457,7 @@ class Checker {
   /** The semantic type of a type expression, reporting unknown names and bad map keys. */
   private tyOf(t: A.TypeExpr): Ty {
     switch (t.kind) {
+      case 'TConf': return { k: 'conf' };
       case 'TBool': return BOOL;
       case 'TInt': return INT;
       case 'TString': return { k: 'string' };
@@ -488,7 +495,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map(), families: new Map(), detached: new Map() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map(), families: new Map(), detached: new Map(), decisions: new Map() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -533,7 +540,13 @@ class Checker {
       if (facts.effects.has(it.name)) { this.err('PL1002', it, `effect ${it.name} is declared twice`); continue; }
       facts.effects.set(it.name, it);
     }
-    const kinds = new Set([...facts.effects.values()].map(effectKind));
+    for (const it of m.items) {
+      if (it.kind !== 'Decision') continue;
+      if (facts.decisions.has(it.name)) { this.err('PL1002', it, `decision ${it.name} is declared twice`); continue; }
+      facts.decisions.set(it.name, it);
+    }
+    // PD1.7: a decision is an effect of kind decision.<name>.
+    const kinds = new Set([...[...facts.effects.values()].map(effectKind), ...[...facts.decisions.keys()].map((d) => `decision.${d}`)]);
     // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
     // Keys are declared by their use (PT6.3, PT6.4); an indexed key k[i] declares the family k (S49).
     const loops: Loop[] = [];
@@ -634,8 +647,12 @@ class Checker {
         case 'EffectDecl':
           this.effectDecl(it, handlerOf);
           break;
+        case 'Decision':
+          this.decisionDecl(it, handlerOf);
+          break;
       }
     }
+    this.confUses(m, facts);
     facts.unhandled = [...this.actions.keys()].filter((a) => !handled.has(a));
     // S53: an action with no handler is not in the lowered module (S35), so a strict check on it never runs.
     for (const a of facts.unhandled) {
@@ -715,7 +732,7 @@ class Checker {
   }
 
   /** `ok -> A(p: v)`: a completion is an ordinary action (PS4.4) whose data the manifest carries as constants (PT6.1). */
-  private completion(it: A.EffectItem & { kind: 'EffOutcome' }, handlers: Set<string>): void {
+  private completion(it: A.EffOutcomeItem, handlers: Set<string>, bound: ((path: string[]) => Ty | null) | null = null): void {
     const act = this.actions.get(it.action);
     if (!act) { this.err('PL1001', it, `${it.outcome} -> ${it.action}: no action ${it.action}`); return; }
     // S40: polyrun refuses a manifest whose completion action is outside the lowered action surface (S35).
@@ -728,11 +745,129 @@ class Checker {
       if (given.has(a.name)) this.err('PL1002', a.value, `${a.name} is given twice`);
       given.add(a.name);
       const pt = this.tyOf(p.type);
+      // PD1.2b, S79: `ok(r) -> A(p: r.x)` binds the handler's result; p is strict by default (PD1.4a).
+      const path = it.bind !== undefined ? boundPath(a.value, it.bind) : null;
+      if (path) {
+        const bt = bound ? bound(path) : pt;
+        if (!bt) { this.err('PL1001', a.value, `${[it.bind, ...path].join('.')} is not part of the reply: r.answer, r.conf or r.margin (PD1.2b)`); continue; }
+        if (!same(bt, pt) || (bt.k === 'conf') !== (pt.k === 'conf')) { this.err('PL1201', p, `${it.action}.${a.name} is ${tyToString(pt)}, and ${[it.bind, ...path].join('.')} is ${tyToString(bt)} (PD1.2f)`); continue; }
+        if (pt.k === 'conf' && p.check) this.err('PL1201', p.check, `a Conf takes no check clause: it is explored by the intervals the program uses (PD1.4b)`);
+        if (p.check?.mode !== 'disclosed') this.facts!.strictParams.add(`${it.action}.${a.name}`);
+        continue;
+      }
       const t = this.typeOf(a.value, this.scope('init'), pt);
       if (!same(t, pt)) { this.err('PL1201', a.value, `${it.action}.${a.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`); continue; }
       // S67: any constant of a finite type, structured ones included; a field or a parameter is not one.
       if (!this.constant(a.value)) this.err('PL1201', a.value, 'a completion argument is a constant, since a manifest cannot compute: not a field, a parameter or a local (PT6.1, S67)');
       else this.checkConst(a.value, pt, p.check, `${it.action}.${a.name}`);
+    }
+  }
+
+  /** `decide d(args)` (PD1.2): asks a declared decision, typed against its parameters. */
+  private decide(s: A.IntentStmt, scope: Scope): void {
+    const d = this.facts!.decisions.get(s.target);
+    if (!d) { this.err('PL1001', s, `${s.target} is not a declared decision`); for (const a of s.args) this.typeOf(a.value, scope); return; }
+    this.intentArgs(s, d.params, `decision ${d.name}`, scope);
+  }
+
+  /** `decision d(params) -> R { … }` (PD1.2, PD1.2a to PD1.2d, S76). */
+  private decisionDecl(d: A.Decision, handlers: Set<string>): void {
+    // S75 judges the completion step and its cascade; poly-ref judges it on the machine's own graph in M2.
+    if (this.facts!.children.size) this.err('PL0901', d, `decision ${d.name} is in a machine with attached children, whose cascade PL6201 would have to follow; checked from a later milestone (S75)`);
+    const pnames = new Set<string>();
+    for (const p of d.params) {
+      if (pnames.has(p.name)) this.err('PL1002', p, `parameter ${p.name} is declared twice`);
+      pnames.add(p.name);
+      const ty = this.tyOf(p.type);
+      if (ty.k === 'conf' || this.holds(ty, (x) => x.k === 'map' || x.k === 'ref' || (x.k === 'union' && !this.env.unions.get(x.name)!.isEnum))) this.err('PL0901', p, `a decision parameter of type ${tyToString(ty)} is not lowered in M2`);
+      if (p.check) this.err('PL1201', p.check, 'a decision parameter takes its value from the handler; it has no check domain');
+    }
+    // PD1.2a: a finite result: an enum, a range, Tri, or a record of these.
+    const result = this.tyOf(d.result);
+    const finite = (t: Ty): boolean => (t.k === 'union' && this.env.unions.get(t.name)!.isEnum) || (t.k === 'int' && Number.isFinite(t.lo) && Number.isFinite(t.hi));
+    const recordOk = result.k === 'record' && this.env.records.get(result.name)!.fields.every((f) => finite(this.tyOf(f.type)));
+    if (result.k !== 'error' && !finite(result) && !recordOk) this.err('PL1101', d.result, `a decision's result is finite: an enum, a range, Tri, or a record of these, not ${tyToString(result)} (PD1.2a)`);
+    const tri = result.k === 'union' && result.name === 'Tri';
+    const seen = new Set<string>();
+    let labelled = false;
+    for (const it of d.items) {
+      const key = it.kind === 'EffOutcome' ? it.outcome : it.kind;
+      if (seen.has(key)) this.err('PL1002', it, `decision ${d.name} states ${key.replace(/^Dec|^Eff/, '').toLowerCase()} twice`);
+      seen.add(key);
+      if (it.kind === 'EffLabels') { labelled = true; for (const l of it.labels) if (!LABELS.has(l)) this.err('PL1001', it, `${l} is not a label of the closed vocabulary (PT6.2)`); }
+      if (it.kind === 'DecTimeout' && durationMs(it.value) === null) this.err('PL1201', it, `${it.value} is not a duration`);
+      if (it.kind === 'DecBand') {
+        if (!tri) this.err('PL1201', it, `band belongs to a decision whose result is Tri (PD1.2d)`);
+        else if (!(it.lo < it.hi && it.hi <= 1000)) this.err('PL1201', it, `a band is lo..hi with 0 <= lo < hi <= 1 (PD1.2d)`);
+      }
+      if (it.kind === 'EffOutcome') {
+        if (it.outcome === 'exhausted') { this.err('PL1201', it, 'a decision is tried once: its completions are ok and failed (PD1.7)'); continue; }
+        this.completion(it, handlers, it.outcome === 'ok' ? (path) => this.replyType(result, path) : null);
+      }
+    }
+    if (tri && !seen.has('DecBand')) this.err('PL1201', d, `decision ${d.name} returns Tri, so it declares its band: band lo..hi (PD1.2d)`);
+    if (!labelled) this.err('PL6301', d, `decision ${d.name} has no labels (PT6.2)`);
+    // PD1.2c: a machine waiting on a dead provider can wait forever.
+    if (!seen.has('DecTimeout') || !seen.has('failed')) this.err('PL6202', d, `decision ${d.name} has no ${!seen.has('DecTimeout') ? 'timeout' : 'failed completion'}; a machine waiting on a dead provider could wait forever (PD1.2c)`);
+  }
+
+  /** PD1.2b: the type of `r.answer`, `r.conf`, `r.margin`, and of their fields for a record result. */
+  private replyType(result: Ty, path: string[]): Ty | null {
+    const [head, field, ...rest] = path;
+    if (rest.length) return null;
+    const rec = result.k === 'record' ? this.env.records.get(result.name)! : null;
+    if (field !== undefined && (!rec || !rec.fields.some((f) => f.name === field))) return null;
+    if (head === 'answer') return field === undefined ? result : this.tyOf(rec!.fields.find((f) => f.name === field)!.type);
+    if (head === 'conf' || head === 'margin') return rec && field === undefined ? null : { k: 'conf' };
+    return null;
+  }
+
+  /** PD1.3b: a Conf is compared with a constant in [0, 1], never with a field, a parameter or another Conf. */
+  private confCompare(e: A.Binary, l: Ty, r: Ty): Ty {
+    const constant = (x: A.Expr) => x.kind === 'Decimal' || (x.kind === 'Int' && (x.value === 0 || x.value === 1));
+    const [q, c, ct] = constant(e.right) && !constant(e.left) ? [e.left, e.right, r] : constant(e.left) && !constant(e.right) ? [e.right, e.left, l] : [null, null, null];
+    if (!q || !c) { if (l.k !== 'error' && r.k !== 'error') this.err('PL1205', e, `a Conf is compared with a constant in [0, 1], not with ${constant(e.left) ? 'another constant' : 'a field, a parameter or another Conf'} (PD1.3b)`); return BOOL; }
+    const qt = q === e.left ? l : r;
+    if (qt.k !== 'conf' && qt.k !== 'error') { this.err('PL1201', c, `${tyToString(qt)} is not a Conf; a decimal is legal only where a Conf is expected (S76)`); return BOOL; }
+    if (c.kind === 'Decimal' && c.value > 1000) this.err('PL1201', c, 'a Conf constant is in [0, 1] (PD1.3a)');
+    void ct;
+    return BOOL;
+  }
+
+  /**
+   * PD1.3b and S76, after typing: a Conf may only be an operand of a comparison, and a decimal only the
+   * constant a Conf is compared with. Anything else is PL1205, or PL1201 for a decimal.
+   */
+  private confUses(m: A.Machine, facts: MachineFacts): void {
+    const cmp = new Set(['==', '!=', '<', '<=', '>', '>=']);
+    const visit = (n: unknown, parent: unknown): void => {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach((x) => visit(x, parent)); return; }
+      const o = n as A.Expr;
+      // Arithmetic on a Conf: one PL1205 at the operation, however many Conf operands it has.
+      if (o.kind === 'Binary' && !cmp.has(o.op) && o.op !== '&&' && o.op !== '||' && o.op !== 'implies' && [o.left, o.right].some((x) => x.kind !== 'Decimal' && facts.types.get(x.id)?.k === 'conf')) {
+        this.err('PL1205', o, 'a Conf may only be compared with a constant: no arithmetic on it (PD1.3b)');
+        return;
+      }
+      const pb = parent as A.Binary | null;
+      const inCompare = !!pb && (pb as { kind?: string }).kind === 'Binary' && cmp.has(pb.op);
+      if (o.kind === 'Decimal') {
+        const other = inCompare ? (pb!.left === o ? pb!.right : pb!.left) : null;
+        if (!other || facts.types.get(other.id)?.k !== 'conf') this.err('PL1201', o, 'a decimal literal is legal only as the constant a Conf is compared with (S76)');
+      } else if (typeof (o as { kind?: unknown }).kind === 'string' && facts.types.get((o as A.NodeBase).id)?.k === 'conf' && !inCompare) {
+        this.err('PL1205', o, 'a Conf may only be compared with a constant or passed as a completion argument: no arithmetic, no write, no other use (PD1.3b)');
+        return;
+      }
+      for (const [k, v] of Object.entries(o)) if (k !== 'span' && k !== 'id') visit(v, o);
+    };
+    for (const f of m.fields) {
+      if (f.type.kind === 'TConf') { this.err('PL1205', f, `${f.name} is a Conf, and a state field cannot hold one (PD1.3b)`); continue; }
+      visit(f.init, null);
+    }
+    for (const it of m.items) {
+      if (it.kind === 'Decision' || it.kind === 'Action') continue;
+      if (it.kind === 'EffectDecl') { for (const p of it.params) if (p.type.kind === 'TConf') this.err('PL1205', p, 'an effect payload cannot carry a Conf (PD1.3b)'); continue; }
+      visit(it, null);
     }
   }
 
@@ -1327,6 +1462,7 @@ class Checker {
         else if (s.op === 'spawn') this.detachedSpawn(s, scope);
         else if (s.op === 'signal') this.signal(s, scope);
         else if (s.op === 'send') this.send(s, scope);
+        else if (s.op === 'decide') this.decide(s, scope);
         else if (s.op === 'cancel') {
           const armedKey = s.index ? [...this.facts!.timerKeys].some((k) => k.startsWith(s.target) && /^\d+$/.test(k.slice(s.target.length))) : this.facts!.timerKeys.has(s.target);
           if (!armedKey) this.err('PL1001', s, `cancel ${s.target}${s.index ? '[…]' : ''}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
@@ -1596,6 +1732,7 @@ class Checker {
     const fields = this.facts?.fieldTypes ?? new Map<string, Ty>();
     switch (e.kind) {
       case 'Int': return { k: 'int', lo: e.value, hi: e.value };
+      case 'Decimal': return { k: 'conf' };
       case 'Bool': return BOOL;
       case 'String': return { k: 'string' };
       case 'Primed':
@@ -1930,6 +2067,7 @@ class Checker {
           l = this.typeOf(e.left, scope);
           r = this.typeOf(e.right, scope, l);
         }
+        if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
         if (!same(l, r)) this.err('PL1201', e, `cannot compare ${tyToString(l)} with ${tyToString(r)}`);
         return BOOL;
       }
@@ -1939,12 +2077,15 @@ class Checker {
       case '>=': {
         const l = this.typeOf(e.left, scope);
         const r = this.typeOf(e.right, scope);
+        if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
         if ((l.k !== 'int' && l.k !== 'error') || (r.k !== 'int' && r.k !== 'error')) this.err('PL1201', e, `${e.op} compares ints, not ${tyToString(l)} and ${tyToString(r)}`);
         return BOOL;
       }
       default: {
         const l = this.typeOf(e.left, scope);
         const r = this.typeOf(e.right, scope);
+        // PD1.3b: arithmetic on a Conf is PL1205, reported once at the Conf by confUses.
+        if (l.k === 'conf' || r.k === 'conf') return ERR;
         if (l.k !== 'int' || r.k !== 'int') {
           if (l.k !== 'error' && r.k !== 'error') this.err('PL1201', e, `${e.op} needs ints, not ${tyToString(l)} and ${tyToString(r)}`);
           return ERR;
@@ -2195,4 +2336,12 @@ interface PathState {
   emits: boolean;
   /** Timer keys armed on this path (PT6.3, PL2301). */
   timers: Map<string, A.NodeBase>;
+}
+
+/** PD1.2b, S79: `r.x.y` as the path [x, y] when it is rooted at the bound name r; null for any other expression. */
+export function boundPath(e: A.Expr, bind: string): string[] | null {
+  const path: string[] = [];
+  let x = e;
+  while (x.kind === 'Member') { path.unshift(x.prop); x = x.object; }
+  return x.kind === 'Name' && x.name === bind ? path : null;
 }

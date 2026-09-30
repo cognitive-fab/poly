@@ -41,6 +41,7 @@ export const CODES: Record<string, CodeInfo> = {
   PL1202: { name: 'READ_OF_PRIMED_FIELD', stage: 'types', severity: 'error' },
   PL1203: { name: 'TRI_WHERE_BOOL_EXPECTED', stage: 'types', severity: 'error' },
   PL1204: { name: 'DIVISION_BY_ZERO', stage: 'types', severity: 'error' },
+  PL1205: { name: 'CONFIDENCE_NOT_COMPARED', stage: 'types', severity: 'error' },
   // PT3.4a: a finding a person must accept (PT12.5), not a refusal.
   PL1301: { name: 'DISCLOSED_IRREVERSIBLE_INPUT', stage: 'types', severity: 'finding' },
   // S53: an explicit strict on a parameter of an action with no handler; the runtime never runs the check.
@@ -105,6 +106,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL5404: { name: 'SEND_TO_NONE', stage: 'configuration', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   PL6401: { name: 'AMBIENT_EFFECT_IN_HANDLER', stage: 'lint', severity: 'error' },
+  PL6201: { name: 'UNGATED_DECISION', stage: 'effects', severity: 'finding' },
+  PL6202: { name: 'DECISION_WITHOUT_FAILURE', stage: 'types', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.
   PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.

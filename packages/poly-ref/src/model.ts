@@ -16,7 +16,9 @@ export type RType =
   | { k: 'record'; name: string }
   | { k: 'map'; key: RType; value: RType }
   /** An address of an instance of machine `machine` (PS1.6); `none` is null. */
-  | { k: 'ref'; machine: string };
+  | { k: 'ref'; machine: string }
+  /** `Conf` (PD1.3): a confidence in thousandths, 0..1000. */
+  | { k: 'conf' };
 
 export interface RUnion {
   name: string;
@@ -36,6 +38,16 @@ export interface RParam {
   type: RType;
   check: Value[] | null;
   strict: boolean;
+}
+
+/** `decision d(params) -> R` (PD1): an effect of kind decision.<d>, and the completion its reply arrives by. */
+export interface RDecision {
+  id: string;
+  name: string;
+  kind: string;
+  params: { name: string; type: RType }[];
+  /** The ok completion's action, and which of its parameters carry the answer and which a confidence or margin. */
+  ok: { action: string; answer: string[]; confidence: string[] } | null;
 }
 
 export interface RAction {
@@ -135,6 +147,8 @@ export interface RMachine {
   /** S49: child families by name, with the indices their keys take. */
   families: Map<string, { lo: number; hi: number }>;
   effects: Map<string, REffect>;
+  /** PD1: the machine's decisions by name. */
+  decisions: Map<string, RDecision>;
   pathProperties: RPathProperty[];
   /** Every machine of the module by name, with its actions: what a send may name (PS2.2). */
   receivers: Map<string, { name: string; params: { name: string; type: RType }[] }[]>;
@@ -170,12 +184,15 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
       case 'TName': return recordNames.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
       case 'TMap': return { k: 'map', key: typeOf(t.key), value: typeOf(t.value) };
       case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
+      case 'TConf': return { k: 'conf' };
     }
   };
   for (const d of decls) {
     if (d.kind === 'EnumDecl') unions.set(d.name, { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })) });
     if (d.kind === 'TypeDecl') unions.set(d.name, { name: d.name, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) })) });
   }
+  // S76: Tri, the enum True | False | Unknown, when a machine names it and the module declares none.
+  if (!unions.has('Tri') && !recordNames.has('Tri') && mentionsType(decls, 'Tri')) unions.set('Tri', { name: 'Tri', ctors: ['True', 'False', 'Unknown'].map((name) => ({ name, fields: [] })) });
   for (const d of decls) if (d.kind === 'RecordDecl') records.set(d.name, { name: d.name, fields: d.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) });
   for (const u of unions.values()) for (const c of u.ctors) if (!ctors.has(c.name)) ctors.set(c.name, u.name);
 
@@ -210,6 +227,14 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
       cls: cls && cls.kind === 'EffClass' ? cls.value : 'none',
       params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })),
     });
+  }
+  // PD1.7: a decision is an effect of kind decision.<d>, class none.
+  const decisions = new Map<string, RDecision>();
+  for (const it of m.items) {
+    if (it.kind !== 'Decision') continue;
+    const ok = it.items.find((x): x is A.EffOutcomeItem => x.kind === 'EffOutcome' && x.outcome === 'ok');
+    const bound = (head: string[]) => (ok?.bind === undefined ? [] : ok.args.filter((a) => { const p = replyPath(a.value, ok.bind!); return p !== null && head.includes(p[0]); }).map((a) => a.name!));
+    decisions.set(it.name, { id: it.id, name: it.name, kind: `decision.${it.name}`, params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })), ok: ok ? { action: ok.action, answer: bound(['answer']), confidence: bound(['conf', 'margin']) } : null });
   }
   const guardedInputs = strictInputs(m, effects);
   const receivers = new Map(decls.filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [d.name, d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) }))]));
@@ -288,13 +313,30 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     if (it.kind === 'Property' && it.form === 'reject') rejectProperties.push(it);
     if (it.kind === 'Liveness') liveness.push(it);
   }
+  // PD1.4a, S79: a parameter a completion binds from the handler's reply is strict unless written disclosed; a
+  // Conf is explored by the intervals its comparisons induce (PD1.4b), and at runtime is 0..1000 (PD1.3a).
+  for (const it of m.items) {
+    if (it.kind !== 'EffectDecl' && it.kind !== 'Decision') continue;
+    for (const o of it.items) {
+      if (o.kind !== 'EffOutcome' || o.bind === undefined) continue;
+      const act = actions.find((a) => a.name === o.action);
+      const decl = m.items.find((x): x is A.Action => x.kind === 'Action' && x.name === o.action);
+      for (const a of o.args) {
+        if (replyPath(a.value, o.bind) === null) continue;
+        const p = act?.params.find((x) => x.name === a.name);
+        if (!p) continue;
+        if (decl?.params.find((x) => x.name === a.name)?.check?.mode !== 'disclosed') p.strict = true;
+        if (p.type.k === 'conf') p.check = confPartition(m, o.action, p.name);
+      }
+    }
+  }
   // S51: a completion's childKey ranges over the keys whose spawn names that action as its completion.
   for (const a of actions) {
     const keys = [...children.values()].filter((c) => c.onComplete === a.name).map((c) => c.key);
     for (const p of a.params) if (p.name === 'childKey' && p.type.k === 'string' && p.check === null && keys.length) p.check = keys;
   }
   return {
-    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties, liveness,
   };
 }
@@ -367,6 +409,8 @@ function strictInputs(m: A.Machine, effects: Map<string, REffect>): Set<string> 
 /** Every value of a finite type, in declaration order. */
 export function valuesOf(t: RType, M: RMachine): Value[] {
   switch (t.k) {
+    // PD1.4b: a Conf is explored by its parameter's partition, which buildMachine sets as its check values.
+    case 'conf': return Array.from({ length: 1001 }, (_, k) => k);
     case 'bool': return [false, true];
     case 'int':
       if (!Number.isFinite(t.lo) || !Number.isFinite(t.hi)) throw new Error('poly-ref: an unbounded int has no enumeration; it needs a check domain (PT3.2)');
@@ -466,6 +510,7 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     case 'int': return typeof v === 'number' && Number.isInteger(v) && v >= t.lo && v <= t.hi;
     case 'string': return typeof v === 'string';
     case 'ref': return v === null || typeof v === 'string';
+    case 'conf': return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1000;
     case 'record': {
       if (!isRecord(v)) return false;
       const fs = M.records.get(t.name)!.fields;
@@ -489,6 +534,55 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
 
 /** `v ∈ D(f)`: membership of the check domain; the type itself when there is no check clause (PS4.2). */
 export function inCheckDomain(v: Value, f: { type: RType; check: Value[] | null }, M: RMachine): boolean {
+  // PD1.3a: a Conf's domain at runtime is 0..1000; its check values are only what the exploration offers.
+  if (f.type.k === 'conf') return inType(v, f.type, M);
   if (f.check) return f.check.some((x) => keyOf(x) === keyOf(v));
   return inType(v, f.type, M);
+}
+
+/** Whether a declaration names the type `name` anywhere. */
+function mentionsType(n: unknown, name: string): boolean {
+  if (!n || typeof n !== 'object') return false;
+  if (Array.isArray(n)) return n.some((x) => mentionsType(x, name));
+  const o = n as { kind?: string; name?: string };
+  if (o.kind === 'TName' && o.name === name) return true;
+  return Object.entries(o).some(([k, v]) => k !== 'span' && mentionsType(v, name));
+}
+
+/** PD1.2b, S79: `r.x.y` as [x, y] when it is rooted at the reply's name; null otherwise. */
+export function replyPath(e: A.Expr, bind: string): string[] | null {
+  const path: string[] = [];
+  let x = e;
+  while (x.kind === 'Member') { path.unshift(x.prop); x = x.object; }
+  return x.kind === 'Name' && x.name === bind ? path : null;
+}
+
+/**
+ * PD1.4b, read from the source: every comparison of the parameter with a constant, in its action's handler and
+ * in the machine's properties and guards, and the least value of 0..1000 for each pattern of their outcomes.
+ * Two values with the same outcomes cannot be told apart by any expression (PD1.3b).
+ */
+export function confPartition(m: A.Machine, action: string, param: string): number[] {
+  const tests: ((v: number) => boolean)[] = [];
+  const constant = (x: A.Expr): number | null => (x.kind === 'Decimal' ? x.value : x.kind === 'Int' ? x.value * 1000 : null);
+  const compare = (op: string, a: number, b: number) => (op === '==' ? a === b : op === '!=' ? a !== b : op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b);
+  const visit = (n: unknown): void => {
+    if (!n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    const e = n as A.Expr;
+    if (e.kind === 'Binary' && ['==', '!=', '<', '<=', '>', '>='].includes(e.op)) {
+      const l = e.left, r = e.right;
+      const cr = constant(r), cl = constant(l);
+      if (l.kind === 'Name' && l.name === param && cr !== null) tests.push((v) => compare(e.op, v, cr));
+      if (r.kind === 'Name' && r.name === param && cl !== null) tests.push((v) => compare(e.op, cl, v));
+    }
+    for (const [k, v] of Object.entries(e)) if (k !== 'span' && k !== 'id') visit(v);
+  };
+  for (const it of m.items) if ((it.kind === 'Handler' && it.action === action) || it.kind === 'Property' || it.kind === 'Guard') visit(it);
+  const classes = new Map<string, number>();
+  for (let v = 0; v <= 1000; v++) {
+    const sig = tests.map((t) => (t(v) ? 1 : 0)).join('');
+    if (!classes.has(sig)) classes.set(sig, v);
+  }
+  return [...classes.values()];
 }

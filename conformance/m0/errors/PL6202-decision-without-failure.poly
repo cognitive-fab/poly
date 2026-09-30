@@ -1,0 +1,18 @@
+// expect: PL6202 (a decision with no failed completion: a machine waiting on a dead provider could wait forever)
+module errors
+enum Branch { Yes, No }
+enum S { Waiting, Done }
+
+machine M {
+  state { s : S = Waiting }
+  action Ask()
+  action Answered(b: Branch)
+  on Ask { decide pick(1) }
+  on Answered(b) { s' = Done }
+  decision pick(n: 0..1) -> Branch {
+    provider "jev"
+    labels { egress:external }
+    timeout 500ms
+    ok(r) -> Answered(b: r.answer)
+  }
+}

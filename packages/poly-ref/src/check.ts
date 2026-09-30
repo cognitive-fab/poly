@@ -24,6 +24,7 @@ const CODE = {
   PL3901: ['BOUND_HIT', 'inconclusive', 'model-check'],
   PL4001: ['PATH_PROPERTY', 'finding', 'effects'],
   PL4002: ['EMIT_WITHOUT_STATE_CHANGE', 'finding', 'effects'],
+  PL6201: ['UNGATED_DECISION', 'finding', 'effects'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -137,6 +138,38 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     seenAction.add(e.label.action);
     const kinds = [...new Set(e.label.effects.filter((x) => x.type !== 'send').map((x) => x.kind))].join(', ');
     findings.push(finding('PL4002', M.handlers.get(e.label.action)?.id, `${e.label.action} emits ${kinds} and leaves the state unchanged, so it can repeat its effect without limit`, trace([...pathTo(g, e.from), e, e]), { property: e.label.action, state: g.states[e.from] }));
+  }
+
+  // PD1.4d, S75, S85: a decision is gated when, for each answer whose completion can emit a compensable or
+  // irreversible effect, some confidence or margin interval keeps it from doing so. The completion step alone is
+  // judged (S75): an answer stored and acted on later is covered by the author's properties. Rejected steps emit
+  // nothing and prove nothing, so only accepted completion steps count.
+  const risky = new Set([...M.effects.values()].filter((e) => e.cls === 'compensable' || e.cls === 'irreversible').map((e) => e.kind));
+  for (const d of M.decisions.values()) {
+    if (!d.ok) continue;
+    const ok = d.ok;
+    const key = (data: Record<string, unknown>, names: string[]) => JSON.stringify(names.map((n) => keyOf(data[n] as never)));
+    const byAnswer = new Map<string, Map<string, Edge<State>[]>>();
+    const intervals = new Map<string, Set<string>>();
+    for (const e of g.edges) {
+      if (e.label.action !== ok.action) continue;
+      const a = key(e.label.data, ok.answer);
+      const i = key(e.label.data, ok.confidence);
+      if (!intervals.has(a)) intervals.set(a, new Set());
+      intervals.get(a)!.add(i);
+      if (e.label.verdict.kind !== 'accepted' || !e.label.effects.some((x) => risky.has(x.kind))) continue;
+      if (!byAnswer.has(a)) byAnswer.set(a, new Map());
+      const m = byAnswer.get(a)!;
+      if (!m.has(i)) m.set(i, []);
+      m.get(i)!.push(e);
+    }
+    for (const [a, reach] of byAnswer) {
+      if (reach.size < intervals.get(a)!.size) continue; // some interval never reaches a risky effect: gated
+      const e = [...reach.values()][0][0];
+      const answer = ok.answer.map((n) => `${n} = ${keyOf(e.label.data[n] as never)}`).join(', ');
+      findings.push(finding('PL6201', d.id, `decision ${d.name} is ungated: for ${answer || 'its answer'}, its completion ${ok.action} can emit a compensable or irreversible effect at every confidence and margin the program tells apart (PD1.4d)`, trace([...pathTo(g, e.from), e]), { property: d.name, state: g.states[e.from] }));
+      break;
+    }
   }
 
   // Liveness (PS6.4): each fair component that never reaches the goal, with its lasso.

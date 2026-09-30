@@ -117,6 +117,8 @@ const int = (v: Value, what: string): number => {
 export function evaluate(e: A.Expr, env: Env): Value {
   switch (e.kind) {
     case 'Int': return e.value;
+    // S76: a decimal is a Conf constant, in thousandths (PD1.3a).
+    case 'Decimal': return e.value;
     case 'Bool': return e.value;
     case 'String': return e.value;
     case 'Primed': throw new EvalError(`poly-ref: ${e.name}' is write-only (PS2.3)`);
@@ -354,8 +356,9 @@ function binary(e: A.Binary, env: Env): Value {
       return e.op === '==' ? eq : !eq;
     }
     default: {
-      const a = int(evaluate(e.left, env), e.op);
-      const b = int(evaluate(e.right, env), e.op);
+      // PD1.3a: an integer constant compared with a Conf (0 or 1) is scaled to thousandths.
+      const a = int(confScaled(e.left, e.right, env), e.op);
+      const b = int(confScaled(e.right, e.left, env), e.op);
       switch (e.op) {
         case '<': return a < b;
         case '<=': return a <= b;
@@ -374,4 +377,14 @@ function binary(e: A.Binary, env: Env): Value {
     }
   }
   throw new EvalError(`poly-ref: unknown operator ${e.op}`);
+}
+
+/** A Conf parameter of the step's action (PD1.3). */
+function isConf(e: A.Expr, env: Env): boolean {
+  if (e.kind !== 'Name' || env.locals.has(e.name) || !env.params || !env.action) return false;
+  return env.M.actions.find((a) => a.name === env.action)?.params.find((p) => p.name === e.name)?.type.k === 'conf';
+}
+
+function confScaled(x: A.Expr, other: A.Expr, env: Env): Value {
+  return x.kind === 'Int' && isConf(other, env) ? x.value * 1000 : evaluate(x, env);
 }

@@ -103,6 +103,8 @@ function readField(cx: Cx, stateVar: string, name: string): string {
 export function expr(e: A.Expr, cx: Cx): string {
   switch (e.kind) {
     case 'Int': return String(e.value);
+    // S76: a decimal is the Conf constant it is compared with, in thousandths (PD1.3a).
+    case 'Decimal': return String(e.value);
     case 'Bool': return String(e.value);
     case 'String': return q(e.value);
     case 'Primed': throw new Error("poly-lower: a primed read reached the lowering (PL1202 must refuse it)");
@@ -167,8 +169,11 @@ export function expr(e: A.Expr, cx: Cx): string {
       throw new Error(`poly-lower: call ${e.callee} reached the lowering`);
     case 'Unary': return `(${e.op}${expr(e.arg, cx)})`;
     case 'Binary': {
-      const a = expr(e.left, cx);
-      const b = expr(e.right, cx);
+      // PD1.3a: a Conf is 0..1000 at runtime, so an integer constant it is compared with (0 or 1) is scaled.
+      const conf = (x: A.Expr) => tyOf(cx, x)?.k === 'conf' && x.kind !== 'Decimal';
+      const scaled = (x: A.Expr, other: A.Expr) => (x.kind === 'Int' && conf(other) ? String(x.value * 1000) : expr(x, cx));
+      const a = scaled(e.left, e.right);
+      const b = scaled(e.right, e.left);
       switch (e.op) {
         case 'implies': return `(!${a} || ${b})`;
         case '&&': return `(${a} && ${b})`;
@@ -427,6 +432,16 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
           `${ind}__E.push({ kind: "cancelTimer", key: ${keyOf(s.as)} });`,
           `${ind}__E.push({ kind: "timer", key: ${keyOf(s.as)}, fireIn: ${q(isoDuration(durationMs(s.modifier)!))}, action: ${q(s.target)}, data: { ${data.join(', ')} } });`,
         ];
+      }
+      if (s.op === 'decide') {
+        // PD1.7: a decision is an effect intent of kind decision.<d>.
+        const d = cx.facts.decisions.get(s.target);
+        if (!d) throw new Error(`poly-lower: no decision ${s.target} (PL1001 must refuse it)`);
+        const payload = s.args.map((a, i) => {
+          const p = a.name === null ? d.params[i] : d.params.find((x) => x.name === a.name)!;
+          return `${q(p.name)}: ${expr(a.value, cx)}`;
+        });
+        return [`${ind}__E.push({ kind: ${q(`decision.${d.name}`)}, payload: { ${payload.join(', ')} } });`];
       }
       const eff = cx.facts.effects.get(s.target);
       if (!eff) throw new Error(`poly-lower: no effect ${s.target} (PL1001 must refuse it)`);

@@ -54,6 +54,7 @@ class Printer {
       case 'TName': return `t.named(${q(t.name)})`;
       case 'TMap': return `t.map(${this.type(t.key)}, ${this.type(t.value)})`;
       case 'TRef': return `t.ref(${q(t.machine.join('.'))})`;
+      case 'TConf': return 't.conf';
     }
   }
 
@@ -115,6 +116,7 @@ class Printer {
       case 'Property': return this.property(i);
       case 'Liveness': return this.liveness(i);
       case 'EffectDecl': return `${this.use('effect')}(${q(i.name)}, ${this.params(i.params)}, [${i.items.map((x) => this.effItem(x)).join(', ')}])`;
+      case 'Decision': return `${this.use('decision')}(${q(i.name)}, ${this.params(i.params)}, ${this.type(i.result)}, [${i.items.map((x) => this.decisionItem(x)).join(', ')}])`;
     }
   }
 
@@ -138,7 +140,20 @@ class Printer {
       case 'EffClass': return `${this.use('cls')}(${q(x.value)})`;
       case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
-      case 'EffOutcome': return `${this.use(x.outcome)}(${q(x.action)}, ${x.args.some((a) => readsName(a.value)) ? `($) => (${this.args(x.args)})` : this.args(x.args)})`;
+      case 'EffOutcome': {
+        const args = x.args.some((a) => readsName(a.value)) ? `($) => (${this.args(x.args)})` : this.args(x.args);
+        // PD1.2b, S79: `ok(r) -> A(…)` is okWith('r', 'A', …), its arguments naming the reply as $.r.
+        return x.bind !== undefined ? `${this.use('okWith')}(${q(x.bind)}, ${q(x.action)}, ${args})` : `${this.use(x.outcome)}(${q(x.action)}, ${args})`;
+      }
+    }
+  }
+
+  private decisionItem(x: A.DecisionItem): string {
+    switch (x.kind) {
+      case 'DecProvider': return `${this.use('provider')}(${q(x.value)})`;
+      case 'DecTimeout': return `${this.use('timeout')}(${q(x.value)})`;
+      case 'DecBand': return `${this.use('band')}(${decimal(x.lo)}, ${decimal(x.hi)})`;
+      default: return this.effItem(x);
     }
   }
 
@@ -194,6 +209,7 @@ class Printer {
     const idx = s.index ? `, ${this.expr(s.index, 0)}` : '';
     switch (s.op) {
       case 'emit': return `${this.use('emit')}(${q(s.target)}, ${this.args(s.args)})`;
+      case 'decide': return `${this.use('decide')}(${q(s.target)}, ${this.args(s.args)})`;
       case 'after': return `${this.use('after')}(${q(s.modifier!)}, ${q(s.target)}, ${this.args(s.args)}, ${q(s.as!)}${idx})`;
       case 'cancel': return `${this.use('cancel')}(${q(s.target)}${idx})`;
       case 'send': return `${this.use('send')}(${this.expr(s.to!, 0)}, ${q(s.target)}, ${this.args(s.args)}${s.as ? `, ${q(s.as)}` : ''})`;
@@ -219,6 +235,7 @@ class Printer {
   expr(e: A.Expr, ctx: number): string {
     switch (e.kind) {
       case 'Int': return e.value < 0 ? `(${e.value})` : String(e.value);
+      case 'Decimal': return decimal(e.value);
       case 'Bool': return String(e.value);
       case 'String': return q(e.value);
       case 'Name': return IDENT.test(e.name) ? `$.${e.name}` : `$[${q(e.name)}]`;
@@ -261,6 +278,13 @@ class Printer {
     if (k.kind === 'String') return q(k.value);
     return `[${this.expr(k, 0)}]`;
   }
+}
+
+/** A decimal literal (S76) from thousandths, always with a point, so that it reads back as a decimal. */
+function decimal(v: number): string {
+  const whole = Math.trunc(v / 1000);
+  const frac = String(v % 1000).padStart(3, '0').replace(/0+$/, '');
+  return `${whole}.${frac || '0'}`;
 }
 
 /** Whether an expression names something, so that it needs the arrow's `$`. */

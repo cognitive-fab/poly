@@ -29,7 +29,7 @@ import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'composition' | 'configuration';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration';
 
 export interface StageRecord {
   stage: StageName;
@@ -220,9 +220,9 @@ function byContent(dir: string, file: string): string {
 /** Stages 2c, 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
 function laterStages(checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
   const f = checked.machines.get(machine)!;
-  const mapper = f.effects.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || sends(f.machine);
+  const mapper = f.effects.size > 0 || f.decisions.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || sends(f.machine);
   const live = f.machine.items.some((i) => i.kind === 'Liveness');
-  return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
+  return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.decisions.size ? ['decisions' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
 }
 
 function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
@@ -339,6 +339,14 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 3: effects (PS5.4, S33) ─────────────────────────────────────
   if (lowered.files['effects.cjs']) await effectsStage(module, machine, mc, dir, contract, ref, engines);
+
+  // ── stage 3b: decisions (PD1.4d, S75) ─────────────────────────────────
+  if (ref.model.decisions.size) {
+    t0 = performance.now();
+    const ungated = ref.findings.filter((f) => f.code === 'PL6201');
+    mc.diagnostics.push(...ungated);
+    mc.stages.push({ stage: 'decisions', status: 'ran', engine: 'poly-ref', verdict: verdictOf(ungated), ms: performance.now() - t0, note: `${ref.model.decisions.size} decision${ref.model.decisions.size === 1 ? '' : 's'}, each answer at each interval of its confidence and margin (PD1.4b); the completion step alone (S75)` });
+  }
 
   // ── stage 4: attached children (PS7) ──────────────────────────────────
   if (checked.machines.get(machine)!.children.size) await compositionStage(module, checked, machine, mc, dir, opts, engines);

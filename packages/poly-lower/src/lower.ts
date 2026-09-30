@@ -4,7 +4,7 @@
 //                   schemas and domains, keyed acceptors, reject/next/unchanged
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
-import { diag, digest, effectKind, effectClass, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
+import { boundPath, diag, digest, effectKind, effectClass, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
 
@@ -87,7 +87,12 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length) {
     const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2. It runs for handled actions only: no other is an intent (S35).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
     if (terminal && opts.fault !== 'skip-terminal') lines.push(`      if (TERMINAL(model)) return reject('terminal');`);
-    for (const s of strict) lines.push(`      if (action === ${JSON.stringify(s.a)} && !${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])) return reject('outside-check-domain');`);
+    for (const s of strict) {
+      // PD1.4b: a Conf is explored by its intervals, and at runtime its domain is 0..1000 (PD1.3a).
+      const isConf = actions.find((a) => a.name === s.a)?.params.find((p) => p.name === s.p)?.type.kind === 'TConf';
+      const test = isConf ? `!(Number.isInteger(proposal[${JSON.stringify(s.p)}]) && proposal[${JSON.stringify(s.p)}] >= 0 && proposal[${JSON.stringify(s.p)}] <= 1000)` : `!${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])`;
+      lines.push(`      if (action === ${JSON.stringify(s.a)} && ${test}) return reject('outside-check-domain');`);
+    }
     if (guards.length) {
       for (const g of guards) lines.push(`      if (${expr(g.cond, stateCx)}) return reject(${JSON.stringify(g.reason)});`);
     }
@@ -178,7 +183,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // ── effects (PT6.1, PT5): the mapper and manifest when the machine declares effects, the path properties' module when it has any ──
   // A machine that arms timers needs the mapper too: a timer is an intent (PT6.3).
   // A machine that sends needs it too (S58): a send is an intent.
-  if (facts.effects.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
+  if (facts.effects.size || facts.decisions.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls }, pre, opts.fault);
     files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data' }), null, 2) + '\n';
   }
@@ -301,7 +306,7 @@ function mapUpdated(body: A.Stmt[]): Set<string> {
 }
 
 function emitsAny(body: A.Stmt[]): boolean {
-  return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel' || s.op === 'spawn' || s.op === 'signal' || s.op === 'send')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))) || (s.kind === 'For' && emitsAny(s.body)));
+  return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel' || s.op === 'spawn' || s.op === 'signal' || s.op === 'send' || s.op === 'decide')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))) || (s.kind === 'For' && emitsAny(s.body)));
 }
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */
@@ -315,10 +320,7 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Recor
     };
     const hooks: Record<string, string> = { ok: 'onSuccess', failed: 'onFailure', exhausted: 'onExhausted' };
     for (const it of e.items) {
-      if (it.kind === 'EffOutcome') {
-        const data = Object.fromEntries(it.args.map((a) => [a.name!, constValue(a.value, cx)]));
-        entry[hooks[it.outcome]] = it.args.length ? { action: it.action, data } : { action: it.action };
-      }
+      if (it.kind === 'EffOutcome') entry[hooks[it.outcome]] = outcomeEntry(it, cx);
       if (it.kind === 'EffRetry') entry.retry = { maxAttempts: it.attempts, baseMs: durationMs(it.base), timeoutMs: durationMs(it.timeout) };
       if (it.kind === 'EffLabels') entry.labels = it.labels;
     }
@@ -326,7 +328,48 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Recor
     entry.class = effectClass(e);
     out.push([effectKind(e), entry]);
   }
+  // PD1.7: a decision is an effect of kind decision.<d>, tried once within its timeout, class none; its reply is
+  // mapped into the completion's data with polyrun's `map`, and a timeout is a failure.
+  for (const d of facts.decisions.values()) {
+    const entry: Record<string, unknown> = {
+      payloadSchema: Object.fromEntries(d.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env), env), required: true }])),
+    };
+    let timeout = 0;
+    for (const it of d.items) {
+      if (it.kind === 'DecTimeout') timeout = durationMs(it.value)!;
+      if (it.kind === 'EffLabels') entry.labels = it.labels;
+    }
+    entry.retry = { maxAttempts: 1, timeoutMs: timeout };
+    for (const it of d.items) {
+      if (it.kind !== 'EffOutcome') continue;
+      entry[it.outcome === 'ok' ? 'onSuccess' : 'onFailure'] = outcomeEntry(it, cx);
+      if (it.outcome === 'failed') entry.onExhausted = outcomeEntry(it, cx);
+    }
+    entry.class = 'none';
+    const provider = d.items.find((i) => i.kind === 'DecProvider') as { value: string } | undefined;
+    const band = d.items.find((i) => i.kind === 'DecBand') as { lo: number; hi: number } | undefined;
+    entry.decision = { provider: provider?.value ?? null, result: resultValues(tyOfTypeExpr(d.result, env), env, facts), ...(band ? { band: [band.lo, band.hi] } : {}) };
+    out.push([`decision.${d.name}`, entry]);
+  }
   return { effects: Object.fromEntries(out) };
+}
+
+/** A completion as the manifest carries it: constants as `data`, and a bound reply as `map` (PD1.7, S79). */
+function outcomeEntry(it: A.EffOutcomeItem, cx: Cx): Record<string, unknown> {
+  const data: [string, unknown][] = [];
+  const map: [string, string][] = [];
+  for (const a of it.args) {
+    const path = it.bind !== undefined ? boundPath(a.value, it.bind) : null;
+    if (path) map.push([a.name!, ['$.result', ...path].join('.')]);
+    else data.push([a.name!, constValue(a.value, cx)]);
+  }
+  return { action: it.action, ...(data.length ? { data: Object.fromEntries(data) } : {}), ...(map.length ? { map: Object.fromEntries(map) } : {}) };
+}
+
+/** The answers a decision can give (PD1.7): an enum's constructors, a range's values, or each field's for a record. */
+function resultValues(t: Ty, env: TypeEnv, facts: MachineFacts): unknown {
+  if (t.k === 'record') return Object.fromEntries(env.records.get(t.name)!.fields.map((f) => [f.name, valuesOfTy(tyOfTypeExpr(f.type, env), env, facts.machine)]));
+  return valuesOfTy(t, env, facts.machine);
 }
 
 /** A completion argument as the manifest carries it: the checker proved it constant (PT6.1). */
@@ -504,6 +547,7 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
 
 /** A parameter's values; a completion's childKey takes the keys wired to its action (S51). */
 function paramValues(p: A.Param, env: TypeEnv, facts?: MachineFacts, action?: string): unknown[] {
+  if (p.type.kind === 'TConf' && facts && action) return confValues(facts, action, p.name);
   const keys = action ? facts?.childKeyDomains.get(action) : undefined;
   if (keys && p.name === 'childKey' && !p.check) return keys;
   return p.check ? checkDomainValues(p.check) : valuesOfTy(tyOfTypeExpr(p.type, env), env, facts?.machine);
@@ -527,7 +571,7 @@ function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[]
 }
 
 function jsType(t: Ty, env: TypeEnv): string {
-  return t.k === 'bool' ? 'boolean' : t.k === 'int' ? 'number' : t.k === 'record' || isPayloadUnion(env, t) ? 'object' : 'string';
+  return t.k === 'bool' ? 'boolean' : t.k === 'int' || t.k === 'conf' ? 'number' : t.k === 'record' || isPayloadUnion(env, t) ? 'object' : 'string';
 }
 
 function typeText(t: Ty, env: TypeEnv): string {
@@ -555,3 +599,36 @@ function keyTypeText(l: import('./layout.js').FieldLayout, key: string, env: Typ
 
 // ── faults (test-only) ──────────────────────────────────────────────────────
 import { applyFault } from './faults.js';
+
+/**
+ * PD1.4b: the values a Conf parameter is explored over. The comparisons of the parameter with constants, in the
+ * machine's handlers and properties, split 0..1000 into the intervals they can tell apart; one representative,
+ * the least value, stands for each. Under PD1.3b no expression can tell two values of one interval apart.
+ */
+export function confValues(facts: MachineFacts, action: string, param: string): number[] {
+  const tests: { op: string; c: number; flip: boolean }[] = [];
+  const isParam = (x: A.Expr) => x.kind === 'Name' && facts.resolutions.get(x.id)?.k === 'param' && (facts.resolutions.get(x.id) as { name: string }).name === param;
+  const constant = (x: A.Expr) => (x.kind === 'Decimal' ? x.value : x.kind === 'Int' ? x.value * 1000 : null);
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    const e = n as A.Expr;
+    if (e.kind === 'Binary' && ['==', '!=', '<', '<=', '>', '>='].includes(e.op)) {
+      if (isParam(e.left) && constant(e.right) !== null) tests.push({ op: e.op, c: constant(e.right)!, flip: false });
+      if (isParam(e.right) && constant(e.left) !== null) tests.push({ op: e.op, c: constant(e.left)!, flip: true });
+    }
+    for (const [k, v] of Object.entries(e)) if (k !== 'span' && k !== 'id') walk(v);
+  };
+  for (const it of facts.machine.items) if ((it.kind === 'Handler' && it.action === action) || it.kind === 'Property' || it.kind === 'Guard') walk(it);
+  const holds = (v: number, t: { op: string; c: number; flip: boolean }) => {
+    const [a, b] = t.flip ? [t.c, v] : [v, t.c];
+    switch (t.op) { case '==': return a === b; case '!=': return a !== b; case '<': return a < b; case '<=': return a <= b; case '>': return a > b; default: return a >= b; }
+  };
+  const seen = new Set<string>();
+  const out: number[] = [];
+  for (let v = 0; v <= 1000; v++) {
+    const sig = tests.map((t) => (holds(v, t) ? '1' : '0')).join('');
+    if (!seen.has(sig)) { seen.add(sig); out.push(v); }
+  }
+  return out;
+}

@@ -40,6 +40,7 @@ export declare const t: {
   named(name: string): Type;
   map(key: Type, value: Type): Type;
   ref(machine: string): Type;
+  readonly conf: Type;
 };
 
 // ── declarations ───────────────────────────────────────────────────────────
@@ -73,6 +74,16 @@ export declare function retry(attempts: number, base: string, timeout: string): 
 export declare function ok(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
 export declare function failed(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
 export declare function exhausted(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
+/** `ok(r) -> A(p: r.x)` (PD1.2b, S79): the reply is `$.r` in the arguments' arrow. */
+export declare function okWith(reply: string, action: string, args: Args | ((scope: Scope) => Args)): EffItem;
+
+// ── decisions (PD1) ────────────────────────────────────────────────────────
+export type DecisionItem = EffItem | Node<'decision-item'>;
+export declare function decision(name: string, params: { [param: string]: Type }, result: Type, items: DecisionItem[]): Item;
+export declare function provider(kind: string): DecisionItem;
+export declare function timeout(duration: string): DecisionItem;
+export declare function band(lo: number, hi: number): DecisionItem;
+export declare function decide(decision: string, args: Args): Stmt;
 
 // ── statements ─────────────────────────────────────────────────────────────
 export declare function require(cond: Expr, reason: string): Stmt;

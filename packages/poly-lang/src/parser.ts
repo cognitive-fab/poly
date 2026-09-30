@@ -56,7 +56,7 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
   implies: { prec: 9, assoc: 'right' },
 };
 
-const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for']);
+const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for', 'decide']);
 const LATER_TOP_LEVEL = new Set(['policy', 'workflow', 'world']);
 
 export function parse(src: string): ParseResult {
@@ -339,6 +339,7 @@ class Parser {
     if (name === 'bool') return this.node<A.TBool>(start, { kind: 'TBool' });
     if (name === 'int') return this.node<A.TInt>(start, { kind: 'TInt' });
     if (name === 'string') return this.node<A.TString>(start, { kind: 'TString' });
+    if (name === 'Conf') return this.node<A.TConf>(start, { kind: 'TConf' });
     if (name === 'map' && this.atPunct('<')) {
       this.next();
       const ks = this.peek();
@@ -520,6 +521,9 @@ class Parser {
       case 'effect':
         this.next();
         return this.effect(start);
+      case 'decision':
+        if (this.peek(1).kind === 'ident') { this.next(); return this.decision(start); }
+        break;
     }
     this.fail('expected a machine item (terminal, action, on, guard, a property, effect)');
   }
@@ -642,14 +646,65 @@ class Parser {
         this.expect('}');
         items.push(this.effItem(is, { kind: 'EffRetry', attempts, base, timeout }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
-        this.expect('->');
-        const action = this.ident('an action name');
-        const args = this.args();
-        items.push(this.effItem(is, { kind: 'EffOutcome', outcome: w, action, args }));
+        items.push(this.outcome(is, w));
       } else this.fail('expected kind, labels, class, retry, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);
+  }
+
+  /** `ok -> A(args)`, `ok(r) -> A(p: r.x)` (PD1.2g, S79), `failed -> …`, `exhausted -> …`. */
+  private outcome(start: Token, w: 'ok' | 'failed' | 'exhausted'): A.EffOutcomeItem {
+    let bind: string | undefined;
+    if (w === 'ok' && this.atPunct('(')) { this.next(); bind = this.ident('the name of the result'); this.expect(')'); }
+    this.expect('->');
+    const action = this.ident('an action name');
+    const args = this.args();
+    return this.effItem(start, { kind: 'EffOutcome', outcome: w, action, args, ...(bind !== undefined ? { bind } : {}) }) as A.EffOutcomeItem;
+  }
+
+  /** `decision d(params) -> R { provider, labels, timeout, band, ok(r) -> …, failed -> … }` (PD1.2, S76). */
+  private decision(start: Token): A.Decision {
+    const name = this.ident('a decision name');
+    this.expect('(');
+    const params = this.params(')');
+    this.expect('->');
+    const result = this.type();
+    this.expect('{');
+    const items: A.DecisionItem[] = [];
+    while (!this.atPunct('}')) {
+      const is = this.peek();
+      const w = this.ident('a decision item');
+      if (w === 'provider') items.push(this.effItem(is, { kind: 'DecProvider', value: this.str() }) as unknown as A.DecisionItem);
+      else if (w === 'timeout') items.push(this.effItem(is, { kind: 'DecTimeout', value: this.duration() }) as unknown as A.DecisionItem);
+      else if (w === 'labels') {
+        this.expect('{');
+        const labels: string[] = [];
+        while (!this.atPunct('}')) {
+          let l = this.ident('a label');
+          if (this.atPunct(':')) { this.next(); l += ':' + this.ident('a label'); }
+          labels.push(l);
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+        items.push(this.effItem(is, { kind: 'EffLabels', labels }) as unknown as A.DecisionItem);
+      } else if (w === 'band') {
+        const lo = this.decimal();
+        this.expect('..');
+        const hi = this.decimal();
+        items.push(this.effItem(is, { kind: 'DecBand', lo, hi }) as unknown as A.DecisionItem);
+      } else if (w === 'ok' || w === 'failed' || w === 'exhausted') items.push(this.outcome(is, w));
+      else this.fail('expected provider, labels, timeout, band, ok or failed', is);
+    }
+    this.next();
+    return this.node<A.Decision>(start, { kind: 'Decision', name, params, result, items }, true);
+  }
+
+  private decimal(): number {
+    const tok = this.peek();
+    if (tok.kind !== 'decimal') this.fail('expected a decimal such as 0.3');
+    this.next();
+    return tok.value as number;
   }
 
   private effItem(start: Token, fields: Record<string, unknown>): A.EffectItem {
@@ -837,6 +892,10 @@ class Parser {
         base.args = this.args();
         if (this.at('as')) { this.next(); base.as = this.ident(); }
         break;
+      case 'decide':
+        base.target = this.ident('a decision name');
+        base.args = this.args();
+        break;
       case 'signal':
         base.extra.push(this.ident('a child key'));
         base.index = index();
@@ -959,6 +1018,7 @@ class Parser {
   private primary(noStruct: boolean): A.Expr {
     const start = this.peek();
     if (start.kind === 'int') { this.next(); return this.node<A.IntLit>(start, { kind: 'Int', value: start.value as number }); }
+    if (start.kind === 'decimal') { this.next(); return this.node<A.DecimalLit>(start, { kind: 'Decimal', value: start.value as number }); }
     if (start.kind === 'string') { this.next(); return this.node<A.StringLit>(start, { kind: 'String', value: start.text }); }
     if (this.atPunct('(')) {
       this.next();
