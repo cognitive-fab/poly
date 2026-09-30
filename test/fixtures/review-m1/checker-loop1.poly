@@ -1,0 +1,22 @@
+module loop1
+
+machine M {
+  state {
+    done : bool = false
+    n    : 1..2 = 1
+    m    : map<0..2, bool> = [false, false, false]
+  }
+  terminal done
+  action Go()
+  action Seal()
+  on Go {
+    require !done else reject "sealed"
+    for i in 0..n {
+      m' = m with [i] = true
+    }
+  }
+  on Seal {
+    require !done else reject "sealed"
+    done' = true
+  }
+}

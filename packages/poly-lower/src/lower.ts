@@ -35,7 +35,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     for (const p of a.params) {
       const t = tyOfTypeExpr(p.type, check.env);
       // S65: a union with payloads is lowered as a parameter; a map is not yet.
-      if (t.k === 'map') {
+      if (holdsMap(p.type, check.env, new Set())) {
         diagnostics.push(diag('PL0901', { module: module.name, machine: m.name, node: p.id, line: p.span?.line, col: p.span?.col }, `a parameter of type map is lowered after milestone M1: ${a.name}.${p.name}`));
       }
     }
@@ -409,6 +409,14 @@ function refDomain(m: A.Machine, target: string): unknown[] {
   // S57: for the machine's own type, self is one more distinct address.
   const self = target === m.name ? 1 : 0;
   return [null, ...Array.from({ length: fields + params + self }, (_, i) => `${target}#${i + 1}`)];
+}
+
+/** Whether a parameter's type is a map or holds one through record fields (S65, review finding C3). */
+function holdsMap(t: A.TypeExpr, env: TypeEnv, seen: Set<string>): boolean {
+  if (t.kind === 'TMap') return true;
+  if (t.kind !== 'TName' || seen.has(t.name) || !env.records.has(t.name)) return false;
+  seen.add(t.name);
+  return env.records.get(t.name)!.fields.some((f) => holdsMap(f.type, env, seen));
 }
 
 function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {

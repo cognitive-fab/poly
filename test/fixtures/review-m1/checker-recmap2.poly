@@ -1,0 +1,18 @@
+module recmap2
+
+enum K { A, B }
+type Env = { m: map<K, bool> }
+
+machine M {
+  state {
+    done : bool = false
+    env : Env = { m: { A: false, B: false } }
+  }
+  terminal done
+  action Seal(x: Env)
+  on Seal(x) {
+    require !done else reject "sealed"
+    done' = true
+    env' = x
+  }
+}

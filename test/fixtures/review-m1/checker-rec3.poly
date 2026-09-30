@@ -1,0 +1,16 @@
+module rec3
+
+type R = { u: U }
+type U = X | Y { r: R }
+
+machine M {
+  state {
+    done : bool = false
+  }
+  terminal done
+  action Seal()
+  on Seal {
+    require !done else reject "sealed"
+    done' = true
+  }
+}

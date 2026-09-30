@@ -1,0 +1,52 @@
+module fam2
+
+enum Leg { Waiting, Moving, Done }
+
+machine Truck {
+  state {
+    leg : Leg = Waiting
+  }
+  terminal leg == Done
+  action Go()
+  action Stop()
+  on Go {
+    require leg == Waiting else reject "moving"
+    leg' = Moving
+  }
+  on Stop {
+    require leg != Done else reject "done"
+    leg' = Done
+  }
+}
+
+machine Dispatch {
+  state {
+    poked : bool = false
+    busy : bool = false
+  }
+  terminal poked
+
+  action Plan()
+  action Poke()
+  action Tick()
+
+  on Plan {
+    require !busy else reject "busy"
+    busy' = true
+    for i in 1..2 {
+      spawn Truck as t[i]
+      after 1h -> Tick() as late[i]
+    }
+  }
+  on Tick {
+    require busy else reject "idle"
+    busy' = false
+  }
+  on Poke {
+    require busy else reject "idle"
+    require !poked else reject "poked"
+    poked' = true
+    cancel late[5]
+  }
+  compose invariant x: t[5] spawned implies children.t[5].leg != Done
+}

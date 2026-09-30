@@ -1,0 +1,20 @@
+module effrec
+
+type Job = Idle | Busy { n: 1..2 }
+type Env = { job: Job }
+
+machine M {
+  state {
+    done : bool = false
+  }
+  terminal done
+  action Seal()
+  effect Notify(e: Env) {
+    labels { egress:external }
+  }
+  on Seal {
+    require !done else reject "sealed"
+    done' = true
+    emit Notify(e: { job: Busy { n: 1 } })
+  }
+}

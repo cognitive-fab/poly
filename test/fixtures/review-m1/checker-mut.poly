@@ -1,0 +1,16 @@
+module mut
+
+type A = { b: B }
+type B = { a: A }
+
+machine M {
+  state {
+    done : bool = false
+  }
+  terminal done
+  action Seal()
+  on Seal {
+    require !done else reject "sealed"
+    done' = true
+  }
+}

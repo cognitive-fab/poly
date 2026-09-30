@@ -1,0 +1,19 @@
+module rec1
+
+enum Size { Small, Large }
+type Box = { size: Size, count: 0..2 }
+
+machine Packer {
+  state {
+    done : bool = false
+    box  : Box  = { size: Small, count: 5 }
+  }
+  terminal done
+
+  action Seal()
+
+  on Seal {
+    require !done else reject "sealed"
+    done' = true
+  }
+}

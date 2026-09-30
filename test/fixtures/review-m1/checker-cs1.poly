@@ -1,0 +1,41 @@
+module cs1
+
+enum Leg { Waiting, Arrived }
+type LegState = { leg: Leg, n: 0..1 }
+
+machine Truck {
+  state {
+    leg : Leg = Waiting
+    n   : 0..3 = 0
+  }
+  terminal leg == Arrived
+
+  action Arrive()
+  on Arrive {
+    require leg == Waiting else reject "done"
+    leg' = Arrived
+    n' = 3
+  }
+}
+
+machine Dispatch {
+  state {
+    got  : bool = false
+    busy : bool = false
+  }
+  terminal got
+
+  action Plan()
+  action Landed(childKey: string, childState: LegState)
+
+  on Plan {
+    require !busy else reject "busy"
+    busy' = true
+    spawn Truck as t on complete -> Landed
+  }
+  on Landed(childKey, childState) {
+    require busy else reject "idle"
+    require !got else reject "got"
+    got' = true
+  }
+}

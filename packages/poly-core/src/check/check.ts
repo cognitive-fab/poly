@@ -334,7 +334,13 @@ class Checker {
         seen.add(d.name);
         const fdup = d.fields.map((f) => f.name).find((n, i, a) => a.indexOf(n) !== i);
         if (fdup) this.err('PL1002', d, `field ${fdup} is declared twice in ${d.name}`);
-        if (this.refersTo(d.name, d.fields.map((f) => f.type), new Set())) { this.recursive.add(d.name); this.err('PL1201', d, `record ${d.name} refers to itself; a record is finite and not recursive (S25)`); continue; }
+        if (this.refersTo(d.name, d.fields.map((f) => f.type), new Set())) {
+          // A cycle through a record already reported is the same mistake (review finding C8).
+          const reported = [...this.recursive].some((r) => this.refersTo(r, d.fields.map((f) => f.type), new Set()));
+          this.recursive.add(d.name);
+          if (!reported) this.err('PL1201', d, `record ${d.name} refers to itself; a record is finite and not recursive (S25)`);
+          continue;
+        }
         for (const f of d.fields) {
           if (this.tyOf(f.type).k === 'ref') this.err('PL0901', f, `an address inside a record is lowered after milestone M1: ${d.name}.${f.name}`);
           if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `field ${d.name}.${f.name} has no finite domain; give it a range or an enum type`);
@@ -359,7 +365,8 @@ class Checker {
             const prev = byName.get(f.name);
             if (prev !== undefined && prev !== key) this.err('PL1601', f, `payload ${f.name} is ${prev} in one constructor of ${d.name} and ${key} in ${c.name}; a shared payload name needs one type`);
             byName.set(f.name, key);
-            if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `payload ${c.name}.${f.name} has no finite domain; give it a range or an enum type`);
+            // A payload through a recursive record was reported at the record (S25).
+            if (cardinality(f.type, this.env) === null && ![...this.recursive].some((r) => this.refersTo(r, [f.type], new Set()))) this.err('PL1101', f, `payload ${c.name}.${f.name} has no finite domain; give it a range or an enum type`);
           }
         }
       }
@@ -411,6 +418,8 @@ class Checker {
         }
         const key = this.tyOf(t.key);
         if (key.k === 'union' && !this.env.unions.get(key.name)!.isEnum) this.errOnce('PL1201', t.key, `map key ${key.name} must be an enum (constructors without payload)`);
+        // PT3.1: an enum or an integer range 0..n; a record has no key form in JSON.
+        if (key.k === 'record') this.errOnce('PL1201', t.key, `map key ${key.name} is a record; a map is keyed by an enum or a range 0..n (PT3.1)`);
         return { k: 'map', key, value, array: false };
       }
     }
@@ -575,7 +584,7 @@ class Checker {
       pnames.add(p.name);
       const ty = this.tyOf(p.type);
       // A payload is plain JSON (PT6.1); maps and payload unions are lowered from plan step 10, as for action parameters.
-      if (ty.k === 'map' || ty.k === 'ref' || (ty.k === 'union' && !this.env.unions.get(ty.name)!.isEnum)) this.err('PL0901', p, `an effect parameter of type ${tyToString(ty)} is lowered after milestone M1: an intent carries no type from which poly-ref could read it back (S65)`);
+      if (this.holds(ty, (x) => x.k === 'map' || x.k === 'ref' || (x.k === 'union' && !this.env.unions.get(x.name)!.isEnum))) this.err('PL0901', p, `an effect parameter of type ${tyToString(ty)} is lowered after milestone M1: an intent carries no type from which poly-ref could read it back (S65)`);
       if (p.check) this.err('PL1201', p.check, 'an effect parameter takes its value from the handler; it has no check domain');
     }
     const seen = new Set<string>();
@@ -604,6 +613,14 @@ class Checker {
       }
     }
     if (!labelled) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
+  }
+
+  /** Whether a type is, or holds through record fields, a type the predicate names (S25, S65). */
+  private holds(t: Ty, p: (x: Ty) => boolean, seen: Set<string> = new Set()): boolean {
+    if (p(t)) return true;
+    if (t.k !== 'record' || seen.has(t.name)) return false;
+    seen.add(t.name);
+    return this.env.records.get(t.name)!.fields.some((f) => this.holds(this.tyOf(f.type), p, seen));
   }
 
   /** `ok -> A(p: v)`: a completion is an ordinary action (PS4.4) whose data the manifest carries as constants (PT6.1). */
@@ -741,7 +758,7 @@ class Checker {
       const rt = this.tyOf(st.type);
       const rec = rt.k === 'record' ? this.env.records.get(rt.name)! : null;
       const matches = rec !== null && rec.fields.length === child.fields.length
-        && child.fields.every((f) => { const rf = rec.fields.find((x) => x.name === f.name); return rf !== undefined && same(this.tyOf(rf.type), this.tyOf(f.type)); });
+        && child.fields.every((f) => { const rf = rec.fields.find((x) => x.name === f.name); return rf !== undefined && tyToString(this.tyOf(rf.type)) === tyToString(this.tyOf(f.type)); });
       if (!matches) { this.errOnce('PL1201', act, `${act.name}.childState is the state of ${child.name}; its type is a record with the fields ${child.fields.map((f) => f.name).join(', ')}, of the same types (S44)`); return; }
       // The runtime passes the child's flat snapshot; a union field with payloads is flat there (PS9.1b).
       if (child.fields.some((f) => { const t = this.tyOf(f.type); return t.k === 'union' && !this.env.unions.get(t.name)!.isEnum; })) this.errOnce('PL0901', act, `${act.name}.childState of ${child.name}, which has a union field with payloads, is lowered after milestone M1: the runtime passes the child's flat snapshot (PS9.1b, S65)`);
@@ -760,6 +777,13 @@ class Checker {
   }
 
   /** `signal k -> A(args)` (PT6.4): k is a child this machine spawns, A an action of that child with a handler. */
+  /** S49: an index whose range leaves its family names no member; PL1201 at the index. */
+  private inFamily(it: Ty, r: { lo: number; hi: number }, at: A.NodeBase, fam: string): boolean {
+    if (it.k !== 'int' || (it.lo >= r.lo && it.hi <= r.hi)) return true;
+    this.err('PL1201', at, `${fam}[…] has the members ${r.lo}..${r.hi}, and this index ranges over ${tyToString(it)} (S49)`);
+    return false;
+  }
+
   private signal(s: A.IntentStmt, scope: Scope): void {
     const key = s.extra[0];
     // S49: `signal f[i]` names a member of the family f; they share one machine and wiring.
@@ -793,6 +817,7 @@ class Checker {
       } else {
         const it = this.typeOf(idx, scope);
         if (it.k !== 'int' && it.k !== 'error') { this.err('PL1201', idx, `an index is an int, not ${tyToString(it)}`); return ERR; }
+        if (!this.inFamily(it, range, idx, fam)) return ERR;
         if (!scope.spawned?.has(`${fam}[${indexText(idx)}]`)) { this.err('PL5103', e, `children.${fam}[${indexText(idx)}].${e.prop} is read where ${fam}[${indexText(idx)}] may not be spawned; write ${fam}[${indexText(idx)}] spawned implies … (S48, S49)`); return ERR; }
       }
       const spec = [...this.facts!.children.values()].find((c) => c.key === `${fam}${range.lo}`);
@@ -827,6 +852,14 @@ class Checker {
     const p = action?.params.find((x) => x.name === (s.hi as A.NameRef).name);
     const t = p ? this.tyOf(p.type) : this.facts?.fieldTypes.get(s.hi.name);
     return t && t.k === 'int' && Number.isFinite(t.hi) ? t.hi : null;
+  }
+
+  /** The least value a loop's bound takes: the bottom of the range type of the field or parameter it names (S49). */
+  private loopLeast(s: A.For, action: A.Action | undefined): number {
+    if (s.hi.kind !== 'Name') return -Infinity;
+    const p = action?.params.find((x) => x.name === (s.hi as A.NameRef).name);
+    const t = p ? this.tyOf(p.type) : this.facts?.fieldTypes.get(s.hi.name);
+    return t && t.k === 'int' && Number.isFinite(t.lo) ? t.lo : -Infinity;
   }
 
   /** `for i in lo..n { … }` (S49): a bound the checker can read, and a body of intents and map-entry writes. */
@@ -1050,6 +1083,15 @@ class Checker {
       }
       return;
     }
+    if (ty.k === 'record' && e.kind === 'MapLit') {
+      // S25: a record literal's fields against their declared types (PS4.2).
+      const r = this.env.records.get(ty.name)!;
+      for (const en of e.entries) {
+        const decl = en.key.kind === 'Name' ? r.fields.find((x) => x.name === (en.key as A.NameRef).name) : undefined;
+        if (decl) this.checkConst(en.value, this.tyOf(decl.type), null, `${what}.${decl.name}`);
+      }
+      return;
+    }
     if (ty.k === 'map' && (e.kind === 'MapLit' || e.kind === 'ArrayLit')) {
       const items = e.kind === 'MapLit' ? e.entries.map((x) => x.value) : e.items;
       items.forEach((x, i) => this.checkConst(x, ty.value, null, `${what}[${i}]`));
@@ -1143,6 +1185,10 @@ class Checker {
         if (s.index) {
           const it = this.typeOf(s.index, scope);
           if (it.k !== 'int' && it.k !== 'error') this.err('PL1201', s.index, `a key's index is an int, not ${tyToString(it)} (S49)`);
+          // S49: signal and cancel name members a spawn or an after declared; their index must stay in that family.
+          const fam = s.op === 'signal' ? s.extra[0] : s.op === 'cancel' ? s.target : null;
+          const range = s.op === 'signal' ? this.facts!.families.get(s.extra[0]) : s.op === 'cancel' ? timerFamily(this.facts!.timerKeys, s.target) : undefined;
+          if (fam && range) this.inFamily(it, range, s.index, fam);
         }
         if (s.op === 'emit') this.emit(s, scope);
         else if (s.op === 'after') this.timer(s, scope);
@@ -1307,12 +1353,14 @@ class Checker {
         const bound = this.loopBound(s, this.handlerAction) ?? s.lo;
         const n = s.hi.kind === 'Int' ? s.hi.value : null;
         const last = n === null ? bound : Math.min(n, bound);
+        // The copies up to the bound's least value always run; only the ones after it may stop (review finding C6).
+        const least = n === null ? this.loopLeast(s, this.handlerAction) : last;
         let cur = [p];
-        const prefixes: PathState[] = n === null ? [p] : [];
+        const prefixes: PathState[] = n === null && least < s.lo ? [p] : [];
         for (let k = s.lo; k <= last; k++) {
           // A statement the loop body may not hold is reported once, by forLoop, and not read for paths.
           cur = this.paths(substitute(s.body.filter(loopStatement), s.var, k), cur);
-          if (n === null) prefixes.push(...cur);
+          if (n === null && k >= least) prefixes.push(...cur);
         }
         return n === null ? prefixes : cur;
       }
@@ -1559,6 +1607,8 @@ class Checker {
           if (!this.facts!.families.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no family ${e.key}`);
           const it = this.typeOf(e.index, scope);
           if (it.k !== 'int' && it.k !== 'error') this.err('PL1201', e.index, `an index is an int, not ${tyToString(it)}`);
+          const range = this.facts!.families.get(e.key);
+          if (range) this.inFamily(it, range, e.index, e.key);
         } else if (!this.facts!.children.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no attached child ${e.key}`);
         return BOOL;
       }
@@ -1726,7 +1776,8 @@ class Checker {
         // S22: each side is typed first; an ambiguous constructor on either side takes the other side's type.
         let l: Ty;
         let r: Ty;
-        if (this.ambiguousCtor(e.left, scope) && !this.ambiguousCtor(e.right, scope)) {
+        const literal = (x: A.Expr) => x.kind === 'MapLit' || x.kind === 'ArrayLit';
+        if ((this.ambiguousCtor(e.left, scope) && !this.ambiguousCtor(e.right, scope)) || (literal(e.left) && !literal(e.right))) {
           r = this.typeOf(e.right, scope);
           l = this.typeOf(e.left, scope, r);
         } else {
@@ -1842,6 +1893,12 @@ function constantKey(e: A.Expr, resolutions: Map<string, Resolution>): string | 
   const r = resolutions.get(e.id);
   if (r?.k === 'ctor') return `${r.union}.${r.ctor}`;
   return null;
+}
+
+/** The indices of a timer family: late with late1 and late2 armed is 1..2 (S49). */
+function timerFamily(keys: Set<string>, name: string): { lo: number; hi: number } | undefined {
+  const ix = [...keys].filter((k) => memberOf(k, name)).map((k) => Number(k.slice(name.length)));
+  return ix.length ? { lo: Math.min(...ix), hi: Math.max(...ix) } : undefined;
 }
 
 /** Whether a key is a member of a family: f1 of f (S49). */

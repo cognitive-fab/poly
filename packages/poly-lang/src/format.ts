@@ -298,7 +298,7 @@ class Printer {
       case 'Unary': return wrap(`${e.op}${this.expr(e.arg, 2, noStruct)}`, 2);
       case 'Spawned': return `${e.key}${e.index ? `[${this.expr(e.index, 0)}]` : ''} spawned`;
       case 'Star': return '*';
-      case 'Quant': return wrap(`${e.q} ${e.var} in ${e.group}: ${this.expr(e.body, 0)}`, 0);
+      case 'Quant': { const q = `${e.q} ${e.var} in ${e.group}: ${this.expr(e.body, 0)}`; return ctx === 0 && parentOp === null ? q : `(${q})`; }
       case 'Is': return wrap(`${this.expr(e.expr, 4, noStruct)} is ${e.ctors.join(' | ')}`, 5);
       case 'In': return wrap(`${this.expr(e.expr, 4, noStruct)} in { ${e.set.map((x) => this.expr(x, 0)).join(', ')} }`, 5);
       case 'Binary': {

@@ -1,0 +1,21 @@
+module cfg1
+
+type Box = { count: 0..2 }
+
+service machine P {
+  state {
+    box : Box = { count: 0 }
+  }
+  action Bump()
+  on Bump {
+    require box.count < 2 else reject "max"
+    box' = { count: box.count + 1 }
+  }
+}
+
+configuration C {
+  p : P { box: { count: 7 } }
+  inputs { p.Bump }
+  bounds { transit 2 }
+  invariant ok: p.box.count <= 2
+}

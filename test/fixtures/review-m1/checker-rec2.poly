@@ -1,0 +1,16 @@
+module rec2
+
+type Box = { a: 0..2, b: bool }
+
+machine M {
+  state {
+    done : bool = false
+    m : map<Box, bool> = { }
+  }
+  terminal done
+  action Seal()
+  on Seal {
+    require !done else reject "sealed"
+    done' = true
+  }
+}
