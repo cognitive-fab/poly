@@ -13,12 +13,11 @@ const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, '
 
 for (const file of SOURCES) {
   test(`translation validation agrees: ${basename(file)}`, async (t) => {
-    // The OutboxIntent forms state liveness, refused until M2 (S13); it is removed before lowering.
-    for (const b of build(file, 'tv', { stripLiveness: true })) {
+    for (const b of build(file, 'tv')) {
       const r = await translationValidate(b.module, b.machine, b.dir);
       assert.deepEqual(r.mismatches.map((d) => d.message), []);
       assert.ok(r.transitions > 0);
-      t.diagnostic(`${b.machine}: ${r.report.states} states, ${r.transitions} transitions and ${r.propertyChecks} property evaluations compared${b.stripped.length ? `; liveness removed: ${b.stripped.join(', ')}` : ''}`);
+      t.diagnostic(`${b.machine}: ${r.report.states} states, ${r.transitions} transitions and ${r.propertyChecks} property evaluations compared`);
     }
   });
 }
@@ -34,8 +33,8 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
     let caught = 0;
     const equivalent = [];
     for (const file of SOURCES) {
-      const good = build(file, 'tv-good', { stripLiveness: true });
-      const bad = build(file, `tv-${fault}`, { stripLiveness: true, fault });
+      const good = build(file, 'tv-good');
+      const bad = build(file, `tv-${fault}`, { fault });
       for (const [k, b] of bad.entries()) {
         const changed = ['next.cjs', 'invariants.mjs'].some((f) => readFileSync(join(b.dir, f), 'utf8') !== readFileSync(join(good[k].dir, f), 'utf8'));
         if (!changed) continue;

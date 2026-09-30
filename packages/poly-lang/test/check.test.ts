@@ -44,12 +44,11 @@ test('each error source raises exactly the code it names', () => {
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 
-test('every example checks with no diagnostic, except liveness refused until M2', () => {
+test('every example checks with no diagnostic, liveness included (M1-2)', () => {
   for (const f of polyFiles(join(ROOT, 'examples'))) {
     const src = readFileSync(f, 'utf8');
-    // The OutboxIntent forms state `settles` under fairness; liveness is checked from M2 (S13: PL0901).
-    const want = /^\s*liveness /m.test(src) ? ['PL0901'] : [];
-    assert.deepEqual(codesOf(src), want, f);
+    // The OutboxIntent forms state `settles`: since M1-2 the checker accepts it, and the pipeline lists it as not run.
+    assert.deepEqual(codesOf(src), [], f);
   }
 });
 

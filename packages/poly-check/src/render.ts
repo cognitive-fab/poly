@@ -64,6 +64,7 @@ export function render(r: CheckReport): string {
     const notRun = m.stages.filter((s) => s.status === 'not-run');
     out.push(`${m.machine}: ${ran.join(' · ')}`);
     if (notRun.length) out.push(`  not run: ${notRun.map((s) => s.stage).join(', ')} (${notRun[0].reason})`);
+    for (const p of m.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
   }
   const instances = r.machines.map((m) => instanceLine(m, r.module));
   out.push(`verdict: ${r.verdict} (exit ${r.exit})${instances.length ? `  ${instances[0]}` : ''}`);

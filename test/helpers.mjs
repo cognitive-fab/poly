@@ -20,31 +20,19 @@ export function polyFiles(dir) {
   return out.sort();
 }
 
-/**
- * Parse and check a source. Liveness properties are refused until M2 (S13,
- * PL0901); with `stripLiveness` they are removed first, and the removal is
- * returned so a test can say so.
- */
-export function load(file, { stripLiveness = false } = {}) {
+/** Parse and check a source; any diagnostic is an error for the gate tests that build from it. */
+export function load(file) {
   const r = parse(readFileSync(file, 'utf8'));
   if (!r.module) throw new Error(`${file}: ${r.diagnostics.map((d) => d.message).join('; ')}`);
-  const stripped = [];
-  if (stripLiveness) {
-    for (const d of r.module.decls) {
-      if (d.kind !== 'Machine') continue;
-      for (const it of d.items) if (it.kind === 'Liveness') stripped.push(`${d.name}.${it.name}`);
-      d.items = d.items.filter((it) => it.kind !== 'Liveness');
-    }
-  }
   const check = checkModule(r.module);
   const errors = [...r.diagnostics, ...check.diagnostics];
   if (errors.length) throw new Error(`${file}: ${errors.map((d) => `${d.code} ${d.message}`).join('; ')}`);
-  return { module: r.module, check, stripped };
+  return { module: r.module, check };
 }
 
 /** Lower every machine of a source and write each to BUILD/<name>/<module>.<Machine>/. */
 export function build(file, name, opts = {}) {
-  const { module, check, stripped } = load(file, opts);
+  const { module, check } = load(file);
   const out = [];
   for (const machine of check.machines.keys()) {
     const { lowered, diagnostics } = lowerMachine(module, check, machine, opts);
@@ -53,7 +41,7 @@ export function build(file, name, opts = {}) {
     const dir = join(BUILD, name, basename(file, '.poly'), `${module.name}.${machine}`);
     mkdirSync(dir, { recursive: true });
     for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);
-    out.push({ machine, dir, lowered, module, check, stripped });
+    out.push({ machine, dir, lowered, module, check });
   }
   return out;
 }

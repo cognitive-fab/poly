@@ -248,7 +248,13 @@ class Checker {
         case 'Liveness':
           if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
           propNames.add(it.name);
-          this.err('PL0901', it, 'liveness properties are checked from milestone M2');
+          // M1-2: a liveness property is checked as far as M1 can (its names and types) and then listed as
+          // not run by the pipeline, which folds the verdict to INCONCLUSIVE at best. It no longer refuses the program.
+          if (it.from) this.expectBool(it.from, this.scope('invariant'));
+          this.expectBool(it.expr, this.scope('invariant'));
+          for (const g of it.fair) {
+            for (const m of g.members) if (!this.actions.has(m.action)) this.err('PL1001', g, `fairness names ${m.action}, which is not an action of ${this.machine!.name}`);
+          }
           break;
         case 'EffectDecl':
           this.err('PL0901', it, 'effects are lowered from milestone M1');

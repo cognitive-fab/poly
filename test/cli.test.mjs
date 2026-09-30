@@ -58,10 +58,12 @@ test('REFUSED, exit 2: a type error stops at stage 0 and lists what did not run'
   assert.match(r.out, /verdict: REFUSED \(exit 2\)/);
 });
 
-test('REFUSED, exit 2: liveness is refused until M2 (S13)', () => {
+test('INCONCLUSIVE, exit 2: a liveness property is listed as not run, and the safety results stand (M1-2)', () => {
   const r = poly('check', src('examples/evidence/outbox-union.poly'));
   assert.equal(r.code, 2);
-  assert.match(r.out, /PL0901 NOT_IN_MILESTONE/);
+  assert.match(r.out, /not run: settles, liveness is checked from milestone M2/);
+  assert.match(r.out, /verdict: INCONCLUSIVE \(exit 2\)  runtime\.OutboxIntent  over 17 states/);
+  assert.doesNotMatch(r.out, /PL0901/);
 });
 
 test('--json: the report, with every diagnostic in poly.diagnostic/1 form', () => {

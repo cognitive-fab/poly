@@ -13,8 +13,7 @@ test('the sources exist', () => assert.ok(SOURCES.length >= 12, SOURCES.join('\n
 
 for (const file of SOURCES) {
   test(`strict validate(): ${basename(file)}`, async () => {
-    // The OutboxIntent forms state liveness, refused until M2 (S13); it is removed before lowering.
-    for (const b of build(file, 'validate', { stripLiveness: true })) {
+    for (const b of build(file, 'validate')) {
       const mod = requireModule(b.dir);
       const problems = mod.instance({}).validate();
       assert.deepEqual(problems, []);

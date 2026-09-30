@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { parse } from '@poly/lang';
 import { checkModule, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
+import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { translationValidate, confirmWitness, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
@@ -36,6 +37,8 @@ export interface StageRecord {
 export interface MachineCheck {
   machine: string;
   stages: StageRecord[];
+  /** Properties that were not checked, with the reason and the milestone that checks them (M1-2). */
+  notRun: { property: string; reason: string }[];
   diagnostics: Diagnostic[];
   verdict: Verdict;
   instance?: InstanceRecord;
@@ -113,7 +116,12 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const engines = report.engines;
 
   for (const machine of checked.machines.keys()) {
-    const mc: MachineCheck = { machine, stages: [], diagnostics: [], verdict: 'CLEAN' };
+    const mc: MachineCheck = { machine, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+    // M1-2: liveness is checked from M2; each property is listed, never silently dropped (no silent clean).
+    const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine);
+    for (const it of decl?.items ?? []) {
+      if (it.kind === 'Liveness') mc.notRun.push({ property: it.name, reason: 'liveness is checked from milestone M2 (PS6)' });
+    }
     report.machines.push(mc);
     mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
     if (refused) {
@@ -293,7 +301,8 @@ function finish(report: CheckReport, module?: Module): CheckReport {
     const decl = module?.decls.find((d) => d.kind === 'Machine' && d.name === m.machine);
     for (const d of m.diagnostics) if (d.at.line === undefined && decl?.span) { d.at.line = decl.span.line; d.at.col = decl.span.col; }
   }
-  for (const m of report.machines) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!)]);
+  // A property not run keeps the verdict from CLEAN: INCONCLUSIVE at best, FINDINGS if a safety check failed (M1-2).
+  for (const m of report.machines) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length ? ['INCONCLUSIVE' as Verdict] : [])]);
   const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict)]);
   report.verdict = v;
   report.exit = EXIT_CODES[v];
