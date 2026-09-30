@@ -80,6 +80,7 @@ const CODE = {
   PL3901: ['BOUND_HIT', 'inconclusive'],
   PL5301: ['TRANSIT_BOUND_HIT', 'inconclusive'],
   PL5302: ['INSTANCE_BOUND_HIT', 'inconclusive'],
+  PL5101: ['CHILDKEY_COLLISION', 'finding'],
   PL5401: ['CONFIGURATION_INVARIANT', 'finding'],
   PL5402: ['STUCK', 'finding'],
   PL5404: ['SEND_TO_NONE', 'finding'],
@@ -219,13 +220,14 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     const next = [...mu];
     let toNone = false;
     let over = false;
+    let collision: { key: string; address: string } | null = null;
     // PS2.2: E in statement order, so a child exists before a send of the same step reaches it.
     for (const x of st.effects) {
       if (x.type === 'create') {
         // S60: a new instance at <parent>/<k>; N counts every instance (PS13.5).
-        // A second spawn of a key would make no new instance, so it is reported before the bound (S83, open).
+        // S83: a second spawn of a live key makes no new instance: PL5101, reported before the bound.
         const t = index.get(x.address);
-        if (t !== undefined && sigma[t] !== null) throw new Error(`poly-ref: ${inst.name} spawns ${x.key} again, and ${x.address} already exists; one key names one address (S60, S83)`);
+        if (t !== undefined && sigma[t] !== null) { collision = { key: x.key, address: x.address }; break; }
         // The step is not explored, so nothing after the spawn is either.
         if (sigma.filter((y) => y !== null).length + 1 > N) { over = true; break; }
         if (t === undefined) throw new Error(`poly-ref: ${inst.name} creates ${x.address}, which is outside the instances the bound admits`);
@@ -241,6 +243,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     }
     const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone, ...(creation ? { creation } : {}) };
     const g: GlobalState = { sigma, mu: sortMu(next) };
+    if (collision) return { label, outcome: { kind: 'collision', state: g, field: collision.address, value: collision.key } };
     if (over) return { label, outcome: { kind: 'bound', state: g, field: 'instances', value: N + 1 } };
     // PS13.5: a step that would exceed B messages in transit is not explored.
     // PS4.2a before PS13.5: a post-state outside a declared type is no state at all, however many messages it sends.
@@ -372,7 +375,8 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     if (o.kind === 'state' || reported.has(`${o.kind}:${o.field}`)) continue;
     reported.add(`${o.kind}:${o.field}`);
     const path = [...pathTo(g, e.from), e];
-    if (o.field === 'instances') findings.push(finding('PL5302', undefined, `a detached spawn would make ${String(o.value)} instances, above the bound ${decl.bounds?.instances}; it is not explored`, path, { field: 'instances', state: o.state }));
+    if (o.kind === 'collision') findings.push(finding('PL5101', undefined, `${instances[(e.label as GlobalLabel).instance].name} spawns ${String(o.value)} again, and ${o.field} exists; one key names one address, so the spawn creates nothing (S60, S83)`, path, { field: o.field, state: o.state }));
+    else if (o.field === 'instances') findings.push(finding('PL5302', undefined, `a detached spawn would make ${String(o.value)} instances, above the bound ${decl.bounds?.instances}; it is not explored`, path, { field: 'instances', state: o.state }));
     else if (o.field === 'transit') findings.push(finding('PL5301', undefined, `a step would put ${String(o.value)} messages in transit, above the bound ${decl.bounds?.transit}; it is not explored`, path, { field: 'transit', state: o.state }));
     else if (o.kind === 'escape') findings.push(finding('PL3102', undefined, `${o.field} can leave its type (value ${keyOf(o.value)})`, path, { field: o.field, state: o.state }));
     else findings.push(finding('PL3901', undefined, `${o.field} can leave its check domain (value ${keyOf(o.value)}); the state is not explored`, path, { field: o.field, state: o.state }));

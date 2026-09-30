@@ -118,12 +118,25 @@ test('S60: the checker: wiring, families, scope and key clashes', () => {
   assert.ok(swap('spawn detached Worker as w -> Start(n: 1)', 'spawn detached Worker as ws[0] -> Start(n: 1)').includes('PL0901'));
 });
 
-test('S83 (open): a second spawn of one key in a configuration stops the exploration with an error, never a clean verdict', async () => {
+test('S83: a second spawn of a live key in a configuration is PL5101, with its witness, before the instance bound', async () => {
   const src = SRC.replace('    require !started else reject "started"\n', '');
   const { dir, f } = write('again', src);
   const r = await checkFile(f, { root: dir });
-  assert.equal(r.verdict, 'ERROR', render(r));
-  assert.match(r.error, /spawns w again, and d\/w already exists/);
+  assert.notEqual(r.verdict, 'ERROR', render(r));
+  const c = r.configurations[0];
+  const d = c.diagnostics.find((x) => x.code === 'PL5101');
+  assert.ok(d, render(r));
+  assert.match(d.message, /d spawns w again, and d\/w exists/);
+  assert.equal(d.witness.trace.filter((s) => s.global.text === 'Go@d').length, 2);
+  // Checked before the bound: instances 2 is full once d/w exists, and the collision is still what is reported.
+  assert.ok(!c.diagnostics.some((x) => x.code === 'PL5302'), render(r));
+  // Its exported test fails on the program, at the second spawn.
+  const out = exportWitness(findWitness(JSON.parse(JSON.stringify(r)), d.witness.id), { root: dir, kind: 'test' });
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const run = spawnSync(process.execPath, ['--test', out], { encoding: 'utf8', env });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stdout, /spawns w again, and d\/w exists/);
 });
 
 test('S68: the exported witness test of a configuration invariant walks the detached spawn through the lowered artefacts', async () => {

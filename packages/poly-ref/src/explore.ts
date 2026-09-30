@@ -29,7 +29,9 @@ export interface Label {
 export type Outcome<S> =
   | { kind: 'state'; state: S }
   | { kind: 'escape'; state: S; field: string; value: Value }
-  | { kind: 'bound'; state: S; field: string; value: Value };
+  | { kind: 'bound'; state: S; field: string; value: Value }
+  /** S83: a step that spawns a detached key whose instance exists; it creates nothing and is not explored. */
+  | { kind: 'collision'; state: S; field: string; value: Value };
 
 export interface System<S> {
   initial(): S;

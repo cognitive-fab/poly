@@ -255,7 +255,9 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
           // S60: the child starts in its machine's initial state, with its creation action as its first message.
           const address = child((x as { childKey?: string }).childKey!);
           const made = byName.get(address);
-          if (!made || sigma.has(address)) return; // outside the bound, or a second spawn of the key: the check reported it
+          // S83: a second spawn of a live key is the defect PL5101 names; outside the bound, the check reported it.
+          if (made && sigma.has(address) && spec.code === 'PL5101') assert.fail(`${g.instance} spawns ${(x as { childKey?: string }).childKey} again, and ${address} exists (S83)`);
+          if (!made || sigma.has(address)) return;
           sigma.set(address, flatten(made.init, made.machine));
           const creation = (x as { creation?: { action: string; data: Flat } }).creation;
           if (creation) mu.push({ target: address, action: creation.action, data: creation.data, creation: true });
