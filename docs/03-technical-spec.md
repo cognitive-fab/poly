@@ -1028,7 +1028,7 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
   - workflow status derivation (modelled on the hatchet study);
   - leader election roles (modelled on the raft study).
 
-  Each task has a written brief and a **host interface**: a small TypeScript API (for example `place(order)`, `pay(order, amount)`) that every arm must implement. The poly arm implements it with a thin generated adapter over the runtime API.
+  Each task has a written brief and a **host interface**: a small TypeScript API (for example `place(order)`, `pay(order, amount)`) that every arm must implement. The poly arm implements it with a thin generated adapter over the runtime API; in M3 the adapter drives polyrun's kernel directly (decision M3-4).
 - **Arms.**
   1. TypeScript alone.
   2. TypeScript, then polygraph after the fact, with the agent allowed to fix findings.
@@ -1041,7 +1041,7 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
 
   | Oracle | Written by | Form | Role |
   |---|---|---|---|
-  | O1 · scenario tests | a person who has read the brief and has **not** seen any reference machine | end-to-end tests against the host interface | **primary** |
+  | O1 · scenario tests | an independent agent session that has read the brief and host interface and has **not** seen any reference machine, oracle or arm output (decision M3-1) | end-to-end tests against the host interface | **primary** |
   | O2 · hidden invariants | the task author | predicates over the host interface's observable state | secondary |
   | O3 · reference traces | the task author's reference machine | traces replayed through the host interface | secondary |
 
