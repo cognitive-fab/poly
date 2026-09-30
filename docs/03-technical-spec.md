@@ -78,8 +78,9 @@ Property    = "invariant" Ident ":" Expr
             | "reject" "property" Ident ":" Expr
             | "path" "property" Ident ":" Expr
             | "compose" "invariant" Ident ":" Expr
-            | "liveness" Ident ":" ( "eventually" Expr | Expr "leads" "to" Expr )
-              "under" "fair" "{" Group { "," Group } "}" ;
+            | "liveness" Ident ":" [ ( "forall" | "exists" ) Ident "in" Ident ":" ]
+              ( "eventually" Expr | Expr "leads" "to" Expr )
+              [ "under" "fair" "{" Group { "," Group } "}" ] ;
 Group       = Fair { "|" Fair } ;
 Fair        = Ident [ "(" "*" ")" ] ;
 Effect      = "effect" Ident "(" [ Param { "," Param } ] ")" "{" { EffectItem } "}" ;
@@ -93,7 +94,7 @@ Configuration = "configuration" Ident "{" { Instance | Inputs | Bounds | Propert
 Instance    = Ident [ "[" Int "]" ] ":" QualIdent [ "{" Ident ":" Expr { "," Ident ":" Expr } "}" ] ;
 Inputs      = "inputs" "{" InputRef { "," InputRef } "}" ;
 InputRef    = Ident [ "[" ( Int | "*" ) "]" ] "." Ident ;
-Bounds      = "bounds" "{" "transit" Int [ "," "instances" Int ] "}" ;
+Bounds      = "bounds" "{" "transit" Int [ "," "instances" Int ] "}" ;   (* required, S62 *)
 Domain      = "{" Literal { "," Literal } "}" | Int ".." Int ;
 ```
 
@@ -163,7 +164,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - `int`;
   - `string`;
   - `map<K, T>`, where the key type `K` is an enum or an integer range `0..n`. A map keyed by an enum lowers to a JSON object keyed by constructor name. A map keyed by `0..n` lowers to a JSON array of length `n + 1`. A range key that does not start at 0 is `PL1602 ARRAY_MAP_NOT_ZERO_BASED`. So a corpus field such as `taskStatuses: ["QUEUED", "RUNNING", "FAILED"]` is `map<0..2, Status>`;
-  - **tagged unions** `type U = C1 { … } | … | Cn { … }` (PS1.4), finite when their payload fields are. Handlers read a union with `match` or `is` and write it as a whole value. The lowering flattens it to a tag field and nullable payload fields, with an automatic `shape:` invariant (PS9.1b). Constructors of one union may share a payload name only with the same type, and then share one flat field; the same name with two types is `PL1601 PAYLOAD_TYPE_CONFLICT`.
+  - **tagged unions** `type U = C1 { … } | … | Cn { … }` (PS1.4), finite when their payload fields are. Handlers read a union with `match` or `is` and write it as a whole value. The lowering flattens it to a tag field and nullable payload fields, with an automatic `shape:` invariant (PS9.1b). Below the top of a field (a map's value, a payload, a parameter) it lowers to one JSON object `{ "$": "C", p: v, … }` with exactly its constructor's payloads, each lowered by the same rule; a union with no payload stays its constructor's name (S65). An effect parameter or a `childState` field of such a type is `PL0901`. Constructors of one union may share a payload name only with the same type, and then share one flat field; the same name with two types is `PL1601 PAYLOAD_TYPE_CONFLICT`.
   - **records** `type R = { f1: T1, …, fn: Tn }` (S25): a nominal type whose values have every field and no tag. A record is finite when its fields are; it has no optional fields and may not refer to itself, directly or through other types. It lowers to a plain JSON object and compares field by field. A record literal `{ f1: e1, … }` lists every field (`PL1502`). A literal `{ k: v, … }` is a map or a record according to its expected type, as S22 resolves constructors; with no expected type it is `PL1005`. A record may be used wherever a type may: as a field, a parameter, a payload, or a map value. `r.f` reads field `f` of a record value.
 - **PT3.2** Every field and parameter has a finite check domain (PF1.2). Enums, `bool`, ranges and maps over finite value types are finite by construction. `int` and `string` need an explicit `check` clause. Without one, the compiler reports `PL1101 UNBOUNDED_DOMAIN`.
 - **PT3.3** A `check` clause narrower than the runtime type is an assumption. It is written to `dataDomain` and to the certificate's `domains`, and it is graded by `poly grade` (polynv).
@@ -344,9 +345,9 @@ The five kinds and their meanings are defined in PS5. This section fixes how eac
 | `liveness n: … under fair { … }` | eventually or leads-to under weak fairness (PS5.5, PS6) | none (no engine format) | `poly-ref` over the explored graph (PS6.4) |
 | (automatic) `domain:<field>` | invariant (PT3.5) | `stateInvariants` | polygraph BFS |
 | (automatic) deadlock freedom | no reachable non-terminal state without an accepting action (PS5.6) | none | `poly-ref` over the explored graph |
-| (automatic) emit without state change | no reachable accepted step with a non-empty effect sequence leaves the state unchanged (S33) | none (the lowered effects mapper) | polyrun `check-effects` (`identity-accept-emits`), confirmed by `poly-ref` |
+| (automatic) emit without state change | no reachable accepted step whose effect sequence holds an effect, a timer or a child intent leaves the state unchanged (S33, S63) | none (the lowered effects mapper) | polyrun `check-effects` (`identity-accept-emits`), confirmed by `poly-ref` |
 
-**Emit without state change (S33).** A step that is accepted, emits at least one intent and leaves the state unchanged is `PL4002 EMIT_WITHOUT_STATE_CHANGE`, a finding in the path-property range, whatever the effect's class. The step stays legal (PS3.4); the finding is sound on **check**: every input is offered in every state (PS4.1), the step is deterministic, and its post-state is its pre-state, so it is enabled again and repeats its effects without limit. The witness is the path to the step followed by two repetitions. polyrun `check-effects` reports it as `identity-accept-emits`; poly-ref confirms it as an accepted step with a non-empty effect sequence and an unchanged state, and the two must name the same steps (a disagreement is `PL2501`). The fix is to record the emission in the state. A person may accept the finding under PT12.5.
+**Emit without state change (S33).** A step that is accepted, emits at least one effect, timer or child intent and leaves the state unchanged is `PL4002 EMIT_WITHOUT_STATE_CHANGE`, a finding in the path-property range, whatever the effect's class. A `send` is not counted (S63): a reply is one step per request, and in a configuration a message takes one step at its receiver (PS13.3, PS14.3), so the repetition this finding is about needs a second request; the consequences of a repeated send are checked where its receiver is. The step stays legal (PS3.4); the finding is sound on **check**: every input is offered in every state (PS4.1), the step is deterministic, and its post-state is its pre-state, so it is enabled again and repeats its effects without limit. The witness is the path to the step followed by two repetitions. polyrun `check-effects` reports it as `identity-accept-emits`; poly-ref confirms it as an accepted step with a non-empty effect sequence and an unchanged state, and the two must name the same steps (a disagreement is `PL2501`). The fix is to record the emission in the state. A person may accept the finding under PT12.5.
 
 The engine formats keep their names (`transitionInvariants`, `effectInvariants`). Only the poly keywords changed, so each keyword now says what kind of property it is.
 
@@ -427,7 +428,7 @@ A completion action that declares `childKey: string` has as its check domain the
 
 **One action, one source of delivery (S52).** The runtime delivers a child's completion and a parent-terminal cancel itself, and refuses them from outside (K9). An action that is both a child's completion or cancel action and an effect completion (`ok`, `failed`, `exhausted`) or a timer's action would then be refused when the effect or the timer delivers it. So it is `PL6102 SHARED_COMPLETION_ACTION`, at the second wiring.
 
-These are **attached** children: checked as a cascade (PT7) and co-located with their parent on one kernel shard (PS7.4). `spawn detached …` creates a separate actor instead. It returns the child's address to the parent (`as pay` binds a `Ref`). From then on the two communicate only by `send`, and they are checked together as a configuration (PT7a). A detached spawn takes no `on complete` wiring, because completion is a message the child sends.
+These are **attached** children: checked as a cascade (PT7) and co-located with their parent on one kernel shard (PS7.4). `spawn detached …` creates a separate actor instead (S60, built in M2). Its address is `<parent address>/<k>`, known in the handler: `as k` binds `k`, a local of the handler of type `Ref<M>`, which the handler may store. The instance starts in `M`'s initial state and takes its creation action (S43) as its first message. From then on the two communicate only by `send`, and they are checked together as a configuration (PT7a). A detached spawn takes no `on complete` wiring, because completion is a message the child sends. polyrun gains a `createInstance` intent for it.
 
 ### PT6.5 Handlers receive capabilities, not ambient authority
 
@@ -546,7 +547,9 @@ With the order waiting for `Taken`, the configuration is clean over 44 global st
 
 **Lowering and runtime.**
 
-- A `send` lowers to a new built-in intent kind, `sendTo { target, action, data }`, beside polyrun's `spawnChild` and `signalChild`. This is a small change to polyrun (architecture §2a).
+- A `send` lowers to a new built-in intent kind, `sendTo { target, action, data }`, beside polyrun's `spawnChild` and `signalChild`. This is a small change to polyrun (architecture §2a). An address is the target instance's id, and `none` is `null` (S58).
+- `self` is legal only as a whole argument of a `send`. It lowers to the marker `{ "$ref": "self" }`, which the kernel replaces with the sender's instance id when it writes the message, since neither the acceptor nor the mapper knows that id (S58). `send … as n` is `PL0901`.
+- Until polyrun has `sendTo`, stage 3 of a machine that sends is poly-ref's alone and says so, and a module that sends does not run under polyrun (S58).
 - The runtime delivers it through the outbox, at least once, as a `dispatch` to the target with the intent's idempotency key as its `actionId`. So each message takes exactly one step at its receiver (K4, PS14.3).
 - A delivery the receiver rejects is a rejected step there. The sender is not notified unless the receiver sends a reply, which is the actor discipline.
 - `fifo` between a pair of instances is available only when they share a kernel shard, and it is checked with the narrower arrival order.
@@ -555,7 +558,9 @@ With the order waiting for `Taken`, the configuration is clean over 44 global st
 
 **A send to `none` (S29).** Inside a configuration, a step that sends to `none` is `PL5404 SEND_TO_NONE`, a finding with the path to the step; the message is not added to `μ`. In a single-machine check, the send is an ordinary intent (PS4.4).
 
-**Configurations in the pipeline.** Stage 4b of the check pipeline (architecture §5) explores every declared configuration. Every verdict carries the configuration's bounds (PT12.3a). A bound hit is `INCONCLUSIVE` (`PL5301`, `PL5302`), never `CLEAN`.
+**Configurations in the pipeline.** Stage 4b of the check pipeline (architecture §5) explores every declared configuration. Every verdict carries the configuration's bounds (PT12.3a). A bound hit is `INCONCLUSIVE` (`PL5301`, `PL5302`), never `CLEAN`. A configuration without `bounds { transit n }` is `PL5303 CONFIGURATION_WITHOUT_BOUNDS` (S62): the program may type-check perfectly, and without the bound the exploration need not end. `instances n` is required only when a machine of the configuration spawns detached children, and reaching it is `PL5302` (S60). A configuration whose machine spawns attached children is `PL0901` until a later milestone (S61).
+
+**Liveness in a configuration (S56).** A liveness property may begin with `forall i in g:`, which scopes over the whole `leads to` (PS13.6), and may leave out `under fair { … }`: delivery is fair by PS14.2, and an input is assumed fair only when the clause names it. In a machine the clause stays required.
 
 ## PT8. Policies
 
@@ -803,7 +808,7 @@ This is the only new engine integration (architecture section 7.2).
     }
 
     invariant at-most-once: steps[M1] <= 1 && steps[M2] <= 1
-    invariant in-order: steps[M2] == 1 implies steps[M1] == 1
+    invariant in-order: steps[M2] >= 1 implies steps[M1] >= 1      // M2 never steps before M1 (S64)
     liveness exactly-once:
       eventually (status[M1] == Acked && status[M2] == Acked && steps[M1] == 1 && steps[M2] == 1)
       under fair { Emit(*), Send(*), Resend(*), DeliverReq(*), DeliverAck(*) }
@@ -901,8 +906,8 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL1xxx | names, types, domains | `PL1001 UNKNOWN_NAME`, `PL1002 DUPLICATE_DECLARATION`, `PL1005 AMBIGUOUS_CONSTRUCTOR`, `PL1101 UNBOUNDED_DOMAIN`, `PL1201 TYPE_MISMATCH`, `PL1202 READ_OF_PRIMED_FIELD`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1204 DIVISION_BY_ZERO`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1502 INCOMPLETE_MAP_LITERAL`, `PL1503 UNREACHABLE_ARM`, `PL1504 UNUSED_BINDER`, `PL1601 PAYLOAD_TYPE_CONFLICT`, `PL1602 ARRAY_MAP_NOT_ZERO_BASED`, `PL1701 NOT_PREFIX_CLOSED` |
 | PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
-| PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` |
-| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
+| PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` (effects, timers and child intents; not `send`, S63) |
+| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5303 CONFIGURATION_WITHOUT_BOUNDS`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
 | PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
