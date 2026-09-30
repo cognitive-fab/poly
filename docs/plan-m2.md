@@ -121,7 +121,25 @@ Step 5 reads PS13.3 and S60 as follows, each recorded here so the review can che
 - **The random-order fix test can pass vacuously** if few fixes overlap. The source is chosen so that at least a third of the orders refuse some fix as stale, and the test counts both outcomes.
 - **Suite length.** Narrowing the fault sweep (step 1) comes first, so the new tests do not push `npm test` past its current length.
 
-## 9. Appendix: the embedded surface as built
+## 9. What was built, and what was measured
+
+Every step of section 4 is built, in the commits from 0e1325d to 7f7202b (the range for the review is `9e1d045..7f7202b`). `npm test` runs 578 tests, all passing, in about 69 seconds; step 1 had brought it from about 95 to about 32, and M2's new tests (the delivery liveness, the random-order fixes, tsc over the printed sources) bring it back to 69.
+
+| Gate item | Measured |
+|---|---|
+| AC3 | Nine seeded kinds (invariant, step, reject and path properties, deadlock, domain escape, configuration invariant, stuck, liveness): each exported test fails on the unfixed program with the violated predicate, refuses the stale build, and passes after the fix and a rebuild. |
+| Fixes | A source with 13 fixable diagnostics and 15 fixes, 120 orders from seed 20260930: 1,191 applications, each with its precondition true and changing only its target node; 609 PL0201 refusals; every order met a stale fix; the source parses after every attempt. |
+| Liveness evidence | `exactly-once` holds for the in-order (1,147 states) and parallel (2,368 states) `Delivery` workers that keep dedupe records; `settles` holds for OutboxIntent v0.3 and the union form, and fails for v0.2 with a fair component at `(Allowed, 3, 1, T, F)` and at `(Allowed, 3, 2, T, T)`; the checkout's `settle` holds for the waiting order. The evidence scripts print the same results. |
+| Embedded surface | All 85 conformance and example sources print and read back to the same digest. The turnstile, the orders example and `workshop` (effects, timers, attached children) are written by hand in the embedded surface: same digest and same verdict as their standalone twins, and `tsc --noEmit` passes on them. The printed sources type-check except one `TS2839` in `records.poly` (S84). |
+| Typed decisions | PD1-A1 to PD1-A4 with a recorded provider: the router runs under polyrun and journals `{ branch: Refund, conf: 910, margin: 420 }`; poly-ref explores 5 × 2 × 2 completions in `Routing`; a refund on a margin below 0.3 is found and its exported test fails before the fix; a sixth branch and a confidence of 1001 are rejected at dispatch with `outside-check-domain` and journaled; `PL1205`, `PL6201` and `PL6202` each have a source, and `require conf >= 0` does not gate a decision. |
+| Detached children | The dispatcher and worker configuration is clean over 5 global states; the worker is created at `d/w` with `Start` delivered first; above `instances n` a spawn is `PL5302` and the verdict `INCONCLUSIVE`. |
+| Handler lint | Eleven forms of ambient authority are each `PL6401` at their node; a violating handler refuses the project; a project with effects and no `handlers` field lists the lint as not run. |
+| Standing rule | Every artefact is read back, `liveness.mjs` and the decision entries of the manifest included; seven broken variants of the artefacts are each caught on the sources listed beside them. |
+| No regressions | Every M0 and M1 gate number is unchanged. The tests that recorded behaviour M2 changes were updated with the change and its id: liveness is checked rather than listed as not run (liveness, checkout, delivery, CLI and evidence tests), a detached spawn is built (S60), a manifest may name `.ts` modules (S71), and the codes no `.poly` source raises (`PL0201`, `PL0301`, `PL6401`) are exempt from the one-source-per-code test with the test that covers each. |
+
+Five spec issues are open. S81 (`PL6102` still names cancel actions) changes nothing until ruled. S82 (PS6.4's prefix avoids the goal), S83 (a second spawn of a detached key stops the exploration), S84 (tsc and object-literal equality) and S85 (the answers PD1.4d's gate quantifies over) are built as proposed. The checkout liveness script (S77) was written from 04-semantics without reading poly-ref, and reproduces `config_check.py` first, but its author also wrote poly-ref, so its independence is limited; it counts only after the owner's review. The fix, witness and embedded forms of PD1's constructs are the ones this milestone built; M3 decides which surface agents use.
+
+## 10. Appendix: the embedded surface as built
 
 PT2.5's table is built as written. Where it leaves a form open, these are the forms `poly-embed` prints and reads (S71).
 
@@ -144,4 +162,4 @@ The printer parenthesises by TypeScript's precedence, not poly's, so the tree ts
 
 ## Conclusion
 
-M2 is planned in nine steps. The standing rule is in place and enforced from the first commit. No engine change is on M2's path: decisions reuse polyrun's completion maps, and detached spawns and sends stay semantics-only until the owner's polyrun changes land. Twelve spec issues (S68 to S79) need a ruling; the three that liveness needs first (S73, S74, S77) are small, and the larger ones (the witness target, the fix catalogue, the embedded mapping and PD1's grammar) each come before the step that builds on them.
+M2 was planned in nine steps, and all nine are built. Liveness, witnesses and fixes, detached children, the embedded surface, the handler lint and typed decisions each meet the gate item section 5 gives them, and `npm test` passes. No engine was changed: decisions reuse polyrun's completion maps, and detached spawns and sends stay semantics-only until the owner's polyrun changes land. Five spec issues (S81 to S85) wait for a ruling, and the checkout liveness script waits for the owner's review before it counts.
