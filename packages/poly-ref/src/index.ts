@@ -11,3 +11,4 @@ export { alpha, flatten, flattenData } from './alpha.js';
 export { translationValidate, type TvResult } from './tv.js';
 export { loadLoweredModule } from './load.js';
 export { confirmWitness, confirmEffectsWitness, stateDigestOf, type Confirmation, type WitnessToConfirm, type FlatStep } from './confirm.js';
+export { checkJoint, jointStep, stimuliAt, jointKey, jointPlain, MAX_CASCADE_DEPTH, type Joint, type JointReport, type Stimulus, type CascadeStep } from './joint.js';

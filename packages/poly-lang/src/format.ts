@@ -226,8 +226,11 @@ class Printer {
       case 'send': return `send ${this.expr(s.to!, 0)} <- ${call}${s.as ? ` as ${s.as}` : ''}`;
       case 'signal': return `signal ${s.extra[0]} -> ${call}`;
       case 'spawn': {
-        let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}(${this.args(s.args)})`;
-        for (let k = 0; k < s.extra.length; k += 2) w += s.extra[k] === 'complete' ? ` on complete -> ${s.extra[k + 1]}` : ` on parent terminal -> ${s.extra[k + 1]}`;
+        let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}`;
+        for (let k = 0; k < s.extra.length; k += 2) {
+          if (s.extra[k] === 'create') w += ` -> ${s.extra[k + 1]}(${this.args(s.args)})`;
+          else w += s.extra[k] === 'complete' ? ` on complete -> ${s.extra[k + 1]}` : ` on parent terminal -> ${s.extra[k + 1]}`;
+        }
         return w;
       }
     }
@@ -264,6 +267,7 @@ class Printer {
       case 'Index': return `${this.expr(e.object, 1, noStruct)}[${this.expr(e.index, 0)}]`;
       case 'Call': return `${e.callee}(${e.args.map((a) => this.expr(a, 0)).join(', ')})`;
       case 'Unary': return wrap(`${e.op}${this.expr(e.arg, 2, noStruct)}`, 2);
+      case 'Spawned': return `${e.key} spawned`;
       case 'Is': return wrap(`${this.expr(e.expr, 4, noStruct)} is ${e.ctors.join(' | ')}`, 5);
       case 'In': return wrap(`${this.expr(e.expr, 4, noStruct)} in { ${e.set.map((x) => this.expr(x, 0)).join(', ')} }`, 5);
       case 'Binary': {

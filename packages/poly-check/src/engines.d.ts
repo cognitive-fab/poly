@@ -25,6 +25,35 @@ declare module '@cognitive-fab/polygraph/scripts/check.mjs' {
   }): PolygraphResult;
 }
 
+// polyrun's product checker, read from polyrun/src/check-product.mjs of @cognitive-fab/polygraph 8.3.1.
+declare module '@cognitive-fab/polygraph/polyrun/src/check-product.mjs' {
+  export interface ProductStep {
+    stimulus: { target: string; action: string; data: unknown } | null;
+    cascade: { target: string; action: string; stepKind: string; reason?: string }[];
+    joint: unknown;
+  }
+  export interface ProductViolation {
+    invariant: string;
+    kind: 'state' | 'transition' | 'doctrine' | 'poison';
+    path: ProductStep[];
+    detail?: string;
+  }
+  export interface ProductResult {
+    ok: boolean;
+    statesExplored: number;
+    capHit: boolean;
+    violations: ProductViolation[];
+    notes: string[];
+    nondeterministic?: boolean;
+  }
+  export function checkProduct(options: {
+    parent: { machineId: string; module: string; contract: string; mapper: string; manifest?: string };
+    children: { machineId: string; module: string; contract: string }[];
+    invariants: string;
+    maxStates?: number;
+  }): Promise<ProductResult>;
+}
+
 // polyrun's effect-emission checker, read from polyrun/src/check-effects.mjs of @cognitive-fab/polygraph 8.3.1.
 declare module '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs' {
   export interface EffectsViolation {

@@ -250,6 +250,16 @@ export function isoDuration(ms: number): string {
 function loweredIntents(x: Intent): unknown[] {
   if (x.type === 'effect') return [{ kind: x.kind, payload: plainRecord(x.payload) }];
   if (x.type === 'cancel') return [{ kind: 'cancelTimer', key: x.key }];
+  // PT6.4, S43: absent wiring is left out of the intent, as polyrun reads it.
+  if (x.type === 'spawn') {
+    return [{
+      kind: 'spawnChild', machineId: x.machineId, childKey: x.key,
+      ...(x.create ? { creation: { action: x.create.action, data: plainRecord(x.create.data) } } : {}),
+      ...(x.onComplete ? { onComplete: x.onComplete } : {}),
+      ...(x.onParentTerminal ? { onParentTerminal: x.onParentTerminal } : {}),
+    }];
+  }
+  if (x.type === 'signal') return [{ kind: 'signalChild', childKey: x.key, action: x.action, data: plainRecord(x.data) }];
   return [{ kind: 'cancelTimer', key: x.key }, { kind: 'timer', key: x.key, fireIn: isoDuration(x.ms), action: x.action, data: plainRecord(x.data) }];
 }
 

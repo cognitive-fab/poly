@@ -247,3 +247,14 @@ test('polywatch: an effect kind that is a JavaScript prototype name still lowers
   const manifest = JSON.parse(readFileSync(join(b.dir, 'effects.manifest.json'), 'utf8'));
   assert.deepEqual(Object.keys(manifest.effects), ['__proto__']);
 });
+
+test('two checks of one module in one process read each its own path properties (no stale import)', async () => {
+  // polyrun imports effect-invariants.mjs by path, and Node caches an import by URL; the build dir is the same.
+  const src = (bound) => `module stale\nmachine M {\n  state { n : 0..2 = 0 }\n  terminal n == 2\n  action Go()\n  on Go { require n < 2 else reject "done"  n' = n + 1  emit ping(1) }\n  path property few: count("k.ping") <= ${bound}\n  effect ping(v: 0..1) {\n    kind "k.ping"\n    labels { exec }\n  }\n}\n`;
+  const loose = await checkFile(write('stale.poly', src(5)), { root: OUT });
+  assert.deepEqual(loose.machines[0].diagnostics.map((d) => d.code), []);
+  const tight = await checkFile(write('stale.poly', src(1)), { root: OUT });
+  const f = tight.machines[0].diagnostics.filter((d) => d.code === 'PL4001');
+  assert.equal(f.length, 1);
+  assert.match(f[0].engine, /polyrun/, 'polyrun read the new bound');
+});

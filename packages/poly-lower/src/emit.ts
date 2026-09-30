@@ -8,7 +8,21 @@
 // the handler frames everything its body never writes.
 import type * as A from '@poly/core';
 import type { MachineFacts, Ty, TypeEnv } from '@poly/core';
-import { effectKind, durationMs } from '@poly/core';
+import { effectKind, durationMs, childSpec } from '@poly/core';
+
+/** The module name, from a child spec's machine id or the facts (S28). */
+function moduleOf(cx: Cx): string {
+  if (!cx.module) throw new Error('poly-lower: a spawn needs the module name');
+  return cx.module;
+}
+
+/** An intent's arguments against declared parameters, as `"p": value` entries. */
+function argList(s: A.IntentStmt, params: A.Param[], cx: Cx): string[] {
+  return s.args.map((a, i) => {
+    const p = a.name === null ? params[i] : params.find((x) => x.name === a.name)!;
+    return `${q(p.name)}: ${expr(a.value, cx)}`;
+  });
+}
 
 /** An ISO-8601 duration, the form polyrun's `fireIn` reads: 1800000 ms is PT30M, 200 ms is PT0.2S. */
 export function isoDuration(ms: number): string {
@@ -19,7 +33,7 @@ export function isoDuration(ms: number): string {
 }
 import { isPayloadUnion, type Layout } from './layout.js';
 
-export type Mode = 'handler' | 'state' | 'step' | 'reject' | 'init';
+export type Mode = 'handler' | 'state' | 'step' | 'reject' | 'init' | 'compose';
 
 export interface Cx {
   facts: MachineFacts;
@@ -30,6 +44,9 @@ export interface Cx {
   stateVar: string;
   /** The variable that holds the step's data. */
   dataVar: string;
+  /** The module's name and declarations, for spawns and signals (PT6.4). */
+  module?: string;
+  moduleDecls?: A.Decl[];
 }
 
 const q = (s: string) => JSON.stringify(s);
@@ -76,6 +93,8 @@ export function expr(e: A.Expr, cx: Cx): string {
         case 'none': return 'null';
         case 'pre':
         case 'post':
+        case 'jointParent':
+        case 'jointChild':
           throw new Error('poly-lower: pre/post outside a member access');
       }
       throw new Error('poly-lower: unreachable');
@@ -84,6 +103,9 @@ export function expr(e: A.Expr, cx: Cx): string {
       // S22: `Type.C` resolved to a constructor.
       const res = cx.facts.resolutions.get(e.id);
       if (res?.k === 'ctor') return cx.env.unions.get(res.union)!.isEnum ? q(res.ctor) : `{ $: ${q(res.ctor)} }`;
+      // PT7: the joint state polyrun's check-product passes, { parent: { state }, children: { k: { state } } }.
+      if (res?.k === 'jointParent') return readField(cx, 'joint.parent.state', res.field);
+      if (res?.k === 'jointChild') return `joint.children[${q(res.key)}].state[${q(res.field)}]`;
       const obj = (e.object as A.NameRef).name;
       // Reject properties and handlers read pre.f from their state variable (PT5; S19 for handlers).
       const v = cx.mode === 'reject' || cx.mode === 'handler' ? cx.stateVar : obj;
@@ -131,6 +153,7 @@ export function expr(e: A.Expr, cx: Cx): string {
       return `{ ${e.entries.map((en) => `${q((en.key as A.NameRef).name)}: ${expr(en.value, cx)}`).join(', ')} }`;
     }
     case 'ArrayLit': return `[${e.items.map((x) => expr(x, cx)).join(', ')}]`;
+    case 'Spawned': return `(joint.children[${q(e.key)}] !== undefined)`;
   }
 }
 
@@ -160,6 +183,10 @@ export interface EmitOptions {
    * rejected step emits nothing, though the kernel calls the mapper on accepted steps only.
    */
   effects?: boolean;
+  /** Test-only fault `unnamed-reject`: the first reject of the acceptors loses its reason (S47). */
+  unnamedReject?: { done: boolean };
+  /** Test-only fault `poison-step`: the first acceptor throws before it writes (S47). */
+  poison?: { done: boolean };
   /** Test-only fault `drop-effect`: the first emit is left out of the mapper; `done` records that it was. */
   dropEffect?: { done: boolean };
 }
@@ -171,8 +198,15 @@ export function resetNames(): void {
   matchCounter = 0;
 }
 
+/** `reject(reason)`; the unnamed-reject fault drops the reason of the first one. */
+function rejectCall(reason: string, opts: EmitOptions): string {
+  if (opts.unnamedReject && !opts.unnamedReject.done) { opts.unnamedReject.done = true; return 'reject()'; }
+  return `reject(${q(reason)})`;
+}
+
 export function stmts(body: A.Stmt[], cx: Cx, indent: string, opts: EmitOptions): string[] {
   const out: string[] = [];
+  if (opts.poison && !opts.poison.done && !opts.effects) { opts.poison.done = true; out.push(`${indent}throw new Error('poisoned by a broken lowering');`); }
   for (const s of body) out.push(...stmt(s, cx, indent, opts));
   return out;
 }
@@ -191,8 +225,8 @@ function branch(body: A.Stmt[], siblingsWrite: Set<string>, cx: Cx, indent: stri
 
 function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
   switch (s.kind) {
-    case 'Require': return [`${ind}if (!${expr(s.cond, cx)}) return ${opts.effects ? '[]' : `reject(${q(s.reason)})`};`];
-    case 'Reject': return [`${ind}return ${opts.effects ? '[]' : `reject(${q(s.reason)})`};`];
+    case 'Require': return [`${ind}if (!${expr(s.cond, cx)}) return ${opts.effects ? '[]' : rejectCall(s.reason, opts)};`];
+    case 'Reject': return [`${ind}return ${opts.effects ? '[]' : rejectCall(s.reason, opts)};`];
     case 'Let': return [`${ind}const l_${s.name} = ${expr(s.expr, cx)};`];
     case 'Assign':
     case 'MapUpdate':
@@ -251,11 +285,32 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       return lines;
     }
     case 'Intent': {
-      if (s.op !== 'emit' && s.op !== 'after' && s.op !== 'cancel') throw new Error(`poly-lower: ${s.op} reached the lowering (PL0901 must refuse it)`);
+      if (s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached')) throw new Error(`poly-lower: ${s.op} reached the lowering (PL0901 must refuse it)`);
       // The acceptor writes and frames; the intents are the mapper's (PT6.1).
       if (!opts.effects) return [];
       if (opts.dropEffect && !opts.dropEffect.done) { opts.dropEffect.done = true; return []; }
       if (s.op === 'cancel') return [`${ind}__E.push({ kind: "cancelTimer", key: ${q(s.target)} });`];
+      if (s.op === 'spawn') {
+        // PT6.4, S43: spawnChild with the creation action and the wiring; absent parts are left out.
+        const spec = childSpec(s, moduleOf(cx));
+        const child = cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec.machine.split('.').pop());
+        const parts = [`kind: "spawnChild"`, `machineId: ${q(spec.machine)}`, `childKey: ${q(spec.key)}`];
+        if (spec.create) {
+          const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === spec.create);
+          if (!act) throw new Error(`poly-lower: no creation action ${spec.create} (the checker must refuse it)`);
+          parts.push(`creation: { action: ${q(spec.create)}, data: { ${argList(s, act.params, cx).join(', ')} } }`);
+        }
+        if (spec.onComplete) parts.push(`onComplete: ${q(spec.onComplete)}`);
+        if (spec.onParentTerminal) parts.push(`onParentTerminal: ${q(spec.onParentTerminal)}`);
+        return [`${ind}__E.push({ ${parts.join(', ')} });`];
+      }
+      if (s.op === 'signal') {
+        const spec = cx.facts.children.get(s.extra[0]);
+        const child = cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec?.machine.split('.').pop());
+        const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
+        if (!spec || !act) throw new Error(`poly-lower: signal ${s.extra[0]} -> ${s.target} is unresolved (the checker must refuse it)`);
+        return [`${ind}__E.push({ kind: "signalChild", childKey: ${q(spec.key)}, action: ${q(s.target)}, data: { ${argList(s, act.params, cx).join(', ')} } });`];
+      }
       if (s.op === 'after') {
         // PT6.3, S26: the compiler cannot know whether the key is armed, so it cancels, then arms.
         const act = cx.facts.machine.items.find((x): x is A.Action => x.kind === 'Action' && x.name === s.target);

@@ -52,6 +52,7 @@ function instanceLine(m: MachineCheck, module: string | null): string {
   const i = m.instance;
   const parts = [...i.domains];
   parts.push(`${i.states} states`);
+  if (i.jointStates !== undefined) parts.push(`${i.jointStates} joint states with its attached children`);
   if (i.bounds.length) parts.push(`bound hit: ${i.bounds.join(', ')}`);
   parts.push(`kernel assumptions ${i.kernelAssumptions.join(', ')}`);
   return `${module}.${m.machine}  over ${parts.join('; ')}`;
@@ -77,6 +78,8 @@ export function render(r: CheckReport): string {
   for (const m of r.machines) for (const x of m.instance?.refOnly ?? []) out.push(`         ${m.machine}: ${x.property} decided by poly-ref alone (it names ${x.actions.join(', ')}, which has no handler; polygraph never takes that step)`);
   // S38: with no path property, polyrun check-effects cannot run, and emission without a state change is poly-ref's alone.
   for (const m of r.machines) if (m.instance?.effectsByRefOnly) out.push(`         ${m.machine}: emission without a state change (PL4002) decided by poly-ref alone (no path property, so polyrun check-effects did not run)`);
+  // A parent with attached children and no compose invariant: check-product needs one, so the joint check is poly-ref's.
+  for (const m of r.machines) if (m.instance?.compositionByRefOnly) out.push(`         ${m.machine}: the joint machine decided by poly-ref alone (no compose invariant, so polyrun check-product did not run)`);
   out.push(`engines: ${Object.entries(r.engines).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   return out.join('\n') + '\n';
 }

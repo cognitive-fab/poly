@@ -668,7 +668,12 @@ class Parser {
         base.target = this.qualName().join('.');
         this.expect('as');
         base.as = this.ident('a child key');
-        base.args = this.args();
+        // S43: an optional creation action, the child's first step.
+        if (this.atPunct('->')) {
+          this.next();
+          base.extra.push('create', this.ident('an action name'));
+          base.args = this.args();
+        }
         if (this.at('on') && this.at('complete', 1)) {
           this.next(); this.next(); this.expect('->');
           base.extra.push('complete', this.ident());
@@ -779,6 +784,12 @@ class Parser {
     const start = this.peek();
     let e = this.primary(noStruct);
     for (;;) {
+      // S48: `k spawned`, in a compose invariant, says the child k exists.
+      if (e.kind === 'Name' && this.at('spawned') && this.peek().line === this.t[this.i - 1].endLine) {
+        this.next();
+        e = this.node<A.Spawned>(start, { kind: 'Spawned', key: e.name });
+        continue;
+      }
       if (this.atPunct('.') && this.peek(1).kind === 'ident') {
         this.next();
         e = this.node<A.Member>(start, { kind: 'Member', object: e, prop: this.ident() });

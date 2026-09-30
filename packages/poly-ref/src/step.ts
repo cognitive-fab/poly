@@ -13,7 +13,9 @@ import { isMap, isUnion, keyOf, mapSet, type State, type Value } from './values.
 export type Intent =
   | { type: 'effect'; kind: string; payload: Record<string, Value> }
   | { type: 'timer'; kind: 'timer'; key: string; action: string; ms: number; data: Record<string, Value> }
-  | { type: 'cancel'; kind: 'cancelTimer'; key: string };
+  | { type: 'cancel'; kind: 'cancelTimer'; key: string }
+  | { type: 'spawn'; kind: 'spawnChild'; key: string; machineId: string; create: { action: string; data: Record<string, Value> } | null; onComplete: string | null; onParentTerminal: string | null }
+  | { type: 'signal'; kind: 'signalChild'; key: string; action: string; data: Record<string, Value> };
 
 /** A duration literal in milliseconds: 200ms, 5s, 2m, 1h (PT2). */
 export function durationMs(text: string): number {
@@ -127,6 +129,16 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
           E.push({ type: 'timer', kind: 'timer', key: st.as, action: st.target, ms: durationMs(st.modifier), data: args(act.params, st.target) });
         } else if (st.op === 'cancel') {
           E.push({ type: 'cancel', kind: 'cancelTimer', key: st.target });
+        } else if (st.op === 'spawn' && st.modifier !== 'detached') {
+          const c = M.children.get(st.as ?? '');
+          if (!c) throw new EvalError(`poly-ref: no child ${st.as}`);
+          const params = c.create ? c.actions.find((a) => a.name === c.create)?.params ?? [] : [];
+          E.push({ type: 'spawn', kind: 'spawnChild', key: c.key, machineId: c.machineId, create: c.create ? { action: c.create, data: args(params, c.create) } : null, onComplete: c.onComplete, onParentTerminal: c.onParentTerminal });
+        } else if (st.op === 'signal') {
+          const c = M.children.get(st.extra[0]);
+          if (!c) throw new EvalError(`poly-ref: no child ${st.extra[0]}`);
+          const params = c.actions.find((a) => a.name === st.target)?.params ?? [];
+          E.push({ type: 'signal', kind: 'signalChild', key: c.key, action: st.target, data: args(params, st.target) });
         } else throw new EvalError(`poly-ref: \`${st.op}\` is not lowered yet`);
         break;
       }

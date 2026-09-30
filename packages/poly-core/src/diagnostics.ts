@@ -9,6 +9,7 @@ export type Stage =
   | 'translation-validation'
   | 'model-check'
   | 'effects'
+  | 'composition'
   | 'deadlock';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
@@ -66,6 +67,16 @@ export const CODES: Record<string, CodeInfo> = {
   // S33: an accepted step that emits and leaves the state unchanged.
   PL4002: { name: 'EMIT_WITHOUT_STATE_CHANGE', stage: 'effects', severity: 'finding' },
   // S40: polyrun refuses a manifest whose completion action is outside the lowered action surface.
+  // PS7.3: a compose invariant violated in a reachable joint state.
+  PL5001: { name: 'COMPOSE_INVARIANT', stage: 'composition', severity: 'finding' },
+  // PS7.2: a spawn that re-uses the key of a live child (the kernel would make a second instance).
+  PL5101: { name: 'CHILDKEY_COLLISION', stage: 'composition', severity: 'finding' },
+  // S47: a cascade delivery reaches an action with no handler.
+  PL5102: { name: 'UNHANDLED_CASCADE_DELIVERY', stage: 'composition', severity: 'finding' },
+  // S48: a compose invariant reads children.k.f without a `k spawned` narrowing.
+  PL5103: { name: 'CHILD_READ_WITHOUT_SPAWNED', stage: 'types', severity: 'error' },
+  // PS7.2: a cascade deeper than 8.
+  PL5201: { name: 'CASCADE_DEPTH', stage: 'composition', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
   PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },

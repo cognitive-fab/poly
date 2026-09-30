@@ -16,15 +16,17 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
+import { createHash } from 'node:crypto';
 import { parse } from '@poly/lang';
 import { checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { translationValidate, confirmWitness, confirmEffectsWitness, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
+import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
+import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'effects';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'effects' | 'composition';
 
 export interface StageRecord {
   stage: StageName;
@@ -60,6 +62,10 @@ export interface InstanceRecord {
   refOnly: { property: string; actions: string[] }[];
   /** S38: the machine emits and has no path property, so PL4002 is decided by poly-ref alone. */
   effectsByRefOnly?: boolean;
+  /** PS7: the joint states of the parent and its attached children, when it has any. */
+  jointStates?: number;
+  /** The machine has attached children and no compose invariant, so check-product did not run. */
+  compositionByRefOnly?: boolean;
 }
 
 export interface CheckReport {
@@ -150,6 +156,18 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     }
   }
   return finish(report, module);
+}
+
+/**
+ * A copy of a lowered ES module named by its content. polyrun imports property modules by path, and Node
+ * caches an import by URL for the life of the process, so a second check of the same machine in one
+ * process would read the first check's properties. A content-addressed name changes when the file does.
+ */
+function byContent(dir: string, file: string): string {
+  const text = readFileSync(join(dir, file), 'utf8');
+  const copy = join(dir, `${file.replace(/\.mjs$/, '')}.${createHash('sha256').update(text).digest('hex').slice(0, 16)}.mjs`);
+  if (!existsSync(copy)) writeFileSync(copy, text);
+  return copy;
 }
 
 function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
@@ -256,6 +274,108 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 3: effects (PS5.4, S33) ─────────────────────────────────────
   if (lowered.files['effects.cjs']) await effectsStage(module, machine, mc, dir, contract, ref, engines);
+
+  // ── stage 4: attached children (PS7) ──────────────────────────────────
+  if (checked.machines.get(machine)!.children.size) await compositionStage(module, checked, machine, mc, dir, opts, engines);
+}
+
+/**
+ * Stage 4. poly-ref explores the joint machine of the parent and its attached children (PS7) and checks
+ * the compose invariants and the doctrine classes (S47). polyrun's check-product explores the same joint
+ * machine from the lowered artefacts; each of its findings is replayed through poly-ref's cascade and must
+ * agree (PL2501 otherwise), and with no cap hit the two must count the same joint states. check-product
+ * needs a compose invariant, so with none the stage is poly-ref's alone and says so (as S38 does). The
+ * joint semantics rests on K1 to K3 (PS7.4) and K9 (S45), which the instance line lists.
+ */
+async function compositionStage(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, dir: string, opts: CheckOptions, engines: Record<string, string>): Promise<void> {
+  const t0 = performance.now();
+  const at = { module: module.name, machine };
+  const engine = `polyrun@${engines.polygraph}`;
+  const joint = checkJoint(module, machine);
+  mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9'];
+  mc.instance!.jointStates = joint.states;
+  const out: Diagnostic[] = [];
+  const facts = checked.machines.get(machine)!;
+  const hasCompose = facts.machine.items.some((i) => i.kind === 'Property' && i.form === 'compose');
+  if (!hasCompose) {
+    out.push(...joint.findings);
+    mc.diagnostics.push(...out);
+    mc.instance!.compositionByRefOnly = true;
+    mc.stages.push({ stage: 'composition', status: 'ran', engine: 'poly-ref', verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states; no compose invariant, so polyrun check-product did not run` });
+    return;
+  }
+  // Each child machine is lowered where the engines read it (S28: <module>.<Machine>).
+  const root = join(resolve(opts.root ?? process.cwd()), '.poly', 'build');
+  const children = [...new Set([...facts.children.values()].map((c) => c.machine))].map((id) => {
+    const name = id.split('.').pop()!;
+    const { lowered } = lowerMachine(module, checked, name);
+    if (!lowered) throw new Error(`the child machine ${id} does not lower`);
+    const cdir = join(root, id);
+    mkdirSync(cdir, { recursive: true });
+    for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(cdir, f), text);
+    return { machineId: id, module: join(cdir, 'next.cjs'), contract: join(cdir, 'contract.json') };
+  });
+  const r = await checkProduct({
+    parent: { machineId: `${module.name}.${machine}`, module: join(dir, 'next.cjs'), contract: join(dir, 'contract.json'), mapper: join(dir, 'effects.cjs'), manifest: join(dir, 'effects.manifest.json') },
+    children,
+    invariants: byContent(dir, 'invariants.compose.mjs'),
+    maxStates: joint.states + 1,
+  });
+  if (r.nondeterministic) throw Object.assign(new Error('polyrun check-product found the lowered machines nondeterministic (double pass)'), { nondeterministic: true });
+  if (!r.capHit && !joint.capHit && r.statesExplored !== joint.states) {
+    out.push(diag('PL2501', at, `polyrun check-product explored ${r.statesExplored} joint states and poly-ref ${joint.states}; with no cap hit they must agree (addressed to the toolchain, not the author)`, { engine }));
+  }
+  const confirmed = new Set<string>();
+  for (const v of r.violations) {
+    const replay = replayProduct(joint, facts.machine, v.path.slice(1).map((s) => s.stimulus!));
+    if (typeof replay === 'string') { out.push(diag('PL2501', at, `polyrun check-product reports ${v.invariant}, and poly-ref cannot follow its path: ${replay} (addressed to the toolchain, not the author)`, { engine })); continue; }
+    const code = productCode(v);
+    if (code === 'PL2501') { out.push(diag('PL2501', at, `polyrun check-product reports ${v.invariant}${v.detail ? `: ${v.detail}` : ''}, which a poly program cannot reach unless its lowering lost something (S47; addressed to the toolchain, not the author)`, { engine })); continue; }
+    const agrees = code === 'PL5001' ? replay.violates.has(v.invariant) : replay.doctrine.has(code);
+    if (!agrees) { out.push(diag('PL2501', at, `polyrun check-product reports ${v.invariant}, and poly-ref's cascade does not (addressed to the toolchain, not the author)`, { engine })); continue; }
+    confirmed.add(code === 'PL5001' ? `PL5001:${v.invariant}` : code);
+  }
+  for (const f of joint.findings) {
+    const key = f.code === 'PL5001' ? `PL5001:${f.property}` : f.code;
+    out.push(confirmed.has(key) ? { ...f, engine: `${f.engine}, ${engine}` } : f);
+  }
+  mc.diagnostics.push(...out);
+  mc.stages.push({ stage: 'composition', status: 'ran', engine: `${engine}, poly-ref`, verdict: verdictOf(out), ms: performance.now() - t0, note: `${joint.states} joint states (polyrun ${r.statesExplored})`, notes: r.notes.length ? r.notes.map((n) => `polyrun: ${n}`) : undefined });
+
+  /** The poly code of a check-product finding (S47). */
+  function productCode(v: { invariant: string; kind: string; detail?: string }): string {
+    if (v.kind === 'state' || v.kind === 'transition') return 'PL5001';
+    if (v.kind === 'poison') return /exceeded depth/.test(v.detail ?? '') ? 'PL5201' : /no child with key/.test(v.detail ?? '') ? 'PL5102' : 'PL2501';
+    if (v.invariant.startsWith('childkey-collision')) return 'PL5101';
+    if (v.invariant.startsWith('unhandled-delivery')) return 'PL5102';
+    return 'PL2501';
+  }
+}
+
+/** Replays check-product's stimuli through poly-ref's cascade: the compose invariants violated at the end, and the doctrine the last step raises. */
+function replayProduct(report: ReturnType<typeof checkJoint>, machine: A.Machine, stimuli: { target: string; action: string; data: unknown }[]): { violates: Set<string>; doctrine: Set<string> } | string {
+  const g = report.graph;
+  let j: Joint = g.states[0];
+  let doctrine = new Set<string>();
+  const stable = (v: unknown): string => (v === null || typeof v !== 'object' ? JSON.stringify(v) : Array.isArray(v) ? `[${v.map(stable).join(',')}]` : `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`);
+  const childMachines = new Map([...g.states.flatMap((s) => s.children.map(([, c]) => [c.machine.id, c.machine] as const))]);
+  for (const st of stimuli) {
+    const target = st.target === 'parent' ? j.parent : j.children.find(([k]) => k === st.target)?.[1];
+    if (!target) return `no instance ${st.target}`;
+    const stim = stimuliAt(j).find((x) => x.target === st.target && x.action === st.action && stable(flattenData(x.data, x.action, target.machine)) === stable(st.data));
+    if (!stim) return `${st.target}.${st.action} ${stable(st.data)} is not offered in that joint state`;
+    const step = jointStep(j, stim, childMachines);
+    doctrine = new Set(step.doctrine.map((d) => d.code));
+    j = step.joint;
+  }
+  // PS7.3: each compose invariant, evaluated by poly-ref on the joint state polyrun's path reaches.
+  const violates = new Set<string>();
+  for (const p of machine.items) {
+    if (p.kind !== 'Property' || p.form !== 'compose') continue;
+    const env = { M: j.parent.machine, state: j.parent.state, data: {}, locals: new Map(), joint: { parent: j.parent.state, children: new Map(j.children.map(([k, c]) => [k, c.state])) } };
+    if (evaluate(p.expr, env) !== true) violates.add(p.name);
+  }
+  return { violates, doctrine };
 }
 
 /**
@@ -279,7 +399,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
     return;
   }
   const r = await checkEffects({
-    module: join(dir, 'next.cjs'), mapper: join(dir, 'effects.cjs'), manifest: join(dir, 'effects.manifest.json'), invariants: join(dir, 'effect-invariants.mjs'),
+    module: join(dir, 'next.cjs'), mapper: join(dir, 'effects.cjs'), manifest: join(dir, 'effects.manifest.json'), invariants: byContent(dir, 'effect-invariants.mjs'),
     contract,
     // A simple path visits each state at most once, so the reachable states bound its length.
     maxDepth: Math.max(ref.states, 1),

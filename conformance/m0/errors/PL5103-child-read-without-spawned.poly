@@ -1,0 +1,18 @@
+// expect: PL5103 (children.job.done is read where job may not be spawned)
+module errors
+
+machine Job {
+  state { done : bool = false }
+  terminal done
+  action Finish()
+  on Finish { require !done else reject "done"  done' = true }
+}
+
+machine Boss {
+  state { started : bool = false }
+  action Start()
+  action Finished()
+  on Start { require !started else reject "started"  started' = true  spawn Job as job on complete -> Finished }
+  on Finished { require started else reject "idle"  started' = false }
+  compose invariant i: children.job.done implies parent.started
+}

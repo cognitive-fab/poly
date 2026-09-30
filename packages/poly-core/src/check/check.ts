@@ -56,7 +56,19 @@ export type Resolution =
   | { k: 'actionVar' }
   | { k: 'none' }
   | { k: 'pre' }
-  | { k: 'post' };
+  | { k: 'post' }
+  /** In a compose invariant: parent.f, and children.k.f of the child k (PT7). */
+  | { k: 'jointParent'; field: string }
+  | { k: 'jointChild'; key: string; field: string };
+
+/** An attached child of a machine, by its key (PT6.4): its machine and its wiring, as the spawn states them. */
+export interface ChildSpec {
+  key: string;
+  machine: string;
+  create: string | null;
+  onComplete: string | null;
+  onParentTerminal: string | null;
+}
 
 export interface MachineFacts {
   machine: A.Machine;
@@ -73,6 +85,8 @@ export interface MachineFacts {
   strictParams: Set<string>;
   /** PT6.3: the timer keys the machine arms; a key is declared by its use in an `after`. */
   timerKeys: Set<string>;
+  /** PT6.4: the attached children the machine spawns, by key; a key is declared by its use in a `spawn`. */
+  children: Map<string, ChildSpec>;
 }
 
 export interface CheckResult {
@@ -83,7 +97,7 @@ export interface CheckResult {
 
 // ── scopes ────────────────────────────────────────────────────────────────
 
-type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'reject' | 'path';
+type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'reject' | 'path' | 'compose';
 
 interface Scope {
   ctx: Ctx;
@@ -95,6 +109,8 @@ interface Scope {
   knownAction: string | null;
   /** Names read, for PL1401. */
   reads?: Set<string>;
+  /** In a compose invariant, the child keys a `k spawned` conjunct establishes (S48). */
+  spawned?: Set<string>;
 }
 
 export function checkModule(module: A.Module): CheckResult {
@@ -201,7 +217,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -244,6 +260,20 @@ class Checker {
       }
     };
     for (const it of m.items) if (it.kind === 'Handler') armed(it.body);
+    // PT6.4: child keys are declared by use too; one key names one machine and one wiring.
+    const spawns = (body: A.Stmt[]): void => {
+      for (const s of body) {
+        if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier !== 'detached' && s.as) {
+          const spec = childSpec(s, this.module.name);
+          const prev = facts.children.get(s.as);
+          if (prev && JSON.stringify(prev) !== JSON.stringify(spec)) this.err('PL1002', s, `child key ${s.as} is spawned as ${prev.machine} and as ${spec.machine}, or with different wiring; one key names one child (PT6.4)`);
+          else facts.children.set(s.as, spec);
+        }
+        if (s.kind === 'If') { spawns(s.then); spawns(s.else ?? []); }
+        if (s.kind === 'Match') for (const a of s.arms) spawns(a.body);
+      }
+    };
+    for (const it of m.items) if (it.kind === 'Handler') spawns(it.body);
     const handlerOf = new Set(m.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => h.action));
 
     const handled = new Set<string>();
@@ -277,7 +307,7 @@ class Checker {
         case 'Property': {
           if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
           propNames.add(it.name);
-          if (it.form === 'compose') { this.err('PL0901', it, 'compose invariants are checked from plan step 6 of milestone M1'); break; }
+          if (it.form === 'compose') { this.expectBool(it.expr, { ...this.scope('compose'), spawned: new Set() }); break; }
           if (it.form === 'path') { this.pathProperty(it, kinds); break; }
           this.expectBool(it.expr, this.scope(it.form === 'invariant' ? 'invariant' : it.form));
           break;
@@ -362,6 +392,113 @@ class Checker {
       if (this.fold(a.value) === undefined) this.err('PL1201', a.value, 'a completion argument is a constant: it is written into the effects manifest (PT6.1)');
       else this.checkConst(a.value, pt, p.check, `${it.action}.${a.name}`);
     }
+  }
+
+  /** The machine an attached spawn names: one of this module (S28); another module's needs `use`. */
+  private childMachine(s: A.IntentStmt): A.Machine | null {
+    const parts = s.target.split('.');
+    if (parts.length > 1 && parts.slice(0, -1).join('.') !== this.module.name) { this.err('PL0901', s, `spawning a machine of another module needs \`use\`, which is not lowered yet (${s.target})`); return null; }
+    const name = parts[parts.length - 1];
+    const m = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
+    if (!m) { this.err('PL1001', s, `no machine ${s.target} in module ${this.module.name}`); return null; }
+    return m;
+  }
+
+  /**
+   * `spawn M as k -> Start(args) on complete -> P on parent terminal -> C` (PT6.4): an attached child of this
+   * module, its optional creation action (S43), and its wiring with the parameter lists the runtime supplies (S44).
+   */
+  private spawn(s: A.IntentStmt, scope: Scope): void {
+    const spec = childSpec(s, this.module.name);
+    if (s.as === 'parent') this.err('PL1201', s, 'the child key parent names the parent in the joint state (PT7); choose another key');
+    const child = this.childMachine(s);
+    if (!child) { for (const a of s.args) this.typeOf(a.value, scope); return; }
+    if (child === this.machine) { this.err('PL0901', s, `${child.name} spawns itself; children of children are checked from a later milestone (S46)`); return; }
+    // S46: check-product runs the parent's mapper only, so a child that spawns or signals is out of M1.
+    if (spawnsOrSignals(child)) this.err('PL0901', s, `${child.name} spawns or signals children of its own; children of children are checked from a later milestone (S46)`);
+    const handled = (m: A.Machine, a: string) => m.items.some((i) => i.kind === 'Handler' && i.action === a);
+    const actionOf = (m: A.Machine, a: string) => m.items.find((i): i is A.Action => i.kind === 'Action' && i.name === a);
+    if (spec.create) {
+      const act = actionOf(child, spec.create);
+      if (!act) { this.err('PL1001', s, `${child.name} has no action ${spec.create}`); for (const a of s.args) this.typeOf(a.value, scope); }
+      else {
+        if (!handled(child, spec.create)) this.err('PL6101', s, `creation action ${child.name}.${spec.create} has no handler, so the runtime cannot deliver it; add a handler (S40, S43)`);
+        this.intentArgs(s, act.params, `${child.name}.${spec.create}`, scope);
+      }
+    } else if (s.args.length) this.err('PL1201', s, `a spawn passes arguments only to a creation action: spawn ${s.target} as ${s.as} -> A(…) (S43)`);
+    if (spec.onComplete) {
+      const act = this.actions.get(spec.onComplete);
+      if (!act) this.err('PL1001', s, `on complete -> ${spec.onComplete}: no action ${spec.onComplete} in ${this.machine!.name}`);
+      else {
+        if (!handled(this.machine!, spec.onComplete)) this.err('PL6101', s, `completion action ${spec.onComplete} has no handler, so the runtime cannot deliver it; add a handler (S40)`);
+        this.completionParams(act);
+      }
+    }
+    if (spec.onParentTerminal) {
+      const act = actionOf(child, spec.onParentTerminal);
+      if (!act) this.err('PL1001', s, `on parent terminal -> ${spec.onParentTerminal}: no action ${spec.onParentTerminal} in ${child.name}`);
+      else {
+        if (!handled(child, spec.onParentTerminal)) this.err('PL6101', s, `cancel action ${child.name}.${spec.onParentTerminal} has no handler, so the runtime cannot deliver it; add a handler (S40)`);
+        this.cancelParams(act, child);
+      }
+    }
+  }
+
+  /** S44: a completion action declares no parameters, or `(childKey: string, childState: R)`, which needs records (plan step 7). */
+  private completionParams(act: A.Action): void {
+    if (act.params.length === 0) return;
+    const [k, st] = act.params;
+    if (act.params.length === 2 && k.name === 'childKey' && st.name === 'childState') {
+      this.errOnce('PL0901', act, `${act.name}(childKey, childState) needs a record type for childState, which is lowered from plan step 7 of milestone M1 (S25, S44)`);
+      return;
+    }
+    this.errOnce('PL1201', act, `completion action ${act.name} declares (${act.params.map((p) => p.name).join(', ')}); the runtime supplies (childKey: string, childState: R) or nothing (S44)`);
+  }
+
+  /** S44: a cancel action declares no parameters, or `(reason: string check { "parent-terminal" })`. */
+  private cancelParams(act: A.Action, child: A.Machine): void {
+    if (act.params.length === 0) return;
+    const p = act.params[0];
+    const values = p.check && p.check.domain.kind !== 'DomainRange' ? p.check.domain.values.map((v) => (v.kind === 'String' ? v.value : null)) : null;
+    const ok = act.params.length === 1 && p.name === 'reason' && p.type.kind === 'TString' && values?.length === 1 && values[0] === 'parent-terminal';
+    if (!ok) this.errOnce('PL1201', act, `cancel action ${child.name}.${act.name} declares (${act.params.map((x) => x.name).join(', ')}); the runtime supplies (reason: string check { "parent-terminal" }) or nothing (S44)`);
+  }
+
+  /** `signal k -> A(args)` (PT6.4): k is a child this machine spawns, A an action of that child with a handler. */
+  private signal(s: A.IntentStmt, scope: Scope): void {
+    const key = s.extra[0];
+    const spec = this.facts!.children.get(key);
+    if (!spec) { this.err('PL1001', s, `signal ${key}: ${this.machine!.name} spawns no attached child ${key}`); for (const a of s.args) this.typeOf(a.value, scope); return; }
+    const child = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec.machine.split('.').pop());
+    const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
+    // A child machine that does not exist is reported at its spawn, once.
+    if (!child) { for (const a of s.args) this.typeOf(a.value, scope); return; }
+    if (!act) { this.err('PL1001', s, `signal ${key} -> ${s.target}: ${spec.machine} has no action ${s.target}`); for (const a of s.args) this.typeOf(a.value, scope); return; }
+    if (!child.items.some((i) => i.kind === 'Handler' && i.action === s.target)) this.err('PL6101', s, `signalled action ${child.name}.${s.target} has no handler, so the runtime cannot deliver it; add a handler (S40)`);
+    this.intentArgs(s, act.params, `${child.name}.${s.target}`, scope);
+  }
+
+  /** PT7: parent.f, and children.k.f under a `k spawned` narrowing (S48). */
+  private jointMember(e: A.Member, scope: Scope): Ty {
+    if (e.object.kind === 'Name' && e.object.name === 'parent') {
+      const t = this.facts!.fieldTypes.get(e.prop);
+      if (!t) { this.err('PL1001', e, `${this.machine!.name} has no field ${e.prop}`); return ERR; }
+      this.resolve(e, { k: 'jointParent', field: e.prop });
+      return t;
+    }
+    if (e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'children') {
+      const key = e.object.prop;
+      const spec = this.facts!.children.get(key);
+      if (!spec) { this.err('PL1001', e, `${this.machine!.name} spawns no attached child ${key}`); return ERR; }
+      if (!scope.spawned?.has(key)) { this.err('PL5103', e, `children.${key}.${e.prop} is read where ${key} may not be spawned; write ${key} spawned implies … (S48)`); return ERR; }
+      const child = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec.machine.split('.').pop());
+      const f = child?.fields.find((x) => x.name === e.prop);
+      if (!f) { this.err('PL1001', e, `${spec.machine} has no field ${e.prop}`); return ERR; }
+      this.resolve(e, { k: 'jointChild', key, field: e.prop });
+      return this.tyOf(f.type);
+    }
+    this.err('PL1201', e, 'a compose invariant reads parent.f and children.k.f (PT7)');
+    return ERR;
   }
 
   /** `after d -> A(args) as key` (PT6.3): a duration, an action of this machine and its typed arguments. */
@@ -635,6 +772,8 @@ class Checker {
       case 'Intent':
         if (s.op === 'emit') this.emit(s, scope);
         else if (s.op === 'after') this.timer(s, scope);
+        else if (s.op === 'spawn' && s.modifier !== 'detached') this.spawn(s, scope);
+        else if (s.op === 'signal') this.signal(s, scope);
         else if (s.op === 'cancel') {
           if (!this.facts!.timerKeys.has(s.target)) this.err('PL1001', s, `cancel ${s.target}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
         } else this.err('PL0901', s, `\`${s.op}\` is lowered from plan step ${s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached') ? 8 : 6} of milestone M1`);
@@ -783,6 +922,14 @@ class Checker {
       case 'Match':
         return s.arms.flatMap((a) => this.paths(a.body, [p]));
       case 'Intent': {
+        if (s.op === 'spawn' && s.as) {
+          const key = `spawn:${s.as}`;
+          const prev = p.timers.get(key);
+          if (prev) this.errOnce('PL5101', s, `child ${s.as} is spawned twice on one path (first at line ${prev.span?.line ?? '?'}); the kernel would make a second instance behind one key (PS7.2)`);
+          const timers = new Map(p.timers);
+          timers.set(key, s);
+          return [{ ...p, emits: true, timers }];
+        }
         if (s.op !== 'after' || !s.as) return [{ ...p, emits: true }];
         // PT6.3: arming one key twice on one path would leave only the second timer; say so.
         const prev = p.timers.get(s.as);
@@ -867,6 +1014,7 @@ class Checker {
         const local = scope.locals.get(n);
         if (local) { if (local.mark) local.mark.used = true; this.resolve(e, local.res); return local.ty; }
         if (scope.params.has(n)) { this.resolve(e, { k: 'param', name: n }); return scope.params.get(n)!; }
+        if (fields.has(n) && scope.ctx === 'compose') { this.err('PL1201', e, `a compose invariant reads the parent's field as parent.${n} (PT7)`); return ERR; }
         if (fields.has(n) && scope.ctx !== 'init' && scope.ctx !== 'step') {
           this.resolve(e, { k: 'field', name: n });
           scope.reads?.add(n);
@@ -902,7 +1050,8 @@ class Checker {
           this.resolve(e, { k: 'ctor', union: c.union, ctor: e.prop });
           return { k: 'union', name: c.union };
         }
-        // S19: in a handler, pre.f names the pre-state field f even where a parameter f shadows it. in a handler, pre.f names the pre-state field f even where a parameter f shadows it.
+        if (scope.ctx === 'compose') return this.jointMember(e, scope);
+        // S19: in a handler, pre.f names the pre-state field f even where a parameter f shadows it.
         const handlerPre = scope.ctx === 'handler' && e.object.kind === 'Name' && e.object.name === 'pre' && !scope.locals.has('pre') && !scope.params.has('pre');
         if (handlerPre || (e.object.kind === 'Name' && (e.object.name === 'pre' || e.object.name === 'post') && (scope.ctx === 'step' || scope.ctx === 'reject'))) {
           const obj = e.object as A.NameRef;
@@ -939,6 +1088,11 @@ class Checker {
         return { k: 'int', lo: -t.hi, hi: -t.lo };
       }
       case 'Binary': return this.binary(e, scope);
+      case 'Spawned': {
+        if (scope.ctx !== 'compose') { this.err('PL1201', e, `${e.key} spawned is read only in a compose invariant (PT7)`); return BOOL; }
+        if (!this.facts!.children.has(e.key)) this.err('PL1001', e, `${this.machine!.name} spawns no attached child ${e.key}`);
+        return BOOL;
+      }
       case 'Is': {
         const t = this.typeOf(e.expr, scope);
         if (t.k !== 'union') { if (t.k !== 'error') this.err('PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
@@ -1041,7 +1195,10 @@ class Checker {
         this.expectBool(e.left, scope);
         // S15: `action == A` on the left establishes A's parameters on the right.
         const known = e.op !== '||' ? this.establishedAction(e.left) : null;
-        const right: Scope = known ? { ...scope, knownAction: known, params: this.paramsOf(known, scope) } : scope;
+        let right: Scope = known ? { ...scope, knownAction: known, params: this.paramsOf(known, scope) } : scope;
+        // S48: `k spawned` on the left establishes the child k on the right, as `action == A` does its parameters.
+        const born = e.op !== '||' && scope.spawned ? spawnedKeys(e.left) : [];
+        if (born.length) right = { ...right, spawned: new Set([...scope.spawned!, ...born]) };
         this.expectBool(e.right, right);
         return BOOL;
       }
@@ -1115,6 +1272,25 @@ class Checker {
     for (const p of this.actions.get(action)?.params ?? []) params.set(p.name, this.tyOf(p.type));
     return params;
   }
+}
+
+/** A spawn's child as a ChildSpec: its machine id `<module>.<Machine>` (S28), creation action and wiring. */
+export function childSpec(s: A.IntentStmt, module: string): ChildSpec {
+  const pair = (tag: string) => { const i = s.extra.indexOf(tag); return i >= 0 ? s.extra[i + 1] : null; };
+  const name = s.target.split('.').pop()!;
+  return { key: s.as ?? '', machine: `${module}.${name}`, create: pair('create'), onComplete: pair('complete'), onParentTerminal: pair('parent-terminal') };
+}
+
+function spawnsOrSignals(m: A.Machine): boolean {
+  const walk = (body: A.Stmt[]): boolean => body.some((s) => (s.kind === 'Intent' && (s.op === 'spawn' || s.op === 'signal')) || (s.kind === 'If' && (walk(s.then) || walk(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => walk(a.body))));
+  return m.items.some((i) => i.kind === 'Handler' && walk(i.body));
+}
+
+/** The keys a conjunction of `k spawned` establishes (S48). */
+function spawnedKeys(e: A.Expr): string[] {
+  if (e.kind === 'Spawned') return [e.key];
+  if (e.kind === 'Binary' && e.op === '&&') return [...spawnedKeys(e.left), ...spawnedKeys(e.right)];
+  return [];
 }
 
 // PT6.2: the closed Polyaxion vocabulary.

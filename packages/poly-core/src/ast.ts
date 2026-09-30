@@ -232,7 +232,7 @@ export interface IntentStmt extends NodeBase {
   modifier: string | null;
   /** after/spawn/send: the `as` name. */
   as: string | null;
-  /** signal: the child key; spawn: the completion wiring as written. */
+  /** signal: the child key; spawn: the creation action ('create', A) and the completion wiring, as written (S43). */
   extra: string[];
 }
 
@@ -259,10 +259,13 @@ export type Expr =
   | In
   | CtorExpr
   | MapLit
-  | ArrayLit;
+  | ArrayLit
+  | Spawned;
 
 export type Literal = IntLit | BoolLit | StringLit | NameRef;
 
+/** `k spawned` (S48): true iff the attached child k exists; only in a compose invariant. */
+export interface Spawned extends NodeBase { kind: 'Spawned'; key: string }
 export interface IntLit extends NodeBase { kind: 'Int'; value: number }
 export interface BoolLit extends NodeBase { kind: 'Bool'; value: boolean }
 export interface StringLit extends NodeBase { kind: 'String'; value: string }

@@ -32,6 +32,8 @@ export interface Env {
    * reject property only on the right of a conjunct `action == A` that holds.
    */
   params?: boolean;
+  /** A compose invariant's joint state (PS7.1, PT7): the parent's state and each spawned child's. */
+  joint?: { parent: State; children: Map<string, State> };
   /** Declared types of local names, where known: pattern binders and lets (for match scrutinees, S21, S22). */
   localTypes?: Map<string, import('./model.js').RType>;
 }
@@ -57,6 +59,13 @@ export function evaluate(e: A.Expr, env: Env): Value {
     case 'Member': {
       if (e.object.kind === 'Name' && e.object.name === 'pre' && env.pre) return field(env.pre, e.prop);
       if (e.object.kind === 'Name' && e.object.name === 'post' && env.post) return field(env.post, e.prop);
+      // PT7: parent.f and children.k.f name fields of the joint state; S48 guarantees k is spawned.
+      if (env.joint && e.object.kind === 'Name' && e.object.name === 'parent') return field(env.joint.parent, e.prop);
+      if (env.joint && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'children') {
+        const child = env.joint.children.get(e.object.prop);
+        if (!child) throw new EvalError(`poly-ref: child ${e.object.prop} is read before it is spawned (S48)`);
+        return field(child, e.prop);
+      }
       // S22: `Type.C`, a constructor named with its type.
       if (e.object.kind === 'Name' && env.M.unions.get(e.object.name)?.ctors.some((c) => c.name === e.prop)) return { ctor: e.prop, payload: {} };
       throw new EvalError(`poly-ref: .${e.prop} outside a step or reject property`);
@@ -72,6 +81,10 @@ export function evaluate(e: A.Expr, env: Env): Value {
         return env.verdict.kind === 'rejected' && env.verdict.reason === e.args[0].value;
       }
       throw new EvalError(`poly-ref: no function ${e.callee} in this context`);
+    }
+    case 'Spawned': {
+      if (!env.joint) throw new EvalError(`poly-ref: ${e.key} spawned outside a compose invariant`);
+      return env.joint.children.has(e.key);
     }
     case 'Unary': {
       const v = evaluate(e.arg, env);

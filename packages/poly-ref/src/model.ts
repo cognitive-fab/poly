@@ -94,9 +94,24 @@ export function clauseText(c: PathClause): string {
   return c.k === 'count' ? `count("${c.kind}") reaches ${c.max + 1}, above ${c.max}` : `"${c.then}" is emitted before any "${c.first}"`;
 }
 
+/** An attached child, by key (PT6.4): its machine, creation action and wiring, and its actions' parameters. */
+export interface RChild {
+  key: string;
+  /** `<module>.<Machine>` (S28). */
+  machineId: string;
+  machine: string;
+  create: string | null;
+  onComplete: string | null;
+  onParentTerminal: string | null;
+  actions: { name: string; params: { name: string; type: RType }[] }[];
+}
+
 export interface RMachine {
   name: string;
+  /** `<module>.<Machine>` (S28). */
+  id: string;
   service: boolean;
+  children: Map<string, RChild>;
   effects: Map<string, REffect>;
   pathProperties: RPathProperty[];
   unions: Map<string, RUnion>;
@@ -167,6 +182,26 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     });
   }
   const guardedInputs = strictInputs(m, effects);
+  // PT6.4: attached children, by the key their spawn names (declared by use, like timer keys).
+  const children = new Map<string, RChild>();
+  const spawns = (body: A.Stmt[]): void => {
+    for (const s of body) {
+      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier !== 'detached' && s.as && !children.has(s.as)) {
+        const name = s.target.split('.').pop()!;
+        const child = decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
+        if (!child) throw new Error(`poly-ref: no machine ${s.target}`);
+        const pair = (tag: string) => { const i = s.extra.indexOf(tag); return i >= 0 ? s.extra[i + 1] : null; };
+        children.set(s.as, {
+          key: s.as, machineId: `${module.name}.${name}`, machine: name,
+          create: pair('create'), onComplete: pair('complete'), onParentTerminal: pair('parent-terminal'),
+          actions: child.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) })),
+        });
+      }
+      if (s.kind === 'If') { spawns(s.then); spawns(s.else ?? []); }
+      if (s.kind === 'Match') for (const a of s.arms) spawns(a.body);
+    }
+  };
+  for (const it of m.items) if (it.kind === 'Handler') spawns(it.body);
   for (const it of m.items) {
     if (it.kind === 'Action') {
       actions.push({
@@ -188,7 +223,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     if (it.kind === 'Property' && it.form === 'reject') rejectProperties.push(it);
   }
   return {
-    name: m.name, service: m.service, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: m.name, id: `${module.name}.${m.name}`, service: m.service, children, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties,
   };
 }
