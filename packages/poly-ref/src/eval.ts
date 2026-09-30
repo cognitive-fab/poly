@@ -7,7 +7,7 @@
 // parameter, field, constructor, `none`.
 import type * as A from '@poly/core';
 import type { RMachine } from './model.js';
-import { equal, isUnion, isMap, keyOf, mapGet, type State, type Value } from './values.js';
+import { equal, isUnion, isMap, isRecord, keyOf, mapGet, type State, type Value } from './values.js';
 import { valuesOf } from './model.js';
 
 /** A step's verdict kind as a reject property sees it (PS5.3). */
@@ -68,6 +68,12 @@ export function evaluate(e: A.Expr, env: Env): Value {
       }
       // S22: `Type.C`, a constructor named with its type.
       if (e.object.kind === 'Name' && env.M.unions.get(e.object.name)?.ctors.some((c) => c.name === e.prop)) return { ctor: e.prop, payload: {} };
+      // S25: `r.f`, a field of a record value.
+      const r = evaluate(e.object, env);
+      if (isRecord(r)) {
+        if (!(e.prop in r.fields)) throw new EvalError(`poly-ref: no field ${e.prop}`);
+        return r.fields[e.prop];
+      }
       throw new EvalError(`poly-ref: .${e.prop} outside a step or reject property`);
     }
     case 'Index': {
@@ -118,6 +124,15 @@ export function evaluateAt(e: A.Expr, env: Env, type: import('./model.js').RType
     const given = new Map(e.entries.map((en) => [keyOf(evaluateAt(en.key, env, type.key)), en.value]));
     return { entries: keys.map((k) => [k, evaluateAt(given.get(keyOf(k))!, env, type.value)] as [Value, Value]) };
   }
+  if (e.kind === 'MapLit' && type.k === 'record') {
+    // S25: a record literal lists every field; the checker proved it.
+    const fields: Record<string, Value> = {};
+    for (const f of env.M.records.get(type.name)!.fields) {
+      const en = e.entries.find((x) => x.key.kind === 'Name' && x.key.name === f.name)!;
+      fields[f.name] = evaluateAt(en.value, env, f.type);
+    }
+    return { fields };
+  }
   if (e.kind === 'ArrayLit' && type.k === 'map') {
     const keys = valuesOf(type.key, env.M);
     return { entries: keys.map((k, i) => [k, evaluateAt(e.items[i], env, type.value)] as [Value, Value]) };
@@ -165,6 +180,29 @@ function lookup(name: string, env: Env): Value {
   throw new EvalError(`poly-ref: unknown name ${name}`);
 }
 
+/**
+ * The two sides of an equality. A record or map literal takes its type from the other side (S25), as the
+ * checker typed it: the other side is evaluated first, and the literal is read in its shape.
+ */
+function operands(l: A.Expr, r: A.Expr, env: Env): [Value, Value] {
+  const lit = (x: A.Expr) => x.kind === 'MapLit' || x.kind === 'ArrayLit';
+  if (lit(r) && !lit(l)) { const a = evaluate(l, env); return [a, literalLike(r, a, env)]; }
+  if (lit(l) && !lit(r)) { const b = evaluate(r, env); return [literalLike(l, b, env), b]; }
+  return [evaluate(l, env), evaluate(r, env)];
+}
+
+function literalLike(e: A.Expr, like: Value, env: Env): Value {
+  if (e.kind === 'MapLit' && isRecord(like)) {
+    return { fields: Object.fromEntries(e.entries.map((en) => [(en.key as A.NameRef).name, evaluate(en.value, env)])) };
+  }
+  if (e.kind === 'MapLit' && isMap(like)) {
+    const byKey = new Map(e.entries.map((en) => [keyOf(evaluate(en.key, env)), en.value]));
+    return { entries: like.entries.map(([k]) => [k, evaluate(byKey.get(keyOf(k))!, env)] as [Value, Value]) };
+  }
+  if (e.kind === 'ArrayLit' && isMap(like)) return { entries: like.entries.map(([k], i) => [k, evaluate(e.items[i], env)] as [Value, Value]) };
+  throw new EvalError('poly-ref: a literal compared with a value of another shape');
+}
+
 function binary(e: A.Binary, env: Env): Value {
   switch (e.op) {
     case '&&': return truth(evaluate(e.left, env), '&&') && truth(evaluate(e.right, narrowed(e.left, env)), '&&');
@@ -177,7 +215,7 @@ function binary(e: A.Binary, env: Env): Value {
       const actionSide = (x: A.Expr) => x.kind === 'Name' && x.name === 'action' && env.action !== undefined;
       if (actionSide(e.left) && e.right.kind === 'Name') eq = env.action === e.right.name;
       else if (actionSide(e.right) && e.left.kind === 'Name') eq = env.action === e.left.name;
-      else eq = equal(evaluate(e.left, env), evaluate(e.right, env));
+      else eq = equal(...operands(e.left, e.right, env));
       return e.op === '==' ? eq : !eq;
     }
     default: {

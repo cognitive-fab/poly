@@ -127,7 +127,8 @@ export function jointStep(j0: Joint, stim: Stimulus, childMachines: Map<string, 
       for (const x of st.effects) if (x.type === 'signal') dispatch(x.key, x.action, x.data, depth + 1, true);
     }
     if (terminal && target !== PARENT && inst.onComplete) {
-      dispatch(PARENT, inst.onComplete, { childKey: target, childState: null }, depth + 1, true);
+      // S44: the completion carries the child key and the child's terminal state, as a record value.
+      dispatch(PARENT, inst.onComplete, { childKey: target, childState: { fields: { ...inst.state } } }, depth + 1, true);
     }
     if (terminal && target === PARENT) {
       for (const [k, c] of [...j.children]) {

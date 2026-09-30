@@ -36,15 +36,15 @@ export interface Layout {
  * The semantic type of a declared type, for a parameter or a payload field. The one mapping the
  * lowering uses (review finding 9): the program was checked first, so every name is a known type.
  */
-export function tyOfTypeExpr(t: A.TypeExpr): Ty {
+export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
   switch (t.kind) {
     case 'TBool': return { k: 'bool' };
     case 'TInt': return { k: 'int', lo: -Infinity, hi: Infinity };
     case 'TString': return { k: 'string' };
     case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
-    case 'TName': return { k: 'union', name: t.name };
+    case 'TName': return env?.records.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
     case 'TRef': return { k: 'ref' };
-    case 'TMap': return { k: 'map', key: tyOfTypeExpr(t.key), value: tyOfTypeExpr(t.value), array: t.key.kind === 'TRange' };
+    case 'TMap': return { k: 'map', key: tyOfTypeExpr(t.key, env), value: tyOfTypeExpr(t.value, env), array: t.key.kind === 'TRange' };
   }
 }
 
@@ -65,6 +65,8 @@ function scalarShape(t: Ty): ShapeSpec | null {
     case 'string': return { type: 'string' };
     case 'union': return { type: 'string' };
     case 'map': return { type: t.array ? 'array' : 'object' };
+    // S25: a record lowers to a plain JSON object.
+    case 'record': return { type: 'object' };
     default: return null;
   }
 }

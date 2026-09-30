@@ -14,8 +14,15 @@ export interface UnionInfo {
   isEnum: boolean;
 }
 
+/** A record type (S25): its fields, in declaration order. */
+export interface RecordInfo {
+  name: string;
+  fields: { name: string; type: TypeExpr }[];
+}
+
 export interface TypeEnv {
   unions: Map<string, UnionInfo>;
+  records: Map<string, RecordInfo>;
   /** Constructor name to the unions that declare it. Two unions may share a name; uses are then resolved by expected type. */
   ctorOwners: Map<string, string[]>;
 }
@@ -23,7 +30,12 @@ export interface TypeEnv {
 export function buildTypeEnv(module: Module): TypeEnv {
   const unions = new Map<string, UnionInfo>();
   const ctorOwners = new Map<string, string[]>();
+  const records = new Map<string, RecordInfo>();
   for (const d of module.decls) {
+    if (d.kind === 'RecordDecl') {
+      if (!records.has(d.name) && !unions.has(d.name)) records.set(d.name, { name: d.name, fields: d.fields.map((f) => ({ name: f.name, type: f.type })) });
+      continue;
+    }
     let info: UnionInfo | null = null;
     if (d.kind === 'EnumDecl') info = { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })), isEnum: true };
     if (d.kind === 'TypeDecl') {
@@ -34,7 +46,7 @@ export function buildTypeEnv(module: Module): TypeEnv {
     unions.set(info.name, info);
     for (const c of info.ctors) ctorOwners.set(c.name, [...(ctorOwners.get(c.name) ?? []), info.name]);
   }
-  return { unions, ctorOwners };
+  return { unions, ctorOwners, records };
 }
 
 export function typeToString(t: TypeExpr): string {
@@ -70,7 +82,7 @@ export function domainSize(d: Domain): number {
  * The number of values a type takes in the checked instance, or null when it
  * is unbounded (PT3.2). `int` and `string` are finite only with a check clause.
  */
-export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null = null): number | null {
+export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null = null, visiting: Set<string> = new Set()): number | null {
   if (check) return domainSize(check.domain);
   switch (t.kind) {
     case 'TBool': return 2;
@@ -80,13 +92,27 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
     case 'TRange': return Math.max(0, t.hi - t.lo + 1);
     case 'TRef': return 1; // `none` alone in a single-machine check (PS1.6)
     case 'TName': {
+      // A type that refers to itself has no finite domain; the checker reports the recursion (S25).
+      if (visiting.has(t.name)) return null;
+      visiting = new Set([...visiting, t.name]);
+      const r = env.records.get(t.name);
+      if (r) {
+        // A record is finite when its fields are (S25); recursion is refused by the checker, so this ends.
+        let k = 1;
+        for (const f of r.fields) {
+          const m = cardinality(f.type, env, null, visiting);
+          if (m === null) return null;
+          k *= m;
+        }
+        return k;
+      }
       const u = env.unions.get(t.name);
       if (!u) return null;
       let n = 0;
       for (const c of u.ctors) {
         let k = 1;
         for (const f of c.fields) {
-          const m = cardinality(f.type, env);
+          const m = cardinality(f.type, env, null, visiting);
           if (m === null) return null;
           k *= m;
         }
@@ -95,8 +121,8 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
       return n;
     }
     case 'TMap': {
-      const keys = cardinality(t.key, env);
-      const vals = cardinality(t.value, env);
+      const keys = cardinality(t.key, env, null, visiting);
+      const vals = cardinality(t.value, env, null, visiting);
       if (keys === null || vals === null) return null;
       return vals ** keys;
     }

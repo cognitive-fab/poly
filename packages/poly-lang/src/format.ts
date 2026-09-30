@@ -52,6 +52,8 @@ class Printer {
     switch (d.kind) {
       case 'EnumDecl':
         return this.emit(d, '', [`enum ${d.name} { ${d.members.join(', ')} }`]);
+      case 'RecordDecl':
+        return this.emit(d, '', [`type ${d.name} = { ${d.fields.map((f) => `${f.name}: ${this.type(f.type)}`).join(', ')} }`]);
       case 'TypeDecl': {
         const ctors = d.ctors.map((c) => this.ctor(c));
         const one = `type ${d.name} = ${ctors.join(' | ')}`;

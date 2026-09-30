@@ -13,6 +13,7 @@ const NAMED: Record<string, string> = {
   Machine: 'machine',
   TypeDecl: 'type',
   EnumDecl: 'type',
+  RecordDecl: 'type',
   Ctor: 'ctor',
   PayloadField: 'pf',
   Field: 'field',

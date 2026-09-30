@@ -7,7 +7,7 @@
 // name, an enum-keyed map is an object keyed by constructor name, and a map
 // keyed by 0..n is an array.
 import type { RMachine, RType } from './model.js';
-import { isMap, isUnion, type State, type Value } from './values.js';
+import { isMap, isRecord, isUnion, type State, type Value } from './values.js';
 import { valuesOf } from './model.js';
 
 type Flat = Record<string, unknown>;
@@ -26,6 +26,8 @@ function payloadNames(t: RType, M: RMachine): string[] {
 
 function flatValue(v: Value, t: RType, M: RMachine): unknown {
   if (t.k === 'union') return isUnion(v) ? v.ctor : v; // an enum member is its name
+  // S25: a record is a plain object of its fields.
+  if (t.k === 'record') return isRecord(v) ? Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, flatValue(v.fields[f.name], f.type, M)])) : v;
   if (t.k === 'map') {
     if (!isMap(v)) return v;
     const vt = t.value;
@@ -60,6 +62,10 @@ export function flattenData(d: Record<string, Value>, action: string, M: RMachin
 
 function structValue(x: unknown, t: RType, M: RMachine): Value {
   if (t.k === 'union') return typeof x === 'string' ? { ctor: x, payload: {} } : (x as Value);
+  if (t.k === 'record' && x && typeof x === 'object') {
+    const o = x as Record<string, unknown>;
+    return { fields: Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, structValue(o[f.name], f.type, M)])) };
+  }
   if (t.k === 'map') {
     const keys = valuesOf(t.key, M);
     if (Array.isArray(x)) return { entries: keys.map((k, i) => [k, structValue(x[i], t.value, M)] as [Value, Value]) };

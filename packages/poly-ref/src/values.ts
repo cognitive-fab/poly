@@ -10,7 +10,13 @@ export type Value =
   | string
   | UnionValue
   | MapValue
+  | RecordValue
   | null; // `none`, the empty address (PS1.6)
+
+/** A record value (S25): every field of its type, no tag. */
+export interface RecordValue {
+  fields: Record<string, Value>;
+}
 
 /** `(C, r)`: a constructor and the record of its payload (PS1.4). An enum member has an empty record. */
 export interface UnionValue {
@@ -27,6 +33,7 @@ export type State = Record<string, Value>;
 
 export const isUnion = (v: Value): v is UnionValue => v !== null && typeof v === 'object' && 'ctor' in v;
 export const isMap = (v: Value): v is MapValue => v !== null && typeof v === 'object' && 'entries' in v;
+export const isRecord = (v: Value): v is RecordValue => v !== null && typeof v === 'object' && 'fields' in v;
 
 /** A canonical text for a value: equal values, equal keys. */
 export function keyOf(v: Value): string {
@@ -38,6 +45,7 @@ export function keyOf(v: Value): string {
     const names = Object.keys(v.payload).sort();
     return names.length ? `${v.ctor}{${names.map((n) => `${n}:${keyOf(v.payload[n])}`).join(',')}}` : v.ctor;
   }
+  if (isRecord(v)) return `{${Object.keys(v.fields).sort().map((n) => `${n}:${keyOf(v.fields[n])}`).join(',')}}`;
   return `[${v.entries.map(([k, x]) => `${keyOf(k)}:${keyOf(x)}`).join(',')}]`;
 }
 
@@ -72,6 +80,7 @@ export function toPlain(v: Value): unknown {
     if (!names.length) return v.ctor;
     return { [v.ctor]: Object.fromEntries(names.map((n) => [n, toPlain(v.payload[n])])) };
   }
+  if (isRecord(v)) return Object.fromEntries(Object.entries(v.fields).map(([n, x]) => [n, toPlain(x)]));
   return Object.fromEntries(v.entries.map(([k, x]) => [typeof k === 'number' ? String(k) : isUnion(k) ? k.ctor : String(k), toPlain(x)]));
 }
 

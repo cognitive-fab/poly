@@ -33,7 +33,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const actions = m.items.filter((i): i is A.Action => i.kind === 'Action');
   for (const a of actions) {
     for (const p of a.params) {
-      const t = tyOfTypeExpr(p.type);
+      const t = tyOfTypeExpr(p.type, check.env);
       if (t.k === 'ref' || t.k === 'map' || isPayloadUnion(check.env, t)) {
         diagnostics.push(diag('PL0901', { module: module.name, machine: m.name, node: p.id, line: p.span?.line, col: p.span?.col }, `a parameter of type ${t.k === 'union' ? t.name : t.k} is lowered after milestone M0: ${a.name}.${p.name}`));
       }
@@ -81,7 +81,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // state, unhandled elsewhere. sam-pattern 2.3 throws for an intent no acceptor constrains (S34, option b).
   const lowerable = actions.filter((a) => handlers.has(a.name));
   // PT3.4a: strict as declared, or by the flow of a parameter into an irreversible or compensable payload.
-  const strict = lowerable.flatMap((a) => a.params.filter((p) => facts.strictParams.has(`${a.name}.${p.name}`)).map((p) => ({ a: a.name, p: p.name, values: paramValues(p, env) })));
+  const strict = lowerable.flatMap((a) => a.params.filter((p) => facts.strictParams.has(`${a.name}.${p.name}`)).map((p) => ({ a: a.name, p: p.name, values: paramValues(p, env, facts, a.name) })));
   const acceptors: string[] = [];
   if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length) {
     const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2. It runs for handled actions only: no other is an intent (S35).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
@@ -107,8 +107,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const modelShape: Record<string, unknown> = {};
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
   const intentDecls = lowerable.map((a) => {
-    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type)), required: true }]));
-    return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(dataDomainOf(a, env))} },`;
+    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env)), required: true }]));
+    return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(dataDomainOf(a, env, facts))} },`;
   });
   const version = digest(module);
   const next = [
@@ -161,9 +161,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     machineVersion: version,
     stateKeys: layout.fields.flatMap((l) => l.flat.map((k) => ({ name: k, type: keyTypeText(l, k, env) }))),
     initState,
-    actions: Object.fromEntries(lowerable.map((a) => [a.name, { dataFields: Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type), env)])) }])),
+    actions: Object.fromEntries(lowerable.map((a) => [a.name, { dataFields: Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type, env), env)])) }])),
     terminalStates,
-    dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length).map((a) => [a.name, Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env)]))])),
+    dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length).map((a) => [a.name, Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env, facts, a.name)]))])),
     invariants: 'invariants.mjs',
   };
 
@@ -175,7 +175,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // A machine that arms timers needs the mapper too: a timer is an intent (PT6.3).
   if (facts.effects.size || facts.timerKeys.size || facts.children.size) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls }, pre, opts.fault);
-    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts), null, 2) + '\n';
+    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env), null, 2) + '\n';
   }
   const pathProps = mutated.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'path');
   if (pathProps.length) files['effect-invariants.mjs'] = effectInvariantsModule(m.name, pathProps);
@@ -246,13 +246,13 @@ function emitsAny(body: A.Stmt[]): boolean {
 }
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */
-function manifestOf(facts: MachineFacts): { effects: Record<string, unknown> } {
+function manifestOf(facts: MachineFacts, env: TypeEnv): { effects: Record<string, unknown> } {
   // Kinds are the author's strings, so the manifest is built from entries: an assignment to a key such
   // as "__proto__" would set a prototype instead of adding the kind.
   const out: [string, unknown][] = [];
   for (const e of facts.effects.values()) {
     const entry: Record<string, unknown> = {
-      payloadSchema: Object.fromEntries(e.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type)), required: true }])),
+      payloadSchema: Object.fromEntries(e.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env)), required: true }])),
     };
     const hooks: Record<string, string> = { ok: 'onSuccess', failed: 'onFailure', exhausted: 'onExhausted' };
     for (const it of e.items) {
@@ -385,18 +385,30 @@ function valuesOfTy(t: Ty, env: TypeEnv): unknown[] {
     return Array.from({ length: t.hi - t.lo + 1 }, (_, i) => t.lo + i);
   }
   if (t.k === 'union') return env.unions.get(t.name)!.ctors.map((c) => c.name);
+  if (t.k === 'record') {
+    // S25: every combination of field values, as plain objects.
+    let recs: Record<string, unknown>[] = [{}];
+    for (const f of env.records.get(t.name)!.fields) {
+      const vs = valuesOfTy(tyOfTypeExpr(f.type, env), env);
+      recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [f.name]: v })));
+    }
+    return recs;
+  }
   return [];
 }
 
-function paramValues(p: A.Param, env: TypeEnv): unknown[] {
-  return p.check ? checkDomainValues(p.check) : valuesOfTy(tyOfTypeExpr(p.type), env);
+/** A parameter's values; a completion's childKey takes the keys wired to its action (S51). */
+function paramValues(p: A.Param, env: TypeEnv, facts?: MachineFacts, action?: string): unknown[] {
+  const keys = action ? facts?.childKeyDomains.get(action) : undefined;
+  if (keys && p.name === 'childKey' && !p.check) return keys;
+  return p.check ? checkDomainValues(p.check) : valuesOfTy(tyOfTypeExpr(p.type, env), env);
 }
 
 /** D(a) as the intent's `domain`: every payload object (PS1.1). */
-function dataDomainOf(a: A.Action, env: TypeEnv): Record<string, unknown>[] {
+function dataDomainOf(a: A.Action, env: TypeEnv, facts?: MachineFacts): Record<string, unknown>[] {
   let recs: Record<string, unknown>[] = [{}];
   for (const p of a.params) {
-    const vs = paramValues(p, env);
+    const vs = paramValues(p, env, facts, a.name);
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
   return recs;
@@ -407,7 +419,7 @@ function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[]
 }
 
 function jsType(t: Ty): string {
-  return t.k === 'bool' ? 'boolean' : t.k === 'int' ? 'number' : 'string';
+  return t.k === 'bool' ? 'boolean' : t.k === 'int' ? 'number' : t.k === 'record' ? 'object' : 'string';
 }
 
 function typeText(t: Ty, env: TypeEnv): string {
@@ -416,6 +428,7 @@ function typeText(t: Ty, env: TypeEnv): string {
     case 'int': return Number.isFinite(t.lo) ? `${t.lo}..${t.hi}` : 'number';
     case 'string': return 'string';
     case 'union': return env.unions.get(t.name)!.ctors.map((c) => `'${c.name}'`).join(' | ');
+    case 'record': return `{ ${env.records.get(t.name)!.fields.map((f) => `${f.name}: ${typeText(tyOfTypeExpr(f.type, env), env)}`).join(', ')} }`;
     case 'map': return t.array ? `array of ${typeText(t.value, env)}, indexed ${typeText(t.key, env)}` : `object of ${typeText(t.value, env)}, keyed ${typeText(t.key, env)}`;
     default: return t.k;
   }

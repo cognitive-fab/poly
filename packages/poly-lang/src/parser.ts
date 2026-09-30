@@ -193,10 +193,25 @@ class Parser {
     this.fail('expected a declaration (type, enum, machine, use)');
   }
 
-  private typeDecl(): A.TypeDecl {
+  private typeDecl(): A.TypeDecl | A.RecordDecl {
     const start = this.next();
     const name = this.ident('a type name');
     this.expect('=');
+    // S25: `type R = { f: T, … }` is a record: its fields and no constructor.
+    if (this.atPunct('{')) {
+      this.next();
+      const fields: A.PayloadField[] = [];
+      while (!this.atPunct('}')) {
+        const fs = this.peek();
+        const fname = this.ident('a record field');
+        this.expect(':');
+        const type = this.type();
+        fields.push(this.node<A.PayloadField>(fs, { kind: 'PayloadField', name: fname, type }));
+        if (!this.atPunct('}')) this.expect(',');
+      }
+      this.next();
+      return this.node<A.RecordDecl>(start, { kind: 'RecordDecl', name, fields }, true);
+    }
     if (this.atPunct('|')) this.next();
     const ctors = [this.ctor()];
     while (this.atPunct('|')) { this.next(); ctors.push(this.ctor()); }

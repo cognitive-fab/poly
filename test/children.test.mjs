@@ -71,7 +71,7 @@ test('S43 to S48: the checker', () => {
   assert.deepEqual(swap('as box -> Start(size: 1)', 'as box -> Begin(size: 1)'), ['PL1001']);
   // S44: the completion and cancel parameter lists the runtime supplies.
   assert.deepEqual(swap('  action Shipped()\n', '  action Shipped(n: 0..1)\n').filter((c) => c === 'PL1201'), ['PL1201']);
-  assert.deepEqual(swap('  action Shipped()\n', '  action Shipped(childKey: string check { "box" }, childState: bool)\n').filter((c) => c === 'PL0901'), ['PL0901'], 'childState needs records, plan step 7');
+  assert.deepEqual(swap('  action Shipped()\n', '  action Shipped(childKey: string check { "box" }, childState: bool)\n').filter((c) => c === 'PL1201'), ['PL1201'], 'childState is a record of the child\'s fields (S44)');
   assert.deepEqual(swap('  action Void(reason: string check { "parent-terminal" })', '  action Void(reason: string check { "late" })'), ['PL1201']);
   assert.deepEqual(codes(base.replace('  action Void(reason: string check { "parent-terminal" })', '  action Void()').replace('  on Void(reason) {', '  on Void {')), [], 'a cancel with no parameters is legal');
   // S40: every wired action has a handler.

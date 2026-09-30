@@ -16,6 +16,8 @@ export type Ty =
   | { k: 'int'; lo: number; hi: number }
   | { k: 'string' }
   | { k: 'union'; name: string }
+  /** A record type (S25): nominal, every field present. */
+  | { k: 'record'; name: string }
   | { k: 'map'; key: Ty; value: Ty; array: boolean }
   | { k: 'ref' }
   | { k: 'action' }
@@ -29,6 +31,7 @@ export function tyToString(t: Ty): string {
   switch (t.k) {
     case 'int': return Number.isFinite(t.lo) && Number.isFinite(t.hi) ? `${t.lo}..${t.hi}` : 'int';
     case 'union': return t.name;
+    case 'record': return t.name;
     case 'map': return `map<${tyToString(t.key)}, ${tyToString(t.value)}>`;
     default: return t.k;
   }
@@ -37,7 +40,7 @@ export function tyToString(t: Ty): string {
 function same(a: Ty, b: Ty): boolean {
   if (a.k === 'error' || b.k === 'error') return true;
   if (a.k !== b.k) return false;
-  if (a.k === 'union') return a.name === (b as { name: string }).name;
+  if (a.k === 'union' || a.k === 'record') return a.name === (b as { name: string }).name;
   if (a.k === 'map') {
     const m = b as typeof a;
     return same(a.key, m.key) && same(a.value, m.value);
@@ -59,6 +62,8 @@ export type Resolution =
   | { k: 'post' }
   /** In a compose invariant: parent.f, and children.k.f of the child k (PT7). */
   | { k: 'jointParent'; field: string }
+  /** `r.f`, a field of a record value (S25). */
+  | { k: 'recordField'; field: string }
   | { k: 'jointChild'; key: string; field: string };
 
 /** An attached child of a machine, by its key (PT6.4): its machine and its wiring, as the spawn states them. */
@@ -87,6 +92,8 @@ export interface MachineFacts {
   timerKeys: Set<string>;
   /** PT6.4: the attached children the machine spawns, by key; a key is declared by its use in a `spawn`. */
   children: Map<string, ChildSpec>;
+  /** S51: for each completion action, the child keys whose completion names it: its `childKey` domain. */
+  childKeyDomains: Map<string, string[]>;
 }
 
 export interface CheckResult {
@@ -119,6 +126,8 @@ export function checkModule(module: A.Module): CheckResult {
 
 class Checker {
   private diags: Diagnostic[] = [];
+  /** S25: records that refer to themselves, reported once at their declaration. */
+  private recursive = new Set<string>();
   private env: TypeEnv;
   private machine: A.Machine | null = null;
   private facts: MachineFacts | null = null;
@@ -164,6 +173,19 @@ class Checker {
   private declarations(): void {
     const seen = new Set<string>();
     for (const d of this.module.decls) {
+      if (d.kind === 'RecordDecl') {
+        // S25: a record has named fields, each once, each finite, and it may not refer to itself.
+        if (seen.has(d.name)) this.err('PL1002', d, `type ${d.name} is declared twice`);
+        seen.add(d.name);
+        const fdup = d.fields.map((f) => f.name).find((n, i, a) => a.indexOf(n) !== i);
+        if (fdup) this.err('PL1002', d, `field ${fdup} is declared twice in ${d.name}`);
+        if (this.refersTo(d.name, d.fields.map((f) => f.type), new Set())) { this.recursive.add(d.name); this.err('PL1201', d, `record ${d.name} refers to itself; a record is finite and not recursive (S25)`); continue; }
+        for (const f of d.fields) {
+          this.tyOf(f.type);
+          if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `field ${d.name}.${f.name} has no finite domain; give it a range or an enum type`);
+        }
+        continue;
+      }
       if (d.kind !== 'TypeDecl' && d.kind !== 'EnumDecl') continue;
       if (seen.has(d.name)) this.err('PL1002', d, `type ${d.name} is declared twice`);
       seen.add(d.name);
@@ -189,6 +211,21 @@ class Checker {
     }
   }
 
+  /** Whether any of the types refers to the type `name`, through records, unions and maps (S25). */
+  private refersTo(name: string, types: A.TypeExpr[], visiting: Set<string>): boolean {
+    return types.some((t) => {
+      if (t.kind === 'TMap') return this.refersTo(name, [t.key, t.value], visiting);
+      if (t.kind !== 'TName') return false;
+      if (t.name === name) return true;
+      if (visiting.has(t.name)) return false;
+      visiting.add(t.name);
+      const r = this.env.records.get(t.name);
+      if (r) return this.refersTo(name, r.fields.map((f) => f.type), visiting);
+      const u = this.env.unions.get(t.name);
+      return u ? u.ctors.some((c) => this.refersTo(name, c.fields.map((f) => f.type), visiting)) : false;
+    });
+  }
+
   /** The semantic type of a type expression, reporting unknown names and bad map keys. */
   private tyOf(t: A.TypeExpr): Ty {
     switch (t.kind) {
@@ -200,6 +237,9 @@ class Checker {
         return { k: 'int', lo: t.lo, hi: t.hi };
       case 'TRef': return { k: 'ref' };
       case 'TName':
+        // A recursive record was reported at its declaration; its uses say nothing more (one mistake, one diagnostic).
+        if (this.recursive.has(t.name)) return ERR;
+        if (this.env.records.has(t.name)) return { k: 'record', name: t.name };
         if (!this.env.unions.has(t.name)) { this.errOnce('PL1001', t, `unknown type ${t.name}`); return ERR; }
         return { k: 'union', name: t.name };
       case 'TMap': {
@@ -218,7 +258,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -233,6 +273,15 @@ class Checker {
       this.checkInit(f, ty);
     }
 
+    const completionActions = new Set<string>();
+    const wired = (body: A.Stmt[]): void => {
+      for (const s of body) {
+        if (s.kind === 'Intent' && s.op === 'spawn') { const i = s.extra.indexOf('complete'); if (i >= 0) completionActions.add(s.extra[i + 1]); }
+        if (s.kind === 'If') { wired(s.then); wired(s.else ?? []); }
+        if (s.kind === 'Match') for (const a of s.arms) wired(a.body);
+      }
+    };
+    for (const it of m.items) if (it.kind === 'Handler') wired(it.body);
     for (const it of m.items) {
       if (it.kind !== 'Action') continue;
       if (this.actions.has(it.name)) { this.err('PL1002', it, `action ${it.name} is declared twice`); continue; }
@@ -241,6 +290,8 @@ class Checker {
       for (const p of it.params) {
         if (pnames.has(p.name)) this.err('PL1002', p, `parameter ${p.name} is declared twice`);
         pnames.add(p.name);
+        // S51: a completion's childKey takes its domain from the keys wired to that action.
+        if (p.name === 'childKey' && p.type.kind === 'TString' && !p.check && completionActions.has(it.name)) continue;
         this.checkDomain(`${it.name}.${p.name}`, p.type, this.tyOf(p.type), p.check, p);
       }
     }
@@ -480,7 +531,9 @@ class Checker {
       if (!act) this.err('PL1001', s, `on complete -> ${spec.onComplete}: no action ${spec.onComplete} in ${this.machine!.name}`);
       else {
         if (!handled(this.machine!, spec.onComplete)) this.err('PL6101', s, `completion action ${spec.onComplete} has no handler, so the runtime cannot deliver it; add a handler (S40)`);
-        this.completionParams(act);
+        this.completionParams(act, child);
+        const keys = this.facts!.childKeyDomains.get(spec.onComplete) ?? [];
+        if (!keys.includes(spec.key)) this.facts!.childKeyDomains.set(spec.onComplete, [...keys, spec.key]);
       }
     }
     if (spec.onParentTerminal) {
@@ -493,12 +546,21 @@ class Checker {
     }
   }
 
-  /** S44: a completion action declares no parameters, or `(childKey: string, childState: R)`, which needs records (plan step 7). */
-  private completionParams(act: A.Action): void {
+  /**
+   * S44: a completion action declares no parameters, or `(childKey: string, childState: R)`, where R is a record
+   * whose fields are the child's fields, with their types (the runtime supplies the child's terminal state).
+   */
+  private completionParams(act: A.Action, child: A.Machine): void {
     if (act.params.length === 0) return;
     const [k, st] = act.params;
-    if (act.params.length === 2 && k.name === 'childKey' && st.name === 'childState') {
-      this.errOnce('PL0901', act, `${act.name}(childKey, childState) needs a record type for childState, which is lowered from plan step 7 of milestone M1 (S25, S44)`);
+    if (act.params.length === 2 && k.name === 'childKey' && k.type.kind === 'TString' && st.name === 'childState') {
+      const rt = this.tyOf(st.type);
+      const rec = rt.k === 'record' ? this.env.records.get(rt.name)! : null;
+      const matches = rec !== null && rec.fields.length === child.fields.length
+        && child.fields.every((f) => { const rf = rec.fields.find((x) => x.name === f.name); return rf !== undefined && same(this.tyOf(rf.type), this.tyOf(f.type)); });
+      if (!matches) { this.errOnce('PL1201', act, `${act.name}.childState is the state of ${child.name}; its type is a record with the fields ${child.fields.map((f) => f.name).join(', ')}, of the same types (S44)`); return; }
+      // The runtime passes the child's flat snapshot; a union field with payloads is flat there (PS9.1b).
+      if (child.fields.some((f) => { const t = this.tyOf(f.type); return t.k === 'union' && !this.env.unions.get(t.name)!.isEnum; })) this.errOnce('PL0901', act, `${act.name}.childState of ${child.name}, which has a union field with payloads, is lowered from plan step 10`);
       return;
     }
     this.errOnce('PL1201', act, `completion action ${act.name} declares (${act.params.map((p) => p.name).join(', ')}); the runtime supplies (childKey: string, childState: R) or nothing (S44)`);
@@ -681,6 +743,8 @@ class Checker {
       return;
     }
     if (ty.k === 'error') return;
+    // A record with an unbounded field was reported at the field (S25); its uses say nothing more.
+    if (ty.k === 'record' && this.env.records.get(ty.name)!.fields.some((x) => cardinality(x.type, this.env) === null)) return;
     if (cardinality(t, this.env) === null) this.err('PL1101', at, `${what} has type ${tyToString(ty)}, which has no finite check domain; add \`check { … }\` or \`check a..b\` (PT3.2)`);
   }
 
@@ -1110,7 +1174,16 @@ class Checker {
           if (!t) { this.err('PL1001', e, `unknown field ${e.prop}`); return ERR; }
           return t;
         }
-        this.err('PL1201', e, `field access .${e.prop} is only pre.f or post.f, in step and reject properties, and pre.f in handlers`);
+        // S25: `r.f` reads a field of a record value.
+        const ot = this.typeOf(e.object, scope);
+        if (ot.k === 'record') {
+          const f = this.env.records.get(ot.name)!.fields.find((x) => x.name === e.prop);
+          if (!f) { this.err('PL1001', e, `${ot.name} has no field ${e.prop}`); return ERR; }
+          this.resolve(e, { k: 'recordField', field: e.prop });
+          return this.tyOf(f.type);
+        }
+        if (ot.k === 'error') return ERR;
+        this.err('PL1201', e, `field access .${e.prop} is only pre.f or post.f, in step and reject properties, pre.f in handlers, and r.f of a record`);
         return ERR;
       }
       case 'Index': {
@@ -1174,7 +1247,11 @@ class Checker {
         return { k: 'union', name: c.union };
       }
       case 'MapLit': {
-        if (expected?.k !== 'map') { this.err('PL1201', e, 'a map literal needs a map type from its context'); return ERR; }
+        if (expected?.k === 'record') return this.recordLit(e, expected, scope);
+        if (expected?.k === 'error') return ERR;
+        // S25: `{ k: v }` is a map or a record by its expected type; with none, it is ambiguous.
+        if (!expected) { this.err('PL1005', e, 'a literal { … } is a map or a record by the type it is given; give it one (S25)'); return ERR; }
+        if (expected.k !== 'map') { this.err('PL1201', e, `a literal { … } is a map or a record, and ${tyToString(expected)} is expected here`); return ERR; }
         const keys = this.keyValues(expected.key);
         const seen: unknown[] = [];
         // One mistake, one diagnostic (M1-4): a key of the wrong type is reported once, and coverage is
@@ -1228,6 +1305,26 @@ class Checker {
   private isParamOfSomeAction(n: string): boolean {
     for (const a of this.actions.values()) if (a.params.some((p) => p.name === n)) return true;
     return false;
+  }
+
+  /** A record literal (S25): every field of the record once, each value of its field's type (PL1502 for a missing one). */
+  private recordLit(e: A.MapLit, t: { k: 'record'; name: string }, scope: Scope): Ty {
+    const r = this.env.records.get(t.name)!;
+    const given = new Set<string>();
+    let ok = true;
+    for (const en of e.entries) {
+      if (en.key.kind !== 'Name') { this.err('PL1201', en.key, `a field of ${r.name} is named, not computed`); ok = false; continue; }
+      const f = r.fields.find((x) => x.name === (en.key as A.NameRef).name);
+      if (!f) { this.err('PL1001', en.key, `${r.name} has no field ${en.key.name}`); ok = false; this.typeOf(en.value, scope); continue; }
+      if (given.has(f.name)) { this.err('PL1502', en.key, `field ${f.name} is listed twice`); ok = false; }
+      given.add(f.name);
+      const ft = this.tyOf(f.type);
+      const vt = this.typeOf(en.value, scope, ft);
+      if (!same(vt, ft)) this.err('PL1201', en.value, `${r.name}.${f.name} is ${tyToString(ft)}, and the value is ${tyToString(vt)}`);
+    }
+    const missing = r.fields.filter((f) => !given.has(f.name)).map((f) => f.name);
+    if (ok && missing.length) this.err('PL1502', e, `a record literal lists every field; missing ${missing.join(', ')} (S25)`);
+    return t;
   }
 
   private keyValues(t: Ty): unknown[] | null {

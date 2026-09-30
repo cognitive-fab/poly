@@ -4,8 +4,8 @@
 // types, builds domains and finds handlers itself, from the definitions in
 // 04-semantics, sharing nothing with the compiler's checker.
 import type * as A from '@poly/core';
-import type { MapValue, UnionValue, Value } from './values.js';
-import { keyOf, isUnion, isMap } from './values.js';
+import type { MapValue, RecordValue, UnionValue, Value } from './values.js';
+import { keyOf, isUnion, isMap, isRecord } from './values.js';
 
 /** Types as PS1.4 lists them. */
 export type RType =
@@ -13,6 +13,7 @@ export type RType =
   | { k: 'int'; lo: number; hi: number } // unbounded int: ±Infinity
   | { k: 'string' }
   | { k: 'union'; name: string }
+  | { k: 'record'; name: string }
   | { k: 'map'; key: RType; value: RType }
   | { k: 'ref' };
 
@@ -106,8 +107,15 @@ export interface RChild {
   actions: { name: string; params: { name: string; type: RType }[] }[];
 }
 
+/** A record type (S25): its fields, in declaration order. */
+export interface RRecord {
+  name: string;
+  fields: { name: string; type: RType }[];
+}
+
 export interface RMachine {
   name: string;
+  records: Map<string, RRecord>;
   /** `<module>.<Machine>` (S28). */
   id: string;
   service: boolean;
@@ -132,6 +140,8 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   const unions = new Map<string, RUnion>();
   const ctors = new Map<string, string>();
   const decls = module.decls;
+  const recordNames = new Set(decls.filter((d) => d.kind === 'RecordDecl').map((d) => d.name));
+  const records = new Map<string, RRecord>();
   // Types first: a union's payload types may name other unions.
   const typeOf = (t: A.TypeExpr): RType => {
     switch (t.kind) {
@@ -139,7 +149,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
       case 'TInt': return { k: 'int', lo: -Infinity, hi: Infinity };
       case 'TString': return { k: 'string' };
       case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
-      case 'TName': return { k: 'union', name: t.name };
+      case 'TName': return recordNames.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
       case 'TMap': return { k: 'map', key: typeOf(t.key), value: typeOf(t.value) };
       case 'TRef': return { k: 'ref' };
     }
@@ -148,6 +158,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     if (d.kind === 'EnumDecl') unions.set(d.name, { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })) });
     if (d.kind === 'TypeDecl') unions.set(d.name, { name: d.name, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) })) });
   }
+  for (const d of decls) if (d.kind === 'RecordDecl') records.set(d.name, { name: d.name, fields: d.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) });
   for (const u of unions.values()) for (const c of u.ctors) if (!ctors.has(c.name)) ctors.set(c.name, u.name);
 
   const m = decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machineName);
@@ -222,8 +233,13 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     if (it.kind === 'Property' && it.form === 'step') stepProperties.push(it);
     if (it.kind === 'Property' && it.form === 'reject') rejectProperties.push(it);
   }
+  // S51: a completion's childKey ranges over the keys whose spawn names that action as its completion.
+  for (const a of actions) {
+    const keys = [...children.values()].filter((c) => c.onComplete === a.name).map((c) => c.key);
+    for (const p of a.params) if (p.name === 'childKey' && p.type.k === 'string' && p.check === null && keys.length) p.check = keys;
+  }
   return {
-    name: m.name, id: `${module.name}.${m.name}`, service: m.service, children, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, effects, pathProperties, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties,
   };
 }
@@ -289,6 +305,15 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
       return Array.from({ length: t.hi - t.lo + 1 }, (_, k) => t.lo + k);
     case 'string': throw new Error('poly-ref: a string has no enumeration; it needs a check domain (PT3.2)');
     case 'ref': return [null]; // `none` only: a single machine holds no other address (PS1.6)
+    case 'record': {
+      // S25: every combination of field values, in declaration order.
+      let recs: Record<string, Value>[] = [{}];
+      for (const f of M.records.get(t.name)!.fields) {
+        const vs = valuesOf(f.type, M);
+        recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [f.name]: v })));
+      }
+      return recs.map((fields) => ({ fields }) satisfies RecordValue);
+    }
     case 'union': {
       const u = M.unions.get(t.name)!;
       const out: Value[] = [];
@@ -341,6 +366,11 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     case 'int': return typeof v === 'number' && Number.isInteger(v) && v >= t.lo && v <= t.hi;
     case 'string': return typeof v === 'string';
     case 'ref': return v === null;
+    case 'record': {
+      if (!isRecord(v)) return false;
+      const fs = M.records.get(t.name)!.fields;
+      return Object.keys(v.fields).length === fs.length && fs.every((f) => f.name in v.fields && inType(v.fields[f.name], f.type, M));
+    }
     case 'union': {
       if (!isUnion(v)) return false;
       const c = M.unions.get(t.name)!.ctors.find((x) => x.name === v.ctor);

@@ -95,6 +95,7 @@ export function expr(e: A.Expr, cx: Cx): string {
         case 'post':
         case 'jointParent':
         case 'jointChild':
+        case 'recordField':
           throw new Error('poly-lower: pre/post outside a member access');
       }
       throw new Error('poly-lower: unreachable');
@@ -104,6 +105,8 @@ export function expr(e: A.Expr, cx: Cx): string {
       const res = cx.facts.resolutions.get(e.id);
       if (res?.k === 'ctor') return cx.env.unions.get(res.union)!.isEnum ? q(res.ctor) : `{ $: ${q(res.ctor)} }`;
       // PT7: the joint state polyrun's check-product passes, { parent: { state }, children: { k: { state } } }.
+      // S25: r.f reads a field of a record value, a plain object.
+      if (res?.k === 'recordField') return `(${expr(e.object, cx)})[${q(res.field)}]`;
       if (res?.k === 'jointParent') return readField(cx, 'joint.parent.state', res.field);
       if (res?.k === 'jointChild') return `joint.children[${q(res.key)}].state[${q(res.field)}]`;
       const obj = (e.object as A.NameRef).name;
@@ -127,7 +130,7 @@ export function expr(e: A.Expr, cx: Cx): string {
         case '==':
         case '!=': {
           const t = tyOf(cx, e.left);
-          const structural = t && (isPayloadUnion(cx.env, t) || t.k === 'map');
+          const structural = t && (isPayloadUnion(cx.env, t) || t.k === 'map' || t.k === 'record');
           const eq = structural ? `__eq(${a}, ${b})` : `(${a} === ${b})`;
           return e.op === '==' ? eq : `(!${eq})`;
         }
@@ -137,7 +140,7 @@ export function expr(e: A.Expr, cx: Cx): string {
     case 'Is': return `[${e.ctors.map(q).join(', ')}].includes(${unionTag(cx, e.expr, expr(e.expr, cx))})`;
     case 'In': {
       const t = tyOf(cx, e.expr);
-      const structural = t && (isPayloadUnion(cx.env, t) || t.k === 'map');
+      const structural = t && (isPayloadUnion(cx.env, t) || t.k === 'map' || t.k === 'record');
       const v = expr(e.expr, cx);
       const set = `[${e.set.map((x) => expr(x, cx)).join(', ')}]`;
       return structural ? `${set}.some((__x) => __eq(__x, ${v}))` : `${set}.includes(${v})`;

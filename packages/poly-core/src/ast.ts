@@ -27,7 +27,14 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | Machine | UseDecl;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl;
+
+/** `type R = { f1: T1, …, fn: Tn }` (S25): a nominal record, every field present, no tag. */
+export interface RecordDecl extends NodeBase {
+  kind: 'RecordDecl';
+  name: string;
+  fields: PayloadField[];
+}
 
 /** `type U = C1 { p: T } | C2` (PT2, PS1.4). */
 export interface TypeDecl extends NodeBase {

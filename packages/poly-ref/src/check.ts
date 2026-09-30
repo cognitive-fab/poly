@@ -203,6 +203,7 @@ function typeText(t: RType, M: RMachine): string {
   switch (t.k) {
     case 'int': return Number.isFinite(t.lo) ? `${t.lo}..${t.hi}` : 'int';
     case 'union': return t.name;
+    case 'record': return t.name;
     case 'map': return `map<${typeText(t.key, M)}, ${typeText(t.value, M)}>`;
     default: return t.k;
   }
@@ -219,7 +220,7 @@ function domainText(check: unknown[] | null, t: RType, M: RMachine): string {
 export function instanceOf(M: RMachine): InstanceLine {
   return {
     fields: M.fields.filter((f) => f.check || f.type.k === 'int').map((f) => ({ name: f.name, domain: domainText(f.check, f.type, M) })),
-    params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) }))),
+    params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'record' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) }))),
   };
 }
 
