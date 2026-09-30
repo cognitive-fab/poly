@@ -149,7 +149,7 @@ class Printer {
     const q = it.quant ? `${it.quant.q} ${it.quant.var} in ${it.quant.group}: ` : '';
     // S56: in a configuration the fairness clause may be left out.
     if (!it.fair) return [`liveness ${it.name}: ${q}${body}`];
-    const fair = it.fair.map((g) => g.members.map((m) => m.action + (m.perValue ? '(*)' : '')).join(' | ')).join(', ');
+    const fair = it.fair.map((g) => g.members.map((m) => (m.input ? `${m.input.instance}${m.input.index === null ? '' : `[${m.input.index}]`}.` : '') + m.action + (m.perValue ? '(*)' : '')).join(' | ')).join(', ');
     return [`liveness ${it.name}: ${q}${body}`, `${INDENT}under fair { ${fair} }`];
   }
 

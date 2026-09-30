@@ -580,10 +580,24 @@ class Parser {
     return this.node<A.Liveness>(start, { kind: 'Liveness', name, from, expr, fair, quant }, true);
   }
 
-  private fairMember(): { action: string; perValue: boolean } {
-    const action = this.ident('an action name');
-    if (this.atPunct('(') && this.atPunct('*', 1) && this.atPunct(')', 2)) { this.next(); this.next(); this.next(); return { action, perValue: true }; }
-    return { action, perValue: false };
+  private fairMember(): A.FairGroup['members'][number] {
+    let action = this.ident('an action name');
+    // S73: in a configuration, `g[*].A`, `g[1].A` or `x.A`, as an InputRef.
+    let input: { instance: string; index: number | '*' | null } | undefined;
+    if (this.atPunct('[') || this.atPunct('.')) {
+      let index: number | '*' | null = null;
+      if (this.atPunct('[')) {
+        this.next();
+        if (this.atPunct('*')) { this.next(); index = '*'; } else index = this.int();
+        this.expect(']');
+      }
+      this.expect('.');
+      input = { instance: action, index };
+      action = this.ident('an action name');
+    }
+    const perValue = this.atPunct('(') && this.atPunct('*', 1) && this.atPunct(')', 2);
+    if (perValue) { this.next(); this.next(); this.next(); }
+    return input ? { action, perValue, input } : { action, perValue };
   }
 
   private effect(start: Token): A.EffectDecl {

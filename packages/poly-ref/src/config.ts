@@ -19,7 +19,8 @@
 import type * as A from '@poly/core';
 import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
 import { createHash } from 'node:crypto';
-import { buildMachine, inCheckDomain, inType, valuesOf, type RMachine } from './model.js';
+import { buildMachine, dataDomain, inCheckDomain, inType, valuesOf, type RMachine } from './model.js';
+import { fairCycles, type FairGroup } from './liveness.js';
 import { transition, initialState, isTerminal } from './step.js';
 import { evaluate, evaluateAt, type GlobalView } from './eval.js';
 import { explore, pathTo, type Edge, type Graph, type Label, type Outcome, type System } from './explore.js';
@@ -63,6 +64,7 @@ const CODE = {
   PL5401: ['CONFIGURATION_INVARIANT', 'finding'],
   PL5402: ['STUCK', 'finding'],
   PL5404: ['SEND_TO_NONE', 'finding'],
+  PL3301: ['LIVENESS_LASSO', 'finding'],
 } as const;
 
 export interface ConfigReport {
@@ -209,9 +211,9 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, ...(node ? { node } : {}) });
   const digestOf = (s: GlobalState) => 'sha256:' + createHash('sha256').update(sys.key(s)).digest('hex');
-  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, edges: Edge<GlobalState>[], about: { property?: string; field?: string; state?: GlobalState } = {}): Diagnostic => {
+  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, edges: Edge<GlobalState>[], about: { property?: string; field?: string; state?: GlobalState; cycle?: number } = {}): Diagnostic => {
     const [cname, severity] = CODE[code];
-    const witness: Witness = { id: '', length: edges.length, trace: trace(edges) };
+    const witness: Witness = { id: '', length: edges.length, trace: trace(edges), ...(about.cycle !== undefined ? { cycle: about.cycle } : {}) };
     return {
       code, name: cname, severity, stage: 'configuration', engine: ENGINE, at: at(node), message, witness,
       ...(about.property ? { property: about.property } : {}),
@@ -243,7 +245,28 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   const envOf = (s: GlobalState) => ({ M: instances[0].machine, state: {}, data: {}, locals: new Map<string, Value>(), global: view(instances, s.sigma, initial) });
   const liveness: string[] = [];
   for (const p of decl.properties) {
-    if (p.kind === 'Liveness') { liveness.push(p.name); continue; }
+    if (p.kind === 'Liveness') {
+      // PS6.4 over global states (S56): delivery is fair per message value (PS13.2b, PS14.2), and an input only
+      // where the clause names it (S73). A quantifier ranges over the whole leads to: forall fails when some
+      // member fails, exists when every member does.
+      liveness.push(p.name);
+      const groups = [...deliveryGroups(g), ...inputGroups(p.fair ?? [], instances)];
+      const members = p.quant ? Array.from({ length: instances.filter((x) => x.group === p.quant!.group).length }, (_, k) => k) : [null];
+      const tried = members.map((k) => {
+        const env = (i: number) => { const e = envOf(g.states[i]); if (k !== null) e.locals.set(p.quant!.var, k); return e; };
+        const holds = (x: A.Expr) => (i: number) => evaluate(x, env(i)) === true;
+        return { k, lassos: fairCycles(g as Graph<unknown>, { goal: holds(p.expr), from: p.from ? holds(p.from) : null, groups }) };
+      });
+      const failing = tried.filter((t) => t.lassos.length);
+      const fails = p.quant?.q === 'exists' ? failing.length === tried.length : failing.length > 0;
+      if (fails) {
+        const { k, lassos } = failing[0];
+        const l = lassos[0];
+        const who = k === null ? '' : ` for ${p.quant!.var} = ${k}`;
+        findings.push(finding('PL3301', p.id, `liveness ${p.name} fails${who}: ${lassos.length} fair component${lassos.length === 1 ? '' : 's'} never reach${lassos.length === 1 ? 'es' : ''} the goal; the witness is a lasso through the first`, [...l.prefix, ...l.cycle] as Edge<GlobalState>[], { property: p.name, state: g.states[l.component[0]], cycle: l.prefix.length }));
+      }
+      continue;
+    }
     const i = g.states.findIndex((s) => evaluate(p.expr, envOf(s)) !== true);
     if (i >= 0) findings.push(finding('PL5401', p.id, `configuration invariant ${p.name} is violated in a reachable global state`, pathTo(g, i), { property: p.name, state: g.states[i] }));
   }
@@ -289,6 +312,38 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     capHit: g.capHit,
     graph: g,
   };
+}
+
+/** PS13.2b, PS14.2: one fair group per message value in transit anywhere in the graph; a delivery takes it, rejected or not. */
+function deliveryGroups(g: Graph<GlobalState>): FairGroup[] {
+  const keys = new Set<string>();
+  for (const s of g.states) for (const m of s.mu) keys.add(msgKey(m));
+  return [...keys].map((key) => ({
+    name: `deliver ${key}`,
+    takes: (e: Edge<unknown>) => { const l = e.label as GlobalLabel; return l.via === 'deliver' && msgKey({ target: l.instance, action: l.action, data: l.data }) === key; },
+  }));
+}
+
+/** S73: an input named in the clause is fair, one group per instance it names, and per data value with (*). */
+function inputGroups(fair: A.FairGroup[], instances: ConfigInstance[]): FairGroup[] {
+  const out: FairGroup[] = [];
+  for (const grp of fair) {
+    for (const m of grp.members) {
+      if (!m.input) continue;
+      const names = m.input.index === null ? [m.input.instance] : m.input.index === '*' ? instances.filter((x) => x.group === m.input!.instance).map((x) => x.name) : [`${m.input.instance}[${m.input.index}]`];
+      for (const n of names) {
+        const k = instances.findIndex((x) => x.name === n);
+        const base = (e: Edge<unknown>) => { const l = e.label as GlobalLabel; return l.via === 'input' && l.instance === k && l.action === m.action && l.verdict.kind === 'accepted'; };
+        if (!m.perValue) { out.push({ name: `${n}.${m.action}`, takes: base }); continue; }
+        const a = instances[k].machine.actions.find((x) => x.name === m.action)!;
+        for (const d of dataDomain(a, instances[k].machine)) {
+          const key = JSON.stringify(Object.keys(d).sort().map((x) => [x, keyOf(d[x])]));
+          out.push({ name: `${n}.${m.action}(${key})`, takes: (e) => base(e) && JSON.stringify(Object.keys(e.label.data).sort().map((x) => [x, keyOf(e.label.data[x])])) === key });
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /** A global state as plain JSON: each instance's state, and the messages in transit. */

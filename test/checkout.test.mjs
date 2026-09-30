@@ -56,18 +56,17 @@ test('AC10: the optimistic order confirms two orders against one unit, PL5401 wi
   assert.match(text, /checkout\.two-buyers {2}over inv: Inventory, order\[0\.\.1\]: Order; transit ≤ 4; \d+ global states; kernel assumptions K1, K2, K4, K7, K8/);
 });
 
-test('AC10: the order that waits for Taken is clean over 44 global states, with no stuck state, and settle not run', async () => {
+test('AC10 and the M2 gate: the waiting order is clean over 44 global states, no stuck state, and settle holds', async () => {
   const r = await checkFile(WAITING, { root: OUT });
   const c = r.configurations.find((x) => x.configuration === 'two-buyers');
   assert.deepEqual(c.diagnostics, [], render(r));
   assert.equal(c.instance.states, 44);
   assert.equal(c.stages[0].verdict, 'CLEAN');
-  assert.deepEqual(c.notRun.map((p) => p.property), ['settle']);
-  // M1-2: a property not run keeps the configuration from CLEAN.
-  assert.equal(c.verdict, 'INCONCLUSIVE');
+  assert.deepEqual(c.notRun, []);
+  assert.equal(c.verdict, 'CLEAN');
   // S63: a reply is not PL4002, so the machines alone are clean and the file's verdict follows its configuration.
   assert.deepEqual(r.machines.flatMap((m) => m.diagnostics), []);
-  assert.equal(r.verdict, 'INCONCLUSIVE');
+  assert.equal(r.verdict, 'CLEAN');
 });
 
 const PYTHON = ['python3', 'python', 'py'].find((cmd) => {
@@ -193,4 +192,50 @@ test('a configuration the explorer cannot follow is an ERROR report, not a rejec
   const r = configurationReports(m, false);
   assert.equal(r.configurations.length, 0);
   assert.match(r.error, /two-buyers: .*Warehouse/);
+});
+
+// ── liveness in a configuration (plan-m2 step 3; S56, S73; PS13.2b, PS14.2) ──
+
+test('settle fails with a lasso when the inventory never answers Take', () => {
+  const r = ref(SRC.replace("if onHand > 0 { onHand' = onHand - 1   send from <- Taken() }", "if onHand > 0 { onHand' = onHand - 1 }"));
+  const f = r.findings.find((d) => d.code === 'PL3301');
+  assert.ok(f, JSON.stringify(r.findings.map((d) => d.code)));
+  assert.equal(f.property, 'settle');
+  const w = f.witness;
+  assert.ok(w.cycle !== undefined && w.cycle < w.length);
+  assert.match(f.message, /for i = 0/);
+});
+
+test('S73: an input named in the fairness clause is fair, and nothing else is', () => {
+  // Without a fair Place, an order may never be placed, and `eventually` its state is Done fails.
+  const base = SRC.replace('  liveness  settle: forall i in order: order[i] is Asked leads to order[i] is Done | Refused', '  liveness  placed: forall i in order: eventually order[i] is Done | Refused');
+  assert.ok(ref(base).findings.some((d) => d.code === 'PL3301'));
+  const fair = base.replace('eventually order[i] is Done | Refused', 'eventually order[i] is Done | Refused under fair { order[*].Place }');
+  assert.deepEqual(codes(fair), []);
+  assert.deepEqual(ref(fair).findings.filter((d) => d.code === 'PL3301'), []);
+  // A machine's action name alone, or an unknown instance, is refused in a configuration.
+  assert.deepEqual(codes(base.replace('eventually order[i] is Done | Refused', 'eventually order[i] is Done | Refused under fair { Place }')), ['PL1201']);
+  assert.deepEqual(codes(base.replace('eventually order[i] is Done | Refused', 'eventually order[i] is Done | Refused under fair { buyer[*].Place }')), ['PL1001']);
+});
+
+test('S77: config_liveness_check.py reproduces config_check.py, and finds settle holding (pending the owner\'s review)', (t) => {
+  if (!PYTHON) { t.skip('Python 3 is not available: the evidence script was not run'); return; }
+  const run = spawnSync(PYTHON, [join(ROOT, 'docs', 'reviews', 'evidence', 'config_liveness_check.py')], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const [optimistic, waiting] = run.stdout.split(/\n(?=order waits)/);
+  assert.deepEqual(optimistic.split('\n').slice(1).map((l) => l.trim()).filter(Boolean).map((s) => s.replace(/\s+/, ' ')), steps(ref(readFileSync(OPTIMISTIC, 'utf8')).findings[0]).map((s) => s.replace(/\s+/, ' ')));
+  assert.match(waiting, /states explored 44 \| confirmed-within-stock holds/);
+  assert.match(waiting, /settle for order\[0\]: holds/);
+  assert.match(waiting, /settle for order\[1\]: holds/);
+  assert.deepEqual(ref(SRC).findings, []);
+});
+
+test('S73: a fairness InputRef formats back to itself', async () => {
+  const { format } = await import('@poly/lang');
+  const { digest } = await import('@poly/core');
+  const src = SRC.replace('  liveness  settle: forall i in order: order[i] is Asked leads to order[i] is Done | Refused', '  liveness  placed: forall i in order: eventually order[i] is Done | Refused under fair { order[*].Place(*) | order[1].Place, inv.Query }');
+  const m = parse(src).module;
+  const out = format(m);
+  assert.match(out, /under fair \{ order\[\*\]\.Place\(\*\) \| order\[1\]\.Place, inv\.Query \}/);
+  assert.equal(digest(parse(out).module), digest(m));
 });

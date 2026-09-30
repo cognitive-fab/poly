@@ -211,7 +211,8 @@ export interface Liveness extends NodeBase {
 
 export interface FairGroup extends NodeBase {
   kind: 'FairGroup';
-  members: { action: string; perValue: boolean }[];
+  /** In a configuration, a member names its instances as an InputRef does (S73): `order[*].Place(*)`. */
+  members: { action: string; perValue: boolean; input?: { instance: string; index: number | '*' | null } }[];
 }
 
 /** `effect k(params) { … }` (PT6.1). Parsed in M0, lowered from M1. */

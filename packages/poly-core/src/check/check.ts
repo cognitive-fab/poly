@@ -266,7 +266,14 @@ class Checker {
       if (p.from) this.expectBool(p.from, inner);
       this.expectBool(p.expr, inner);
       for (const g of p.fair ?? []) {
-        for (const m of g.members) if (![...instances.values()].some((x) => x.machine.items.some((it) => it.kind === 'Action' && it.name === m.action))) this.err('PL1001', g, `fairness names ${m.action}, which is not an action of any machine of ${c.name}`);
+        for (const m of g.members) {
+          // S73: a configuration's fairness names instances as an InputRef does.
+          if (!m.input) { this.err('PL1201', g, `in a configuration, fairness names an input as g[*].${m.action} or x.${m.action} (S73)`); continue; }
+          const inst = instances.get(m.input.instance);
+          if (!inst) { this.err('PL1001', g, `no instance ${m.input.instance} in ${c.name}`); continue; }
+          if ((inst.count === null) !== (m.input.index === null)) this.err('PL1201', g, `${m.input.instance} is ${inst.count === null ? 'one instance' : 'a group'}; name it as in inputs (S31, S73)`);
+          if (!inst.machine.items.some((it) => it.kind === 'Action' && it.name === m.action)) this.err('PL1001', g, `${inst.machine.name} has no action ${m.action}`);
+        }
       }
     }
   }
@@ -565,7 +572,10 @@ class Checker {
           if (!it.fair) this.err('PL1201', it, `liveness ${it.name} of a machine states its fairness: under fair { … } (PS6)`);
           if (it.quant) this.err('PL1201', it, `${it.quant.q} ${it.quant.var} in ${it.quant.group}: ranges over a group of a configuration, not over a machine's property (PS13.6)`);
           for (const g of it.fair ?? []) {
-            for (const m of g.members) if (!this.actions.has(m.action)) this.err('PL1001', g, `fairness names ${m.action}, which is not an action of ${this.machine!.name}`);
+            for (const m of g.members) {
+              if (m.input) this.err('PL1201', g, `${m.input.instance}.${m.action} names an instance, which only a configuration has (S73)`);
+              else if (!this.actions.has(m.action)) this.err('PL1001', g, `fairness names ${m.action}, which is not an action of ${this.machine!.name}`);
+            }
           }
           break;
         case 'EffectDecl':

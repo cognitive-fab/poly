@@ -528,7 +528,6 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  */
 function configurationStage(module: Module, decl: A.Configuration, refused: boolean): ConfigCheck {
   const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
-  for (const p of decl.properties) if (p.kind === 'Liveness') cc.notRun.push({ property: p.name, reason: 'liveness is checked from milestone M2 (PS6, PS13.2b)' });
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
     return cc;
@@ -552,7 +551,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   const sender = r.instances.some((i) => sends(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === i.machine.name)));
   cc.stages.push({
     stage: 'configuration', status: 'ran', engine: 'poly-ref', verdict: verdictOf(r.findings), ms: performance.now() - t0,
-    note: `${r.states} global states, ${r.transitions} global steps`,
+    note: `${r.states} global states, ${r.transitions} global steps${r.liveness.length ? `; liveness under delivery fairness per message value (PS13.2b, PS14.2)` : ''}`,
     notes: sender ? ['polyrun has no sendTo intent yet (S58): the configuration is checked from the semantics, and its machines do not run under polyrun until it has'] : undefined,
   });
   return cc;
