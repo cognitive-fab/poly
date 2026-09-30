@@ -1,0 +1,64 @@
+// AC3 seed, liveness, fixed: OutboxIntent v0.3.
+// OutboxIntent in its v0.3 five-field form (03-technical-spec.md at commit 5160ba8).
+// evidence/outbox_check.py v0.3: 33 states, 40 accepted steps, no deadlock.
+module runtime
+
+enum IntentStatus { Pending, Proposed, Allowed, Running, Settled, Denied, Escalated, Dead, Done }
+
+machine OutboxIntent {
+  state {
+    status    : IntentStatus = Pending
+    attempts  : 0..3         = 0
+    decisions : 0..2         = 0     // gate decisions taken for this intent
+    executed  : bool         = false // the handler may have run (at-least-once)
+    approved  : bool         = false
+  }
+  terminal status in { Done, Denied, Dead }
+
+  action Propose()
+  action GateAllow()
+  action GateDeny()
+  action GateEscalate()
+  action Approve()
+  action EscalationTimeout()
+  action Start()
+  action HandlerOk()
+  action HandlerFailed()
+  action SettleFailed()
+  action SettleOk()
+
+  on Propose {
+    require status in { Pending } || (status == Escalated && approved) else reject "not-proposable"
+    status' = Proposed
+    decisions' = decisions + 1
+  }
+  on GateAllow    { require status == Proposed else reject "no-proposal"   status' = Allowed }
+  on GateDeny     { require status == Proposed else reject "no-proposal"
+                    require !executed          else reject "deny-after-execution"
+                    status' = Denied }
+  on GateEscalate { require status == Proposed else reject "no-proposal"
+                    require decisions == 1     else reject "escalate-once"
+                    status' = Escalated }
+  on Approve      { require status == Escalated else reject "not-escalated" approved' = true }
+  on EscalationTimeout { require status == Escalated && !approved else reject "not-waiting"
+                         status' = Denied }
+  on Start        { require status == Allowed  else reject "not-allowed"
+                    require attempts < 3       else reject "exhausted"
+                    status' = Running
+                    attempts' = attempts + 1
+                    executed' = true }
+  on HandlerOk    { require status == Running  else reject "not-running"   status' = Settled }
+  on HandlerFailed { require status == Running else reject "not-running"
+                     if attempts < 3 { status' = Allowed } else { status' = Dead } }
+  on SettleFailed { require status == Settled  else reject "not-settled"
+                    if attempts < 3 { status' = Allowed } else { status' = Dead } }
+  on SettleOk     { require status == Settled  else reject "not-settled"   status' = Done }
+
+  invariant one-decision-per-execution: executed implies (decisions <= 1 || approved)
+  step property no-reproposal-after-allow:
+    pre.status in { Allowed, Running, Settled } implies post.status != Proposed
+  step property no-deny-after-run: pre.executed implies post.status != Denied
+  liveness settles: eventually status in { Done, Denied, Dead }
+    under fair { Propose, GateAllow | GateDeny | GateEscalate, EscalationTimeout, Start,
+                 HandlerOk | HandlerFailed, SettleOk | SettleFailed }
+}

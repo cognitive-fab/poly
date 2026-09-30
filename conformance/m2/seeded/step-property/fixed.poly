@@ -1,0 +1,11 @@
+// AC3 seed, step property (PL3002): fixed: the step that would lower the total is refused the step property says never falls.
+module seeded
+
+service machine Wallet {
+  state { total : 0..3 = 1 }
+  action Add()
+  action Refund()
+  on Add { require total < 3 else reject "full"   total' = total + 1 }
+  on Refund { reject "no-refunds" }
+  step property never-falls: post.total >= pre.total
+}

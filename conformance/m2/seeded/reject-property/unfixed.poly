@@ -1,0 +1,11 @@
+// AC3 seed, reject property (PL3003): an action refused with the wrong reason.
+module seeded
+
+service machine Door {
+  state { open : bool = true }
+  action Close()
+  action Open()
+  on Close { require open else reject "closed"   open' = false }
+  on Open { require !open else reject "opened"   open' = true }
+  reject property close-reason: (action == Close && !pre.open) implies rejected("already-closed")
+}

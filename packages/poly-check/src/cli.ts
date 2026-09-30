@@ -1,59 +1,112 @@
 #!/usr/bin/env node
-// `poly`: the command line. One command, `poly check <file.poly | project dir>`
-// (PT14), with the exit codes of PT12.3.
-import { existsSync, statSync } from 'node:fs';
+// `poly`: the command line (PT14), with the exit codes of PT12.3.
+//
+//   poly check <file.poly | project dir> [--json] [--root <dir>]
+//   poly witness <id> --trace | --test [--root <dir>] [--out <file>]
+//   poly fix <id> [--root <dir>]
+//
+// `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { EXIT_CODES, ManifestError, toJson } from '@poly/core';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
+import { exportWitness, findWitness } from './witness.js';
+import { applyFixById } from './fix.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
+       poly witness <id> --trace | --test [--root <dir>] [--out <file>]
+       poly fix <id> [--root <dir>]
 
-  Parses, types and lowers each module; runs strict validate(), translation
-  validation (poly-ref), polygraph's model check and poly-ref's deadlock check;
-  prints the verdict with its checked instance. A project directory is read
-  through its poly.json (PT1.2): every module it names is checked.
+  check    Parses, types and lowers each module; runs strict validate(), translation
+           validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
+           effect, composition and configuration checks; prints the verdict with its checked
+           instance, and writes the report to <root>/.poly/report.json.
+  witness  Writes the witness with that id as {pre, action, data, post} windows (--trace),
+           or as a host test that walks it and asserts the violated predicate (--test).
+  fix      Applies the fix with that id if its target node still has the digest it was
+           computed on; otherwise refuses it with PL0201 STALE_FIX.
 
   --json        print the report as JSON (diagnostics in poly.diagnostic/1 form)
-  --root <dir>  write .poly/build under <dir> (default: the project directory,
-                or the working directory for a single file)
+  --root <dir>  where .poly/ lives (default: the project directory, or the working directory)
+  --out <file>  where \`poly witness\` writes (default: .poly/witness/<id prefix>.<ext>)
 
-exit codes: 0 CLEAN, 1 FINDINGS, 2 REFUSED / INCONCLUSIVE, 3 nondeterminism, 4 error, 64 usage`;
+exit codes: 0 CLEAN, 1 FINDINGS, 2 REFUSED / INCONCLUSIVE / stale fix, 3 nondeterminism, 4 error, 64 usage`;
 
 // Every diagnostic in the JSON form carries its schema, poly.diagnostic/1 (PT12.1).
 const asJson = (r: CheckReport) => ({ ...r, diagnostics: r.diagnostics.map(toJson), machines: r.machines.map((m) => ({ ...m, diagnostics: m.diagnostics.map(toJson) })), configurations: (r.configurations ?? []).map((c) => ({ ...c, diagnostics: c.diagnostics.map(toJson) })) });
 
+/** S69: the last report: .poly/report.json under the root. */
+function writeReport(root: string, report: unknown): void {
+  mkdirSync(join(root, '.poly'), { recursive: true });
+  writeFileSync(join(root, '.poly', 'report.json'), JSON.stringify(report, null, 2) + '\n');
+}
+
+function readReport(root: string): unknown {
+  const path = join(root, '.poly', 'report.json');
+  if (!existsSync(path)) throw new UsageError(`no report at ${path}: run poly check first`);
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+class UsageError extends Error {}
+
+function option(args: string[], name: string): string | undefined | null {
+  const at = args.indexOf(name);
+  if (at < 0) return undefined;
+  const v = args[at + 1];
+  return v !== undefined && !v.startsWith('--') ? v : null;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const rootAt = args.indexOf('--root');
-  const root = rootAt >= 0 && args[rootAt + 1] !== undefined && !args[rootAt + 1].startsWith('--') ? args[rootAt + 1] : undefined;
-  const positional = args.filter((a, i) => !a.startsWith('--') && (rootAt < 0 || i !== rootAt + 1));
-  if (positional[0] !== 'check' || positional.length !== 2 || (rootAt >= 0 && !root)) {
-    process.stderr.write(USAGE + '\n');
-    return EXIT_CODES.USAGE;
-  }
-  const target = positional[1];
-  if (!existsSync(target)) {
-    process.stderr.write(`poly: no such file or directory ${target}\n`);
-    return EXIT_CODES.USAGE;
-  }
+  const root = option(args, '--root');
+  const out = option(args, '--out');
+  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1].filter((i) => i > 0));
+  const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
+  const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
+  if (root === null || out === null) return usage();
   try {
-    if (statSync(target).isDirectory()) {
-      const p = await checkProject(target, { root });
-      if (json) process.stdout.write(JSON.stringify({ ...p, files: p.files.map(asJson) }, null, 2) + '\n');
-      else {
-        for (const r of p.files) process.stdout.write(`── ${r.file}\n${render(r)}`);
-        process.stdout.write(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
+    if (positional[0] === 'check' && positional.length === 2) {
+      const target = positional[1];
+      if (!existsSync(target)) { process.stderr.write(`poly: no such file or directory ${target}\n`); return EXIT_CODES.USAGE; }
+      if (statSync(target).isDirectory()) {
+        const p = await checkProject(target, { root });
+        writeReport(root ?? target, { ...p, files: p.files.map(asJson) });
+        if (json) process.stdout.write(JSON.stringify({ ...p, files: p.files.map(asJson) }, null, 2) + '\n');
+        else {
+          for (const r of p.files) process.stdout.write(`── ${r.file}\n${render(r)}`);
+          process.stdout.write(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
+        }
+        return p.exit;
       }
-      return p.exit;
+      const report = await checkFile(target, { root });
+      writeReport(root ?? process.cwd(), asJson(report));
+      process.stdout.write(json ? JSON.stringify(asJson(report), null, 2) + '\n' : render(report));
+      return report.exit;
     }
-    const report = await checkFile(target, { root });
-    process.stdout.write(json ? JSON.stringify(asJson(report), null, 2) + '\n' : render(report));
-    return report.exit;
+    if (positional[0] === 'witness' && positional.length === 2) {
+      const trace = args.includes('--trace');
+      if (trace === args.includes('--test')) return usage();
+      const base = root ?? process.cwd();
+      const found = findWitness(readReport(base), positional[1]);
+      if (!found) { process.stderr.write(`poly: no witness ${positional[1]} in the report\n`); return EXIT_CODES.USAGE; }
+      const written = exportWitness(found, { root: base, kind: trace ? 'trace' : 'test', out: out ?? undefined });
+      process.stdout.write(`${written}\n`);
+      return 0;
+    }
+    if (positional[0] === 'fix' && positional.length === 2) {
+      const base = root ?? process.cwd();
+      const r = applyFixById(readReport(base), positional[1]);
+      if (r.status === 'applied') { process.stdout.write(`applied ${positional[1]} to ${r.file}; run poly check again (PT12.1)\n`); return 0; }
+      process.stderr.write(`${r.code ?? 'poly'}: ${r.message}\n`);
+      return r.code === 'PL0201' ? EXIT_CODES.REFUSED : EXIT_CODES.USAGE;
+    }
+    return usage();
   } catch (e) {
     const err = e as Error & { nondeterministic?: boolean };
     process.stderr.write(`poly: ${err.message}\n`);
-    if (err instanceof ManifestError) return EXIT_CODES.USAGE;
+    if (err instanceof ManifestError || err instanceof UsageError) return EXIT_CODES.USAGE;
     return err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;
   }
 }

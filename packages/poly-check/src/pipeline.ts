@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse } from '@poly/lang';
-import { checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
+import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
@@ -89,6 +89,8 @@ export interface ConfigCheck {
 export interface CheckReport {
   file: string;
   module: string | null;
+  /** The module digest (PT1.4) the witnesses and fixes of this report were computed on (S69). */
+  moduleDigest?: string;
   verdict: Verdict | 'NONDETERMINISM' | 'ERROR';
   exit: number;
   diagnostics: Diagnostic[];
@@ -662,6 +664,14 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
 }
 
 function finish(report: CheckReport, module?: Module): CheckReport {
+  // S69: a witness id is the digest of { moduleDigest, property, trace }, so the same trace in another version
+  // of the module is another witness.
+  if (module) {
+    report.moduleDigest = digest(module);
+    for (const d of [...report.diagnostics, ...report.machines.flatMap((m) => m.diagnostics), ...report.configurations.flatMap((c) => c.diagnostics)]) {
+      if (d.witness) d.witness.id = 'sha256:' + sha256Hex(canonicalize({ moduleDigest: report.moduleDigest, property: d.property ?? d.code, trace: d.witness.trace }));
+    }
+  }
   // Engine diagnostics carry no source position. One that names a node (a property, a handler) points at
   // that node's line; any other points at the machine's declaration (display only, PT12.1).
   const spans = new Map<string, { line: number; col: number }>();

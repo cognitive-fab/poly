@@ -18,7 +18,7 @@ import { initialState, durationMs } from './step.js';
 import { evaluate, evaluateAt } from './eval.js';
 import { flatten, flatValue } from './alpha.js';
 import { checkJoint } from './joint.js';
-import type { Value } from './values.js';
+import type { State, Value } from './values.js';
 
 const stable = (v: unknown): string => {
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
@@ -27,7 +27,7 @@ const stable = (v: unknown): string => {
 };
 
 /** The mismatches between the artefacts in `dir` and the source, one message each (PL2501 in tv.ts). */
-export async function readBack(module: A.Module, M: RMachine, dir: string): Promise<string[]> {
+export async function readBack(module: A.Module, M: RMachine, dir: string, states: State[] = []): Promise<string[]> {
   const out: string[] = [];
   const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === M.name)!;
   const differ = (what: string, got: unknown, want: unknown) => { if (stable(got) !== stable(want)) out.push(`${what}: the artefact has ${stable(got)}, the source gives ${stable(want)}`); };
@@ -117,6 +117,33 @@ export async function readBack(module: A.Module, M: RMachine, dir: string): Prom
           let got: boolean | string;
           try { got = l.pred(view) === true; } catch (e) { got = `a throw (${(e as Error).message})`; }
           if (got !== want) { out.push(`invariants.compose.mjs ${p.name} is ${got} on a reachable joint state, and PS7.3 gives ${want}`); break; }
+        }
+      }
+    }
+  }
+  // ── liveness.mjs (S74) ──
+  const live = M.liveness.filter((p) => !p.quant);
+  const liveFile = join(dir, 'liveness.mjs');
+  if (live.length) {
+    if (!existsSync(liveFile)) out.push('liveness.mjs is missing, and the machine has liveness properties');
+    else {
+      const lowered = ((await import(pathToFileURL(liveFile).href + `?v=${Date.now()}-${Math.random()}`)) as { liveness?: { name: string; goal: (s: unknown) => boolean; from: ((s: unknown) => boolean) | null; fair: unknown }[] }).liveness ?? [];
+      for (const p of live) {
+        const l = lowered.find((x) => x.name === p.name);
+        if (!l) { out.push(`liveness.mjs has no predicate ${p.name}`); continue; }
+        differ(`liveness.mjs ${p.name}.fair`, l.fair, (p.fair ?? []).map((g) => g.members.map((x) => ({ action: x.action, perValue: x.perValue }))));
+        if ((l.from === null) !== (p.from === null)) out.push(`liveness.mjs ${p.name} has ${l.from ? 'a' : 'no'} start predicate, and the source ${p.from ? 'has' : 'has none'}`);
+        for (const s of states) {
+          const flat = flatten(s, M);
+          const env = { M, state: s, data: {}, locals: new Map() };
+          const pairs: [string, ((x: unknown) => boolean) | null, A.Expr | null][] = [['goal', l.goal, p.expr], ['from', l.from, p.from]];
+          for (const [what, fn, e] of pairs) {
+            if (!fn || !e) continue;
+            let got: boolean | string;
+            try { got = fn(flat) === true; } catch (err) { got = `a throw (${(err as Error).message})`; }
+            const want = evaluate(e, env) === true;
+            if (got !== want) { out.push(`liveness.mjs ${p.name}.${what} is ${got} on a reachable state, and PS5.5 gives ${want}`); break; }
+          }
         }
       }
     }

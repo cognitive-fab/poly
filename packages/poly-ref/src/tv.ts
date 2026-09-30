@@ -212,7 +212,7 @@ export async function translationValidate(module: Module, machineName: string, b
     }
   }
   // The standing rule after the M1 review: the artefacts the engines read without running the module are read back.
-  for (const message of await readBack(module, M, buildDir)) mismatch(message, []);
+  for (const message of await readBack(module, M, buildDir, g.states)) mismatch(message, []);
   return { machine: M.name, transitions, propertyChecks, mismatches, report };
 }
 

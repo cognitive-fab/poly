@@ -1,0 +1,10 @@
+// AC3 seed, domain escape (PL3102): items can leave 0..3.
+module seeded
+
+service machine Basket {
+  state { items : 0..3 = 0 }
+  action Add()
+  action Clear()
+  on Add { items' = items + 1 }
+  on Clear { require items > 0 else reject "empty"   items' = 0 }
+}

@@ -1,0 +1,9 @@
+// AC3 seed, invariant (PL3001): the counter's handler can pass the invariant's bound.
+module seeded
+
+service machine Counter {
+  state { n : 0..3 = 0 }
+  action Inc()
+  on Inc { require n < 3 else reject "top"   n' = n + 1 }
+  invariant at-most-two: n <= 2
+}

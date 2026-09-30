@@ -122,7 +122,7 @@ function addressOf(e: A.Expr): Value {
 }
 
 /** The global view σ gives a configuration property (PS13.6). */
-function view(instances: ConfigInstance[], sigma: State[], initial: GlobalView | null): GlobalView {
+export function globalView(instances: ConfigInstance[], sigma: State[], initial: GlobalView | null): GlobalView {
   const byName = new Map(instances.map((x, k) => [x.name, k]));
   const groups = new Map<string, number>();
   for (const x of instances) if (x.group) groups.set(x.group, (groups.get(x.group) ?? 0) + 1);
@@ -241,8 +241,8 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   });
 
   // PS13.6: each configuration invariant, at its first violating state in BFS order (a shortest witness).
-  const initial = view(instances, g.states[0].sigma, null);
-  const envOf = (s: GlobalState) => ({ M: instances[0].machine, state: {}, data: {}, locals: new Map<string, Value>(), global: view(instances, s.sigma, initial) });
+  const initial = globalView(instances, g.states[0].sigma, null);
+  const envOf = (s: GlobalState) => ({ M: instances[0].machine, state: {}, data: {}, locals: new Map<string, Value>(), global: globalView(instances, s.sigma, initial) });
   const liveness: string[] = [];
   for (const p of decl.properties) {
     if (p.kind === 'Liveness') {
@@ -263,7 +263,10 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
         const { k, lassos } = failing[0];
         const l = lassos[0];
         const who = k === null ? '' : ` for ${p.quant!.var} = ${k}`;
-        findings.push(finding('PL3301', p.id, `liveness ${p.name} fails${who}: ${lassos.length} fair component${lassos.length === 1 ? '' : 's'} never reach${lassos.length === 1 ? 'es' : ''} the goal; the witness is a lasso through the first`, [...l.prefix, ...l.cycle] as Edge<GlobalState>[], { property: p.name, state: g.states[l.component[0]], cycle: l.prefix.length }));
+        const lassoFinding = finding('PL3301', p.id, `liveness ${p.name} fails${who}: ${lassos.length} fair component${lassos.length === 1 ? '' : 's'} never reach${lassos.length === 1 ? 'es' : ''} the goal; the witness is a lasso through the first`, [...l.prefix, ...l.cycle] as Edge<GlobalState>[], { property: p.name, state: g.states[l.component[0]], cycle: l.prefix.length });
+        // The member of the quantifier the lasso is for, which an exported witness test needs.
+        if (k !== null) (lassoFinding as Diagnostic & { member?: number }).member = k;
+        findings.push(lassoFinding);
       }
       continue;
     }

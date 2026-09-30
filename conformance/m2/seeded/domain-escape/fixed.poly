@@ -1,0 +1,10 @@
+// AC3 seed, domain escape (PL3102): fixed: a require before the write.
+module seeded
+
+service machine Basket {
+  state { items : 0..3 = 0 }
+  action Add()
+  action Clear()
+  on Add { require items < 3 else reject "full"   items' = items + 1 }
+  on Clear { require items > 0 else reject "empty"   items' = 0 }
+}

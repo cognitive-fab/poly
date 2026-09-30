@@ -1,0 +1,38 @@
+// AC3 seed, stuck, fixed: the inventory answers.
+module checkout
+
+service machine Inventory {
+  state { onHand: 0..1 = 1 }
+  action Query(from: Ref<Order>)
+  action Take(from: Ref<Order>)
+
+  on Query(from) { send from <- Available(n: onHand) }
+  on Take(from) {
+    if onHand > 0 { onHand' = onHand - 1   send from <- Taken() }
+    else          { send from <- OutOfStock() }
+  }
+}
+
+type OrderState = Idle | Asked | Taking | Done | Refused
+
+machine Order {
+  state { st: OrderState = Idle   inv: Ref<Inventory> = none }
+  terminal st is Done | Refused
+  action Place()  action Available(n: 0..1)  action Taken()  action OutOfStock()
+
+  on Place      { require st is Idle   else reject "not-idle"    st' = Asked   send inv <- Query(from: self) }
+  on Available(n) { require st is Asked else reject "not-asked"
+                    if n > 0 { st' = Taking   send inv <- Take(from: self) } else { st' = Refused } }
+  // Taking waits for the inventory's answer before the order is confirmed (Done)
+  on Taken      { require st is Taking else reject "not-taking"  st' = Done }
+  on OutOfStock { require st is Taking else reject "not-taking"  st' = Refused }
+}
+
+configuration two-buyers {
+  inv       : Inventory
+  order[2]  : Order { inv: inv }
+  inputs    { order[*].Place }
+  bounds    { transit 4 }
+  invariant confirmed-within-stock: count(order[*] is Done) <= init(inv.onHand)
+
+}

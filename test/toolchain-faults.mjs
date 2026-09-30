@@ -27,6 +27,7 @@ export const FAULT_SOURCES = {
   'contract-init': ['examples/hello/hello.poly'],
   'path-invariant': ['conformance/m1/effects.poly'],
   'compose-invariant': ['conformance/m1/children.poly'],
+  'liveness-goal': ['examples/evidence/outbox-union.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

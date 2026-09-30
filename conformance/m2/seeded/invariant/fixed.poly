@@ -1,0 +1,9 @@
+// AC3 seed, invariant (PL3001): fixed: a require keeps the invariant's bound.
+module seeded
+
+service machine Counter {
+  state { n : 0..3 = 0 }
+  action Inc()
+  on Inc { require n < 2 else reject "top"   n' = n + 1 }
+  invariant at-most-two: n <= 2
+}

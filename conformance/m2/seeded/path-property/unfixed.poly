@@ -1,0 +1,19 @@
+// AC3 seed, path property (PL4001): Pay charges again while the first charge is out.
+module seeded
+
+enum Status { Open, Charging, Paid }
+
+machine Cart {
+  state { status : Status = Open }
+  terminal status == Paid
+  action Pay()
+  action Settled()
+  on Pay { require status == Open || status == Charging else reject "not-open"   status' = Charging   emit charge(amount: 10) }
+  on Settled { require status == Charging else reject "not-charging"   status' = Paid }
+  effect charge(amount: 0..10) {
+    kind "payment.charge"
+    labels { egress:external }
+    ok -> Settled()
+  }
+  path property charge-once: count("payment.charge") <= 1
+}
