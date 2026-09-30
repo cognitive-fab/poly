@@ -573,7 +573,7 @@ class Checker {
       pnames.add(p.name);
       const ty = this.tyOf(p.type);
       // A payload is plain JSON (PT6.1); maps and payload unions are lowered from plan step 10, as for action parameters.
-      if (ty.k === 'map' || ty.k === 'ref' || (ty.k === 'union' && !this.env.unions.get(ty.name)!.isEnum)) this.err('PL0901', p, `an effect parameter of type ${tyToString(ty)} is lowered from plan step 10 of milestone M1`);
+      if (ty.k === 'map' || ty.k === 'ref' || (ty.k === 'union' && !this.env.unions.get(ty.name)!.isEnum)) this.err('PL0901', p, `an effect parameter of type ${tyToString(ty)} is lowered after milestone M1: an intent carries no type from which poly-ref could read it back (S65)`);
       if (p.check) this.err('PL1201', p.check, 'an effect parameter takes its value from the handler; it has no check domain');
     }
     const seen = new Set<string>();
@@ -742,7 +742,7 @@ class Checker {
         && child.fields.every((f) => { const rf = rec.fields.find((x) => x.name === f.name); return rf !== undefined && same(this.tyOf(rf.type), this.tyOf(f.type)); });
       if (!matches) { this.errOnce('PL1201', act, `${act.name}.childState is the state of ${child.name}; its type is a record with the fields ${child.fields.map((f) => f.name).join(', ')}, of the same types (S44)`); return; }
       // The runtime passes the child's flat snapshot; a union field with payloads is flat there (PS9.1b).
-      if (child.fields.some((f) => { const t = this.tyOf(f.type); return t.k === 'union' && !this.env.unions.get(t.name)!.isEnum; })) this.errOnce('PL0901', act, `${act.name}.childState of ${child.name}, which has a union field with payloads, is lowered from plan step 10`);
+      if (child.fields.some((f) => { const t = this.tyOf(f.type); return t.k === 'union' && !this.env.unions.get(t.name)!.isEnum; })) this.errOnce('PL0901', act, `${act.name}.childState of ${child.name}, which has a union field with payloads, is lowered after milestone M1: the runtime passes the child's flat snapshot (PS9.1b, S65)`);
       return;
     }
     this.errOnce('PL1201', act, `completion action ${act.name} declares (${act.params.map((p) => p.name).join(', ')}); the runtime supplies (childKey: string, childState: R) or nothing (S44)`);

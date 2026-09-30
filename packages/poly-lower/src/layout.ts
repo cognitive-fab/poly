@@ -58,12 +58,13 @@ export function isPayloadUnion(env: TypeEnv, t: Ty): boolean {
   return t.k === 'union' && !env.unions.get(t.name)!.isEnum;
 }
 
-function scalarShape(t: Ty): ShapeSpec | null {
+function scalarShape(t: Ty, env: TypeEnv): ShapeSpec | null {
   switch (t.k) {
     case 'bool': return { type: 'boolean' };
     case 'int': return { type: 'number' };
     case 'string': return { type: 'string' };
-    case 'union': return { type: 'string' };
+    // S65: a union with payloads below the top of a field is one object, { $: C, payloads }.
+    case 'union': return { type: isPayloadUnion(env, t) ? 'object' : 'string' };
     case 'map': return { type: t.array ? 'array' : 'object' };
     // S25: a record lowers to a plain JSON object.
     case 'record': return { type: 'object' };
@@ -79,8 +80,8 @@ export function layoutOf(m: A.Machine, facts: MachineFacts, env: TypeEnv, module
   const fields: FieldLayout[] = [];
   for (const f of m.fields) {
     const ty = facts.fieldTypes.get(f.name)!;
-    if (ty.k === 'map' && (isPayloadUnion(env, ty.value) || ty.value.k === 'map' || ty.value.k === 'ref')) {
-      refuse(f, `a map whose values are unions with payloads, maps or addresses is lowered after milestone M0: ${f.name}`);
+    if (ty.k === 'map' && (ty.value.k === 'map' || ty.value.k === 'ref')) {
+      refuse(f, `a map whose values are maps or addresses is lowered after milestone M1: ${f.name}`);
       continue;
     }
     if (isPayloadUnion(env, ty)) {
@@ -92,20 +93,19 @@ export function layoutOf(m: A.Machine, facts: MachineFacts, env: TypeEnv, module
         ctors[c.name] = [];
         for (const pf of c.fields) {
           const key = `${f.name}_${pf.name}`;
-          const pty = tyOfTypeExpr(pf.type);
-          if (pf.type.kind === 'TName' && !env.unions.get(pf.type.name)?.isEnum) refuse(f, `a payload that is itself a union with payloads is lowered after milestone M0: ${c.name}.${pf.name}`);
-          if (pf.type.kind === 'TMap' || pf.type.kind === 'TRef') refuse(f, `a map or address payload is lowered after milestone M0: ${c.name}.${pf.name}`);
+          const pty = tyOfTypeExpr(pf.type, env);
+          if (pf.type.kind === 'TMap' || pf.type.kind === 'TRef') refuse(f, `a map or address payload is lowered after milestone M1: ${c.name}.${pf.name}`);
           ctors[c.name].push([pf.name, key]);
           if (!payloads.some(([p]) => p === pf.name)) {
             payloads.push([pf.name, key]);
-            shapes[key] = { ...(scalarShape(pty) ?? { type: 'string' }), nullable: true };
+            shapes[key] = { ...(scalarShape(pty, env) ?? { type: 'string' }), nullable: true };
           }
         }
       }
       fields.push({ field: f.name, ty, kind: 'union', flat: [f.name, ...payloads.map(([, k]) => k)], shapes, ctors, payloads });
       continue;
     }
-    const shape = scalarShape(ty)!;
+    const shape = scalarShape(ty, env)!;
     const kind = ty.k === 'map' ? 'map' : ty.k === 'union' ? 'enum' : 'scalar';
     fields.push({ field: f.name, ty, kind, flat: [f.name], shapes: { [f.name]: shape } });
   }

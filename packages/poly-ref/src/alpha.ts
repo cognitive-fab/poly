@@ -24,7 +24,17 @@ function payloadNames(t: RType, M: RMachine): string[] {
   return out;
 }
 
+/** A union's constructor record, in the union's payload order. */
+function ctorOf(t: RType, M: RMachine, name: string) {
+  return t.k === 'union' ? M.unions.get(t.name)!.ctors.find((c) => c.name === name) : undefined;
+}
+
 function flatValue(v: Value, t: RType, M: RMachine): unknown {
+  // S65: below the top of a field, a union with payloads is one object { $: C, payloads }.
+  if (t.k === 'union' && hasPayloads(t, M) && isUnion(v)) {
+    const c = ctorOf(t, M, v.ctor)!;
+    return { $: v.ctor, ...Object.fromEntries(c.fields.map((f) => [f.name, flatValue(v.payload[f.name], f.type, M)])) };
+  }
   if (t.k === 'union') return isUnion(v) ? v.ctor : v; // an enum member is its name
   // S25: a record is a plain object of its fields.
   if (t.k === 'record') return isRecord(v) ? Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, flatValue(v.fields[f.name], f.type, M)])) : v;
@@ -61,6 +71,13 @@ export function flattenData(d: Record<string, Value>, action: string, M: RMachin
 }
 
 function structValue(x: unknown, t: RType, M: RMachine): Value {
+  if (t.k === 'union' && x && typeof x === 'object' && '$' in (x as object)) {
+    // S65: { $: C, payloads } back to (C, r); a key the constructor does not have is left out here and
+    // caught by the exact comparison of flat values in translation validation.
+    const o = x as Record<string, unknown>;
+    const c = ctorOf(t, M, String(o.$));
+    return { ctor: String(o.$), payload: Object.fromEntries((c?.fields ?? []).map((f) => [f.name, structValue(o[f.name], f.type, M)])) };
+  }
   if (t.k === 'union') return typeof x === 'string' ? { ctor: x, payload: {} } : (x as Value);
   if (t.k === 'record' && x && typeof x === 'object') {
     const o = x as Record<string, unknown>;

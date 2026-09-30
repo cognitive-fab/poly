@@ -1,0 +1,54 @@
+// What M0 refused at lowering (plan step 10, S65): a map whose values are unions with payloads, a payload
+// that is itself such a union, and a parameter of such a type. Below the top of a field each lowers to one
+// object { $: C, payloads }; translation validation compares every transition and every flat value.
+module unions
+
+enum Slot { A, B }
+type Job = Idle | Busy { n: 1..2 }
+type Hold = Free | Held { job: Job, slot: Slot }
+
+service machine Board {
+  state {
+    jobs : map<Slot, Job> = { A: Idle, B: Busy { n: 1 } }
+    hold : Hold = Free
+  }
+
+  action Assign(s: Slot, job: Job)
+  action Grab(s: Slot)
+  action Release()
+  action Bump(s: Slot)
+
+  on Assign(s, job) {
+    require jobs[s] is Idle else reject "slot-busy"
+    match job {
+      Idle => reject "nothing-to-assign"
+      Busy { n: k } => jobs' = jobs with [s] = Busy { n: k }
+    }
+  }
+  on Grab(s) {
+    require hold is Free else reject "holding"
+    require jobs[s] is Busy else reject "idle"
+    hold' = Held { job: jobs[s], slot: s }
+    jobs' = jobs with [s] = Idle
+  }
+  on Release {
+    match hold {
+      Free => reject "not-holding"
+      Held { job: j, slot: t } => {
+        require jobs[t] == Idle else reject "slot-taken"
+        jobs' = jobs with [t] = j
+        hold' = Free
+      }
+    }
+  }
+  on Bump(s) {
+    match jobs[s] {
+      Idle => reject "idle"
+      Busy { n: 1 } => jobs' = jobs with [s] = Busy { n: 2 }
+      Busy { n: 2 } => reject "at-most"
+    }
+  }
+
+  invariant held-is-busy: hold != Held { job: Idle, slot: A } && hold != Held { job: Idle, slot: B }
+  step property grab-empties: action == Grab implies post.jobs[s] == Idle
+}

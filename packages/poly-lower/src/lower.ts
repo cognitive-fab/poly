@@ -34,8 +34,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   for (const a of actions) {
     for (const p of a.params) {
       const t = tyOfTypeExpr(p.type, check.env);
-      if (t.k === 'map' || isPayloadUnion(check.env, t)) {
-        diagnostics.push(diag('PL0901', { module: module.name, machine: m.name, node: p.id, line: p.span?.line, col: p.span?.col }, `a parameter of type ${t.k === 'union' ? t.name : t.k} is lowered after milestone M0: ${a.name}.${p.name}`));
+      // S65: a union with payloads is lowered as a parameter; a map is not yet.
+      if (t.k === 'map') {
+        diagnostics.push(diag('PL0901', { module: module.name, machine: m.name, node: p.id, line: p.span?.line, col: p.span?.col }, `a parameter of type map is lowered after milestone M1: ${a.name}.${p.name}`));
       }
     }
   }
@@ -110,7 +111,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
   const intentDecls = lowerable.map((a) => {
     // S58: an address is a string, and none is null.
-    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env)), required: true, ...(p.type.kind === 'TRef' ? { nullable: true } : {}) }]));
+    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env), env), required: true, ...(p.type.kind === 'TRef' ? { nullable: true } : {}) }]));
     return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(dataDomainOf(a, env, facts))} },`;
   });
   const version = digest(module);
@@ -271,7 +272,7 @@ function manifestOf(facts: MachineFacts, env: TypeEnv): { effects: Record<string
   const out: [string, unknown][] = [];
   for (const e of facts.effects.values()) {
     const entry: Record<string, unknown> = {
-      payloadSchema: Object.fromEntries(e.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env)), required: true }])),
+      payloadSchema: Object.fromEntries(e.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env), env), required: true }])),
     };
     const hooks: Record<string, string> = { ok: 'onSuccess', failed: 'onFailure', exhausted: 'onExhausted' };
     for (const it of e.items) {
@@ -418,7 +419,18 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
     if (!Number.isFinite(t.lo) || !Number.isFinite(t.hi)) throw new Error('poly-lower: an unbounded int has no domain (PL1101)');
     return Array.from({ length: t.hi - t.lo + 1 }, (_, i) => t.lo + i);
   }
-  if (t.k === 'union') return env.unions.get(t.name)!.ctors.map((c) => c.name);
+  if (t.k === 'union') {
+    if (!isPayloadUnion(env, t)) return env.unions.get(t.name)!.ctors.map((c) => c.name);
+    // S65: every constructor with every combination of its payloads, as { $: C, payloads }.
+    return env.unions.get(t.name)!.ctors.flatMap((c) => {
+      let recs: Record<string, unknown>[] = [{ $: c.name }];
+      for (const f of c.fields) {
+        const vs = valuesOfTy(tyOfTypeExpr(f.type, env), env, m);
+        recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [f.name]: v })));
+      }
+      return recs;
+    });
+  }
   if (t.k === 'record') {
     // S25: every combination of field values, as plain objects.
     let recs: Record<string, unknown>[] = [{}];
@@ -452,8 +464,8 @@ function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[]
   return f.check ? checkDomainValues(f.check) : valuesOfTy(facts.fieldTypes.get(f.name)!, env, facts.machine);
 }
 
-function jsType(t: Ty): string {
-  return t.k === 'bool' ? 'boolean' : t.k === 'int' ? 'number' : t.k === 'record' ? 'object' : 'string';
+function jsType(t: Ty, env: TypeEnv): string {
+  return t.k === 'bool' ? 'boolean' : t.k === 'int' ? 'number' : t.k === 'record' || isPayloadUnion(env, t) ? 'object' : 'string';
 }
 
 function typeText(t: Ty, env: TypeEnv): string {
@@ -461,7 +473,7 @@ function typeText(t: Ty, env: TypeEnv): string {
     case 'bool': return 'boolean';
     case 'int': return Number.isFinite(t.lo) ? `${t.lo}..${t.hi}` : 'number';
     case 'string': return 'string';
-    case 'union': return env.unions.get(t.name)!.ctors.map((c) => `'${c.name}'`).join(' | ');
+    case 'union': return env.unions.get(t.name)!.ctors.map((c) => (isPayloadUnion(env, t) ? `{ $: '${c.name}'${c.fields.map((f) => `, ${f.name}: ${typeText(tyOfTypeExpr(f.type, env), env)}`).join('')} }` : `'${c.name}'`)).join(' | ');
     case 'record': return `{ ${env.records.get(t.name)!.fields.map((f) => `${f.name}: ${typeText(tyOfTypeExpr(f.type, env), env)}`).join(', ')} }`;
     case 'map': return t.array ? `array of ${typeText(t.value, env)}, indexed ${typeText(t.key, env)}` : `object of ${typeText(t.value, env)}, keyed ${typeText(t.key, env)}`;
     case 'ref': return `address of ${t.machine} | null`;

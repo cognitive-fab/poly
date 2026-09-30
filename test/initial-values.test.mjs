@@ -35,9 +35,6 @@ const SHAPES = [
   ['map value, enum keys', 'map<Door, 0..3>', '{ Open: 1, Shut: 3 }', '{ Open: 1, Shut: 4 }'],
   ['nested union in a map', 'map<0..1, Job>', '[Idle, Busy { n: 1 }]', '[Idle, Busy { n: 9 }]'],
 ];
-// Lowered from plan step 10 (maps of unions with payloads); until then the inside case is reported as todo, not passed.
-const LOWERED_LATER = new Set(['nested union in a map']);
-
 const source = (type, value) => `module gen
 ${TYPES}
 machine M {
@@ -70,7 +67,7 @@ for (const [shape, type, inside, outside] of SHAPES) {
     assert.ok(d.length > 0 && d.every((x) => x.code === 'PL1201' && x.at.line === FIELD_LINE), JSON.stringify(d.map((x) => [x.code, x.at.line, x.message])));
   });
 
-  test(`inside its type lowers and passes strict validate(): ${shape} (${inside})`, { todo: LOWERED_LATER.has(shape) ? 'lowered from plan step 10' : false }, () => {
+  test(`inside its type lowers and passes strict validate(): ${shape} (${inside})`, () => {
     const dir = join(ROOT, '.poly', 'test-build', 'initial-values');
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${shape.replace(/[^a-z]+/g, '-')}.poly`);
