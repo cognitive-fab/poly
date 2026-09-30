@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { parse } from '@poly/lang';
 import { checkModule } from '@poly/core';
@@ -247,7 +247,8 @@ test('D5, D6: cover-rest and move-require are offered only where they remove the
   assert.ok(!fixes.includes('PL2101:move-require'), fixes.join(' '));
 });
 
-test('D7: no fix is offered on the embedded surface, where poly fix does not apply (S70)', async () => {
+// D7 kept fixes off the embedded surface, where poly fix did not apply (S70). M3-3 puts them there.
+test('D7, since M3-3: the embedded surface is offered the fixes of the standalone one, and poly fix applies them', async () => {
   const { printModule } = await import('@poly/embed');
   const dir = join(BUILD, 'review-m2', 'd7');
   rmSync(dir, { recursive: true, force: true });
@@ -255,8 +256,18 @@ test('D7: no fix is offered on the embedded surface, where poly fix does not app
   const f = join(dir, 'm.ts');
   writeFileSync(f, printModule(parse(readFileSync(join(ROOT, 'conformance', 'm0', 'errors', 'PL2101-write-before-require.poly'), 'utf8')).module));
   const r = await checkFile(f, { root: dir });
-  assert.ok(all(r).some((d) => d.code === 'PL2101'), render(r));
-  assert.deepEqual(all(r).filter((d) => d.fixes?.length), []);
+  const d = all(r).find((x) => x.code === 'PL2101');
+  assert.ok(d, render(r));
+  // The same module digest on both surfaces (PT1.4), so the same fix ids (S69).
+  const std = join(dir, 'm.poly');
+  copyFileSync(join(ROOT, 'conformance', 'm0', 'errors', 'PL2101-write-before-require.poly'), std);
+  const rs = await checkFile(std, { root: join(dir, 'poly') });
+  assert.deepEqual(d.fixes.map((x) => x.id), all(rs).find((x) => x.code === 'PL2101').fixes.map((x) => x.id));
+  const cli = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
+  spawnSync(process.execPath, [cli, 'check', f, '--root', dir], { encoding: 'utf8' });
+  const out = spawnSync(process.execPath, [cli, 'fix', d.fixes[0].id, '--root', dir], { encoding: 'utf8' });
+  assert.equal(out.status, 0, out.stderr);
+  assert.ok(!all(await checkFile(f, { root: dir })).some((x) => x.code === 'PL2101'));
 });
 
 test('D8: two machines with the same defect have witnesses with different ids, each exported for its own machine', async () => {

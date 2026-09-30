@@ -21,8 +21,7 @@ export function findFix(report: unknown, id: string): { file: string; fix: Fix }
 export function applyFixById(report: unknown, id: string): FixResult {
   const found = findFix(report, id);
   if (!found) return { status: 'refused', message: `no fix ${id} in the report` };
-  if (!found.file.endsWith('.poly')) return { status: 'refused', message: `fixes apply to the standalone surface only (S70); ${found.file} is not a .poly file` };
-  const r = applyFix(readFileSync(found.file, 'utf8'), found.fix);
+  const r = applyFix(readFileSync(found.file, 'utf8'), found.fix, found.file);
   if (r.status === 'refused') return { status: 'refused', file: found.file, code: r.code, message: r.message };
   writeFileSync(found.file, r.text);
   return { status: 'applied', file: found.file, message: `applied ${id}` };

@@ -1,15 +1,16 @@
 // Fixes (PT12.1, S69, S70; plan-m2 step 4, section 6). A source with twelve fixable diagnostics; its fixes
 // are applied in at least 100 random orders from a recorded seed. Each attempt either applies with its
 // precondition true and changes its target node only, or is refused with PL0201 STALE_FIX and leaves the
-// text as it was. After every attempt the source parses. Comments survive every edit.
+// text as it was. After every attempt the source parses. Comments survive every edit. Since M3-3 the same
+// orders run over the embedded surface too.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { digest } from '@poly/core';
 import { parse } from '@poly/lang';
-import { applyFix, checkFile } from '@poly/check';
+import { applyFix, checkFile, render } from '@poly/check';
 import { ROOT, BUILD } from './helpers.mjs';
 
 const SOURCE = join(ROOT, 'conformance', 'm2', 'errors', 'fixes.poly');
@@ -67,10 +68,11 @@ test('S70: the fixable source has at least ten fixable diagnostics, each fix wit
   }
 });
 
-test(`S70: ${ORDERS} random orders from seed ${SEED}: every fix applies with its precondition true and changes only its target, or is refused PL0201`, async (t) => {
-  const r = await checkFile(SOURCE, { root: join(BUILD, 'fixes') });
-  const fixes = allDiags(r).flatMap((d) => d.fixes ?? []);
-  const original = readFileSync(SOURCE, 'utf8');
+/**
+ * The random-order run of S70 over one surface. `read` parses the surface; `kept` are texts of the author's
+ * (comments, and on the embedded surface a line in their own formatting) that must survive every order.
+ */
+function randomOrders(t, { fixes, original, read, file, kept }) {
   const rand = mulberry32(SEED);
   let ordersWithRefusal = 0, applied = 0, refused = 0;
   for (let o = 0; o < ORDERS; o++) {
@@ -78,15 +80,15 @@ test(`S70: ${ORDERS} random orders from seed ${SEED}: every fix applies with its
     for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
     let text = original, refusedHere = false;
     for (const fix of order) {
-      const where = `order ${o} (seed ${SEED}), fix ${fix.id}`;
-      const before = parse(text).module;
+      const where = `${file}, order ${o} (seed ${SEED}), fix ${fix.id}`;
+      const before = read(text);
       const target = nodeById(before, targetOf(fix));
       const pre = target !== null && digest(target) === fix.pre;
-      const out = applyFix(text, fix);
+      const out = applyFix(text, fix, file);
       if (out.status === 'applied') {
         applied++;
         assert.ok(pre, `${where}: applied with its precondition false`);
-        const after = parse(out.text).module;
+        const after = read(out.text);
         assert.ok(after, `${where}: the edited source does not parse`);
         assert.equal(masked(after, targetOf(fix)), masked(before, targetOf(fix)), `${where}: changed more than its target node`);
         assert.notEqual(digest(nodeById(after, targetOf(fix))), fix.pre, `${where}: applied and changed nothing`);
@@ -98,14 +100,49 @@ test(`S70: ${ORDERS} random orders from seed ${SEED}: every fix applies with its
         // A refusal with the digest still true is the operation's own precondition failing, and says so.
         if (pre) assert.match(out.message, /no longer (writes|follows a write|in its block)/, `${where}: refused with its precondition true: ${out.message}`);
       }
-      assert.ok(parse(text).module, `${where}: the source no longer parses`);
+      assert.ok(read(text), `${where}: the source no longer parses`);
     }
-    for (const comment of ['// the guard', '// the write', '// B: two ambiguous constructors']) assert.ok(text.includes(comment), `order ${o}: lost ${comment}`);
+    for (const k of kept) assert.ok(text.includes(k), `${file}, order ${o}: lost ${k}`);
     if (refusedHere) ordersWithRefusal++;
   }
   assert.ok(ordersWithRefusal >= ORDERS / 3, `${ordersWithRefusal} of ${ORDERS} orders met a stale fix`);
   assert.ok(applied > 0 && refused > 0);
-  t.diagnostic(`${fixes.length} fixes, ${applied} applied, ${refused} refused PL0201, ${ordersWithRefusal} of ${ORDERS} orders met a stale fix`);
+  t.diagnostic(`${file}: ${fixes.length} fixes, ${applied} applied, ${refused} refused PL0201, ${ordersWithRefusal} of ${ORDERS} orders met a stale fix`);
+}
+
+test(`S70: ${ORDERS} random orders from seed ${SEED}: every fix applies with its precondition true and changes only its target, or is refused PL0201`, async (t) => {
+  const r = await checkFile(SOURCE, { root: join(BUILD, 'fixes') });
+  randomOrders(t, {
+    fixes: allDiags(r).flatMap((d) => d.fixes ?? []), original: readFileSync(SOURCE, 'utf8'), read: (x) => parse(x).module, file: 'fixes.poly',
+    kept: ['// the guard', '// the write', '// B: two ambiguous constructors'],
+  });
+});
+
+// M3-3: the same source printed as an embedded module, with the author's comments and one line in their own
+// formatting. It is offered the same fixes, by id, and the same random orders hold on it: each fix is spliced
+// in at its node's span, and the rest of the text is left as the author wrote it.
+test(`M3-3: the same ${ORDERS} random orders over the embedded surface, with the same fixes`, async (t) => {
+  const { printModule, readEmbedded } = await import('@poly/embed');
+  let original = printModule(parse(readFileSync(SOURCE, 'utf8')).module);
+  const put = (anchor, text) => { assert.equal(original.split(anchor).length, 2, anchor); original = original.split(anchor).join(text); };
+  put('        require(primed("n") < 3, "full"),\n', '        // the guard\n        require(primed("n") < 3, "full"),\n');
+  put('        set("m", 2),\n', '        set("m", 2), // the write\n');
+  put('      on("B", ', '      // B: two ambiguous constructors, and a binder no one reads.\n      on("B", ');
+  put('      action("A", {}),', '      action( "A",   {} ),');
+  const dir = join(BUILD, 'fixes', 'embedded');
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'fixes.ts');
+  writeFileSync(file, original);
+  const r = await checkFile(file, { root: dir });
+  const fixes = allDiags(r).flatMap((d) => d.fixes ?? []);
+  const std = allDiags(await checkFile(SOURCE, { root: join(BUILD, 'fixes') })).flatMap((d) => d.fixes ?? []);
+  assert.equal(fixes.length, 15);
+  assert.deepEqual(fixes.map((f) => f.id).sort(), std.map((f) => f.id).sort(), 'the embedded surface is offered the fixes of the standalone one');
+  randomOrders(t, {
+    fixes, original, read: (x) => readEmbedded(x, 'fixes.ts').module, file: 'fixes.ts',
+    kept: ['// the guard', '// the write', '// B: two ambiguous constructors', 'action( "A",   {} ),'],
+  });
 });
 
 test('S70: after the fixes of one order, checking again leaves none of the fixed codes', async () => {
@@ -129,25 +166,66 @@ test('S70: after the fixes of one order, checking again leaves none of the fixed
 
 // add-require removes the finding. widen-range admits the escaped value; on this counter the next value
 // escapes the wider range, so the finding moves up by one and names 5 (a fix is a proposal, PT12.1).
+// M3-3: the same on the embedded surface, where add-require inserts a call its import must gain.
 test('S70: PL3102 offers add-require and widen-range; add-require removes the finding, widen-range admits the escaped value', async () => {
-  for (const name of ['add-require', 'widen-range']) {
-    const dir = join(BUILD, 'fixes', name);
+  const { printModule } = await import('@poly/embed');
+  const seed = join(ROOT, 'conformance', 'm2', 'seeded', 'domain-escape', 'unfixed.poly');
+  for (const [name, ext] of [['add-require', 'poly'], ['widen-range', 'poly'], ['add-require', 'ts'], ['widen-range', 'ts']]) {
+    const dir = join(BUILD, 'fixes', `${name}-${ext}`);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'm.poly');
-    copyFileSync(join(ROOT, 'conformance', 'm2', 'seeded', 'domain-escape', 'unfixed.poly'), file);
+    const file = join(dir, `m.${ext}`);
+    if (ext === 'poly') copyFileSync(seed, file);
+    else writeFileSync(file, printModule(parse(readFileSync(seed, 'utf8')).module));
     const r = await checkFile(file, { root: dir });
     const d = allDiags(r).find((x) => x.code === 'PL3102');
     assert.deepEqual(d.fixes.map((f) => f.id.split('@')[0]), ['add-require', 'widen-range']);
-    const out = applyFix(readFileSync(file, 'utf8'), d.fixes.find((f) => f.id.startsWith(name)));
+    const out = applyFix(readFileSync(file, 'utf8'), d.fixes.find((f) => f.id.startsWith(name)), file);
     assert.equal(out.status, 'applied');
     await import('node:fs').then((fs) => fs.writeFileSync(file, out.text));
     const again = await checkFile(file, { root: dir });
     const left = allDiags(again).filter((x) => x.code === 'PL3102');
     if (name === 'add-require') assert.deepEqual(left, [], name);
     else assert.deepEqual(left.map((x) => x.witness.trace.at(-1).post.items), [5]);
-    assert.match(out.text, name === 'add-require' ? /require items \+ 1 <= 3 else reject "items-range"/ : /items : 0\.\.4 = 0/);
+    if (ext === 'poly') assert.match(out.text, name === 'add-require' ? /require items \+ 1 <= 3 else reject "items-range"/ : /items : 0\.\.4 = 0/);
+    else assert.match(out.text, name === 'add-require' ? /require\(\$\.items \+ 1 <= 3, "items-range"\)/ : /t\.range\(0, 4\)/);
   }
+});
+
+// M3-3: an author's embedded module need not look printed. Here the arrows name their parameter `s`, `set` is
+// imported as `assign`, `require` is not imported, and a handler is on one line.
+test('M3-3: an embedded fix reads through the author\'s parameter, and adds the import it needs', async () => {
+  const dir = join(BUILD, 'fixes', 'embedded-author');
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'basket.ts');
+  writeFileSync(file, [
+    "import { action, field, machine, module, on, set as assign, t } from '@cognitive-fab/poly/embed';",
+    '',
+    '// A basket that counts past its range.',
+    'export default module("seeded", [',
+    '  machine("Basket", {',
+    '    service: true,',
+    '    state: { items: field(t.range(0, 3), (s) => 0) },',
+    '    items: [',
+    '      action("Add", {}), action("Clear", {}),',
+    '      on("Add", (s) => [assign("items", s.items + 1)]), // one line',
+    '      on("Clear", (s) => [assign("items", 0)]),',
+    '    ],',
+    '  }),',
+    ']);',
+    '',
+  ].join('\n'));
+  const r = await checkFile(file, { root: dir });
+  const d = allDiags(r).find((x) => x.code === 'PL3102');
+  assert.ok(d, render(r));
+  const out = applyFix(readFileSync(file, 'utf8'), d.fixes.find((f) => f.id.startsWith('add-require')), file);
+  assert.equal(out.status, 'applied', out.message);
+  assert.match(out.text, /^import \{ action, field, machine, module, on, set as assign, t, require \} from/);
+  assert.match(out.text, /on\("Add", \(s\) => \[ require\(s\.items \+ 1 <= 3, "items-range"\),assign\("items", s\.items \+ 1\)\]\), \/\/ one line/);
+  assert.ok(out.text.includes('// A basket that counts past its range.'));
+  writeFileSync(file, out.text);
+  assert.deepEqual(allDiags(await checkFile(file, { root: dir })).filter((x) => x.code === 'PL3102'), []);
 });
 
 test('the CLI: poly fix applies a fix once, refuses it stale the second time (PL0201, exit 2), and rejects an unknown id', () => {

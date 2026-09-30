@@ -19,7 +19,13 @@ const TS_OP: Record<string, string> = { '==': '===', '!=': '!==' };
 class Printer {
   readonly used = new Set<string>();
 
-  private use(name: string): string { this.used.add(name); return name; }
+  /**
+   * `p` is the arrow parameter a name reads through, `$` unless a fix is spliced where the author named it
+   * otherwise; `names` maps a combinator to the local name the file imports it under (M3-3).
+   */
+  constructor(private readonly p = '$', private readonly names: ReadonlyMap<string, string> = new Map()) {}
+
+  private use(name: string): string { this.used.add(name); return this.names.get(name) ?? name; }
 
   module(m: A.Module): string {
     const decls = m.decls.map((d) => this.decl(d, '  '));
@@ -85,7 +91,7 @@ class Printer {
   }
 
   /** An arrow whose body is an expression; an object literal there would read as a block. */
-  private arrow(e: A.Expr): string { return `($) => ${e.kind === 'MapLit' ? `(${this.expr(e, 0)})` : this.expr(e, 0)}`; }
+  private arrow(e: A.Expr): string { return `(${this.p}) => ${e.kind === 'MapLit' ? `(${this.expr(e, 0)})` : this.expr(e, 0)}`; }
 
   private machine(m: A.Machine, ind: string): string {
     const inner = ind + '  ';
@@ -111,7 +117,7 @@ class Printer {
     switch (i.kind) {
       case 'Terminal': return `${this.use('terminal')}(${this.arrow(i.expr)})`;
       case 'Action': return `${this.use('action')}(${q(i.name)}, ${this.params(i.params)})`;
-      case 'Handler': return `${this.use('on')}(${q(i.action)}, ($) => ${this.stmts(i.body, ind)}${i.params ? `, [${i.params.map(q).join(', ')}]` : ''})`;
+      case 'Handler': return `${this.use('on')}(${q(i.action)}, (${this.p}) => ${this.stmts(i.body, ind)}${i.params ? `, [${i.params.map(q).join(', ')}]` : ''})`;
       case 'Guard': return `${this.use('guard')}(${this.arrow(i.cond)}, ${q(i.reason)})`;
       case 'Property': return this.property(i);
       case 'Liveness': return this.liveness(i);
@@ -141,7 +147,7 @@ class Printer {
       case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
       case 'EffOutcome': {
-        const args = x.args.some((a) => readsName(a.value)) ? `($) => (${this.args(x.args)})` : this.args(x.args);
+        const args = x.args.some((a) => readsName(a.value)) ? `(${this.p}) => (${this.args(x.args)})` : this.args(x.args);
         // PD1.2b, S79: `ok(r) -> A(…)` is okWith('r', 'A', …), its arguments naming the reply as $.r.
         return x.bind !== undefined ? `${this.use('okWith')}(${q(x.bind)}, ${q(x.action)}, ${args})` : `${this.use(x.outcome)}(${q(x.action)}, ${args})`;
       }
@@ -170,7 +176,7 @@ class Printer {
   private instance(i: A.ConfigInstance): string {
     const opts: string[] = [];
     if (i.count !== null) opts.push(`count: ${i.count}`);
-    if (i.init.length) opts.push(`init: ($) => ({ ${i.init.map((x) => `${this.key(x.field)}: ${this.expr(x.value, 0)}`).join(', ')} })`);
+    if (i.init.length) opts.push(`init: (${this.p}) => ({ ${i.init.map((x) => `${this.key(x.field)}: ${this.expr(x.value, 0)}`).join(', ')} })`);
     return `${this.use('instance')}(${q(i.name)}, ${q(i.machine.join('.'))}${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
   }
 
@@ -179,6 +185,8 @@ class Printer {
     if (!body.length) return '[]';
     return `[\n${body.map((s) => `${ind}  ${this.stmt(s, ind + '  ')},\n`).join('')}${ind}]`;
   }
+
+  stmtAt(s: A.Stmt, ind: string): string { return this.stmt(s, ind); }
 
   private stmt(s: A.Stmt, ind: string): string {
     switch (s.kind) {
@@ -238,7 +246,7 @@ class Printer {
       case 'Decimal': return decimal(e.value);
       case 'Bool': return String(e.value);
       case 'String': return q(e.value);
-      case 'Name': return IDENT.test(e.name) ? `$.${e.name}` : `$[${q(e.name)}]`;
+      case 'Name': return IDENT.test(e.name) ? `${this.p}.${e.name}` : `${this.p}[${q(e.name)}]`;
       case 'Primed': return `${this.use('primed')}(${q(e.name)})`;
       case 'Member': return `${this.postfixable(e.object)}.${e.prop}`;
       case 'Index': return `${this.postfixable(e.object)}[${e.index.kind === 'Star' ? this.use('ALL') : this.expr(e.index, 0)}]`;
@@ -260,7 +268,7 @@ class Printer {
       case 'CtorExpr': return `${this.use('ctor')}(${q(e.ctor)}, ${e.fields.length ? `{ ${e.fields.map((f) => `${this.key(f.name)}: ${this.expr(f.value, 0)}`).join(', ')} }` : '{}'})`;
       case 'MapLit': return `{ ${e.entries.map((x) => `${this.mapKey(x.key)}: ${this.expr(x.value, 0)}`).join(', ')} }`;
       case 'ArrayLit': return `[${e.items.map((x) => this.expr(x, 0)).join(', ')}]`;
-      case 'Spawned': return `${this.use('spawned')}(${e.index ? `$.${e.key}[${this.expr(e.index, 0)}]` : `$.${e.key}`})`;
+      case 'Spawned': return `${this.use('spawned')}(${e.index ? `${this.p}.${e.key}[${this.expr(e.index, 0)}]` : `${this.p}.${e.key}`})`;
       case 'Quant': return `${this.use(e.q)}(${q(e.var)}, ${q(e.group)}, ${this.arrow(e.body)})`;
     }
   }
@@ -313,4 +321,28 @@ function inputRef(r: A.InputRef): string {
 /** A module as embedded TypeScript (PT2.5). */
 export function printModule(m: A.Module): string {
   return new Printer().module(m);
+}
+
+export type NodeKind = 'expr' | 'stmt' | 'pattern' | 'type';
+
+/**
+ * One node as embedded TypeScript, for a fix spliced into an embedded module at the node's span (M3-3). A
+ * statement's inner lines are indented from `indent`; an expression that is not a primary is parenthesised, since
+ * the context it lands in is not known here. `used` lists the combinators it calls, which the file must import.
+ */
+export function printNode(kind: NodeKind, node: unknown, opts: { indent?: string; param?: string; names?: ReadonlyMap<string, string> } = {}): { text: string; used: string[] } {
+  const pr = new Printer(opts.param, opts.names);
+  let text: string;
+  switch (kind) {
+    case 'expr': {
+      const e = node as A.Expr;
+      text = pr.expr(e, 0);
+      if (e.kind === 'Binary' || e.kind === 'Unary') text = `(${text})`;
+      break;
+    }
+    case 'stmt': text = pr.stmtAt(node as A.Stmt, opts.indent ?? ''); break;
+    case 'pattern': text = pr.pattern(node as A.Pattern); break;
+    case 'type': text = pr.type(node as A.TypeExpr); break;
+  }
+  return { text, used: [...pr.used] };
 }

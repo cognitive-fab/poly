@@ -10,10 +10,13 @@
 // is refused with PL0201 STALE_FIX when the node is gone, its digest differs from `pre`, or the operation's
 // own precondition fails. The file is reprinted by the canonical formatter with its comments: the nodes the
 // edit keeps keep their ids, so their comments stay with them, and an unchanged subtree of a replacement is
-// the old subtree itself (grafting). Fixes apply to the standalone surface only (S70).
+// the old subtree itself (grafting). On the embedded surface the changed node alone is reprinted and spliced
+// in at its span (M3-3), so both poly surfaces get the same fixes with the same preconditions.
 import { canonicalize, digest, sha256Hex, type Diagnostic, type Fix, type Module } from '@poly/core';
 import type * as A from '@poly/core';
+import ts from 'typescript';
 import { format, parse, parseFragment, printExpr, printPattern, printStmt, type FragmentKind } from '@poly/lang';
+import { EMBED_MODULE, printNode, readEmbedded } from '@poly/embed';
 
 type Obj = Record<string, unknown>;
 interface Place { node: Obj; parent: Obj | null; key: string | null; index: number | null }
@@ -180,11 +183,15 @@ function graft(n: unknown, old: unknown): unknown {
   return o;
 }
 
-/** Applies one fix to a source (PT12.1): the new text, or a PL0201 refusal. The source is never half-edited. */
-export function applyFix(src: string, fix: Fix): FixOutcome {
-  const parsed = parse(src);
-  if (!parsed.module) return stale('the source does not parse, so no node can be found');
-  const at = places(parsed.module);
+/** Where an applied edit changed the source, in the terms an embedded splice needs (M3-3). */
+type Change =
+  | { op: 'replace'; span: A.Span; fragment: FragmentKind; fresh: Obj }
+  | { op: 'insert'; spans: A.Span[]; i: number; stmt: A.Stmt }
+  | { op: 'move'; spans: A.Span[]; i: number; j: number };
+
+/** Applies the edit to the module in place: what changed, or a PL0201 refusal. */
+function editModule(module: Module, fix: Fix): Change | FixOutcome {
+  const at = places(module);
   const e = fix.edit as Obj;
   const targetId = (e.op === 'replace-node' ? e.node : e.op === 'insert-before-first-write' ? e.handler : e.block) as string;
   const t = at.get(targetId);
@@ -197,27 +204,152 @@ export function applyFix(src: string, fix: Fix): FixOutcome {
       if (typeof t.node.id === 'string') fresh.id = t.node.id;
       if (t.index === null) t.parent[t.key] = fresh;
       else (t.parent[t.key] as unknown[])[t.index] = fresh;
-    } else if (e.op === 'insert-before-first-write') {
+      return { op: 'replace', span: t.node.span as A.Span, fragment: e.fragment as FragmentKind, fresh };
+    }
+    if (e.op === 'insert-before-first-write') {
       if (t.node.kind !== 'Handler') return stale(`${fix.id}: its node is not a handler`);
       const body = t.node.body as A.Stmt[];
       const i = firstWrite(body);
       if (i < 0) return stale(`${fix.id}: the handler no longer writes`);
-      body.splice(i, 0, parseFragment('stmt', e.stmt as string) as A.Stmt);
-    } else if (e.op === 'move-before-first-write') {
+      const spans = body.map((x) => x.span!);
+      const stmt = parseFragment('stmt', e.stmt as string) as A.Stmt;
+      body.splice(i, 0, stmt);
+      return { op: 'insert', spans, i, stmt };
+    }
+    if (e.op === 'move-before-first-write') {
       const list = t.node[e.branch as string] as A.Stmt[] | null | undefined;
-      const j = list ? list.findIndex((s) => s.id === e.node) : -1;
+      const j = list ? list.findIndex((x) => x.id === e.node) : -1;
       const i = list ? firstWrite(list) : -1;
       if (!list || j < 0) return stale(`${fix.id}: the statement to move is no longer in its block`);
       if (i < 0 || i >= j) return stale(`${fix.id}: the statement no longer follows a write`);
-      const [s] = list.splice(j, 1);
-      list.splice(i, 0, s);
-    } else {
-      return stale(`${fix.id}: unknown edit ${String(e.op)}`);
+      const spans = list.map((x) => x.span!);
+      const [moved] = list.splice(j, 1);
+      list.splice(i, 0, moved);
+      return { op: 'move', spans, i, j };
     }
+    return stale(`${fix.id}: unknown edit ${String(e.op)}`);
   } catch (err) {
     return stale(`${fix.id}: the edit does not parse (${(err as Error).message})`);
   }
-  const text = format(parsed.module, parsed.trivia);
+}
+
+/**
+ * Applies one fix to a source (PT12.1): the new text, or a PL0201 refusal. The source is never half-edited.
+ * A `.ts` file is an embedded module (M3-3): the edit is made on its AST as for a `.poly` file, and the
+ * changed node alone is reprinted by the embedded printer and spliced in at its span, so the author's
+ * formatting and comments elsewhere are kept. The result must read back as the edited AST, or the fix is refused.
+ */
+export function applyFix(src: string, fix: Fix, file = 'module.poly'): FixOutcome {
+  const embedded = file.endsWith('.ts');
+  const parsed = embedded ? readEmbedded(src, file) : parse(src);
+  if (!parsed.module) return stale('the source does not parse, so no node can be found');
+  const change = editModule(parsed.module, fix);
+  if ('status' in change) return change;
+  if (embedded) {
+    let text: string;
+    try {
+      text = spliceEmbedded(src, file, change);
+    } catch (err) {
+      return stale(`${fix.id}: the edit cannot be spliced into the embedded module (${(err as Error).message})`);
+    }
+    const back = readEmbedded(text, file).module;
+    if (!back || digest(back) !== digest(parsed.module)) return stale(`${fix.id}: the edited embedded module does not read back as the edited AST`);
+    return { status: 'applied', text };
+  }
+  const text = format(parsed.module, (parsed as ReturnType<typeof parse>).trivia);
   if (!parse(text).module) return stale(`${fix.id}: the edited module does not print to a source that parses`);
   return { status: 'applied', text };
+}
+
+/** The offset just past whitespace and comments from `p`. */
+function skipTrivia(text: string, p: number): number {
+  for (;;) {
+    while (p < text.length && /\s/.test(text[p])) p++;
+    if (text.startsWith('//', p)) { const nl = text.indexOf('\n', p); p = nl < 0 ? text.length : nl; continue; }
+    if (text.startsWith('/*', p)) { const c = text.indexOf('*/', p + 2); p = c < 0 ? text.length : c + 2; continue; }
+    return p;
+  }
+}
+
+/**
+ * M3-3: the change spliced into the embedded text. A statement list is an array literal of calls, so a
+ * statement is inserted or moved with its separating comma, and a line comment after an element stays with
+ * that element. A combinator the new text calls and the file does not import is added to its import.
+ */
+function spliceEmbedded(src: string, file: string, change: Change): string {
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const startOf = (sp: A.Span) => sf.getPositionOfLineAndCharacter(sp.line - 1, sp.col - 1);
+  const endOf = (sp: A.Span) => sf.getPositionOfLineAndCharacter(sp.endLine - 1, sp.endCol - 1);
+  const indentAt = (p: number) => /^[ \t]*/.exec(src.slice(src.lastIndexOf('\n', p - 1) + 1))![0];
+  // The combinators the file imports, by their own name, under the name it uses.
+  let named: ts.NamedImports | null = null;
+  const names = new Map<string, string>();
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || (st.moduleSpecifier as ts.StringLiteral).text !== EMBED_MODULE) continue;
+    const b = st.importClause?.namedBindings;
+    if (b && ts.isNamedImports(b)) { named = b; for (const el of b.elements) names.set((el.propertyName ?? el.name).text, el.name.text); }
+  }
+  // The parameter of the innermost arrow around a position: the name a field is read through there (PT2.5).
+  const paramAt = (p: number): string => {
+    let best = '$';
+    const visit = (n: ts.Node): void => {
+      if (p < n.getStart(sf) || p >= n.getEnd()) return;
+      if (ts.isArrowFunction(n) && n.parameters.length && ts.isIdentifier(n.parameters[0].name)) best = n.parameters[0].name.text;
+      n.forEachChild(visit);
+    };
+    visit(sf);
+    return best;
+  };
+  const need = new Set<string>();
+  const print = (kind: FragmentKind, node: unknown, p: number, indent: string): string => {
+    const r = printNode(kind, node, { indent, param: paramAt(p), names });
+    for (const u of r.used) if (!names.has(u)) need.add(u);
+    return r.text;
+  };
+  // The array literal a statement list is, from its first element.
+  const arrayOf = (sp: A.Span): ts.ArrayLiteralExpression => {
+    const a = startOf(sp), b = endOf(sp);
+    let hit: ts.ArrayLiteralExpression | null = null;
+    const visit = (n: ts.Node): void => {
+      if (hit || a < n.getFullStart() || b > n.getEnd()) return;
+      if (ts.isArrayLiteralExpression(n) && n.elements.some((x) => x.getStart(sf) === a && x.getEnd() === b)) { hit = n; return; }
+      n.forEachChild(visit);
+    };
+    visit(sf);
+    if (!hit) throw new Error('the statement list is not an array literal');
+    return hit;
+  };
+  // Just past the comma after an element; where the next element's own lines begin, after a line comment.
+  const afterComma = (sp: A.Span): number => { const k = skipTrivia(src, endOf(sp)); return src[k] === ',' ? k + 1 : endOf(sp); };
+  const lineStart = (from: number, before: number): number => { const nl = src.indexOf('\n', from); return nl >= 0 && nl < before ? nl : from; };
+  const slot = (spans: A.Span[], i: number): number => lineStart(i > 0 ? afterComma(spans[i - 1]) : arrayOf(spans[0]).elements.pos, startOf(spans[i]));
+  const edits: { at: number; del: number; text: string }[] = [];
+  if (change.op === 'replace') {
+    const a = startOf(change.span);
+    edits.push({ at: a, del: endOf(change.span) - a, text: print(change.fragment, change.fresh, a, indentAt(a)) });
+  } else if (change.op === 'insert') {
+    const a = startOf(change.spans[change.i]);
+    const q = slot(change.spans, change.i);
+    const indent = indentAt(a);
+    edits.push({ at: q, del: 0, text: `${src[q] === '\n' ? '\n' + indent : ' '}${print('stmt', change.stmt, a, indent)},` });
+  } else {
+    const { spans, i, j } = change;
+    const c = afterComma(spans[j - 1]);
+    const from = lineStart(c, startOf(spans[j]));
+    const end = endOf(spans[j]);
+    const k = skipTrivia(src, end);
+    const trailing = src[k] === ',';
+    edits.push({ at: from, del: (trailing ? k + 1 : end) - from, text: '' });
+    // The last element without a trailing comma leaves the comma before it behind.
+    if (!trailing && src[c - 1] === ',') edits.push({ at: c - 1, del: 1, text: '' });
+    edits.push({ at: slot(spans, i), del: 0, text: src.slice(from, end) + ',' });
+  }
+  if (need.size) {
+    if (!named) throw new Error(`the file does not import ${EMBED_MODULE} by name`);
+    const list = (named as ts.NamedImports).elements;
+    edits.push({ at: list.length ? list[list.length - 1].getEnd() : (named as ts.NamedImports).getStart(sf) + 1, del: 0, text: `${list.length ? ', ' : ' '}${[...need].sort().join(', ')}` });
+  }
+  let out = src;
+  for (const x of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, x.at) + x.text + out.slice(x.at + x.del);
+  return out;
 }

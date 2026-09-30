@@ -708,9 +708,9 @@ function finish(report: CheckReport, module?: Module): CheckReport {
       if (d.witness && !exportable(d.code, report.configurations.some((c) => c.configuration === subject && c.diagnostics.includes(d)))) d.testExport = 'no test export until M4';
       if (d.witness) d.witness.id = 'sha256:' + sha256Hex(canonicalize({ moduleDigest: report.moduleDigest, subject, property: d.property ?? d.code, trace: d.witness.trace }));
     }
-    // S70: fixes are computed on the module this report checked; their ids carry its digest (S69). They apply to
-    // the standalone surface only, so an embedded module is offered none (review D7).
-    if (report.file.endsWith('.poly')) attachFixes([
+    // S70: fixes are computed on the module this report checked; their ids carry its digest (S69). Since M3-3 an
+    // embedded module is offered the same fixes, which applyFix splices into its text.
+    attachFixes([
       ...report.diagnostics.map((d) => ({ d, machine: d.at.machine ?? null })),
       ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, machine: m.machine }))),
       ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, machine: null }))),
