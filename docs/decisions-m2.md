@@ -21,6 +21,12 @@ The owner's rulings on the spec issues raised while planning M2. Issue ids conti
 | **S78** A detached child's address in a lowered handler | **Accepted with a change: resolve at commit, not at delivery.** The marker `{ "$ref": "child", "key": "k" }` is resolved by the kernel when it commits the step that creates it, in the post-state and in every outgoing intent, to the absolute address `<parent>/<k>`. Resolving at delivery against the sender would be wrong as soon as the parent passes the address to a third machine, because the sender is then not the parent. After the creating step, every copy of the address is absolute, and translation validation compares after resolution. Alone, each detached key adds one distinct symbolic address to S57's count. This is part of the polyrun change already on my list for `sendTo` and `createInstance`. | PS1.6, PT6.4, PT7a |
 | **S79** `ok(r)` for ordinary effects | **Accepted.** `r.x` takes the type of the completion parameter it is bound to, and that parameter is strict by default. A handler result without `x`, or with `x` outside the domain, is rejected at dispatch and journaled as a rejected step; a machine that can then wait forever is caught by the liveness check. | PT6.1 |
 
+## Ruling on S80: K9 and cancel actions
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S80** K9 is stricter than PS7.1 | K9 says a child's completion **or cancel** action comes only from the kernel; PS7.1 withholds only the completion, and poly-ref and check-product offer cancel actions from outside. **K9 names completions only; PS7.1 is unchanged.** Offering cancels from outside only adds behaviour, so every verdict stays sound without that half of K9, and the joint state counts of both engines stay as they are. A kernel assumption lists only what a verdict relies on. The polyrun change on my list narrows to match: refuse an outside dispatch of an action wired as a child's completion. Gate M4d is narrowed the same way. | PS10 (K9); PT18 M4 row |
+
 ## Conclusion
 
 The plan can proceed as written, with five changes: witness and fix ids that include the module digest (S69), an AST printer that turns the surface-equality test into a test over every conformance source (S71), liveness predicates in their own module (S74), an independently written evidence script for the checkout's `settle` (S77), and detached addresses resolved at commit rather than at delivery (S78).
