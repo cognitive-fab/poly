@@ -136,7 +136,7 @@ There are five kinds of property. Each has its own keyword (PT5), and none is ca
 
 Children come in two kinds. The author chooses, and the verdict says which semantics was checked.
 
-- **PS7.1** **Attached children** (the default) form a **joint machine** with their parent. Its state is `(s_P, {k ↦ s_k})`, over the children spawned so far. The joint label is the **stimulus** `(target, a, d)`, where the target is the parent or a child key.
+- **PS7.1** **Attached children** (the default) form a **joint machine** with their parent. Its state is `(s_P, {k ↦ s_k})`, over the children spawned so far, and with each instance's status (active or terminal) and each child's wiring (its completion and cancel actions). The joint label is the **stimulus** `(target, a, d)`, where the target is the parent or a child key. The stimuli are offered as the kernel delivers them (S45): a terminal instance is offered nothing, and an action wired as the completion of a child is offered to the parent only once that child is terminal, because until then only the kernel delivers it, in the cascade. Inside a cascade, a delivery to a terminal instance is rejected and changes nothing. This rests on kernel assumption K9.
 - **PS7.2** A joint step of attached children is the **cascade** of a stimulus: the stimulus's own transition, followed by every transition it causes, applied in order. These are completions to the parent, parent-terminal actions to children and signals, up to depth 8. The joint step is accepted iff the stimulus transition is accepted. A cascade that exceeds depth 8 is `PL5201 CASCADE_DEPTH`.
 - **PS7.3** A **compose invariant** is an invariant (PS5.1) of the joint machine.
 - **PS7.4** **Attached means co-located.** The cascade semantics is a model of the runtime only under K1 to K3, and K3 (one transaction per cascade) holds only if the parent and all its attached descendants are served by one kernel shard. The runtime shards by the root of each attached tree and refuses to place an attached child elsewhere (`PL5202 ATTACHED_ACROSS_SHARDS`). Every composition guarantee cites K1 to K3 and this rule.
@@ -206,6 +206,7 @@ The guarantees about running programs hold under these assumptions about the run
 | K6 | **Gate function.** The gate's decision is a function of the policy digest, the session state Σ, the emitting-step snapshot and the proposal. | Polyaxion's replay check; to be stated as an engine requirement |
 | K7 | **Profile fidelity.** The SAM v2 strict runtime executes a lowered module as PS9.1 describes. | sam-lib strict-profile tests; PS9.3 checks the rest per program |
 | K8 | **Delivery conformance.** The outbox worker, the network path and the receiver's dedupe implement the `Delivery` machine of PT9.8. | The `Delivery` machine is checked (evidence script now, poly-ref from M1). Conformance of the runtime is checked by replaying its delivery traces against the machine at M4. |
+| K9 | **Cascade actions come from the kernel.** An action wired as a child's completion or as a parent-terminal cancel is delivered only by the kernel, in a cascade; an external dispatch of it is refused (S45). | Gate M4d. Until then polyrun accepts such a dispatch from outside, and every verdict that relies on K9 lists it under its instance line. |
 
 ### Runtime obligations
 

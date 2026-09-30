@@ -64,7 +64,7 @@ Stmt        = "require" Expr "else" "reject" String
             | "emit" Ident "(" [ Args ] ")"
             | "after" Duration "->" Ident "(" [ Args ] ")" "as" Ident
             | "cancel" Ident
-            | "spawn" [ "detached" ] QualIdent "as" Ident "(" [ Args ] ")" [ ChildWiring ]
+            | "spawn" [ "detached" ] QualIdent "as" Ident [ "->" Ident "(" [ Args ] ")" ] [ ChildWiring ]
             | "send" Expr "<-" Ident "(" [ Args ] ")" [ "as" Ident ]
             | "signal" Ident "->" Ident "(" [ Args ] ")" ;
 ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
@@ -403,13 +403,17 @@ Timer keys are declared by use and scoped to the machine. Arming a key replaces 
 
 ### PT6.4 Children
 
-`spawn payments.Payment as pay(amount: amount) on complete -> Paid on parent terminal -> Abort` lowers to `spawnChild` with:
+`spawn payments.Payment as pay -> Start(amount: amount) on complete -> Paid on parent terminal -> Abort` lowers to `spawnChild` with:
 
-- `machineId`;
+- `machineId: "payments.Payment"` (S28);
 - `childKey: "pay"`;
-- `initData`;
+- `creation: { action: "Start", data: { amount } }`;
 - `onComplete: "Paid"`;
 - `onParentTerminal: "Abort"`.
+
+The child is created in its initial state and then takes `Start(amount: amount)` as its first step, in the same cascade, as polyrun does. `spawn M as k` with no `-> A(…)` creates the child in its initial state and nothing more (S43).
+
+The runtime delivers a completion to the parent with the data `{ childKey, childState }`, where `childState` is the child's terminal state, and a parent-terminal cancel to each active child with `{ reason: "parent-terminal" }`. So a completion action declares `(childKey: string, childState: R)`, where `R` is a record type whose fields match the child's state (S25), or declares no parameters. A cancel action declares `(reason: string check { "parent-terminal" })`, or none. Any other parameter list is `PL1201 TYPE_MISMATCH` at the action, because the runtime will not supply it (S44).
 
 `signal pay -> Refund()` lowers to `signalChild`. The child instance id is `hash(parentId, childKey, seq)`, as polyrun defines it.
 
@@ -460,12 +464,13 @@ A machine that spawns children is checked with its children as a product:
 
 These rules are polyrun's composition semantics, unchanged, and they apply to **attached** children only. The compiler emits `invariants.compose.mjs` from `compose invariant` declarations. Joint state is addressed as `parent.<field>` and `children.<key>.<field>`. The runtime places an attached tree on the shard of its root and refuses to place a descendant elsewhere (`PL5202 ATTACHED_ACROSS_SHARDS`, PS7.4).
 
-The built-in doctrine findings are surfaced as poly diagnostics in the `PL5xxx` range:
+A compose invariant reads `children.k.f` only under a `k spawned` narrowing, as `action == A` narrows parameters (S19): `k spawned implies children.k.shipState == Delivered`. A read without it is `PL5103 CHILD_READ_WITHOUT_SPAWNED`, and the fix is the narrowing (S48).
 
-- poison class;
-- unhandled cascade delivery;
-- unnamed rejects;
-- child-key collision.
+polyrun's built-in doctrine findings are surfaced as poly diagnostics (S47):
+
+- child-key collision: `PL5101 CHILDKEY_COLLISION`;
+- a cascade delivery (completion, cancel or signal) that reaches an action with no handler: `PL5102 UNHANDLED_CASCADE_DELIVERY`;
+- an unnamed reject, or the poison class: `PL2501 LOWERING_MISMATCH`, since every poly reject has a reason and only a lowering that lost something can reach either.
 
 ## PT7a. Configurations
 
@@ -886,7 +891,7 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` |
-| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
+| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
 | PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
@@ -1110,7 +1115,7 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 | M1 · Effects, composition and configurations | `emit`, effect declarations, timers, attached and detached children, `Ref` and `send`, configurations explored by poly-ref, emission and compose invariants, maps | The `polyrun-oms` order machine in poly agrees window by window with the hand-written module on the copied corpus (53/81 each), replays at 100% the corpus that polyrun's kernel records from the hand-written artefacts, and gives the same `check-effects` and `check-product` results (AC1, decision S24). The `checkout` configuration finds the double-confirmation witness with the optimistic order and is clean with the waiting order (AC10). poly-ref reproduces the configuration and delivery evidence scripts: the checkout results (six-step witness; 44 states clean) and the safety results of all four `Delivery` variants of PT9.8 (state counts, `at-most-once`, `in-order`, and both violation witnesses). `exactly-once` is liveness and is checked in M2. A disagreement with a script is investigated until one side is shown wrong. |
 | M2 · Diagnostics and second surface | `poly-embed` front end producing the same AST; handler capability lint (PT6.5); diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. poly-ref reproduces the liveness evidence: `exactly-once` holds under the stated fairness for the two `Delivery` variants that keep dedupe records, and `settles` holds for the v0.3 and union forms of `OutboxIntent` and fails for the v0.2 form, with a fair cycle at each of its two deadlocked states. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain and today's polyrun | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
-| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. M4c: the runtime's delivery traces replay against the `Delivery` machine of PT9.8 (K8), including traces captured across an archive. |
+| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7 | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. M4c: the runtime's delivery traces replay against the `Delivery` machine of PT9.8 (K8), including traces captured across an archive. M4d: an external dispatch of an action wired as a child completion or a parent-terminal cancel is refused (K9, S45). |
 | M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, obligation consistency (PT8.5), escalation with timeout, person-key signatures (PT12.5), `sendTo` delivery in polyrun | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. |
 | M6 · Agents | Workflow lowering, MCP server, language server, Claude Code plugin, `poly new` | AC5. A workflow in poly runs through unchanged polyflow tools. |
 | M7 · Feedback | `poly mine`, `poly propose`, `poly export traces` | A Polyx rule adjudicated `real` round-trips to an admitted obligation. A polyness proposal arrives as poly source and is admitted or refused by the pipeline. |
