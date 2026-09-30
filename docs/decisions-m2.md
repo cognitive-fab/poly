@@ -27,6 +27,30 @@ The owner's rulings on the spec issues raised while planning M2. Issue ids conti
 |---|---|---|
 | **S80** K9 is stricter than PS7.1 | K9 says a child's completion **or cancel** action comes only from the kernel; PS7.1 withholds only the completion, and poly-ref and check-product offer cancel actions from outside. **K9 names completions only; PS7.1 is unchanged.** Offering cancels from outside only adds behaviour, so every verdict stays sound without that half of K9, and the joint state counts of both engines stay as they are. A kernel assumption lists only what a verdict relies on. The polyrun change on my list narrows to match: refuse an outside dispatch of an action wired as a child's completion. Gate M4d is narrowed the same way. | PS10 (K9); PT18 M4 row |
 
+## Rulings at M2's close (S81 to S85), and the review of `config_liveness_check.py` (S77)
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S81** `PL6102` still names cancel actions | **Accepted.** `PL6102` names child completions only, as K9 does since S80. S52's text in PT6.4 follows. | PT6.4; PT12.2 |
+| **S82** The prefix of an `eventually` counterexample | **Accepted.** For `eventually P`, the counterexample is a fair component of the states reachable from the initial state through states where `P` does not hold; this is the standard reading, and it matches the restriction PS6.4 already makes for `leads to`. | PS6.4 |
+| **S83** A second spawn of a live detached key | **Accepted.** In a configuration it is `PL5101 CHILDKEY_COLLISION`, with its witness, checked before the instance bound. The interim `ERROR` goes away. | PS13.3; PT6.4 |
+| **S84** tsc and equality with an object literal | **Accepted.** A record or map literal used as an operand is written `lit({ … })` in the embedded surface; elsewhere (initial values, arguments) it stays an object literal. The printer and the reader both follow it, and the exemption for `TS2839` in the printed-sources test is removed: every printed source must pass `tsc --noEmit`. | PT2.5 |
+| **S85** What PD1.4d's gate quantifies over | **Accepted: PD1.5's reading.** A decision is gated iff, for every answer whose accepted completion can emit a compensable or irreversible effect, some confidence or margin interval keeps every accepted completion with that answer from emitting one. Rejected completions emit nothing, so a `require` that rejects below a threshold is a gate. `require conf >= 0` is not. A decision in a machine with attached children stays `PL0901` until the cascade is followed through the joint machine. | proposal PD1.4d |
+
+**`config_liveness_check.py` is accepted as an acceptance test, with three conditions.** I read it against PS6.4, PS13 and PS14 and ran it:
+
+- It reproduces `config_check.py`: the six-step witness for the optimistic order, and 44 states with the invariant holding for the order that waits. It reports `settle` holding for both orders.
+- It is sensitive. I ran two mutants. One removes the inventory's `OutOfStock` reply, so an order can wait in `Taking` forever: `settle` is violated for both orders, with one fair component each. The other ignores fairness: `settle` is violated with 29 components each, so the fairness check is what makes the result hold.
+- Its fairness is weak fairness per message value, and a rejected input is a stutter (PS3.3), so a state with nothing in transit and an order still `Asked` counts as a violation, as it should.
+
+Conditions:
+
+1. **The two mutants become built-in controls.** The script runs them first and refuses to report on the real model unless both are violated, as the M0 doctrine requires ("controls first").
+2. **A bound hit makes the liveness result inconclusive.** Today the script drops a step that exceeds the transit bound and would still print "holds". It must print `INCONCLUSIVE` for `settle` whenever `bound hit` is true.
+3. **Record why the optimistic count differs.** This script explores 47 states for the optimistic order and `config_check.py` reports 30. The gate numbers are unaffected (the witness and the 44), but the plan records which script stops early and why, so the two scripts' counts are not mistaken for a disagreement.
+
+Its independence is limited, as the agent says, because the same agent wrote poly-ref. My reading, the two mutants, and its agreement with `config_check.py` are what it relies on.
+
 ## Conclusion
 
 The plan can proceed as written, with five changes: witness and fix ids that include the module digest (S69), an AST printer that turns the surface-equality test into a test over every conformance source (S71), liveness predicates in their own module (S74), an independently written evidence script for the checkout's `settle` (S77), and detached addresses resolved at commit rather than at delivery (S78).
