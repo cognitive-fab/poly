@@ -283,12 +283,13 @@ machine Order {
 }
 ```
 
-This source contains two findings.
+This source contains three findings.
 
 1. **Domain escape.** `AddItem` can overflow `items: 0..3`. The model check reports `PL3102 DOMAIN_ESCAPE` with the witness `AddItem, AddItem, AddItem, AddItem`, and offers two typed fixes:
    - add `require items < 3 else reject "cart-full"`;
    - widen the range.
 2. **Double charge.** `Pay` accepts while the order is `Placed` but does not change its state, so a second `Pay` emits a second charge. The path property check reports `PL4001 PATH_PROPERTY` for `charge-at-most-once`, with the witness `AddItem, Place, Pay(10), Pay(10)`. The fix is a `Charging` status that `Pay` enters and `PaymentOk` / `PaymentFailed` leave. This is the double-charge sequence the Poly stack was built to find: each call is allowed, and the sequence is not.
+3. **Emit without state change.** The same step is also `PL4002 EMIT_WITHOUT_STATE_CHANGE` on `Pay`: it is accepted, emits `payment.charge`, and leaves the state as it was, so on **check** it is enabled again after itself and repeats its effect without limit (S33). The witness is two repetitions, `AddItem, Place, Pay(10), Pay(10)`, and the fix is the same `Charging` status, which records the emission in the state.
 
 `amount` flows into the irreversible `charge`, so its check domain `{ 10, 20 }` is `strict` by default (PT3.4a). A `Pay(15)` is rejected at dispatch with `outside-check-domain`, and the program that runs is the program that was checked.
 
@@ -337,6 +338,9 @@ The five kinds and their meanings are defined in PS5. This section fixes how eac
 | `liveness n: … under fair { … }` | eventually or leads-to under weak fairness (PS5.5, PS6) | none (no engine format) | `poly-ref` over the explored graph (PS6.4) |
 | (automatic) `domain:<field>` | invariant (PT3.5) | `stateInvariants` | polygraph BFS |
 | (automatic) deadlock freedom | no reachable non-terminal state without an accepting action (PS5.6) | none | `poly-ref` over the explored graph |
+| (automatic) emit without state change | no reachable accepted step with a non-empty effect sequence leaves the state unchanged (S33) | none (the lowered effects mapper) | polyrun `check-effects` (`identity-accept-emits`), confirmed by `poly-ref` |
+
+**Emit without state change (S33).** A step that is accepted, emits at least one intent and leaves the state unchanged is `PL4002 EMIT_WITHOUT_STATE_CHANGE`, a finding in the path-property range, whatever the effect's class. The step stays legal (PS3.4); the finding is sound on **check**: every input is offered in every state (PS4.1), the step is deterministic, and its post-state is its pre-state, so it is enabled again and repeats its effects without limit. The witness is the path to the step followed by two repetitions. polyrun `check-effects` reports it as `identity-accept-emits`; poly-ref confirms it as an accepted step with a non-empty effect sequence and an unchanged state, and the two must name the same steps (a disagreement is `PL2501`). The fix is to record the emission in the state. A person may accept the finding under PT12.5.
 
 The engine formats keep their names (`transitionInvariants`, `effectInvariants`). Only the poly keywords changed, so each keyword now says what kind of property it is.
 
@@ -875,7 +879,7 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL1xxx | names, types, domains | `PL1001 UNKNOWN_NAME`, `PL1002 DUPLICATE_DECLARATION`, `PL1005 AMBIGUOUS_CONSTRUCTOR`, `PL1101 UNBOUNDED_DOMAIN`, `PL1201 TYPE_MISMATCH`, `PL1202 READ_OF_PRIMED_FIELD`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1204 DIVISION_BY_ZERO`, `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1502 INCOMPLETE_MAP_LITERAL`, `PL1503 UNREACHABLE_ARM`, `PL1504 UNUSED_BINDER`, `PL1601 PAYLOAD_TYPE_CONFLICT`, `PL1602 ARRAY_MAP_NOT_ZERO_BASED` |
 | PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
-| PL4xxx | path properties | `PL4001 PATH_PROPERTY` |
+| PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` |
 | PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
 | PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |

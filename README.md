@@ -115,7 +115,7 @@ machine Order {
 }
 ```
 
-`poly check` finds that two `Pay` calls emit two charges:
+`poly check` finds that two `Pay` calls emit two charges, and says why they can:
 
 ```
 orders.poly:17  PL4001 PATH_PROPERTY  charge-at-most-once
@@ -126,10 +126,18 @@ orders.poly:17  PL4001 PATH_PROPERTY  charge-at-most-once
     Pay(10)        Placed/1 -> Placed/1   emits payment.charge   <- count = 2
   test:  poly witness sha256:3be1… --test   (fails on this program)
   fixes: [enter-charging-status]  add status Charging, entered by Pay, left by PaymentOk / PaymentFailed
+orders.poly:16  PL4002 EMIT_WITHOUT_STATE_CHANGE  Pay
+  Pay emits payment.charge and leaves the state unchanged, so it can repeat its effect without limit
+  witness (4 steps):
+    AddItem()      Draft/0  -> Draft/1
+    Place()        Draft/1  -> Placed/1
+    Pay(10)        Placed/1 -> Placed/1   emits payment.charge
+    Pay(10)        Placed/1 -> Placed/1   emits payment.charge
+  fixes: [enter-charging-status]  record the emission in the state
 verdict: FINDINGS (exit 1)  over items ∈ 0..3, amount ∈ {10, 20}
 ```
 
-Each call is allowed; the sequence is not. That is the bug the Poly stack was built to find, reported before the program can run. The snippet is abridged; the full example is in the technical specification, PT4.5.
+Each call is allowed; the sequence is not. The second finding names the cause: a step that emits and changes nothing can always be taken again. That is the bug the Poly stack was built to find, reported before the program can run. The snippet is abridged; the full example is in the technical specification, PT4.5.
 
 
 
