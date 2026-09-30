@@ -23,6 +23,7 @@ import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignatu
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
+import { exportable } from './witness.js';
 import { lintHandlers } from './lint.js';
 import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
@@ -690,18 +691,20 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
 }
 
 function finish(report: CheckReport, module?: Module): CheckReport {
-  // S69: a witness id is the digest of { moduleDigest, property, trace }, so the same trace in another version
-  // of the module is another witness. S86: the machine or configuration it is about is part of it too, so two
-  // machines with the same defect have two witnesses (review D8).
+  // S69, S86: a witness id is the digest of { moduleDigest, subject, property, trace }, the subject being the
+  // machine or configuration it is about, so the same trace in another version of the module, or in another
+  // machine with the same defect, is another witness.
   if (module) {
     report.moduleDigest = digest(module);
     const scoped = [
-      ...report.diagnostics.map((d) => ({ d, scope: d.at.machine ?? null })),
-      ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, scope: m.machine }))),
-      ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, scope: c.configuration }))),
+      ...report.diagnostics.map((d) => ({ d, subject: d.at.machine ?? null })),
+      ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, subject: m.machine }))),
+      ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, subject: c.configuration }))),
     ];
-    for (const { d, scope } of scoped) {
-      if (d.witness) d.witness.id = 'sha256:' + sha256Hex(canonicalize({ moduleDigest: report.moduleDigest, scope, property: d.property ?? d.code, trace: d.witness.trace }));
+    for (const { d, subject } of scoped) {
+      // Ruling after the M2 review: a witness no exported test can judge yet is marked, and its export refused.
+      if (d.witness && !exportable(d.code, report.configurations.some((c) => c.configuration === subject && c.diagnostics.includes(d)))) d.testExport = 'no test export until M4';
+      if (d.witness) d.witness.id = 'sha256:' + sha256Hex(canonicalize({ moduleDigest: report.moduleDigest, subject, property: d.property ?? d.code, trace: d.witness.trace }));
     }
     // S70: fixes are computed on the module this report checked; their ids carry its digest (S69). They apply to
     // the standalone surface only, so an embedded module is offered none (review D7).

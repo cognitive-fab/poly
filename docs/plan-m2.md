@@ -178,7 +178,7 @@ The review ran over `9e1d045..0ed23c3`, in four parts (front ends and checker, l
 | D10 | The handler lint missed aliases of ambient globals, `sqlite`, `eval` and `Function`, and flagged type imports and a local capability named `fetch` | Free ambient globals flagged; type imports and local names passed (PT6.5) | `0c4690b` |
 | minor | A configuration lasso was rendered without its cycle | Rendered | `0c4690b` |
 
-- **S86. A witness id names what it is about (open, built as proposed).** S69 makes a witness id the digest of `{ moduleDigest, property, trace }`. Two machines of one module with the same defect and trace then share one id, and `poly witness` exports only the first (review D8). *Proposal:* the id is the digest of `{ moduleDigest, scope, property, trace }`, where `scope` is the machine or configuration the finding is about. A trace is still one witness in one version of one machine.
+- **S86. A witness id names what it is about (ruled: accepted, with the field named `subject`; built).** S69 makes a witness id the digest of `{ moduleDigest, property, trace }`. Two machines of one module with the same defect and trace then share one id, and `poly witness` exports only the first (review D8). *Proposal:* the id is the digest of `{ moduleDigest, scope, property, trace }`, where `scope` is the machine or configuration the finding is about. A trace is still one witness in one version of one machine.
 
 After the review and its fixes `npm test` runs 621 tests, all passing.
 

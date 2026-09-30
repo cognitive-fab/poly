@@ -1,6 +1,6 @@
 // `poly witness <id> --trace | --test` (PT12.4, S68, S69, S74).
 //
-// A witness is found in the last report by its id, the digest of { moduleDigest, property, trace }.
+// A witness is found in the last report by its id, the digest of { moduleDigest, subject, property, trace } (S69, S86).
 // --trace writes it as {pre, action, data, post} windows, with the cycle's index for a lasso.
 // --test writes a host test that walks the witness through the lowered artefacts (S68: the runtime API
 // arrives in M4) and asserts the violated predicate; the walking is done by witness-runtime.ts, which the
@@ -64,6 +64,11 @@ const JUDGED = {
   machine: new Set(['PL3001', 'PL3002', 'PL3003', 'PL3102', 'PL3901', 'PL3201', 'PL3301', 'PL4001', 'PL4002', 'PL6201']),
   configuration: new Set(['PL5401', 'PL5402', 'PL5404', 'PL3301', 'PL5101']),
 };
+
+/** Whether an exported test can judge a witness of this code, about a machine or about a configuration. */
+export function exportable(code: string, configuration: boolean): boolean {
+  return JUDGED[configuration ? 'configuration' : 'machine'].has(code);
+}
 
 /** A witness no exported test can judge yet (review D1): it is refused, never exported as a test that passes. */
 export class WitnessExportError extends Error {}
