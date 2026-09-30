@@ -169,6 +169,21 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       await checkMachineStages(module, checked, machine, mc, opts, engines);
     } catch (e) {
       const err = e as Error & { nondeterministic?: boolean };
+      // No silent clean in the JSON form either: the machine that stopped and every machine and configuration
+      // after it list what did not run, and none of them folds to CLEAN (polywatch, rated at M2's start).
+      const reason = `the check stopped with an error in ${machine}`;
+      const done = new Set(mc.stages.map((st) => st.stage));
+      notRun(mc, (['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)] as StageName[]).filter((st) => !done.has(st)), reason);
+      const cut = [mc];
+      for (const rest of [...checked.machines.keys()].slice([...checked.machines.keys()].indexOf(machine) + 1)) {
+        const other: MachineCheck = { machine: rest, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+        notRun(other, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, rest)], reason);
+        report.machines.push(other);
+        cut.push(other);
+      }
+      for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
+      finish(report, module);
+      for (const m of cut) m.verdict = fold([m.verdict, 'INCONCLUSIVE']);
       report.error = `${machine}: ${err.message}`;
       report.verdict = err.nondeterministic ? 'NONDETERMINISM' : 'ERROR';
       report.exit = err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;
@@ -180,6 +195,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   report.configurations.push(...configs.configurations);
   if (configs.error) {
     // As for a machine's stages: a throw is an ERROR report, never a rejected check (review finding).
+    finish(report, module);
     report.error = configs.error;
     report.verdict = 'ERROR';
     report.exit = EXIT_CODES.ERROR;

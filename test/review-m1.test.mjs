@@ -244,3 +244,26 @@ test('C1b: an index that names no member of a family with a gap is PL1201, for s
 test('W1: a map-literal key that names a parameter or a field is PL1502, not a constructor or a wrong key', () => {
   assert.deepEqual(codes(src('pw-mapkey')), ['PL1502', 'PL1502']);
 });
+
+// polywatch, rated at M2's start. W2: an ERROR report must not show the machines it did not finish as CLEAN.
+test('W2: when a stage throws, no machine of the ERROR report says CLEAN', async () => {
+  const blocker = join(OUT, 'root-is-a-file');
+  mkdirSync(OUT, { recursive: true });
+  writeFileSync(blocker, 'not a directory');
+  const r = await checkFile(join(ROOT, 'conformance', 'm1', 'sends.poly'), { root: blocker });
+  assert.equal(r.verdict, 'ERROR');
+  assert.deepEqual(r.machines.map((m) => m.verdict).filter((v) => v === 'CLEAN'), []);
+  assert.equal(r.machines.length, 4);
+});
+
+// W3: sync-corpora's verify reports a listed file missing from a copy instead of throwing.
+test('W3: expand lists a missing entry instead of throwing', async () => {
+  const { expand } = await import('../scripts/sync-corpora.mjs');
+  assert.deepEqual(expand(OUT, ['no-such-file']), ['no-such-file']);
+});
+
+// W4 (already fixed by 905083b, pinned here): an initial value outside a check domain, int or string, is PL1201.
+test('W4: initial values are checked against int and string check domains', () => {
+  const text = 'module c\nservice machine M {\n  state {\n    x : int check { 1, 2 } = 3\n    s : string check { "a", "b" } = "c"\n  }\n  action Go()\n  on Go { x\' = 1 }\n}\n';
+  assert.deepEqual(codes(text), ['PL1201', 'PL1201']);
+});

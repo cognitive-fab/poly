@@ -63,10 +63,12 @@ export const STUDIES = [
 
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
-function expand(base, entries) {
+/** The files an entry list names; an entry missing from base is listed as it is, so verify reports it (polywatch). */
+export function expand(base, entries) {
   const out = [];
   for (const e of entries) {
     const p = join(base, e);
+    if (!existsSync(p)) { out.push(e); continue; }
     if (statSync(p).isDirectory()) for (const f of readdirSync(p).sort()) out.push(`${e}/${f}`);
     else out.push(e);
   }
