@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { parse } from '@poly/lang';
-import { checkModule, fold, verdictOf, diag, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
+import { checkModule, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { translationValidate, confirmWitness, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
@@ -300,3 +300,28 @@ function finish(report: CheckReport, module?: Module): CheckReport {
   return report;
 }
 
+
+// ── project mode (PT1.2, decision M1-6) ────────────────────────────────────
+
+export interface ProjectReport {
+  project: string;
+  name: string;
+  files: CheckReport[];
+  verdict: CheckReport['verdict'];
+  exit: number;
+}
+
+/**
+ * `poly check <dir>`: every module the manifest names, each through the whole
+ * pipeline. The build goes under the project directory unless --root says
+ * otherwise (PT1.5). The project verdict is the fold of the files' verdicts;
+ * an error or a nondeterminism in any file decides it.
+ */
+export async function checkProject(dir: string, opts: CheckOptions = {}): Promise<ProjectReport> {
+  const { manifest, files } = loadProject(dir);
+  const reports: CheckReport[] = [];
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir }));
+  const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');
+  const verdict = special ? special.verdict : fold(reports.map((r) => r.verdict as Verdict));
+  return { project: dir, name: manifest.name, files: reports, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict] };
+}

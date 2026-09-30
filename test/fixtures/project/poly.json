@@ -1,0 +1,3 @@
+{ "poly": "1", "name": "hello-project", "modules": ["src/*.poly", "more/**/*.poly"],
+  "host": "typescript", "require": { "grade": false },
+  "engines": { "polygraph": "^8.3" } }
