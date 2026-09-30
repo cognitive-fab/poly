@@ -118,6 +118,30 @@ The agent applies the spec text in one commit, with a regression test that fails
 
 **The model-decisions proposal** (`docs/proposals/pd-model-decisions.md`, v0.2, with its review and response in `docs/reviews/`) is not part of M1. It is ruled at M1's close, after the M1 code review and before the M2 handoff. If ruled as proposed, PD1 joins M2's scope and gate (PD1-A1 to A4), PD2 and PD3 join M4 with K10, and PD4 joins M5. Nothing in M1 reads it or builds toward it.
 
+## Rulings at M1's close (S56 to S65), and the model-decisions proposal
+
+| Issue | Ruling | Spec change |
+|---|---|---|
+| **S56** Liveness in a configuration | **Accepted.** In a configuration, a liveness property takes an optional `forall i in g:` over the whole `leads to` and an optional `under fair { … }`. Delivery is fair by PS14.2; an input is fair only if the clause names it. In a machine the clause stays required. | PT2; PS13.6 |
+| **S57** The domain of `Ref<M>` alone | **Accepted, with one addition.** Alone, a `Ref<M>` ranges over `none` and `n` symbolic addresses `M#1 … M#n`, with `n` the number of `Ref<M>` fields plus the largest number of `Ref<M>` parameters of one action. **Addition:** when `M` is the machine's own type, `self` is one more distinct address, so `n` grows by one. The argument in the plan (addresses are only compared or passed on, so every equality pattern is realised) is recorded in PS1.6. | PS1.6 |
+| **S58** `send` and `self` at runtime | **Accepted.** `send` lowers to `{ kind: "sendTo", target, action, data }`; `none` is `null`; `self` is the marker `{ "$ref": "self" }`, legal only as a whole argument of a `send`. Until polyrun has `sendTo`, stage 3 of a sending machine is poly-ref's alone and says so, and such a module does not run under polyrun. `send … as n` stays `PL0901`. The polyrun change (the intent and the `self` resolution) is on my list. | PT7a |
+| **S59** `SendDenied` needs trust scopes | **Accepted, with a correction.** Trust scopes and the gate arrive in **M5** (PT18), not M3. Until then no send crosses a scope and `SendDenied` is an ordinary action name. | none |
+| **S60** `spawn detached` | **Accepted as proposed, built in M2.** The address is `<parent address>/<k>`; `k` is a handler local of type `Ref<M>` that may be stored; the instance starts in `M`'s initial state and takes its creation action (S43) as its first message; instances spawned from `M` join the group `M`; `N` counts every instance, and reaching `instances n` is `PL5302`. The polyrun `createInstance` intent is on my list. | PT6.4; PS13.3; PT18 M2 row |
+| **S61** Other intents in a configuration | **Accepted.** Effects and timers of an instance are completed only through declared `inputs`. A configuration whose machine spawns attached children is `PL0901` until a later milestone. | PS13.3 |
+| **S62** A configuration without bounds | **Accepted, with its own code.** A configuration with no `bounds { transit n }` is **`PL5303 CONFIGURATION_WITHOUT_BOUNDS`**, not `PL1201`: the program may type-check perfectly. `instances n` is required only when a machine spawns detached children. | PT2; PT12.2 |
+| **S63** PT7a's inventory reports `PL4002` | **Accepted.** S33 counts effects, timers and child intents, and not `send`. A reply is one step per request, and in a configuration a message takes one step at its receiver (PS13.3, PS14.3), so the unbounded repetition S33 is about needs a second request. The consequences of a repeated send are checked where its receiver is. The checkout file's verdict then follows its configuration. | S33 text in PT5 and PT12.2 |
+| **S64** PT9.8's `in-order` | **Accepted.** `invariant in-order: steps[M2] >= 1 implies steps[M1] >= 1` (M2 never steps before M1), which is the script's property. The fourth variant then reports `at-most-once` alone, as PT9.8's table says, and the two properties stay apart. | PT9.8 |
+| **S65** A union with payloads below the top of a field | **Accepted.** It lowers to one JSON object `{ "$": "C", p: v, … }` with exactly its own payloads, recursively; a union with no payload stays its constructor's name. Effect parameters and `childState` stay `PL0901`. | PS9.1b; PT3.1 |
+
+**The model-decisions proposal is ruled as written in v0.2.** PD1 joins M2's scope and gate (PD1-A1 to A4), with the toolchain list from the M1 closing summary as its plan input. PD2 and PD3 join M4, and K10 enters PS10 when PD2 is built. PD4 joins M5. PT18 is amended in this commit.
+
+**Other items from the closing summary.**
+
+- The OMS example's `onExhausted` data outside `CHARGE_FAILED`'s domain is a defect in the polygraph example; it is on my list, with the three polyrun changes (`sendTo`, the K9 refusal, `createInstance`) and the probe for polyflow and Polyaxion.
+- The test suite's length: `npm test` stays the whole gate in one command. In M2, each deliberately broken lowering runs over the smallest sources that exercise its construct, listed beside it in `test/toolchain-faults.mjs`, and one full sweep over every source stays in the suite.
+
+**Next.** The M1 code review runs over `ca2e6b2..122b520`, as M0's did. The agent applies the spec text for S56 to S65 in one commit citing the ids, fixes the review's findings with regression tests that fail first, then stops for the M2 handoff.
+
 ## Conclusion
 
 M1 starts with its three open questions settled. The emit-only step is fixed where it originates, in the engine. Liveness no longer blocks a safety result. The one gate item that needs liveness moves to the milestone that builds it. The configuration explorer is the main work, and its first targets (the checkout witness and the delivery variants) are already measured by independent scripts. The rulings on the plan add the record type the OMS order needs and fix the timer rule against polyrun's store.

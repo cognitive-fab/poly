@@ -1,6 +1,6 @@
 # poly · Model decisions: typed answers, provenance, model independence and operating modes
 
-*Cognitive Fab · September 2026 · proposal v0.2, not part of draft v0.6 · ids `PD` · v0.2 answers [`review-2026-09-30-decisions.md`](../reviews/review-2026-09-30-decisions.md)*
+*Cognitive Fab · September 2026 · proposal v0.2, ruled at M1's close (see `decisions-m1.md`) · ids `PD` · v0.2 answers [`review-2026-09-30-decisions.md`](../reviews/review-2026-09-30-decisions.md)*
 
 ## 0. Scope and status
 
