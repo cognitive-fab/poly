@@ -203,9 +203,46 @@ Step 8 (configurations) raised eight more, and step 9 (delivery) one. Each was r
 
 One thing found in the hand-written example, reported rather than normalised: its manifest's `onExhausted` for `chargeCard` delivers `CHARGE_FAILED` with `reason: "provider-unavailable"`, a value outside that action's own domain (`{ "declined" }`). poly cannot write that completion (the argument is checked against the domain), so the poly manifest delivers `"declined"`. Neither comparison reads completion data, so the results agree; the example's manifest is yours to correct if you want the two to match.
 
+### Steps 8 to 10, measured
+
+| Item | Result |
+|---|---|
+| Checkout, optimistic order (`examples/checkout/checkout-optimistic.poly`) | `PL5401 confirmed-within-stock` with PT7a's six global steps: `Place@order[0]`, `Place@order[1]`, `Query(order[0]) -> inv`, `Query(order[1]) -> inv`, `Available(1) -> order[0]`, `Available(1) -> order[1]`; transit ≤ 4; 47 global states in all (the script stops at the violation, after 30) |
+| Checkout, order waiting for `Taken` (`examples/checkout/checkout.poly`, PT7a's source) | configuration stage CLEAN over **44 global states** and 146 global steps, no `PL5402`, `settle` listed as not run, so the configuration's verdict is `INCONCLUSIVE` (M1-2); `config_check.py` prints 44 and the same witness |
+| Checkout machines alone | `Inventory` 2 states, `Order` 5 (4 optimistic); `Inventory.Query` and `Inventory.Take` report `PL4002` under S33 as written (S63) |
+| Delivery, PT9.8 as written | 1,147 states; `at-most-once` and `in-order` hold; translation validation over 17,205 transitions; `exactly-once` not run |
+| Delivery, parallel worker | 2,368 states; `at-most-once` holds |
+| Delivery, parallel worker claiming in-order | `in-order` violated in 4 steps, `Emit(M1), Emit(M2), Send(M2), DeliverReq(M2)`, found by polygraph and confirmed by poly-ref |
+| Delivery, dedupe cleared on archive | `at-most-once` violated in 10 steps, the script's witness exactly; `in-order` reported at the same state (S64); 2,219 states in all |
+| `delivery_check.py` | the same four results, compared by `test/delivery.test.mjs` |
+| What M0 refused (`conformance/m1/unions.poly`) | a map of unions with payloads, a union payload inside a union, and a union parameter: CLEAN, 36 states, translation validation over 396 transitions and 468 property evaluations |
+| Sends alone (`conformance/m1/sends.poly`) | `Lock` explores a release by a client that does not hold the lock (S57), 3 states; translation validation compares every `sendTo` |
+| Translation validation | zero `PL2501` over the 35 example and conformance sources; each of the twelve deliberately broken lowerings caught |
+| `npm test` | 374 tests, all pass, none todo |
+
+What step 8 does not build: `spawn detached` and `SendDenied` wait for S60 and S59; `fifo` pairs (PS13.4) have no grammar yet and nothing in M1 needs them; message identities and oldest-copy delivery matter only for fairness (PS13.2b), so the explorer keeps PS13.2a's quotient, as the script does, and M2 adds them with liveness. `PL5302` cannot arise until detached spawns exist.
+
+### The M1 gate, item by item
+
+| Gate item | Status |
+|---|---|
+| AC1: replay, `check-effects`, `check-product` (S24, S26, S27, S28) | passes (`test/oms.test.mjs`); the numbers are under step 7 |
+| AC10 and the checkout evidence | passes (`test/checkout.test.mjs`) |
+| The four `Delivery` variants, safety only | passes (`test/delivery.test.mjs`), with S64 recorded |
+| Translation validation on every M1 conformance case, with the explicit fault list | passes (`test/tv.test.mjs`) |
+| Strict validation under sam-pattern 2.3.0 | passes (`test/validate.test.mjs`) |
+| No regressions | the M0 tests pass; the few a ruling changed assert the new rule: liveness listed as not run (M1-2), the vendored sam-pattern 2.3.0 (S36), a step's intents in `R_M` (PS2.1), the order field study gated by AC1 (S24), and the `PL0901` case now about `self` (S58); field-study windows and evidence results are unchanged |
+| One command | `npm test`, exit 0 |
+
+### Spec issues still open
+
+S56 to S65 wait for a ruling. S56, S57, S58, S61, S62 and S65 are built as proposed and marked provisional; S59 and S60 are not built; S63 and S64 change nothing until ruled, and the tests record what the current text gives.
+
 ### Changes for the owner
 
 - **polyrun, K9 (S45):** refuse an external dispatch of an action wired as an active child's completion, or as a parent-terminal cancel; the detail is above.
+- **polyrun, `sendTo` (S58, PT7a):** a built-in intent `sendTo { target, action, data }` beside `spawnChild` and `signalChild`, delivered through the outbox as a `dispatch` with the intent's idempotency key as its `actionId`, and the `{ "$ref": "self" }` marker in its data replaced by the sender's instance id. Until then the kernel poisons on it and `check-effects` calls it an undeclared kind, so no module that sends runs under polyrun.
+- **polyrun, `createInstance` (S60):** only if S60 is ruled as proposed.
 - **polyflow and Polyaxion:** the sam-pattern probe of the two shapes 2.3.0 changed, as polygraph 583b82c has it, in polyflow's `machine-host.mjs` (`fire`), and in Polyaxion's `makeMediator` and `polyman` `step`.
 - **The OMS example:** its `chargeCard` `onExhausted` data is outside `CHARGE_FAILED`'s domain (above).
 
@@ -217,4 +254,4 @@ One thing found in the hand-written example, reported rather than normalised: it
 
 ## Conclusion
 
-M1 is planned in eleven steps, starting with the engine's missing classification and ending with the code review. The checkout and delivery targets are measured and reproducible. Reading the engines turned up one engine change the decisions did not expect (S23), a corpus that cannot support AC1's replay as written (S24), and a missing record type that the OMS order needs (S25). Those three, and the timer rule (S26), wait for your ruling; the rest have proposals that can be settled on the way.
+M1 was planned in eleven steps, and all eleven are done. The engine gained its missing classification, poly gained effects, timers, attached children and their families, records, addresses and sends, and configurations, and the lowering now takes what M0 refused. Every gate item passes in one command: the OMS order agrees with the hand-written artefacts on both corpora and under both of polyrun's checks, the checkout configuration finds PT7a's witness and is clean over 44 global states, and the four delivery variants reproduce the evidence script. Ten spec issues from the last steps (S56 to S65) wait for a ruling; six are built provisionally, two are not built, and two change nothing until ruled. The owner's list names the engine changes these results rely on, first among them polyrun's `sendTo`.
