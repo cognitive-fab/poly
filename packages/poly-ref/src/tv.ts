@@ -16,7 +16,8 @@ import { loadLoweredModule } from './load.js';
 import { pathTo, type Edge } from './explore.js';
 import { evaluate, type Verdict } from './eval.js';
 import { alpha, flatten, flattenData } from './alpha.js';
-import { keyOf, stateKey, statePlain, toPlain, type State } from './values.js';
+import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
+import type { Intent } from './step.js';
 import type { RMachine } from './model.js';
 
 interface SamModule {
@@ -139,7 +140,7 @@ export async function translationValidate(module: Module, machineName: string, b
     // The intent sequence (PS9.2, decisions-m1.md): the kernel calls the mapper on accepted steps only, so
     // R_L's E is the mapper's output there and empty elsewhere, as R_M's is by PS3.2.
     if (want.kind !== 'accepted') continue;
-    const wantE = e.label.effects.map((x) => ({ kind: x.kind, payload: Object.fromEntries(Object.entries(x.payload).map(([k, v]) => [k, toPlain(v)])) }));
+    const wantE = e.label.effects.flatMap(loweredIntents);
     let gotE: unknown;
     try {
       gotE = mapper ? mapper(structuredClone(flatPre), e.label.action, structuredClone(flatData), structuredClone(got.post), 'accepted') : [];
@@ -229,6 +230,27 @@ export function automaticInvariants(M: RMachine): string[] {
     if (f.check) out.push(`bound:${f.name}`);
   }
   return out;
+}
+
+const plainRecord = (r: Record<string, Value>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, toPlain(v)]));
+
+/** An ISO-8601 duration for polyrun's `fireIn`, from milliseconds: 1800000 is PT30M, 200 is PT0.2S. */
+export function isoDuration(ms: number): string {
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  const s = (ms % 60_000) / 1000;
+  return `PT${h ? `${h}H` : ''}${m ? `${m}M` : ''}${s || (!h && !m) ? `${s}S` : ''}`;
+}
+
+/**
+ * What the effects mapper must return for one intent of R_M's E. An effect is its kind and payload. A
+ * timer set is a cancel then a set of its key, since the compiler cannot know whether the key is armed
+ * (PT6.3, S26); a cancel is a cancel.
+ */
+function loweredIntents(x: Intent): unknown[] {
+  if (x.type === 'effect') return [{ kind: x.kind, payload: plainRecord(x.payload) }];
+  if (x.type === 'cancel') return [{ kind: 'cancelTimer', key: x.key }];
+  return [{ kind: 'cancelTimer', key: x.key }, { kind: 'timer', key: x.key, fireIn: isoDuration(x.ms), action: x.action, data: plainRecord(x.data) }];
 }
 
 /** The flat keys the expected state has: the module may keep keys α ignores, which `shape:` covers. */

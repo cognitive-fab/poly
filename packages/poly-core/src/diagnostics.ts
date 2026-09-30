@@ -53,6 +53,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL2001: { name: 'STRICT_VALIDATE', stage: 'validate', severity: 'error' },
   // A handler path with no write, no effect and no rejection (PT4.4).
   PL2201: { name: 'SILENT_NOOP', stage: 'types', severity: 'error' },
+  // PT6.3: two `after` statements with one key on one control path.
+  PL2301: { name: 'DUPLICATE_TIMER_KEY', stage: 'types', severity: 'error' },
   PL2501: { name: 'LOWERING_MISMATCH', stage: 'translation-validation', severity: 'error' },
   PL3001: { name: 'INVARIANT_REACHABLE', stage: 'model-check', severity: 'finding' },
   PL3002: { name: 'STEP_PROPERTY', stage: 'model-check', severity: 'finding' },

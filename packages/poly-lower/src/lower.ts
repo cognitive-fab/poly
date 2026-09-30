@@ -168,7 +168,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
 
   const files: Lowered['files'] = { 'contract.json': JSON.stringify(contract, null, 2) + '\n', 'next.cjs': next, 'invariants.mjs': invariants };
   // ── effects (PT6.1, PT5): the mapper and manifest when the machine declares effects, the path properties' module when it has any ──
-  if (facts.effects.size) {
+  // A machine that arms timers needs the mapper too: a timer is an intent (PT6.3).
+  if (facts.effects.size || facts.timerKeys.size) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data' }, pre, opts.fault);
     files['effects.manifest.json'] = JSON.stringify(manifestOf(facts), null, 2) + '\n';
   }
@@ -223,7 +224,7 @@ function effectsModule(m: A.Machine, lowerable: A.Action[], handlers: Map<string
 }
 
 function emitsAny(body: A.Stmt[]): boolean {
-  return body.some((s) => (s.kind === 'Intent' && s.op === 'emit') || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))));
+  return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))));
 }
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */

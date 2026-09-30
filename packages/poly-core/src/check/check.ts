@@ -71,6 +71,8 @@ export interface MachineFacts {
   effects: Map<string, A.EffectDecl>;
   /** `Action.param` for every parameter whose check domain is strict, declared or by PT3.4a's flow rule. */
   strictParams: Set<string>;
+  /** PT6.3: the timer keys the machine arms; a key is declared by its use in an `after`. */
+  timerKeys: Set<string>;
 }
 
 export interface CheckResult {
@@ -199,7 +201,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set() };
     this.facts = facts;
     this.actions = new Map();
 
@@ -233,6 +235,15 @@ class Checker {
       facts.effects.set(it.name, it);
     }
     const kinds = new Set([...facts.effects.values()].map(effectKind));
+    // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
+    const armed = (body: A.Stmt[]): void => {
+      for (const s of body) {
+        if (s.kind === 'Intent' && s.op === 'after' && s.as) facts.timerKeys.add(s.as);
+        if (s.kind === 'If') { armed(s.then); armed(s.else ?? []); }
+        if (s.kind === 'Match') for (const a of s.arms) armed(a.body);
+      }
+    };
+    for (const it of m.items) if (it.kind === 'Handler') armed(it.body);
     const handlerOf = new Set(m.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => h.action));
 
     const handled = new Set<string>();
@@ -353,6 +364,41 @@ class Checker {
     }
   }
 
+  /** `after d -> A(args) as key` (PT6.3): a duration, an action of this machine and its typed arguments. */
+  private timer(s: A.IntentStmt, scope: Scope): void {
+    if (!s.modifier || durationMs(s.modifier) === null) this.err('PL1201', s, `${s.modifier} is not a duration`);
+    const act = this.actions.get(s.target);
+    if (!act) { this.err('PL1001', s, `after … -> ${s.target}: no action ${s.target}`); for (const a of s.args) this.typeOf(a.value, scope); return; }
+    this.intentArgs(s, act.params, `${s.target}`, scope);
+  }
+
+  /** Arguments of an intent against declared parameters: all positional or all named, typed, none missing. */
+  private intentArgs(s: A.IntentStmt, params: A.Param[], what: string, scope: Scope): void {
+    const positional = s.args.every((a) => a.name === null);
+    if (!positional && !s.args.every((a) => a.name !== null)) {
+      this.err('PL1201', s, `the arguments of ${what} are all positional or all named`);
+      for (const a of s.args) this.typeOf(a.value, scope);
+      return;
+    }
+    if (positional && s.args.length !== params.length) {
+      this.err('PL1201', s, `${what} takes ${params.length} argument${params.length === 1 ? '' : 's'} (${params.map((p) => p.name).join(', ')}), not ${s.args.length}`);
+      for (const a of s.args) this.typeOf(a.value, scope);
+      return;
+    }
+    const given = new Set<string>();
+    s.args.forEach((a, i) => {
+      const p = a.name === null ? params[i] : params.find((x) => x.name === a.name);
+      if (!p) { this.err('PL1001', a.value, `${what} has no parameter ${a.name}`); this.typeOf(a.value, scope); return; }
+      if (given.has(p.name)) this.err('PL1002', a.value, `${p.name} is given twice`);
+      given.add(p.name);
+      const pt = this.tyOf(p.type);
+      const t = this.typeOf(a.value, scope, pt);
+      if (!same(t, pt)) this.err('PL1201', a.value, `${what}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
+    });
+    const missing = params.filter((p) => !given.has(p.name)).map((p) => p.name);
+    if (!positional && missing.length) this.err('PL1201', s, `${what} is missing ${missing.join(', ')}`);
+  }
+
   private emit(s: A.IntentStmt, scope: Scope): void {
     const e = this.facts!.effects.get(s.target);
     if (!e) {
@@ -360,29 +406,7 @@ class Checker {
       for (const a of s.args) this.typeOf(a.value, scope);
       return;
     }
-    const positional = s.args.every((a) => a.name === null);
-    if (!positional && !s.args.every((a) => a.name !== null)) {
-      this.err('PL1201', s, 'the arguments of an emit are all positional or all named');
-      for (const a of s.args) this.typeOf(a.value, scope);
-      return;
-    }
-    if (positional && s.args.length !== e.params.length) {
-      this.err('PL1201', s, `${s.target} takes ${e.params.length} argument${e.params.length === 1 ? '' : 's'} (${e.params.map((p) => p.name).join(', ')}), not ${s.args.length}`);
-      for (const a of s.args) this.typeOf(a.value, scope);
-      return;
-    }
-    const given = new Set<string>();
-    s.args.forEach((a, i) => {
-      const p = a.name === null ? e.params[i] : e.params.find((x) => x.name === a.name);
-      if (!p) { this.err('PL1001', a.value, `${s.target} has no parameter ${a.name}`); this.typeOf(a.value, scope); return; }
-      if (given.has(p.name)) this.err('PL1002', a.value, `${p.name} is given twice`);
-      given.add(p.name);
-      const pt = this.tyOf(p.type);
-      const t = this.typeOf(a.value, scope, pt);
-      if (!same(t, pt)) this.err('PL1201', a.value, `${s.target}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
-    });
-    const missing = e.params.filter((p) => !given.has(p.name)).map((p) => p.name);
-    if (!positional && missing.length) this.err('PL1201', s, `emit ${s.target} is missing ${missing.join(', ')}`);
+    this.intentArgs(s, e.params, s.target, scope);
   }
 
   /**
@@ -553,7 +577,7 @@ class Checker {
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
     this.stmts(h.body, scope);
     // Per-path rules (PT4.1, PS2.4, PT4.4).
-    const ends = this.paths(h.body, [{ written: new Map(), done: false, emits: false }]);
+    const ends = this.paths(h.body, [{ written: new Map(), done: false, emits: false, timers: new Map() }]);
     for (const e of ends) {
       if (!e.done && e.written.size === 0 && !e.emits) {
         this.err('PL2201', h, `on ${h.action} can complete with no write, no effect and no rejection (PT4.4)`);
@@ -609,7 +633,10 @@ class Checker {
         break;
       case 'Intent':
         if (s.op === 'emit') this.emit(s, scope);
-        else this.err('PL0901', s, `\`${s.op}\` is lowered from plan step ${s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached') ? 8 : 6} of milestone M1`);
+        else if (s.op === 'after') this.timer(s, scope);
+        else if (s.op === 'cancel') {
+          if (!this.facts!.timerKeys.has(s.target)) this.err('PL1001', s, `cancel ${s.target}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
+        } else this.err('PL0901', s, `\`${s.op}\` is lowered from plan step ${s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached') ? 8 : 6} of milestone M1`);
         break;
     }
   }
@@ -754,8 +781,15 @@ class Checker {
         return [...this.paths(s.then, [p]), ...this.paths(s.else ?? [], [p])];
       case 'Match':
         return s.arms.flatMap((a) => this.paths(a.body, [p]));
-      case 'Intent':
-        return [{ ...p, emits: true }];
+      case 'Intent': {
+        if (s.op !== 'after' || !s.as) return [{ ...p, emits: true }];
+        // PT6.3: arming one key twice on one path would leave only the second timer; say so.
+        const prev = p.timers.get(s.as);
+        if (prev) this.errOnce('PL2301', s, `timer ${s.as} is armed twice on one path (first at line ${prev.span?.line ?? '?'}) (PT6.3)`);
+        const timers = new Map(p.timers);
+        timers.set(s.as, s);
+        return [{ ...p, emits: true, timers }];
+      }
       default:
         return [p];
     }
@@ -1165,4 +1199,6 @@ interface PathState {
   done: boolean;
   /** An intent was appended to E on this path (PS2.1). */
   emits: boolean;
+  /** Timer keys armed on this path (PT6.3, PL2301). */
+  timers: Map<string, A.NodeBase>;
 }

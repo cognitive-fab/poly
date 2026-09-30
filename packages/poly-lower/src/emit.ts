@@ -8,7 +8,15 @@
 // the handler frames everything its body never writes.
 import type * as A from '@poly/core';
 import type { MachineFacts, Ty, TypeEnv } from '@poly/core';
-import { effectKind } from '@poly/core';
+import { effectKind, durationMs } from '@poly/core';
+
+/** An ISO-8601 duration, the form polyrun's `fireIn` reads: 1800000 ms is PT30M, 200 ms is PT0.2S. */
+export function isoDuration(ms: number): string {
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  const s = (ms % 60_000) / 1000;
+  return `PT${h ? `${h}H` : ''}${m ? `${m}M` : ''}${s || (!h && !m) ? `${s}S` : ''}`;
+}
 import { isPayloadUnion, type Layout } from './layout.js';
 
 export type Mode = 'handler' | 'state' | 'step' | 'reject' | 'init';
@@ -243,10 +251,24 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       return lines;
     }
     case 'Intent': {
-      if (s.op !== 'emit') throw new Error(`poly-lower: ${s.op} reached the lowering (PL0901 must refuse it)`);
+      if (s.op !== 'emit' && s.op !== 'after' && s.op !== 'cancel') throw new Error(`poly-lower: ${s.op} reached the lowering (PL0901 must refuse it)`);
       // The acceptor writes and frames; the intents are the mapper's (PT6.1).
       if (!opts.effects) return [];
       if (opts.dropEffect && !opts.dropEffect.done) { opts.dropEffect.done = true; return []; }
+      if (s.op === 'cancel') return [`${ind}__E.push({ kind: "cancelTimer", key: ${q(s.target)} });`];
+      if (s.op === 'after') {
+        // PT6.3, S26: the compiler cannot know whether the key is armed, so it cancels, then arms.
+        const act = cx.facts.machine.items.find((x): x is A.Action => x.kind === 'Action' && x.name === s.target);
+        if (!act || !s.as || !s.modifier) throw new Error(`poly-lower: after … -> ${s.target} is incomplete (the checker must refuse it)`);
+        const data = s.args.map((a, i) => {
+          const p = a.name === null ? act.params[i] : act.params.find((x) => x.name === a.name)!;
+          return `${q(p.name)}: ${expr(a.value, cx)}`;
+        });
+        return [
+          `${ind}__E.push({ kind: "cancelTimer", key: ${q(s.as)} });`,
+          `${ind}__E.push({ kind: "timer", key: ${q(s.as)}, fireIn: ${q(isoDuration(durationMs(s.modifier)!))}, action: ${q(s.target)}, data: { ${data.join(', ')} } });`,
+        ];
+      }
       const eff = cx.facts.effects.get(s.target);
       if (!eff) throw new Error(`poly-lower: no effect ${s.target} (PL1001 must refuse it)`);
       const kind = effectKind(eff);

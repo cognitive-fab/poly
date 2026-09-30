@@ -3,7 +3,7 @@
 // import boundary is checked by scripts/check-boundaries.mjs.
 export { buildMachine, valuesOf, dataDomain, inType, inCheckDomain, monitorStart, monitorStep, type RMachine, type RType, type RPathProperty, type PathClause } from './model.js';
 export { evaluate, type Env, type Verdict } from './eval.js';
-export { transition, runHandler, initialState, isTerminal, type Step } from './step.js';
+export { transition, runHandler, initialState, isTerminal, type Step, type Intent } from './step.js';
 export { explore, machineSystem, pathTo, type System, type Graph, type Edge, type Label, type Outcome } from './explore.js';
 export { checkMachine, pathViolation, instanceOf, alphabetSize, ENGINE, type MachineReport, type InstanceLine } from './check.js';
 export { keyOf, stateKey, statePlain, toPlain, type Value, type State, type UnionValue, type MapValue } from './values.js';

@@ -1,0 +1,38 @@
+// Conformance: timers (PT6.3). An `after` arms a key and lowers to a cancel, then a set (S26); a
+// `cancel` clears it; a timer's data is read from the step; a timer that fires into a state where
+// its action is rejected is an ordinary rejected step.
+module timers
+
+enum Phase { Waiting, Paid, Expired }
+
+machine Hold {
+  state {
+    phase : Phase = Waiting
+    tries : 0..2  = 0
+  }
+  terminal phase in { Paid, Expired }
+
+  action Open(minutes: int check { 1, 5 })
+  action Pay()
+  action Expire(reason: string check { "late", "retry" })
+
+  on Open(minutes) {
+    require phase == Waiting else reject "closed"
+    require tries < 2 else reject "no-more"
+    tries' = tries + 1
+    if minutes == 1 {
+      after 1m -> Expire(reason: "late") as hold
+    } else {
+      after 5m -> Expire(reason: "retry") as hold
+    }
+  }
+  on Pay {
+    require phase == Waiting else reject "closed"
+    phase' = Paid
+    cancel hold
+  }
+  on Expire(reason) {
+    require phase == Waiting else reject "closed"
+    phase' = Expired
+  }
+}

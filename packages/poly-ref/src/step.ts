@@ -5,10 +5,21 @@ import { inCheckDomain } from './model.js';
 import { evaluate, evaluateAt, EvalError, type Env, type Verdict } from './eval.js';
 import { isMap, isUnion, keyOf, mapSet, type State, type Value } from './values.js';
 
-/** An effect intent (PS2.1): the kind of the declared effect and its payload, in statement order in E. */
-export interface Intent {
-  kind: string;
-  payload: Record<string, Value>;
+/**
+ * An intent of E (PS2.1), in statement order: an effect (its declared kind and payload), a timer set
+ * (`after`, PT6.3) or a timer cancel (`cancel`). `kind` is what a path property counts: the effect's
+ * kind, or `timer` and `cancelTimer`, which no effect may declare.
+ */
+export type Intent =
+  | { type: 'effect'; kind: string; payload: Record<string, Value> }
+  | { type: 'timer'; kind: 'timer'; key: string; action: string; ms: number; data: Record<string, Value> }
+  | { type: 'cancel'; kind: 'cancelTimer'; key: string };
+
+/** A duration literal in milliseconds: 200ms, 5s, 2m, 1h (PT2). */
+export function durationMs(text: string): number {
+  const m = /^(\d+)(ms|s|m|h)$/.exec(text);
+  if (!m) throw new EvalError(`poly-ref: ${text} is not a duration`);
+  return Number(m[1]) * { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[m[2] as 'ms' | 's' | 'm' | 'h'];
 }
 
 /** h_a(s, d) = accept(w, E) | reject(r) (PS2.1). */
@@ -96,17 +107,27 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
         break;
       }
       case 'Intent': {
-        // `emit k(d)` appends an intent to E (PS2.2); the other intents come with plan steps 6 and 8.
-        if (st.op !== 'emit') throw new EvalError(`poly-ref: \`${st.op}\` is not lowered yet`);
-        const eff = M.effects.get(st.target);
-        if (!eff) throw new EvalError(`poly-ref: no effect ${st.target}`);
-        const payload: Record<string, Value> = {};
-        st.args.forEach((a, i) => {
-          const p = a.name === null ? eff.params[i] : eff.params.find((x) => x.name === a.name);
-          if (!p) throw new EvalError(`poly-ref: ${st.target} has no parameter ${a.name ?? i}`);
-          payload[p.name] = evaluateAt(a.value, env, p.type);
-        });
-        E.push({ kind: eff.kind, payload });
+        // emit, after and cancel append an intent to E (PS2.2); spawn, signal and send come later in M1.
+        const args = (params: { name: string; type: RType }[], what: string): Record<string, Value> => {
+          const out: Record<string, Value> = {};
+          st.args.forEach((a, i) => {
+            const p = a.name === null ? params[i] : params.find((x) => x.name === a.name);
+            if (!p) throw new EvalError(`poly-ref: ${what} has no parameter ${a.name ?? i}`);
+            out[p.name] = evaluateAt(a.value, env, p.type);
+          });
+          return out;
+        };
+        if (st.op === 'emit') {
+          const eff = M.effects.get(st.target);
+          if (!eff) throw new EvalError(`poly-ref: no effect ${st.target}`);
+          E.push({ type: 'effect', kind: eff.kind, payload: args(eff.params, st.target) });
+        } else if (st.op === 'after') {
+          const act = M.actions.find((x) => x.name === st.target);
+          if (!act || !st.as || !st.modifier) throw new EvalError(`poly-ref: after … -> ${st.target} is incomplete`);
+          E.push({ type: 'timer', kind: 'timer', key: st.as, action: st.target, ms: durationMs(st.modifier), data: args(act.params, st.target) });
+        } else if (st.op === 'cancel') {
+          E.push({ type: 'cancel', kind: 'cancelTimer', key: st.target });
+        } else throw new EvalError(`poly-ref: \`${st.op}\` is not lowered yet`);
         break;
       }
     }

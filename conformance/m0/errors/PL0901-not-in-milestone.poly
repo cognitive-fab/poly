@@ -1,10 +1,8 @@
-// expect: PL0901 (a timer is lowered from plan step 6 of M1)
+// expect: PL0901 (a send is lowered from plan step 8 of M1)
 module errors
 
 machine M {
   state { x : bool = false }
   action A()
-  action Tick()
-  on A { x' = true  after 5s -> Tick() as tick }
-  on Tick { x' = false }
+  on A { x' = true  send self <- A() }
 }

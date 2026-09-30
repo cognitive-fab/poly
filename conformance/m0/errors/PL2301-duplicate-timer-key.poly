@@ -1,0 +1,10 @@
+// expect: PL2301 (the key hold is armed twice on one path)
+module errors
+
+machine M {
+  state { x : bool = false }
+  action A()
+  action Tick()
+  on A { x' = true  after 1m -> Tick() as hold  after 5m -> Tick() as hold }
+  on Tick { x' = false }
+}
