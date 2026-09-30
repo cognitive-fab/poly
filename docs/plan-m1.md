@@ -88,6 +88,35 @@ S23 to S32 are ruled in `decisions-m1.md`; S33 and S34 were raised and ruled aft
 
 **The engine audit of sam-pattern 2.3.0.** Every engine suite that loads sam-pattern (polygraph selftests, polyrun, polynv, polyvers, polyviz, polyflow, polygents, polyaxion, the SAM tests of polysim, sam-fsm) passed on 2.2 and on 2.3.0 alike, but none covers the two cases 2.3.0 changed. A direct probe through polygraph's adapter and polyflow's host showed them. The framed no-write step became `unchanged` and accepted, which is what S34 intended. The intent with no acceptor stopped throwing and became `unhandled`. polysec's mediator and polyman refuse only on a throw or on `rejected`, so they allowed that step, and polygraph's adapter explored it as an accepted step that changed nothing. The owner ruled option (b): sam-lib keeps the 2.2 throw for an intent with no acceptor (sam-lib 3047024), and the probe now matches 2.2 on that case.
 
+**After the rulings on S35 and S36.** S35's spec text is in 38fcec4 and its implementation in 65d5877. For S36, every audited suite was re-run on the 3047024 build before polygraph's commit, and each gave the count it gave on 2.2:
+
+| Suite | On 3047024 |
+|---|---|
+| polygraph selftests | 135, 71, 70, 27, 10 and 41 checks, all passed |
+| polyrun, polynv, polyvers | 92, 46 and 73 pass |
+| polyviz | 85 pass |
+| polyflow | 47 pass, 1 fail (the same test fails on 2.2: "a workflow refused at admission guards nothing, and says so plainly") |
+| polygents | 583 pass, 3 skipped |
+| polyaxion (polyaxion, polysec, polyman) | 100, 892 (2 skipped), 36 and 36 pass |
+| polysim and polysim-ou, the SAM tests | 322 pass each |
+| sam-fsm | 63 passing |
+
+polygraph 583b82c re-vendors the 3047024 build, with its hash in the provenance header, and adds `test/sam-classification.test.mjs` to `npm test`: both changed shapes through the adapter, on the vendored bundle. It fails on the old vendored 2.2.0 (the framed step) and on the first 2.3.0 build (the missing acceptor). The same probe for polyflow's host and polyaxion's mediator and polyman is the owner's to add: polyflow `platform/packages/kernel/src/machine-host.mjs` (`fire`), polyaxion `packages/polysec-core/src/polysec-lib.mjs` (`makeMediator`) and `packages/polysec/polyman/src/engine.ts` (`step`).
+
+poly now runs on sam-pattern 2.3.0 and polygraph 8.3.1, linked from their local checkouts because neither is published. The version ranges in `packages/poly-check` and `packages/poly-ref` still name 2.2.1 and 8.3.0 and move with the lockfile when the owner publishes. Two tests changed with the engines: the CLI test now expects the vendored version 2.3.0, and the standing test no longer enters `node_modules` while walking for sources, because the linked sam-lib checkout holds a file the walk cannot stat.
+
+**The M0 gate after S35**, on the linked engines: `npm test`, 241 pass, 0 fail, 1 todo. Nothing moved from the final M0 run.
+
+| Item | Result |
+|---|---|
+| Field studies, window for window | turnstile 12/12 and 9/12, raft 54/67 and 44/67, hatchet 19/19 and 18/19, for poly and for the hand-written controls alike |
+| Translation validation | every source agrees; turnstile 7 states, 14 transitions, 21 property evaluations; raft 38, 342, 1,444; hatchet 216, 3,888, 4,320 |
+| Broken lowerings | all eight caught with PL2501 |
+| Evidence | every number and witness reproduced |
+| `poly check` | hello FINDINGS (PL3201), hello with `Empty` CLEAN, turnstile INCONCLUSIVE (PL3901 `coins`), raft INCONCLUSIVE (PL3901 `term`), hatchet CLEAN, AC9 escape FINDINGS (PL3102, PL3901), with the M0 state counts |
+
+One contract's `actions` changed: `conformance/m0/guard-terminal.poly` (`conf.Room`) loses `Knock`, its one action with no handler. No field study, example or evidence source has such an action, so no other contract changed. Translation validation still compares `Knock` on all 7 states (35 transitions for the machine, as before): `rejected("terminal")` in `Broken` and `unhandled` elsewhere.
+
 ## 7. Risks
 
 - **Two new `System` implementations in poly-ref.** Configurations are M1's heart and the part of poly-ref most likely to have bugs. Its first tests are the checkout and delivery evidence, run before the configuration lowering and stage 4b exist, as M0 ran the evidence before any lowering.
