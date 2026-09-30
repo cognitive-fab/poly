@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { join, basename } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { translationValidate } from '@poly/ref';
-import { DELIBERATELY_BROKEN_LOWERINGS } from './toolchain-faults.mjs';
+import { DELIBERATELY_BROKEN_LOWERINGS, FAULT_SOURCES } from './toolchain-faults.mjs';
 import { ROOT, polyFiles, build } from './helpers.mjs';
 
 const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0')), ...polyFiles(join(ROOT, 'conformance', 'm1')), ...polyFiles(join(ROOT, 'conformance', 'm2'))];
@@ -22,7 +22,7 @@ for (const file of SOURCES) {
   });
 }
 
-// Each fault must be caught with PL2501 on at least one source. Where a fault
+// Each fault must be caught with PL2501 on every source listed beside it in toolchain-faults.mjs. Where a fault
 // changes the artefacts but translation validation agrees, the change had no
 // effect on any transition of I (for example, a frame dropped after a
 // `return reject(...)`, which never runs): an equivalent mutant. Those are
@@ -32,7 +32,8 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
   test(`a broken lowering is caught with PL2501: ${fault}`, async (t) => {
     let caught = 0;
     const equivalent = [];
-    for (const file of SOURCES) {
+    const listed = FAULT_SOURCES[fault].map((p) => join(ROOT, p));
+    for (const file of listed) {
       const good = build(file, 'tv-good');
       const bad = build(file, `tv-${fault}`, { fault });
       for (const [k, b] of bad.entries()) {
@@ -48,6 +49,7 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
       }
     }
     if (equivalent.length) t.diagnostic(`equivalent on I (no transition changed): ${equivalent.join(', ')}`);
-    assert.ok(caught > 0, `the fault ${fault} is caught on no source`);
+    assert.deepEqual(equivalent, [], `the fault ${fault} changes nothing on a listed source`);
+    assert.ok(caught >= listed.length, `the fault ${fault} is caught on ${caught} of ${listed.length} listed sources`);
   });
 }
