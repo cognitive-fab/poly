@@ -141,7 +141,7 @@ S81 to S85 are ruled in `decisions-m2.md` (aefd6a4) and accepted as proposed, wi
 
 ### The code review of M2
 
-The review ran over `9e1d045..0ed23c3`, in four parts (front ends and checker, lowering, poly-ref, pipeline with witnesses, fixes and the lint), after the rulings on S81 to S85 were applied. Each reviewer reproduced every finding it reports. They found 31 defects; polywatch found two more on the rulings' commits. Each fix landed with a test that failed before it, in `test/review-m2.test.mjs`, with the programs in `test/fixtures/review-m2`.
+The review ran over `9e1d045..0ed23c3`, in four parts (front ends and checker, lowering, poly-ref, pipeline with witnesses, fixes and the lint), after the rulings on S81 to S85 were applied. Each reviewer reproduced every finding it reports. They found 32 defects (B6 and the minor rendering one among them); polywatch found two more on the rulings' commits. Each fix landed with a test that failed before it, in `test/review-m2.test.mjs`, with the programs in `test/fixtures/review-m2`.
 
 | Finding | Defect | Fix | Commit |
 |---|---|---|---|
@@ -206,4 +206,4 @@ The printer parenthesises by TypeScript's precedence, not poly's, so the tree ts
 
 ## Conclusion
 
-M2 was planned in nine steps, and all nine are built. Liveness, witnesses and fixes, detached children, the embedded surface, the handler lint and typed decisions each meet the gate item section 5 gives them, and `npm test` passes. No engine was changed: decisions reuse polyrun's completion maps, and detached spawns and sends stay semantics-only until the owner's polyrun changes land. The spec issues S68 to S85 are ruled; S86, raised by the code review, is open and built as proposed. The code review found 31 defects and polywatch two more, each fixed with a test that failed first, and the checkout liveness script is an acceptance test with its controls.
+M2 was planned in nine steps, and all nine are built. Liveness, witnesses and fixes, detached children, the embedded surface, the handler lint and typed decisions each meet the gate item section 5 gives them, and `npm test` passes. No engine was changed: decisions reuse polyrun's completion maps, and detached spawns and sends stay semantics-only until the owner's polyrun changes land. The spec issues S68 to S85 are ruled; S86, raised by the code review, is open and built as proposed. The code review found 32 defects and polywatch two more, each fixed with a test that failed first, and the checkout liveness script is an acceptance test with its controls.
