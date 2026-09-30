@@ -1,0 +1,22 @@
+// Review B1: a record parameter bound from a reply is strict (S79), and its domain check must compare values.
+module b1
+
+type Box = { n: 0..2 }
+enum S { Idle, Asked, Done }
+
+machine M {
+  state { s : S = Idle   got : 0..2 = 0 }
+  terminal s == Done
+  action Go()
+  action Got(n: 0..2, b: Box)
+  action Bad()
+  on Go { require s == Idle else reject "busy"   s' = Asked   emit fetch() }
+  on Got(n, b) { require s == Asked else reject "not-waiting"   s' = Done   got' = b.n }
+  on Bad { require s == Asked else reject "not-waiting"   s' = Done }
+  effect fetch() {
+    kind "x.fetch"
+    labels { egress:external }
+    ok(r) -> Got(n: r.n, b: r.box)
+    failed -> Bad()
+  }
+}

@@ -1,0 +1,21 @@
+// Review B5: a detached child's address is known only when its step commits (S78), so the handler may store
+// it, send to it or pass it on, but not compare it.
+module b5
+
+machine Worker {
+  state { k : 0..1 = 0 }
+  action Start(k: 0..1)
+  on Start(k) { k' = k }
+}
+
+service machine Boss {
+  state { c : 0..2 = 0   last : Ref<Worker> = none   same : bool = false }
+  action Go()
+  on Go {
+    require c < 2 else reject "enough"
+    spawn detached Worker as w -> Start(k: 1)
+    same' = last == w
+    last' = w
+    c' = c + 1
+  }
+}

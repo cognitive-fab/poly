@@ -1,0 +1,24 @@
+// Review B (read-back): a decision whose result is a record with a Tri field.
+module b6
+
+enum K { X, Y }
+type Ans = { k: K, t: Tri }
+enum S { Waiting, Done }
+
+machine M {
+  state { s : S = Waiting   asked : bool = false }
+  terminal s == Done
+  action Ask()
+  action Go(k: K, t: Tri, ck: Conf, mt: Conf)
+  action Failed()
+  on Ask { require !asked else reject "asked"   asked' = true   decide pick() }
+  on Go(k, t, ck, mt) { require ck >= 0.5 || mt >= 0.5 else reject "unsure"   s' = Done }
+  on Failed { s' = Done }
+  decision pick() -> Ans {
+    provider "jev"
+    labels { egress:external }
+    timeout 500ms
+    ok(r) -> Go(k: r.answer.k, t: r.answer.t, ck: r.conf.k, mt: r.margin.t)
+    failed -> Failed()
+  }
+}

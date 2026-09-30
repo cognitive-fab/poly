@@ -99,3 +99,28 @@ test('A8: one mistake, one diagnostic, for a decimal compared with an int, a neg
 test('A9: Tri.Unknown is always legal (S76)', () => {
   assert.deepEqual(codes(swap(ROUTER, '  path property one-routing', '  invariant tri: Tri.Unknown == Tri.Unknown\n  path property one-routing')), []);
 });
+
+// ── the lowering (B) ───────────────────────────────────────────────────────
+
+test('B1: a record parameter bound from a reply is checked by value at dispatch, so the program checks clean', async () => {
+  const { r } = await check('b1', src('b1-record-reply'));
+  assert.equal(r.verdict, 'CLEAN', render(r));
+});
+
+test('B3, B4: an int beside a Conf means thousandths in poly-ref and in a completion constant (PD1.3a)', async () => {
+  const { dir, r } = await check('b3', src('b3-conf-eq'));
+  assert.equal(r.verdict, 'CLEAN', render(r));
+  const manifest = JSON.parse(readFileSync(join(dir, '.poly', 'build', 'b3.M', 'effects.manifest.json'), 'utf8'));
+  assert.deepEqual(manifest.effects['decision.pick'].onFailure, { action: 'Go', data: { k: 'Y', conf: 1000 } });
+});
+
+test('B5: a detached child\'s address is stored, sent to or passed on, never compared before its step commits (S78)', () => {
+  assert.deepEqual(codes(src('b5-marker-compare')), ['PL0901']);
+  assert.deepEqual(codes(src('b5-marker-compare').replace("    same' = last == w\n", '')), []);
+});
+
+test('B6: a decision whose result is a record with a Tri field is read back, not a crash', async () => {
+  const { r } = await check('b6', src('b6-tri-record'));
+  assert.notEqual(r.verdict, 'ERROR', render(r));
+  assert.equal(r.verdict, 'CLEAN', render(r));
+});

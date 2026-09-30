@@ -352,6 +352,8 @@ function binary(e: A.Binary, env: Env): Value {
       const actionSide = (x: A.Expr) => x.kind === 'Name' && x.name === 'action' && env.action !== undefined;
       if (actionSide(e.left) && e.right.kind === 'Name') eq = env.action === e.right.name;
       else if (actionSide(e.right) && e.left.kind === 'Name') eq = env.action === e.left.name;
+      // PD1.3a: `conf == 1` is 1000 thousandths, as the ordering comparisons read it (review B3).
+      else if ((e.left.kind === 'Int' && isConf(e.right, env)) || (e.right.kind === 'Int' && isConf(e.left, env))) eq = confScaled(e.left, e.right, env) === confScaled(e.right, e.left, env);
       else eq = equal(...operands(e.left, e.right, env));
       return e.op === '==' ? eq : !eq;
     }

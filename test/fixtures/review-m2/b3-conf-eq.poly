@@ -1,0 +1,27 @@
+// Review B3 and B4: an int constant beside a Conf means thousandths (PD1.3a): conf == 1 is 1000, and a
+// completion that passes the constant 1 as a Conf passes 1000.
+module b3
+
+enum K { X, Y }
+enum S { Waiting, High, Low }
+
+machine M {
+  state { s : S = Waiting   asked : bool = false }
+  terminal s != Waiting
+  action Ask()
+  action Go(k: K, conf: Conf)
+  on Ask { require !asked else reject "asked"   asked' = true   decide pick() }
+  on Go(k, conf) {
+    match k {
+      X => { if conf == 1 { s' = High } else { s' = Low } }
+      Y => { if conf >= 1 { s' = High } else { s' = Low } }
+    }
+  }
+  decision pick() -> K {
+    provider "jev"
+    labels { egress:external }
+    timeout 500ms
+    ok(r) -> Go(k: r.answer, conf: r.conf)
+    failed -> Go(k: Y, conf: 1)
+  }
+}

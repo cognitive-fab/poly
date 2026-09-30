@@ -90,7 +90,10 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     for (const s of strict) {
       // PD1.4b: a Conf is explored by its intervals, and at runtime its domain is 0..1000 (PD1.3a).
       const isConf = actions.find((a) => a.name === s.a)?.params.find((p) => p.name === s.p)?.type.kind === 'TConf';
-      const test = isConf ? `!(Number.isInteger(proposal[${JSON.stringify(s.p)}]) && proposal[${JSON.stringify(s.p)}] >= 0 && proposal[${JSON.stringify(s.p)}] <= 1000)` : `!${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])`;
+      const test = isConf ? `!(Number.isInteger(proposal[${JSON.stringify(s.p)}]) && proposal[${JSON.stringify(s.p)}] >= 0 && proposal[${JSON.stringify(s.p)}] <= 1000)` : s.values.some((v) => v !== null && typeof v === 'object')
+          // A record or a union with payloads is compared by value (review B1): `includes` compares objects by identity.
+          ? `!${JSON.stringify(s.values)}.some((v) => __eq(v, proposal[${JSON.stringify(s.p)}]))`
+          : `!${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])`;
       lines.push(`      if (action === ${JSON.stringify(s.a)} && ${test}) return reject('outside-check-domain');`);
     }
     if (guards.length) {
@@ -360,8 +363,10 @@ function outcomeEntry(it: A.EffOutcomeItem, cx: Cx): Record<string, unknown> {
   const map: [string, string][] = [];
   for (const a of it.args) {
     const path = it.bind !== undefined ? boundPath(a.value, it.bind) : null;
-    if (path) map.push([a.name!, ['$.result', ...path].join('.')]);
-    else data.push([a.name!, constValue(a.value, cx)]);
+    if (path) { map.push([a.name!, ['$.result', ...path].join('.')]); continue; }
+    // PD1.3a: an int constant passed as a Conf is in [0, 1], so 1 is 1000 thousandths (review B4).
+    const conf = cx.facts.machine.items.find((i): i is A.Action => i.kind === 'Action' && i.name === it.action)?.params.find((p) => p.name === a.name)?.type.kind === 'TConf';
+    data.push([a.name!, conf && a.value.kind === 'Int' ? a.value.value * 1000 : constValue(a.value, cx)]);
   }
   return { action: it.action, ...(data.length ? { data: Object.fromEntries(data) } : {}), ...(map.length ? { map: Object.fromEntries(map) } : {}) };
 }

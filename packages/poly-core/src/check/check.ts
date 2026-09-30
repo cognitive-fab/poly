@@ -773,6 +773,31 @@ class Checker {
     }
   }
 
+  /**
+   * S78: a detached child's address exists only when the step that creates it commits, so in that handler `k` is
+   * stored whole, sent to, or passed whole as an argument; any other use, such as a comparison, would read a
+   * value the lowered step does not have yet (review B5).
+   */
+  private childAddressUses(body: A.Stmt[]): void {
+    const isChild = (e: A.Expr | null) => !!e && e.kind === 'Name' && this.facts!.resolutions.get(e.id)?.k === 'child';
+    const visit = (n: unknown, whole: boolean): void => {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach((x) => visit(x, false)); return; }
+      const o = n as A.Expr;
+      if (isChild(o)) { if (!whole) this.err('PL0901', o, `${(o as A.NameRef).name} is a detached child's address, which is known only when this step commits: store it, send to it or pass it on (S78)`); return; }
+      const s = n as A.Stmt;
+      if (s.kind === 'Assign') { visit(s.expr, true); return; }
+      if (s.kind === 'Intent') {
+        visit(s.to, true);
+        for (const a of s.args) visit(a.value, true);
+        visit(s.index, false);
+        return;
+      }
+      for (const [k, v] of Object.entries(o)) if (k !== 'span' && k !== 'id') visit(v, false);
+    };
+    visit(body, false);
+  }
+
   /** `decide d(args)` (PD1.2): asks a declared decision, typed against its parameters. */
   private decide(s: A.IntentStmt, scope: Scope): void {
     const d = this.facts!.decisions.get(s.target);
@@ -1413,6 +1438,7 @@ class Checker {
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
     this.handlerAction = act;
     this.stmts(h.body, scope);
+    this.childAddressUses(h.body);
     // Per-path rules (PT4.1, PS2.4, PT4.4).
     const ends = this.paths(h.body, [{ written: new Map(), done: false, emits: false, timers: new Map() }]);
     this.handlerAction = undefined;

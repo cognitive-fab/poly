@@ -61,7 +61,8 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
       const path = it.bind !== undefined ? replyPath(arg.value, it.bind) : null;
       if (path) { map.push([arg.name!, ['$.result', ...path].join('.')]); continue; }
       const p = target?.params.find((x) => x.name === arg.name)!;
-      const v: Value = evaluateAt(arg.value, { M, state: {}, data: {}, locals: new Map() }, p.type);
+      // PD1.3a: an int constant given as a Conf is in [0, 1], so 1 is 1000 thousandths.
+      const v: Value = p.type.k === 'conf' && arg.value.kind === 'Int' ? arg.value.value * 1000 : evaluateAt(arg.value, { M, state: {}, data: {}, locals: new Map() }, p.type);
       data.push([arg.name!, flatValue(v, p.type, M)]);
     }
     return { action: it.action, ...(data.length ? { data: Object.fromEntries(data) } : {}), ...(map.length ? { map: Object.fromEntries(map) } : {}) };
@@ -107,7 +108,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const provider = d.items.find((x) => x.kind === 'DecProvider') as { value: string } | undefined;
         const band = d.items.find((x) => x.kind === 'DecBand') as { lo: number; hi: number } | undefined;
         const answers = (t: RType): unknown => (t.k === 'record' ? Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, answers(f.type)])) : valuesOf(t, M).map((v) => flatValue(v, t, M)));
-        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, result: answers(resultType(d.result)), ...(band ? { band: [band.lo, band.hi] } : {}) });
+        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}) });
       }
     }
   }
@@ -213,11 +214,11 @@ function pathDisagreement(p: RPathProperty, pred: (path: unknown) => boolean): {
 }
 
 /** A decision's result type as poly-ref reads types (PD1.2a). */
-function resultType(t: A.TypeExpr): RType {
+function resultType(t: A.TypeExpr, M: RMachine): RType {
   switch (t.kind) {
     case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
     case 'TBool': return { k: 'bool' };
-    case 'TName': return { k: 'union', name: t.name };
+    case 'TName': return M.records.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
     default: throw new Error(`poly-ref: a decision's result is finite, not ${t.kind} (PD1.2a)`);
   }
 }
