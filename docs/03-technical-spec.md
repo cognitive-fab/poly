@@ -20,6 +20,182 @@ This document fixes the grammar, the semantics and the formats. It covers the lo
   ```json
   { "poly": "1", "name": "orders", "modules": ["src/*.poly"],
     "host": "typescript", "require": { "grade": false },
+    "handlers": ["handlers/**/*.ts"],
+    "engines": { "polygraph": "^8.3", "polyaxion": "^2" } }
+  ```
+
+  `handlers` names the effect handler modules that `poly lint handlers` reads (PT6.5, S72). `modules` may name `.poly` and `.ts` files; a `.ts` module is read by `poly-embed` (PT2.5, S71).
+
+- **PT1.3** Imports are by module name within a project: `use payments.Payment`. Cross-project imports are out of scope for v1 (open question 4 in the architecture).
+- **PT1.4** The canonical formatter defines one text per AST. The module digest is the SHA-256 of the RFC 8785 canonical JSON of the AST. This is the same canonicalisation the polyflow platform kernel uses. The digest becomes the `machineVersion` of each machine it contains.
+- **PT1.4a** Comments and blank lines are trivia. They are kept by the formatter but are not part of the AST, so they do not change the digest. Two sources with the same AST have the same digest, whatever their comments.
+- **PT1.5** Build output goes to `.poly/build/<machine>/`, one directory per machine, in the layout the engines already read (PT17). The directory name `<module>.<Machine>` is also the machine's `machineId` in every engine artefact that names a machine, such as polyrun's configuration and `spawnChild` intents (S28).
+
+## PT2. Grammar
+
+The core grammar in EBNF. Terminals are quoted. `Expr` is the expression sublanguage of PT2.2.
+
+```ebnf
+Module      = "module" Ident { Decl } ;
+Decl        = [ "service" ] Machine | Workflow | Enum | TypeDecl | Policy | Configuration | Use ;
+TypeDecl    = "type" Ident "=" ( [ "|" ] Ctor { "|" Ctor } | Record ) ;
+Record      = "{" Ident ":" Type { "," Ident ":" Type } "}" ;
+Ctor        = Ident [ "{" Ident ":" Type { "," Ident ":" Type } "}" ] ;
+Use         = "use" QualIdent ;
+Enum        = "enum" Ident "{" Ident { "," Ident } "}" ;
+
+Machine     = "machine" Ident "{" [ Version ] StateBlock { MachineItem } "}" ;
+Version     = "version" Int [ "from" Int Migrate ] ;
+Migrate     = "{" "migrate" "{" { "new" "." Ident "=" Expr } "}" "}" ;
+StateBlock  = "state" "{" { Field } "}" ;
+Field       = Ident ":" Type [ Check ] "=" Expr [ "internal" | "derived" ] ;
+Check       = "check" Domain [ "strict" | "disclosed" ] ;
+MachineItem = Terminal | Action | Handler | Guard | Property | Effect | Decision ;
+Terminal    = "terminal" Expr ;
+Action      = "action" Ident "(" [ Param { "," Param } ] ")" ;
+Param       = Ident ":" Type [ Check ] ;
+Handler     = "on" Ident [ "(" Ident { "," Ident } ")" ] Block ;
+Guard       = "guard" "all" "when" Expr "reject" String ;
+Block       = "{" { Stmt } "}" ;
+Stmt        = "require" Expr "else" "reject" String
+            | "reject" String
+            | "let" Ident "=" Expr
+            | Ident "'" "=" Expr
+            | Ident "'" "=" Ident "with" "[" Expr "]" "=" Expr
+            | "if" Expr Block [ "else" Block ]
+            | "match" Expr "{" Arm { Arm } "}"
+            | "emit" Ident "(" [ Args ] ")"
+            | "after" Duration "->" Ident "(" [ Args ] ")" "as" Key
+            | "cancel" Key
+            | "spawn" [ "detached" ] QualIdent "as" Key [ "->" Ident "(" [ Args ] ")" ] [ ChildWiring ]
+            | "send" Expr "<-" Ident "(" [ Args ] ")" [ "as" Ident ]
+            | "signal" Key "->" Ident "(" [ Args ] ")"
+            | "for" Ident "in" Int ".." Expr Block
+            | "decide" Ident "(" [ Args ] ")" ;
+Key         = Ident [ "[" Expr "]" ] ;
+ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
+Arm         = Pattern "=>" ( Block | Stmt ) ;
+Pattern     = "_" | CtorName [ "{" Ident ":" ( Literal | Ident | "_" ) { "," Ident ":" ( Literal | Ident | "_" ) } "}" ] ;
+CtorName    = Ident [ "." Ident ] ;
+Property    = "invariant" Ident ":" Expr
+            | "step" "property" Ident ":" Expr
+            | "reject" "property" Ident ":" Expr
+            | "path" "property" Ident ":" Expr
+            | "compose" "invariant" Ident ":" Expr
+            | "liveness" Ident ":" [ ( "forall" | "exists" ) Ident "in" Ident ":" ]
+              ( "eventually" Expr | Expr "leads" "to" Expr )
+              [ "under" "fair" "{" Group { "," Group } "}" ] ;
+Group       = Fair { "|" Fair } ;
+Fair        = ( Ident | InputRef ) [ "(" "*" ")" ] ;   (* InputRef in a configuration, S73 *)
+Effect      = "effect" Ident "(" [ Param { "," Param } ] ")" "{" { EffectItem } "}" ;
+EffectItem  = "kind" String | "labels" "{" Label { "," Label } "}" | "class" Class
+            | "retry" "{" "attempts" Int "," "base" Duration "," "timeout" Duration "}"
+            | ( "ok" [ "(" Ident ")" ] | "failed" | "exhausted" ) "->" Ident "(" [ Args ] ")" ;   (* ok(r), PD1.2g, S79 *)
+Decision    = "decision" Ident "(" [ Param { "," Param } ] ")" "->" Type "{" { DecisionItem } "}" ;
+DecisionItem = "provider" String | "labels" "{" Label { "," Label } "}" | "timeout" Duration
+            | "band" Decimal ".." Decimal | ( "ok" "(" Ident ")" | "failed" ) "->" Ident "(" [ Args ] ")" ;
+Decimal     = Int "." Digit [ Digit [ Digit ] ] ;   (* only where a Conf is expected, S76 *)
+Class       = "none" | "reversible" | "compensable" | "irreversible" ;
+Type        = "bool" | "int" | "string" | Ident | Int ".." Int
+            | "map" "<" ( Ident | Int ".." Int ) "," Type ">" | "Ref" "<" QualIdent ">" | "Conf" ;
+Configuration = "configuration" Ident "{" { Instance | Inputs | Bounds | Property } "}" ;
+Instance    = Ident [ "[" Int "]" ] ":" QualIdent [ "{" Ident ":" Expr { "," Ident ":" Expr } "}" ] ;
+Inputs      = "inputs" "{" InputRef { "," InputRef } "}" ;
+InputRef    = Ident [ "[" ( Int | "*" ) "]" ] "." Ident ;
+Bounds      = "bounds" "{" "transit" Int [ "," "instances" Int ] "}" ;   (* required, S62 *)
+Domain      = "{" Literal { "," Literal } "}" | Int ".." Int ;
+```
+
+The `Policy` production is in PT8, in its own file type. The `Workflow` production is in PT10.
+
+- **PT2.1** Keywords are **contextual**: a keyword is reserved only in the grammar positions that use it, and anywhere an identifier is expected it is an ordinary identifier. So a field may be named `state`, `derived`, `internal`, `terminal` or `type`. The parser decides with at most two tokens of lookahead: after a field's initial expression, `derived` or `internal` followed by `:` begins the next field, and otherwise it is the modifier. Field and action names lower verbatim into `contract.json`, traces and diagnostics, so a corpus's own names are kept. There is no second, external name for a field. Identifiers follow TypeScript identifier rules. Rejection reasons and effect kinds are string literals, so agents can reuse the names already present in a system.
+- **PT2.2** The expression sublanguage (AD-2) is a total, side-effect-free subset of TypeScript expressions:
+  - literals, field and parameter names, `pre.` and `post.` (in step properties), enum members;
+  - **name resolution (S19).** A bare name resolves to the innermost binding: a local (`let` or a pattern binder), then a parameter, then a field, as in TypeScript. `pre.f` always names the pre-state field `f`, in handlers as in properties, so a field hidden by a parameter of the same name stays readable. Parameters are visible only where the action is known: in a handler, and in a guard, step property or reject property only where `action == A` narrows it (PT5). With no narrowing, no parameter is in scope and a bare name is the field;
+  - `== != < <= > >= && || !`, `+ - *`, and integer `/` and `%`. Division truncates toward zero, and `%` takes the sign of the dividend, as in TypeScript with the quotient truncated (`Math.trunc(a / b)`). A divisor whose static range contains 0 is `PL1204 DIVISION_BY_ZERO`, so division is total;
+  - `implies`;
+  - `count(kind)` and `before(k1, k2)` (in path properties). Their arguments are effect kinds, string literals. `before("k1", "k2")` holds on a path iff every emission of `k2` is preceded by an emission of `k1` (S37);
+  - `in { … }`;
+  - in configuration properties only: `forall i in g: …`, `exists i in g: …`, the aggregates `count`, `sum`, `all` and `any` over `g[*]`, and `init(e)` for the initial value of `e` (PS13.6). The same quantifiers and aggregates range over a child family `f` in a compose invariant (S49);
+  - map indexing `m[k]`, where `k` is a value of the map's key type;
+  - map literals `{ k1: v1, …, kn: vn }`, which must list every key of the map's key type exactly once (`PL1502 INCOMPLETE_MAP_LITERAL`), and, for maps keyed by an integer range, the array literal `[v0, v1, …, vn]`; map update is the statement form `m' = m with [k] = v`, which writes one entry and leaves the others unchanged.
+
+  It has no loops, no calls to host functions and no string operations beyond equality and membership. Every expression terminates by construction. Precedence and associativity are fixed in PS12; the formatter parenthesises any mix of `implies` with `&&` or `||`.
+  Primed fields are write-only: an expression never reads `f'` (PS2.3), and a field written twice on one path is `PL2102 DOUBLE_WRITE` (PS2.4).
+- **PT2.3** Policies use PX, Polyaxion's three-valued (Kleene) language. The two logics are separated by **type**, not by syntax (PS8.0):
+  - machine expressions have type `Bool`; policy inputs are optional, so policy expressions have type `Tri`;
+  - one operator set (`==`, `!=`, `&&`, `||`, `!`, `in`) serves both, with its meaning given by the operand types;
+  - `unknown(x)` has type `Bool` and is legal anywhere an optional value is in scope;
+  - a `Tri` where a `Bool` is expected is `PL1203 TRI_WHERE_BOOL_EXPECTED`.
+
+  This follows the pattern of an option type, which agents know from TypeScript's `boolean | undefined`.
+- **PT2.4** `e is C` tests a union value's constructor and has type `Bool`; `e is C1 | C2` is short for `e is C1 || e is C2`. `C { q: e }` constructs a union value. `match` is exhaustive (`PL1501 NON_EXHAUSTIVE_MATCH`). Enums are unions without payloads, so `==` and `is` agree on them.
+  - **Names in patterns (S21).** In a payload pattern `C { q: x }`, the name `x` is read by these rules, in order: (1) a constructor of the payload's type is a literal pattern; (2) a constructor of another type in scope is `PL1201 TYPE_MISMATCH`, not a binder; (3) any other name binds the payload value. A binder that shadows a constructor in scope is an error (`PL1002`). A binder its arm never reads is `PL1504 UNUSED_BINDER`: write `_` to ignore a payload. An arm that the arms before it always cover is `PL1503 UNREACHABLE_ARM`. So a misspelled constructor cannot become a silent catch-all.
+  - **Constructors shared by two types (S22).** A constructor name resolves against the expected type. In `a == b` (and `!=`), each side is typed first, and an ambiguous constructor on either side takes the other side's type, so `Open == s` and `s == Open` mean the same. The qualified form `Type.C` is always legal, in expressions and in patterns. A constructor still ambiguous after that is `PL1005 AMBIGUOUS_CONSTRUCTOR`, whose fix is the qualified form.
+  - **Constructors and blocks.** In the condition of an `if` and the scrutinee of a `match`, an identifier followed by `{` is never read as a constructor: the `{` opens the block. Parentheses restore a constructor there, as in `if intent == (Proposed { decision: 1 }) { … }`. This is the rule Rust uses for the same ambiguity.
+- **PT2.4a** **Handler parameters.** In `on A(x, y) { … }` the parameter list is optional. When present, it must repeat the action's declared parameter names in declaration order, otherwise it is `PL1201 TYPE_MISMATCH`. It neither renames nor selects parameters. The action's parameters are in scope in the body whether or not the list is written.
+
+- **PT2.5** **The embedded surface.** poly also has a surface embedded in TypeScript. It is valid TypeScript, type-checked by `tsc` against the combinators' declarations, and it produces **the same AST** as the standalone syntax, so the same AST digest (PT1.4). Every AST node has exactly one embedded form, and the mapping is syntactic: `poly-embed` never infers a type to decide which node a form is (S71).
+
+  ```ts
+  import { module, enumType, machine, field, t, action, on, require, set, emit, effect, labels, cls, pathProperty, count } from '@cognitive-fab/poly/embed'
+
+  export default module('orders', [
+    enumType('Status', ['Draft', 'Placed', 'Paid', 'Shipped', 'Cancelled']),
+    machine('Order', {
+      state: { status: field(t.named('Status'), ($) => $.Draft), items: field(t.range(0, 3), () => 0) },
+      items: [
+        action('Place', {}),
+        action('Pay', { amount: t.int.check([10, 20]) }),
+        on('Place', ($) => [require($.status === $.Draft, 'not-draft'), require($.items > 0, 'empty-order'), set('status', $.Placed)]),
+        on('Pay', ($) => [require($.status === $.Placed, 'not-placed'), emit('charge', { amount: $.amount })]),
+        effect('charge', { amount: t.int }, [labels(['egress:external']), cls('irreversible')]),
+        pathProperty('charge-at-most-once', () => count('payment.charge') <= 1),
+      ],
+    }),
+  ])
+  ```
+
+  | AST node | Embedded form |
+  |---|---|
+  | module and its declarations, in order | `export default module('m', [decl, …])` |
+  | `enum E { A, B }` | `enumType('E', ['A', 'B'])` |
+  | `type U = C1 { p: T } \| C2` | `union('U', { C1: { p: T }, C2: {} })` |
+  | `type R = { f: T }` | `record('R', { f: T })` |
+  | `use a.b` | `use('a.b')` |
+  | `[service] machine M { version n  state { … } items }` | `machine('M', { service?: true, version?: n, state: { f: field(T, init, opts?) }, items: [item, …] })` |
+  | field `f : T check D mode = e flag` | `f: field(T, ($) => e, { check?: D, mode?: 'strict' \| 'disclosed', flag?: 'internal' \| 'derived' })` |
+  | types | `t.bool`, `t.int`, `t.string`, `t.range(lo, hi)`, `t.named('N')`, `t.map(K, V)`, `t.ref('M')`, `t.conf`, `t.int.check([…])` or `.check(lo, hi)` for a parameter's check clause |
+  | `action A(p: T)` | `action('A', { p: T })` |
+  | `on A [(x, …)] { body }` | `on('A', ($) => [stmt, …], ['x', …]?)`, the list only when written |
+  | `guard all when e reject "r"` | `guard(($) => e, 'r')` |
+  | `terminal e` | `terminal(($) => e)` |
+  | `invariant`, `step property`, `reject property`, `path property`, `compose invariant` | `invariant('n', ($) => e)`, `stepProperty`, `rejectProperty`, `pathProperty`, `composeInvariant` |
+  | `liveness n: [forall i in g:] eventually e [under fair {…}]` | `liveness('n', { eventually: ($) => e }, { forall?: ['i', 'g'], fair?: [[member, …], …] })`; `leads to` is `{ from: ($) => p, to: ($) => q }`; a member is `'A'` or `'A(*)'` |
+  | `effect k(p: T) { items }` | `effect('k', { p: T }, [kind('…'), labels([…]), cls('…'), retry(n, '200ms', '5s'), ok('A', args), failed('A', args), exhausted('A', args)])` |
+  | a name `x` (field, parameter, local, constructor, `none`, `self`, `pre`, `post`, `action`) | `$.x`, a property of the arrow's one parameter |
+  | `e.f` | `e.f` on any expression other than `# poly · Technical specification
+
+*Cognitive Fab · September 2026 · draft v0.6 · specification only, no code*
+
+The meaning of every construct is defined in [`04-semantics.md`](04-semantics.md) (`PS` ids); this document fixes syntax, formats and engineering. v0.2 to v0.6 answer the five reviews in [`reviews/`](reviews/), with a response to each.
+
+This document fixes the grammar, the semantics and the formats. It covers the lowering of each construct to the Poly stack artefacts, the integration of the gate with the kernel, the diagnostics, the command surface, the implementation plan and the first experiment.
+
+- Functional requirements are cited as `PF`.
+- Architectural principles and decisions are cited as `PA` and `AD`.
+- Engine formats are quoted from [`research/primitive-inventory.md`](research/primitive-inventory.md).
+
+## PT1. Source files and modules
+
+- **PT1.1** A module is a file with the extension `.poly`. It starts with `module <name>` and holds `enum`, `machine` and `workflow` declarations.
+- **PT1.1a** By convention a policy lives in a `.policy.poly` file, because policies are read by different people. The convention is for readers. The two logics are separated by type (PS8.0), not by file.
+- **PT1.1b** Worlds are deferred to v2 (appendix A).
+- **PT1.2** A project is a directory with a `poly.json` manifest:
+
+  ```json
+  { "poly": "1", "name": "orders", "modules": ["src/*.poly"],
+    "host": "typescript", "require": { "grade": false },
     "engines": { "polygraph": "^8.3", "polyaxion": "^2" } }
   ```
 
@@ -127,31 +303,33 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - **Constructors and blocks.** In the condition of an `if` and the scrutinee of a `match`, an identifier followed by `{` is never read as a constructor: the `{` opens the block. Parentheses restore a constructor there, as in `if intent == (Proposed { decision: 1 }) { … }`. This is the rule Rust uses for the same ambiguity.
 - **PT2.4a** **Handler parameters.** In `on A(x, y) { … }` the parameter list is optional. When present, it must repeat the action's declared parameter names in declaration order, otherwise it is `PL1201 TYPE_MISMATCH`. It neither renames nor selects parameters. The action's parameters are in scope in the body whether or not the list is written.
 
-- **PT2.5** **The embedded surface.** poly also has a surface embedded in TypeScript. It is valid TypeScript, type-checked by `tsc`, and it produces the same AST as the standalone syntax:
+ itself |
+  | `e[k]`, `g[*]` | `e[k]`, `$.g[ALL]` |
+  | literals | number, `true`, `false`, a string literal |
+  | `==`, `!=`, `&&`, `\|\|`, `!`, `-`, `+`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=` | `===`, `!==`, and the operator itself |
+  | `a implies b`, `e is C1 \| C2`, `e in { a, b }` | `implies(a, b)`, `is(e, 'C1', 'C2')`, `isIn(e, [a, b])` |
+  | `C { p: e }`, `T.C { p: e }` | `ctor('C', { p: e })`, `ctor('T.C', { p: e })` |
+  | `{ k: v, … }` (a map or a record) | an object literal: an identifier key is a name, a numeric key an int, a string key a string, and `[e]: v` any other key |
+  | `[v0, …]` | an array literal |
+  | `count`, `before`, `rejected`, `init`, `sum`, `all`, `any` | the function of that name |
+  | `k spawned`, `f[i] spawned` | `spawned($.k)`, `spawned($.f[i])` |
+  | `forall i in g: e`, `exists …` | `forall('i', 'g', ($) => e)`, `exists(…)` |
+  | `require e else reject "r"`, `reject "r"`, `let x = e` | `require(e, 'r')`, `reject('r')`, `let_('x', e)` |
+  | `f' = e`, `f' = f with [k] = v` | `set('f', e)`, `setEntry('f', k, v)` |
+  | `if c { … } [else { … }]` | `when(c, [...], [...]?)`, the second list only when written |
+  | `match e { P => body, … }` | `match(e, [arm(P, [...]), …])`; `P` is `'_'` or `pattern('C', { p: bind('x') \| 1 \| 'lit' \| true })` |
+  | `for i in lo..n { … }` | `forEach('i', lo, n, [...])` |
+  | `emit k(args)` | `emit('k', args)`; args are an array when positional, an object when named |
+  | `after d -> A(args) as k[i]`, `cancel k[i]` | `after('d', 'A', args, 'k', i?)`, `cancel('k', i?)` |
+  | `spawn [detached] M as k[i] -> A(args) on complete -> P on parent terminal -> C` | `spawn('M', 'k', { index?, detached?, create?: ['A', args], complete?: 'P', parentTerminal?: 'C' })` |
+  | `signal k[i] -> A(args)`, `send r <- A(args)` | `signal('k', i \| null, 'A', args)`, `send(r, 'A', args)` |
+  | `decision`, `decide` (PD1) | `decision('d', { p: T }, R, [provider('…'), labels([…]), timeout('800ms'), band(lo, hi), okWith('r', 'A', args), failed('A', args)])`, `decide('d', args)` |
+  | `configuration c { … }` | `configuration('c', { instances: [instance('x', 'M', { count?, init? })], inputs: ['g[*].A', …], bounds: { transit, instances? }, properties: [...] })` |
 
-  ```ts
-  import { machine, t, require, set, emit, invariant, pathProperty } from '@cognitive-fab/poly/embed'
-
-  export const Order = machine('orders.Order', {
-    state: { status: t.enum('Draft', 'Placed', 'Paid', 'Shipped', 'Cancelled'), items: t.range(0, 3) },
-    actions: { Place: {}, Pay: { amount: t.int.check([10, 20]) } },
-    on: {
-      Place: (s) => [require(s.status === 'Draft', 'not-draft'),
-                     require(s.items > 0, 'empty-order'),
-                     set({ status: 'Placed' })],
-      Pay:   (s, d) => [require(s.status === 'Placed', 'not-placed'), emit('charge', { amount: d.amount })],
-    },
-    properties: [pathProperty('charge-at-most-once', (p) => p.count('payment.charge') <= 1)],
-  })
-  ```
-
-  - **Front end.** `poly-embed` reads the module with the TypeScript compiler API and accepts only the PT2.2 subset inside handler and property bodies:
-    - arrow functions returning statement lists;
-    - no loops, calls to anything but the poly combinators, or mutation;
-    - no access beyond the handler's parameters.
-
-    Anything else is `PL0301 OUTSIDE_EMBEDDED_SUBSET`, with the offending node. The resulting AST goes through the same checks, lowering and translation validation as the standalone syntax.
-  - **What the embedded surface gives up:** primes (writes are `set({…})`), the canonical formatter (the host formatter applies; the AST digest is unaffected, PT1.4a), and some syntax for properties.
+  - **Front end.** `poly-embed` reads the module with the TypeScript compiler API and accepts only the forms above; inside an arrow, only the PT2.2 subset. Anything else (a loop, a call to anything but a poly combinator, mutation, access beyond the arrow's parameter) is `PL0301 OUTSIDE_EMBEDDED_SUBSET`, with the offending node. The resulting AST goes through the same checks, lowering and translation validation as the standalone syntax.
+  - **The printer.** poly also prints any AST in this surface. Parsing a standalone source, printing it as TypeScript and reading that back gives the same AST digest; the test runs over every conformance source, beside hand-written embedded sources, which catch a mapping both directions would get wrong alike (S71).
+  - **Projects.** A project's `modules` globs may name `.ts` files, which `poly-embed` reads (S71).
+  - **What the embedded surface gives up:** primes (writes are `set`), the canonical formatter (the host formatter applies; the AST digest is unaffected, PT1.4a), fixes (S70: fixes apply to the standalone surface until M3 decides which surface agents use), and some syntax for properties.
   - **What it gains:** no training-data gap for agents, and the host's type checker, language server and package manager.
   - **Which surface is primary** is decided by the first experiment (PT13, arm 4).
 
@@ -342,7 +520,7 @@ The five kinds and their meanings are defined in PS5. This section fixes how eac
 | `reject property n: e` | predicate on every step, any verdict (PS5.3) | `rejectionInvariants` | polygraph BFS with step verdicts |
 | `path property n: e` | prefix-closed predicate on emission paths (PS5.4) | `effect-invariants.mjs` | polyrun `check-effects` |
 | `compose invariant n: e` | invariant of the joint machine (PS7.3) | `invariants.compose.mjs` | polyrun `check-product` |
-| `liveness n: … under fair { … }` | eventually or leads-to under weak fairness (PS5.5, PS6) | none (no engine format) | `poly-ref` over the explored graph (PS6.4) |
+| `liveness n: … under fair { … }` | eventually or leads-to under weak fairness (PS5.5, PS6) | `liveness.mjs`: the goal predicates, for exported witness tests only; no engine reads it, and it is read back like every artefact (S74) | `poly-ref` over the explored graph (PS6.4) |
 | (automatic) `domain:<field>` | invariant (PT3.5) | `stateInvariants` | polygraph BFS |
 | (automatic) deadlock freedom | no reachable non-terminal state without an accepting action (PS5.6) | none | `poly-ref` over the explored graph |
 | (automatic) emit without state change | no reachable accepted step whose effect sequence holds an effect, a timer or a child intent leaves the state unchanged (S33, S63) | none (the lowered effects mapper) | polyrun `check-effects` (`identity-accept-emits`), confirmed by `poly-ref` |
@@ -373,7 +551,7 @@ A named invariant is a forbidden region when it carries `region "<name>"`. The n
 
 Each `effect` declaration lowers to one manifest kind. An effect with no `kind` has its name as its kind. polyrun keys handlers by kind, so two effect declarations in one project with the same kind and a different payload, completions or class are `PL1002 DUPLICATE_DECLARATION` (S41).
 
-A completion (`ok`, `failed`, `exhausted`) names an action with a handler. An action that is not declared is `PL1001 UNKNOWN_NAME`. A declared action with no handler is `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6102 SHARED_COMPLETION_ACTION`, at the completion's line: such an action is not in the lowered module (S35), and polyrun refuses a manifest whose completion action is outside the action surface. The fix is to add a handler (S40).
+A completion (`ok`, `failed`, `exhausted`) names an action with a handler. Its data are constants of finite types, encoded as a value of that type is encoded everywhere else: an enum or a union with no payload as its constructor's name, a union with payloads as `{ "$": "C", … }` (S65), a record as a plain object (S25); a field or a parameter is not a constant, because a manifest cannot compute (S67). `ok(r) -> A(p: r.x)` binds the handler's result: `r.x` takes the type of the parameter `p` it is bound to, `p` is strict by default, and the manifest maps it with `"map": { "p": "$.result.x" }`. A result without `x`, or with `x` outside the domain, is rejected at dispatch and journaled as a rejected step (S79). An action that is not declared is `PL1001 UNKNOWN_NAME`. A declared action with no handler is `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6102 SHARED_COMPLETION_ACTION`, at the completion's line: such an action is not in the lowered module (S35), and polyrun refuses a manifest whose completion action is outside the action surface. The fix is to add a handler (S40).
 
 The manifest for `charge` in PT4.5:
 
@@ -426,9 +604,11 @@ The runtime delivers a completion to the parent with the data `{ childKey, child
 
 A completion action that declares `childKey: string` has as its check domain the keys of the families and single children whose completion names that action, computed by the compiler (S51).
 
+**One signal per child and action per step (S66).** A step that signals one child with one action twice is `PL5105 DUPLICATE_SIGNAL`, on the second copy, beside `PL2301` (timers) and `PL5101` (spawns): the kernel poisons such a step.
+
 **One action, one source of delivery (S52).** The runtime delivers a child's completion and a parent-terminal cancel itself, and refuses them from outside (K9). An action that is both a child's completion or cancel action and an effect completion (`ok`, `failed`, `exhausted`) or a timer's action would then be refused when the effect or the timer delivers it. So it is `PL6102 SHARED_COMPLETION_ACTION`, at the second wiring.
 
-These are **attached** children: checked as a cascade (PT7) and co-located with their parent on one kernel shard (PS7.4). `spawn detached …` creates a separate actor instead (S60, built in M2). Its address is `<parent address>/<k>`, known in the handler: `as k` binds `k`, a local of the handler of type `Ref<M>`, which the handler may store. The instance starts in `M`'s initial state and takes its creation action (S43) as its first message. From then on the two communicate only by `send`, and they are checked together as a configuration (PT7a). A detached spawn takes no `on complete` wiring, because completion is a message the child sends. polyrun gains a `createInstance` intent for it.
+These are **attached** children: checked as a cascade (PT7) and co-located with their parent on one kernel shard (PS7.4). `spawn detached …` creates a separate actor instead (S60, built in M2). Its address is `<parent address>/<k>`, known in the handler: `as k` binds `k`, a local of the handler of type `Ref<M>`, which the handler may store. In the lowered handler the address is the marker `{ "$ref": "child", "key": "k" }`; the kernel resolves it to the absolute address when it commits the step that creates the child, in the post-state and in every outgoing intent, so every later copy is absolute, and translation validation compares after that resolution (S78). The instance starts in `M`'s initial state and takes its creation action (S43) as its first message. From then on the two communicate only by `send`, and they are checked together as a configuration (PT7a). A detached spawn takes no `on complete` wiring, because completion is a message the child sends. polyrun gains a `createInstance` intent for it.
 
 ### PT6.5 Handlers receive capabilities, not ambient authority
 
@@ -456,7 +636,7 @@ The runtime passes the handler only the capabilities its labels and targets gran
 | `exec` | `exec.run` | the declared commands |
 | none of the above | nothing | none |
 
-- **Handler modules are checked by a lint pass** (`poly lint handlers`). It rejects imports of ambient-authority modules, such as `fs`, `net`, `http`, `child_process`, global `fetch` and `process.env`. A violation is `PL6401 AMBIENT_EFFECT_IN_HANDLER`, and the program is not admitted.
+- **Handler modules are checked by a lint pass** (`poly lint handlers`), over the files `poly.json`'s `handlers` names (S72). A project with effects and no `handlers` field lists the lint as not run under the instance line; it is never silently clean. It rejects imports of ambient-authority modules, such as `fs`, `net`, `http`, `child_process`, global `fetch` and `process.env`. A violation is `PL6401 AMBIENT_EFFECT_IN_HANDLER`, and the program is not admitted.
 - **This is a discipline, not a proof.** TypeScript cannot stop determined code from reaching ambient authority, for example through dynamic `import()` or `globalThis`. The lint rejects both forms, but only the sandbox below enforces the boundary.
 
 **2. Generated sandbox (opt-in, M5).** With `handlers: { isolation: "openshell" }` in `poly.json`, each effect kind's handlers run in an NVIDIA OpenShell sandbox. Its policy is **generated from the effect's labels and targets**: network egress only to the declared prefixes, no filesystem beyond a scratch directory, and secrets scoped to the declared names. A wrong or missing label then fails closed at the sandbox boundary instead of silently widening what the gate believes. The stack's existing polyaxion-openshell work supplies the integration.
@@ -548,6 +728,7 @@ With the order waiting for `Taken`, the configuration is clean over 44 global st
 **Lowering and runtime.**
 
 - A `send` lowers to a new built-in intent kind, `sendTo { target, action, data }`, beside polyrun's `spawnChild` and `signalChild`. This is a small change to polyrun (architecture §2a). An address is the target instance's id, and `none` is `null` (S58).
+- A detached child's address is resolved at the commit of the step that creates the child, not at delivery: resolving against the sender would be wrong once the parent passes the address to a third machine (S78).
 - `self` is legal only as a whole argument of a `send`. It lowers to the marker `{ "$ref": "self" }`, which the kernel replaces with the sender's instance id when it writes the message, since neither the acceptor nor the mapper knows that id (S58). `send … as n` is `PL0901`.
 - Until polyrun has `sendTo`, stage 3 of a machine that sends is poly-ref's alone and says so, and a module that sends does not run under polyrun (S58).
 - The runtime delivers it through the outbox, at least once, as a `dispatch` to the target with the intent's idempotency key as its `actionId`. So each message takes exactly one step at its receiver (K4, PS14.3).
@@ -897,6 +1078,8 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 - Each fix carries `pre`, the digest of the target node when the fix was computed. `poly fix <id>` applies it only if the node still has that digest; otherwise it is refused with `PL0201 STALE_FIX`. Applying several fixes in sequence is therefore safe: a fix invalidated by an earlier one is refused, never misapplied.
 - Line and column are kept for display only.
 - A fix is a proposal. `poly check` must run again after it is applied.
+- **The catalogue (S70).** M2 offers: for `PL3102`, `add-require` (before the handler's first write) and `widen-range` (to the escaped value); for `PL1202`, reading the pre-state field; for `PL1504`, the binder becomes `_`; for `PL1005`, the qualified constructor; for `PL1501`, an arm `_ => reject "unmatched"`; for `PL2101`, the `require` moved before the first write. The edit operations are `replace-node`, `insert-before-first-write` and `move-before-first-write`. The file is reprinted by the canonical formatter, comments kept. Fixes apply to the standalone surface only.
+- **Ids and staleness (S69).** A fix id is `<name>@<prefix>` of the digest of `{ moduleDigest, nodeId, edit }`. `PL0201 STALE_FIX` follows directly from a digest mismatch or a failed precondition.
 
 ### PT12.2 Code ranges
 
@@ -907,7 +1090,7 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` (effects, timers and child intents; not `send`, S63) |
-| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5303 CONFIGURATION_WITHOUT_BOUNDS`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
+| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5105 DUPLICATE_SIGNAL`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5303 CONFIGURATION_WITHOUT_BOUNDS`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
 | PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
@@ -946,6 +1129,11 @@ The line above is illustrative; the counts are not measured. A `CLEAN` without i
 ### PT12.4 Witness export
 
 `poly witness <id> --trace` writes the witness as `{pre, action, data, post}` windows. `poly witness <id> --test` writes a host test that drives the runtime API through the witness sequence and asserts the violated predicate. The test fails on the unfixed program by construction (acceptance criterion AC3).
+
+- **The report.** `poly check` writes its JSON report to `.poly/report.json` under the root; `poly witness` and `poly fix` read it (S69).
+- **Ids.** A witness id is the SHA-256 of the RFC 8785 canonical JSON of `{ moduleDigest, property, trace }`, so the same trace in another version of the module is another witness. A fix id is `<name>@<prefix>` of the digest of `{ moduleDigest, nodeId, edit }`, so a fix is tied to the AST it was computed on (S69).
+- **Before the runtime API (S68).** Until PT15's runtime API exists (M4), the exported test drives the lowered artefacts: the SAM module, the effects mapper, polyrun's kernel for attached children, and a small harness that delivers a configuration's messages. The test pins the build by its module digest and refuses to run against another build. A step the program rejects ends the walk, and the test passes; after each accepted step it asserts the violated predicate. When M4's runtime API lands, exported tests are regenerated against it.
+- **Liveness (S74).** A liveness witness is the trace of the prefix followed by the cycle, with `witness.cycle` the index where the cycle begins. The exported test replays the prefix and the cycle and checks that the cycle returns to its first state, that the goal never holds on it, and that every fair group is taken on it or disabled somewhere on it. The goal predicates come from `liveness.mjs`.
 
 ### PT12.5 Acceptances and approvals are signed by people
 
@@ -1105,6 +1293,8 @@ poly/
     orders/                  PT4.5, with its lowered build checked in for review
     turnstile/ raft-roles/ hatchet-status/ checkout/ (PT7a)
   conformance/               lowering conformance, generated from the lowering map (02 §4): one case per row, poly source vs hand-written artefacts
+  .poly/build/<module>.<Machine>/   contract.json, next.cjs, invariants.mjs, effects.cjs, effects.manifest.json,
+                             effect-invariants.mjs, invariants.compose.mjs, liveness.mjs (S74): the engines' artefacts, each read back (PT9.3)
     field-studies/<name>/    copied traces, contracts, invariants and hand-written controls (data, not engine code),
                              with PROVENANCE.md (source path and commit, upstream project and its licence, SHA-256 of
                              every file) and a sync script that re-verifies the hashes against the local sources when
@@ -1131,7 +1321,7 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 | M1 · Effects, composition and configurations | `emit`, effect declarations, timers, attached and detached children, `Ref` and `send`, configurations explored by poly-ref, emission and compose invariants, maps | The `polyrun-oms` order machine in poly agrees window by window with the hand-written module on the copied corpus (53/81 each), replays at 100% the corpus that polyrun's kernel records from the hand-written artefacts, and gives the same `check-effects` and `check-product` results (AC1, decision S24). The `checkout` configuration finds the double-confirmation witness with the optimistic order and is clean with the waiting order (AC10). poly-ref reproduces the configuration and delivery evidence scripts: the checkout results (six-step witness; 44 states clean) and the safety results of all four `Delivery` variants of PT9.8 (state counts, `at-most-once`, `in-order`, and both violation witnesses). `exactly-once` is liveness and is checked in M2. A disagreement with a script is investigated until one side is shown wrong. |
 | M2 · Diagnostics and second surface | `poly-embed` front end producing the same AST; handler capability lint (PT6.5); diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI; `spawn detached` (S60); typed decisions (proposal PD1: `decision`, `decide`, the `Conf` type explored by intervals, calibration maps, `PL1205`, `PL6201`, `PL6202`) | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. poly-ref reproduces the liveness evidence: `exactly-once` holds under the stated fairness for the two `Delivery` variants that keep dedupe records, and `settles` holds for the v0.3 and union forms of `OutboxIntent` and fails for the v0.2 form, with a fair cycle at each of its two deadlocked states. Typed decisions pass PD1-A1 to PD1-A4 of `docs/proposals/pd-model-decisions.md`, with a recorded provider: no test calls a model. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain and today's polyrun | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
-| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7; decision provenance and model independence (proposal PD2, PD3, K10) | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. M4c: the runtime's delivery traces replay against the `Delivery` machine of PT9.8 (K8), including traces captured across an archive. M4d: an external dispatch of an action wired as a child completion or a parent-terminal cancel is refused (K9, S45). M4e: PD2-A1 to PD2-A4 and PD3-A1 to PD3-A3. |
+| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7; decision provenance and model independence (proposal PD2, PD3, K10) | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. M4c: the runtime's delivery traces replay against the `Delivery` machine of PT9.8 (K8), including traces captured across an archive. M4d: an external dispatch of an action wired as a child completion is refused (K9, S45, S80). M4e: PD2-A1 to PD2-A4 and PD3-A1 to PD3-A3. |
 | M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, obligation consistency (PT8.5), escalation with timeout, person-key signatures (PT12.5), `sendTo` delivery in polyrun; operating modes (proposal PD4) | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. PD4-A1 to PD4-A3. |
 | M6 · Agents | Workflow lowering, MCP server, language server, Claude Code plugin, `poly new` | AC5. A workflow in poly runs through unchanged polyflow tools. |
 | M7 · Feedback | `poly mine`, `poly propose`, `poly export traces` | A Polyx rule adjudicated `real` round-trips to an admitted obligation. A polyness proposal arrives as poly source and is admitted or refused by the pipeline. |

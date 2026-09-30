@@ -286,7 +286,7 @@ What the review checked and found sound is in its reports: the joint cascade's o
 
 ### Changes for the owner
 
-- **polyrun, K9 (S45):** refuse an external dispatch of an action wired as an active child's completion, or as a parent-terminal cancel; the detail is above.
+- **polyrun, K9 (S45, narrowed by S80):** refuse an external dispatch of an action wired as an active child's completion; the detail is above.
 - **polyrun, `sendTo` (S58, PT7a):** a built-in intent `sendTo { target, action, data }` beside `spawnChild` and `signalChild`, delivered through the outbox as a `dispatch` with the intent's idempotency key as its `actionId`, and the `{ "$ref": "self" }` marker in its data replaced by the sender's instance id. Until then the kernel poisons on it and `check-effects` calls it an undeclared kind, so no module that sends runs under polyrun.
 - **polyrun, `createInstance` (S60):** only if S60 is ruled as proposed.
 - **polyflow and Polyaxion:** the sam-pattern probe of the two shapes 2.3.0 changed, as polygraph 583b82c has it, in polyflow's `machine-host.mjs` (`fire`), and in Polyaxion's `makeMediator` and `polyman` `step`.
