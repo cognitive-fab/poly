@@ -751,18 +751,26 @@ class Checker {
         if (expected?.k !== 'map') { this.err('PL1201', e, 'a map literal needs a map type from its context'); return ERR; }
         const keys = this.keyValues(expected.key);
         const seen: unknown[] = [];
+        // One mistake, one diagnostic (M1-4): a key of the wrong type is reported once, and coverage is
+        // judged only when every key given is a key of the map, so a wrong key does not also read as a missing one.
+        let everyKeyValid = true;
         for (const en of e.entries) {
           const kt = this.typeOf(en.key, scope, expected.key);
-          if (!same(kt, expected.key)) this.err('PL1201', en.key, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(expected.key)}`);
           const kv = this.fold(en.key);
-          // A key outside the map's key type is not a key of this map (ranges type alike, so check the value).
-          if (keys && kv !== undefined && !keys.includes(kv)) this.err('PL1201', en.key, `${String(kv)} is not a key of ${tyToString(expected)}`);
+          if (!same(kt, expected.key)) {
+            this.err('PL1201', en.key, `key has type ${tyToString(kt)}, the map's keys are ${tyToString(expected.key)}`);
+            everyKeyValid = false;
+          } else if (keys && kv !== undefined && !keys.includes(kv)) {
+            // A key outside the map's key type is not a key of this map (ranges type alike, so check the value).
+            this.err('PL1201', en.key, `${String(kv)} is not a key of ${tyToString(expected)}`);
+            everyKeyValid = false;
+          }
           if (seen.includes(kv)) this.err('PL1502', en.key, `key ${String(kv)} is listed twice`);
           seen.push(kv);
           const vt = this.typeOf(en.value, scope, expected.value);
           if (!same(vt, expected.value)) this.err('PL1201', en.value, `value has type ${tyToString(vt)}, the map's values are ${tyToString(expected.value)}`);
         }
-        if (keys) {
+        if (keys && everyKeyValid) {
           const missing = keys.filter((k) => !seen.includes(k));
           if (missing.length) this.err('PL1502', e, `a map literal lists every key; missing ${missing.join(', ')} (PT2.2)`);
         }
