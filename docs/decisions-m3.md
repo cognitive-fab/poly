@@ -50,6 +50,17 @@ Steps 1 and 2 can start. The task set starts after S90 to S92 are reflected in t
 
 **S114 The manual is not in the freeze (found by Claude Code).** The poly arms receive `README.md`, `docs/03-technical-spec.md` and `docs/04-semantics.md` as poly's manual, and no part covers them. Commits 3ad3b52 and a5ccf4b changed the spec after the freeze, so the arms would read about `PL1207` and vacuous verdicts that their frozen toolchain does not enforce. **Ruling:** add a part `manual`. Snapshot the three files **as of the freeze commit 04c62e8** (`git show 04c62e8:<path>`), not as of today, into `experiments/m3/manual/`, and have the runner copy from the snapshot only. The manual then describes exactly the toolchain the arms run. Also list every file the runner copies into any arm's workspace, and confirm each one is in a part; a file outside every part is a defect of the freeze. A regression test fails first: a changed byte in a snapshot file changes the `manual` part, and a change to `docs/` changes no part. This touches `experiments/` only. JJ's step 4 (FROZEN) waits on it.
 
+**S114 done (3b6106c).** Accepted as built: the manual snapshotted at 04c62e8, the three new parts (examples, toolchain build, arm 2 polygraph), `.tsbuildinfo` left out, and the copy list in `plan-m3.md`. Freezing the new groups in place rather than snapshotting them is accepted.
+
+**S115 The manual carries worked examples of task families.** The runner leaves out the examples that model a task family, but the manual itself does not. The spec given to arms 3 and 4 holds a `machine Order` lifecycle (PT4 and PT10) and the `checkout` configuration of PT7a, an order and an inventory talking by messages, with the optimistic race and its fix. These are close to T1, T2 and T4. Arms 1 and 2 get nothing comparable. **Ruling:** the manual is not edited. It is poly's documentation, and every user of poly gets it. Instead:
+1. List every worked example in the material each arm receives (the manual for arms 3 and 4, the polygraph archive for arm 2), and map each to the tasks whose family it models. Record the list in `plan-m3.md`.
+2. Pre-register a sensitivity analysis in `analyse.mjs`: the primary comparison over all ten tasks, and the same comparison over the tasks no arm's material models. Both are reported. A win that holds only with the modelled tasks is reported as such, never as a win.
+3. Test it on synthetic records where the two answers differ.
+
+**S116 The environment is not recorded.** The freeze pins files but not the Node version, the `claude` CLI version, the model id or the operating system. Every arm shares them, so they do not bias a comparison, but a run cannot be reproduced without them, and a CLI update between runs would change all arms mid-experiment. **Ruling:** `freeze.json` records them, and the runner refuses a run (pilots included) when any of them differs from the record. The model id is the exact id passed to the CLI, never an alias.
+
+JJ's step 4 (FROZEN) waits on S115 and S116.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
