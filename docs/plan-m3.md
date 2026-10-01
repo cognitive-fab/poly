@@ -134,7 +134,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 **Step 8 is done.** `experiments/m3/analysis/analyse.mjs` computes PT13's measures per arm and task, the five escaped-defect comparisons by the exact Wilcoxon signed-rank test with Holm's correction (tokens as a second family), and the win (S96), surface and stop rules; a task with no delivered run for an arm is left out of that comparison and listed. `stats.mjs` is tested on known values, and `test/m3-analysis.test.mjs` on synthetic records whose answer is known: a clear win, a reduction that is not significant, a win denied by tokens, a null result, the surface decision each way, a stop, a left-out task, and the four token parts with their cost.
 
-**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 450 files of the experiment (364, and since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`), with the git commit it was taken from (`04c62e8`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
+**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 739 files of the experiment (364; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`162fc44`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
 
 | Part | Digest |
 |---|---|
@@ -184,9 +184,15 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | template | `2d43b4899af7aa53` |
 | controls | `120afbeace3a1754` |
 | adapter | `56bff45dcf872922` |
-| runner and prompts | `52262a7c78dda0ee` |
+| runner and prompts | `d853a135b601c878` |
 | analysis | `de9bb54faa4c0f16` |
 | toolchain (S100) | `246ec34ee8e2dc7f` |
+| manual (S114) | `137da845784fe69b` |
+| examples (S114) | `facc8d422e048c60` |
+| toolchain build (S114) | `06b5ee5fa1226fdd` |
+| arm 2 polygraph (S114) | `1d33d1fa2fb7cff5` |
+
+*What the runner copies into a workspace (S114).* `workspaceSources` and `changeSources` in `runner/workspace.mjs` list every file, and `makeWorkspace` and `run.mjs` copy nothing else; `test/m3-manual.test.mjs` checks, for every task, version and arm, that each one is in a part with the digest it is copied with. Every arm gets `BRIEF.md` and `host.ts` (the task's part), `CHANGE-n.md` and the new `host.ts` at each change (the version's part) and `node_modules/typescript` (toolchain build). Arm 2 gets polygraph by `git archive` at `4949de4` (arm 2 polygraph). Arms 3 and 4 get each package's `package.json` (toolchain) and `dist` without `.tsbuildinfo` (toolchain build), `vendor/polygraph` and `vendor/sam-pattern` (toolchain), `adapter/generate.mjs` (adapter), `host.map.schema.json` (template), the manual from `experiments/m3/manual/`, the spec with PT13 cut on the way (manual), and `examples/hello`, `delivery` and `evidence` (examples). Arm 4 also gets `packages/poly-embed/embed/index.d.ts` (toolchain) and `conformance/m2/embed/turnstile.ts` and `workshop.ts` (examples). The runner writes `package.json`, and `tsconfig.json` for arm 4, from its own code (runner and prompts). Before S114 four groups were outside every part: the manual, read live from `docs/`; the examples; the built `dist` and TypeScript, which the sources and the lock file describe but do not pin; and arm 2's archive, pinned only by its commit. A `.tsbuildinfo` differs between a clean and an incremental build of the same sources (measured), and nothing in a workspace reads it, so the runner no longer copies it. `--check` reports no change after a clean rebuild of every package.
 
 *The proposed budget.* Each run (base brief and three changes, one session) gets **30,000,000 tokens**, counted as all tokens processed (S99), and **3 hours** of wall time, with `--max-budget-usd 60` as the CLI's own cap. The dry run's tokens are scripted, so they say nothing about real use, and the budget cannot be computed from them as section 8 first planned. The figures above are a ceiling for a session that reads its toolchain's manual, writes and tests a small system, and takes three changes; the pilots are there to replace them with measured ones.
 

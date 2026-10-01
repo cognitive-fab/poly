@@ -5,6 +5,10 @@
 // The poly arms get poly's manual and toolchain; examples that model a task family closely (the field studies,
 // the checkout, the OMS order) are left out, so no arm starts from a near-answer. Arm 2 gets polygraph at the
 // commit poly vendors. The experiment's own design (PT13) is cut from the manual.
+//
+// Every file copied in comes from the list workspaceSources and changeSources return (S114), and the freeze
+// covers every one of them (test/m3-manual.test.mjs). The manual is the snapshot in experiments/m3/manual/,
+// taken at the freeze commit 04c62e8, never the live docs/: it then describes exactly the toolchain the arms run.
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -12,26 +16,79 @@ import { M3 } from '../lib/task.mjs';
 
 export const ROOT = join(M3, '..', '..');
 /** polygraph as arm 2 gets it: the commit poly vendors (vendor/polygraph/PROVENANCE.md). */
-export const POLYGRAPH = { repo: 'C:/Users/jjdub/code/polygraph', commit: '4949de4' };
-const POLY_EXAMPLES = ['hello', 'delivery', 'evidence'];
-const EMBED_EXAMPLES = ['turnstile.ts', 'workshop.ts'];
+export const POLYGRAPH = { repo: 'C:/Users/jjdub/code/polygraph', commit: '4949de4', paths: ['README.md', 'package.json', 'scripts', 'skills', 'polyrun/src', 'LICENSE'] };
+/** poly's manual as the poly arms read it (S114): README.md, docs/03-technical-spec.md and docs/04-semantics.md at 04c62e8. */
+export const MANUAL = join(M3, 'manual');
+export const POLY_PACKAGES = [['poly-core', 'core'], ['poly-lang', 'lang'], ['poly-lower', 'lower'], ['poly-ref', 'ref'], ['poly-embed', 'embed'], ['poly-check', 'check']];
+export const POLY_EXAMPLES = ['hello', 'delivery', 'evidence'];
+export const EMBED_EXAMPLES = ['turnstile.ts', 'workshop.ts'];
 
 const write = (ws, rel, text) => { mkdirSync(dirname(join(ws, rel)), { recursive: true }); writeFileSync(join(ws, rel), text); };
-const copy = (ws, rel, from) => { mkdirSync(dirname(join(ws, rel)), { recursive: true }); cpSync(from, join(ws, rel), { recursive: true }); };
+const copy = (ws, rel, from, filter) => { mkdirSync(dirname(join(ws, rel)), { recursive: true }); cpSync(from, join(ws, rel), { recursive: true, filter }); };
+
+/**
+ * A package's dist without tsc's incremental bookkeeping: nothing in a workspace reads a .tsbuildinfo, and it
+ * differs between a clean build and an incremental one of the same sources (measured), so it cannot be frozen.
+ */
+export const notBuildInfo = (p) => !p.endsWith('.tsbuildinfo');
 
 /** The technical spec without PT13, the experiment's own design. */
-function specWithoutPT13() {
-  const text = readFileSync(join(ROOT, 'docs', '03-technical-spec.md'), 'utf8');
+function withoutPT13(text) {
   const a = text.indexOf('## PT13.');
   const b = text.indexOf('## PT14.');
   if (a < 0 || b < a) throw new Error('03-technical-spec.md: PT13 not found');
   return text.slice(0, a) + text.slice(b);
 }
 
-/** A package of the poly toolchain as node_modules holds it: its package.json and dist. */
-function copyPolyPackage(ws, dir, name) {
-  copy(ws, `node_modules/@poly/${name}/package.json`, join(ROOT, 'packages', dir, 'package.json'));
-  copy(ws, `node_modules/@poly/${name}/dist`, join(ROOT, 'packages', dir, 'dist'));
+/** polygraph at the pinned commit, by git archive, into a directory: nothing of the owner's working tree, nothing from poly. */
+export function extractPolygraph(into) {
+  mkdirSync(into, { recursive: true });
+  execFileSync('git', ['-C', POLYGRAPH.repo, 'archive', '--format=tar', '-o', join(into, 'polygraph.tar'), POLYGRAPH.commit, ...POLYGRAPH.paths]);
+  // A relative archive path: GNU tar reads "C:" in an absolute Windows path as a remote host.
+  execFileSync('tar', ['-xf', 'polygraph.tar'], { cwd: into });
+  rmSync(join(into, 'polygraph.tar'));
+}
+
+/**
+ * Every file the runner copies into the workspace of `arm` (1 to 4) for version 0 of a task (S114): { to, from }
+ * with `from` a file or a directory, `filter` when only some of a directory's files are copied, `edit` when the
+ * text is changed on the way, and { to, git } for arm 2's
+ * polygraph. The runner writes package.json, and tsconfig.json for arm 4, itself.
+ */
+export function workspaceSources(arm, version) {
+  const out = [
+    { to: 'BRIEF.md', from: version.briefs[0] },
+    { to: 'host.ts', from: version.hostFile },
+    { to: 'node_modules/typescript', from: join(ROOT, 'node_modules', 'typescript') },
+  ];
+  if (arm === 2) out.push({ to: 'tools/polygraph', git: POLYGRAPH });
+  if (arm === 3 || arm === 4) {
+    // A package of the poly toolchain as node_modules holds it: its package.json and dist.
+    for (const [dir, name] of POLY_PACKAGES) {
+      out.push({ to: `node_modules/@poly/${name}/package.json`, from: join(ROOT, 'packages', dir, 'package.json') });
+      out.push({ to: `node_modules/@poly/${name}/dist`, from: join(ROOT, 'packages', dir, 'dist'), filter: notBuildInfo });
+    }
+    out.push(
+      { to: 'node_modules/@cognitive-fab/polygraph', from: join(ROOT, 'vendor', 'polygraph') },
+      { to: 'node_modules/@cognitive-fab/sam-pattern', from: join(ROOT, 'vendor', 'sam-pattern') },
+      { to: 'tools/adapter/generate.mjs', from: join(M3, 'adapter', 'generate.mjs') },
+      { to: 'host.map.schema.json', from: join(M3, 'tasks', '_template', 'host.map.schema.json') },
+      { to: 'tools/poly/README.md', from: join(MANUAL, 'README.md') },
+      { to: 'tools/poly/docs/03-technical-spec.md', from: join(MANUAL, 'docs', '03-technical-spec.md'), edit: withoutPT13 },
+      { to: 'tools/poly/docs/04-semantics.md', from: join(MANUAL, 'docs', '04-semantics.md') },
+    );
+    for (const e of POLY_EXAMPLES) out.push({ to: `tools/poly/examples/${e}`, from: join(ROOT, 'examples', e) });
+    if (arm === 4) {
+      out.push({ to: 'tools/poly/embed/index.d.ts', from: join(ROOT, 'packages', 'poly-embed', 'embed', 'index.d.ts') });
+      for (const e of EMBED_EXAMPLES) out.push({ to: `tools/poly/examples/embedded/${e}`, from: join(ROOT, 'conformance', 'm2', 'embed', e) });
+    }
+  }
+  return out;
+}
+
+/** The files the runner copies in when a change starts (version n > 0): the version's host interface and the change's brief. */
+export function changeSources(version) {
+  return [{ to: 'host.ts', from: version.hostFile }, { to: `CHANGE-${version.n}.md`, from: version.briefs[version.n] }];
 }
 
 /**
@@ -41,33 +98,15 @@ function copyPolyPackage(ws, dir, name) {
 export function makeWorkspace(ws, arm, version) {
   rmSync(ws, { recursive: true, force: true });
   mkdirSync(ws, { recursive: true });
-  write(ws, 'BRIEF.md', readFileSync(version.briefs[0], 'utf8'));
-  copy(ws, 'host.ts', version.hostFile);
-  copy(ws, 'node_modules/typescript', join(ROOT, 'node_modules', 'typescript'));
-  const scripts = { test: 'node --test' };
-  if (arm === 2) {
-    // git archive of the pinned commit: nothing of the owner's working tree, nothing from poly.
-    const into = join(ws, 'tools', 'polygraph');
-    mkdirSync(into, { recursive: true });
-    execFileSync('git', ['-C', POLYGRAPH.repo, 'archive', '--format=tar', '-o', join(into, 'polygraph.tar'), POLYGRAPH.commit, 'README.md', 'package.json', 'scripts', 'skills', 'polyrun/src', 'LICENSE']);
-    // A relative archive path: GNU tar reads "C:" in an absolute Windows path as a remote host.
-    execFileSync('tar', ['-xf', 'polygraph.tar'], { cwd: into });
-    rmSync(join(into, 'polygraph.tar'));
+  for (const s of workspaceSources(arm, version)) {
+    if (s.git) extractPolygraph(join(ws, s.to));
+    else if (s.edit) write(ws, s.to, s.edit(readFileSync(s.from, 'utf8')));
+    else copy(ws, s.to, s.from, s.filter);
   }
+  const scripts = { test: 'node --test' };
   if (arm === 3 || arm === 4) {
     const entry = arm === 3 ? 'src/system.poly' : 'src/system.ts';
-    for (const [dir, name] of [['poly-core', 'core'], ['poly-lang', 'lang'], ['poly-lower', 'lower'], ['poly-ref', 'ref'], ['poly-embed', 'embed'], ['poly-check', 'check']]) copyPolyPackage(ws, dir, name);
-    copy(ws, 'node_modules/@cognitive-fab/polygraph', join(ROOT, 'vendor', 'polygraph'));
-    copy(ws, 'node_modules/@cognitive-fab/sam-pattern', join(ROOT, 'vendor', 'sam-pattern'));
-    copy(ws, 'tools/adapter/generate.mjs', join(M3, 'adapter', 'generate.mjs'));
-    copy(ws, 'host.map.schema.json', join(M3, 'tasks', '_template', 'host.map.schema.json'));
-    write(ws, 'tools/poly/README.md', readFileSync(join(ROOT, 'README.md'), 'utf8'));
-    write(ws, 'tools/poly/docs/03-technical-spec.md', specWithoutPT13());
-    copy(ws, 'tools/poly/docs/04-semantics.md', join(ROOT, 'docs', '04-semantics.md'));
-    for (const e of POLY_EXAMPLES) copy(ws, `tools/poly/examples/${e}`, join(ROOT, 'examples', e));
     if (arm === 4) {
-      copy(ws, 'tools/poly/embed/index.d.ts', join(ROOT, 'packages', 'poly-embed', 'embed', 'index.d.ts'));
-      for (const e of EMBED_EXAMPLES) copy(ws, `tools/poly/examples/embedded/${e}`, join(ROOT, 'conformance', 'm2', 'embed', e));
       write(ws, 'tsconfig.json', JSON.stringify({
         compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, noEmit: true, types: [], paths: { '@cognitive-fab/poly/embed': ['./tools/poly/embed/index.d.ts'] } },
         include: ['src/*.ts'],

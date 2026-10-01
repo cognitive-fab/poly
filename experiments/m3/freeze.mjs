@@ -3,16 +3,23 @@
 // plan to record. A file changed after the freeze changes its part's digest, so a deviation cannot pass
 // unnoticed. The `toolchain` part (S100) covers what arms 2 to 4 run: poly's package sources (no build output),
 // the vendored engines and package-lock.json; freeze.json also records the git commit it was taken from.
+// The `manual` part (S114) is the snapshot of README, spec and semantics taken at the freeze commit 04c62e8 into
+// experiments/m3/manual/, which the runner copies from; the live docs/ are in no part. Every other file the runner
+// copies into a workspace is in a part too: `examples`, `toolchain build` (the packages' dist and TypeScript, which
+// the sources and the lock file only describe) and `arm 2 polygraph` (the files git archive gives at the pinned
+// commit). test/m3-manual.test.mjs checks the runner's list against the freeze.
 // This does not approve anything: a real run also needs experiments/m3/FROZEN, which the owner writes
 // on approval (runner/run.mjs).
 //
 // Usage: node experiments/m3/freeze.mjs [--check]   (--check compares with freeze.json and lists what changed)
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { M3, PRACTICE, taskIds, versions } from './lib/task.mjs';
+import { EMBED_EXAMPLES, MANUAL, POLYGRAPH, POLY_EXAMPLES, POLY_PACKAGES, extractPolygraph, notBuildInfo } from './runner/workspace.mjs';
 
 const ROOT = join(M3, '..', '..');
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -33,8 +40,19 @@ export function toolchainFiles(root = ROOT) {
   return [...sources(join(root, 'packages')), ...walk(join(root, 'vendor')), join(root, 'package-lock.json')];
 }
 
-/** The parts of the experiment and their files. */
-export function parts({ toolchainRoot = ROOT } = {}) {
+/** Arm 2's polygraph as git archive gives it at the pinned commit, each file named under `polygraph@<commit>/`. */
+function polygraphFiles() {
+  const into = mkdtempSync(join(tmpdir(), 'poly-freeze-polygraph-'));
+  try {
+    extractPolygraph(into);
+    return walk(into).map((f) => ({ as: `polygraph@${POLYGRAPH.commit}/${relative(into, f)}`, bytes: readFileSync(f) }));
+  } finally {
+    rmSync(into, { recursive: true, force: true });
+  }
+}
+
+/** The parts of the experiment and their files; `manualDir` reads the manual from another directory, as the test does with a copy. */
+export function parts({ toolchainRoot = ROOT, manualDir = MANUAL } = {}) {
   const out = {};
   // The ten tasks, and the practice tasks of the pilot runs.
   const practice = existsSync(PRACTICE) ? readdirSync(PRACTICE).filter((d) => /^P\d+$/.test(d)).sort() : [];
@@ -53,16 +71,21 @@ export function parts({ toolchainRoot = ROOT } = {}) {
   out['runner and prompts'] = [...walk(join(M3, 'runner')), ...walk(join(M3, 'prompts'))];
   out['analysis'] = walk(join(M3, 'analysis'));
   out['toolchain'] = toolchainFiles(toolchainRoot).map((f) => ({ file: f, as: relative(toolchainRoot, f) }));
+  // S114: the manual as of the freeze commit, named where it lives in the repository whatever directory it is read from.
+  out['manual'] = walk(manualDir).map((f) => ({ file: f, as: `experiments/m3/manual/${relative(manualDir, f)}` }));
+  out['examples'] = [...POLY_EXAMPLES.flatMap((e) => walk(join(ROOT, 'examples', e))), ...EMBED_EXAMPLES.map((e) => join(ROOT, 'conformance', 'm2', 'embed', e))];
+  out['toolchain build'] = [...POLY_PACKAGES.flatMap(([dir]) => walk(join(ROOT, 'packages', dir, 'dist')).filter(notBuildInfo)), ...walk(join(ROOT, 'node_modules', 'typescript'))];
+  out['arm 2 polygraph'] = polygraphFiles();
   return out;
 }
 
-/** The digests; `toolchainRoot` reads the toolchain part from another tree, as the test does with a copy. */
-export function manifest({ toolchainRoot = ROOT } = {}) {
+/** The digests; `toolchainRoot` and `manualDir` read those parts from elsewhere, as the tests do with copies. */
+export function manifest({ toolchainRoot = ROOT, manualDir = MANUAL } = {}) {
   const files = {};
   const digests = {};
-  for (const [part, list] of Object.entries(parts({ toolchainRoot }))) {
-    // A toolchain file is named by its path under its root, so a copy of the tree digests alike.
-    const entries = list.map((f) => (typeof f === 'string' ? [rel(f), sha(readFileSync(f))] : [f.as.split('\\').join('/'), sha(readFileSync(f.file))])).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  for (const [part, list] of Object.entries(parts({ toolchainRoot, manualDir }))) {
+    // A toolchain or manual file is named by its path under its root, so a copy of the tree digests alike.
+    const entries = list.map((f) => (typeof f === 'string' ? [rel(f), sha(readFileSync(f))] : [f.as.split('\\').join('/'), sha(f.bytes ?? readFileSync(f.file))])).sort((a, b) => (a[0] < b[0] ? -1 : 1));
     for (const [p, d] of entries) files[p] = d;
     digests[part] = sha(entries.map(([p, d]) => `${p} ${d}\n`).join(''));
   }

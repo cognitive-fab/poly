@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { M3, versions } from '../lib/task.mjs';
-import { deliveryFiles, listFiles, makeWorkspace, takeDelivery } from './workspace.mjs';
+import { changeSources, deliveryFiles, listFiles, makeWorkspace, takeDelivery } from './workspace.mjs';
 import { runTurn } from './agent.mjs';
 
 const sha = (t) => createHash('sha256').update(t).digest('hex');
@@ -62,8 +62,7 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
   let stopped = null;
   for (const v of vs) {
     if (v.n > 0) {
-      copyFileSync(v.hostFile, join(ws, 'host.ts'));
-      writeFileSync(join(ws, `CHANGE-${v.n}.md`), readFileSync(v.briefs[v.n], 'utf8'));
+      for (const s of changeSources(v)) copyFileSync(s.from, join(ws, s.to));
     }
     const prompt = promptOf(arm, v);
     if (stopped) { record.versions.push({ n: v.n, attempted: false, reason: `the run's ${stopped} was spent` }); continue; }
