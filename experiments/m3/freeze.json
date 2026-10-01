@@ -1,5 +1,5 @@
 {
-  "commit": "162fc442d380aea542f70217bb16e09248f7417b",
+  "commit": "c3dfa7fd091ec4cbbb26430377e02cf31f52c360",
   "parts": {
     "T1 v0": "599c12190596ca04ceb0a362147b3e699410afd2a7fdf8869a5df9564340bc82",
     "T1 v1": "6959d7b6c3c7dda1338a49e0b58e3fbcef15342b3a70ad4a83ace010b06157c3",
@@ -45,10 +45,10 @@
     "P1 v1": "0c2f87ea81498248a011faa1f72d90d9af0751b6929687ce57056ec0890740ab",
     "O1 prompt": "7b3997f818de199b84dd49d77eb87e472936a2b8fac9e85bb02f7845b6fc865a",
     "template": "2d43b4899af7aa533838116c9d9b3e6d19ac41c33daa39989800c83b7883a993",
-    "controls": "120afbeace3a1754dae68e077015565102ce911cdc607474968915f2c91b6574",
+    "controls": "531ed9b4c2adb0dea28123ec4e159f0ba143c7dfdac8184ab46ecac163ff69f5",
     "adapter": "56bff45dcf8729221f654cc5f84e7815fc84d249781505f58da325b10c8d961a",
-    "runner and prompts": "f5e9f3e9ccf60bf4e09460500ac9120e7bfe3a24fc371361cbc03c9968d0fe56",
-    "analysis": "de9bb54faa4c0f1653e55d6103be860d2498f1dc71a3c52ea5d0849785cf98ef",
+    "runner and prompts": "d1c6bff0844fce12ef039e9d347ace46dafd9bfb4c6f0b9784f6114c9657cd1e",
+    "analysis": "03d2a9264488b477738f6e66d3e1679b2436cd1ff304f9f79fd0a53e3a9b55b8",
     "toolchain": "246ec34ee8e2dc7f5dc9a742ea34163c54b6071e8950667df94f4a7d461ba6f4",
     "manual": "137da845784fe69b83f7aa3e1ee24e104585dd98f4f315b9e3863e15a976cc49",
     "examples": "facc8d422e048c6085ae5f7bc0c54929bfb86664d09660d0d74ada456d550fdc",
@@ -400,6 +400,7 @@
     "experiments/m3/tasks/_template/task.json": "5f7926d82cab8d1ff6c75cbb33ab652e83a5526b3d4ba7ce4ce29fa629dd5ec3",
     "experiments/m3/controls/o1-check.mjs": "403918c283e933d1b4ba5cc753a770c83841dd927caab5d89d821d5068f7df15",
     "experiments/m3/controls/run.mjs": "c6e77858aeab1d7735a0bb314c2a8e131e48d46819c3ff6e5f2ff8f363391804",
+    "experiments/m3/lib/environment.mjs": "01fedefda5d22595277f1dcd3b01f9b64e55af7956f0a862d1ae8d51aa5286c8",
     "experiments/m3/lib/o3.mjs": "d5ee7ee4a795940423264edf5d91ebd064394a21f98182f723e64663e3fe207a",
     "experiments/m3/lib/task.mjs": "e2585f9228e341203b77f287f93999dad7b9f99610abceda7b9f5486868e4c10",
     "experiments/m3/o3/generate.mjs": "90d409f9c44d8cc2ca75a87c326d16e7e4a1b3c982ce17ea6a5107f2f32445f9",
@@ -414,11 +415,11 @@
     "experiments/m3/runner/agent.mjs": "e268aa4e2dc2171e0c191318e866b9a67783701ea84656cebd5496e387278822",
     "experiments/m3/runner/dry-run.mjs": "bdc1eca781c8cae0c84e3434a0cfe409f32e058a87ac80540abcddfe77b941ae",
     "experiments/m3/runner/dry-run/t1-impl.ts": "d479d2ce23fa768c72694974006a113d33c910554dde98674ac2e256edf59f44",
-    "experiments/m3/runner/run.mjs": "315f8afaec197fb859b0a2b428d3668c3bfeb353664b4dc83de57ce2a5dad418",
+    "experiments/m3/runner/run.mjs": "5aabd24e4025a94061e865fc2c534dcfe08088832b682df6dce80676e3e53a04",
     "experiments/m3/runner/score-one.mjs": "c41730b564885d891c75df2ce6eb1f4cb85f937c3bddd29290d18a3aaff2a512",
     "experiments/m3/runner/score.mjs": "c32c7c0bf938b3b3737080a14d71bbc6764a50336ec68952b986ff0c2eb06e44",
     "experiments/m3/runner/workspace.mjs": "9752094c780865758bdacf877266d2eb6fc643ba419570818fbc5295c9c32011",
-    "experiments/m3/analysis/analyse.mjs": "ad1119a2274147fdc8d56324dfac208ecf6cbb0d2937c283d005d30c1a8e3a53",
+    "experiments/m3/analysis/analyse.mjs": "2a0ff374163eec4fe232b33625cb52e136ca53174f45817179b859e2d99ea8c7",
     "experiments/m3/analysis/stats.mjs": "f32bcb8ec58b3d54f6b2bb1def09060dcb49b674db6af4ce253514ed890bbb0d",
     "package-lock.json": "bc40fb3bfc82fefc113c8c3636f433c41e60741867125eee6068a8da05b375bd",
     "packages/poly-check/package.json": "9acf8a36f834fb2395367007dc5e35a39903ce927c0db7ef3ecb5c37f637341f",
@@ -795,5 +796,15 @@
     "polygraph@4949de4/skills/polynv/SKILL.md": "5a66f649bb4379cdf4b9622068a24d01428c812b832841acf1f09be9fc5f5017",
     "polygraph@4949de4/skills/polyvers/SKILL.md": "a62fad4028261e420752c38c78d1734757925cf2c9a3ca4fdab06c8dccd10536",
     "polygraph@4949de4/skills/workflow/SKILL.md": "9d13c728f28423f34290010cf0d5b389dc7de3c056f42caf889463963f46a3c7"
+  },
+  "environment": {
+    "node": "v24.12.0",
+    "claude": "2.1.286",
+    "model": "claude-opus-5-5",
+    "os": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "arch": "x64"
+    }
   }
 }

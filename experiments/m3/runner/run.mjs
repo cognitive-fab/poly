@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { M3, versions } from '../lib/task.mjs';
+import { currentEnvironment, environmentDiff, isExactModelId } from '../lib/environment.mjs';
 import { changeSources, deliveryFiles, listFiles, makeWorkspace, takeDelivery } from './workspace.mjs';
 import { runTurn } from './agent.mjs';
 
@@ -100,6 +101,18 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const agent = stub ? { kind: 'stub', turns: JSON.parse(readFileSync(stub, 'utf8')).turns } : { kind: 'claude' };
   // A real run spends money: a pilot runs only on a practice task (P1, ...) once the owner writes
   // experiments/m3/PILOT, and a run of T1 to T10 only once the owner approves the freeze and writes FROZEN.
+  // S116: a run, a pilot included, needs the environment freeze.json records, with the model given by its exact id.
+  if (!stub) {
+    const model = flag('model');
+    const recorded = JSON.parse(readFileSync(join(M3, 'freeze.json'), 'utf8')).environment;
+    const current = currentEnvironment({ model });
+    const differs = environmentDiff(recorded, current);
+    if (!isExactModelId(model) || differs.length) {
+      if (!isExactModelId(model)) console.error(`environment: the model must be an exact id, never an alias: ${model}`);
+      for (const k of differs) console.error(`environment differs from freeze.json in ${k}: recorded ${JSON.stringify(recorded?.[k])}, now ${JSON.stringify(current[k])}`);
+      process.exit(2);
+    }
+  }
   const practice = /^P\d+$/.test(task);
   const gate = practice ? 'PILOT' : 'FROZEN';
   if (!stub && !existsSync(join(M3, gate))) { console.error(practice ? 'a pilot run needs the owner\'s approval (experiments/m3/PILOT)' : 'a real run needs the freeze (experiments/m3/FROZEN), which the owner approves'); process.exit(2); }

@@ -13,6 +13,9 @@
 //   - tokens kept as their four parts, input, output, cache read and cache write; the measure is their sum, all
 //     tokens processed, and cost at list price is a secondary measure from a price table given with --prices (S99).
 //
+// Pre-registered with them (S115): the same comparisons and rules over the tasks no arm's material models (MODELLED),
+// both reported, and a win that holds only with the modelled tasks reported as such, never as a win.
+//
 // A task whose value is missing for an arm (no delivered run) is left out of that comparison, and the report says
 // so. Nothing is imputed.
 //
@@ -23,6 +26,31 @@ import { pathToFileURL } from 'node:url';
 import { holm, wilcoxonSignedRank } from './stats.mjs';
 
 export const COMPARISONS = [[3, 1], [3, 2], [4, 1], [4, 2], [4, 3]];
+
+/**
+ * Every worked example in the material an arm receives (S115), with the tasks whose family it models: the manual
+ * and examples of arms 3 and 4 (runner/workspace.mjs, as frozen) and arm 2's polygraph archive. Arm 1 receives
+ * TypeScript only. An example models a task when it has the task's domain and lifecycle, or its central mechanism
+ * (a payment effect and its completion, attempts up to a limit); fragments that show a format and no machine model
+ * nothing. plan-m3.md section 10 records the same list.
+ */
+export const MODELLED = [
+  { example: 'hello: the Gate', where: 'README; examples/hello', arms: [3, 4], tasks: [] },
+  { example: 'orders: the Order with its payment.charge effect', where: 'README; spec PT2.5, PT4.5, PT6, PT11, PT12, PT15', arms: [3, 4], tasks: ['T1', 'T3'] },
+  { example: 'checkout: Inventory, Order and two-buyers', where: 'README; spec PT7a, Appendix A', arms: [3, 4], tasks: ['T2', 'T4'] },
+  { example: 'runtime: the OutboxIntent', where: 'spec PT9.7; examples/evidence', arms: [3, 4], tasks: ['T3', 'T6'] },
+  { example: 'delivery: the Delivery protocol', where: 'spec PT9.8; examples/delivery', arms: [3, 4], tasks: [] },
+  { example: 'repo-hygiene: a gate policy', where: 'spec PT8', arms: [3, 4], tasks: [] },
+  { example: 'customer-brief: a workflow declaration', where: 'spec PT10', arms: [3, 4], tasks: [] },
+  { example: 'turnstile: the embedded turnstile', where: 'examples/embedded/turnstile.ts', arms: [4], tasks: [] },
+  { example: 'workshop: a Job with a charge effect, retries, a timer and a Drill child', where: 'examples/embedded/workshop.ts', arms: [4], tasks: ['T3', 'T6'] },
+  { example: 'Rocket Launcher: a SAM v2 strict-profile reducer', where: 'polygraph scripts/prompt_template_v2.txt', arms: [2], tasks: [] },
+  { example: 'push-locked-must-reject: a turnstile rejection invariant', where: 'polygraph README', arms: [2], tasks: [] },
+  { example: 'withTracing: a trace projection of a payment workflow', where: 'polygraph README', arms: [2], tasks: [] },
+];
+
+/** The tasks some arm's material models, sorted by number. */
+export const modelledTasks = (list = MODELLED) => [...new Set(list.flatMap((e) => e.tasks))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
 /** The four parts of a run's tokens, summed over its turns (S99). */
@@ -140,11 +168,28 @@ export function rules(table, defects) {
   return { escapedMean: { 1: esc(1), 2: esc(2), 3: s3, 4: s4 }, tokensMean: { 1: tok(1), 2: tok(2), 3: tok(3), 4: tok(4) }, win, surface, admittedRate: { 3: admitted(3), 4: admitted(4) }, stop, verdict };
 }
 
-export function analyse(records, prices) {
+/** The comparisons and rules over a set of records. */
+function primary(records, prices) {
   const table = perTask(records, prices);
   const defects = compare(table, 'escapedPerDelivered');
   const tokens = compare(table, 'tokensPerDelivered');
   return { table, comparisons: { escapedDefects: defects, tokens }, rules: rules(table, defects) };
+}
+
+/**
+ * The primary analysis over all tasks, and the sensitivity analysis (S115): the same comparison over the tasks no
+ * arm's material models. Both are reported. `reported` is what the experiment may claim: a win of an arm counts
+ * only when it holds in both; one that holds only with the modelled tasks is reported as such, never as a win.
+ */
+export function analyse(records, prices, { modelled = modelledTasks() } = {}) {
+  const all = primary(records, prices);
+  const left = records.filter((r) => !modelled.includes(r.task));
+  const sensitivity = { ...primary(left, prices), modelled: [...modelled], tasks: [...new Set(left.map((r) => r.task))].sort() };
+  const win = {};
+  for (const p of [3, 4]) win[p] = !all.rules.win[p].win ? 'no win' : sensitivity.rules.win[p].win ? 'win' : 'only with the modelled tasks';
+  const values = Object.values(win);
+  const verdict = all.rules.verdict !== 'win' ? all.rules.verdict : values.includes('win') ? 'win' : 'win only with the modelled tasks';
+  return { ...all, sensitivity, reported: { verdict, win } };
 }
 
 /** Every scored run record under a directory. */
@@ -159,6 +204,10 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const a = analyse(loadRecords(dir), p > 0 ? JSON.parse(readFileSync(process.argv[p + 1], 'utf8')) : undefined);
   const i = process.argv.indexOf('--json');
   if (i > 0) writeFileSync(process.argv[i + 1], JSON.stringify(a, null, 2) + '\n');
-  for (const c of a.comparisons.escapedDefects) console.log(`escaped defects, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)}, Holm ${c.adjusted.toFixed(4)}${c.rejected ? ' (significant)' : ''}`);
-  console.log(`verdict: ${a.rules.verdict}; surface: ${a.rules.surface}; win: arm 3 ${JSON.stringify(a.rules.win[3])}, arm 4 ${JSON.stringify(a.rules.win[4])}; stop: ${a.rules.stop}`);
+  for (const [name, x] of [['all tasks', a], [`without the modelled tasks ${a.sensitivity.modelled.join(', ')}`, a.sensitivity]]) {
+    console.log(`${name}:`);
+    for (const c of x.comparisons.escapedDefects) console.log(`  escaped defects, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)}, Holm ${c.adjusted.toFixed(4)}${c.rejected ? ' (significant)' : ''}`);
+    console.log(`  verdict: ${x.rules.verdict}; surface: ${x.rules.surface}; win: arm 3 ${JSON.stringify(x.rules.win[3])}, arm 4 ${JSON.stringify(x.rules.win[4])}; stop: ${x.rules.stop}`);
+  }
+  console.log(`reported (S115): ${a.reported.verdict}; arm 3 ${a.reported.win[3]}, arm 4 ${a.reported.win[4]}`);
 }

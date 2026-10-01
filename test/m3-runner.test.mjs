@@ -139,10 +139,12 @@ test('the CLI turn: headless, bare, the arm\'s tools only, and resumed for a cha
 });
 
 test('a real run is refused until the freeze is approved, and a pilot until the owner approves it', () => {
-  const r = spawnSync(process.execPath, [join(M3, 'runner', 'run.mjs'), '--arm', '1', '--task', 'T1', '--model', 'm', '--tokens', '1', '--wall', '1', '--out', join(tmpdir(), 'poly-m3-refused')], { encoding: 'utf8' });
+  // The model the freeze records, so the environment check passes and the gate is what refuses (S116).
+  const model = JSON.parse(readFileSync(join(M3, 'freeze.json'), 'utf8')).environment.model;
+  const r = spawnSync(process.execPath, [join(M3, 'runner', 'run.mjs'), '--arm', '1', '--task', 'T1', '--model', model, '--tokens', '1', '--wall', '1', '--out', join(tmpdir(), 'poly-m3-refused')], { encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /needs the freeze/);
-  const p = spawnSync(process.execPath, [join(M3, 'runner', 'run.mjs'), '--arm', '1', '--task', 'P1', '--model', 'm', '--tokens', '1', '--wall', '1', '--out', join(tmpdir(), 'poly-m3-refused')], { encoding: 'utf8' });
+  const p = spawnSync(process.execPath, [join(M3, 'runner', 'run.mjs'), '--arm', '1', '--task', 'P1', '--model', model, '--tokens', '1', '--wall', '1', '--out', join(tmpdir(), 'poly-m3-refused')], { encoding: 'utf8' });
   assert.equal(p.status, 2);
   assert.match(p.stderr, /pilot run needs/);
 });

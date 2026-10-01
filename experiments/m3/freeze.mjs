@@ -11,7 +11,9 @@
 // This does not approve anything: a real run also needs experiments/m3/FROZEN, which the owner writes
 // on approval (runner/run.mjs).
 //
-// Usage: node experiments/m3/freeze.mjs [--check]   (--check compares with freeze.json and lists what changed)
+// freeze.json also records the environment every arm shares (S116, lib/environment.mjs), which the runner checks.
+//
+// Usage: node experiments/m3/freeze.mjs --model <exact id> | --check   (--check compares with freeze.json and lists what changed)
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -19,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { M3, PRACTICE, taskIds, versions } from './lib/task.mjs';
+import { currentEnvironment, environmentDiff, isExactModelId } from './lib/environment.mjs';
 import { EMBED_EXAMPLES, MANUAL, POLYGRAPH, POLY_EXAMPLES, POLY_PACKAGES, extractPolygraph, notBuildInfo } from './runner/workspace.mjs';
 
 const ROOT = join(M3, '..', '..');
@@ -103,11 +106,17 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   if (process.argv.includes('--check')) {
     const old = JSON.parse(readFileSync(file, 'utf8'));
     const changed = Object.keys({ ...old.files, ...m.files }).filter((f) => old.files[f] !== m.files[f]).sort();
+    // S116: the model is the one recorded, since a check runs no agent; the rest is this machine's.
+    const env = environmentDiff(old.environment, currentEnvironment({ model: old.environment?.model }));
     for (const p of changedParts(old, m)) console.log(`part changed since the freeze: ${p}`);
     for (const f of changed) console.log(`changed since the freeze: ${f}`);
-    process.exitCode = changed.length ? 1 : 0;
+    for (const k of env) console.log(`environment changed since the freeze: ${k}`);
+    process.exitCode = changed.length || env.length ? 1 : 0;
   } else {
-    writeFileSync(file, JSON.stringify(m, null, 2) + '\n');
+    const i = process.argv.indexOf('--model');
+    const model = i > 0 ? process.argv[i + 1] : undefined;
+    if (!isExactModelId(model)) { console.error('usage: freeze.mjs --model <exact model id, never an alias> | --check'); process.exit(64); }
+    writeFileSync(file, JSON.stringify({ ...m, environment: currentEnvironment({ model }) }, null, 2) + '\n');
     for (const [p, d] of Object.entries(m.parts)) console.log(`| ${p} | \`${d.slice(0, 16)}\` |`);
   }
 }

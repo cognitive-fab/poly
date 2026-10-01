@@ -134,7 +134,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 **Step 8 is done.** `experiments/m3/analysis/analyse.mjs` computes PT13's measures per arm and task, the five escaped-defect comparisons by the exact Wilcoxon signed-rank test with Holm's correction (tokens as a second family), and the win (S96), surface and stop rules; a task with no delivered run for an arm is left out of that comparison and listed. `stats.mjs` is tested on known values, and `test/m3-analysis.test.mjs` on synthetic records whose answer is known: a clear win, a reduction that is not significant, a win denied by tokens, a null result, the surface decision each way, a stop, a left-out task, and the four token parts with their cost.
 
-**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 739 files of the experiment (364; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`162fc44`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
+**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 740 files of the experiment (365; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`c3dfa7f`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
 
 | Part | Digest |
 |---|---|
@@ -182,10 +182,10 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | P1 v1 | `0c2f87ea81498248` |
 | O1 prompt | `7b3997f818de199b` |
 | template | `2d43b4899af7aa53` |
-| controls | `120afbeace3a1754` |
+| controls | `531ed9b4c2adb0de` |
 | adapter | `56bff45dcf872922` |
-| runner and prompts | `d853a135b601c878` |
-| analysis | `de9bb54faa4c0f16` |
+| runner and prompts | `d1c6bff0844fce12` |
+| analysis | `03d2a9264488b477` |
 | toolchain (S100) | `246ec34ee8e2dc7f` |
 | manual (S114) | `137da845784fe69b` |
 | examples (S114) | `facc8d422e048c60` |
@@ -193,6 +193,27 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | arm 2 polygraph (S114) | `1d33d1fa2fb7cff5` |
 
 *What the runner copies into a workspace (S114).* `workspaceSources` and `changeSources` in `runner/workspace.mjs` list every file, and `makeWorkspace` and `run.mjs` copy nothing else; `test/m3-manual.test.mjs` checks, for every task, version and arm, that each one is in a part with the digest it is copied with. Every arm gets `BRIEF.md` and `host.ts` (the task's part), `CHANGE-n.md` and the new `host.ts` at each change (the version's part) and `node_modules/typescript` (toolchain build). Arm 2 gets polygraph by `git archive` at `4949de4` (arm 2 polygraph). Arms 3 and 4 get each package's `package.json` (toolchain) and `dist` without `.tsbuildinfo` (toolchain build), `vendor/polygraph` and `vendor/sam-pattern` (toolchain), `adapter/generate.mjs` (adapter), `host.map.schema.json` (template), the manual from `experiments/m3/manual/`, the spec with PT13 cut on the way (manual), and `examples/hello`, `delivery` and `evidence` (examples). Arm 4 also gets `packages/poly-embed/embed/index.d.ts` (toolchain) and `conformance/m2/embed/turnstile.ts` and `workshop.ts` (examples). The runner writes `package.json`, and `tsconfig.json` for arm 4, from its own code (runner and prompts). Before S114 four groups were outside every part: the manual, read live from `docs/`; the examples; the built `dist` and TypeScript, which the sources and the lock file describe but do not pin; and arm 2's archive, pinned only by its commit. A `.tsbuildinfo` differs between a clean and an incremental build of the same sources (measured), and nothing in a workspace reads it, so the runner no longer copies it. `--check` reports no change after a clean rebuild of every package.
+
+*Worked examples and the tasks they model (S115).* The manual is not edited. Every worked example in the material an arm receives is listed below with the tasks whose family it models: the same domain and lifecycle, or the task's central mechanism (a payment effect and its completion, attempts up to a limit). Fragments that show only a format (the project file, the diagnostic JSON, the verdict line, the host API, the ledger event) model nothing. Arm 1 receives TypeScript and the brief only. The list is `MODELLED` in `analysis/analyse.mjs`, and `test/m3-sensitivity.test.mjs` checks that this table names every entry.
+
+| Example | Where | Arms | Tasks it models |
+|---|---|---|---|
+| hello: the Gate | README; `examples/hello` | 3, 4 | none |
+| orders: the Order with its payment.charge effect | README; spec PT2.5, PT4.5, PT6, PT11, PT12, PT15 | 3, 4 | T1 (the order lifecycle); T3 (a payment effect completed ok or failed) |
+| checkout: Inventory, Order and two-buyers | README; spec PT7a, Appendix A | 3, 4 | T2 and T4 (an order and an inventory by messages, the optimistic race and its fix) |
+| runtime: the OutboxIntent | spec PT9.7; `examples/evidence` | 3, 4 | T3 and T6 (attempts up to 3, then dead or failed) |
+| delivery: the Delivery protocol | spec PT9.8; `examples/delivery` | 3, 4 | none (the transport, not a task) |
+| repo-hygiene: a gate policy | spec PT8 | 3, 4 | none |
+| customer-brief: a workflow declaration | spec PT10 | 3, 4 | none (a tool workflow, not a run's status) |
+| turnstile: the embedded turnstile | `examples/embedded/turnstile.ts` | 4 | none |
+| workshop: a Job with a charge effect, retries, a timer and a Drill child | `examples/embedded/workshop.ts` | 4 | T3 and T6 (a charge with retries and a timeout; tries up to a limit) |
+| Rocket Launcher: a SAM v2 strict-profile reducer | polygraph `scripts/prompt_template_v2.txt` | 2 | none |
+| push-locked-must-reject: a turnstile rejection invariant | polygraph README | 2 | none |
+| withTracing: a trace projection of a payment workflow | polygraph README | 2 | none (a projection of two fields, no machine) |
+
+The modelled tasks are **T1, T2, T3, T4 and T6**, all from material only arms 3 and 4 receive. The polygraph README names its examples (the turnstile, the cart checkout, etcd raft), but the archive does not include them. The tasks left for the sensitivity analysis are **T5, T7, T8, T9 and T10**. `analyse.mjs` reports the primary comparison over all ten tasks and the same comparison over those five, and `reported` claims a win for an arm only when it holds in both; a win that holds only with the modelled tasks is reported as `win only with the modelled tasks`. One consequence needs the owner's ruling: over five tasks the smallest two-sided exact p of the signed-rank test is 2/32 = 0.0625, so the sensitivity comparison can never reject at 0.05, even before Holm. As pre-registered, every win would be reported as holding only with the modelled tasks. Over the five comparisons with Holm, a win needs at least eight tasks (5 × 2/256 = 0.039); seven are not enough (5 × 2/128 = 0.078). The test records this as measured.
+
+*The environment (S116).* `freeze.json` records the environment every arm shares: Node `v24.12.0`, the claude CLI `2.1.286`, the model `claude-opus-5-5` (the exact id passed to the CLI, the one proposed below and still to be confirmed) and the operating system (`win32`, release `10.0.26200`, `x64`). The runner refuses a run, pilots included, when any of them differs from the record or the model is not an exact id, and `--check` reports any change of the environment. `freeze.mjs` now needs `--model <exact id>` to write the freeze.
 
 *The proposed budget.* Each run (base brief and three changes, one session) gets **30,000,000 tokens**, counted as all tokens processed (S99), and **3 hours** of wall time, with `--max-budget-usd 60` as the CLI's own cap. The dry run's tokens are scripted, so they say nothing about real use, and the budget cannot be computed from them as section 8 first planned. The figures above are a ceiling for a session that reads its toolchain's manual, writes and tests a small system, and takes three changes; the pilots are there to replace them with measured ones.
 
