@@ -26,6 +26,26 @@ M2 is closed. These rulings settle what the experiment needs before any run. PT1
 
 Steps 1 and 2 can start. The task set starts after S90 to S92 are reflected in the task template.
 
+## Rulings on the frozen set (S94 to S99), and the next steps
+
+| Issue | Ruling |
+|---|---|
+| **S94** Multi-machine briefs name their messages and effects | **Accepted.** Every arm gets the same brief, so naming the messages helps all four equally. |
+| **S95** Effects and timers | **Accepted as applied.** T1 (`payment.charge`) and T3 (`card.authorize`) have effects, through the effect port every arm shares (`pendingEffects`, `completeEffect`). Timers stay out of the task set, for the reason the plan gives; the report lists it as a limitation. |
+| **S96** What a win requires | **Accepted.** Both the 30% reduction and a Holm-corrected p below 0.05 against arms 1 and 2. A reduction without significance is reported as it is, never as a win. |
+| **S97** Reference traces | **Accepted.** One trace per transition in every version, and every mutant re-verified against them. |
+| **S98** T9 limited to one election round | **Accepted,** as the brief states. |
+| **S99** Tokens | **Accepted.** Input, output, cache-read and cache-write tokens are recorded separately; their sum is the primary measure, and cost at list price is secondary. |
+
+**An observation for the report, not a change to the frozen set.** T10's defect (a revocation overtaking its grant, leaving a client holding an expired lease) was found by O2, not by poly. A configuration invariant cannot express it. A liveness property such as "a revoked lease leads to the client not holding it" could have, and T2's references carry liveness properties while T10's do not. The report records that poly's checks find what the properties written for them say, and this case is listed with T2 and T7 as one where checking the reference changed the design. A `quiescent` predicate for configuration invariants ("no message in transit") is a candidate for after M3.
+
+**Order of the next steps.**
+
+1. The O1 session (mine), then control 4. Nothing else runs until control 4 passes on all 40 versions.
+2. The four pilot runs on P1 (`experiments/m3/PILOT`), one per arm. They replace the cost assumptions with measured token counts and set the per-run budget.
+3. The budget decision, from the pilots' numbers: the per-run token cap, the wall-time limit and the total spend. If the total is too high, the first lever is three runs per task per arm instead of five (120 runs); the model is not changed, because the question is about the model agents use.
+4. `experiments/m3/FROZEN`, after `freeze.mjs --check` reports no change.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
