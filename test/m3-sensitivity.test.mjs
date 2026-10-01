@@ -39,40 +39,53 @@ test('S115: every worked example is listed with the arms that receive it, and th
   for (const e of MODELLED) assert.ok(plan.includes(e.example), `plan-m3.md does not list ${e.example}`);
 });
 
-test('S115: a win carried by the modelled tasks is reported as a win only with the modelled tasks, never as a win', () => {
-  // Arm 3 is better on every task: by far on the modelled ones, by 10% on the others. Over all ten tasks the mean
-  // drops by more than 30% and every difference has one sign; over the five unmodelled tasks the drop is 10%.
+
+// S117: significance is decided once, by the primary comparison over all ten tasks (S96). On the unmodelled tasks the
+// check is an effect check: the arm's mean escaped defects is at least 30% below each comparator's (arms 1 and 2),
+// or the win is reported as holding only with the modelled tasks. The subset's p is descriptive, never a gate.
+
+test('S117: a win that holds on both, all tasks and the unmodelled ones, is reported as a win', () => {
+  const a = analyse(records((arm) => ({ escaped: arm === 3 ? 2 : 10, tokens: 100_000 })));
+  assert.equal(a.rules.verdict, 'win');
+  assert.deepEqual(a.sensitivity.holds, { 3: true, 4: false });
+  assert.equal(a.reported.verdict, 'win');
+  assert.deepEqual(a.reported.win, { 3: 'win', 4: 'no win' });
+  // The subset's p is reported as descriptive, with the note that five tasks cannot reach 0.05.
+  assert.equal(a.sensitivity.descriptive, true);
+  assert.match(a.sensitivity.note, /5 tasks.*0\.0625.*cannot reach 0\.05/);
+});
+
+test('S117: a win carried by the modelled tasks only is reported as a win only with the modelled tasks, never as a win', () => {
+  // Arm 3 is far better on the modelled tasks and 10% better on the others: the primary comparison wins, and the
+  // unmodelled tasks fall short of the 30% reduction.
   const big = new Set(modelledTasks());
-  const a = analyse(records((arm, t) => ({ escaped: arm === 3 ? (big.has(t) ? 1 : 9) : (big.has(t) ? 10 : 10), tokens: 100_000 })));
+  const a = analyse(records((arm, t) => ({ escaped: arm === 3 ? (big.has(t) ? 1 : 9) : 10, tokens: 100_000 })));
   assert.equal(a.rules.verdict, 'win');
   assert.deepEqual(a.sensitivity.tasks, ['T10', 'T5', 'T7', 'T8', 'T9']);
-  assert.equal(a.sensitivity.rules.win[3].effect, false);
-  assert.equal(a.sensitivity.rules.verdict, 'between');
+  assert.deepEqual(a.sensitivity.holds, { 3: false, 4: false });
   assert.equal(a.reported.verdict, 'win only with the modelled tasks');
   assert.deepEqual(a.reported.win, { 3: 'only with the modelled tasks', 4: 'no win' });
 });
 
-test('S115: a win that holds without the modelled tasks is reported as a win', () => {
-  // With two modelled tasks, eight are left: enough for the exact test to reject after Holm (5 x 2/256 < 0.05).
-  const a = analyse(records((arm) => ({ escaped: arm === 3 ? 2 : 10, tokens: 100_000 })), undefined, { modelled: ['T1', 'T2'] });
-  assert.equal(a.sensitivity.tasks.length, 8);
-  assert.equal(a.rules.verdict, 'win');
-  assert.equal(a.sensitivity.rules.verdict, 'win');
-  assert.equal(a.reported.verdict, 'win');
-  assert.deepEqual(a.reported.win, { 3: 'win', 4: 'no win' });
+test('S117: a reduction on the unmodelled tasks just under 30% does not hold, and one of exactly 30% does', () => {
+  const big = new Set(modelledTasks());
+  // 71 against 100 is a 29% reduction; 70 against 100 is 30%.
+  for (const [subset, holds] of [[71, false], [70, true]]) {
+    const a = analyse(records((arm, t) => ({ escaped: arm === 3 ? (big.has(t) ? 1 : subset) : 100, tokens: 100_000 })));
+    assert.equal(a.rules.verdict, 'win', `subset ${subset}`);
+    assert.equal(a.sensitivity.holds[3], holds, `subset ${subset}`);
+    assert.equal(a.reported.verdict, holds ? 'win' : 'win only with the modelled tasks', `subset ${subset}`);
+  }
 });
 
-test('S115: with the five unmodelled tasks of the plan, the sensitivity comparison cannot reject (measured, for the owner)', () => {
-  // Arm 3 is better on every task by the same wide margin: the primary analysis wins; over five tasks the smallest
-  // two-sided exact p is 2/32 = 0.0625, so the sensitivity comparison never reaches 0.05, even before Holm.
+test('S115: with the five unmodelled tasks of the plan, the subset comparison cannot reject (documentation)', () => {
+  // Over five tasks the smallest two-sided exact p is 2/32 = 0.0625, so the subset never reaches 0.05, even before
+  // Holm: why S117 makes it an effect check.
   const a = analyse(records((arm) => ({ escaped: arm === 3 ? 2 : 10, tokens: 100_000 })));
-  assert.equal(a.rules.verdict, 'win');
   const c31 = a.sensitivity.comparisons.escapedDefects.find((c) => c.arms[0] === 3 && c.arms[1] === 1);
   assert.equal(c31.tasks, 5);
   assert.equal(c31.p, 2 / 32);
-  assert.equal(a.sensitivity.rules.win[3].effect, true);
   assert.equal(a.sensitivity.rules.win[3].significant, false);
-  assert.equal(a.reported.verdict, 'win only with the modelled tasks');
 });
 
 test('S115: a stop or a result between is reported unchanged', () => {

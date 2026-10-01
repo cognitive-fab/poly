@@ -1,5 +1,5 @@
 {
-  "commit": "c3dfa7fd091ec4cbbb26430377e02cf31f52c360",
+  "commit": "ce7cdc1ccd4976940ebf59f26feac52a4519426b",
   "parts": {
     "T1 v0": "599c12190596ca04ceb0a362147b3e699410afd2a7fdf8869a5df9564340bc82",
     "T1 v1": "6959d7b6c3c7dda1338a49e0b58e3fbcef15342b3a70ad4a83ace010b06157c3",
@@ -48,7 +48,7 @@
     "controls": "531ed9b4c2adb0dea28123ec4e159f0ba143c7dfdac8184ab46ecac163ff69f5",
     "adapter": "56bff45dcf8729221f654cc5f84e7815fc84d249781505f58da325b10c8d961a",
     "runner and prompts": "d1c6bff0844fce12ef039e9d347ace46dafd9bfb4c6f0b9784f6114c9657cd1e",
-    "analysis": "03d2a9264488b477738f6e66d3e1679b2436cd1ff304f9f79fd0a53e3a9b55b8",
+    "analysis": "07eed61ee87a20d7decb73869f6762442c8d1d8ae93d11b7fe6c7b4ebbbf0266",
     "toolchain": "246ec34ee8e2dc7f5dc9a742ea34163c54b6071e8950667df94f4a7d461ba6f4",
     "manual": "137da845784fe69b83f7aa3e1ee24e104585dd98f4f315b9e3863e15a976cc49",
     "examples": "facc8d422e048c6085ae5f7bc0c54929bfb86664d09660d0d74ada456d550fdc",
@@ -419,7 +419,7 @@
     "experiments/m3/runner/score-one.mjs": "c41730b564885d891c75df2ce6eb1f4cb85f937c3bddd29290d18a3aaff2a512",
     "experiments/m3/runner/score.mjs": "c32c7c0bf938b3b3737080a14d71bbc6764a50336ec68952b986ff0c2eb06e44",
     "experiments/m3/runner/workspace.mjs": "9752094c780865758bdacf877266d2eb6fc643ba419570818fbc5295c9c32011",
-    "experiments/m3/analysis/analyse.mjs": "2a0ff374163eec4fe232b33625cb52e136ca53174f45817179b859e2d99ea8c7",
+    "experiments/m3/analysis/analyse.mjs": "d3e2c17a0c5a7c81ccd9ebeb420568396053af802464098434db8830344c3c44",
     "experiments/m3/analysis/stats.mjs": "f32bcb8ec58b3d54f6b2bb1def09060dcb49b674db6af4ce253514ed890bbb0d",
     "package-lock.json": "bc40fb3bfc82fefc113c8c3636f433c41e60741867125eee6068a8da05b375bd",
     "packages/poly-check/package.json": "9acf8a36f834fb2395367007dc5e35a39903ce927c0db7ef3ecb5c37f637341f",

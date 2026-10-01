@@ -13,8 +13,10 @@
 //   - tokens kept as their four parts, input, output, cache read and cache write; the measure is their sum, all
 //     tokens processed, and cost at list price is a secondary measure from a price table given with --prices (S99).
 //
-// Pre-registered with them (S115): the same comparisons and rules over the tasks no arm's material models (MODELLED),
-// both reported, and a win that holds only with the modelled tasks reported as such, never as a win.
+// Pre-registered with them (S115, S117): a sensitivity analysis over the tasks no arm's material models (MODELLED).
+// Significance is decided once, over all ten tasks; on the unmodelled tasks a primary win must also show the 30%
+// reduction against arms 1 and 2, or it is reported as a win only with the modelled tasks, never as a win. The
+// subset's p-values are descriptive: five tasks cannot reach 0.05.
 //
 // A task whose value is missing for an arm (no delivered run) is left out of that comparison, and the report says
 // so. Nothing is imputed.
@@ -177,16 +179,28 @@ function primary(records, prices) {
 }
 
 /**
- * The primary analysis over all tasks, and the sensitivity analysis (S115): the same comparison over the tasks no
- * arm's material models. Both are reported. `reported` is what the experiment may claim: a win of an arm counts
- * only when it holds in both; one that holds only with the modelled tasks is reported as such, never as a win.
+ * The primary analysis over all tasks, and the sensitivity analysis (S115) over the tasks no arm's material models.
+ * Both are reported. Significance is decided once, by the primary comparison (S96, S117). On the unmodelled tasks
+ * the check is an effect check: an arm's mean escaped defects per delivered task is at least 30% below that of
+ * arms 1 and 2 (`holds`). The subset's comparisons and p-values are reported as descriptive, never as a gate: over
+ * five tasks the smallest exact two-sided p is 2/32, which cannot reach 0.05. `reported` is what the experiment may
+ * claim: a primary win counts only when the effect holds on the unmodelled tasks; otherwise it is reported as a
+ * win only with the modelled tasks, never as a win.
  */
 export function analyse(records, prices, { modelled = modelledTasks() } = {}) {
   const all = primary(records, prices);
   const left = records.filter((r) => !modelled.includes(r.task));
-  const sensitivity = { ...primary(left, prices), modelled: [...modelled], tasks: [...new Set(left.map((r) => r.task))].sort() };
+  const sub = primary(left, prices);
+  const tasks = [...new Set(left.map((r) => r.task))].sort();
+  const minP = 2 / 2 ** tasks.length;
+  const esc = sub.rules.escapedMean;
+  // At least 30% below, as 10 x arm <= 7 x comparator: 0.7 x 100 is not 70 in floating point.
+  const below = (p, o) => esc[p] != null && esc[o] != null && esc[o] > 0 && 10 * esc[p] <= 7 * esc[o];
+  const holds = { 3: below(3, 1) && below(3, 2), 4: below(4, 1) && below(4, 2) };
+  const note = `descriptive only (S117): over ${tasks.length} tasks the smallest exact two-sided p is ${minP.toFixed(4)}` + (minP >= 0.05 ? ', so it cannot reach 0.05' : '');
+  const sensitivity = { ...sub, modelled: [...modelled], tasks, holds, descriptive: true, note };
   const win = {};
-  for (const p of [3, 4]) win[p] = !all.rules.win[p].win ? 'no win' : sensitivity.rules.win[p].win ? 'win' : 'only with the modelled tasks';
+  for (const p of [3, 4]) win[p] = !all.rules.win[p].win ? 'no win' : holds[p] ? 'win' : 'only with the modelled tasks';
   const values = Object.values(win);
   const verdict = all.rules.verdict !== 'win' ? all.rules.verdict : values.includes('win') ? 'win' : 'win only with the modelled tasks';
   return { ...all, sensitivity, reported: { verdict, win } };
@@ -204,10 +218,13 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const a = analyse(loadRecords(dir), p > 0 ? JSON.parse(readFileSync(process.argv[p + 1], 'utf8')) : undefined);
   const i = process.argv.indexOf('--json');
   if (i > 0) writeFileSync(process.argv[i + 1], JSON.stringify(a, null, 2) + '\n');
-  for (const [name, x] of [['all tasks', a], [`without the modelled tasks ${a.sensitivity.modelled.join(', ')}`, a.sensitivity]]) {
-    console.log(`${name}:`);
-    for (const c of x.comparisons.escapedDefects) console.log(`  escaped defects, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)}, Holm ${c.adjusted.toFixed(4)}${c.rejected ? ' (significant)' : ''}`);
-    console.log(`  verdict: ${x.rules.verdict}; surface: ${x.rules.surface}; win: arm 3 ${JSON.stringify(x.rules.win[3])}, arm 4 ${JSON.stringify(x.rules.win[4])}; stop: ${x.rules.stop}`);
-  }
-  console.log(`reported (S115): ${a.reported.verdict}; arm 3 ${a.reported.win[3]}, arm 4 ${a.reported.win[4]}`);
+  console.log('all tasks:');
+  for (const c of a.comparisons.escapedDefects) console.log(`  escaped defects, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)}, Holm ${c.adjusted.toFixed(4)}${c.rejected ? ' (significant)' : ''}`);
+  console.log(`  verdict: ${a.rules.verdict}; surface: ${a.rules.surface}; win: arm 3 ${JSON.stringify(a.rules.win[3])}, arm 4 ${JSON.stringify(a.rules.win[4])}; stop: ${a.rules.stop}`);
+  const s = a.sensitivity;
+  console.log(`without the modelled tasks ${s.modelled.join(', ')} (${s.tasks.join(', ')}):`);
+  for (const c of s.comparisons.escapedDefects) console.log(`  escaped defects, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)} (descriptive)`);
+  console.log(`  ${s.note}`);
+  console.log(`  at least 30% below arms 1 and 2 (S117): arm 3 ${s.holds[3]}, arm 4 ${s.holds[4]}`);
+  console.log(`reported (S115, S117): ${a.reported.verdict}; arm 3 ${a.reported.win[3]}, arm 4 ${a.reported.win[4]}`);
 }
