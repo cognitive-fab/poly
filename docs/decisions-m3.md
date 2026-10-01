@@ -46,6 +46,8 @@ Steps 1 and 2 can start. The task set starts after S90 to S92 are reflected in t
 3. The budget decision, from the pilots' numbers: the per-run token cap, the wall-time limit and the total spend. If the total is too high, the first lever is three runs per task per arm instead of five (120 runs); the model is not changed, because the question is about the model agents use.
 4. `experiments/m3/FROZEN`, after `freeze.mjs --check` reports no change.
 
+**S100 The toolchain is not in the freeze (found on review).** `freeze.mjs` digests the tasks, the O1 kit, the controls, the adapter, the runner, the prompts and the analysis. It does not digest the poly toolchain (`packages/`), the vendored engines (`vendor/`) or `package-lock.json`. Arms 2 to 4 run that toolchain, so a change to it after the freeze would change three arms without changing any digest. **Ruling:** add a part `toolchain` covering `packages/` (sources only, no build output), `vendor/` and `package-lock.json`, and record the git commit in `freeze.json`. Until M3's runs are finished, nothing under `packages/` or `vendor/` changes. Work that does not touch them (proposals, reviews, evidence scripts under `docs/`) may continue. Step 4 above waits on this part.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
