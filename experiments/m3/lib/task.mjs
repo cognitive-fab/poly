@@ -4,7 +4,8 @@
 // o2.mjs, explore.json and o3/. host.ts is the nearest one at or before the version, since a change gives a
 // new interface only when the interface changes. The brief an arm reads for version n is the base brief
 // followed by the deltas of changes 1 to n.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -12,6 +13,9 @@ import { generate } from '../adapter/generate.mjs';
 
 export const M3 = fileURLToPath(new URL('..', import.meta.url));
 export const TASKS = join(M3, 'tasks');
+/** Practice tasks (P1, ...) for pilot runs: outside the ten, never scored with them. */
+export const PRACTICE = join(M3, 'practice');
+const rootOf = (id) => join(/^P\d+$/.test(id) ? PRACTICE : TASKS, id);
 /** poly's vendored polyrun, by file URL, so an adapter generated outside the repository resolves it. */
 export const POLYRUN = pathToFileURL(join(M3, '..', '..', 'vendor', 'polygraph', 'polyrun', 'src', 'index.mjs')).href;
 
@@ -22,7 +26,7 @@ export function taskIds() {
 
 /** The versions of a task: [{ n, dir, hostFile, briefs }]. */
 export function versions(id) {
-  const root = join(TASKS, id);
+  const root = rootOf(id);
   const out = [];
   let hostFile = join(root, 'host.ts');
   const briefs = [join(root, 'brief.md')];
@@ -64,3 +68,9 @@ export async function adapterOf(version, which = 'reference') {
 }
 
 export const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
+
+/** A version's O3, stored gzipped (o3/traces.json.gz): the traces repeat their states, so the file packs well. */
+export const O3_FILE = 'traces.json.gz';
+export const o3Path = (version) => join(version.dir, 'o3', O3_FILE);
+export const readO3 = (version) => JSON.parse(gunzipSync(readFileSync(o3Path(version))).toString('utf8'));
+export const writeO3 = (version, o3) => { mkdirSync(join(version.dir, 'o3'), { recursive: true }); writeFileSync(o3Path(version), gzipSync(JSON.stringify(o3) + '\n', { level: 9 })); };

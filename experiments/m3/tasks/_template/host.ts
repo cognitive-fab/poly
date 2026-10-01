@@ -20,6 +20,20 @@ export interface Network {
   deliverAll(): Promise<void>;
 }
 
+/** An effect the system asked the outside world to carry out, not yet completed (S95). */
+export interface Effect {
+  id: string;
+  from: string;
+  kind: string;
+  data: Record<string, unknown>;
+}
+
+/** The effect port of a task with effects (S95): the effects pending, and the outside world's answer to one. */
+export interface Effects {
+  pendingEffects(): Promise<Effect[]>;
+  completeEffect(id: string, outcome: 'ok' | 'failed'): Promise<void>;
+}
+
 /** The outcome of a command: accepted, or refused with a reason the brief names. */
 export type Outcome = { ok: true } | { ok: false; reason: string };
 

@@ -17,13 +17,18 @@ const MODULE = join(ROOT, 'examples', 'checkout', 'checkout.poly');
 const MAP = JSON.parse(readFileSync(join(FX, 'host.map.json'), 'utf8'));
 
 let n = 0;
-async function build(map = MAP, module = MODULE) {
+// A host interface with a member named as the adapter's own __state.
+const RESERVED = join(BUILD, 'm3-adapter', 'reserved.host.ts');
+mkdirSync(join(BUILD, 'm3-adapter'), { recursive: true });
+writeFileSync(RESERVED, readFileSync(join(FX, 'host.ts'), 'utf8').replace('  stock(): Promise<{ onHand: number } | null>;', '  stock(): Promise<{ onHand: number } | null>;\n  __state(): Promise<unknown>;'));
+
+async function build(map = MAP, module = MODULE, hostFile = join(FX, 'host.ts')) {
   const out = join(BUILD, 'm3-adapter', String(++n));
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const mapFile = join(out, 'host.map.json');
   writeFileSync(mapFile, JSON.stringify(map));
-  const r = generate({ mapFile, hostFile: join(FX, 'host.ts'), moduleFile: module, out });
+  const r = generate({ mapFile, hostFile, moduleFile: module, out });
   return { ...r, out };
 }
 const host = async (out) => (await import(pathToFileURL(join(out, 'host.gen.ts')).href)).default();
@@ -32,7 +37,7 @@ test('M3-4: the adapter creates the inventory with the host and an order per pla
   const r = await build();
   assert.equal(r.errors, undefined, r.errors?.join('\n'));
   const h = await host(r.out);
-  t.after(() => h.close());
+  t.after(() => h.__dispose());
   assert.deepEqual(await h.stock(), { onHand: 1 });
   assert.equal(await h.order('o1'), null, 'no order before place');
   assert.deepEqual(await h.place('o1'), { ok: true });
@@ -49,7 +54,7 @@ test('M3-4: the adapter creates the inventory with the host and an order per pla
 test('M3-4: deliver takes one message by id, so a test chooses the arrival order', async (t) => {
   const r = await build();
   const h = await host(r.out);
-  t.after(() => h.close());
+  t.after(() => h.__dispose());
   await h.place('o1');
   await h.place('o2');
   // o2 is answered first, and takes the item.
@@ -70,7 +75,7 @@ test('M3-4: the adapter is generated from an embedded module as well', async (t)
   const r = await build(MAP, file);
   assert.equal(r.errors, undefined, r.errors?.join('\n'));
   const h = await host(r.out);
-  t.after(() => h.close());
+  t.after(() => h.__dispose());
   await h.place('o1');
   await h.deliverAll();
   assert.deepEqual(await h.order('o1'), { status: 'Done' });
@@ -91,14 +96,18 @@ const BROKEN = [
   ['an action parameter the map does not give', (m) => { m.methods.place.action = 'Available'; }, /Order\.Available takes 'n', which the map does not give/],
   ['a family used without its key', (m) => { delete m.queries.order.key; }, /queries\.order: 'order' is a family/],
   ['a map naming another module', (m) => { m.module = 'shop'; }, /module: the map names 'shop', and the module is 'checkout'/],
+  ['an instance named by an argument without its machine', (m) => { m.methods.place = { instance: '$arg:order', action: 'Place' }; }, /methods.place: an instance named by an argument needs "machine"/],
+  ['an instance named by an argument that is not one', (m) => { m.queries.stock.instance = '$arg:shelf'; m.queries.stock.machine = 'Inventory'; }, /queries.stock.instance: 'shelf' is not an argument of stock()/],
+  ['a machine given for a named instance', (m) => { m.queries.stock.machine = 'Inventory'; }, /queries.stock: "machine" goes only with an instance named by an argument/],
+  ['a Host member the adapter reserves', null, /the Host interface has a member '__state', which the adapter reserves/],
   ['a map driving the network API itself', (m) => { m.methods.deliver = { instance: 'inv', action: 'Query', params: { from: null } }; }, /'deliver' is the network API/],
 ];
 
 for (const [what, breakIt, message] of BROKEN) {
   test(`S90: ${what} is a failed build, and nothing is written`, async () => {
     const map = structuredClone(MAP);
-    breakIt(map);
-    const r = await build(map);
+    breakIt?.(map);
+    const r = await build(map, MODULE, breakIt ? join(FX, 'host.ts') : RESERVED);
     assert.ok(r.errors?.length, `${what}: the build did not fail`);
     assert.ok(r.errors.some((e) => message.test(e)), r.errors.join('\n'));
     assert.equal(existsSync(join(r.out, 'host.gen.ts')), false);

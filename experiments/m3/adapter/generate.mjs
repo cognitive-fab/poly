@@ -20,6 +20,9 @@ import { checkModule } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 
 const NETWORK = ['inFlight', 'deliver', 'deliverAll'];
+// The effect port (S95): the effects the system requested and has not had completed, and their completion.
+const EFFECTS = ['pendingEffects', 'completeEffect'];
+const ADAPTER = [...NETWORK, ...EFFECTS];
 const RETURNS = ['verdict', 'state', 'nothing'];
 const ARG = /^\$arg:([A-Za-z_$][\w$]*)$/;
 
@@ -68,6 +71,7 @@ export function validate(map, host, module) {
   if (errors.length) return errors;
   if (map.module !== module.name) errors.push(`module: the map names '${map.module}', and the module is '${module.name}'`);
   if (!host.found) errors.push('host.ts declares no interface Host');
+  for (const reserved of ['__dispose', '__state', '__snapshot', '__restore']) if (host.members.has(reserved)) errors.push(`host.ts: the Host interface has a member '${reserved}', which the adapter reserves`);
   const machines = new Map(module.decls.filter((d) => d.kind === 'Machine').map((d) => [d.name, d]));
   const typeDecl = (name) => module.decls.find((d) => (d.kind === 'EnumDecl' || d.kind === 'TypeDecl') && d.name === name);
   const instances = map.instances ?? {};
@@ -95,8 +99,19 @@ export function validate(map, host, module) {
     }
   }
 
-  // The instance a method or query targets: a named instance, or a family with the argument that keys it.
+  // The instance a method or query targets: a named instance, a family with the argument that keys it, or, as
+  // "$arg:<argument>" with "machine", whichever instance created with the host the argument names.
   const target = (spec, where, params) => {
+    const byArg = typeof spec.instance === 'string' ? ARG.exec(spec.instance) : null;
+    if (byArg) {
+      if (params && !params.includes(byArg[1])) errors.push(`${where}.instance: '${byArg[1]}' is not an argument of ${where.split('.')[1]}(${params.join(', ')})`);
+      if (spec.key !== undefined) errors.push(`${where}: an instance named by an argument takes no key`);
+      const m = machines.get(spec.machine);
+      if (!m) { errors.push(`${where}: an instance named by an argument needs "machine", a machine of module ${module.name}${spec.machine ? `, not '${spec.machine}'` : ''}`); return null; }
+      if (!Object.values(instances).some((x) => x.machine === spec.machine && x.createdBy === undefined)) errors.push(`${where}: no instance of ${spec.machine} is created with the host`);
+      return m;
+    }
+    if (spec.machine !== undefined) errors.push(`${where}: "machine" goes only with an instance named by an argument`);
     const inst = instances[spec.instance];
     if (!inst) { errors.push(`${where}: no instance or family '${spec.instance}' in instances`); return null; }
     const keyed = inst.createdBy !== undefined;
@@ -112,10 +127,11 @@ export function validate(map, host, module) {
 
   for (const [name, spec] of Object.entries(methods)) {
     const where = `methods.${name}`;
-    if (!keysOnly(spec, ['instance', 'key', 'action', 'params', 'returns'], where, errors)) continue;
+    if (!keysOnly(spec, ['instance', 'machine', 'key', 'action', 'params', 'returns'], where, errors)) continue;
     const params = host.members.get(name);
     if (!params) errors.push(`${where}: the Host interface has no method '${name}'`);
     if (NETWORK.includes(name)) errors.push(`${where}: '${name}' is the network API, which the adapter implements itself (S91)`);
+    if (EFFECTS.includes(name)) errors.push(`${where}: '${name}' is the effect port, which the adapter implements itself (S95)`);
     if (spec.returns !== undefined && !RETURNS.includes(spec.returns)) errors.push(`${where}.returns: '${spec.returns}' is not one of ${RETURNS.join(', ')}`);
     const m = target(spec, where, params);
     if (!m) continue;
@@ -132,7 +148,7 @@ export function validate(map, host, module) {
 
   for (const [name, spec] of Object.entries(queries)) {
     const where = `queries.${name}`;
-    if (!keysOnly(spec, ['instance', 'key', 'fields'], where, errors)) continue;
+    if (!keysOnly(spec, ['instance', 'machine', 'key', 'fields'], where, errors)) continue;
     const params = host.members.get(name);
     if (!params) errors.push(`${where}: the Host interface has no method '${name}'`);
     if (name in methods) errors.push(`${where}: '${name}' is mapped as a method too`);
@@ -143,7 +159,7 @@ export function validate(map, host, module) {
 
   // Every member of Host is driven by the map, except the network API, which the adapter implements.
   for (const name of host.members.keys()) {
-    if (NETWORK.includes(name)) continue;
+    if (ADAPTER.includes(name)) continue;
     if (!(name in methods) && !(name in queries)) errors.push(`the Host interface's '${name}' is neither a method nor a query of the map`);
   }
   return errors;
@@ -174,24 +190,35 @@ function initError(t, v, instances, typeDecl) {
 }
 
 /** The adapter's source: the map as data, and one method per member of Host with its parameters in order. */
-function emit(map, host, machines, polyrun) {
-  const members = [...host.members].filter(([n]) => !NETWORK.includes(n));
+function emit(map, host, machines, polyrun, kinds) {
+  const members = [...host.members].filter(([n]) => !ADAPTER.includes(n));
   const methods = members.map(([n, params]) => `    ${n}: (${params.join(', ')}) => ${n in map.methods ? 'call' : 'query'}(${JSON.stringify(n)}, { ${params.join(', ')} }),`);
   return `// Generated by experiments/m3/adapter/generate.mjs from host.map.json (M3-4, S90). Do not edit.
 // A fresh host over polyrun's kernel: a method dispatches one action to one instance, a query reads the
-// instance's flat state, and the network methods deliver messages one at a time (S89, S91).
+// instance's flat state, the network methods deliver messages one at a time (S89, S91), and the effect port
+// lists the effects requested and completes one at a time with the outcome the caller gives (S95).
 import { fileURLToPath } from 'node:url';
 import { createRuntime } from ${JSON.stringify(polyrun)};
 
 const MAP = ${JSON.stringify(map, null, 2)};
 const MACHINES = ${JSON.stringify(machines, null, 2)};
+const KINDS = ${JSON.stringify(kinds)};
 const at = (rel) => fileURLToPath(new URL(rel, import.meta.url));
 const ARG = /^\\$arg:(.+)$/;
 
 export default async function createHost() {
+  const outcomes = new Map();
   const rt = await createRuntime({
     store: { sqlite: ':memory:' },
     machines: MACHINES.map((m) => ({ machineId: m.machineId, module: at(m.module), contract: at(m.contract), ...(m.effects ? { effects: { mapper: at(m.effects.mapper), manifest: at(m.effects.manifest) } } : {}) })),
+    // An effect's handler does what the caller of completeEffect said: it returns for ok, and throws a permanent
+    // failure for failed, which polyrun completes with the effect's failed action at once.
+    handlers: Object.fromEntries(KINDS.map((k) => [k, (_payload, intentId) => {
+      if (outcomes.get(intentId) === 'ok') return {};
+      const e = new Error('failed');
+      e.permanent = true;
+      throw e;
+    }])),
   });
   let n = 0;
   const actionId = () => \`host-\${++n}\`;
@@ -204,14 +231,22 @@ export default async function createHost() {
     }
   };
   for (const [name, spec] of Object.entries(MAP.instances)) if (spec.createdBy === undefined) await make(name, spec);
-  const idOf = (spec, args) => (spec.key === undefined ? spec.instance : String(args[ARG.exec(spec.key)[1]]));
+  // An instance named by an argument must be one created with the host, of the machine the map names.
+  const idOf = (spec, args) => {
+    if (ARG.test(spec.instance)) {
+      const id = String(args[ARG.exec(spec.instance)[1]]);
+      const inst = MAP.instances[id];
+      return inst && inst.createdBy === undefined && inst.machine === spec.machine ? id : null;
+    }
+    return spec.key === undefined ? spec.instance : String(args[ARG.exec(spec.key)[1]]);
+  };
   const valueOf = (v, args) => (typeof v === 'string' && ARG.test(v) ? args[ARG.exec(v)[1]] : v);
   const call = async (name, args) => {
     const spec = MAP.methods[name];
     const id = idOf(spec, args);
     const family = MAP.instances[spec.instance];
-    if (family.createdBy === name && !(await rt.store.getInstance(id))) await make(id, family);
-    if (!(await rt.store.getInstance(id))) return spec.returns === 'nothing' ? undefined : { ok: false, reason: 'unknown' };
+    if (id !== null && family?.createdBy === name && !(await rt.store.getInstance(id))) await make(id, family);
+    if (id === null || !(await rt.store.getInstance(id))) return spec.returns === 'nothing' ? undefined : { ok: false, reason: 'unknown' };
     const data = Object.fromEntries(Object.entries(spec.params ?? {}).map(([p, v]) => [p, valueOf(v, args)]));
     const r = await rt.dispatch(id, spec.action, data, actionId());
     if (spec.returns === 'nothing') return undefined;
@@ -220,12 +255,26 @@ export default async function createHost() {
   };
   const query = async (name, args) => {
     const spec = MAP.queries[name];
-    const inst = await rt.getState(idOf(spec, args)).catch(() => null);
+    const id = idOf(spec, args);
+    const inst = id === null ? null : await rt.getState(id).catch(() => null);
     if (!inst) return null;
     return Object.fromEntries(Object.entries(spec.fields).map(([out, f]) => [out, inst.state[f]]));
   };
   const inFlight = async () => (await rt.workers.pendingMessages()).map(({ id, from, to, action, data }) => ({ id, from, to, action, data }));
+  // polyrun runs one claimed effect with its worker's own step (_runEffect), so the completion, its journal entry
+  // and its deduplication are the engine's, not the adapter's.
+  const pendingEffects = async () => rt.store.db.prepare("SELECT intent_id, instance_id, kind, payload FROM pr_outbox WHERE kind <> 'sendTo' AND status = 'pending' ORDER BY intent_id").all().map((r) => ({ id: r.intent_id, from: r.instance_id, kind: r.kind, data: JSON.parse(r.payload) ?? {} }));
+  const completeEffect = async (id, outcome) => {
+    if (outcome !== 'ok' && outcome !== 'failed') throw new Error("completeEffect: the outcome is 'ok' or 'failed', not " + JSON.stringify(outcome));
+    const row = rt.store.db.prepare("SELECT * FROM pr_outbox WHERE intent_id = ? AND kind <> 'sendTo' AND status = 'pending'").get(id);
+    if (!row) throw new Error('no effect ' + id + ' is pending');
+    rt.store.db.prepare("UPDATE pr_outbox SET status = 'inflight', claimed_until = ? WHERE intent_id = ?").run(rt.now() + 60000, id);
+    outcomes.set(id, outcome);
+    await rt.workers._runEffect({ ...row, payload: JSON.parse(row.payload) }, rt.now());
+  };
   return {
+    pendingEffects,
+    completeEffect,
     inFlight,
     async deliver(id) {
       if (!(await rt.workers.deliverMessage(id))) throw new Error(\`no message \${id} in transit\`);
@@ -236,7 +285,28 @@ export default async function createHost() {
       throw new Error('deliverAll: messages still in transit after 10000 rounds');
     },
 ${methods.join('\n')}
-    close: () => rt.close(),
+    // Not members of any Host (the generator refuses them): __dispose releases the store, and __state gives every
+    // instance's state, which O3's generator uses to tell apart states the interface shows alike.
+    __dispose: () => rt.close(),
+    __state: async () => rt.store.db.prepare('SELECT instance_id, state FROM pr_instance ORDER BY instance_id').all().map((r) => [r.instance_id, r.state]),
+    // __snapshot and __restore copy every table of the store and the action-id counter, so O3's generator can
+    // try each step from one state without replaying the path to it. O3's traces are replayed from a fresh host
+    // by the controls, which would show any difference.
+    __snapshot: async () => {
+      const tables = rt.store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+      return { n, rows: Object.fromEntries(tables.map((t) => [t, rt.store.db.prepare('SELECT rowid AS __rowid, * FROM ' + t).all()])) };
+    },
+    __restore: async (snap) => {
+      for (const [t, rows] of Object.entries(snap.rows)) {
+        rt.store.db.prepare('DELETE FROM ' + t).run();
+        for (const r of rows) {
+          const cols = Object.keys(r).filter((c) => c !== '__rowid');
+          rt.store.db.prepare('INSERT INTO ' + t + ' (rowid, ' + cols.join(', ') + ') VALUES (?, ' + cols.map(() => '?').join(', ') + ')').run(r.__rowid, ...cols.map((c) => r[c]));
+        }
+      }
+      n = snap.n;
+      outcomes.clear();
+    },
   };
 }
 `;
@@ -256,10 +326,12 @@ export function generate({ mapFile, hostFile, moduleFile, out, polyrun = '@cogni
   if (errors.length) return { errors };
   const machines = [];
   const lowered = [];
+  const kinds = new Set();
   for (const machine of loaded.checked.machines.keys()) {
     const r = lowerMachine(loaded.module, loaded.checked, machine);
     if (!r.lowered) return { errors: r.diagnostics.map((d) => `${machine} does not lower: ${d.code} ${d.message}`) };
     lowered.push([machine, r.lowered.files]);
+    if (r.lowered.files['effects.manifest.json']) for (const k of Object.keys(JSON.parse(r.lowered.files['effects.manifest.json']).effects ?? {})) kinds.add(k);
   }
   rmSync(join(out, 'build'), { recursive: true, force: true });
   const files = [];
@@ -269,7 +341,7 @@ export function generate({ mapFile, hostFile, moduleFile, out, polyrun = '@cogni
     for (const [f, text] of Object.entries(fs)) { writeFileSync(join(out, rel, f), text); files.push(`${rel}/${f}`); }
     machines.push({ machineId: machine, module: `./${rel}/next.cjs`, contract: `./${rel}/contract.json`, ...(fs['effects.cjs'] ? { effects: { mapper: `./${rel}/effects.cjs`, manifest: `./${rel}/effects.manifest.json` } } : {}) });
   }
-  writeFileSync(join(out, 'host.gen.ts'), emit(map, host, machines, polyrun));
+  writeFileSync(join(out, 'host.gen.ts'), emit(map, host, machines, polyrun, [...kinds].sort()));
   files.push('host.gen.ts');
   return { files };
 }

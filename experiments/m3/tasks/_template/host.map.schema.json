@@ -30,7 +30,8 @@
         "required": ["instance", "action"],
         "additionalProperties": false,
         "properties": {
-          "instance": { "type": "string", "description": "An instance name, or the name of a family of instances a method creates." },
+          "instance": { "type": "string", "description": "An instance name, the name of a family of instances a method creates, or $arg:<name> for an argument that names an instance created with the host." },
+          "machine": { "type": "string", "description": "With $arg:<name>: the machine of the instances the argument may name." },
           "key": { "type": "string", "description": "For a family: $arg:<name>, the argument that names the member." },
           "action": { "type": "string" },
           "params": { "type": "object", "additionalProperties": { "type": "string", "description": "$arg:<name>, or a constant." } },
@@ -46,7 +47,8 @@
         "required": ["instance", "fields"],
         "additionalProperties": false,
         "properties": {
-          "instance": { "type": "string", "description": "An instance name, or the name of a family." },
+          "instance": { "type": "string", "description": "An instance name, the name of a family, or $arg:<name> for an argument that names an instance created with the host." },
+          "machine": { "type": "string", "description": "With $arg:<name>: the machine of the instances the argument may name." },
           "key": { "type": "string", "description": "For a family: $arg:<name>, the argument that names the member." },
           "fields": { "type": "object", "additionalProperties": { "type": "string" } }
         }

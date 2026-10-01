@@ -15,7 +15,8 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { checkFile } from '@poly/check';
 import { replay } from '../lib/o3.mjs';
-import { M3, adapterOf, mapOf, moduleOf, readJson, taskIds, versions } from '../lib/task.mjs';
+import { cleanEnv } from '../runner/score.mjs';
+import { M3, adapterOf, mapOf, moduleOf, o3Path, readJson, readO3, taskIds, versions } from '../lib/task.mjs';
 import { tmpdir } from 'node:os';
 
 /** Runs the controls of one version; returns { version, controls: [{ n, name, status, detail }] }. */
@@ -23,8 +24,7 @@ export async function controlsOf(v) {
   const out = [];
   const add = (n, name, status, detail = '') => out.push({ n, name, status, detail });
   const spec = readJson(join(v.dir, 'explore.json'));
-  const o3File = join(v.dir, 'o3', 'traces.json');
-  const o3 = existsSync(o3File) ? readJson(o3File) : null;
+  const o3 = existsSync(o3Path(v)) ? readO3(v) : null;
   const o2 = (await import(pathToFileURL(join(v.dir, 'o2.mjs')).href)).default;
 
   // 1. The reference checks clean, every stage run.
@@ -35,8 +35,8 @@ export async function controlsOf(v) {
 
   // 2 and 3 need O3.
   if (!o3) {
-    add(2, 'reference replays O3', 'not-run', 'no o3/traces.json');
-    add(3, 'mutant fails O3 or O2', 'not-run', 'no o3/traces.json');
+    add(2, 'reference replays O3', 'not-run', 'no O3');
+    add(3, 'mutant fails O3 or O2', 'not-run', 'no O3');
   } else {
     if (o3.bounded) add(2, 'O3 is complete', 'fail', 'the exploration was bounded');
     const ref = await replay(await adapterOf(v, 'reference'), o3, o2, spec);
@@ -52,7 +52,7 @@ export async function controlsOf(v) {
   else {
     const runO1 = async (which) => {
       const dir = await adapterDir(v, which);
-      return spawnSync(process.execPath, ['--no-warnings', '--test', o1], { encoding: 'utf8', env: { ...process.env, M3_IMPL: join(dir, 'host.gen.ts') } }).status;
+      return spawnSync(process.execPath, ['--no-warnings', '--test', o1], { encoding: 'utf8', env: cleanEnv({ M3_IMPL: join(dir, 'host.gen.ts') }) }).status;
     };
     const onRef = await runO1('reference');
     const onMut = await runO1('mutant');

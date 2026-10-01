@@ -35,6 +35,8 @@ export interface Network {
 
 The brief of a multi-machine task says that messages may arrive in any order, and that nothing is delivered until `deliver` or `deliverAll` is called. O1 tests arrival orders only through this API.
 
+A task with effects (S95) adds the effect port to `Host`, for all four arms: `pendingEffects()` lists the effects the system asked the outside world to carry out and that were not answered yet, each with its `id`, `from` (the part that asked), `kind` and `data`, and `completeEffect(id, outcome)` gives the answer, `'ok'` or `'failed'`. The brief names each effect's kind and data and says what each answer does. In the poly arms an effect is an `effect` declaration whose `ok` and `failed` completions are those answers.
+
 ## `host.map.json`, written by the poly arms (S90)
 
 In arms 3 and 4 the agent writes `host.map.json` as part of its solution. It says which machine, which instance and which action each host method drives, and which fields each query reads. An instance is created with the host, or is one of a family a method creates, keyed by one of that method's arguments; a method or query on a family names the argument that keys it. The adapter generator (`experiments/m3/adapter/`) validates it against the host interface and the agent's poly module: a map that names a machine, an instance, an action, a parameter, an argument or a field that does not exist, or leaves a member of `Host` unmapped, is a failed build. Its schema is `host.map.schema.json`, given to the poly arms with the host interface. The task's own reference has its own map, which no arm sees.
