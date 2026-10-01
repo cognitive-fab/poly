@@ -61,6 +61,16 @@ Steps 1 and 2 can start. The task set starts after S90 to S92 are reflected in t
 
 JJ's step 4 (FROZEN) waits on S115 and S116.
 
+**S115 and S116 done (a13d48f).** Accepted as built. The mapping of T3 and T6 as modelled is accepted: counting a doubtful task as modelled is the conservative side for the poly arms. The environment record is accepted; the model id `claude-opus-5-5` is the owner's to confirm before FROZEN.
+
+**S117 The sensitivity gate of S115 can never pass (my error).** Over five tasks, the smallest exact two-sided p of the signed-rank test is 2/32 = 0.0625, and with Holm over five comparisons a win needs at least eight tasks. As written, S115 makes every win impossible. **Ruling:** the sensitivity analysis is an effect check, not a second significance test.
+1. Significance is decided once, by the primary comparison over all ten tasks, as S96 states: the 30% reduction and a Holm-corrected p below 0.05.
+2. A primary win stands only if, on the unmodelled tasks (T5, T7, T8, T9, T10), the arm's mean escaped defects per delivered task is also at least 30% below the comparator's. Otherwise it is reported as "win only with the modelled tasks".
+3. The subset's p-value is computed and reported as descriptive, never as a gate, with a note that five tasks cannot reach 0.05.
+4. Tests on synthetic records: a win that holds on both, a win carried by the modelled tasks only, and a subset reduction just under 30%. The existing test recording the minimum p stays, as documentation.
+
+JJ's step 4 (FROZEN) waits on S117.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
