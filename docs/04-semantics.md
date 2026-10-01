@@ -70,6 +70,8 @@ The definitions are mathematical and short. They are written so that a reference
   | `h_a(s, d) = accept(w, E)` | `accepted(E)` | `s ⊕ w` |
 
   `(s ⊕ w)(f) = w(f)` if `f ∈ dom(w)`, and `s(f)` otherwise. This is the **frame**: every field not written is unchanged.
+
+  **Reserved reasons (S101).** The reasons the runtime uses, `terminal` and `outside-check-domain`, are reserved. A handler's `reject` may not use them (`PL1207 RESERVED_REJECT_REASON`), so a rejection's reason always says whether the runtime or the module refused the step.
 - **PS3.3** **Rejected and unhandled steps are steps.** They are transitions whose next state equals their current state, and they carry their verdict in the label, not in the state. They are journaled, they appear in traces, and properties over labels see them (PS5). Properties over states cannot distinguish them from not taking a step at all. This is the answer to the question "is a rejected step a step?": it is a labelled stuttering step.
 - **PS3.4** An accepted step may leave the state unchanged (for example `Pay` in PT4.5, which only emits). It is still accepted, and its label carries its effects.
 
