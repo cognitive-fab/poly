@@ -107,7 +107,8 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     const old = JSON.parse(readFileSync(file, 'utf8'));
     const changed = Object.keys({ ...old.files, ...m.files }).filter((f) => old.files[f] !== m.files[f]).sort();
     // S116: the model is the one recorded, since a check runs no agent; the rest is this machine's.
-    const env = environmentDiff(old.environment, currentEnvironment({ model: old.environment?.model }));
+    // A freeze without a record differs in every field, the model included (null never equals a missing model).
+    const env = environmentDiff(old.environment, currentEnvironment({ model: old.environment?.model ?? null }));
     for (const p of changedParts(old, m)) console.log(`part changed since the freeze: ${p}`);
     for (const f of changed) console.log(`changed since the freeze: ${f}`);
     for (const k of env) console.log(`environment changed since the freeze: ${k}`);
