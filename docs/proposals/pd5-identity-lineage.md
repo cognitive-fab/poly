@@ -46,10 +46,11 @@ claims Caller {
 An action names the claims it requires with `by`:
 
 ```poly
-on Request(amount) by caller: Caller {
+on Request(a) by caller: Caller {
   require status == Idle else reject "busy"
   requester' = caller.principal
-  if amount > limit { status' = AwaitingApproval } else { status' = Refunded; emit refund(amount) }
+  amount' = a
+  if a > limit { status' = AwaitingApproval } else { status' = Refunded; emit refund(a) }
 }
 
 on Approve() by caller: Caller {
