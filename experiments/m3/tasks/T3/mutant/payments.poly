@@ -1,0 +1,80 @@
+// T3 mutant: a refund may exceed what was captured, which the brief rules out.
+module payments
+
+enum Status { unset, authorizing, authorized, declined, failed, captured, voided, refunded }
+
+machine Payment {
+  state {
+    status   : Status = unset
+    held     : 0..2 = 0
+    taken    : 0..2 = 0
+    returned : 0..2 = 0
+    requests : 0..3 = 0
+  }
+  terminal status in { declined, failed, voided, refunded }
+
+  action Authorize(amount: 1..2)
+  action Approved()
+  action Declined()
+  action TimedOut()
+  action Capture(amount: 1..2)
+  action Void()
+  action Refund(amount: 1..2)
+
+  on Authorize(amount) {
+    require status == unset else reject "exists"
+    status' = authorizing
+    held' = amount
+    requests' = 1
+    emit authorizeCard(amount: amount)
+  }
+  on Approved {
+    require status == authorizing else reject "not-authorizing"
+    status' = authorized
+  }
+  on Declined {
+    require status == authorizing else reject "not-authorizing"
+    status' = declined
+  }
+  on TimedOut {
+    require status == authorizing else reject "not-authorizing"
+    if requests < 3 {
+      requests' = requests + 1
+      emit authorizeCard(amount: held)
+    } else {
+      status' = failed
+    }
+  }
+  on Capture(amount) {
+    require status == authorized else reject "not-authorized"
+    require amount <= held else reject "over-authorized"
+    status' = captured
+    taken' = amount
+  }
+  on Void {
+    require status == authorized else reject "not-authorized"
+    status' = voided
+  }
+  on Refund(amount) {
+    require status == captured else reject "not-captured"
+    returned' = returned + amount
+    if returned + amount >= taken {
+      status' = refunded
+    }
+  }
+
+  invariant capture-within-authorization: taken <= held
+  invariant refund-within-capture: returned <= taken
+  invariant voided-captured-nothing: status == voided implies taken == 0
+  invariant refunded-means-all-returned: status == refunded implies returned == taken && taken >= 1
+  invariant at-most-three-requests: requests <= 3
+  path property at-most-three-authorisation-requests: count("card.authorize") <= 3
+
+  effect authorizeCard(amount: 1..2) {
+    kind "card.authorize"
+    labels { egress:external }
+    retry { attempts 1, base 100ms, timeout 5s }
+    ok -> Approved()
+    failed -> Declined()
+  }
+}

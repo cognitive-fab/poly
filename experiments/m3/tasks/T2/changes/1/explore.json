@@ -1,0 +1,46 @@
+{
+  "calls": {
+    "place": [
+      [
+        "a",
+        2
+      ],
+      [
+        "b",
+        1
+      ]
+    ],
+    "cancel": [
+      [
+        "a"
+      ],
+      [
+        "b"
+      ]
+    ],
+    "expire": [
+      [
+        "a"
+      ]
+    ],
+    "restock": [
+      []
+    ]
+  },
+  "observe": {
+    "order": [
+      [
+        "a"
+      ],
+      [
+        "b"
+      ]
+    ],
+    "stock": [
+      []
+    ]
+  },
+  "network": true,
+  "maxDepth": 60,
+  "maxTraces": 400000
+}

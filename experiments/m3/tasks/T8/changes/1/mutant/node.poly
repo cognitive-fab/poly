@@ -1,0 +1,58 @@
+// T8 mutant after change 1: the node votes for two candidates in one term, which the brief rules out.
+module node
+
+enum Role { follower, candidate, leader, shutdown }
+enum Voter { nobody, itself, n1, n2 }
+
+machine Node {
+  state {
+    role : Role = follower
+    term : 0..3 = 0
+    votedFor : Voter = nobody
+  }
+  terminal role == shutdown
+
+  action ElectionTimeout()
+  action ElectionWon()
+  action NewerTermSeen(term: 1..3)
+  action QuorumLost()
+  action Shutdown()
+  action VoteRequested(candidate: Voter, term: 1..3)
+
+  on ElectionTimeout {
+    require role in { follower, candidate } else reject "leader"
+    require pre.term < 3 else reject "term-limit"
+    role' = candidate
+    term' = pre.term + 1
+    votedFor' = itself
+  }
+  on ElectionWon {
+    require role == candidate else reject "not-candidate"
+    role' = leader
+  }
+  on NewerTermSeen(term) {
+    require term > pre.term else reject "stale-term"
+    role' = follower
+    term' = term
+    votedFor' = nobody
+  }
+  on VoteRequested(candidate, term) {
+    require candidate in { n1, n2 } else reject "unknown-candidate"
+    require term > pre.term || term == pre.term && role == follower else reject "vote-denied"
+    role' = follower
+    term' = term
+    votedFor' = candidate
+  }
+  on QuorumLost {
+    require role == leader else reject "not-leader"
+    role' = follower
+  }
+  on Shutdown {
+    role' = shutdown
+  }
+
+  step property term-never-decreases: post.term >= pre.term
+  step property leader-was-candidate: post.role == leader implies pre.role == leader || pre.role == candidate
+  invariant leaders-were-elected: role == leader implies term >= 1
+  invariant leaders-voted-for-themselves: role in { leader, candidate } implies votedFor == itself
+}

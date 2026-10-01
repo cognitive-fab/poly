@@ -1,0 +1,84 @@
+// T6 mutant after change 3: a resubmitted job keeps its tries, so it can never be claimed, which the brief rules out.
+module jobs
+
+enum Status { unset, queued, running, cancelling, succeeded, failed, cancelled, held }
+
+machine Job {
+  state {
+    status   : Status = unset
+    tries    : 0..3 = 0
+    maxTries : 0..3 = 0
+  }
+  terminal status in { succeeded, cancelled }
+
+  action Submit(maxTries: 1..3)
+  action Claim()
+  action Succeed()
+  action Fail()
+  action FailPermanently()
+  action Cancel()
+  action Hold()
+  action Release()
+  action Resubmit()
+
+  on Submit(maxTries) {
+    require status == unset else reject "exists"
+    status' = queued
+    maxTries' = maxTries
+  }
+  on Claim {
+    require status == queued else reject "not-queued"
+    require tries < maxTries else reject "no-tries-left"
+    status' = running
+    tries' = tries + 1
+  }
+  on Succeed {
+    require status in { running, cancelling } else reject "not-running"
+    status' = succeeded
+  }
+  on Fail {
+    require status in { running, cancelling } else reject "not-running"
+    if status == cancelling {
+      status' = cancelled
+    } else {
+      if tries < maxTries {
+        status' = queued
+      } else {
+        status' = failed
+      }
+    }
+  }
+  on Hold {
+    require status == queued else reject "not-queued"
+    status' = held
+  }
+  on Release {
+    require status == held else reject "not-held"
+    status' = queued
+  }
+  on FailPermanently {
+    require status in { running, cancelling } else reject "not-running"
+    if status == cancelling {
+      status' = cancelled
+    } else {
+      status' = failed
+    }
+  }
+  on Resubmit {
+    require status == failed else reject "not-failed"
+    status' = queued
+  }
+  on Cancel {
+    require status in { queued, held, running } else reject "not-cancellable"
+    if status in { queued, held } {
+      status' = cancelled
+    } else {
+      status' = cancelling
+    }
+  }
+
+  invariant tries-within-limit: tries <= maxTries
+  invariant failed-only-after-a-try: status == failed implies tries >= 1
+  invariant queued-jobs-have-a-try-left: status in { queued, held } implies tries < maxTries
+  invariant succeeded-was-tried: status == succeeded implies tries >= 1
+}

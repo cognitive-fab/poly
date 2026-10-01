@@ -1,0 +1,63 @@
+{
+  "module": "election",
+  "instances": {
+    "n0": {
+      "machine": "Node",
+      "init": {
+        "p1": "n1",
+        "p2": "n2",
+        "me": "n0"
+      }
+    },
+    "n1": {
+      "machine": "Node",
+      "init": {
+        "p1": "n0",
+        "p2": "n2",
+        "me": "n1"
+      }
+    },
+    "n2": {
+      "machine": "Node",
+      "init": {
+        "p1": "n0",
+        "p2": "n1",
+        "me": "n2"
+      }
+    }
+  },
+  "methods": {
+    "timeout": {
+      "instance": "$arg:node",
+      "machine": "Node",
+      "action": "Timeout"
+    },
+    "giveUp": {
+      "instance": "$arg:node",
+      "machine": "Node",
+      "action": "GiveUp"
+    },
+    "crash": {
+      "instance": "$arg:node",
+      "machine": "Node",
+      "action": "Crash"
+    },
+    "recover": {
+      "instance": "$arg:node",
+      "machine": "Node",
+      "action": "Recover"
+    }
+  },
+  "queries": {
+    "node": {
+      "instance": "$arg:node",
+      "machine": "Node",
+      "fields": {
+        "role": "role",
+        "term": "term",
+        "votedFor": "votedFor",
+        "leader": "known"
+      }
+    }
+  }
+}

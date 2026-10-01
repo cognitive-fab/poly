@@ -1,16 +1,51 @@
 {
   "calls": {
-    "create": [["a"]],
-    "addItem": [["a"]],
-    "removeItem": [["a"]],
-    "place": [["a"]],
-    "paymentSucceeded": [["a"]],
-    "paymentFailed": [["a"]],
-    "ship": [["a"], ["b"]],
-    "cancel": [["a"]]
+    "create": [
+      [
+        "a"
+      ]
+    ],
+    "addItem": [
+      [
+        "a"
+      ]
+    ],
+    "removeItem": [
+      [
+        "a"
+      ]
+    ],
+    "place": [
+      [
+        "a"
+      ]
+    ],
+    "ship": [
+      [
+        "a"
+      ],
+      [
+        "b"
+      ]
+    ],
+    "cancel": [
+      [
+        "a"
+      ]
+    ]
   },
-  "observe": { "order": [["a"], ["b"]] },
+  "observe": {
+    "order": [
+      [
+        "a"
+      ],
+      [
+        "b"
+      ]
+    ]
+  },
   "network": false,
-  "maxDepth": 12,
-  "maxTraces": 400
+  "maxDepth": 60,
+  "maxTraces": 400000,
+  "effects": true
 }

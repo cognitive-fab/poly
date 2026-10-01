@@ -1,0 +1,48 @@
+{
+  "calls": {
+    "start": [
+      []
+    ],
+    "cancel": [
+      []
+    ],
+    "workDone": [
+      [
+        "worker0"
+      ],
+      [
+        "worker1"
+      ]
+    ],
+    "workFailed": [
+      [
+        "worker0"
+      ],
+      [
+        "worker1"
+      ],
+      [
+        "worker9"
+      ]
+    ]
+  },
+  "observe": {
+    "run": [
+      []
+    ],
+    "worker": [
+      [
+        "worker0"
+      ],
+      [
+        "worker1"
+      ],
+      [
+        "worker9"
+      ]
+    ]
+  },
+  "network": true,
+  "maxDepth": 60,
+  "maxTraces": 400000
+}

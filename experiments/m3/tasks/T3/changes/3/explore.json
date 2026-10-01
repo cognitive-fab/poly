@@ -1,0 +1,71 @@
+{
+  "calls": {
+    "authorize": [
+      [
+        "p",
+        1
+      ],
+      [
+        "p",
+        2
+      ]
+    ],
+    "timedOut": [
+      [
+        "p"
+      ]
+    ],
+    "capture": [
+      [
+        "p",
+        1
+      ],
+      [
+        "p",
+        2
+      ]
+    ],
+    "void": [
+      [
+        "p"
+      ],
+      [
+        "q"
+      ]
+    ],
+    "refund": [
+      [
+        "p",
+        1
+      ],
+      [
+        "p",
+        2
+      ]
+    ],
+    "increase": [
+      [
+        "p"
+      ]
+    ],
+    "expire": [
+      [
+        "p"
+      ]
+    ]
+  },
+  "observe": {
+    "payment": [
+      [
+        "p"
+      ],
+      [
+        "q"
+      ]
+    ]
+  },
+  "network": false,
+  "maxDepth": 60,
+  "maxTraces": 400000,
+  "effects": true
+}

@@ -1,0 +1,70 @@
+{
+  "calls": {
+    "submit": [
+      [
+        "j",
+        1
+      ],
+      [
+        "j",
+        3
+      ]
+    ],
+    "claim": [
+      [
+        "j"
+      ]
+    ],
+    "succeed": [
+      [
+        "j"
+      ]
+    ],
+    "fail": [
+      [
+        "j"
+      ]
+    ],
+    "lost": [
+      [
+        "j"
+      ]
+    ],
+    "cancel": [
+      [
+        "j"
+      ],
+      [
+        "k"
+      ]
+    ],
+    "hold": [
+      [
+        "j"
+      ]
+    ],
+    "release": [
+      [
+        "j"
+      ]
+    ],
+    "failPermanently": [
+      [
+        "j"
+      ]
+    ]
+  },
+  "observe": {
+    "job": [
+      [
+        "j"
+      ],
+      [
+        "k"
+      ]
+    ]
+  },
+  "network": false,
+  "maxDepth": 60,
+  "maxTraces": 400000
+}

@@ -1,0 +1,12 @@
+{
+  "calls": {
+    "add": [["b"]],
+    "lend": [["b"], ["c"]],
+    "giveBack": [["b"]],
+    "retire": [["b"]]
+  },
+  "observe": { "book": [["b"], ["c"]] },
+  "network": false,
+  "maxDepth": 60,
+  "maxTraces": 400000
+}

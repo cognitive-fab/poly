@@ -1,0 +1,80 @@
+// T9 mutant after change 1: a candidate that hears of the leader stays a candidate, which the brief rules out.
+module election
+
+enum Role { follower, candidate, leader }
+
+service machine Node {
+  state {
+    role     : Role = follower
+    term     : 0..1 = 0
+    votedFor : Ref<Node> = none
+    votes    : 0..3 = 0
+    p1       : Ref<Node> = none
+    p2       : Ref<Node> = none
+    me       : Ref<Node> = none
+    known    : Ref<Node> = none
+  }
+
+  action Timeout()
+  action RequestVote(from: Ref<Node>, term: 1..1)
+  action VoteReply(term: 1..1, granted: bool)
+  action Leader(from: Ref<Node>, term: 1..1)
+
+  on Timeout {
+    require role in { follower, candidate } else reject "leader"
+    require pre.term < 1 else reject "term-limit"
+    role' = candidate
+    term' = pre.term + 1
+    // self may be only a whole argument of a send (S58), so a node knows its own address as a field.
+    votedFor' = me
+    votes' = 1
+    send p1 <- RequestVote(from: self, term: pre.term + 1)
+    send p2 <- RequestVote(from: self, term: pre.term + 1)
+  }
+  on RequestVote(from, term) {
+    require from != none else reject "no-sender"
+    if term > pre.term {
+      role' = follower
+      term' = term
+      votedFor' = from
+      votes' = 0
+      send from <- VoteReply(term: term, granted: true)
+    } else {
+      if term == pre.term && role == follower && (votedFor == none || votedFor == from) {
+        votedFor' = from
+        send from <- VoteReply(term: term, granted: true)
+      } else {
+        send from <- VoteReply(term: term, granted: false)
+      }
+    }
+  }
+  on VoteReply(term, granted) {
+    require role == candidate && term == pre.term && granted else reject "stale-or-denied"
+    votes' = votes + 1
+    if votes + 1 >= 2 {
+      role' = leader
+      known' = me
+      send p1 <- Leader(from: self, term: 1)
+      send p2 <- Leader(from: self, term: 1)
+    }
+  }
+  on Leader(from, term) {
+    require from != none else reject "no-sender"
+    require role != leader else reject "leader"
+    term' = term
+    known' = from
+  }
+
+  invariant leaders-have-a-majority: role == leader implies votes >= 2
+  invariant candidates-voted-for-themselves: role == candidate implies votes >= 1
+  invariant leaders-know-themselves: role == leader implies known == me
+}
+
+configuration cluster {
+  n0 : Node { p1: n1, p2: n2, me: n0 }
+  n1 : Node { p1: n0, p2: n2, me: n1 }
+  n2 : Node { p1: n0, p2: n1, me: n2 }
+  inputs { n0.Timeout, n1.Timeout, n2.Timeout }
+  bounds { transit 6 }
+  invariant one-leader-per-term: !(n0.role == leader && n1.role == leader && n0.term == n1.term) && !(n0.role == leader && n2.role == leader && n0.term == n2.term) && !(n1.role == leader && n2.role == leader && n1.term == n2.term)
+}

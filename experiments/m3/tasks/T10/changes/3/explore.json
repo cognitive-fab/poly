@@ -1,0 +1,52 @@
+{
+  "calls": {
+    "acquire": [
+      [
+        "c0"
+      ],
+      [
+        "c1"
+      ]
+    ],
+    "release": [
+      [
+        "c0"
+      ]
+    ],
+    "write": [
+      [
+        "c0"
+      ],
+      [
+        "c1"
+      ]
+    ],
+    "expire": [
+      []
+    ],
+    "cancelAcquire": [
+      [
+        "c0"
+      ]
+    ]
+  },
+  "observe": {
+    "lease": [
+      []
+    ],
+    "client": [
+      [
+        "c0"
+      ],
+      [
+        "c1"
+      ],
+      [
+        "c9"
+      ]
+    ]
+  },
+  "network": true,
+  "maxDepth": 60,
+  "maxTraces": 400000
+}

@@ -1,0 +1,48 @@
+{
+  "module": "loans",
+  "instances": {
+    "book": {
+      "machine": "Book",
+      "createdBy": "add",
+      "keyArgument": "book"
+    }
+  },
+  "methods": {
+    "add": {
+      "instance": "book",
+      "key": "$arg:book",
+      "action": "Add"
+    },
+    "lend": {
+      "instance": "book",
+      "key": "$arg:book",
+      "action": "Lend"
+    },
+    "giveBack": {
+      "instance": "book",
+      "key": "$arg:book",
+      "action": "GiveBack"
+    },
+    "retire": {
+      "instance": "book",
+      "key": "$arg:book",
+      "action": "Retire"
+    },
+    "renew": {
+      "instance": "book",
+      "key": "$arg:book",
+      "action": "Renew"
+    }
+  },
+  "queries": {
+    "book": {
+      "instance": "book",
+      "key": "$arg:book",
+      "fields": {
+        "status": "status",
+        "loans": "loans",
+        "renewed": "renewed"
+      }
+    }
+  }
+}

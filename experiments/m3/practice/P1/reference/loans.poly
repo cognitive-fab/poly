@@ -1,0 +1,38 @@
+// P1 reference: a library book, lent at most three times.
+module loans
+
+enum Status { unset, available, lent, retired }
+
+machine Book {
+  state {
+    status : Status = unset
+    loans  : 0..3 = 0
+  }
+  terminal status == retired
+
+  action Add()
+  action Lend()
+  action GiveBack()
+  action Retire()
+
+  on Add {
+    require status == unset else reject "exists"
+    status' = available
+  }
+  on Lend {
+    require status == available else reject "not-available"
+    require loans < 3 else reject "worn-out"
+    status' = lent
+    loans' = loans + 1
+  }
+  on GiveBack {
+    require status == lent else reject "not-lent"
+    status' = available
+  }
+  on Retire {
+    require status == available else reject "not-available"
+    status' = retired
+  }
+
+  invariant lent-books-were-lent: status == lent implies loans >= 1
+}

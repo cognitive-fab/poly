@@ -44,6 +44,7 @@ machine Order {
     require items > 0 else reject "empty"
     status' = placed
     charges' = charges + 1
+    emit charge(amount: items)
   }
   on PaymentSucceeded {
     require status in { placed, cancelling } else reject "not-placed"
@@ -71,6 +72,7 @@ machine Order {
     require charges < 2 else reject "no-retry-left"
     status' = placed
     charges' = charges + 1
+    emit charge(amount: items)
   }
   on Hold {
     require status == paid else reject "not-paid"
@@ -106,4 +108,14 @@ machine Order {
   invariant placed-orders-hold-items: status in { placed, paid, shipped, cancelling, declined, failed } implies items >= 1
   invariant no-refund-while-cancelling: status == cancelling implies refunds == 0
   invariant only-paid-orders-are-held: held implies status == paid
+  path property charge-requested-at-most-twice: count("payment.charge") <= 2
+
+  effect charge(amount: 0..3) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 100ms, timeout 5s }
+    ok -> PaymentSucceeded()
+    failed -> PaymentFailed()
+  }
 }

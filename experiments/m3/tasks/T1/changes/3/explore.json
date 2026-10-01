@@ -20,16 +20,6 @@
         "a"
       ]
     ],
-    "paymentSucceeded": [
-      [
-        "a"
-      ]
-    ],
-    "paymentFailed": [
-      [
-        "a"
-      ]
-    ],
     "retryPayment": [
       [
         "a"
@@ -70,6 +60,7 @@
     ]
   },
   "network": false,
-  "maxDepth": 14,
-  "maxTraces": 1000
+  "maxDepth": 60,
+  "maxTraces": 400000,
+  "effects": true
 }

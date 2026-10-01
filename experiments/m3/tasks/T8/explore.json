@@ -1,0 +1,35 @@
+{
+  "calls": {
+    "electionTimeout": [
+      []
+    ],
+    "electionWon": [
+      []
+    ],
+    "newerTermSeen": [
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ]
+    ],
+    "quorumLost": [
+      []
+    ],
+    "shutdown": [
+      []
+    ]
+  },
+  "observe": {
+    "node": [
+      []
+    ]
+  },
+  "network": false,
+  "maxDepth": 60,
+  "maxTraces": 400000
+}

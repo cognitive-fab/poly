@@ -28,16 +28,6 @@
       "key": "$arg:order",
       "action": "Place"
     },
-    "paymentSucceeded": {
-      "instance": "order",
-      "key": "$arg:order",
-      "action": "PaymentSucceeded"
-    },
-    "paymentFailed": {
-      "instance": "order",
-      "key": "$arg:order",
-      "action": "PaymentFailed"
-    },
     "ship": {
       "instance": "order",
       "key": "$arg:order",
