@@ -71,6 +71,24 @@ JJ's step 4 (FROZEN) waits on S115 and S116.
 
 JJ's step 4 (FROZEN) waits on S117.
 
+**Control 4 (first run, after O1 was committed in bb929b2).** `o1-check.mjs` passes on all 40 suites. Control 4 passes on 32 versions and fails on 8: all of T3 and all of T6, where the suite fails on the reference. Every failing test sends a value outside a range the brief states and expects a refusal; the reference accepts it, because the range is declared only as a parameter type, which PT3.4a makes `disclosed` unless the value reaches an irreversible or compensable effect. O3 explores only in-range values, so controls 1 to 3 could not see it. The defect is in the references, not in O1. These rulings are numbered M3-6 to M3-9 so that the S-series stays with M4 (M4-0).
+
+**M3-6 T3: the references refuse out-of-range amounts.** The brief is explicit: capture and refund take "1 or 2 units" (capture "1 to 3" from change 1) and are "Refused otherwise". Change 1 widens capture only, so a refund of 3 is refused in v1 to v3. **Ruling:** in every T3 reference, mark the amount parameters of capture and refund `strict`, so the runtime refuses an out-of-range amount before the handler (`outside-check-domain`). Keep each domain exactly as the brief of that version states it. Regenerate O3 for T3 and rerun controls 1 to 4 on its four versions. If a mutant stops failing, report it.
+
+**M3-7 T6: a stated input range is a constraint, and the brief says so.** The T6 brief gives "(1 to 3)" for `maxTries` without "Refused otherwise". O1 reads the range as a constraint, which is the reading an engineer would make, and the reading this experiment adopts: a range the brief states for an input is the set of accepted values. **Ruling:** amend the T6 brief to make it explicit: "`submit(job, maxTries)`: creates the job, **queued**, allowed `maxTries` tries (1 to 3). Refused if `maxTries` is outside 1 to 3, or if a job with that id exists." O1 already tests this reading and stays valid. Mark `maxTries` `strict` in every T6 reference, regenerate O3 and rerun controls 1 to 4 on T6. The amendment is made before FROZEN, so it is part of the frozen set, not a deviation.
+
+**M3-8 Audit every reference and brief for the same gap.** No other O1 test exposed one, but O1 may simply not have probed it. **Ruling:** list every action parameter, in every reference of every version, whose brief states a range or a set of values. For each: (a) if the brief says out-of-range is refused, the reference must refuse it (`strict` or a `require`); (b) if the brief states a range without saying what happens outside it, amend the brief as in M3-7. Report the list, the briefs amended and the references changed, with controls 1 to 4 rerun on every changed version.
+
+**An observation for the report, not a change to the frozen toolchain.** The defect was written by the reference author, with the spec at hand: a type range on a parameter reads like a constraint, and PT3.4a makes it one only when the value reaches an irreversible or compensable effect. The poly arms will meet the same trap. The report must say so, and an escaped defect caused by a disclosed range is counted like any other. Making action parameters `strict` by default, or warning when a disclosed range guards nothing, is a candidate language change after M3.
+
+**M3-9 O1 enters the freeze, and o1-check's parser is fixed.**
+1. Add a part `O1` covering every file under `experiments/m3/o1/`. A changed byte in a suite changes only that part (test fails first).
+2. `o1-check.mjs` lists LEAKS.md's two preamble paragraphs as flags. Fix the parser so it lists only the flags under each task and version, with a test that fails first on the current file.
+3. Accepted: e4f936c (the model listed when a freeze has no environment record). Both polywatch findings on this run that you marked false are agreed false.
+4. The T9 suites run up to about 3.5 minutes. Confirm that the scorer's timeout for O1 is at least twice the longest suite's reference time, and say what it is.
+
+FROZEN waits on M3-6 to M3-9 and a clean control 4 on all 40 versions.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
