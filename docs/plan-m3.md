@@ -134,7 +134,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 **Step 8 is done.** `experiments/m3/analysis/analyse.mjs` computes PT13's measures per arm and task, the five escaped-defect comparisons by the exact Wilcoxon signed-rank test with Holm's correction (tokens as a second family), and the win (S96), surface and stop rules; a task with no delivered run for an arm is left out of that comparison and listed. `stats.mjs` is tested on known values, and `test/m3-analysis.test.mjs` on synthetic records whose answer is known: a clear win, a reduction that is not significant, a win denied by tokens, a null result, the surface decision each way, a stop, a left-out task, and the four token parts with their cost.
 
-**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 364 files of the experiment to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
+**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 450 files of the experiment (364, and since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`), with the git commit it was taken from (`04c62e8`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
 
 | Part | Digest |
 |---|---|
@@ -186,6 +186,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | adapter | `56bff45dcf872922` |
 | runner and prompts | `52262a7c78dda0ee` |
 | analysis | `de9bb54faa4c0f16` |
+| toolchain (S100) | `246ec34ee8e2dc7f` |
 
 *The proposed budget.* Each run (base brief and three changes, one session) gets **30,000,000 tokens**, counted as all tokens processed (S99), and **3 hours** of wall time, with `--max-budget-usd 60` as the CLI's own cap. The dry run's tokens are scripted, so they say nothing about real use, and the budget cannot be computed from them as section 8 first planned. The figures above are a ceiling for a session that reads its toolchain's manual, writes and tests a small system, and takes three changes; the pilots are there to replace them with measured ones.
 
