@@ -43,7 +43,8 @@ test('each error source raises exactly the code it names', () => {
   // PL0201 is raised by poly fix on a stale fix, never by a source (S70), tested by fixes.test.mjs.
   // PL0301 is raised by poly-embed on a .ts source (PT2.5, S71), tested by embed.test.mjs.
   // PL6401 is raised by the handler lint over handler modules, not a source (PT6.5, S72), tested by lint.test.mjs.
-  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401').map(([c]) => c);
+  // PL5405 is raised by the runtime at load, and fifo has no syntax yet (S125).
+  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405').map(([c]) => c);
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 

@@ -9,6 +9,7 @@ import { Store, type InsertJournal, type CommitStep } from '@cognitive-fab/polyg
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
 import { nextEvent, runOf, type LedgerEvent, type Run } from './ledger.js';
+import { initJournalTables } from './journal.js';
 
 const LEDGER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS poly_ledger (
@@ -45,6 +46,7 @@ export class LedgerStore extends Store {
   override initSync(): this {
     super.initSync();
     this.db.exec(LEDGER_SCHEMA);
+    initJournalTables(this);
     return this;
   }
 

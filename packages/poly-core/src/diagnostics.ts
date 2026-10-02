@@ -13,7 +13,9 @@ export type Stage =
   | 'configuration'
   | 'deadlock'
   | 'liveness'
-  | 'lint';
+  | 'lint'
+  | 'runtime'
+  | 'replay';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
 export type DiagSeverity = 'error' | 'finding' | 'inconclusive' | 'warning';
@@ -114,6 +116,18 @@ export const CODES: Record<string, CodeInfo> = {
   PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
   PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },
+  // S129: an accepted adjudication reachable without a preceding accepted ok completion of its decision.
+  PL6203: { name: 'ADJUDICATION_WITHOUT_DECISION', stage: 'effects', severity: 'finding' },
+  // S125: a fifo pair, which polyrun's parallel message worker cannot serve; refused at load.
+  PL5405: { name: 'FIFO_WITHOUT_IN_ORDER_WORKER', stage: 'runtime', severity: 'error' },
+  // PT9.7, S119: a worker state or transition that the OutboxIntent machine does not have, in the runtime's CI.
+  PL2401: { name: 'RUNTIME_MODEL_DRIFT', stage: 'runtime', severity: 'finding' },
+  // PS11.4, S131: a post-state that differs from the fold of the journal through the step.
+  PL9001: { name: 'SPEC_DIVERGENCE', stage: 'replay', severity: 'finding' },
+  // S131: a chain, a signed head or an anchor that does not verify.
+  PL9002: { name: 'LEDGER_BROKEN', stage: 'replay', severity: 'finding' },
+  // PD2.2d, S131: a decision completion with no decision event, or with data that differs from it.
+  PL9003: { name: 'DECISION_PROVENANCE', stage: 'replay', severity: 'finding' },
 };
 
 export interface NodeAt {

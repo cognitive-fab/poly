@@ -14,6 +14,7 @@ import type { Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore } from './ledger-store.js';
 import { verifyBuild, recheckCopy, LoadError } from './load.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
+import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
 
 export { LoadError };
 
@@ -24,6 +25,8 @@ export interface LoadOptions {
   /** S135: SQLite only. ':memory:' when omitted. */
   store?: { sqlite: string };
   now?: () => number;
+  /** S123: the head signer, and how often heads are signed and anchors published, off the step path. */
+  ledger?: LedgerSigner & { headMs?: number; anchorMs?: number };
 }
 
 export type Handler = (payload: any, caps: Readonly<Record<string, never>>, ctx: { idempotencyKey: string; instanceId: string; seq: number; attempt: number }) => unknown;
@@ -38,7 +41,7 @@ export class PolyRuntime {
   private readonly inputSubscribers = new Map<string, Set<(step: unknown) => void>>();
   private timers: NodeJS.Timeout[] = [];
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly certificate: Certificate) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly certificate: Certificate, readonly ledger: LoadOptions['ledger'] = undefined) {
     kernel.events.on('step', (step) => {
       for (const f of this.inputSubscribers.get(step.instanceId) ?? []) f(step);
     });
@@ -74,6 +77,54 @@ export class PolyRuntime {
     return this.store.txn(() => this.store.appendEvent(instanceId, 'advice', verdict, this.now()));
   }
 
+  /** S123: signs the latest head of each run that moved; off the step path. */
+  async signHeads(only?: string): Promise<SignedHead[]> {
+    if (!this.ledger) return [];
+    return signHeads(this.store, this.ledger, only);
+  }
+
+  heads(instanceId: string): Promise<SignedHead[]> { return headsOf(this.store, instanceId); }
+
+  /** S123: an anchor over the latest signed head of every run, for the period it names. */
+  async publishAnchor(period: { from: number; to: number }): Promise<{ anchor: Anchor; heads: SignedHead[] }> {
+    if (!this.ledger) throw new Error('no ledger signer: an anchor is signed (S123)');
+    return publishAnchor(this.store, this.ledger, period);
+  }
+
+  /** The chain, the signed heads, the closure and the binding to the journal while it exists (PT16). */
+  async verifyRun(instanceId: string, trust: Record<string, string>): Promise<RunVerification> {
+    const exists = await this.store.getInstance(instanceId);
+    return verifyRun(await this.chain(instanceId), await this.heads(instanceId), trust, exists ? await this.getJournal(instanceId) : null);
+  }
+
+  /**
+   * Archives a terminal instance: its `closure` event, then polyrun's purge, in one transaction, then its head is
+   * signed (S122, S123). The chain outlives the purge; polyrun 8.3.2 drops the dedupe keys with the journal, which
+   * K4 forbids, until E1 (S124).
+   */
+  async archive(instanceId: string): Promise<LedgerEvent> {
+    const inst = await this.store.getInstance(instanceId);
+    if (!inst) throw new Error(`unknown instance '${instanceId}'`);
+    const closure = await this.store.txn(async () => {
+      const e = this.store.appendEvent(instanceId, 'closure', { outcome: 'archived', seq: inst.seq, status: inst.status }, this.now());
+      await this.store.purgeInstance(instanceId, inst.seq);
+      return e;
+    });
+    await this.signHeads(instanceId);
+    return closure;
+  }
+
+  /** A run's chain, signed heads and the bodies its step events name, for an auditor (PT16 trace export). */
+  async exportRun(instanceId: string): Promise<{ events: LedgerEvent[]; heads: SignedHead[]; bodies: Record<string, unknown> }> {
+    const events = await this.chain(instanceId);
+    const bodies: Record<string, unknown> = {};
+    for (const e of events) {
+      if (e.kind !== 'step') continue;
+      for (const k of ['data', 'pre', 'post']) { const d = (e.body as Record<string, string>)[k]; bodies[d] = await this.store.body(d); }
+    }
+    return { events, heads: await this.heads(instanceId), bodies };
+  }
+
   /** PT15 streams: every labelled step of an instance, after its transaction commits. */
   inputs(instanceId: string): { subscribe(f: (step: any) => void): () => void } {
     return {
@@ -96,6 +147,12 @@ export class PolyRuntime {
     const m = setInterval(() => { this.kernel.workers.tickMessages().catch(report); }, messagePollMs);
     t.unref?.(); m.unref?.();
     this.timers.push(t, m);
+    if (this.ledger?.headMs) { const h = setInterval(() => { this.signHeads().catch(report); }, this.ledger.headMs); h.unref?.(); this.timers.push(h); }
+    if (this.ledger?.anchorMs) {
+      let from = this.now();
+      const a = setInterval(() => { const to = this.now(); this.publishAnchor({ from, to }).then(() => { from = to; }).catch(report); }, this.ledger.anchorMs);
+      a.unref?.(); this.timers.push(a);
+    }
   }
 
   stopWorkers(): void { for (const t of this.timers) clearInterval(t); this.timers = []; }
@@ -121,5 +178,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (e instanceof LoadError) throw e;
     throw new LoadError(`refused at load: polyrun did not register the certified machines: ${(e as Error).message}`);
   }
-  return new PolyRuntime(kernel, store, verified.certificate);
+  return new PolyRuntime(kernel, store, verified.certificate, opts.ledger);
 }
