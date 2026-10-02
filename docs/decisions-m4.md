@@ -52,6 +52,25 @@ The plan is accepted with the rulings below. Its reading of the engines is the b
 
 **Order.** The plan's order stands. The first commit on `m4` is the tree guard; the plan is committed next; then the spec text from these rulings, before any code that depends on it.
 
+## Rulings at the end of the M4 build (S137 to S140)
+
+The build is accepted as reported: M4a to M4f pass, with three tests waiting on E1, E2 and FROZEN, each printed with its reason. The three failing tests belong to M3 and are fixed there (see below). The three defects found and fixed during the build are accepted: message lease recovery in the runtime, the claim fencing every worker transition, and `poly check` no longer loading `poly-runtime`.
+
+| Issue | Ruling |
+|---|---|
+| **S137** Effects with no retry clause, and the bound | **Accepted, with the cap raised.** An effect with no retry clause gets polyrun's default of 5 attempts, written into its manifest. The cap of 5 set in S120 was a guess, and it refuses the oms example (6). The cap becomes **10**: the runtime's CI checks `OutboxIntent` at every bound from 1 to 10 and records the state count of each. A bound above 10 is refused at admission, and PT19 lists the limit. |
+| **S138** Permanent failure | **Add it to the machine now.** A handler can report a permanent error (a declined card is not retried). `OutboxIntent` gains `HandlerFailedPermanent`, from `Running` to `Dead`, which dispatches the effect's `failed` completion and counts no further attempt. PT9.7 is amended first; the machine is re-checked at every bound, `settles` included; the worker conforms by trace replay with the new path in its corpus; a worker that retries a permanent error is a `PL2401` drift. |
+| **S139** Witness tests through the runtime | **No unchecked loader.** A loader that skips the certificate would break the standing rule that every artefact the runtime reads is checked. Instead, `poly admit --witness` issues a **witness certificate**: same format, `purpose: "witness"`, the findings listed, signed with a test key. `load` refuses a witness certificate unless the caller passes `allowWitness: true`, and that option is refused when `NODE_ENV` is `production`. Exported witness tests load through it and drive the runtime API. A test shows a witness certificate refused by default. Step 11 is built this way. |
+| **S140** Input outside an action's type | **Refused before any step.** PS3.2 defines steps only for `d ∈ T(a)`. An input outside the type ("Invalid proposal…") is refused by `dispatch` with an error and an audit row, and no journal row, like K9. Replay no longer meets such a row. PS3.2 says so. |
+
+**The M4f re-check result is accepted.** Three step properties are vacuous: two copies of `cancel-is-final` in orders, and `shutdown-is-a-true-terminal-state` in raft. They restate what `terminal` already guarantees, so they test nothing, and `INCONCLUSIVE` is the right verdict. The sources are not edited to hide it. The record lists the three, explains why, and notes that raft moves from `CLEAN` to `INCONCLUSIVE` while no M0 to M2 gate number changes. In new code, terminality is stated with `terminal`, not restated as a property.
+
+**For M3, on `main`, not for the M4 session:** the control 4 test that still expects O1 to be absent is stale and is updated by the M3 session; the environment failures clear once the CLI is pinned and the freeze regenerated (M3-10).
+
+**Merging.** M3 work commits on `main` may come into `m4` with the next merge of `main`; that is harmless. `m4` still never goes into `main` before M3's runs are recorded.
+
+**Next.** Build S137 to S140 and step 11, each with a test that fails first. Then M4's code review, as for earlier milestones, before M4 is closed. M5 is planned only after that.
+
 ## Conclusion
 
 Building M4 and M5 alongside M3 saves calendar time without touching the experiment. The worktree keeps the frozen toolchain where the runner reads it, the merge waits for M3's result, and the stop rule keeps its force over everything built in the meantime. The M4 plan is ruled: the runtime hosts the checked outbox machine itself, writes the ledger inside each step's transaction, and needs two engine changes, tombstones in polyrun and four ledger kinds in polyflow.
