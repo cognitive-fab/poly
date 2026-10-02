@@ -251,6 +251,84 @@ Four reviewers read `d604bee..3db54e8` in four parts (peers, records and loading
 
 M5a is ready to close. M5b does not start before the owner closes it.
 
+## 11. Record of M5b
+
+The owner closed M5a at 038fe86 (bea38eb), put E8 on the engine list and moved B13 to M5b. `main` was merged into `m4` before the build (6fcd331), never the reverse. Steps 11 to 18 were built as ruled, each with a test that failed before it, except where noted below.
+
+| Step | What was built | Commits |
+|---|---|---|
+| 11 | Claims (PD5.1): `claims` types, `Principal`, `by` on both surfaces, `PL1206`; the claims row of the label in poly-ref and the lowering, with the broken lowering `skip-claims` listed; principal representatives with the count in the instance line (PS4.1c); the verifier adapter at dispatch and create, the person-key adapter by default, and PD4-A3's signed `Declare` through it; `step.claims` in policies; `$claims` and `$lineage` reserved (`PL1208`) | 261649d, c82c3fd, 33faea9, 32fcc0e, d6c638d |
+| 12 | Lineage (PD5.2): each step's origin, intent and hop in `poly_lineage`, inherited from the causing completion, message or timer; `SendDenied(…, "lineage")` for a missing or broken chain; `lineage.origin` and `lineage.intent` in policies; `scope "x" requires attribution` and `PL6701` (S156); configurations checked over origin classes | 696fdb3, 92d0b95, 4b0c024 |
+| 13 | Revocation (PD5.3): the `Trust` fixture, the halt `never`, the possibility check, `Restore` through the person-key adapter, the joint test | d45830d |
+| 14 | Attributed provenance (PD5.4): claims and lineage digests in every `step` event, bound by `poly journal verify` and replay; countersignature records through a host adapter (`--countersign`); K11 in PS10 | 5d28008 |
+| 15 | Initial values (S141, S153): listed as waiting on E5, with S160's end-to-end send | 62c1ce5 |
+| 16 | Installed packages (S154): the closure follows bare imports into `node_modules`; every file reached and each `package.json` certified under `packageFiles`; `PL6403` at load | cda672e |
+| 17 | The sandbox (PT6.5, S152): `openshell.policies.yaml` per machine under `isolation: "openshell"`, certified and read back, with the broken generator `widen-sandbox` listed | 2344717 |
+| 18 | B13, the review, and this record | bbe7ad9 and the fixes below |
+| | Outage O10: a verifier that throws gives no claims, so `claims-unverified` before the module | 40f26d6 |
+
+PD5-A3 and PD5-A6, A7, A8 and A12 passed on their first run: the representatives (step 11) and M5a's decision-table check, consistency stage and person-key records already held the mechanism they test. Each was written against a fixture before it ran, and none needed a change to pass.
+
+**The gate, item by item.**
+
+| Item | Status | Measured |
+|---|---|---|
+| PD5-A1 | **passes** | No claims, malformed claims, or a value outside a field's domain is `rejected("claims-unverified")` before the module, journaled, state unchanged; `reject "claims-unverified"` in a source is `PL1207`. |
+| PD5-A2 | **passes** | `int` or `string` claims fields are `PL1101`, `Tri` is `PL1203`, bool, record, map, payload union and nested claims are `PL1201`; ordering, arithmetic, string comparison and a map key over `Principal` are `PL1206`; equality, storage and passing are accepted. |
+| PD5-A3 | **passes** | The refund example is CLEAN at 3 representatives, named in the instance line; 7, 13 and 21 states at 2, 3 and 4, as `principal_symmetry.py` prints; the self-approval mutant is a finding with one principal; one representative is `INCONCLUSIVE` (`vacuous`). |
+| PD5-A4 | **passes** | `require step.claims.kind == Person else deny` denies an Agent caller's refund and allows a Person's; the `verdict` event records the claims digest. |
+| PD5-A5 | **passes** | Completions, timers and delivered messages inherit origin and append a hop; an outside dispatch never inherits; a broken or missing chain on a cross-scope send gives `SendDenied(…, "lineage")`; a configuration is checked over origin classes. |
+| PD5-A6, A7 | **pass** | No compensable or irreversible effect is allowed while `Halted`; a policy without the halt rule is a finding with a witness; a program that needs an irreversible effect to finish is `PL6501` naming `Halted`. |
+| PD5-A8 | **passes** | The adapter's output for a keyring signature is exactly `{ kind: Person, attest: Verified, assurance: 3, principal }`; `Restore` succeeds with it and is refused with an agent key or none; PD4-A3 passes through the same adapter. |
+| PD5-A9 | **passes** | A countersignature over a head is stored in its own record and checked through the adapter; a tampered one is `PL9002`; with no adapter it is listed as not verified. |
+| PD5-A10 | **passes** | K11 follows K10 in PS10; a certificate lists it exactly when actions take claims, and the composition stage keeps it. |
+| PD5-A11 | **passes** | Every `step` event carries the claims and lineage digests; `poly journal verify` and `rt.verifyRun` bind them, and replay reproduces them. |
+| PD5-A12 | **passes** | With a recorded verifier composed with the person-key adapter and one `CredentialRevoked`: no refund handler runs after the revocation, refunds while halted are denied, and after a person's `Restore` new refunds are allowed. |
+| PD4-A3 | **passes** | A signed `Declare` (`by op: Caller`) changes the mode; an agent key or none is `claims-unverified`. |
+| S154 | **passes** | A changed file in an installed package is `PL6403` at load; a test traces every file Node loads and requires each to be certified. |
+| S152 | **passes, enforcement not run** | The policy per effect kind allows exactly its declared prefixes and secrets, deterministically, and gives a kind with no egress label no network; enforcement is listed as not run (no `POLY_OPENSHELL_GATEWAY`). |
+| O10 | **passes** | A verifier that throws gives no claims: `claims-unverified`, before the module, and no effect. |
+| S141, S153 | **waiting on E5** | Listed as `todo`, with S160's end-to-end send. |
+
+**Limits, stated.**
+- **S162 (new, proposed).** `PL6701` does not report an outside dispatch of an effect's completion or a timer's target. Such a step has no claims, and the attribution rule denies its effect at the gate, so nothing runs unattributed, but the check is not where the author learns it. *Proposal:* in a scope that requires attribution, the runtime refuses such a dispatch, as K9 and K10 refuse others. PT8 says so.
+- A configuration's completion given as a declared input has no origin class. No verdict reads it today.
+- A child created in a cascade starts its own chain, so it does not inherit its creator's origin (PT2.4d).
+- The sandbox policy is generated, certified and read back, and not enforced by this runtime; the certificate's limits say so. OpenShell has no per-command allowlist, so `exec` targets stay bound in process.
+- **The embedded policy form was not built.** The ruling put B13 "alongside the embedded surface's policy form", but PT1.1a and section 3 keep policies in the standalone surface only, and no embedded policy grammar is specified. B13 is fixed in the standalone formatter, which is the only one that prints policies. The embedded form needs a ruling before it is built.
+
+### The code review of M5b
+
+Four reviewers read `261649d..2344717` in four parts (claims and representatives; lineage, provenance and K11; policies over identity; packages, the sandbox and B13), and each reproduced every finding with a script under `.poly/review-m5b-a` to `review-m5b-d`. They found 22, and an inspection note. Each was fixed with a test that failed first, except the two recorded as limits above.
+
+| Findings | What was wrong | Fix | Commit |
+|---|---|---|---|
+| B1 | `rt.create` with a creation action skipped dispatch's checks, so its `$claims` and origin were the caller's | a creation is an outside dispatch: claims from the verifier, `$claims` and `$lineage` refused | be1ea3b |
+| B2 (= A-F1) | an exported witness with claims passed `$claims` as data, was refused, and read that as the path being gone | the walk hands the witness's claims to its verifier | be1ea3b |
+| B3, B4 | the composition stage dropped K11; `verifyLineage` did not check inheritance from the previous hop | K11 kept; a hop that does not inherit is a broken chain; `rt.verifyRun` binds the lineage digest | be1ea3b |
+| A-F2 | sam-pattern runs the handler's acceptor after the first rejects, so a body matching on claims ran on none | the handler's acceptor applies the claims row first | f219d4d |
+| A-F3, A-F4 | a map of principals counted once, and a label with two principals counted one, so CLEAN on reachable violations | one position per key, plus the most principals one label carries | f219d4d |
+| A-F5 to A-F7 | bool, record, map, payload-union and nested claims fields crashed the lowering; poly-ref's row was looser than the lowered one; a binder could be `pre` or `self` | refused as `PL1201`; one strict row; translation validation probes past ranges, null and wrong forms | f219d4d |
+| C2 | a whole-record read of `step.claims` or `lineage.origin` gave a table without them, so a violated `never` was proved | such a read reads every field | cb39299 |
+| C3 | a claims field declared with two types was typed by declaration order | reading it is `PL1201` naming both | cb39299 |
+| C4 | the attribution rule took its examples from an author's obligation named `attribution` | its source is `$attribution` | cb39299 |
+| C1, C5 | as the limits above | recorded, S162 proposed | cb39299 |
+| D-F3 | the package closure missed conditions, subpath patterns, the imports map, `.json` and a directory's main, and dropped unresolved imports | each followed; unresolved imports listed in the limits | 109a521 |
+| D-F4 | the runtime imports the handlers' copy, so a bare import could resolve to an uncertified package | certified package files are copied beside it and re-checked | 109a521 |
+| D-F5 | a certificate with sandbox policies implied they were enforced | its limits say they are not (not run) | 109a521 |
+| D-F1 | a composed child was lowered again without isolation and lost its policy; TV checked the policy only when present | the child keeps it; under isolation a missing policy is a mismatch | 51b4a62, f145696 |
+| D-F2 | a glob character in an egress target became a pattern in the sandbox | `PL1201` | 51b4a62, f145696 |
+| D-F6 | B13 left comments on `on unknown`, `states`, `initial` and `end` lines misplaced | those lines are anchors too | af1f7b3 |
+| D, inspection | the certificate read-back compared handler files but not package files | read back, with the listed fault `omit-package-file` | 525f993 |
+
+**B13.** Comments inside an obligation body now keep their place: the parser anchors them to each body line, and the formatter prints them there and keeps the output idempotent (bbe7ad9, af1f7b3).
+
+**Found by the gate.** The first clean run failed one test: after A-F2 put the claims row in the handler's acceptor too, the broken lowering `skip-claims` removed only the first copy and changed nothing on `refund.poly`. The fault now drops both (ec19eae), and translation validation catches it again.
+
+**The gate, from a clean build.** Every `dist` directory, build-info file and test build directory was removed; `npm test` built, ran the boundary check (passed) and ran 1322 tests: 1317 pass, 0 fail, 1 skipped (sandbox enforcement, no gateway), and 4 are listed as waiting (S141 and S153 on E5, S160's end-to-end send on E5, the archive trace on E1, polyflow's verifier on E2).
+
+M5b is ready to close, with S162 and the embedded policy form for the owner.
+
 ## Conclusion
 
-M5 turns M4's gate interface into a governed gate. Policies get a front end and a checked lowering. Polyaxion decides in process, with a session sequence and state digests that make every decision replayable, and approvals are signed by people. The outage test shows by its log, not by assertion, that no effect runs without a recorded allow. Polyaxion needs no change if program-state reads are carried as reserved action fields, and polyrun needs one, for instances started at given values. Identity follows in M5b, on top of the gate and the signatures, with twelve acceptance criteria drawn from the PD5 rulings. Fourteen issues need rulings before the build, and the first two decide its shape: whether M5 is split (S144), and whether a BUSL engine can be vendored (S145). M5a is built as ruled, reviewed, and clean from a clean build (section 10); it closes when the owner rules on E8 and B13.
+M5 turns M4's gate interface into a governed gate. Policies get a front end and a checked lowering. Polyaxion decides in process, with a session sequence and state digests that make every decision replayable, and approvals are signed by people. The outage test shows by its log, not by assertion, that no effect runs without a recorded allow. Polyaxion needs no change if program-state reads are carried as reserved action fields, and polyrun needs one, for instances started at given values. Identity follows in M5b, on top of the gate and the signatures, with twelve acceptance criteria drawn from the PD5 rulings. Fourteen issues need rulings before the build, and the first two decide its shape: whether M5 is split (S144), and whether a BUSL engine can be vendored (S145). M5a is built as ruled, reviewed, clean from a clean build, and closed (section 10). M5b is built as ruled except S141 and S153, which wait on E5; it is reviewed and clean from a clean build (section 11), and it closes when the owner rules on S162 and the embedded policy form.
