@@ -68,6 +68,8 @@ export function parts({ toolchainRoot = ROOT, manualDir = MANUAL, o1Dir = join(M
     }
   }
   // M3-9: O1, the independent session's suites and LEAKS.md, named where they live whatever directory they are read from.
+  // M3-10: O1-R, the range refusals generated from the M3-8 list, a secondary measure beside O1.
+  out['O1-R'] = walk(join(M3, 'o1r'));
   out['O1'] = walk(o1Dir).map((f) => ({ file: f, as: `experiments/m3/o1/${relative(o1Dir, f)}` }));
   out['O1 prompt'] = [join(ROOT, 'docs', 'm3', 'o1-prompt.md'), join(M3, 'o1-kit.mjs')];
   out['template'] = walk(join(M3, 'tasks', '_template'));
