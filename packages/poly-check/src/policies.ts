@@ -46,17 +46,20 @@ const scopeGoverns = (scope: string, module: string) => {
   return re.test(module);
 };
 
-/** The effect kinds a scope's policies name, which polycheck counts as gated (S161). */
+/**
+ * The effect kinds a scope's obligations name with `==` or `in`, which polycheck counts as gated (S161, PT8.4). A never
+ * statement enforces nothing, and `!=` names every other kind, so neither gates the kind it names (review B10).
+ */
 function mentionedKinds(ps: Policy[]): Set<string> {
   const out = new Set<string>();
   const isKind = (e: any) => e?.kind === 'Member' && e.prop === 'kind' && e.object?.kind === 'Name' && e.object.name === 'effect';
   const walk = (e: any): void => {
     if (!e || typeof e !== 'object') return;
-    if (e.kind === 'Binary' && (e.op === '==' || e.op === '!=')) for (const [a, b] of [[e.left, e.right], [e.right, e.left]]) if (isKind(a) && b?.kind === 'String') out.add(b.value);
+    if (e.kind === 'Binary' && e.op === '==') for (const [a, b] of [[e.left, e.right], [e.right, e.left]]) if (isKind(a) && b?.kind === 'String') out.add(b.value);
     if (e.kind === 'In' && isKind(e.expr)) for (const x of e.set) if (x.kind === 'String') out.add(x.value);
     for (const v of Object.values(e)) { if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') walk(v); }
   };
-  for (const p of ps) for (const it of p.items) walk(it);
+  for (const p of ps) for (const it of p.items) if (it.kind !== 'Never') walk(it);
   return out;
 }
 
@@ -261,9 +264,29 @@ export async function policyReports(module: Module, program: Module[], root: str
     for (const m of consistency.bounded) r.notRun.push({ property: m, reason: 'the discharge check stopped at its bound (PS8.6)' });
     r.stages.push({ stage: 'consistency', status: 'ran', engine: 'poly-ref', verdict: consistency.findings.length ? 'FINDINGS' : consistency.bounded.length ? 'INCONCLUSIVE' : 'CLEAN', note: `${consistency.mandates} mandate(s); ${consistency.checks} discharge check(s)` });
 
-    // policy-admission and policy-tv need the engine.
+    // PS8.4 (review B8): in a scope whose obligations read labels or class, an unlabelled effect is refused.
+    const readsLabels = (x: any): boolean => !!x && typeof x === 'object' && ((x.kind === 'Member' && x.object?.kind === 'Name' && x.object.name === 'effect' && (x.prop === 'labels' || x.prop === 'class')) || Object.values(x).some((v) => (Array.isArray(v) ? v.some(readsLabels) : readsLabels(v))));
+    if (ps.some((p) => p.items.some((i) => i.kind !== 'Never' && readsLabels(i)))) {
+      for (const m of program) {
+        if (!scopeGoverns(scope, m.name)) continue;
+        for (const d of m.decls) {
+          if (d.kind !== 'Machine') continue;
+          for (const it of d.items) {
+            if (it.kind !== 'EffectDecl' || it.items.some((x) => x.kind === 'EffLabels')) continue;
+            const kind = (it.items.find((x) => x.kind === 'EffKind') as { value: string } | undefined)?.value ?? it.name;
+            r.diagnostics.push(diag('PL6302', { module: m.name, node: it.id, line: it.span?.line }, `effect ${kind} of ${m.name}.${d.name} has no labels, and the obligations of scope ${scope} read labels or class; it is refused at admission (PS8.4)`));
+          }
+        }
+      }
+    }
+
+    // A scope with only never statements gives the gate nothing to enforce, and the engine takes no empty document.
     const peer = polyaxionPeer();
-    if (!peer.ok) {
+    if (!doc.obligations.length) {
+      r.diagnostics.push(diag('PL1201', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `the policies of scope ${scope} have no obligation for the gate to enforce: a never statement proves, it does not enforce (PT8.2)`));
+      r.stages.push({ stage: 'policy-admission', status: 'not-run', engine: '', reason: 'the scope has no obligation' });
+      r.stages.push({ stage: 'policy-tv', status: 'not-run', engine: '', reason: 'the scope has no obligation' });
+    } else if (!peer.ok) {
       r.stages.push({ stage: 'policy-admission', status: 'not-run', engine: '', reason: peer.reason });
       r.stages.push({ stage: 'policy-tv', status: 'not-run', engine: '', reason: peer.reason });
     } else {

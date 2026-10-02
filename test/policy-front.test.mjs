@@ -241,3 +241,25 @@ test('PT8.2: a transition that reads only a var is lowered and validated', async
   const s = scopeOf(await checkProject(projectOf('var-transition', { 'orders.poly': ORDERS, 'p.policy.poly': pol })), 'orders');
   assert.equal(s.stages.find((x) => x.stage === 'policy-tv').verdict, 'CLEAN', JSON.stringify(s.diagnostics.map((d) => d.message)));
 });
+
+// Review B8: PS8.4, in a scope whose obligations read labels or class, an effect with no labels is refused.
+test('PS8.4: an unlabelled effect in a labelled scope is PL6302, refused', async () => {
+  const prog = ORDERS.replace('    labels { write:store }\n', '');
+  const pol = `module lab_policy\n\npolicy orders-labels {\n  scope "orders"\n  obligation no-egress "No egress." rule {\n    when effect.labels has "egress:external" && effect.class == "irreversible"\n    require false else deny\n  }\n}\n`;
+  const s = scopeOf(await checkProject(projectOf('unlabelled', { 'orders.poly': prog, 'p.policy.poly': pol })), 'orders');
+  const d = s.diagnostics.find((x) => x.code === 'PL6302');
+  assert.ok(d, JSON.stringify(s.diagnostics.map((x) => x.code)));
+  assert.match(d.message, /stock\.reserve/);
+  assert.equal(s.verdict, 'REFUSED');
+});
+
+// A scope whose policies hold only never statements gives the gate nothing to enforce; it is refused with a reason,
+// not left to the engine, which takes no empty document.
+test('PT8.2: a scope with no obligation to enforce is refused with a reason', async () => {
+  const pol = `module nev_policy\n\npolicy only-never {\n  scope "orders"\n  never n "No fee.": allow when effect.kind == "payment.fee"\n}\n`;
+  const p = await checkProject(projectOf('only-never', { 'orders.poly': ORDERS, 'p.policy.poly': pol }));
+  const s = scopeOf(p, 'orders');
+  assert.ok(s, JSON.stringify(p.files.map((f) => [f.verdict, f.error])));
+  assert.ok(s.diagnostics.some((x) => x.code === 'PL1201' && /no obligation/.test(x.message)));
+  assert.equal(s.verdict, 'REFUSED');
+});

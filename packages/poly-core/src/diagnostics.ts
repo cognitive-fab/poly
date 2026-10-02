@@ -142,6 +142,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
   PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },
+  // PS8.4: in a scope whose obligations read labels or class, an effect with no labels (refused at admission).
+  PL6302: { name: 'UNLABELLED_IN_LABELLED_SCOPE', stage: 'policy', severity: 'error' },
   // PT6.5, S151: a target whose capability the effect's labels do not grant.
   PL6303: { name: 'TARGET_NOT_GRANTED', stage: 'types', severity: 'error' },
   // S129: an accepted adjudication reachable without a preceding accepted ok completion of its decision.

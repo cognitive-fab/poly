@@ -42,3 +42,12 @@ test('S161: the same program with its egress gated by a policy is clean, and a r
   assert.equal(st.verdict, 'CLEAN');
   assert.match(st.note, /source-egress: unreachable, no effect provides proprietary/);
 });
+
+// Review B10: PT8.4, a kind is gated when a rule or machine names it with == or in. A never statement enforces
+// nothing, and `!=` names every other kind, so neither marks it gated.
+test('S161: a kind named only with != or in a never statement is not counted as gated', { skip }, async () => {
+  for (const body of ['  obligation r "Not a post." rule {\n    when effect.kind != "http.post"\n    require true else deny\n  }\n', '  obligation r "Classes are known." rule {\n    when effect.class == "none"\n    require true else deny\n  }\n  never n "Never a post.": allow when effect.kind == "http.post" && effect.class == "none"\n']) {
+    const s = await scope('trifecta-mention', `module tri_policy\n\npolicy tri-mention {\n  scope "tri"\n${body}}\n`);
+    assert.ok(s.diagnostics.some((d) => d.code === 'PL7001' && d.property === 'lethal-trifecta'), body);
+  }
+});
