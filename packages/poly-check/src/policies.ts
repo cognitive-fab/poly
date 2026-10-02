@@ -12,11 +12,11 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkPolicies, policyProgram, diag, type Diagnostic, type Module, type Policy, type Verdict } from '@poly/core';
+import { checkPolicies, policyProgram, diag, type Diagnostic, type Module, type Policy, type Verdict, type WitnessStep } from '@poly/core';
 import { lowerPolicyScope, type PolicyDoc } from '@poly/lower';
-import { policyFacts, checkNever, validatePolicy } from '@poly/ref';
+import { policyFacts, checkNever, validatePolicy, proposalTable, evalPolicyExpr, initialSigma, type PolicyFacts } from '@poly/ref';
 
-export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'policy-tv' | 'never';
+export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'consistency' | 'policy-tv' | 'never';
 
 export interface PolicyReport {
   scope: string;
@@ -34,6 +34,73 @@ export interface PolicyReport {
 
 export const policySlug = (scope: string) => scope.replace(/[^A-Za-z0-9._-]/g, '_');
 
+/**
+ * PT8.4: Polyaxion's exploration (its checks, harden, and the m2 discharge check) draws its actions from a policy's
+ * examples, and its own sampler does not reach the reserved fields of a runtime proposal. So each lowered obligation
+ * is given, as examples, every proposal of the decision table, one step each from the initial state, allowed or
+ * refused as PS8 says of that obligation alone. Admission then also requires the engine to agree with each.
+ */
+export function withExamples(doc: PolicyDoc, scope: { scope: string; policies: Policy[] }, facts: PolicyFacts, max = 400): void {
+  const rows = proposalTable(scope, facts).rows.slice(0, max);
+  const t3 = (v: unknown) => (v === true ? true : v === false ? false : null);
+  const sigma = initialSigma(scope);
+  const vars: Record<string, any> = {};
+  for (const p of scope.policies) for (const v of p.vars) vars[v.name] = (v.init as { value: unknown }).value;
+  const action = (row: Record<string, unknown>) => ({ kind: row.proposal === 'send' ? 'custom.poly.send' : 'custom.poly.effect', ...row });
+  for (const o of doc.obligations) {
+    const src = (o as { source?: { policy: string; obligation: string; unknown?: boolean } }).source;
+    const p = scope.policies.find((x) => x.name === src?.policy);
+    const it = p?.items.find((x) => x.name === src?.obligation);
+    if (!it || (it.kind !== 'RuleObligation' && it.kind !== 'MachineObligation')) continue;
+    const allow: unknown[][] = [];
+    const deny: unknown[][] = [];
+    for (const row of rows) {
+      let refused = false;
+      if (it.kind === 'RuleObligation') {
+        const w = it.when ? t3(evalPolicyExpr(it.when, row, vars)) : true;
+        const u = it.onUnknown ?? (it.severity === 'warn' ? 'warn' : 'escalate');
+        if (src?.unknown) refused = w === null && u !== 'warn' && u !== 'skip';
+        else refused = w === true && t3(evalPolicyExpr(it.require, row, vars)) !== true && it.severity !== 'warn';
+      } else {
+        const id = `${p!.name}.${it.name}`;
+        refused = it.guards.some((g) => g.in.includes(sigma[id]) && t3(evalPolicyExpr(g.when, row, vars)) !== false);
+      }
+      (refused ? deny : allow).push([action(row)]);
+    }
+    (o as { examples?: unknown }).examples = { allow, deny };
+  }
+}
+
+/**
+ * PT8.5, PS8.6, S148: each mandate (a machine obligation with end states) that cannot be discharged under the
+ * obligations together, with a minimal conflicting subset: obligations are tried for removal in declaration order, and
+ * one is dropped when the mandate stays undischargeable without it. Minimal, not the smallest; the number of discharge
+ * checks it took is reported. `discharge` is Polyaxion's m2 check over a document.
+ */
+export function mandates(doc: PolicyDoc, policies: Policy[], discharge: (d: PolicyDoc) => { applicable: boolean; ok: boolean; trapped: { state: unknown; machines: { id: string; state: string; discharge: string[] }[]; path: { action: unknown; state: unknown }[] }[] }): { findings: { mandate: string; node: string; line?: number; message: string; path: WitnessStep[] }[]; mandates: number; checks: number } {
+  let checks = 0;
+  const units = policies.flatMap((p) => p.items.filter((i) => i.kind !== 'Never' && i.kind !== 'Recalled').map((i) => ({ id: `${p.name}.${i.name}`, node: i.id, line: i.span?.line, kind: i.kind })));
+  const ofUnit = (u: string) => doc.obligations.filter((o) => o.id === u || o.id === `${u}.unknown`);
+  const trappedIn = (set: string[], mandate: string) => {
+    checks++;
+    const d = discharge({ ...doc, obligations: set.flatMap(ofUnit) });
+    return d.applicable && !d.ok ? d.trapped.find((t) => t.machines.some((m) => m.id === mandate)) ?? null : null;
+  };
+  const findings: { mandate: string; node: string; line?: number; message: string; path: WitnessStep[] }[] = [];
+  const machines = units.filter((u) => u.kind === 'MachineObligation');
+  for (const m of machines) {
+    const all = units.map((u) => u.id);
+    const trap = trappedIn(all, m.id);
+    if (!trap) continue;
+    let rest = all.filter((u) => u !== m.id);
+    for (const u of [...rest]) if (trappedIn([m.id, ...rest.filter((x) => x !== u)], m.id)) rest = rest.filter((x) => x !== u);
+    const subset = [m.id, ...rest];
+    const path: WitnessStep[] = trap.path.map((s) => ({ pre: null, action: 'propose', data: s.action, post: s.state }));
+    findings.push({ mandate: m.id, node: m.node, line: m.line, path, message: `mandate ${m.id} cannot be discharged under the obligations ${subset.join(', ')}: from ${JSON.stringify(trap.state)} no allowed proposal leads to its end states (PS8.6; the subset is minimal by deletion in declaration order, not the smallest; ${checks} discharge check(s))` });
+  }
+  return { findings, mandates: machines.length, checks };
+}
+
 /** The policies of `module`, checked against `program` (the project's modules), one report per scope. */
 export async function policyReports(module: Module, program: Module[], root: string): Promise<PolicyReport[]> {
   const policies = module.decls.filter((d): d is Policy => d.kind === 'Policy');
@@ -42,7 +109,7 @@ export async function policyReports(module: Module, program: Module[], root: str
   const typed = checkPolicies(module, facts);
   const scopes = new Map<string, Policy[]>();
   for (const p of policies) { if (!scopes.has(p.scope)) scopes.set(p.scope, []); scopes.get(p.scope)!.push(p); }
-  const { polyaxionPeer, loadPolyaxion, policyEngine } = await import('@poly/runtime');
+  const { polyaxionPeer, loadPolyaxion, loadPolyaxionModule, policyEngine } = await import('@poly/runtime');
   const refFacts = policyFacts(program);
   const out: PolicyReport[] = [];
   for (const [scope, ps] of scopes) {
@@ -57,11 +124,13 @@ export async function policyReports(module: Module, program: Module[], root: str
     const refused = mine.some((d) => d.severity === 'error');
     r.stages.push({ stage: 'policy-types', status: 'ran', engine: '@poly/core', verdict: refused ? 'REFUSED' : mine.length ? 'FINDINGS' : 'CLEAN' });
     if (refused) {
-      for (const s of ['policy-lower', 'policy-admission', 'policy-tv', 'never'] as PolicyStage[]) r.stages.push({ stage: s, status: 'not-run', engine: '', reason: 'the policies were refused at policy-types' });
+      for (const s of ['policy-lower', 'policy-admission', 'consistency', 'policy-tv', 'never'] as PolicyStage[]) r.stages.push({ stage: s, status: 'not-run', engine: '', reason: 'the policies were refused at policy-types' });
       continue;
     }
     // policy-lower: one document per scope, written where admission certifies it.
-    const text = JSON.stringify(lowerPolicyScope(scope, ps, 'sha256:' + createHash('sha256').update(JSON.stringify(ps)).digest('hex').slice(0, 16)), null, 2) + '\n';
+    const lowered = lowerPolicyScope(scope, ps, 'sha256:' + createHash('sha256').update(JSON.stringify(ps)).digest('hex').slice(0, 16));
+    withExamples(lowered, { scope, policies: ps }, refFacts);
+    const text = JSON.stringify(lowered, null, 2) + '\n';
     const rel = `.poly/build/policies/${policySlug(scope)}.policy.json`;
     mkdirSync(join(root, '.poly', 'build', 'policies'), { recursive: true });
     writeFileSync(join(root, rel), text);
@@ -73,14 +142,20 @@ export async function policyReports(module: Module, program: Module[], root: str
     const peer = polyaxionPeer();
     if (!peer.ok) {
       r.stages.push({ stage: 'policy-admission', status: 'not-run', engine: '', reason: peer.reason });
+      r.stages.push({ stage: 'consistency', status: 'not-run', engine: '', reason: peer.reason });
       r.stages.push({ stage: 'policy-tv', status: 'not-run', engine: '', reason: peer.reason });
     } else {
       const px = await loadPolyaxion();
       const admission = await px.admitPolicy(doc, {});
-      const errors = (admission.findings ?? []).filter((f: { level: string }) => f.level === 'error');
+      // Stage 5b (PT8.5, S148): an undischargeable mandate is PL6501 with its minimal conflicting subset, not a refusal.
+      const { checkDischarge } = await loadPolyaxionModule('compile/discharge.mjs');
+      const consistency = mandates(doc, ps, (d) => checkDischarge(px.compileToTriple(d).plan, {}));
+      for (const m of consistency.findings) r.diagnostics.push({ ...diag('PL6501', { module: module.name, node: m.node, line: m.line }, m.message), property: m.mandate, witness: { id: '', length: m.path.length, trace: m.path } });
+      const errors = (admission.findings ?? []).filter((f: { level: string; message: string }) => f.level === 'error' && !/not lawfully dischargeable \(m2\)/.test(f.message));
       for (const f of errors) r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `Polyaxion refuses the policies of scope ${scope} at admission: ${f.obligation ? `${f.obligation}: ` : ''}${f.message} (PT8.4)`));
-      if (!admission.servable && !errors.length) r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `Polyaxion does not serve the policies of scope ${scope}: ${admission.refused?.message ?? 'not servable'} (PT8.4)`));
-      r.stages.push({ stage: 'policy-admission', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: admission.servable ? 'CLEAN' : 'REFUSED', note: `coverage ${(admission.coverage ?? []).map((c: { id: string; grade: string }) => `${c.id}: ${c.grade}`).join(', ')}` });
+      if (!admission.servable && !errors.length && !consistency.findings.length) r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `Polyaxion does not serve the policies of scope ${scope}: ${admission.refused?.message ?? 'not servable'} (PT8.4)`));
+      r.stages.push({ stage: 'consistency', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: consistency.findings.length ? 'FINDINGS' : 'CLEAN', note: `${consistency.mandates} mandate(s); ${consistency.checks} discharge check(s)` });
+      r.stages.push({ stage: 'policy-admission', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: errors.length ? 'REFUSED' : 'CLEAN', note: `coverage ${(admission.coverage ?? []).map((c: { id: string; grade: string }) => `${c.id}: ${c.grade}`).join(', ')}` });
       const engine = policyEngine(px, px.compileToTriple(doc).plan);
       const tv = validatePolicy({ scope, policies: ps }, refFacts, engine);
       if (tv.mismatch) {

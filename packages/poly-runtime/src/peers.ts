@@ -51,6 +51,13 @@ export class PeerUnavailable extends Error {
   constructor(message: string) { super(message); this.name = 'PeerUnavailable'; }
 }
 
+/** One pinned module of the Polyaxion package by its path under packages/polyaxion/src (PT8.5's discharge check). */
+export async function loadPolyaxionModule(rel: string): Promise<any> {
+  const peer = polyaxionPeer();
+  if (!peer.ok) throw new PeerUnavailable(peer.reason);
+  return import(pathToFileURL(join(peer.dir, 'packages', 'polyaxion', 'src', ...rel.split('/'))).href);
+}
+
 /** The Polyaxion package's public surface, from a peer whose every pinned file matches. */
 export async function loadPolyaxion(): Promise<any> {
   const peer = polyaxionPeer();

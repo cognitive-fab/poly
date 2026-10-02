@@ -61,7 +61,7 @@ test('PT8: the AC4 project checks CLEAN through every policy stage, and lowers o
     return;
   }
   assert.equal(s.verdict, 'CLEAN', JSON.stringify(s.stages));
-  assert.deepEqual(s.stages.map((x) => [x.stage, x.verdict]), [['policy-types', 'CLEAN'], ['policy-lower', 'CLEAN'], ['policy-admission', 'CLEAN'], ['policy-tv', 'CLEAN'], ['never', 'CLEAN']]);
+  assert.deepEqual(s.stages.map((x) => [x.stage, x.verdict]), [['policy-types', 'CLEAN'], ['policy-lower', 'CLEAN'], ['consistency', 'CLEAN'], ['policy-admission', 'CLEAN'], ['policy-tv', 'CLEAN'], ['never', 'CLEAN']]);
 });
 
 test('PT8, S147: unknown names, wrong types and a machine read that can never be known are reported', async () => {
@@ -154,10 +154,11 @@ test('PT8.4, PT15: admission certifies each scope\'s lowered policy, and load re
   await assert.rejects(load(a.build, { certificate: a.certificate, trust: a.trust }), (e) => e instanceof LoadError && /policies/.test(e.message));
 });
 
-test('PT8.4: a policy Polyaxion refuses at admission is PL6001, with the engine\'s reason', async (t) => {
+test('PT8.4, PT8.5: a policy Polyaxion refuses at admission is PL6001 with the engine\'s reason; a trapped mandate is PL6501', async (t) => {
   if (!peer.ok) { t.todo(`not run: ${peer.reason}`); return; }
   const trapped = POLICY.replace('    end open, reserved\n', '    end reserved\n').replace('from open when effect.kind == "stock.reserve" -> reserved', 'from reserved when effect.kind == "stock.reserve" -> open');
   const s = scopeOf(await checkProject(projectOf('refused', { 'orders.poly': ORDERS, 'orders.policy.poly': trapped })), 'orders');
-  assert.ok(s.diagnostics.some((d) => d.code === 'PL6001' && /dischargeable/.test(d.message)), JSON.stringify(s.diagnostics.map((d) => d.message)));
+  assert.ok(s.diagnostics.some((d) => d.code === 'PL6001' && /discharge state 'reserved' is unreachable/.test(d.message)), JSON.stringify(s.diagnostics.map((d) => d.message)));
+  assert.ok(s.diagnostics.some((d) => d.code === 'PL6501' && /reserve-before-charge cannot be discharged/.test(d.message)));
   assert.equal(s.verdict, 'REFUSED');
 });
