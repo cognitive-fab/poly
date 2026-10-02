@@ -1,6 +1,6 @@
 // OutboxIntent in its union form, as in PT9.7 (03-technical-spec.md).
 // evidence/outbox_sum_check.py: 17 states, 24 accepted steps, no deadlock.
-module runtime
+module intents
 
 type Intent =
   | Pending

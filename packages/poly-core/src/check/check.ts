@@ -8,6 +8,8 @@
 import type * as A from '../ast.js';
 import { diag, type Diagnostic, type NodeAt } from '../diagnostics.js';
 import { buildTypeEnv, cardinality, type TypeEnv, type UnionInfo } from '../types.js';
+import { digest } from '../digest.js';
+import { RESERVED_MODULE, RUNTIME_MODEL_DIGESTS } from '../reserved.js';
 
 // ── semantic types ─────────────────────────────────────────────────────────
 
@@ -184,7 +186,10 @@ class Checker {
   run(): CheckResult {
     const machines = new Map<string, MachineFacts>();
     this.declarations();
+    // S143: runtime.* and runtime<m>.* are the runtime's own machine ids; only PT9.7's model takes them.
+    const reserved = RESERVED_MODULE.test(this.module.name) && !RUNTIME_MODEL_DIGESTS.has(digest(this.module));
     for (const d of this.module.decls) {
+      if (reserved && d.kind === 'Machine') this.err('PL1208', d, `machine ${this.module.name}.${d.name}: the module name ${this.module.name} is reserved for the runtime's own OutboxIntent model (PT9.7), and only that model takes it; rename the module (S143)`);
       if (d.kind === 'Use') this.err('PL0901', d, '`use` (imports between modules) is not lowered in milestone M0');
       if (d.kind !== 'Machine') continue;
       if (machines.has(d.name)) { this.err('PL1002', d, `machine ${d.name} is declared twice`); continue; }

@@ -11,7 +11,7 @@ import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import type { Certificate } from '@poly/core';
+import { RESERVED_MODULE, type Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.js';
@@ -133,8 +133,7 @@ export class PolyRuntime {
   /** The runtime's own model behind a machine id (an OutboxIntent instance), or null for a program's machine. */
   modelOf(machineId: string): { source: string; module: string } | null {
     const m = /^runtime(\d*)\.OutboxIntent$/.exec(machineId);
-    // A program may name a machine runtime.OutboxIntent; load refuses it only where the runtime needs that model.
-    if (!m || this.verified.machines.some((x) => x.id === machineId)) return null;
+    if (!m) return null;
     const bound = m[1] ? Number(m[1]) : 3;
     return { source: modelSource(bound), module: verifiedModels([bound])[0].module };
   }
@@ -428,21 +427,19 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust, { allowWitness: opts.allowWitness });
   const dbPath = opts.store?.sqlite ?? ':memory:';
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true });
+  // S143: runtime.* and runtime<m>.* are the runtime's own ids, whatever this build or store needs. The checker refuses
+  // them (PL1208); load refuses them again, so a certificate from an older toolchain cannot bring one in.
+  const reserved = verified.machines.find((m) => RESERVED_MODULE.test(m.id.slice(0, m.id.lastIndexOf('.'))));
+  if (reserved) throw new LoadError(`refused at load: the program's machine ${reserved.id} is in a module reserved for the runtime's own OutboxIntent model (PL1208, S143)`);
   const store = openLedgerStore(dbPath);
   // S119, S120: the OutboxIntent instance for every retry bound the build declares. Review C8: and every bound an
   // intent in the store started under, so it keeps its own machine after a redeploy changes the bound.
   const bounds = new Set<number>(verified.machines.flatMap((m) => Object.values(m.manifest?.effects ?? {}).map((e) => e.retry.maxAttempts as number)));
   for (const r of store.db.prepare("SELECT DISTINCT machine_id FROM pr_instance WHERE machine_id LIKE 'runtime%.OutboxIntent'").all() as { machine_id: string }[]) {
     const m = /^runtime(\d*)\.OutboxIntent$/.exec(r.machine_id);
-    if (m && !verified.machines.some((x) => x.id === r.machine_id)) bounds.add(m[1] ? Number(m[1]) : 3);
+    if (m) bounds.add(m[1] ? Number(m[1]) : 3);
   }
   const models = verifiedModels([...bounds].filter((b) => BOUNDS.includes(b as 1)).sort((x, y) => x - y));
-  // Review C4, C8: a program machine with the id of a model the runtime registers would shadow it, or be stepped as it.
-  const clash = models.find((x) => verified.machines.some((m) => m.id === x.machineId));
-  if (clash) {
-    await store.close();
-    throw new LoadError(`refused at load: the program's machine ${clash.machineId} has the id of the runtime's own OutboxIntent model, which this build needs (S119)`);
-  }
   let kernel: Runtime;
   try {
     kernel = await createRuntime({

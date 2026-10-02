@@ -177,14 +177,17 @@ test('review C7: conformance relates each intent\'s end to the program\'s comple
 
 // Review C4 and C8 met a program machine named as the runtime's own model: the internal ids are reserved only where
 // the runtime registers that model, and a program machine with one of those ids is refused at load, never shadowed.
-test('review C4, C8: a program machine with the id of a model the runtime needs is refused at load; with no such need it runs as the program\'s', async () => {
-  const { load, LoadError } = await import('@poly/runtime');
-  const clash = await admitted('review-c-collide', ['test/fixtures/review-m4/collide.poly']);
-  await assert.rejects(load(clash.build, { certificate: clash.certificate, trust: clash.trust }), (e) => e instanceof LoadError && /runtime\.OutboxIntent/.test(e.message));
+// S143 replaces the load-time clash of the C4, C8 follow-up: runtime.* is reserved by the checker, whatever the build
+// declares or the store holds, so the same program is refused every day, at admission.
+test('S143: a program machine in module runtime is refused at admission (PL1208); the renamed seed is the program\'s own', async () => {
+  const { admit, AdmitError } = await import('@poly/check');
+  const { makeKey, project } = await import('./runtime-helpers.mjs');
+  const dir = project('review-c-collide', ['test/fixtures/review-m4/collide.poly'], makeKey('collide'), 'test-runtime');
+  await assert.rejects(admit(dir), (e) => e instanceof AdmitError);
   const own = await admitted('review-c-own', ['conformance/m2/seeded/liveness/fixed.poly']);
   const { rt } = await loaded(own);
   try {
-    const o = await rt.create('runtime.OutboxIntent', { id: 'mine' });
+    const o = await rt.create('intents.OutboxIntent', { id: 'mine' });
     const r = await rt.dispatch(o.id, 'Propose');
     assert.equal(r.kind ?? r.verdict?.kind ?? 'accepted', 'accepted');
     assert.equal((await rt.getState(o.id)).state.status, 'Proposed');

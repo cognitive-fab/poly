@@ -1,6 +1,6 @@
 // AC9: the union OutboxIntent with the Dead branch of SettleFailed replaced by Allowed.
 // Allowed { attempts: 3 } leaves 0..2, so poly check reports PL3102 DOMAIN_ESCAPE.
-module runtime
+module intents
 
 type Intent =
   | Pending

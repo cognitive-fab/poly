@@ -1,6 +1,7 @@
 export type * from './ast.js';
 export { canonicalize } from './jcs.js';
 export { digest, stripped, sha256Hex } from './digest.js';
+export { RESERVED_MODULE, RUNTIME_MODEL_DIGESTS } from './reserved.js';
 export { assignIds, idOfPath } from './ids.js';
 export * from './truth.js';
 export * from './types.js';

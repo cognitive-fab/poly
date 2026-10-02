@@ -1,7 +1,7 @@
 // AC3 seed, liveness, fixed: OutboxIntent v0.3.
 // OutboxIntent in its v0.3 five-field form (03-technical-spec.md at commit 5160ba8).
 // evidence/outbox_check.py v0.3: 33 states, 40 accepted steps, no deadlock.
-module runtime
+module intents
 
 enum IntentStatus { Pending, Proposed, Allowed, Running, Settled, Denied, Escalated, Dead, Done }
 

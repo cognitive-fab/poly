@@ -1,5 +1,5 @@
 // AC9 escape without the liveness property (refused until M2, S13): poly check must report PL3102.
-module runtime
+module intents
 
 type Intent =
   | Pending

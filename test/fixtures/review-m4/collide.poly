@@ -1,5 +1,5 @@
-// A program machine whose id is the runtime's own OutboxIntent at bound 3 (runtime.OutboxIntent), with an effect
-// of three attempts, so the runtime needs that model too: load must refuse, never shadow one with the other.
+// A program machine in module runtime, whose id is the runtime's own OutboxIntent at bound 3: refused by the
+// checker under PL1208 whatever the build declares or the store holds (S143).
 module runtime
 
 enum S { Idle, Busy, Over }

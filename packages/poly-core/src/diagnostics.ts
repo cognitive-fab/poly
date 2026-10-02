@@ -47,7 +47,7 @@ export const CODES: Record<string, CodeInfo> = {
   // S101, S127: a reason the runtime uses (PS3.2), so a rejection always says who refused the step.
   PL1207: { name: 'RESERVED_REJECT_REASON', stage: 'types', severity: 'error' },
   // M4 review D1: an effect kind with a prefix the toolchain generates (decision.*, outcome.*).
-  PL1208: { name: 'RESERVED_EFFECT_KIND', stage: 'types', severity: 'error' },
+  PL1208: { name: 'RESERVED_NAME', stage: 'types', severity: 'error' },
   // PT3.4a: a finding a person must accept (PT12.5), not a refusal.
   PL1301: { name: 'DISCLOSED_IRREVERSIBLE_INPUT', stage: 'types', severity: 'finding' },
   // S53: an explicit strict on a parameter of an action with no handler; the runtime never runs the check.
