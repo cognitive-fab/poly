@@ -33,6 +33,10 @@ PT9.7's `OutboxIntent` has no transition from `Allowed` back to `Proposed`, its 
 
 PD4-A3 ("`Declare` is dispatched only with a person's signature") is met in M5b, where `Declare` is written `on Declare(m) by op: Caller` with the person-key adapter (S107). No interim `signed` modifier is added: grammar that M5b would retire is not built. M5a builds and tests the signed-record half (keyrings, verification, the signer journaled) through approvals. M5a's gate is PD4-A1, PD4-A2 and PD3-A2; PT18 is amended in this commit.
 
+## S149 amended: `never` statements in policies
+
+The decision-table check proves statements a policy states. In M5a, PT8.1 gains `never <id> "<text>": allow when <expr>`. poly-ref proves it over the decision table and gives a witness proposal when the policy allows one. The seeded control drops the rule that enforces a `never`. Two rules carry over: a statement whose `<expr>` is never true over the table is `INCONCLUSIVE` (`vacuous`), never clean (S113); a statement over an open domain is `runtime-only`. PD5.3.3a is written as a `never` in M5b.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
