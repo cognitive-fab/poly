@@ -53,6 +53,10 @@ The decision-table check proves statements a policy states. In M5a, PT8.1 gains 
 - Controls, as for every check: a seeded program with the trifecta and no gate must be a finding with a witness, and the same program with the egress effect gated must be clean.
 - `never` statements keep the state-dependent cases (S149).
 
+## For M6's planning list
+
+- **A second agent host.** M6 (PT18: workflow lowering, MCP server, language server, Claude Code plugin, `poly new`) is planned so that the MCP server and the language server are host-neutral, and the Claude Code plugin is one thin adapter over them. A DeepSeek Harness plugin is planned as a second adapter, built once its plugin API is declared stable. M6's gate then shows the same workflow running unchanged under both hosts.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
