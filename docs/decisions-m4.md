@@ -20,6 +20,38 @@ PT18 places M4 after the M3 experiment, and PT13's rules decide what follows it.
 
 Spec issues found during M4 continue at **S118**.
 
+## Rulings on `docs/plan-m4.md` (S118 to S136)
+
+The plan is accepted with the rulings below. Its reading of the engines is the basis of these rulings: K4 not met after an archive, three worker transitions outside `OutboxIntent`, the effect result dropped, the ledger writable inside the step's transaction, the polyflow ledger's fixed kinds.
+
+**Merging `main` into `m4`.** M4-0 rule 3 is clarified: Claude Code merges `main` into `m4` whenever `main` gains rulings, starting now (9d8d7ba and this commit). It never merges `m4` into `main`.
+
+| Issue | Ruling |
+|---|---|
+| **S118** The gate in M4 | **Accepted.** M4 builds the gate interface, an allow-all default and scripted test gates; each decision is a `verdict` event. Session replay in `sseq` order moves to M5, and PT18's M4a row says so. Approvals in M4 are recorded API calls without a person-key signature; the instance line states the limit until PT12.5 lands in M5. |
+| **S119** Who hosts the outbox intent | **Accepted: `poly-runtime` hosts its own effect worker**, every worker transition an action on the lowered `OutboxIntent`, a rejected action a runtime fault that stops the worker on that intent. A crash or lease expiry while `Running` is `HandlerFailed` and counts an attempt; the idempotency key (PT15) is what keeps a re-run of an effect that did execute from repeating it. `Dead` is terminal. An operator who wants to retry creates a new intent through a governed action, never by resurrecting a dead one. `02` §2a is amended; E3 is dropped. |
+| **S120** The attempt bound | **Accepted.** The machine is checked once per distinct `maxAttempts` in the build, and `load` refuses a manifest without one. A `maxAttempts` above 5 is refused at admission, so the state space stays small; the limit is listed in PT19. |
+| **S121** The ledger in the step's transaction | **Accepted.** `LedgerStore` subclasses polyrun's `Store`; K1 extends to the ledger; the decision record is held from the provider's return to the completion's commit and written in that transaction. E4 is dropped. |
+| **S122** The ledger format | **Accepted**, including `at` in milliseconds (PT16 corrected), closure at archive, a poisoning as an `observation`, and no event for a K9 refusal. |
+| **S123** Signed heads and the anchor | **Accepted.** The verifier reports a live run as `open-and-signed` through a stated `seq`, never as fully signed. |
+| **S124** K4 | **Accepted: E1 goes on the owner's list.** The host-side fallback is not built. Until E1 is re-vendored on `m4`, PS10 states that polyrun 8.3.2 drops the dedupe keys at archive, and the M4c archive traces are a failing test listed as waiting on E1, never skipped silently. |
+| **S125** Which `Delivery` machine | **Accepted:** the parallel variant; `fifo` refused at `load` with its own code until an in-order worker exists; the abstraction function written down in the test. |
+| **S126** The certificate | **Accepted**, with one addition: **no private key is ever committed.** Test keys are generated at test time; `poly.json` names the admission key by id and location, and `load` reads only public keys. Only `CLEAN` programs are admitted in M4. |
+| **S127** Reserved reasons | **Accepted:** `terminal`, `outside-check-domain`, `poisoned`, `archived`, `claims-unverified`. |
+| **S128** Vacuity per property kind | **Accepted.** "After" properties are removed from PT12.3. |
+| **S129** `adjudicate` | **Accepted, with its own code.** `PL1201` is a type mismatch and is not reused for a path finding. An accepted adjudication reachable without a preceding accepted `ok` completion of its decision is **`PL6203 ADJUDICATION_WITHOUT_DECISION`**, a finding with its witness path. The runtime reason `no-decision-to-adjudicate` is dropped. |
+| **S130** Outside dispatch of a decision's completion | **Accepted.** Refused before any step, like K9, with an audit row. K10's row in PS10 says so. |
+| **S131** PD3-A2 and the replay codes | **Accepted:** PD3-A2 moves to M5 with PD4; `PL9002 LEDGER_BROKEN` and `PL9003 DECISION_PROVENANCE` are added beside `PL9001`. |
+| **S132** `poly journal eval` and `fit` | **Accepted.** Neither writes to any chain. Both run on recorded providers in tests. |
+| **S133** Regenerations | **Accepted.** Witness tests regenerate in M4; the M3 adapter regenerates after the merge, as a separate change. |
+| **S134** Capabilities | **Accepted.** An empty, frozen capability object, and the instance line says capabilities are not bound until M5. |
+| **S135** The store | **Accepted:** SQLite only; Postgres listed as not built. |
+| **S136** Which M3 references | **Accepted, with timing.** The re-check reads the references at the commit FROZEN records, through `git show`. FROZEN does not exist yet: until it does, that half of M4f is listed as not run, and the rest of M4f proceeds. |
+
+**Engine list for the owner:** E1 (polyrun: tombstones at archive, K4) and E2 (polyflow kernel and verifier: the kinds `step`, `advice`, `decision`, `outcome`). E3 and E4 are dropped.
+
+**Order.** The plan's order stands. The first commit on `m4` is the tree guard; the plan is committed next; then the spec text from these rulings, before any code that depends on it.
+
 ## Conclusion
 
-Building M4 and M5 alongside M3 saves calendar time without touching the experiment. The worktree keeps the frozen toolchain where the runner reads it, the merge waits for M3's result, and the stop rule keeps its force over everything built in the meantime.
+Building M4 and M5 alongside M3 saves calendar time without touching the experiment. The worktree keeps the frozen toolchain where the runner reads it, the merge waits for M3's result, and the stop rule keeps its force over everything built in the meantime. The M4 plan is ruled: the runtime hosts the checked outbox machine itself, writes the ledger inside each step's transaction, and needs two engine changes, tombstones in polyrun and four ledger kinds in polyflow.
