@@ -1254,6 +1254,9 @@ class Checker {
     const receiver = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === tt.machine);
     const act = receiver?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
     if (!act) { this.err('PL1001', s, `send … <- ${s.target}: ${tt.machine} has no action ${s.target}`); rest(); return; }
+    // M4 review C5, K10: a decision's completion is delivered by the outbox worker only, with its decision event.
+    const decision = receiver!.items.find((i): i is A.Decision => i.kind === 'Decision' && i.items.some((x) => x.kind === 'EffOutcome' && (x as A.EffOutcomeItem).action === s.target));
+    if (decision) { this.err('PL6204', s, `send … <- ${s.target}: ${s.target} completes decision ${decision.name} of ${tt.machine}, and only the outbox worker delivers it, with its decision event (K10)`); rest(); return; }
     this.intentArgs(s, act.params, `${tt.machine}.${s.target}`, scope);
   }
 

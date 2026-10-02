@@ -36,6 +36,15 @@ CREATE TABLE IF NOT EXISTS poly_content (
  * with a SamSchemaError, which polyrun journals as a rejected step; here, before that row is written, the whole
  * dispatch is refused instead, so no step, no journal row and no ledger event exist for it.
  */
+/**
+ * Review C5, K10: a decision's completion delivered by anything but the outbox worker (a message, a timer). Named
+ * RefusedError so that polyrun's message worker dead-letters it, as it does a K9 refusal; the runtime audits it.
+ */
+export class DecisionCompletionRefused extends Error {
+  readonly rule = 'K10';
+  constructor(message: string, readonly instanceId: string, readonly action: string, readonly actionId: string) { super(message); this.name = 'RefusedError'; }
+}
+
 /** Review B6: an id whose run was archived; creating it again would extend a closed chain under another machine. */
 export class ArchivedId extends Error {
   constructor(message: string) { super(message); this.name = 'ArchivedId'; }
@@ -62,6 +71,11 @@ export class LedgerStore extends Store {
   /** Events to write with the step whose `(instance, actionId)` is the key; set by the worker before it dispatches. */
   readonly pending = new Map<string, StepEvents>();
   /** Builds the events of a step's outbox rows inside its transaction (the outcome event, PD2.4). */
+  /** Review C5: the actions that complete a decision on a machine, and whether a witness walk may deliver them. */
+  decisionCompletions: ((machineId: string) => Set<string>) | null = null;
+  allowWitnessCompletions = false;
+  /** Review C5: refusals made inside a transaction that rolled back, for the runtime to audit after it. */
+  readonly refused: DecisionCompletionRefused[] = [];
   onOutbox: ((instanceId: string, rows: CommitStep['outboxRows'], seq: number, now: number) => { kind: string; body: unknown }[]) | null = null;
 
   override initSync(): this {
@@ -107,6 +121,22 @@ export class LedgerStore extends Store {
       throw new ArchivedId(`instance '${row.instanceId}' was archived: its run is closed, and its id is not created again (K4)`);
     }
     const extra = this.pending.get(`${row.instanceId}\u0000${row.actionId}`);
+    // Review C5, K10: only the worker delivers a decision's completion: its action id names a decision intent of this
+    // instance. A message or any other path carrying one is refused before its step (S130).
+    if (this.decisionCompletions) {
+      const machine = this.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(row.instanceId)?.machine_id as string | undefined;
+      if (machine && this.decisionCompletions(machine).has(row.action)) {
+        const m = /^(.+):(done|failed|exhausted)$/.exec(row.actionId);
+        const intent = m ? this.db.prepare('SELECT kind FROM pr_outbox WHERE intent_id = ? AND instance_id = ?').get(m[1], row.instanceId) : null;
+        const byWorker = typeof intent?.kind === 'string' && intent.kind.startsWith('decision.');
+        const byWitness = this.allowWitnessCompletions && row.actionId.startsWith('witness:');
+        if (!byWorker && !byWitness) {
+          const e = new DecisionCompletionRefused(`K10: '${row.action}' completes a decision of '${row.instanceId}', and only the outbox worker delivers it (action id ${row.actionId})`, row.instanceId, row.action, row.actionId);
+          this.refused.push(e);
+          throw e;
+        }
+      }
+    }
     // Review B2: the worker's success completion of a decision commits only with its decision record (K10, PD2.2).
     const done = /^(.+):done$/.exec(row.actionId);
     if (done && !extra?.before?.some((e) => e.kind === 'decision')) {

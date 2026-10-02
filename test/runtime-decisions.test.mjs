@@ -275,3 +275,26 @@ test('review B3: an engine that picks Refund at 0.1 gets conf 100, margin 0, and
     assert.equal((await rt.outbox('b3')).filter((r) => r.kind === 'payments.refund').length, 0);
   } finally { await rt.close(); }
 });
+
+// Review C5: K10 is closed at both ends for messages.
+test('review C5: a send of a decision\'s completion is PL6204, and a delivered message carrying one is refused like S130', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { parse } = await import('@poly/lang');
+  const { checkModule } = await import('@poly/core');
+  const src = readFileSync(join(ROOT, 'conformance', 'm0', 'errors', 'PL6204-decision-completion-sent.poly'), 'utf8');
+  assert.deepEqual(checkModule(parse(src).module).diagnostics.map((d) => d.code), ['PL6204']);
+  // At runtime, a message in transit that carries the completion (written by no checked program) is refused.
+  const { rt } = await loaded(a);
+  try {
+    await rt.create('support.Ticket', { id: 'c5' });
+    await rt.dispatch('c5', 'Received', TEXT);
+    const now = rt.now();
+    rt.store.db.prepare(`INSERT INTO pr_outbox (intent_id, instance_id, seq, kind, payload, status, attempts, next_attempt_at) VALUES ('m-1', 'c5', 1, 'sendTo', ?, 'pending', 0, ?)`)
+      .run(JSON.stringify({ target: 'c5', action: 'RouteFailed', data: {} }), now);
+    await rt.tick();
+    assert.ok(!(await rt.getJournal('c5')).some((r) => r.action_id === 'm-1'), 'the message took no step');
+    assert.equal(rt.store.db.prepare(`SELECT status FROM pr_outbox WHERE intent_id = 'm-1'`).get().status, 'dead');
+    assert.ok((await rt.audit('c5')).some((r) => r.rule === 'K10' && r.action === 'RouteFailed'));
+  } finally { await rt.close(); }
+});

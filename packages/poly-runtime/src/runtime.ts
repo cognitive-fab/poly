@@ -64,6 +64,8 @@ export class PolyRuntime {
 
   constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> = {}) {
     this.gateGiven = opts.gate?.gate !== undefined;
+    store.decisionCompletions = (machineId) => this.decisionCompletions(machineId);
+    store.allowWitnessCompletions = verified.certificate.purpose === 'witness';
     const builtins: Record<string, EffectHandler> = {};
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
     this.worker = new EffectWorker(kernel, store, this.handlers, {
@@ -198,6 +200,11 @@ export class PolyRuntime {
   effectDeclaration(instanceId: string, kind: string): any {
     const id = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined;
     return this.verified.machines.find((x) => x.id === id)?.manifest?.effects?.[kind] ?? null;
+  }
+
+  /** Review C5: audit the K10 refusals the store made inside transactions that rolled back. */
+  async auditRefusals(): Promise<void> {
+    for (const e of this.store.refused.splice(0)) await this.store.insertAudit({ at: this.now(), instanceId: e.instanceId, action: e.action, actionId: e.actionId, rule: 'K10', reason: e.message });
   }
 
   /** The decision whose ok completion an action is, on a machine, or null. */
@@ -360,6 +367,7 @@ export class PolyRuntime {
     const effects = await pass(() => this.worker.tick(now));
     const timers = await pass(() => this.kernel.workers.tickTimers(now));
     const messages = await pass(() => this.kernel.workers.tickMessages(now));
+    await this.auditRefusals();
     if (errors.length) throw errors[0];
     return { effects, timers, messages };
   }
@@ -379,7 +387,7 @@ export class PolyRuntime {
     w.unref?.();
     this.timers.push(w);
     const t = setInterval(() => { this.kernel.workers.tickTimers().catch(report); }, timerPollMs);
-    const m = setInterval(() => { this.recoverMessages().then(() => this.kernel.workers.tickMessages()).catch(report); }, messagePollMs);
+    const m = setInterval(() => { this.recoverMessages().then(() => this.kernel.workers.tickMessages()).then(() => this.auditRefusals()).catch(report); }, messagePollMs);
     t.unref?.(); m.unref?.();
     this.timers.push(t, m);
     if (this.ledger?.headMs) { const h = setInterval(() => { this.signHeads().catch(report); }, this.ledger.headMs); h.unref?.(); this.timers.push(h); }
