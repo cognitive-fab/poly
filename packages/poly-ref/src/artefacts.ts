@@ -84,7 +84,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
           differ(`effects.manifest.json ${kind}.${hook}`, entry[hook], outcome(it));
         }
         const retry = e.items.find((x): x is A.EffectItem & { kind: 'EffRetry' } => x.kind === 'EffRetry');
-        differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, retry ? { maxAttempts: retry.attempts, baseMs: durationMs(retry.base), timeoutMs: durationMs(retry.timeout) } : null);
+        differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, retry ? { maxAttempts: retry.attempts, baseMs: durationMs(retry.base), timeoutMs: durationMs(retry.timeout) } : { maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }); // PT6.1, S137
         const labels = e.items.find((x): x is A.EffectItem & { kind: 'EffLabels' } => x.kind === 'EffLabels');
         differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, labels ? labels.labels : null);
         differ(`effects.manifest.json ${kind}.class`, entry.class, M.effects.get(e.name)!.cls);

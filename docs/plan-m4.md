@@ -137,6 +137,10 @@ Each issue gives a proposal. Nothing is built on an issue before it is ruled.
 
 - **S136. Which M3 references M4f re-checks.** The references on `m4` predate M3-6 to M3-8. *Proposal:* the references at the commit that FROZEN records, read with `git show <commit>:<path>` into a temporary directory. Nothing in `C:\Users\jjdub\code\poly` is read through its working tree or written. A change of verdict is a finding for the M3 report, not a change to the frozen set.
 
+### Raised during the build
+
+- **S137. The retry bound of an effect with no `retry` clause** (open, built as proposed). S120 has `load` refuse a manifest entry without `maxAttempts`, and most effects declare no `retry`, so the lowering wrote none and polyrun applied its hidden default (5). *Proposal:* the lowering writes that default out, `{ maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }`, and poly-ref's read-back expects it from PT6.1. The runtime behaves as before, and every bound is declared. One consequence of S120 is not changed: the oms example declares `attempts 6` on `chargeCard` (copied from the hand-written polyrun-oms manifest, AC1), so it is refused at admission; the runtime tests use other sources.
+
 ## 7. Risks
 
 - **Subclassing polyrun's `Store`** (S121) depends on `commitStep` and `insertJournal` keeping their names and call pattern. `test/vendor.test.mjs` pins the bytes; a re-vendoring that changes either fails the ledger tests first.

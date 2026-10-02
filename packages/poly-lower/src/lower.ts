@@ -312,6 +312,9 @@ function emitsAny(body: A.Stmt[]): boolean {
   return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel' || s.op === 'spawn' || s.op === 'signal' || s.op === 'send' || s.op === 'decide')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))) || (s.kind === 'For' && emitsAny(s.body)));
 }
 
+/** PT6.1, S137: the retry of an effect with no retry clause, polyrun's own default written out. */
+export const DEFAULT_RETRY = { maxAttempts: 5, baseMs: 500, timeoutMs: 30_000 } as const;
+
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */
 function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Record<string, unknown> } {
   // Kinds are the author's strings, so the manifest is built from entries: an assignment to a key such
@@ -327,6 +330,8 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Recor
       if (it.kind === 'EffRetry') entry.retry = { maxAttempts: it.attempts, baseMs: durationMs(it.base), timeoutMs: durationMs(it.timeout) };
       if (it.kind === 'EffLabels') entry.labels = it.labels;
     }
+    // S137: an effect with no retry clause declares polyrun's default bound, so every manifest entry has its maxAttempts (S120).
+    if (!entry.retry) entry.retry = { ...DEFAULT_RETRY };
     // polyrun ignores fields it does not read, so labels and class stay in the manifest (PT6.1).
     entry.class = effectClass(e);
     out.push([effectKind(e), entry]);
