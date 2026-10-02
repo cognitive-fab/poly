@@ -29,6 +29,8 @@ export type Ty =
 const BOOL: Ty = { k: 'bool' };
 const INT: Ty = { k: 'int', lo: -Infinity, hi: Infinity };
 const ERR: Ty = { k: 'error' };
+/** The reasons the runtime gives (PS3.2, S101, S127), which a module may not use (PL1207). */
+export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified'];
 
 export function tyToString(t: Ty): string {
   switch (t.k) {
@@ -620,6 +622,7 @@ class Checker {
         }
         case 'Guard':
           this.expectBool(it.cond, this.scope('guard'));
+          this.reason(it);
           break;
         case 'Terminal': {
           if (terminal) { this.err('PL1002', it, 'a machine has one terminal predicate'); break; }
@@ -1453,6 +1456,11 @@ class Checker {
     }
   }
 
+  /** PL1207 (PS3.2, S101, S127): the reasons the runtime gives are not the module's to give. */
+  private reason(n: A.Require | A.Reject | A.Guard): void {
+    if (RESERVED_REASONS.includes(n.reason)) this.err('PL1207', n, `reject "${n.reason}" uses a reason the runtime reserves (${RESERVED_REASONS.join(', ')})`);
+  }
+
   private stmts(body: A.Stmt[], scope: Scope): void {
     const local: Scope = { ...scope, locals: new Map(scope.locals) };
     for (const s of body) this.stmt(s, local);
@@ -1463,8 +1471,10 @@ class Checker {
     switch (s.kind) {
       case 'Require':
         this.expectBool(s.cond, scope);
+        this.reason(s);
         break;
       case 'Reject':
+        this.reason(s);
         break;
       case 'Let': {
         if (scope.locals.has(s.name) || scope.params.has(s.name) || fields.has(s.name)) this.err('PL1002', s, `${s.name} is already a name here`);
