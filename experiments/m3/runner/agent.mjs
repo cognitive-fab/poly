@@ -35,6 +35,8 @@ export function claudeArgs({ arm, model, prompt, sessionId, maxBudgetUsd }) {
     // dontAsk: a tool outside the allowed list is denied without a prompt, so the arm cannot leave its tools.
     '--permission-mode', 'dontAsk',
     '--disable-slash-commands',
+    // No MCP server: none is given with --mcp-config, so neither a plugin's nor the account's connectors load.
+    '--strict-mcp-config',
     ...(maxBudgetUsd ? ['--max-budget-usd', String(maxBudgetUsd)] : []),
     ...(sessionId ? ['--resume', sessionId] : []),
   ];
@@ -88,9 +90,13 @@ export function turnAccount() {
     },
     running,
     status: () => status,
+    /** The CLI's own dollar cap stopped the turn (--max-budget-usd, enforced on the subscription: measured). */
+    capStop: () => (result?.subtype === 'error_max_budget_usd' ? 'usd' : null),
     final() {
       const r = running();
-      if (!result?.usage) return { source: 'running', usage: r, running: r, differs: [], cliCostUsd: result?.total_cost_usd ?? null, cacheCreation: null };
+      // A turn the dollar cap stops reports no usage in its result event (measured: every part 0 after a $0.20 call),
+      // so its running count is recorded instead, and the record says which.
+      if (!result?.usage || (tokensOf(result.usage) === 0 && tokensOf(r) > 0)) return { source: 'running', usage: r, running: r, differs: [], cliCostUsd: result?.total_cost_usd ?? null, cacheCreation: null };
       const usage = partsOf(result.usage);
       return { source: 'result', usage, running: r, differs: PARTS.filter((k) => r[k] !== usage[k]), cliCostUsd: result.total_cost_usd ?? null, cacheCreation: result.usage.cache_creation ?? null };
     },
@@ -100,7 +106,7 @@ export function turnAccount() {
 /**
  * Runs one turn. `agent` is { kind: 'claude', bin?: 'claude' } or { kind: 'stub', turns: [...] } (see stubTurn).
  * `limits` is { tokens, wallMs }, what is left of the run's budget. Resolves to { sessionId, usage, tokens, costUsd,
- * cliCostUsd, usageSource, running, differs, wallMs, stopped: null | 'budget' | 'wall' | 'limited' | 'auth', exitCode }.
+ * cliCostUsd, usageSource, running, differs, wallMs, stopped: null | 'budget' | 'wall' | 'usd' | 'limited' | 'auth', exitCode }.
  * `configDir` is the arms' configuration folder (isolation.mjs).
  */
 export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionId, limits, turn, maxBudgetUsd, onToolResult, configDir }) {
@@ -145,7 +151,7 @@ export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionI
   }
   const wallMs = Date.now() - t0;
   const f = account.final();
-  const stopped = state.stopped ?? account.status();
+  const stopped = state.stopped ?? account.status() ?? account.capStop();
   const out = { usage: f.usage, tokens: tokensOf(f.usage), costUsd: PRICES[model] ? costOfUsage({ ...f.usage, cache_creation: f.cacheCreation }, model) : null, cliCostUsd: f.cliCostUsd, usageSource: f.source, running: f.running, differs: f.differs, wallMs, stopped, exitCode };
   log({ type: 'runner.turn-end', ...out });
   return { sessionId: state.sessionId, ...out };

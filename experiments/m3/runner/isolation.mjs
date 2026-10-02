@@ -35,7 +35,12 @@ const FORBIDDEN = new Set(['CLAUDE.md', 'CLAUDE.local.md', 'agents', 'commands',
 
 /** The environment of an arm's CLI: the runner's own, pointed at the arms' folder, with the owner's CLAUDE.md files and auto memory off. */
 export function armEnv(base = process.env, configDir = ARM_CONFIG_DIR) {
-  return { ...base, CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', DISABLE_AUTOUPDATER: '1' };
+  // The account's own setup: logged in to the subscription, the CLI syncs the account's plugins and skills into the
+  // folder and loads its claude.ai connectors. Measured after the owner's login, against a local stand-in for the
+  // API: 8 plugins and 58 MCP servers (Gmail, Drive and Calendar among them) loaded, and their names reached the
+  // model. CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC stops the sync; ENABLE_CLAUDEAI_MCP_SERVERS=false and
+  // --strict-mcp-config (agent.mjs) load no MCP server. With all three, the stand-in saw none of them.
+  return { ...base, CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ENABLE_CLAUDEAI_MCP_SERVERS: 'false', DISABLE_AUTOUPDATER: '1' };
 }
 
 /** Why a run would bill an API key: the variables that are set, by name only. */

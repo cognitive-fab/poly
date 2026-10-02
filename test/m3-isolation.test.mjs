@@ -135,3 +135,25 @@ test('no API billing: the runner refuses to start while ANTHROPIC_API_KEY or ANT
   assert.match(r.stderr, /ANTHROPIC_API_KEY/);
   assert.doesNotMatch(r.stderr + r.stdout, /stand-in-not-a-key/);
 });
+
+test('no arm may use the Skill tool, and the arm\'s CLI loads no MCP server and syncs no plugin or skill from the account', async () => {
+  const { ALLOWED_TOOLS } = await import('../experiments/m3/runner/agent.mjs');
+  for (const [arm, tools] of Object.entries(ALLOWED_TOOLS)) assert.ok(!tools.some((t) => /^Skill\b/.test(t)), `arm ${arm} may use the Skill tool`);
+  // Measured on the arms' folder after the owner's login, against the local stand-in: without these, the CLI synced
+  // the account's 8 plugins and 58 MCP servers (Gmail and Drive among them) into the arm, and their names reached the model.
+  const env = armEnv({}, 'cfg');
+  assert.equal(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, '1');
+  assert.equal(env.ENABLE_CLAUDEAI_MCP_SERVERS, 'false');
+  assert.ok(claudeArgs({ arm: 1, model: 'm', prompt: 'p' }).includes('--strict-mcp-config'));
+  assert.ok(!claudeArgs({ arm: 1, model: 'm', prompt: 'p' }).includes('--mcp-config'));
+});
+
+test('no arm\'s own material reaches it through a CLAUDE.md, which the arm\'s environment would not read', async () => {
+  const { makeWorkspace } = await import('../experiments/m3/runner/workspace.mjs');
+  const { versions } = await import('../experiments/m3/lib/task.mjs');
+  for (const arm of [1, 2, 3, 4]) {
+    const { ws, files } = makeWorkspace(join(tmpdir(), 'poly-m3-ws-test', `claude-md-arm${arm}`), arm, versions('T1')[0]);
+    assert.deepEqual(files.filter((f) => /(^|\/)(CLAUDE(\.local)?\.md|AGENTS\.md|\.claude)(\/|$)/i.test(f)), [], `arm ${arm}`);
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
