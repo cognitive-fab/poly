@@ -5,6 +5,7 @@ export { applyFix, attachFixes, fixId, type FixOutcome } from './fixes.js';
 export { applyFixById, findFix, type FixResult } from './fix.js';
 export { lintHandlers, lintHandlerText } from './lint.js';
 export { handlerClosure, LINT_VERSION, type HandlerClosure } from './handlers.js';
+export { benchGate, BENCH_SIZES, type GateBench } from './bench.js';
 export { admit, admitWitness, witnessKey, artefactsOnDisk, AdmitError, CERTIFICATE_FAULTS, MAX_ATTEMPTS, M4_LIMITS, type AdmitOptions, type AdmitResult, type CertificateFault } from './admit.js';
 export { replayRun, replayRuntime, replaySessions, certifiedModules, type RunReplay, type JournalRowLike } from './replay.js';
 export { workerConformance, workerActions, type Conformance } from './conformance.js';

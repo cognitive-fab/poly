@@ -1,0 +1,92 @@
+{
+  "bench": "gate",
+  "at": "2026-10-02T15:57:13.391Z",
+  "machine": {
+    "cpu": "Intel(R) Core(TM) Ultra 7 155H",
+    "cores": 22,
+    "platform": "win32",
+    "arch": "x64",
+    "memoryGb": 63
+  },
+  "node": "v24.12.0",
+  "program": {
+    "sources": [
+      "conformance/m5/orders.poly",
+      "conformance/m5/orders.policy.poly"
+    ],
+    "digest": "sha256:620acf1fc017a688715e5cc56805a47d0ab52838892d668a541c47fa0d95a8b1",
+    "scope": "orders",
+    "session": "scope:orders"
+  },
+  "sizes": [
+    1,
+    8,
+    64
+  ],
+  "latencyMs": {
+    "propose": {
+      "n": 146,
+      "p50": 0.667,
+      "p99": 15.989
+    },
+    "settle": {
+      "n": 146,
+      "p50": 0.523,
+      "p99": 2.905
+    },
+    "path": {
+      "n": 146,
+      "p50": 5.219,
+      "p99": 21.742
+    }
+  },
+  "throughput": {
+    "runtime": [
+      {
+        "instances": 1,
+        "effects": 2,
+        "allowed": 2,
+        "ms": 38.599,
+        "perSecond": 51.8
+      },
+      {
+        "instances": 8,
+        "effects": 16,
+        "allowed": 16,
+        "ms": 166.399,
+        "perSecond": 96.2
+      },
+      {
+        "instances": 64,
+        "effects": 128,
+        "allowed": 128,
+        "ms": 1147.438,
+        "perSecond": 111.6
+      }
+    ],
+    "session": [
+      {
+        "instances": 1,
+        "effects": 2,
+        "allowed": 2,
+        "ms": 124.224,
+        "perSecond": 16.1
+      },
+      {
+        "instances": 8,
+        "effects": 16,
+        "allowed": 16,
+        "ms": 190.61,
+        "perSecond": 83.9
+      },
+      {
+        "instances": 64,
+        "effects": 128,
+        "allowed": 128,
+        "ms": 1427.803,
+        "perSecond": 89.6
+      }
+    ]
+  },
+  "note": "A measurement with no pass threshold (AC4). In-memory SQLite stores, one process, one worker; each tick claims every pending intent and runs them in turn. Latencies are over every proposal of every size. The program has one trust scope, so the session series is per-session throughput (PT9.6)."
+}

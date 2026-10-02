@@ -6,6 +6,7 @@
 //   poly fix <id> [--root <dir>]
 //   poly admit <project dir>
 //   poly journal verify | replay | export --db <store> …
+//   poly bench gate [--sizes 1,8,64] [--out <file>]
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -19,6 +20,7 @@ import { applyFixById } from './fix.js';
 import { admit, admitWitness, witnessKey, AdmitError } from './admit.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance, RecordUsageError } from './records.js';
 import { journalCommand, JournalUsageError } from './journal.js';
+import { benchGate } from './bench.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
@@ -31,6 +33,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
        poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
        poly journal export --db <store> --run <id>
+       poly bench gate [--sizes 1,8,64] [--out <file>]
        poly journal eval --db <store> --decision <d> --candidate <provider module>
        poly journal fit --db <store> --decision <d> --model <id> [--version <n>] [--out <file>]
 
@@ -90,7 +93,7 @@ export async function main(argv: string[]): Promise<number> {
   const json = args.includes('--json');
   const root = option(args, '--root');
   const out = option(args, '--out');
-  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (root === null || out === null) return usage();
@@ -178,6 +181,28 @@ export async function main(argv: string[]): Promise<number> {
       const r = await admit(positional[1]);
       process.stdout.write(`admitted ${r.certificate.subject.project}: ${r.certificate.buildId}, ${r.certificate.digest}\n  ${r.certificatePath}\n`);
       for (const l of r.certificate.poly.limits) process.stdout.write(`  limit: ${l}\n`);
+      return EXIT_CODES.CLEAN;
+    }
+    if (positional[0] === 'bench' && positional[1] === 'gate' && positional.length === 2) {
+      // PT9.6, AC4: a measurement with no pass threshold, over AC4's program in this checkout.
+      const sizes = (option(args, '--sizes') ?? '1,8,64').split(',').map(Number);
+      if (sizes.some((n) => !Number.isInteger(n) || n < 1)) return usage();
+      const { REPO_ROOT } = await import('@poly/runtime');
+      const r = await benchGate({ repo: REPO_ROOT, sizes, out: out ?? undefined });
+      const line = (t: { instances: number; perSecond: number; allowed: number; effects: number }) => `${t.instances}: ${t.perSecond}/s (${t.allowed}/${t.effects} allowed)`;
+      process.stdout.write(`gate bench on ${r.machine.cpu}, Node ${r.node}
+`);
+      if ('notRun' in r.latencyMs) process.stdout.write(`  latency: not run (${r.latencyMs.notRun})
+`);
+      else for (const [k, p] of Object.entries(r.latencyMs)) process.stdout.write(`  latency ${k}: p50 ${p.p50} ms, p99 ${p.p99} ms over ${p.n}
+`);
+      process.stdout.write(`  throughput runtime (no policy): ${r.throughput.runtime.map(line).join(', ')}
+`);
+      const s = r.throughput.session;
+      process.stdout.write(`  throughput session ${r.program.session}: ${'notRun' in s ? `not run (${s.notRun})` : s.map(line).join(', ')}
+`);
+      if (out) process.stdout.write(`  ${out}
+`);
       return EXIT_CODES.CLEAN;
     }
     if (positional[0] === 'fix' && positional.length === 2) {
