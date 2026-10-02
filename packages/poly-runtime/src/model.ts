@@ -22,19 +22,20 @@ export const machineOfBound = (m: number): string => `${moduleOfBound(m)}.Outbox
 /** The PT9.7 text with its bound replaced. */
 export function modelSource(m: number, text = readFileSync(MODEL_SOURCE, 'utf8')): string {
   if (!Number.isInteger(m) || m < 1) throw new Error(`a retry bound is a positive integer, not ${m}`);
-  const swaps: [string, string][] = [
-    ['module runtime\n', `module ${moduleOfBound(m)}\n`],
-    ['Allowed   { attempts: 0..2 }', `Allowed   { attempts: 0..${m - 1} }`],
-    ['Running   { attempt: 1..3 }', `Running   { attempt: 1..${m} }`],
-    ['Settled   { attempt: 1..3 }', `Settled   { attempt: 1..${m} }`],
+  // Each text that states the bound, and how many times the source states it (S147 added the rechecks, whose own
+  // bound of 2 is not the retry bound and is not replaced).
+  const swaps: [string, string, number][] = [
+    ['module runtime\n', `module ${moduleOfBound(m)}\n`, 1],
+    ['attempts: 0..2,', `attempts: 0..${m - 1},`, 3],
+    ['attempt: 1..3,', `attempt: 1..${m},`, 2],
+    ['if n < 3 {', `if n < ${m} {`, 2],
   ];
   let out = text;
-  for (const [a, b] of swaps) {
-    if (out.split(a).length !== 2) throw new Error(`the OutboxIntent source no longer states "${a.trim()}" once`);
-    out = out.replace(a, () => b);
+  for (const [a, b, times] of swaps) {
+    if (out.split(a).length !== times + 1) throw new Error(`the OutboxIntent source no longer states "${a.trim()}" ${times} time(s)`);
+    out = out.split(a).join(b);
   }
-  if (out.split('if n < 3 {').length !== 3) throw new Error('the OutboxIntent source no longer tests the bound twice');
-  return out.split('if n < 3 {').join(`if n < ${m} {`);
+  return out;
 }
 
 export interface ModelBuild { machineId: string; dir: string; module: string; contract: string }

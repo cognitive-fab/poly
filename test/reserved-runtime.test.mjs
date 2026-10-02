@@ -27,7 +27,7 @@ test('S143: PT9.7\'s model at every bound is the runtime\'s own, and is not refu
   for (const m of BOUNDS) assert.ok(!codes(modelSource(m)).includes('PL1208'), `bound ${m}`);
   assert.deepEqual([...RUNTIME_MODEL_DIGESTS].sort(), BOUNDS.map((m) => digest(parse(modelSource(m)).module)).sort());
   // One changed range is a program, not the model.
-  assert.ok(codes(modelSource(3).replace('Allowed   { attempts: 0..2 }', 'Allowed   { attempts: 0..1 }')).includes('PL1208'));
+  assert.ok(codes(modelSource(3).replace('if r < 2 {', 'if r < 1 {')).includes('PL1208'));
 });
 
 test('S143: no conformance or evidence source is written in a reserved module any more', () => {

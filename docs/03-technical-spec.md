@@ -744,11 +744,11 @@ This is the only new engine integration (architecture section 7.2).
 
   type Intent =
     | Pending
-    | Proposed  { decision: 1..2 }        // 2 only for an approved re-proposal
-    | Escalated { approved: bool }
-    | Allowed   { attempts: 0..2 }        // attempts already made
-    | Running   { attempt: 1..3 }
-    | Settled   { attempt: 1..3 }
+    | Proposed  { decision: 1..2, attempts: 0..2, rechecks: 0..2 }   // decision 2 only for an approved re-proposal
+    | Escalated { approved: bool, attempts: 0..2, rechecks: 0..2 }
+    | Allowed   { attempts: 0..2, rechecks: 0..2 }                   // attempts already made; rechecks of a stale allow
+    | Running   { attempt: 1..3, rechecks: 0..2 }
+    | Settled   { attempt: 1..3, rechecks: 0..2 }
     | Done | Denied | Dead
 
   machine OutboxIntent {
@@ -756,52 +756,57 @@ This is the only new engine integration (architecture section 7.2).
     terminal intent is Done | Denied | Dead
 
     action Propose()   action GateAllow()   action GateDeny()   action GateEscalate()
-    action Approve()   action EscalationTimeout()
+    action Approve()   action EscalationTimeout()   action Recheck()
     action Start()     action HandlerOk()   action HandlerFailed()   action HandlerFailedPermanent()
     action SettleOk()  action SettleFailed()
 
     on Propose {
       match intent {
-        Pending                      => intent' = Proposed { decision: 1 }
-        Escalated { approved: true } => intent' = Proposed { decision: 2 }
-        _                            => reject "not-proposable"
+        Pending => intent' = Proposed { decision: 1, attempts: 0, rechecks: 0 }
+        Escalated { approved: true, attempts: n, rechecks: r } => intent' = Proposed { decision: 2, attempts: n, rechecks: r }
+        _ => reject "not-proposable"
       }
     }
-    on GateAllow    { require intent is Proposed else reject "no-proposal"
-                      intent' = Allowed { attempts: 0 } }
+    on GateAllow    { match intent {
+                        Proposed { attempts: n, rechecks: r } => intent' = Allowed { attempts: n, rechecks: r }
+                        _                                     => reject "no-proposal" } }
     on GateDeny     { require intent is Proposed else reject "no-proposal"
                       intent' = Denied }
     on GateEscalate { match intent {
-                        Proposed { decision: 1 } => intent' = Escalated { approved: false }
-                        _                        => reject "escalate-once" } }
+                        Proposed { decision: 1, attempts: n, rechecks: r } => intent' = Escalated { approved: false, attempts: n, rechecks: r }
+                        _                                                  => reject "escalate-once" } }
     on Approve      { match intent {
-                        Escalated { approved: false } => intent' = Escalated { approved: true }
-                        _                             => reject "not-waiting" } }
+                        Escalated { approved: false, attempts: n, rechecks: r } => intent' = Escalated { approved: true, attempts: n, rechecks: r }
+                        _                                                       => reject "not-waiting" } }
     on EscalationTimeout { match intent {
-                        Escalated { approved: false } => intent' = Denied
-                        _                             => reject "not-waiting" } }
+                        Escalated { approved: false, attempts: _, rechecks: _ } => intent' = Denied
+                        _                                                       => reject "not-waiting" } }
+    on Recheck      { match intent {
+                        Allowed { attempts: n, rechecks: r } => if r < 2 { intent' = Proposed { decision: 1, attempts: n, rechecks: r + 1 } }
+                                                                else     { intent' = Denied }
+                        _                                    => reject "not-allowed" } }
     on Start        { match intent {
-                        Allowed { attempts: n } => intent' = Running { attempt: n + 1 }
-                        _                       => reject "not-allowed" } }
+                        Allowed { attempts: n, rechecks: r } => intent' = Running { attempt: n + 1, rechecks: r }
+                        _                                    => reject "not-allowed" } }
     on HandlerOk    { match intent {
-                        Running { attempt: n } => intent' = Settled { attempt: n }
-                        _                      => reject "not-running" } }
+                        Running { attempt: n, rechecks: r } => intent' = Settled { attempt: n, rechecks: r }
+                        _                                   => reject "not-running" } }
     on HandlerFailed { match intent {
-                        Running { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
-                                                  else     { intent' = Dead }
-                        _                      => reject "not-running" } }
+                        Running { attempt: n, rechecks: r } => if n < 3 { intent' = Allowed { attempts: n, rechecks: r } }
+                                                               else     { intent' = Dead }
+                        _                                   => reject "not-running" } }
     on HandlerFailedPermanent { match intent {
                         Running => intent' = Dead
                         _       => reject "not-running" } }
     on SettleOk     { require intent is Settled else reject "not-settled"
                       intent' = Done }
     on SettleFailed { match intent {
-                        Settled { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
-                                                  else     { intent' = Dead }
-                        _                      => reject "not-settled" } }
+                        Settled { attempt: n, rechecks: r } => if n < 3 { intent' = Allowed { attempts: n, rechecks: r } }
+                                                               else     { intent' = Dead }
+                        _                                   => reject "not-settled" } }
 
     step property no-reproposal-after-allow:
-      (pre.intent is Allowed || pre.intent is Running || pre.intent is Settled)
+      (action != Recheck && (pre.intent is Allowed || pre.intent is Running || pre.intent is Settled))
         implies !(post.intent is Proposed)
     liveness settles: eventually intent is Done | Denied | Dead
       under fair { Propose, GateAllow | GateDeny | GateEscalate, EscalationTimeout, Start,
@@ -815,13 +820,13 @@ This is the only new engine integration (architecture section 7.2).
   - a deny after execution cannot be written, because `GateDeny` only matches `Proposed`;
   - `executed` is not a field, because it is `intent is Running || intent is Settled || …`.
 
-  One step property is kept as a regression guard, and the liveness property holds with `HandlerFailedPermanent` in the fair group of the handler's outcomes (S138), which adds three transitions and no state: 17 states and 27 accepted transitions at the bound 3. An independent exploration of the machine before S138 ([`reviews/evidence/outbox_sum_check.py`](reviews/evidence/outbox_sum_check.py)) confirms 17 reachable states, no deadlock and no fair cycle outside the terminal states.
+  One step property is kept as a regression guard, and the liveness property holds with `HandlerFailedPermanent` in the fair group of the handler's outcomes (S138), which adds three transitions and no state. **A stale allow is rechecked (S147).** `Recheck` takes `Allowed` back to `Proposed`, keeping the attempts made, when a singleton the allow read has moved on; each intent is rechecked at most twice, and a third stale allow is `Denied` with reason `stale-allow`. The bound keeps `settles` true under weak fairness, since `Recheck` is not in a fair group. The step property becomes "no re-proposal except by `Recheck`". With the rechecks the machine has 17m + 8 states at bound m: 59 at the bound 3, all reachable. An independent exploration of the machine before S138 ([`reviews/evidence/outbox_sum_check.py`](reviews/evidence/outbox_sum_check.py)) confirms 17 reachable states, no deadlock and no fair cycle outside the terminal states.
 
   Three rules follow from the machine and are normative:
 
-  1. **One decision per execution.** Once the gate allows an intent, a retry after a timeout or a failed settle goes back to `Allowed`, not to `Proposed`. The gate is not asked again for the same idempotency key, so "allowed, executed, then denied" cannot happen. In v0.4 this is a consequence of the type.
+  1. **One decision per execution.** Once the gate allows an intent, a retry after a timeout or a failed settle goes back to `Allowed`, not to `Proposed`. The gate is not asked again for the same idempotency key, except by `Recheck`, when the state the allow read has moved on (S147). In v0.4 this is a consequence of the type.
   2. **Escalation happens once and has a timeout.** An approved re-proposal can be allowed or denied, never escalated again, so an intent takes at most two gate decisions. `escalation.timeoutMs` (the polyflow platform policy field) fires `EscalationTimeout`, which denies the intent.
-  3. **Denial is final and only precedes execution.** A deny can only happen from `Proposed`, before any attempt ran.
+  3. **Denial is final.** A deny can only happen from `Proposed`: before any attempt ran, or after a `Recheck` found the state the allow read had moved on (S147), when the attempts already made are kept and no further one is.
   4. **A permanent failure is final (S138).** A handler may report a permanent error (a declined card is a result, not an infrastructure failure). `HandlerFailedPermanent` takes `Running` to `Dead` whatever attempt it is, the worker dispatches the effect's `failed` completion, and no further attempt is made. A crash is never permanent: it is `HandlerFailed`.
 
   **The worker hosts the machine (S119).** poly-runtime runs its own effect worker, and polyrun's `tickEffects` is never started. Each intent's state is an `OutboxIntent` value in a poly-runtime table, and every worker transition is an action on the lowered `OutboxIntent` module, written in one transaction with the matching `pr_outbox` change. An action the module rejects is a runtime fault: the worker stops on that intent and reports it, and never takes the transition. A terminal transition and the completion it delivers commit in one transaction, behind the claim's fence: K1 extends to the hosted machine, so neither exists without the other, and a worker whose claim was taken over delivers nothing (review C1, C2). `Approve` and `EscalationTimeout` race, and whichever commits first wins; the other is a rejected step of the machine, journaled with its reason, and a late approval's caller gets an error saying the escalation timed out (review C3). Every park has a retry deadline. An outside dispatch to a hosted instance is refused before any step, with an audit row (review C4). A gate that throws holds only the intent it was asked about, `Proposed` with a backoff and never allowed (review C6, PT9.5). An intent keeps the bound it was created under: the runtime registers the machine of every bound the build declares and of every bound an intent in the store was created under, so a redeploy that changes a manifest's `maxAttempts` strands nothing (review C8). The machine for bound m is `runtime<m>.OutboxIntent` (`runtime.OutboxIntent` at 3), and these ids are the runtime's own: a program machine in a module named `runtime` or `runtime<m>` is `PL1208`, and `load` refuses one again, so whether a program loads never depends on the bounds or the store (S143). The only module the checker takes under those names is this model at a bound, identified by its module digest. A crash or lease expiry while `Running` is `HandlerFailed` and counts an attempt; the idempotency key (PT15) keeps a re-run of an effect that did execute from repeating it. A row the worker cannot place (machine or manifest unavailable) takes no transition. `Dead` is terminal: an operator who wants another try creates a new intent through a governed action, never by resurrecting a dead one.
@@ -1267,7 +1272,7 @@ Worlds (appendix A) are planned after M7 and are not part of v1.
 - **State explosion.** It is managed by small machines and atomic cascades, not by abstraction. A check that hits its bound reports `INCONCLUSIVE` (`PL3901 BOUND_HIT`).
 - **Liveness.** Liveness holds only under the fairness stated with each property plus the delivery guarantee of PS14. At runtime, delivery is obligation R1: it is monitored, and a missed delivery is a runtime fault, not a program fault.
 - **Configurations.** Checks cover the bounded fragment: finite instances and a declared bound on messages in transit (PS4.1e, PS13.5). A bound hit is reported. The state space of a configuration grows with its instances, and that growth is the cost of checking interactions.
-- **Retries.** A manifest's `retry.maxAttempts` is at most 10, refused at admission otherwise, so the `OutboxIntent` machine checked for each bound stays small: 3m + 8 states at bound m, 38 at 10 (S120, S137).
+- **Retries.** A manifest's `retry.maxAttempts` is at most 10, refused at admission otherwise, so the `OutboxIntent` machine checked for each bound stays small: 17m + 8 states at bound m, 178 at 10 (S120, S137, S147).
 - **Kernel assumptions.** Every guarantee about a running program holds under the kernel assumptions K1 to K10 of PS10. Their evidence is listed there. poly does not verify the kernel.
 - **Over-approximation.** The checked instance lets the environment offer any action at any time (PS4.4). Clean results are sound; some witnesses may be infeasible and are marked `environment: unconstrained`.
 - **Advice.** Advice is recorded but not enforced until it is promoted, adjudicated and admitted.

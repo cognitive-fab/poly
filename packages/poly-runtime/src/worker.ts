@@ -25,9 +25,16 @@ export interface Proposal {
   payloadDigest: string;
   stateDigest: string;
   approved?: { by: string; ref: string };
+  /** S147: how many times a stale allow of this intent was rechecked, when it was. */
+  rechecks?: number;
 }
 
-export type GateDecision = { decision: 'allow' } | { decision: 'deny'; reason: string; witnessDigest?: string } | { decision: 'escalate'; reason?: string };
+/**
+ * A gate's decision. `reads` names each singleton instance the decision read, with its `seq` (S147): no allow is acted
+ * on once one of them has moved on. `record` is what the gate adds to the `verdict` event (its session, `sseq`, Σ
+ * digests and reason, S146).
+ */
+export type GateDecision = ({ decision: 'allow' } | { decision: 'deny'; reason: string; witnessDigest?: string } | { decision: 'escalate'; reason?: string }) & { reads?: Record<string, number>; record?: Record<string, unknown> };
 
 /** PT9.1 to PT9.4, before M5's policy gate (S118): a decision is a function of the proposal and the snapshot (K6). */
 export interface Gate {
@@ -64,6 +71,11 @@ export interface WorkerOptions {
   beforeCompletion?: (row: OutboxRow, decl: any, result: unknown) => void;
   afterCompletion?: (row: OutboxRow) => void;
   drift?: WorkerDrift;
+  /**
+   * S147: whether the allow an intent holds is stale, because a singleton it read has moved on. By default the
+   * `reads` of the allow are compared with each instance's current `seq`.
+   */
+  isStale?: (row: OutboxRow, reads: Record<string, number>) => boolean | Promise<boolean>;
   /** PT15: called with each intent the gate allowed, after its transaction commits. Observation only. */
   onAllowed?: (row: OutboxRow, proposal: Proposal) => void;
 }
@@ -79,7 +91,7 @@ export class RuntimeFault extends Error {
   constructor(message: string) { super(message); this.name = 'RuntimeFault'; }
 }
 
-type IntentState = { intent: string; intent_decision?: number | null; intent_approved?: boolean | null; intent_attempts?: number | null; intent_attempt?: number | null };
+type IntentState = { intent: string; intent_decision?: number | null; intent_approved?: boolean | null; intent_attempts?: number | null; intent_attempt?: number | null; intent_rechecks?: number | null };
 
 const MAX_BACKOFF_MS = 60 * 60_000;
 
@@ -199,13 +211,14 @@ export class EffectWorker {
   }
 
   /** PT9.1: the proposal, and PT9.3: the post-state of the emitting step, never a newer one. */
-  async proposalOf(row: OutboxRow, decl: any, approved?: { by: string; ref: string }): Promise<{ proposal: Proposal; snapshot: Record<string, unknown> }> {
+  async proposalOf(row: OutboxRow, decl: any, approved?: { by: string; ref: string }, rechecks = 0): Promise<{ proposal: Proposal; snapshot: Record<string, unknown> }> {
     const inst = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(row.instance_id);
     const snapshot = await this.kernel.getStateAt(row.instance_id, row.seq);
     const proposal: Proposal = {
       kind: 'effect', effectKind: row.kind, labels: decl.labels ?? [], class: decl.class ?? 'none', machine: inst.machine_id,
       instance: row.instance_id, seq: row.seq, idempotencyKey: row.intent_id, payloadDigest: digest(row.payload), stateDigest: digest(snapshot),
       ...(approved ? { approved } : {}),
+      ...(rechecks ? { rechecks } : {}),
     };
     return { proposal, snapshot };
   }
@@ -310,7 +323,7 @@ export class EffectWorker {
         case 'Proposed': {
           const d = st.intent_decision!;
           const approval = d === 2 ? this.lastApproval(row) : undefined;
-          const { proposal, snapshot } = await this.proposalOf(row, decl, approval);
+          const { proposal, snapshot } = await this.proposalOf(row, decl, approval, st.intent_rechecks ?? 0);
           let g: GateDecision;
           try {
             g = await this.gate.propose(proposal, snapshot);
@@ -324,7 +337,7 @@ export class EffectWorker {
           }
           // Rule 2 of PT9.7: an approved re-proposal is allowed or denied, never escalated again.
           if (d === 2 && g.decision === 'escalate') g = { decision: 'deny', reason: 'escalate-once' };
-          const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot) };
+          const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot), ...(g.reads ? { reads: g.reads } : {}), ...(g.record ?? {}) };
           if (g.decision === 'allow') {
             await this.store.txn(async () => { await this.transition(row, 'GateAllow'); this.verdict(row, { outcome: 'allowed', ...recorded }); });
             this.opts.onAllowed?.(row, proposal);
@@ -348,6 +361,19 @@ export class EffectWorker {
         }
         case 'Allowed':
           if (this.opts.drift === 'repropose-after-failure' && st.intent_attempts! > 0) { await this.store.txn(() => this.transition(row, 'Propose')); continue; }
+          // S147: no allow outlives the state it read. A stale allow is rechecked, at most twice, and then denied.
+          if (await this.stale(row)) {
+            if ((st.intent_rechecks ?? 0) < 2) {
+              await this.store.txn(async () => { await this.transition(row, 'Recheck'); this.verdict(row, { outcome: 'rechecked', reason: 'stale-allow' }); });
+              continue;
+            }
+            const stale = { reason: 'stale-allow' };
+            await this.finish(row, 'Recheck', { hook: decl.onFailure, suffix: ':failed', data: mapCompletion(decl.onFailure ?? {}, { error: { message: 'stale-allow', ...stale } }, stale) }, async () => {
+              this.verdict(row, { outcome: 'denied', reason: 'stale-allow' });
+              await this.store.markEffectDead(row.intent_id, row.attempts, 'denied: stale-allow');
+            });
+            return;
+          }
           await this.store.txn(() => this.transition(row, 'Start'));
           ran = false;
           try {
@@ -404,6 +430,19 @@ export class EffectWorker {
           throw new RuntimeFault(`intent ${row.intent_id} is in ${st.intent}, a state OutboxIntent does not have: PL2401 RUNTIME_MODEL_DRIFT`);
       }
     }
+  }
+
+  /** S147: the allow this intent holds read a singleton that has moved on since. */
+  private async stale(row: OutboxRow): Promise<boolean> {
+    const events = this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict' ORDER BY seq DESC`).all(row.instance_id).map((r) => JSON.parse(r.event));
+    const allowed = events.find((x) => x.body?.intent === row.intent_id && x.body?.outcome === 'allowed');
+    const reads: Record<string, number> = allowed?.body?.reads ?? {};
+    if (this.opts.isStale) return this.opts.isStale(row, reads);
+    for (const [instance, seq] of Object.entries(reads)) {
+      const now = this.store.db.prepare('SELECT seq FROM pr_instance WHERE instance_id = ?').get(instance)?.seq;
+      if (now !== seq) return true;
+    }
+    return false;
   }
 
   private lastApproval(row: OutboxRow): { by: string; ref: string } | undefined {

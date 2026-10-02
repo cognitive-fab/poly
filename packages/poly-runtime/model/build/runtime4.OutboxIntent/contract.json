@@ -1,22 +1,26 @@
 {
   "lang": "javascript",
-  "machineVersion": "sha256:b074381880b69f4803976ee39df0bdf73f4e187895d59de1dd794051799c2a22",
+  "machineVersion": "sha256:664954bd396980beec3e6012bce471070df439445eec6e55def9341d777124ab",
   "stateKeys": [
     {
       "name": "intent",
-      "type": "{ $: 'Pending' } | { $: 'Proposed', decision: 1..2 } | { $: 'Escalated', approved: boolean } | { $: 'Allowed', attempts: 0..3 } | { $: 'Running', attempt: 1..4 } | { $: 'Settled', attempt: 1..4 } | { $: 'Done' } | { $: 'Denied' } | { $: 'Dead' }"
+      "type": "{ $: 'Pending' } | { $: 'Proposed', decision: 1..2, attempts: 0..3, rechecks: 0..2 } | { $: 'Escalated', approved: boolean, attempts: 0..3, rechecks: 0..2 } | { $: 'Allowed', attempts: 0..3, rechecks: 0..2 } | { $: 'Running', attempt: 1..4, rechecks: 0..2 } | { $: 'Settled', attempt: 1..4, rechecks: 0..2 } | { $: 'Done' } | { $: 'Denied' } | { $: 'Dead' }"
     },
     {
       "name": "intent_decision",
       "type": "1..2 | null (payload of Proposed)"
     },
     {
-      "name": "intent_approved",
-      "type": "boolean | null (payload of Escalated)"
+      "name": "intent_attempts",
+      "type": "0..3 | null (payload of Proposed, Escalated, Allowed)"
     },
     {
-      "name": "intent_attempts",
-      "type": "0..3 | null (payload of Allowed)"
+      "name": "intent_rechecks",
+      "type": "0..2 | null (payload of Proposed, Escalated, Allowed, Running, Settled)"
+    },
+    {
+      "name": "intent_approved",
+      "type": "boolean | null (payload of Escalated)"
     },
     {
       "name": "intent_attempt",
@@ -26,8 +30,9 @@
   "initState": {
     "intent": "Pending",
     "intent_decision": null,
-    "intent_approved": null,
     "intent_attempts": null,
+    "intent_rechecks": null,
+    "intent_approved": null,
     "intent_attempt": null
   },
   "actions": {
@@ -47,6 +52,9 @@
       "dataFields": {}
     },
     "EscalationTimeout": {
+      "dataFields": {}
+    },
+    "Recheck": {
       "dataFields": {}
     },
     "Start": {
