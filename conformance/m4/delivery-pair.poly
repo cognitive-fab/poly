@@ -1,0 +1,48 @@
+// M4c's pair (PT9.8, K8): one sender, one receiver, two messages. The runtime's delivery traces of this pair,
+// under injected crashes and an archive, are replayed against the Delivery machine.
+module pair
+
+enum Msg { M1, M2 }
+
+machine Receiver {
+  state {
+    got  : 0..2 = 0
+    seen : map<Msg, bool> = { M1: false, M2: false }
+  }
+  terminal got == 2
+
+  action Got(m: Msg)
+
+  on Got(m) {
+    require !seen[m] else reject "again"
+    got' = got + 1
+    seen' = seen with [m] = true
+  }
+}
+
+machine Sender {
+  state {
+    sent : 0..2 = 0
+    peer : Ref<Receiver> = none
+  }
+  terminal sent == 2
+
+  action Wire(to: Ref<Receiver>)
+  action Send1()
+  action Send2()
+
+  on Wire(to) {
+    require peer == none && sent == 0 else reject "wired"
+    peer' = to
+  }
+  on Send1 {
+    require peer != none && sent == 0 else reject "not-first"
+    sent' = 1
+    send peer <- Got(m: M1)
+  }
+  on Send2 {
+    require sent == 1 else reject "not-second"
+    sent' = 2
+    send peer <- Got(m: M2)
+  }
+}

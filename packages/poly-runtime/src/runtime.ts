@@ -194,7 +194,17 @@ export class PolyRuntime {
 
   /** Timers and messages run on polyrun's own workers; effects never do (S119). */
   async tick(now = this.now()): Promise<{ effects: number; timers: number; messages: number }> {
+    await this.recoverMessages(now);
     return { effects: await this.worker.tick(now), timers: await this.kernel.workers.tickTimers(now), messages: await this.kernel.workers.tickMessages(now) };
+  }
+
+  /**
+   * A message whose delivery lease expired (the worker crashed after claiming it, or after the receiver's step and
+   * before the mark) goes back to pending and is sent again; the receiver dedupes it (K4, PT9.8). polyrun does this
+   * in its effect tick, which poly-runtime does not run (S119), so the runtime does it here.
+   */
+  async recoverMessages(now = this.now()): Promise<number> {
+    return this.store.txn(() => this.store.db.prepare("UPDATE pr_outbox SET status = 'pending', claimed_until = NULL WHERE kind = 'sendTo' AND status = 'inflight' AND claimed_until < ?").run(now).changes);
   }
 
   startWorkers({ effectPollMs = 200, timerPollMs = 200, messagePollMs = 200 }: { effectPollMs?: number; timerPollMs?: number; messagePollMs?: number } = {}): void {
@@ -203,7 +213,7 @@ export class PolyRuntime {
     w.unref?.();
     this.timers.push(w);
     const t = setInterval(() => { this.kernel.workers.tickTimers().catch(report); }, timerPollMs);
-    const m = setInterval(() => { this.kernel.workers.tickMessages().catch(report); }, messagePollMs);
+    const m = setInterval(() => { this.recoverMessages().then(() => this.kernel.workers.tickMessages()).catch(report); }, messagePollMs);
     t.unref?.(); m.unref?.();
     this.timers.push(t, m);
     if (this.ledger?.headMs) { const h = setInterval(() => { this.signHeads().catch(report); }, this.ledger.headMs); h.unref?.(); this.timers.push(h); }
