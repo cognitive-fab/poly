@@ -89,6 +89,12 @@ JJ's step 4 (FROZEN) waits on S117.
 
 FROZEN waits on M3-6 to M3-9 and a clean control 4 on all 40 versions.
 
+**M3-10 Closing M3-6 to M3-9 (from the progress report).**
+1. **Accepted:** the M3-8 list (14 entries), `strict` on the listed parameters in references and mutants alike, the seven amended briefs, O3 unchanged in bytes, the O1 part, the o1-check parser, and the scorer's 30-minute O1 timeout.
+2. **The adapter changed, so every version reruns.** The adapter generator is shared by all 40 versions and by both poly arms. Controls 1 to 4 rerun on all 40 versions after the adapter fix, not control 4 alone. The report states that removing the empty instance left by a refused creating command is the adapter's job, not the agent's, and that it applies equally to arms 3 and 4.
+3. **O1 stays as written; the new range refusals get a separate, labeled check.** O1 was written from the briefs before M3-7 and M3-8 amended them, and its author removed out-of-range tests where the brief was silent (T2, T3 authorize). Its independence matters more than its completeness, so O1 is not edited or rewritten. The out-of-range refusals the amended briefs now state are checked by **O1-R**, generated mechanically from the M3-8 list through the host interface, the same in every arm. O1-R is reported as a secondary measure, beside O1, and never added into the primary count of escaped defects pre-registered in S96. The analysis script reports it separately, with a test.
+4. **The environment rule is narrowed.** The runner keeps refusing a run when the Node version, the `claude` CLI version or the model id differs from the record. A change of operating system release is recorded in the run's record and reported, not refused: an OS patch does not change what the agent sees. Before FROZEN, the owner disables the CLI's automatic updates and pauses operating system updates for the duration of the runs; the freeze is then regenerated once, recording the pinned versions.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
