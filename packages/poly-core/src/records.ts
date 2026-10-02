@@ -9,7 +9,8 @@
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { canonicalize } from './jcs.js';
 
-export type RecordKind = 'approval' | 'acceptance';
+/** `invocation` (PD5.1.4, S107): a person's signature on one dispatch, which the person-key adapter turns into claims. */
+export type RecordKind = 'approval' | 'acceptance' | 'invocation';
 
 export interface SignedRecord {
   v: 1;
@@ -32,6 +33,11 @@ export const recordMessage = (digest: string): string => `poly-record\n${digest}
 export function recordDigest(r: Omit<SignedRecord, 'sig'> & { sig?: string }): string {
   const { sig: _s, ...body } = r;
   return 'sha256:' + createHash('sha256').update(canonicalize(body), 'utf8').digest('hex');
+}
+
+/** The subject of an invocation record: the digest of the one dispatch it authorises, its action id included. */
+export function invocationSubject(x: { instance: string; action: string; data: unknown; actionId: string }): string {
+  return 'sha256:' + createHash('sha256').update(canonicalize({ instance: x.instance, action: x.action, data: x.data ?? {}, actionId: x.actionId }), 'utf8').digest('hex');
 }
 
 export function signRecord(body: Omit<SignedRecord, 'sig' | 'v'>, privateKeyPem: string): SignedRecord {

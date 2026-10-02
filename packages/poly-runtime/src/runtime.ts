@@ -7,6 +7,7 @@
 //   const r = await rt.dispatch(order.id, 'Place', {}, { actionId: 'req-7781' })
 //
 // What M4's runtime does not do is stated in the certificate's `limits` and printed with it (S118, S134, S135).
+import { personKeyVerifier, type Verifier } from './verifier.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +45,8 @@ export interface LoadOptions {
   worker?: { leaseMs?: number; batch?: number; drift?: WorkerDrift };
   /** S123: the head signer, and how often heads are signed and anchors published, off the step path. */
   ledger?: LedgerSigner & { headMs?: number; anchorMs?: number };
+  /** PD5.1.4, K11: the verifier adapter for actions with claims; the person-key adapter over the certified keyrings by default (S107). */
+  verifier?: Verifier;
   /**
    * S134, S151: the host functions handlers' capabilities are built over. poly-runtime imports no network module;
    * each capability checks a call against its effect's declared targets before calling the transport.
@@ -86,8 +89,12 @@ export class PolyRuntime {
   /** PT9: the policy gate, when the build has policies. */
   readonly policyGate: PolicyGate | null;
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
+  /** PD5.1.4: the verifier adapter. */
+  private readonly verifier: Verifier;
+
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
+    this.verifier = opts.verifier ?? personKeyVerifier(verified.certificate.poly.keyrings ?? { people: [], agents: [] });
     this.certified = opts.certified ?? new Map();
     this.certifiedFunctions = new Set([...this.certified.values()].flatMap((ns) => Object.values(ns).filter((v) => typeof v === 'function')));
     this.gateGiven = opts.gate?.gate !== undefined || this.policyGate !== null;
@@ -268,9 +275,16 @@ export class PolyRuntime {
    * completion (K10, S130), since only the worker delivers it with its decision event, and an input outside its
    * action's type (S140). Each comes before any step, with an audit row and no journal row.
    */
-  async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string } = {}): Promise<DispatchResult> {
+  async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string; credentials?: unknown } = {}): Promise<DispatchResult> {
     const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
     const inst = await this.store.getInstance(instanceId);
+    // S155: $claims and $lineage are the runtime's; a dispatch that supplies either is refused before any step.
+    const reserved = data && typeof data === 'object' && !Array.isArray(data) ? ['$claims', '$lineage'].filter((k) => k in (data as object)) : [];
+    if (reserved.length) {
+      const reason = `PL1208 RESERVED_NAME: ${action} on ${instanceId} supplies ${reserved.join(' and ')}, which only the runtime writes (S155)`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S155', reason });
+      throw new RefusedDispatch(reason, 'S155');
+    }
     // Review C4: the hosted OutboxIntent instances are internal to the runtime; only its worker steps them.
     if (inst && this.modelOf(inst.machine_id)) {
       const reason = `${action} on ${instanceId}: an OutboxIntent instance is internal to the runtime, and only its worker takes its transitions (S119)`;
@@ -288,8 +302,18 @@ export class PolyRuntime {
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'K10', reason });
       throw new RefusedDispatch(reason, 'K10');
     }
+    // PD5.1.4, K11: an action with claims gets them from the verifier adapter, under $claims; the module's first acceptor
+    // rejects missing or bad ones (PS3.2's claims row). A verifier that throws is no answer: no claims (O10).
+    let payload = data;
+    if (inst && this.claimed(inst.machine_id, action)) {
+      let claims: Record<string, unknown> | null = null;
+      if (opts.credentials !== undefined) {
+        try { claims = await this.verifier(opts.credentials, { instance: instanceId, action, data: data ?? {}, actionId }); } catch { claims = null; }
+      }
+      payload = { ...((data ?? {}) as object), $claims: claims ?? null };
+    }
     try {
-      return await this.kernel.dispatch(instanceId, action, data, actionId);
+      return await this.kernel.dispatch(instanceId, action, payload, actionId);
     } catch (e) {
       if (e instanceof InputOutsideType) {
         await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S140', reason: e.message });
@@ -299,6 +323,11 @@ export class PolyRuntime {
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'PD2.4', reason: e.message });
       throw new RefusedDispatch(e.message, 'PD2.4');
     }
+  }
+
+  /** PD5.1.2: whether an action of a machine requires claims (its contract has the field $claims). */
+  claimed(machineId: string, action: string): boolean {
+    return this.verified.machines.find((x) => x.id === machineId)?.types.get(action)?.some(([p]) => p === '$claims') ?? false;
   }
 
   /** S140: why data is outside an action's type on an instance's machine, or null (a runtime model's actions take none). */
@@ -671,5 +700,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
       throw new LoadError(`refused at load: the policy gate did not open: ${(e as Error).message}`);
     }
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports });
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier });
 }

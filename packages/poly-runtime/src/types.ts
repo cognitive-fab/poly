@@ -38,6 +38,8 @@ export function parseType(text: string): TypeNode {
   if ((m = /^'([^']*)'$/.exec(t))) return { k: 'lit', value: m[1] };
   if ((m = /^(-?\d+)\.\.(-?\d+)$/.exec(t))) return { k: 'range', lo: Number(m[1]), hi: Number(m[2]) };
   if (t === 'number') return { k: 'int' };
+  // PD5.1.2b: a principal is a non-empty string; none is null.
+  if (t === 'principal') return { k: 'string' };
   if (t === 'conf') return { k: 'range', lo: 0, hi: 1000 };
   if (t === 'string') return { k: 'string' };
   if (t === 'boolean') return { k: 'bool' };
@@ -112,6 +114,8 @@ export function dataOutside(types: Map<string, [string, TypeNode][]>, action: st
   if (data !== undefined && data !== null && (typeof data !== 'object' || Array.isArray(data))) return `${action}'s data is ${JSON.stringify(data)}, not a record of its parameters`;
   const d = (data ?? {}) as Record<string, unknown>;
   for (const [p, t] of params) {
+    // PD5.1.2c: the claims are the runtime's to supply, and PS3.2's claims row is the module's to apply.
+    if (p === '$claims') continue;
     if (!(p in d)) return `${action} has no ${p}`;
     const why = outside(t, d[p], `${action}.${p}`, exists);
     if (why) return why;
