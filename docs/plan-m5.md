@@ -267,7 +267,15 @@ The owner closed M5a at 038fe86 (bea38eb), put E8 on the engine list and moved B
 | 18 | B13, the review, and this record | bbe7ad9 and the fixes below |
 | | Outage O10: a verifier that throws gives no claims, so `claims-unverified` before the module | 40f26d6 |
 
-PD5-A3 and PD5-A6, A7, A8 and A12 passed on their first run: the representatives (step 11) and M5a's decision-table check, consistency stage and person-key records already held the mechanism they test. Each was written against a fixture before it ran, and none needed a change to pass.
+**Confirmation tests and their controls (de66918).** PD5-A3 and PD5-A6, A7, A8 (Restore) and A12 could not fail first: the evidence script printed A3's numbers before the build, and the others were met by machinery steps 11 and 12 and M5a had already built. They are confirmation tests, labelled so in their names. Each property is a function that the confirmation test runs on the fixture and a seeded control runs on a mutant that breaks it; the control passes only when the same assertions fail, with the message named below (89b964f).
+
+| Test | Mutant | How the test fails on it |
+|---|---|---|
+| PD5-A3 | the refund example's self-approval require replaced by `caller.kind == Person`, so the approver may be the requester | the default check is not CLEAN: `PL3001` on `not-self-approved` |
+| PD5-A6 | the halt rule stops effects in `Restricted` instead of `Halted` (the `never` statement unchanged) | the halt is not proved: `PL6503` |
+| PD5-A7 | the way out is `compensable`, so the halt stops it too | the halt strands the mandate: `PL6501` in mode `Halted` |
+| PD5-A8 (Restore) | `Restore` takes no claims (`by op: Caller` and its requires removed) | a `Restore` with no credentials is accepted, not `claims-unverified` |
+| PD5-A12 | `CredentialRevoked` sets `Restricted` instead of `Halted` | the refund handler runs again after the revocation |
 
 **The gate, item by item.**
 
@@ -291,11 +299,10 @@ PD5-A3 and PD5-A6, A7, A8 and A12 passed on their first run: the representatives
 | S141, S153 | **waiting on E5** | Listed as `todo`, with S160's end-to-end send. |
 
 **Limits, stated.**
-- **S162 (new, proposed).** `PL6701` does not report an outside dispatch of an effect's completion or a timer's target. Such a step has no claims, and the attribution rule denies its effect at the gate, so nothing runs unattributed, but the check is not where the author learns it. *Proposal:* in a scope that requires attribution, the runtime refuses such a dispatch, as K9 and K10 refuse others. PT8 says so.
 - A configuration's completion given as a declared input has no origin class. No verdict reads it today.
 - A child created in a cascade starts its own chain, so it does not inherit its creator's origin (PT2.4d).
 - The sandbox policy is generated, certified and read back, and not enforced by this runtime; the certificate's limits say so. OpenShell has no per-command allowlist, so `exec` targets stay bound in process.
-- **The embedded policy form was not built.** The ruling put B13 "alongside the embedded surface's policy form", but PT1.1a and section 3 keep policies in the standalone surface only, and no embedded policy grammar is specified. B13 is fixed in the standalone formatter, which is the only one that prints policies. The embedded form needs a ruling before it is built.
+- **No embedded policy form** (de66918). PT1.1a stands: policies live in `.policy.poly` files only, and B13 is fixed in the standalone formatter.
 
 ### The code review of M5b
 
@@ -312,7 +319,8 @@ Four reviewers read `261649d..2344717` in four parts (claims and representatives
 | C2 | a whole-record read of `step.claims` or `lineage.origin` gave a table without them, so a violated `never` was proved | such a read reads every field | cb39299 |
 | C3 | a claims field declared with two types was typed by declaration order | reading it is `PL1201` naming both | cb39299 |
 | C4 | the attribution rule took its examples from an author's obligation named `attribution` | its source is `$attribution` | cb39299 |
-| C1, C5 | as the limits above | recorded, S162 proposed | cb39299 |
+| C1 | `PL6701` missed an outside dispatch of a completion or a timer's target | S162, ruled in e60a24b: in a scope that requires attribution the runtime refuses it before any step, with an audit row, as K9 and K10 refuse theirs; the manifest names timer targets, read back, with the fault `drop-timer-target` | 75772cd |
+| C5 | a configuration's completion input has no origin class | a limit, accepted in e60a24b | cb39299 |
 | D-F3 | the package closure missed conditions, subpath patterns, the imports map, `.json` and a directory's main, and dropped unresolved imports | each followed; unresolved imports listed in the limits | 109a521 |
 | D-F4 | the runtime imports the handlers' copy, so a bare import could resolve to an uncertified package | certified package files are copied beside it and re-checked | 109a521 |
 | D-F5 | a certificate with sandbox policies implied they were enforced | its limits say they are not (not run) | 109a521 |
@@ -321,14 +329,27 @@ Four reviewers read `261649d..2344717` in four parts (claims and representatives
 | D-F6 | B13 left comments on `on unknown`, `states`, `initial` and `end` lines misplaced | those lines are anchors too | af1f7b3 |
 | D, inspection | the certificate read-back compared handler files but not package files | read back, with the listed fault `omit-package-file` | 525f993 |
 
+**Polywatch on the M5b fixes.** Ten findings across its two reviews of M5b, each checked against the code (outcomes recorded):
+
+| Finding | Verdict | Resolution |
+|---|---|---|
+| a package Node resolves from above the project ran from the original file | real | copied under a deeper copy root and re-checked before import (cbfd2c2) |
+| a handler's `#…` specifier was refused as a missing package | real | refused with its reason: the imports map resolves to the originals, not the copy (cbfd2c2) |
+| comments on claims fields moved below the declaration | real | fields are comment anchors (c2c4abd) |
+| a claims field named `constructor` was a conflict with a type named undefined | real | the table has no prototype (6cfb5f4) |
+| a `by` binder named `$claims` passed check on the embedded surface | real | `PL1208` (6cfb5f4) |
+| the embedded reader cannot read `claims` or `by` | false | it reads both; `refund.poly` round-trips |
+| package files not copied; claims field with two types; subpath patterns | real | already fixed by the review (109a521, cb39299) |
+| a cascade child starts its own chain | real | a stated limit, accepted in e60a24b |
+
 **B13.** Comments inside an obligation body now keep their place: the parser anchors them to each body line, and the formatter prints them there and keeps the output idempotent (bbe7ad9, af1f7b3).
 
 **Found by the gate.** The first clean run failed one test: after A-F2 put the claims row in the handler's acceptor too, the broken lowering `skip-claims` removed only the first copy and changed nothing on `refund.poly`. The fault now drops both (ec19eae), and translation validation catches it again.
 
-**The gate, from a clean build.** Every `dist` directory, build-info file and test build directory was removed; `npm test` built, ran the boundary check (passed) and ran 1322 tests: 1317 pass, 0 fail, 1 skipped (sandbox enforcement, no gateway), and 4 are listed as waiting (S141 and S153 on E5, S160's end-to-end send on E5, the archive trace on E1, polyflow's verifier on E2).
+**The gate, from a clean build.** At 09a7042: 1322 tests, 1317 pass, 0 fail, 1 skipped (sandbox enforcement, no gateway), 4 waiting (S141 and S153 on E5, S160's end-to-end send on E5, the archive trace on E1, polyflow's verifier on E2). Rerun once at 89b964f, after `main` was merged in (9c6fbef), S162, the controls and the polywatch fixes: every `dist` directory, build-info file and test build directory was removed; `npm test` built, ran the boundary check (passed) and ran 1379 tests: 1373 pass, 1 fail, 1 skipped (the same), 4 waiting (the same). The failure is `test/m3-runner.test.mjs`, "a real run is refused until the freeze is approved", which came in with `main`: it spawns the M3 runner and expects the freeze gate to refuse, but the runner's isolation check refuses first, because the isolated account `~/.poly-m3/claude` now holds `plugins` and `skills` directories (created 2026-10-02 at 14:25, outside this build). The test depends on the machine's M3 account, not on M5b's code; nothing here touches it, and the account is the owner's to clean.
 
-M5b is ready to close, with S162 and the embedded policy form for the owner.
+M5b is ready to close: S162 is built, the controls are shown to fail their tests, and polywatch's findings are resolved. The one failing test is the M3 runner's isolation check on this machine.
 
 ## Conclusion
 
-M5 turns M4's gate interface into a governed gate. Policies get a front end and a checked lowering. Polyaxion decides in process, with a session sequence and state digests that make every decision replayable, and approvals are signed by people. The outage test shows by its log, not by assertion, that no effect runs without a recorded allow. Polyaxion needs no change if program-state reads are carried as reserved action fields, and polyrun needs one, for instances started at given values. Identity follows in M5b, on top of the gate and the signatures, with twelve acceptance criteria drawn from the PD5 rulings. Fourteen issues need rulings before the build, and the first two decide its shape: whether M5 is split (S144), and whether a BUSL engine can be vendored (S145). M5a is built as ruled, reviewed, clean from a clean build, and closed (section 10). M5b is built as ruled except S141 and S153, which wait on E5; it is reviewed and clean from a clean build (section 11), and it closes when the owner rules on S162 and the embedded policy form.
+M5 turns M4's gate interface into a governed gate. Policies get a front end and a checked lowering. Polyaxion decides in process, with a session sequence and state digests that make every decision replayable, and approvals are signed by people. The outage test shows by its log, not by assertion, that no effect runs without a recorded allow. Polyaxion needs no change if program-state reads are carried as reserved action fields, and polyrun needs one, for instances started at given values. Identity follows in M5b, on top of the gate and the signatures, with twelve acceptance criteria drawn from the PD5 rulings. Fourteen issues need rulings before the build, and the first two decide its shape: whether M5 is split (S144), and whether a BUSL engine can be vendored (S145). M5a is built as ruled, reviewed, clean from a clean build, and closed (section 10). M5b is built as ruled except S141 and S153, which wait on E5, with S162 built and each confirmation test controlled by a mutant it catches (section 11). With M5b, M5 is ready to close.
