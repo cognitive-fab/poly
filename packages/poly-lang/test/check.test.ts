@@ -45,7 +45,8 @@ test('each error source raises exactly the code it names', () => {
   // PL6401 is raised by the handler lint over handler modules, not a source (PT6.5, S72), tested by lint.test.mjs.
   // PL5405 is raised by the runtime at load, and fifo has no syntax yet (S125).
   // PL6402 is raised by the handler closure at admission, PL6403 at load and PL6404 by rt.handle (S142), tested by certified-handlers.test.mjs.
-  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404').map(([c]) => c);
+  // PL6405 is raised at load by a changed keyring (S150), tested by person-keys.test.mjs.
+  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404' && c !== 'PL6405').map(([c]) => c);
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 
