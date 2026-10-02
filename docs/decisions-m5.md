@@ -43,6 +43,16 @@ The decision-table check proves statements a policy states. In M5a, PT8.1 gains 
 
 **Cross-scope sends come from configurations, as PS8.7's second clause states.** In M5a, a configuration may assign `scope "x"` to its instances. The configuration check explores the gate's allow, deny and escalate on every send between instances of different scopes (PS4.4), and a deny delivers `SendDenied`. The runtime's gated message path and `SendDenied` are built in M5a and tested by injecting a cross-scope message below the language, since the runtime has no configuration instances before S153 (E5). M5b adds the end-to-end runtime test once configurations can be instantiated. M5a's record states this limit.
 
+## S161 polycheck runs as stage 5a
+
+**Option 2: pin polycheck and run it.** A `never` statement is proved per proposal, so it cannot express a region over capabilities a program accumulates across steps, such as the lethal trifecta (untrusted input, sensitive data and egress together). That is what polycheck checks, and PT8.4 stays as written.
+
+- polycheck becomes a second optional peer, pinned and hash-checked like Polyaxion (S145), and listed as not run where absent.
+- Each effect kind's labels map to polycheck's flags by a fixed table in the spec; an effect kind a policy mentions is marked gated.
+- Stage 5a runs polycheck's default regions over that model.
+- Controls, as for every check: a seeded program with the trifecta and no gate must be a finding with a witness, and the same program with the egress effect gated must be clean.
+- `never` statements keep the state-dependent cases (S149).
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
