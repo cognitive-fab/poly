@@ -7,5 +7,6 @@ export * from './truth.js';
 export * from './types.js';
 export * from './diagnostics.js';
 export { checkModule, tyToString, boundPath, effectKind, effectClass, effectSignature, childSpec, type ChildSpec, durationMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
-export { parseManifest, loadProject, ManifestError, type Manifest } from './manifest.js';
+export { parseManifest, loadProject, keyringsOf, ManifestError, type Manifest } from './manifest.js';
+export { signRecord, verifyRecord, recordDigest, recordMessage, sameKeyrings, EMPTY_KEYRINGS, type SignedRecord, type RecordKind, type Keyrings, type KeyHolder } from './records.js';
 export { CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, certificateMessage, buildIdOf, signDigest, publicKeyOf, certificateProblems, type Certificate, type CertifiedMachine, type CertificateSignature, type CertificateProblem } from './certificate.js';

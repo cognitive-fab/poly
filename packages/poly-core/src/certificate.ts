@@ -34,7 +34,8 @@ export interface Certificate {
   guarantees: string[];
   checks: { name: string; ok: true; engine: string; verdict: 'CLEAN' }[];
   domains: Record<string, string[]>;
-  boundAccepted: null;
+  /** PT12.5: the findings a person accepted, each with its signed acceptance; null when none was. */
+  boundAccepted: null | { code: string; property: string | null; subject: string; witness: string; by: string; record: string }[];
   toolchain: Record<string, string>;
   issuedAt: string;
   buildId: string;
@@ -62,6 +63,8 @@ export interface Certificate {
       packages: string[];
       lockfile: { path: string; digest: string } | null;
     };
+    /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */
+    keyrings: { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] };
   };
   signatures: CertificateSignature[];
   digest: string;

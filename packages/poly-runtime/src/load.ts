@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { actionTypes, type TypeNode } from './types.js';
-import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, type Certificate, type CertificateProblem } from '@poly/core';
+import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, parseManifest, keyringsOf, sameKeyrings, EMPTY_KEYRINGS, type Certificate, type CertificateProblem } from '@poly/core';
 
 export class LoadError extends Error {
   constructor(message: string, readonly problems: CertificateProblem[] = []) { super(message); this.name = 'LoadError'; }
@@ -74,6 +74,14 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (have !== h.lockfile.digest) changed.push(`the lockfile ${h.lockfile.path} is not the certified one (certified ${h.lockfile.digest}, found ${have ?? 'nothing'})`);
   }
   if (changed.length) throw new LoadError(`refused at load: PL6403 HANDLER_CHANGED: ${changed.join('; ')} (S142)`);
+
+  // S150: the keyrings that sign approvals and acceptances are the certified ones; a change needs re-admission.
+  const ring = certificate.poly?.keyrings;
+  if (!ring || !Array.isArray(ring.people) || !Array.isArray(ring.agents)) throw new LoadError('refused at load: PL6405 KEYRING_CHANGED: the certificate binds no keyrings; it predates S150, so admit the program again');
+  const manifestPath = join(root, 'poly.json');
+  let current;
+  try { current = existsSync(manifestPath) ? keyringsOf(root, parseManifest(readFileSync(manifestPath, 'utf8'), manifestPath)) : EMPTY_KEYRINGS; } catch (e) { throw new LoadError(`refused at load: PL6405 KEYRING_CHANGED: the keyrings cannot be read: ${(e as Error).message}`); }
+  if (!sameKeyrings(ring, current)) throw new LoadError('refused at load: PL6405 KEYRING_CHANGED: the people or agents keyring in poly.json differs from the certified one; a keyring change needs re-admission (S150)');
 
   const runDir = join(root, '.poly', 'run', certificate.buildId);
   const handlers = new Map<string, string>();

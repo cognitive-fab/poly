@@ -11,7 +11,7 @@ import { checkFile, workerConformance, replayRuntime } from '@poly/check';
 import { checkMachine, flatten } from '@poly/ref';
 import { modelSource, BOUNDS, MODEL_BUILD, MODEL_SOURCE, verifiedModels } from '@poly/runtime/model';
 import { ROOT } from './helpers.mjs';
-import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
+import { admitted, loaded, handleWith, approveAs, PERSON } from './runtime-helpers.mjs';
 import { lowerModels } from '../scripts/outbox-models.mjs';
 
 const WORKER_SOURCE = join(ROOT, 'packages', 'poly-runtime', 'src', 'worker.ts');
@@ -118,7 +118,7 @@ async function corpus(extra = {}) {
   await new Promise((r) => setTimeout(r, 50));
   for (const id of Object.keys(SCRIPT).filter((x) => SCRIPT[x].approve)) {
     const [row] = await rt.outbox(id);
-    await rt.approve(row.intent_id, { by: 'ops@example', ref: `esc-${id}` });
+    await approveAs(rt, row.intent_id);
   }
   for (let k = 0; k < 8; k++) await pass(61_000);
   await pass(11 * 60_000); // the unapproved escalation times out
@@ -167,7 +167,7 @@ test('every recorded gate decision replays from its proposal and snapshot (S118)
     for (const r of runs) assert.deepEqual(r.diagnostics.map((d) => d.message), [], r.run);
     const verdicts = (await Promise.all(Object.keys(SCRIPT).map((id) => rt.chain(id)))).flat().filter((e) => e.kind === 'verdict');
     assert.ok(verdicts.filter((e) => e.body.proposal).length >= 14, 'every proposal decided is recorded with its proposal and snapshot');
-    assert.ok(verdicts.some((e) => e.body.outcome === 'approved' && e.body.by === 'ops@example' && e.body.signed === false), 'the approval is recorded, unsigned until M5');
+    assert.ok(verdicts.some((e) => e.body.outcome === 'approved' && e.body.by === PERSON.keyId && e.body.signed === true), 'the approval is recorded with its signer (PT12.5)');
   } finally { await rt.close(); }
 });
 

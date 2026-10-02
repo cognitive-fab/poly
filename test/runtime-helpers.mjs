@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { admit } from '@poly/check';
 import { load } from '@poly/runtime';
+import { signRecord } from '@poly/core';
 import { ROOT } from './helpers.mjs';
 
 const KEYS = mkdtempSync(join(tmpdir(), 'poly-keys-'));
@@ -16,6 +17,23 @@ export function makeKey(name = 'admission') {
   writeFileSync(file, privateKey.export({ type: 'pkcs8', format: 'pem' }));
   return { id: `test-${name}`, file, publicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
 }
+
+/** PT12.5: a person's (or an agent's) signing key, generated for the run and never stored in the repository. */
+export function makePerson(name) {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return { name, keyId: `key-${name}`, privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), publicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
+}
+
+/** The keyrings every test project certifies: one person, one agent (S150). */
+export const PERSON = makePerson('ops');
+export const AGENT = makePerson('ci-agent');
+
+/** A signed approval of an intent's escalation, by a key holder (PT12.5, S150). */
+export async function approvalFor(rt, intentId, who = PERSON, subject) {
+  const esc = await rt.escalationOf(intentId);
+  return signRecord({ kind: 'approval', subject: subject ?? esc?.hash ?? 'none', by: who.keyId, at: '2026-10-02T00:00:00.000Z' }, who.privateKeyPem);
+}
+export const approveAs = async (rt, intentId, who = PERSON) => rt.approve(await approvalFor(rt, intentId, who));
 
 /**
  * A test's handler module (S142): the certified export delegates to a script the test sets through another export,
@@ -43,7 +61,7 @@ export function project(name, sources, key, base = 'test-cert') {
   mkdirSync(join(dir, 'src'), { recursive: true });
   for (const s of sources) copyFileSync(join(ROOT, s), join(dir, 'src', s.split('/').pop()));
   writeFileSync(join(dir, 'src', 'handlers.ts'), HANDLERS_TS);
-  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` } } }, null, 2));
+  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` } }, people: [{ name: PERSON.name, keyId: PERSON.keyId, publicKey: PERSON.publicKey }], agents: [{ name: AGENT.name, keyId: AGENT.keyId, publicKey: AGENT.publicKey }] }, null, 2));
   return dir;
 }
 

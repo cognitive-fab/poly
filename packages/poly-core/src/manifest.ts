@@ -24,18 +24,24 @@ export interface Manifest {
    * holding the private key, PEM) or `file:PATH` (a file outside version control). No private key is committed.
    */
   keys?: { admission: { id: string; location: string } };
+  /**
+   * PT12.5, S150: the people whose keys sign approvals and acceptances, and the agents whose keys never may. A public
+   * key is PEM, or `file:PATH` relative to the project. Admission certifies both keyrings.
+   */
+  people?: { name: string; keyId: string; publicKey: string }[];
+  agents?: { name: string; keyId: string; publicKey: string }[];
 }
 
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents']);
 
 export function parseManifest(text: string, where = 'poly.json'): Manifest {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch (e) { throw new ManifestError(`${where}: not JSON (${(e as Error).message})`); }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ManifestError(`${where}: expected an object`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents)`);
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
   if (!Array.isArray(m.modules) || m.modules.length === 0 || !m.modules.every((x) => typeof x === 'string' && x)) {
@@ -64,7 +70,29 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
       && typeof a.id === 'string' && a.id !== '' && typeof a.location === 'string' && /^(env|file):./.test(a.location);
     if (!ok) throw new ManifestError(`${where}: "keys" must be { "admission": { "id": "...", "location": "env:NAME" or "file:PATH" } } (S126)`);
   }
+  const ids = new Set<string>();
+  for (const ring of ['people', 'agents'] as const) {
+    if (m[ring] === undefined) continue;
+    const list = m[ring];
+    const ok = Array.isArray(list) && list.every((h) => h && typeof h === 'object' && !Array.isArray(h) && Object.keys(h).sort().join(',') === 'keyId,name,publicKey'
+      && typeof h.name === 'string' && h.name !== '' && typeof h.keyId === 'string' && h.keyId !== '' && typeof h.publicKey === 'string' && h.publicKey !== '');
+    if (!ok) throw new ManifestError(`${where}: "${ring}" must be a list of { "name", "keyId", "publicKey" } (PT12.5)`);
+    for (const h of list as { keyId: string }[]) {
+      if (ids.has(h.keyId)) throw new ManifestError(`${where}: key ${h.keyId} is named twice across "people" and "agents" (PT12.5)`);
+      ids.add(h.keyId);
+    }
+  }
   return m as unknown as Manifest;
+}
+
+/** PT12.5, S150: the keyrings a manifest names, each public key read (PEM, or `file:PATH` relative to the project). */
+export function keyringsOf(dir: string, manifest: Manifest): { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] } {
+  const read = (h: { name: string; keyId: string; publicKey: string }) => {
+    const pem = h.publicKey.startsWith('file:') ? readFileSync(join(dir, h.publicKey.slice(5)), 'utf8') : h.publicKey;
+    if (!/-----BEGIN PUBLIC KEY-----/.test(pem)) throw new ManifestError(`poly.json: the public key of ${h.keyId} is not a PEM public key (PT12.5)`);
+    return { name: h.name, keyId: h.keyId, publicKey: pem.trim() };
+  };
+  return { people: (manifest.people ?? []).map(read), agents: (manifest.agents ?? []).map(read) };
 }
 
 /** A module pattern to a regular expression: `*` within one path segment, `**` across segments. */

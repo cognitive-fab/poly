@@ -118,6 +118,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6403: { name: 'HANDLER_CHANGED', stage: 'runtime', severity: 'error' },
   // S142: rt.handle given a function that is not an export of a certified handler file the runtime loaded.
   PL6404: { name: 'HANDLER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },
+  // S150: at load, a people or agents keyring that differs from the one the certificate binds.
+  PL6405: { name: 'KEYRING_CHANGED', stage: 'runtime', severity: 'error' },
   PL6201: { name: 'UNGATED_DECISION', stage: 'effects', severity: 'finding' },
   PL6202: { name: 'DECISION_WITHOUT_FAILURE', stage: 'types', severity: 'error' },
   // M4 review C5, K10: a send of an action that completes one of the receiver's decisions.

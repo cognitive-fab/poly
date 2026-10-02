@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { workerConformance } from '@poly/check';
 import { RefusedDispatch } from '@poly/runtime';
 import { ROOT } from './helpers.mjs';
-import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
+import { admitted, loaded, handleWith, approveAs } from './runtime-helpers.mjs';
 
 const WORKER = join(ROOT, 'packages', 'poly-runtime', 'src', 'worker.ts');
 const a = await admitted('review-c', ['conformance/m4/outbox.poly']);
@@ -74,7 +74,7 @@ test('review C3: an approval that loses the race to the timeout is a rejected st
     await rt.worker.tick(); // timed out: denied
     assert.equal(await phase(rt, 'j'), 'Failed');
     const { row } = await intentOf(rt, 'j');
-    await assert.rejects(rt.approve(row.intent_id, { by: 'ops', ref: 'late' }), /timed out/);
+    await assert.rejects(approveAs(rt, row.intent_id), /timed out/);
     const ij = await rt.getJournal(`intent:${row.intent_id}`);
     assert.deepEqual(ij.at(-1) && [ij.at(-1).action, ij.at(-1).step_kind], ['Approve', 'rejected']);
     assert.deepEqual((await workerConformance(rt, WORKER)).diagnostics.map((d) => d.message), []);
@@ -94,7 +94,7 @@ test('review C3: an approval that wins the race makes the timeout a rejected ste
     // The timeout pass reads the intent as waiting, then the approval commits before its EscalationTimeout does.
     const read = rt.worker.intentState.bind(rt.worker);
     let raced = false;
-    rt.worker.intentState = async (r) => { const s = await read(r); if (!raced && s?.intent === 'Escalated' && !s.intent_approved) { raced = true; await rt.approve(row.intent_id, { by: 'ops', ref: 'race' }); } return s; };
+    rt.worker.intentState = async (r) => { const s = await read(r); if (!raced && s?.intent === 'Escalated' && !s.intent_approved) { raced = true; await approveAs(rt, row.intent_id); } return s; };
     await rt.worker.tick();
     rt.worker.intentState = read;
     assert.ok(raced);

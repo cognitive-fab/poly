@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import { RESERVED_MODULE, type Certificate } from '@poly/core';
+import { RESERVED_MODULE, verifyRecord, type Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.js';
@@ -46,6 +46,11 @@ export type Handler = EffectHandler;
 /** PD2.4: an adjudication with no decision event to link; a checked program cannot reach it (PL6203). */
 export class OutcomeWithoutDecision extends Error {
   constructor(message: string) { super(message); this.name = 'OutcomeWithoutDecision'; }
+}
+
+/** PT12.5: an approval that is not a person's signed record for a waiting escalation. Audited, with no effect. */
+export class ApprovalRefused extends Error {
+  constructor(message: string) { super(message); this.name = 'ApprovalRefused'; }
 }
 
 export class RefusedDispatch extends Error {
@@ -127,7 +132,42 @@ export class PolyRuntime {
   }
 
   /** PT9.2: a recorded approval of an escalated intent (S118: no person-key signature until M5). */
-  approve(intentId: string, approval: { by: string; ref: string }): Promise<void> { return this.worker.approve(intentId, approval); }
+  /** PT12.5: the latest escalation of an intent, by its verdict event's hash, which a signed approval names. */
+  async escalationOf(intentId: string): Promise<{ hash: string; run: string; seq: number } | null> {
+    return this.store.txn(() => {
+      const rows = this.store.db.prepare(`SELECT run, seq, hash, event FROM poly_ledger WHERE kind = 'verdict' ORDER BY seq DESC`).all() as { run: string; seq: number; hash: string; event: string }[];
+      for (const r of rows) {
+        const b = JSON.parse(r.event).body;
+        if (b?.intent === intentId && b?.outcome === 'escalated') return { hash: r.hash, run: r.run, seq: r.seq };
+      }
+      return null;
+    });
+  }
+
+  /**
+   * PT9.2, PT12.5, S150: a signed approval lifts the escalation it names, once. Its subject is the escalated verdict
+   * event's hash; its key must be a person's in the certified keyring. Anything else is refused with an audit row,
+   * and the intent stays Escalated until it is approved or times out.
+   */
+  async approve(record: unknown): Promise<void> {
+    const r = record as { subject?: unknown } | null;
+    const subject = typeof r?.subject === 'string' ? r.subject : '';
+    const found = subject ? await this.store.txn(() => this.store.db.prepare(`SELECT run, event FROM poly_ledger WHERE hash = ? AND kind = 'verdict'`).get(subject) as { run: string; event: string } | undefined) : undefined;
+    const body = found ? JSON.parse(found.event).body : null;
+    const refuse = async (problem: string): Promise<never> => {
+      await this.store.insertAudit({ at: this.now(), instanceId: found?.run ?? '', action: 'Approve', actionId: body?.intent ?? subject, rule: 'PT12.5', reason: problem });
+      throw new ApprovalRefused(`approval refused: ${problem}`);
+    };
+    const v = verifyRecord(record, this.verified.certificate.poly.keyrings, { kind: 'approval' });
+    if (!v.ok) {
+      // An unverifiable record is audited against the escalation it names, when it names one.
+      return refuse(v.problem);
+    }
+    if (!found || body?.outcome !== 'escalated') return refuse(`the record names no escalation (${subject})`);
+    try {
+      await this.worker.approve(body.intent, { by: v.person.keyId, person: v.person.name, record: v.digest, subject, at: (record as { at: string }).at });
+    } catch (e) { return refuse((e as Error).message); }
+  }
 
   /** The outbox rows of an instance (polyrun's), for hosts and tests that watch the intents. */
   outbox(instanceId: string) { return this.store.getOutbox(instanceId); }

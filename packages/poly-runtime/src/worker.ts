@@ -254,8 +254,8 @@ export class EffectWorker {
     return claimed.length;
   }
 
-  /** PT9.2: a recorded approval re-proposes an escalated intent; in M4 it carries no person-key signature (S118). */
-  async approve(intentId: string, approval: { by: string; ref: string }): Promise<void> {
+  /** PT9.2, PT12.5: a verified, signed approval re-proposes an escalated intent; the runtime checked the record. */
+  async approve(intentId: string, approval: { by: string; person: string; record: string; subject: string; at: string }): Promise<void> {
     const row = await this.store.txn(() => this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(intentId));
     if (!row) throw new Error(`no intent ${intentId}`);
     const r = { ...row, payload: JSON.parse(row.payload) } as OutboxRow;
@@ -263,7 +263,7 @@ export class EffectWorker {
     const res = await this.store.txn(async () => {
       const a = await this.attempt(r, 'Approve');
       if (!a.accepted) return a;
-      this.verdict(r, { outcome: 'approved', by: approval.by, ref: approval.ref, signed: false });
+      this.verdict(r, { outcome: 'approved', by: approval.by, person: approval.person, record: approval.record, escalation: approval.subject, at: approval.at, signed: true });
       this.store.db.prepare(`UPDATE pr_outbox SET next_attempt_at = ? WHERE intent_id = ? AND status = 'pending'`).run(this.now, intentId);
       return a;
     });
@@ -409,7 +409,8 @@ export class EffectWorker {
   private lastApproval(row: OutboxRow): { by: string; ref: string } | undefined {
     const events = this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict' ORDER BY seq DESC`).all(row.instance_id).map((r) => JSON.parse(r.event));
     const e = events.find((x) => x.body?.intent === row.intent_id && x.body?.outcome === 'approved');
-    return e ? { by: e.body.by, ref: e.body.ref } : undefined;
+    // The gate sees who approved and the intent it approved (Polyaxion's approved.ref is the escalated call's id).
+    return e ? { by: e.body.by, ref: row.intent_id } : undefined;
   }
 
   private async execute(row: OutboxRow, decl: any, attempt: number): Promise<unknown> {

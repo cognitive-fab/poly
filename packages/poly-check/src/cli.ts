@@ -17,6 +17,7 @@ import { render } from './render.js';
 import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
 import { applyFixById } from './fix.js';
 import { admit, admitWitness, witnessKey, AdmitError } from './admit.js';
+import { approvalRecord, acceptanceRecord, writeAcceptance, RecordUsageError } from './records.js';
 import { journalCommand, JournalUsageError } from './journal.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
@@ -25,6 +26,8 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly lint handlers [project dir]
        poly admit <project dir>
        poly admit --witness <file | project dir> --key <private key file> [--root <dir>] [--out <file>]
+       poly approve <intent> --by <keyId> --key <private key file> --db <store> [--out <file>]
+       poly accept <witness id> --by <keyId> --key <private key file> [--root <dir>]
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
        poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
        poly journal export --db <store> --run <id>
@@ -87,7 +90,7 @@ export async function main(argv: string[]): Promise<number> {
   const json = args.includes('--json');
   const root = option(args, '--root');
   const out = option(args, '--out');
-  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (root === null || out === null) return usage();
@@ -137,6 +140,29 @@ export async function main(argv: string[]): Promise<number> {
     }
     if (positional[0] === 'journal' && positional.length >= 2) {
       return await journalCommand(positional[1], argv, (s) => process.stdout.write(s));
+    }
+    if ((positional[0] === 'approve' || positional[0] === 'accept') && positional.length === 2) {
+      // PT12.5, S150: a person's signed record, with a key given by file, never one under version control.
+      const by = option(args, '--by');
+      const keyFile = option(args, '--key');
+      if (!by || !keyFile) { process.stderr.write(`poly: ${positional[0]} needs --by <keyId> and --key <private key file>\n`); return EXIT_CODES.USAGE; }
+      try {
+        if (positional[0] === 'approve') {
+          const db = option(args, '--db');
+          if (!db) { process.stderr.write('poly: approve needs --db <store>\n'); return EXIT_CODES.USAGE; }
+          const record = await approvalRecord(db, positional[1], by, keyFile);
+          const text = JSON.stringify(record, null, 2) + '\n';
+          if (out) writeFileSync(out, text); else process.stdout.write(text);
+          return EXIT_CODES.CLEAN;
+        }
+        const base = root ?? process.cwd();
+        const path = writeAcceptance(base, acceptanceRecord(readReport(base), positional[1], by, keyFile));
+        process.stdout.write(`${path}\n  admission reads it from accepted/ (PT12.5)\n`);
+        return EXIT_CODES.CLEAN;
+      } catch (e) {
+        if (e instanceof RecordUsageError) { process.stderr.write(`poly: ${e.message}\n`); return EXIT_CODES.USAGE; }
+        throw e;
+      }
     }
     if (positional[0] === 'admit' && positional.length === 2 && args.includes('--witness')) {
       // S139: a witness certificate, signed with the test key given by file (never one under version control).

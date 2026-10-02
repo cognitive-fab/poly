@@ -1,0 +1,70 @@
+// Signed records (PT12.5, S150): an approval of an escalation, or the acceptance of a finding, signed by a person.
+//
+// A record is `{ v: 1, kind, subject, by, at, sig }`. Its digest is the SHA-256 of the RFC 8785 canonical JSON of
+// everything but `sig`, and `sig` is ed25519 over the fixed message `poly-record\n<digest>`, so a record cannot be
+// mistaken for a certificate signature (`poly-certificate\n…`). An approval's subject is the hash of the escalated
+// `verdict` event, so one record lifts one escalation; an acceptance's subject is `<module digest>:<witness id>`.
+// `at` is recorded, never trusted (S150). The keys are the project's `people` and `agents` keyrings, which admission
+// certifies; an agent key never signs either kind (PT12.5). Pure apart from node:crypto.
+import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
+import { canonicalize } from './jcs.js';
+
+export type RecordKind = 'approval' | 'acceptance';
+
+export interface SignedRecord {
+  v: 1;
+  kind: RecordKind;
+  subject: string;
+  /** The signing key's id, in the `people` keyring. */
+  by: string;
+  /** When the signer says it signed. Recorded, not trusted. */
+  at: string;
+  sig: string;
+}
+
+export interface KeyHolder { name: string; keyId: string; publicKey: string }
+export interface Keyrings { people: KeyHolder[]; agents: KeyHolder[] }
+
+export const EMPTY_KEYRINGS: Keyrings = { people: [], agents: [] };
+
+export const recordMessage = (digest: string): string => `poly-record\n${digest}`;
+
+export function recordDigest(r: Omit<SignedRecord, 'sig'> & { sig?: string }): string {
+  const { sig: _s, ...body } = r;
+  return 'sha256:' + createHash('sha256').update(canonicalize(body), 'utf8').digest('hex');
+}
+
+export function signRecord(body: Omit<SignedRecord, 'sig' | 'v'>, privateKeyPem: string): SignedRecord {
+  const r = { v: 1 as const, kind: body.kind, subject: body.subject, by: body.by, at: body.at };
+  const sig = sign(null, Buffer.from(recordMessage(recordDigest(r)), 'utf8'), createPrivateKey(privateKeyPem)).toString('base64');
+  return { ...r, sig };
+}
+
+/** The record verified against the certified keyrings, for the kind and subject the caller expects, or why not. */
+export function verifyRecord(record: unknown, keyrings: Keyrings, expect: { kind: RecordKind; subject?: string }): { ok: true; person: KeyHolder; digest: string } | { ok: false; problem: string } {
+  const r = record as Partial<SignedRecord> | null;
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return { ok: false, problem: 'not a signed record: an unsigned approval has no effect (PT12.5)' };
+  const fields = Object.keys(r).sort().join(',');
+  if (fields !== 'at,by,kind,sig,subject,v' || r.v !== 1 || typeof r.sig !== 'string' || typeof r.by !== 'string' || typeof r.subject !== 'string' || typeof r.at !== 'string') {
+    return { ok: false, problem: 'not a signed record { v: 1, kind, subject, by, at, sig }: an unsigned approval has no effect (PT12.5)' };
+  }
+  if (r.kind !== expect.kind) return { ok: false, problem: `a ${r.kind} record, where an ${expect.kind} is needed` };
+  if (expect.subject !== undefined && r.subject !== expect.subject) return { ok: false, problem: `the record is for ${r.subject}, not for ${expect.subject}` };
+  if (keyrings.agents.some((a) => a.keyId === r.by)) return { ok: false, problem: `${r.by} is an agent key, and an agent key never signs an ${r.kind} (PT12.5)` };
+  const person = keyrings.people.find((p) => p.keyId === r.by);
+  if (!person) return { ok: false, problem: `${r.by} is not a key in the certified people keyring (PT12.5)` };
+  const digest = recordDigest(r as SignedRecord);
+  let ok = false;
+  try { ok = verify(null, Buffer.from(recordMessage(digest), 'utf8'), createPublicKey(person.publicKey), Buffer.from(r.sig, 'base64')); } catch { ok = false; }
+  if (!ok) return { ok: false, problem: `the signature by ${r.by} does not verify` };
+  return { ok: true, person, digest };
+}
+
+/** Keyrings compared as admission certifies them: the same holders, ids and public keys, in any order. */
+export function sameKeyrings(a: Keyrings, b: Keyrings): boolean {
+  const norm = (k: Keyrings) => canonicalize({
+    people: [...k.people].map((p) => ({ name: p.name, keyId: p.keyId, publicKey: p.publicKey.trim() })).sort((x, y) => (x.keyId < y.keyId ? -1 : 1)),
+    agents: [...k.agents].map((p) => ({ name: p.name, keyId: p.keyId, publicKey: p.publicKey.trim() })).sort((x, y) => (x.keyId < y.keyId ? -1 : 1)),
+  });
+  return norm(a) === norm(b);
+}

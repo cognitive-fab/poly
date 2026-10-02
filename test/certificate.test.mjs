@@ -27,7 +27,7 @@ test('a CLEAN project is admitted: the certificate covers every artefact, is sig
   // PD3.2b: the decision is listed with its domain and labels, and the model is never bound.
   assert.deepEqual(cert.poly.decisions.map((d) => [d.machine, d.kind, d.modelBound]), [['support.Ticket', 'decision.route', false]]);
   assert.ok(cert.poly.kernelAssumptions.includes('K10'));
-  for (const l of ['approvals', 'capabilities', 'SQLite']) assert.ok(cert.poly.limits.some((x) => x.includes(l)), l);
+  for (const l of ['capabilities', 'SQLite']) assert.ok(cert.poly.limits.some((x) => x.includes(l)), l);
   // No private key is in the certificate or next to it.
   assert.doesNotMatch(readFileSync(join(dir, '.poly', 'certificate.json'), 'utf8'), /PRIVATE KEY/);
 });

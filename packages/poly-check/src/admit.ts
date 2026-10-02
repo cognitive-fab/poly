@@ -5,11 +5,11 @@
 // version-controlled tree is refused. The certificate is written to a temporary name, read back against the
 // files it describes and the signature it carries, and only then renamed into place: a certificate that does not
 // read back is a toolchain fault, and nothing is left behind (the standing rule on artefacts the runtime reads).
-import { readFileSync, writeFileSync, existsSync, renameSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, renameSync, rmSync, mkdirSync, realpathSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import {
   CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, buildIdOf, signDigest, publicKeyOf, certificateProblems,
-  loadProject, type Certificate, type CertifiedMachine,
+  loadProject, keyringsOf, verifyRecord, sameKeyrings, EMPTY_KEYRINGS, type Certificate, type CertifiedMachine, type Keyrings,
 } from '@poly/core';
 import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
@@ -30,7 +30,6 @@ export const MAX_ATTEMPTS = 10;
 
 /** The limits every M4 build states with its verdicts (S118, S134, S135). */
 export const M4_LIMITS = [
-  'escalation approvals are recorded API calls without a person-key signature until PT12.5 (M5, S118)',
   'handlers receive no capabilities; capabilities are not bound until M5 (S134)',
   'the store is SQLite only; Postgres is not built (S135)',
   'installed packages the handlers import are not hashed; the certificate records the lockfile\'s digest, and hashing them is M5\'s (S142)',
@@ -78,6 +77,12 @@ export function witnessKey(file: string): { id: string; privateKeyPem: string } 
   return { id: 'witness', privateKeyPem: readFileSync(file, 'utf8') };
 }
 
+/** PT12.5, S126: a person's signing key, read from a file never under version control. */
+export function personKey(file: string): string {
+  if (insideVersionControl(file)) throw new AdmitError(`the person key is at ${resolve(file)}, inside a tree under version control; a private key is never committed (S126)`);
+  return readFileSync(file, 'utf8');
+}
+
 function admissionKey(dir: string, named: { id: string; location: string } | undefined, given: AdmitOptions['key']): { id: string; privateKeyPem: string } {
   if (given) return given;
   if (!named) throw new AdmitError('no admission key: poly.json names none under keys.admission (S126)');
@@ -118,15 +123,15 @@ function moduleOf(file: string): A.Module | null {
   return (file.endsWith('.ts') ? readEmbedded(text, file) : parse(text)).module;
 }
 
-/** What a certificate is issued from: the root its paths are relative to, the checked reports, the source files. */
-interface Checked { dir: string; name: string; files: string[]; report: ProjectReport }
+/** What a certificate is issued from: the root its paths are relative to, the checked reports, the source files, the keyrings. */
+interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings }
 
 /** A project directory, or one module file checked alone (its handler lint is then not run, S72). */
 async function checkTarget(target: string, root?: string): Promise<Checked> {
   const abs = resolve(target);
   if (existsSync(join(abs, 'poly.json'))) {
     const { manifest, files } = loadProject(abs);
-    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs }) };
+    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs }), keyrings: keyringsOf(abs, manifest) };
   }
   const dir = resolve(root ?? dirname(abs));
   const r = await checkFile(abs, { root: dir });
@@ -136,7 +141,7 @@ async function checkTarget(target: string, root?: string): Promise<Checked> {
     handlers: hasEffects ? { status: 'not-run', reason: 'a module admitted alone has no poly.json naming its handlers (S72)' } : null,
     verdict: r.verdict, exit: r.exit,
   };
-  return { dir, name: r.module ?? 'module', files: [abs], report };
+  return { dir, name: r.module ?? 'module', files: [abs], report, keyrings: EMPTY_KEYRINGS };
 }
 
 export async function admit(target: string, opts: AdmitOptions & { root?: string } = {}): Promise<AdmitResult> {
@@ -149,12 +154,58 @@ export async function admit(target: string, opts: AdmitOptions & { root?: string
   rmSync(out, { force: true });
   const c = await checkTarget(abs, opts.root);
   opts.afterCheck?.();
-  if (c.report.verdict !== 'CLEAN') {
-    throw new AdmitError(`not admitted: the verdict is ${c.report.verdict}; in M4 only a CLEAN program is admitted, since accepting a finding needs a person's signature (PT12.5, S126)`);
+  // PT12.5: a CLEAN program is admitted; a program with findings only when a person signed the acceptance of each.
+  let accepted: NonNullable<Certificate['boundAccepted']> | null = null;
+  if (c.report.verdict === 'FINDINGS') {
+    try { accepted = acceptedFindings(c); } catch (e) {
+      if (e instanceof AdmitError && !e.message.includes('FINDINGS')) throw new AdmitError(e.message.replace('not admitted: ', 'not admitted: the verdict is FINDINGS, and '));
+      throw e;
+    }
+  }
+  else if (c.report.verdict !== 'CLEAN') {
+    throw new AdmitError(`not admitted: the verdict is ${c.report.verdict}; only a CLEAN program, or one whose every finding a person accepted, is admitted (PT12.5, S126)`);
   }
   // PT6.5, S72: the lint over handler modules is part of admission; a project with effects whose lint did not run is not admitted.
   if (c.report.handlers?.status === 'not-run') throw new AdmitError(`not admitted: the handler lint did not run (${c.report.handlers.reason})`);
-  return issue(c, key, out, opts);
+  return issue(c, key, out, opts, undefined, accepted);
+}
+
+/**
+ * PT12.5: each finding of a FINDINGS program with its acceptance, signed by a person in the certified keyring, read
+ * from the project's `accepted/*.json`. Every finding must have one, and the check must otherwise be clean (nothing
+ * not run, nothing vacuous, nothing inconclusive), or the program is not admitted.
+ */
+function acceptedFindings(c: Checked): NonNullable<Certificate['boundAccepted']> {
+  const records: unknown[] = [];
+  const folder = join(c.dir, 'accepted');
+  if (existsSync(folder)) for (const f of readdirSync(folder).filter((x) => x.endsWith('.json')).sort()) {
+    try { records.push(JSON.parse(readFileSync(join(folder, f), 'utf8'))); } catch { throw new AdmitError(`not admitted: accepted/${f} is not JSON`); }
+  }
+  const out: NonNullable<Certificate['boundAccepted']> = [];
+  const missing: string[] = [];
+  const problems: string[] = [];
+  for (const r of c.report.files) {
+    const subjects = [
+      ...r.machines.map((m) => ({ name: `${r.module}.${m.machine}`, m })),
+      ...r.configurations.map((k) => ({ name: `${r.module}.${k.configuration}`, m: k })),
+    ];
+    for (const { name, m } of subjects) {
+      if (m.notRun.length || m.vacuous.length) throw new AdmitError(`not admitted: ${name} has checks not run or vacuous, which no acceptance covers (PT12.5)`);
+      for (const d of m.diagnostics) {
+        if (d.severity !== 'finding') throw new AdmitError(`not admitted: ${name} has ${d.code} ${d.name}, which is not a finding a person can accept (PT12.5)`);
+        if (!d.witness) throw new AdmitError(`not admitted: ${name} has ${d.code} with no witness, so there is nothing to accept (PT12.5)`);
+        const want = `${r.moduleDigest}:${d.witness.id}`;
+        const verdicts = records.filter((x) => (x as { subject?: string })?.subject === want).map((x) => verifyRecord(x, c.keyrings, { kind: 'acceptance', subject: want }));
+        const good = verdicts.find((v) => v.ok);
+        if (good && good.ok) out.push({ code: d.code, property: d.property ?? null, subject: name, witness: d.witness.id, by: good.person.keyId, record: good.digest });
+        else if (verdicts.length) problems.push(`${name} ${d.code}: ${(verdicts[0] as { problem: string }).problem}`);
+        else missing.push(`${name} ${d.code}${d.property ? ` ${d.property}` : ''} (witness ${d.witness.id.slice(7, 19)}) has no signed acceptance`);
+      }
+    }
+    if (r.diagnostics.length) throw new AdmitError(`not admitted: ${r.file} has diagnostics no acceptance covers`);
+  }
+  if (problems.length || missing.length) throw new AdmitError(`not admitted: the verdict is FINDINGS, and ${[...problems, ...missing].join('; ')} (PT12.5)`);
+  return out;
 }
 
 /**
@@ -177,7 +228,7 @@ export async function admitWitness(target: string, opts: { root?: string; key: {
   return issue(c, opts.key, resolve(opts.out), { now: opts.now }, { purpose: 'witness', findings });
 }
 
-async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out: string, opts: AdmitOptions, witness?: { purpose: 'witness'; findings: NonNullable<Certificate['findings']> }): Promise<AdmitResult> {
+async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out: string, opts: AdmitOptions, witness?: { purpose: 'witness'; findings: NonNullable<Certificate['findings']> }, accepted: Certificate['boundAccepted'] = null): Promise<AdmitResult> {
   const { dir, files, report } = c;
   const machines: CertifiedMachine[] = [];
   const instances: Record<string, unknown> = {};
@@ -202,8 +253,10 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
       for (const s of m.stages) if (s.status === 'ran' && s.verdict === 'CLEAN') checks.push({ name: `${id}:${s.stage}`, ok: true, engine: s.engine, verdict: 'CLEAN' });
       const decl = ast?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === m.machine);
       if (!witness) {
-        for (const it of decl?.items ?? []) if (it.kind === 'Property' || it.kind === 'Liveness') guarantees.push(`${id}:${it.name}`);
-        if (decl && !decl.service) guarantees.push(`${id}:deadlock-free`);
+        // PT12.5: a property whose finding a person accepted is not claimed, nor deadlock freedom after an accepted PL3201.
+        const waived = (accepted ?? []).filter((x) => x.subject === id);
+        for (const it of decl?.items ?? []) if ((it.kind === 'Property' || it.kind === 'Liveness') && !waived.some((x) => x.property === it.name)) guarantees.push(`${id}:${it.name}`);
+        if (decl && !decl.service && !waived.some((x) => x.code === 'PL3201')) guarantees.push(`${id}:deadlock-free`);
       }
       // PT19, S120, S137: every entry declares its bound, and none above the limit.
       const manifestPath = join(m.buildDir, 'effects.manifest.json');
@@ -281,11 +334,11 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     guarantees: guarantees.sort(),
     checks,
     domains,
-    boundAccepted: null,
+    boundAccepted: accepted,
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS], handlers: certifiedHandlers },
+    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS], handlers: certifiedHandlers, keyrings: c.keyrings },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -300,6 +353,8 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const sourcesNow = Object.fromEntries(files.map((f) => [rel(dir, f), sha256OfBytes(readFileSync(f))]));
   if (JSON.stringify(back.poly.sources) !== JSON.stringify(sourcesNow)) problems.push({ name: 'sources', problem: 'the sources changed while the program was admitted' });
   for (const p of handlerProblems()) problems.push({ name: 'handlers', problem: p });
+  // S150: the keyrings read back are the ones the manifest names now.
+  if (!sameKeyrings(back.poly.keyrings, existsSync(join(dir, 'poly.json')) ? keyringsOf(dir, loadProject(dir).manifest) : EMPTY_KEYRINGS)) problems.push({ name: 'keyrings', problem: 'the keyrings changed while the program was admitted' });
   // S142: the handlers read back are the closure of the roots as it is on disk now, file for file.
   if (lint?.status === 'ran') {
     const now = handlerClosure(dir, lint.roots.map((p) => join(dir, p)));
