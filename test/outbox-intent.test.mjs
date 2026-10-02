@@ -170,3 +170,27 @@ test('every recorded gate decision replays from its proposal and snapshot (S118)
     assert.ok(verdicts.some((e) => e.body.outcome === 'approved' && e.body.by === 'ops@example' && e.body.signed === false), 'the approval is recorded, unsigned until M5');
   } finally { await rt.close(); }
 });
+
+test('polywatch: an expired Running intent whose manifest is gone is parked, not a crash', async () => {
+  const a = await admitted('outbox-park', ['conformance/m4/outbox.poly']);
+  const { rt, clock } = await loaded(a, { worker: { leaseMs: 60_000 } });
+  try {
+    let release;
+    rt.handle('w.work', () => new Promise((r) => { release = r; }));
+    await rt.create('outbox.Job', { id: 'j' });
+    await rt.dispatch('j', 'Go');
+    const pending = rt.worker.tick();
+    await new Promise((r) => setTimeout(r, 50));
+    const effects = rt.kernel.machines.get('outbox.Job').manifest.effects;
+    const saved = effects['w.work'];
+    delete effects['w.work'];
+    clock.advance(61_000);
+    await rt.worker.tick(); // must not throw
+    const [row] = await rt.outbox('j');
+    assert.equal(row.status, 'pending');
+    assert.match(row.last_error ?? '', /parked/);
+    effects['w.work'] = saved;
+    release('late');
+    await pending;
+  } finally { await rt.close(); }
+});

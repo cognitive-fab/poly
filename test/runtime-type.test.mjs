@@ -64,3 +64,28 @@ test('the runtime reads the type of every action of every conformance and exampl
   }
   assert.ok(actions > 50, `${actions} actions`);
 });
+
+test('polywatch: data that is not a record is refused as outside its type, not a TypeError', async () => {
+  const { rt } = await loaded(a);
+  try {
+    await rt.create('unions.Board', { id: 'b2' });
+    for (const data of [5, 'Idle', true]) {
+      await assert.rejects(rt.dispatch('b2', 'Grab', data), (e) => e instanceof RefusedDispatch && e.rule === 'S140', JSON.stringify(data));
+    }
+  } finally { await rt.close(); }
+});
+
+test('polywatch: a failure completion outside its type is audited (S140) and the intent still ends', async () => {
+  const { rt } = await loaded(a);
+  try {
+    rt.provide('route', { provider: () => { throw Object.assign(new Error('declined'), { permanent: true }); }, model: 'm' });
+    // Every completion is declared outside its type, so the permanent path's failed completion cannot be delivered.
+    rt.worker['opts'].outsideType = () => 'forced outside';
+    await rt.create('support.Ticket', { id: 'tp' });
+    await rt.dispatch('tp', 'Received', { text: 'where is my refund' });
+    await rt.worker.tick();
+    const [row] = (await rt.outbox('tp')).filter((r) => r.kind === 'decision.route');
+    assert.equal(row.status, 'dead');
+    assert.ok((await rt.audit('tp')).some((r) => r.rule === 'S140' && r.action === 'RouteFailed'));
+  } finally { await rt.close(); }
+});

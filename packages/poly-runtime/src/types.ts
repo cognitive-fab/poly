@@ -96,6 +96,7 @@ export function actionTypes(contract: { actions?: Record<string, { dataFields?: 
 export function dataOutside(types: Map<string, [string, TypeNode][]>, action: string, data: unknown): string | null {
   const params = types.get(action);
   if (!params) return null; // not in the module: the kernel answers it (unhandled, PS9.1a)
+  if (data !== undefined && data !== null && (typeof data !== 'object' || Array.isArray(data))) return `${action}'s data is ${JSON.stringify(data)}, not a record of its parameters`;
   const d = (data ?? {}) as Record<string, unknown>;
   for (const [p, t] of params) {
     if (!(p in d)) return `${action} has no ${p}`;

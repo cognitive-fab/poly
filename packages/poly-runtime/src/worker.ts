@@ -146,7 +146,14 @@ export class EffectWorker {
   private async dispatchCompletion(row: OutboxRow, hook: any, suffix: string, data: Record<string, unknown>): Promise<void> {
     if (!hook || !hook.action) return;
     const why = this.opts.outsideType?.(row.instance_id, hook.action, data);
-    if (why) throw new InputOutsideType(`${hook.action} on ${row.instance_id}: ${why} (PS3.2, S140)`, row.instance_id, hook.action);
+    if (why) {
+      const message = `${hook.action} on ${row.instance_id}: ${why} (PS3.2, S140)`;
+      // A success's data comes from the handler, and its settle fails; a failure's cannot be delivered, so it is
+      // audited and the intent still takes its terminal transition.
+      if (suffix === ':done') throw new InputOutsideType(message, row.instance_id, hook.action);
+      await this.store.insertAudit({ at: this.now, instanceId: row.instance_id, action: hook.action, actionId: `${row.intent_id}${suffix}`, rule: 'S140', reason: message });
+      return;
+    }
     await this.kernel.dispatch(row.instance_id, hook.action, data, `${row.intent_id}${suffix}`);
   }
 
@@ -184,7 +191,10 @@ export class EffectWorker {
       (row as Fenced).fence = fence;
       const st = await this.intentState(row);
       try {
-        if (st?.intent === 'Running') await this.failed(row, this.decl(row), st.intent_attempt!, 'lease expired while running (a crash)', now, 'lost');
+        const decl = this.decl(row);
+        // As at a claim: a row whose machine or manifest is unavailable is parked and takes no transition.
+        if (decl === null) await this.store.markEffectRetry(row.intent_id, row.attempts, now + 30_000, `parked: machine or manifest unavailable for effect '${row.kind}', not executed`);
+        else if (st?.intent === 'Running') await this.failed(row, decl, st.intent_attempt!, 'lease expired while running (a crash)', now, 'lost');
         else await this.store.txn(() => this.store.db.prepare(`UPDATE pr_outbox SET status = 'pending', claimed_until = NULL WHERE intent_id = ? AND status = 'inflight'`).run(row.intent_id));
       } catch (e) { if (!(e instanceof StaleClaim)) throw e; }
     }
