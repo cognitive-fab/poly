@@ -108,3 +108,35 @@ test('review B6: an archived instance\'s id is not created again, so its closed 
     assert.equal((await rt.verifyRun(o.id, trust)).verdict, 'closed-and-signed');
   } finally { await rt.close(); }
 });
+
+test('review B8: no event is appended after a closure, and a chain with one is not ok', async () => {
+  const { rt } = await loaded(a, { ledger });
+  try {
+    const o = await rt.create('shop.Order', { id: 'j-after' });
+    await rt.dispatch(o.id, 'Cancel');
+    await rt.archive(o.id);
+    const before = await rt.chain(o.id);
+    await assert.rejects(rt.advise(o.id, { rule: 'late', verdict: 'after the end' }), /closed/);
+    assert.equal((await rt.chain(o.id)).length, before.length);
+    // An event written past the store's refusal is still found by verification.
+    const { verifyRun } = await import('@poly/runtime');
+    const { nextEvent } = await import('@poly/runtime');
+    const last = before.at(-1);
+    const late = nextEvent(last.run, { seq: last.seq, hash: last.hash }, 'advice', { rule: 'late' }, last.at + 1);
+    const v = verifyRun([...before, late], [], trust, null);
+    assert.match(v.problems.join('; '), /seq \d+ follows the closure/);
+  } finally { await rt.close(); }
+});
+
+test('review B9: a journal row whose action id or machine version changed differs from its step event', async () => {
+  const { rt } = await loaded(a, { ledger });
+  try {
+    const o = await rt.create('shop.Order', { id: 'j-bind' });
+    await rt.dispatch(o.id, 'Checkout', {}, { actionId: 'req-1' });
+    assert.equal((await rt.verifyRun(o.id, trust)).problems.length, 0);
+    rt.store.db.prepare("UPDATE pr_journal SET action_id = 'req-forged' WHERE instance_id = ? AND seq = 1").run(o.id);
+    assert.match((await rt.verifyRun(o.id, trust)).problems.join('; '), /journal row 1 differs from its step event/);
+    rt.store.db.prepare("UPDATE pr_journal SET action_id = 'req-1', machine_version = 'v-forged' WHERE instance_id = ? AND seq = 1").run(o.id);
+    assert.match((await rt.verifyRun(o.id, trust)).problems.join('; '), /journal row 1 differs from its step event/);
+  } finally { await rt.close(); }
+});

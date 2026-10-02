@@ -159,6 +159,9 @@ export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Rec
   const signedThrough = good.length ? Math.max(...good) : null;
   const last = events.length ? events[events.length - 1].seq : -1;
   const closed = events.some((e) => e.kind === 'closure');
+  // Review B8, S122: the closure is the last event of a run.
+  const closure = events.findIndex((e) => e.kind === 'closure');
+  if (closure >= 0 && closure < events.length - 1) problems.push(`seq ${events[closure + 1].seq} follows the closure at seq ${events[closure].seq}`);
   if (closed && (signedThrough === null || signedThrough < last)) problems.push(`the run is closed and seq ${(signedThrough ?? -1) + 1}..${last} are not covered by a trusted signed head`);
   // Binding: every journal row has its step event, with the digests of its bodies (S122).
   if (journal) {
@@ -168,7 +171,8 @@ export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Rec
       const s = steps.find((e) => (e.body as { seq: number }).seq === row.seq);
       const b = s?.body as Record<string, unknown> | undefined;
       if (!b) { problems.push(`journal row ${row.seq} has no step event`); continue; }
-      if (b.action !== row.action || b.stepKind !== row.step_kind || (b.rejectReason ?? null) !== (row.reject_reason ?? null) || b.data !== digest(row.data) || b.pre !== digest(row.pre) || b.post !== digest(row.post)) {
+      // Review B9: the action id (K4's dedupe key) and the machine version are bound with the rest of the row.
+      if (b.action !== row.action || b.actionId !== row.action_id || b.machineVersion !== row.machine_version || b.stepKind !== row.step_kind || (b.rejectReason ?? null) !== (row.reject_reason ?? null) || b.data !== digest(row.data) || b.pre !== digest(row.pre) || b.post !== digest(row.post)) {
         problems.push(`journal row ${row.seq} differs from its step event`);
       }
     }

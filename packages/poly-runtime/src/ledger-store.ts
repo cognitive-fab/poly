@@ -106,7 +106,9 @@ export class LedgerStore extends Store {
   /** Appends one event to a run's chain. Must be called inside a transaction of this store. */
   appendEvent(instanceId: string, kind: string, body: unknown, at: number): LedgerEvent {
     const run = this.runOfInstance(instanceId);
-    const last = this.db.prepare('SELECT seq, hash FROM poly_ledger WHERE run = ? ORDER BY seq DESC LIMIT 1').get(instanceId) ?? null;
+    const last = this.db.prepare('SELECT seq, hash, kind FROM poly_ledger WHERE run = ? ORDER BY seq DESC LIMIT 1').get(instanceId) ?? null;
+    // Review B8, S122: a closure is a run's last event; nothing is chained after it.
+    if (last?.kind === 'closure') throw new Error(`ledger: the run '${instanceId}' is closed at seq ${last.seq}; no ${kind} event is chained after its closure`);
     const event = nextEvent(run, last, kind, body, at);
     this.db.prepare('INSERT INTO poly_ledger (run, seq, kind, event, hash) VALUES (?, ?, ?, ?, ?)').run(instanceId, event.seq, kind, JSON.stringify(event), event.hash);
     return event;
