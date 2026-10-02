@@ -7,7 +7,7 @@
 // can never be known: a machine that is neither a service (a singleton) nor the emitter of any effect (S147).
 import type * as A from '../ast.js';
 import { diag, type Diagnostic, type NodeAt } from '../diagnostics.js';
-import { effectKind, effectClass } from './check.js';
+import { effectKind, effectClass, LABELS } from './check.js';
 
 /** The type of a policy expression. Every input is optional, so `tri` is the type of a comparison (PS8.0). */
 export type PType =
@@ -207,6 +207,7 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             const x = type(e.args[1]);
             if (s && s.k !== 'labels') err('PL1201', e, '`s has x` needs a set of labels on the left (effect.labels)');
             if (x && x.k !== 'str') err('PL1201', e, '`s has x` needs a string on the right');
+            else if (x?.k === 'str' && x.values) for (const v of x.values) if (!LABELS.has(v)) err('PL1001', e.args[1], `${JSON.stringify(v)} is not a label of the closed vocabulary (PT6.2)`);
             return { k: 'tri' };
           }
           err('PL1001', e, `${e.callee}(…) is not a policy function (machine, decision, unknown)`);
@@ -234,6 +235,7 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (bare(e.left) && !bare(e.right)) { r = type(e.right); l = r ? type(e.left, r) : null; }
             else { l = type(e.left); r = l === null && bare(e.right) ? null : type(e.right, l); }
             if (l && r && !comparable(l, r, e.op)) err('PL1201', e, `${show(l)} ${e.op} ${show(r)} compares values of different types`);
+            else if (l && r) known(l, r, e);
             return { k: 'tri' };
           }
           const l = type(e.left); const r = type(e.right);
@@ -242,13 +244,20 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
         }
         case 'In': {
           const t = type(e.expr);
-          for (const x of e.set) { const s = type(x, t); if (t && s && !comparable(t, s, '==')) err('PL1201', x, `${show(s)} is not a value of ${show(t)}`); }
+          for (const x of e.set) { const s = type(x, t); if (t && s && !comparable(t, s, '==')) err('PL1201', x, `${show(s)} is not a value of ${show(t)}`); else if (t && s) known(t, s, x); }
           return { k: 'tri' };
         }
         default:
           err('PL1201', e, `${e.kind} is not a policy expression (PT2.3)`);
           return null;
       }
+    };
+    // Review B6, PT8.1: a string literal compared with a field whose values the program fixes (an effect's kind or
+    // class, a machine id) must be one of them, or the comparison silently matches nothing.
+    const known = (a: PType, b: PType, at: A.Expr) => {
+      if (a.k !== 'str' || b.k !== 'str' || !a.values || !b.values) return;
+      const [lit, dom] = a.values.length === 1 && b.values.length !== 1 ? [a, b] : [b, a];
+      for (const v of lit.values!) if (!dom.values!.includes(v)) err('PL1001', at, `${JSON.stringify(v)} is not one of the program's values here (${dom.values!.slice(0, 8).map((x) => JSON.stringify(x)).join(', ')}${dom.values!.length > 8 ? ', …' : ''})`);
     };
     const condition = (e: A.Expr, what: string) => {
       const t = type(e);

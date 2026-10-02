@@ -2368,7 +2368,7 @@ const KERNEL_KINDS = new Set(['timer', 'cancelTimer', 'spawnChild', 'signalChild
 /** PT6.5: the labels that grant each kind of target's capability. */
 const GRANTS: Record<string, string[]> = { egress: ['egress:external', 'egress:public'], secrets: ['read:private'], exec: ['exec'], store: ['read:store', 'write:store'] };
 
-const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
+export const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
 const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
 
 /** S41: an effect with no `kind` has its name as its kind. */

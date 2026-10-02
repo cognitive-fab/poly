@@ -88,7 +88,7 @@ test('S149: a policy without the rule its never statement relies on is a finding
   assert.equal(last.data.machines['orders.Order'].status, 'Cancelled');
   assert.equal(last.data.effect.class, 'irreversible');
   assert.match(f.witness.id, /^sha256:/);
-  const vacuous = POLICY.replace('effect.machine == "orders.Order" && effect.class == "irreversible" && machine("orders.Order").status == Cancelled\n}', 'effect.kind == "payment.refund"\n}');
+  const vacuous = POLICY.replace('effect.machine == "orders.Order" && effect.class == "irreversible" && machine("orders.Order").status == Cancelled\n}', 'effect.kind == "payment.fee" && effect.class == "none"\n}'); // the fee is irreversible, so no proposal meets it
   const s2 = scopeOf(await checkProject(projectOf('never-vacuous', { 'orders.poly': ORDERS, 'orders.policy.poly': vacuous })), 'orders');
   assert.deepEqual(s2.vacuous.map((v) => v.property), ['orders-governance.no-fee-when-cancelled']);
   assert.equal(s2.verdict, 'INCONCLUSIVE');
@@ -211,4 +211,14 @@ test('S149: a string field with a check domain is enumerated; a rule over an ope
   const rf = policyFacts([router]);
   rf.decisions.set('route', { answers: null });
   assert.deepEqual(openReads({ scope: 'support', policies: routed.decls.filter((d) => d.kind === 'Policy') }, rf), ['decision route.answer']);
+});
+
+// Review B6: PT8.1, each name is checked against the program. A misspelt effect kind, class or label would make a
+// rule apply to nothing.
+test('PT8.1: an effect kind, class or label the program does not have is PL1001', async () => {
+  for (const [bad, what] of [['effect.kind == "payment.fees"', 'payment.fees'], ['effect.class == "irreversable"', 'irreversable'], ['effect.labels has "egress:externel"', 'egress:externel'], ['effect.kind in { "payment.fee", "payment.chrage" }', 'payment.chrage']]) {
+    const pol = `module typo_policy\n\npolicy typo {\n  scope "orders"\n  obligation r "A rule." rule {\n    when ${bad}\n    require false else deny\n  }\n}\n`;
+    const s = scopeOf(await checkProject(projectOf('typo', { 'orders.poly': ORDERS, 'p.policy.poly': pol })), 'orders');
+    assert.ok(s.diagnostics.some((d) => d.code === 'PL1001' && d.message.includes(what)), `${bad}: ${JSON.stringify(s.diagnostics.map((d) => d.message))}`);
+  }
 });
