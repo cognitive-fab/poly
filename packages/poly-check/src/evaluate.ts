@@ -4,7 +4,6 @@
 // and neither writes to any chain. Tests use recorded providers only: no test calls a model.
 import { digest as polyDigest } from '@poly/core';
 import type { JournalReader, Provider, CalibrationMap } from '@poly/runtime';
-import { mapDigest } from '@poly/runtime';
 
 export interface Sample {
   run: string;
@@ -90,5 +89,7 @@ export async function fit(reader: JournalReader, decision: string, model: string
   }
   const points: [number, number][] = blocks.map((b) => [b.x, Math.round((b.sum / b.n) * 1000)]);
   const body = { decision, version, fittedFor: model, points };
+  // The runtime is loaded only by the commands that use it, so `poly check` runs without it.
+  const { mapDigest } = await import('@poly/runtime');
   return { ...body, digest: mapDigest(body) };
 }

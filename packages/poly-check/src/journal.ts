@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { diag, EXIT_CODES, type Diagnostic } from '@poly/core';
-import { load, openJournal, verifyRun, type JournalReader, type Provider } from '@poly/runtime';
+import type { JournalReader, Provider } from '@poly/runtime';
 import { evaluate, fit } from './evaluate.js';
 import { replayRuntime } from './replay.js';
 
@@ -33,6 +33,8 @@ function trustOf(args: string[]): Record<string, string> {
 }
 
 export async function journalCommand(sub: string, args: string[], write: (s: string) => void): Promise<number> {
+  // The runtime is loaded only here, so `poly check` and its tests run in a toolchain without it.
+  const { load, openJournal, verifyRun } = await import('@poly/runtime');
   const db = one(args, '--db');
   if (!db) throw new JournalUsageError('poly journal needs --db <store>');
   const only = one(args, '--run');
