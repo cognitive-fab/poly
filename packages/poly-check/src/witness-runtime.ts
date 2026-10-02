@@ -134,6 +134,23 @@ async function witnessRuntime(spec: WitnessSpec): Promise<PolyRuntime> {
   return loadRuntime(join(spec.buildRoot, '.poly', 'build'), { certificate: out, trust: { [key.id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() }, allowWitness: true });
 }
 
+/** Whether a machine's handlers spawn children, which a witness drives itself and the runtime would run (S141). */
+function spawnsChildren(decl: Machine): boolean {
+  return JSON.stringify(decl.items.filter((x) => x.kind === 'Handler')).includes('"op":"spawn"');
+}
+
+/**
+ * S139, S141: how an exported test walks its witness: through the runtime API, or, for a configuration or a machine
+ * that spawns children, through the certified lowered artefacts (ruled an M4 limit).
+ */
+export function walkRoute(spec: WitnessSpec): 'runtime' | 'configuration' | 'spawns' {
+  if (spec.configuration) return 'configuration';
+  const text = readFileSync(spec.source, 'utf8');
+  const parsed = spec.source.endsWith('.ts') ? readEmbedded(text, spec.source) : parse(text);
+  const decl = parsed.module?.decls.find((d): d is Machine => d.kind === 'Machine' && d.name === spec.machine);
+  return decl && spawnsChildren(decl) ? 'spawns' : 'runtime';
+}
+
 export async function runWitness(spec: WitnessSpec): Promise<void> {
   const text = readFileSync(spec.source, 'utf8');
   const parsed = spec.source.endsWith('.ts') ? readEmbedded(text, spec.source) : parse(text);
@@ -175,7 +192,7 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
   const l = load(rt.verified.runDir, spec.module, spec.machine!, moduleDigest);
   const machineId = `${spec.module}.${spec.machine}`;
   // S139, S141: through the runtime API unless the machine spawns children, which the witness drives itself.
-  const spawns = JSON.stringify(decl.items.filter((x) => x.kind === 'Handler')).includes('"op":"spawn"');
+  const spawns = spawnsChildren(decl);
   if (!spawns) {
     await rt.create(machineId, { id: 'witness' });
     console.log(`# walked through poly-runtime: ${spec.steps.length} step(s) of ${machineId}, under a witness certificate (S139)`);
