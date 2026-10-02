@@ -262,3 +262,16 @@ test('review B2: a decision handler can only come from the provider host, and a 
     assert.ok((await rt.audit('b2')).some((r) => r.rule === 'K10' && r.action === 'Routed'));
   } finally { await rt.close(); }
 });
+
+// Review B3: conf is the calibrated probability of the answer returned, not of the most probable one.
+test('review B3: an engine that picks Refund at 0.1 gets conf 100, margin 0, and the refund gate holds', async () => {
+  const { rt } = await loaded(a);
+  try {
+    rt.provide('route', { provider: () => ({ answer: 'Refund', distribution: [['Complaint', 0.9], ['Refund', 0.1]] }), model: 'm' });
+    await route(rt, 'b3');
+    const d = (await rt.chain('b3')).find((e) => e.kind === 'decision').body;
+    assert.deepEqual([d.answer, d.raw, d.conf, d.margin], ['Refund', 0.1, 100, 0]);
+    assert.equal((await rt.getState('b3')).state.status, 'NeedsHuman');
+    assert.equal((await rt.outbox('b3')).filter((r) => r.kind === 'payments.refund').length, 0);
+  } finally { await rt.close(); }
+});

@@ -52,8 +52,8 @@ export async function evaluate(reader: JournalReader, decision: string, candidat
   for (const s of scored) {
     const q = s.question as { decision: string; payload: unknown; intent: string };
     const a = await candidate(q);
-    const dist = [...a.distribution].sort((x, y) => y[1] - x[1]);
-    const conf = dist[0]?.[1] ?? 0;
+    // Review B3: the candidate's confidence is the probability it gives the answer it returns.
+    const conf = a.distribution.find(([x]) => polyDigest(x) === polyDigest(a.answer))?.[1] ?? 0;
     const same = polyDigest(a.answer) === polyDigest(s.answer);
     const right = s.outcome === 'Correct' ? same : !same;
     if (right) agree++;

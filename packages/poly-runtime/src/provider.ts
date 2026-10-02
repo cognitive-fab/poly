@@ -69,6 +69,13 @@ export interface DecisionRecord {
   cost: { units: number; unit: string } | null;
 }
 
+const sameAnswer = (x: unknown, y: unknown): boolean => digest(x ?? null) === digest(y ?? null);
+
+/** The raw probability the distribution gives an answer, 0 when it does not list it (review B3). */
+export function answerProbability(distribution: [unknown, number][], answer: unknown): number {
+  return distribution.find(([x]) => sameAnswer(x, answer))?.[1] ?? 0;
+}
+
 /** The adapter: the effect handler for `decision.<d>`, recording the full record for the ledger by intent id. */
 export function decisionHandler(decision: string, providerKind: string | null, config: ProviderConfig, records: Map<string, DecisionRecord>) {
   return async (payload: unknown, _caps: unknown, ctx: { idempotencyKey: string }) => {
@@ -76,8 +83,10 @@ export function decisionHandler(decision: string, providerKind: string | null, c
     const t0 = Date.now();
     const a = await config.provider(question);
     const dist = [...a.distribution].sort((x, y) => y[1] - x[1]);
-    const first = dist[0]?.[1] ?? 0;
-    const second = dist[1]?.[1] ?? 0;
+    // Review B3: conf is the calibrated probability of the answer returned, and margin that probability minus the
+    // highest of any other answer, floored at 0; an answer the distribution does not list has probability 0.
+    const first = answerProbability(dist, a.answer);
+    const second = Math.max(0, ...dist.filter(([x]) => !sameAnswer(x, a.answer)).map(([, p]) => p));
     const conf = calibrate(config.calibration, first);
     const margin = Math.max(0, conf - calibrate(config.calibration, second));
     const map = config.calibration;
