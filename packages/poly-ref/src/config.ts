@@ -30,6 +30,7 @@ import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
 import { createHash } from 'node:crypto';
 import { buildMachine, inCheckDomain, inType, valuesOf, type RMachine } from './model.js';
 import { fairCycles, type FairGroup } from './liveness.js';
+import { antecedents, judge, type Members, type Vacuous } from './vacuity.js';
 import { transition, initialState, isTerminal } from './step.js';
 import { AbsentInstance, evaluate, evaluateAt, type GlobalView } from './eval.js';
 import { explore, pathTo, type Edge, type Graph, type Label, type Outcome, type System } from './explore.js';
@@ -99,6 +100,8 @@ export interface ConfigReport {
   liveness: string[];
   capHit: boolean;
   graph: Graph<GlobalState>;
+  /** PT12.3, S128: properties whose antecedent is never true in any explored global state. */
+  vacuous: Vacuous[];
 }
 
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
@@ -384,7 +387,23 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     else findings.push(finding('PL3901', undefined, `${o.field} can leave its check domain (value ${keyOf(o.value)}); the state is not explored`, path, { field: o.field, state: o.state }));
   }
   if (g.capHit) findings.push(finding('PL3901', undefined, `exploration stopped at ${g.states.length} global states`, []));
+
+  // PT12.3, S128: a configuration property is judged over the global states, and under a quantifier for every
+  // member of its group that exists (S60).
+  const groupMembers: Members = (env, group) => env.global?.groups.get(group) ?? [];
+  const states = () => g.states.map(envOf);
+  const vacuous: Vacuous[] = [];
+  for (const p of decl.properties) {
+    const list = p.kind === 'Liveness'
+      ? (p.from ? [{ parts: [p.from], quant: p.quant }] : [])
+      : antecedents(p.expr);
+    for (const a of list) {
+      const v = judge(a, states, groupMembers);
+      if (v) { vacuous.push({ property: p.name, id: p.id, parts: a.parts, ...v }); break; }
+    }
+  }
   return {
+    vacuous,
     configuration: decl.name,
     states: g.states.length,
     transitions: g.edges.length,

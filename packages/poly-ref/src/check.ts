@@ -12,6 +12,7 @@ import { isTerminal } from './step.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
+import { antecedents, judge, type Members, type Vacuous } from './vacuity.js';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
 const CODE = {
@@ -50,6 +51,8 @@ export interface MachineReport {
   model: RMachine;
   /** S33: every accepted edge that emits and leaves the state unchanged, the steps PL4002 is about. */
   identityEmits: Edge<State>[];
+  /** PT12.3, S128: properties whose antecedent is never true where they are judged. */
+  vacuous: Vacuous[];
 }
 
 export interface CheckOptions {
@@ -204,7 +207,10 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     });
   }
 
+  const vacuous = machineVacuity(M, g);
+
   return {
+    vacuous,
     machine: M.name,
     states: g.states.length,
     transitions: g.edges.length,
@@ -304,4 +310,46 @@ export function machineGroups(M: RMachine, fair: AstFairGroup[]): FairGroup[] {
 /** How many data records each action is offered in every state: |D(a)|. */
 export function alphabetSize(M: RMachine): number {
   return M.actions.reduce((n, a) => n + dataDomain(a, M).length, 0);
+}
+
+/** S49: a quantifier in a machine ranges over a family's indices. */
+const familyMembers: Members = (env, group) => {
+  const r = env.M.families.get(group);
+  if (!r) return [];
+  const out: number[] = [];
+  for (let k = r.lo; k <= r.hi; k++) out.push(k);
+  return out;
+};
+
+/** PT12.3, S128: each property of the machine whose antecedent is never true where the property is judged. */
+export function machineVacuity(M: RMachine, g: Graph<State>): Vacuous[] {
+  const out: Vacuous[] = [];
+  const states = () => g.states.map((s) => ({ M, state: s, data: {}, locals: new Map() }));
+  const accepted = () => g.edges.filter((x) => x.label.verdict.kind === 'accepted').map((x) => ({
+    M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action,
+  }));
+  const every = () => g.edges.map((x) => ({
+    M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], action: x.label.action, verdict: x.label.verdict,
+  }));
+  const judgeAll = (name: string, id: string, e: Expr, envs: () => Iterable<import('./eval.js').Env>) => {
+    for (const a of antecedents(e)) {
+      const v = judge(a, envs, familyMembers);
+      if (v) { out.push({ property: name, id, parts: a.parts, ...v }); return; }
+    }
+  };
+  for (const p of M.invariants) judgeAll(p.name, p.id, p.expr, states);
+  for (const p of M.stepProperties) judgeAll(p.name, p.id, p.expr, accepted);
+  for (const p of M.rejectProperties) judgeAll(p.name, p.id, p.expr, every);
+  for (const p of M.liveness) {
+    if (!p.from || p.quant) continue; // a quantified liveness is refused in a machine (S56)
+    const v = judge({ parts: [p.from], quant: null }, states, familyMembers);
+    if (v) out.push({ property: p.name, id: p.id, parts: [p.from], ...v });
+  }
+  // before(k1, k2) is about every k2 emitted: none on any explored step is vacuous (S128).
+  const emitted = new Set(g.edges.filter((x) => x.label.verdict.kind === 'accepted').flatMap((x) => x.label.effects.map((f) => f.kind)));
+  for (const p of M.pathProperties) {
+    const c = p.clauses.find((x): x is Extract<PathClause, { k: 'before' }> => x.k === 'before' && !emitted.has(x.then));
+    if (c) out.push({ property: p.name, id: p.id, parts: [], text: `before("${c.first}", "${c.then}"): no ${c.then} is emitted` });
+  }
+  return out;
 }

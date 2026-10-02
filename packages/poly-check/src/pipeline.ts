@@ -17,7 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
-import { parse } from '@poly/lang';
+import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
@@ -25,7 +25,7 @@ import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
 import { lintHandlers } from './lint.js';
-import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
+import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type Vacuous } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
@@ -49,10 +49,29 @@ export interface MachineCheck {
   stages: StageRecord[];
   /** Properties that were not checked, with the reason and the milestone that checks them (M1-2). */
   notRun: { property: string; reason: string }[];
+  /** PT12.3, S128: properties whose antecedent is never true where they are judged; each makes the verdict INCONCLUSIVE. */
+  vacuous: VacuousRecord[];
   diagnostics: Diagnostic[];
   verdict: Verdict;
   instance?: InstanceRecord;
   buildDir?: string;
+}
+
+/** A vacuous property (PT12.3, S128): its name, its antecedent's source text, and the member it never held for. */
+export interface VacuousRecord {
+  property: string;
+  reason: 'vacuous';
+  antecedent: string;
+  member?: number;
+}
+
+function vacuousRecords(list: Vacuous[]): VacuousRecord[] {
+  return list.map((v) => ({
+    property: v.property,
+    reason: 'vacuous',
+    antecedent: v.text ?? v.parts.map((p) => printExpr(p)).join(' && '),
+    ...(v.member !== undefined ? { member: v.member } : {}),
+  }));
 }
 
 export interface InstanceRecord {
@@ -78,6 +97,8 @@ export interface ConfigCheck {
   stages: StageRecord[];
   /** Liveness properties, listed as not run (M1-2). */
   notRun: { property: string; reason: string }[];
+  /** PT12.3, S128: as for a machine. */
+  vacuous: VacuousRecord[];
   diagnostics: Diagnostic[];
   verdict: Verdict;
   /** The checked instance (PT12.3a): the instances, the bounds, and what the verdict assumes. */
@@ -161,7 +182,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const engines = report.engines;
 
   for (const machine of checked.machines.keys()) {
-    const mc: MachineCheck = { machine, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+    const mc: MachineCheck = { machine, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
     report.machines.push(mc);
     mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
     if (refused) {
@@ -179,12 +200,12 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       notRun(mc, (['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)] as StageName[]).filter((st) => !done.has(st)), reason);
       const cut = [mc];
       for (const rest of [...checked.machines.keys()].slice([...checked.machines.keys()].indexOf(machine) + 1)) {
-        const other: MachineCheck = { machine: rest, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+        const other: MachineCheck = { machine: rest, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
         notRun(other, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, rest)], reason);
         report.machines.push(other);
         cut.push(other);
       }
-      for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
+      for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
       finish(report, module);
       for (const m of cut) m.verdict = fold([m.verdict, 'INCONCLUSIVE']);
       report.error = `${machine}: ${err.message}`;
@@ -281,6 +302,8 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     return;
   }
   mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'CLEAN', ms: performance.now() - t0, note: `${tv.transitions} transitions and ${tv.propertyChecks} property evaluations agree` });
+
+  mc.vacuous = vacuousRecords(ref.vacuous);
 
   // ── stage 2: polygraph model check ────────────────────────────────────
   t0 = performance.now();
@@ -545,7 +568,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
  */
 function configurationStage(module: Module, decl: A.Configuration, refused: boolean): ConfigCheck {
-  const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+  const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
     return cc;
@@ -553,6 +576,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   const t0 = performance.now();
   const r = checkConfiguration(module, decl.name);
   cc.diagnostics.push(...r.findings);
+  cc.vacuous = vacuousRecords(r.vacuous);
   const groups = new Map<string, { machine: string; n: number }>();
   for (const i of r.instances) {
     const key = i.group ?? i.name;
@@ -747,7 +771,7 @@ function finish(report: CheckReport, module?: Module): CheckReport {
     }
   }
   // A property not run keeps the verdict from CLEAN: INCONCLUSIVE at best, FINDINGS if a safety check failed (M1-2).
-  for (const m of [...report.machines, ...report.configurations]) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length ? ['INCONCLUSIVE' as Verdict] : [])]);
+  for (const m of [...report.machines, ...report.configurations]) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length || m.vacuous.length ? ['INCONCLUSIVE' as Verdict] : [])]);
   const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict), ...report.configurations.map((c) => c.verdict)]);
   report.verdict = v;
   report.exit = EXIT_CODES[v];
