@@ -37,6 +37,12 @@ PD4-A3 ("`Declare` is dispatched only with a person's signature") is met in M5b,
 
 The decision-table check proves statements a policy states. In M5a, PT8.1 gains `never <id> "<text>": allow when <expr>`. poly-ref proves it over the decision table and gives a witness proposal when the policy allows one. The seeded control drops the rule that enforces a `never`. Two rules carry over: a statement whose `<expr>` is never true over the table is `INCONCLUSIVE` (`vacuous`), never clean (S113); a statement over an open domain is `runtime-only`. PD5.3.3a is written as a `never` in M5b.
 
+## S160 and cross-scope sends in M5a
+
+**S160 accepted:** an instance's trust scope is its module by default. A trust scope is a boundary between parties, not a machine, so scopes are not made per machine.
+
+**Cross-scope sends come from configurations, as PS8.7's second clause states.** In M5a, a configuration may assign `scope "x"` to its instances. The configuration check explores the gate's allow, deny and escalate on every send between instances of different scopes (PS4.4), and a deny delivers `SendDenied`. The runtime's gated message path and `SendDenied` are built in M5a and tested by injecting a cross-scope message below the language, since the runtime has no configuration instances before S153 (E5). M5b adds the end-to-end runtime test once configurations can be instantiated. M5a's record states this limit.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
