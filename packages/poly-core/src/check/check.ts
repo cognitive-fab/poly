@@ -798,6 +798,8 @@ class Checker {
         if (!u || !/^https?:$/.test(u.protocol) || u.username || u.password || u.search || u.hash || v.includes('?') || v.includes('#')) this.err('PL1201', t, `${JSON.stringify(v)} is not an egress prefix: an absolute http or https URL with no user, query or fragment (S151)`);
         // Review D3: the prefix the runtime binds is the parsed URL, so the text must be that form already: no dot
         // segments, backslashes, encoded separators, upper-case host or default port that parsing would rewrite.
+        // Review D-F2: a glob character would widen the sandbox, which reads host and path as patterns.
+        else if (/[*?[\]{}]/.test(u.hostname + u.pathname)) this.err('PL1201', t, `${JSON.stringify(v)} holds a glob character (* ? [ ] { }), which the sandbox would read as a pattern (S152)`);
         else if (u.href !== v || /%2e|%2f|%5c/i.test(u.pathname)) this.err('PL1201', t, `${JSON.stringify(v)} is not written in its normalised form${u.href !== v ? ` (${JSON.stringify(u.href)})` : ''}; an egress prefix is bound as parsed, so it is written as parsed, with no encoded dot or separator (S151)`);
       }
     }

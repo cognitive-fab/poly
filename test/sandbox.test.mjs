@@ -59,3 +59,29 @@ test('S152: admission certifies the generated policy, and translation validation
 test('S152: enforcement through an OpenShell gateway', { skip: process.env.POLY_OPENSHELL_GATEWAY ? false : 'not run: no OpenShell gateway is configured (POLY_OPENSHELL_GATEWAY), and enforcement needs one on Linux 6.2 or later (S152)' }, () => {
   assert.fail('an enforcement run against a configured gateway is not written: no gateway is available to this repository');
 });
+
+// Review of M5b, D-F1: a composed child keeps its sandbox policy, and translation validation refuses a build whose
+// machine has effects and no policy when isolation is asked for.
+test('S152: a composed child keeps its sandbox policy; a missing policy under isolation is a mismatch', async () => {
+  const key = makeKey('sandbox-kids');
+  const dir = project('sandbox-kids', ['conformance/m5/kids-ship.poly'], key);
+  const manifest = JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8'));
+  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...manifest, isolation: 'openshell' }, null, 2));
+  const a = await admit(dir);
+  assert.ok(Object.keys(a.certificate.artefacts).includes('.poly/build/ship.Shipment/openshell.policies.yaml'));
+  const { translationValidate } = await import('@poly/ref');
+  const [m] = build(SRC, 'sandbox-missing', {});
+  const r = await translationValidate(m.module, m.machine, m.dir, { isolation: 'openshell' });
+  assert.ok(r.mismatches.some((d) => /openshell\.policies\.yaml/.test(d.message)), JSON.stringify(r.mismatches.map((d) => d.message)));
+});
+
+// Review of M5b, D-F2: a glob character in an egress target would widen the sandbox, which reads it as a pattern.
+test('S152: an egress target with a glob character is PL1201', async () => {
+  const { parse } = await import('@poly/lang');
+  const { checkModule } = await import('@poly/core');
+  for (const p of ['https://*.psp.example/v1/', 'https://api.psp.example/v1/*', 'https://api.psp.example/v1/[a-z]x', 'https://api.psp.example/v1/{a,b}']) {
+    const src = `module t\nmachine M {\n  state { n : 0..1 = 0 }\n  action Go()\n  on Go { emit call(1) }\n  effect call(n: 0..1) {\n    labels { egress:external }\n    targets { egress: "${p}" }\n    class none\n  }\n}\n`;
+    const r = parse(src);
+    assert.deepEqual([...r.diagnostics, ...checkModule(r.module).diagnostics].map((d) => d.code), ['PL1201'], p);
+  }
+});

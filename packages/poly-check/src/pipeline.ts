@@ -319,7 +319,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 1b: translation validation (PS9.3) ──────────────────────────
   t0 = performance.now();
-  const tv = await translationValidate(module, machine, dir);
+  const tv = await translationValidate(module, machine, dir, opts.isolation ? { isolation: opts.isolation } : {});
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {
@@ -446,7 +446,8 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   }
   const children = ids.map((id) => {
     const name = id.split('.').pop()!;
-    const { lowered } = lowerMachine(module, checked, name);
+    // Review D-F1: a child is lowered as its own stages lowered it, sandbox policy included.
+    const { lowered } = lowerMachine(module, checked, name, opts.isolation ? { isolation: opts.isolation } : {});
     const cdir = join(root, id);
     rmSync(cdir, { recursive: true, force: true });
     mkdirSync(cdir, { recursive: true });

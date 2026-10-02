@@ -1,0 +1,69 @@
+// Review of M5b, D-F1: a child with an egress effect, spawned by a parent with a compose invariant, under isolation.
+module ship
+
+enum OrderStatus { Open, Shipping, Done, Cancelled }
+enum ShipStatus { Pending, Sent, Delivered, Voided }
+
+machine Shipment {
+  state {
+    ship : ShipStatus = Pending
+  }
+  terminal ship in { Delivered, Voided }
+
+  action Start()
+  action Send()
+  action Deliver()
+  action Void(reason: string check { "parent-terminal" })
+
+  on Start {
+    require ship == Pending else reject "started"
+    ship' = Pending
+  }
+  on Send {
+    require ship == Pending else reject "not-pending"
+    ship' = Sent
+    emit call(1)
+  }
+  on Deliver {
+    require ship == Sent else reject "not-sent"
+    ship' = Delivered
+  }
+  on Void(reason) {
+    require ship != Delivered else reject "delivered"
+    ship' = Voided
+  }
+
+  effect call(n: 0..1) {
+    kind "ship.call"
+    labels { egress:external }
+    targets { egress: "https://api.carrier.example/v1/labels" }
+    class none
+  }
+}
+
+machine Order {
+  state {
+    status  : OrderStatus = Open
+  }
+  terminal status in { Done, Cancelled }
+
+  action Checkout()
+  action Shipped()
+  action Cancel()
+
+  on Checkout {
+    require status == Open else reject "not-open"
+    status' = Shipping
+    spawn Shipment as box -> Start() on complete -> Shipped on parent terminal -> Void
+  }
+  on Shipped {
+    require status == Shipping else reject "not-shipping"
+    status' = Done
+  }
+  on Cancel {
+    require status in { Open, Shipping } else reject "too-late"
+    status' = Cancelled
+  }
+
+  compose invariant done-means-settled: parent.status == Done implies (box spawned && children.box.ship in { Delivered, Voided })
+}

@@ -86,7 +86,7 @@ function stepModule(mod: SamModule, rt: RuntimeFacts, pre: Record<string, unknow
 
 const verdictText = (v: Verdict) => (v.kind === 'rejected' ? `rejected(${v.reason})` : v.kind);
 
-export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number; principals?: number } = {}): Promise<TvResult> {
+export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number; principals?: number; isolation?: 'openshell' } = {}): Promise<TvResult> {
   const report = checkMachine(module, machineName, opts);
   const { graph: g, model: M } = report;
   // Finding 5: sam-pattern resolves from poly's own install, wherever the build directory is.
@@ -258,6 +258,8 @@ export async function translationValidate(module: Module, machineName: string, b
   }
   // The standing rule after the M1 review: the artefacts the engines read without running the module are read back.
   for (const message of await readBack(module, M, buildDir, g.states)) mismatch(message, []);
+  // Review D-F1, S152: under isolation, a machine with effects must have its sandbox policy.
+  if (opts.isolation === 'openshell' && M.effects.size && !existsSync(join(buildDir, 'openshell.policies.yaml'))) mismatch('openshell.policies.yaml is missing, and isolation is asked for (S152)', []);
   return { machine: M.name, transitions, propertyChecks, mismatches, report };
 }
 
