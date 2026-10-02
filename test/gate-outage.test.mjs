@@ -36,7 +36,9 @@ function faulty(state) {
       if (prop === 'merge') return async (args) => {
         const f = state.active;
         if (f === 'O1') throw new Error('injected: the engine throws');
-        if (f === 'O2') return new Promise(() => {}); // never answers
+        // O2: the engine hangs past the host's timeout and answers once the outage ends (plan section 6: the late
+        // answer is journaled as late). Review C1: until it does, the session takes no other proposal.
+        if (f === 'O2') return new Promise((res, rej) => state.hung.push(() => target.merge(args).then(res, rej)));
         // O3: the engine's own store fails, so it decides nothing and says so.
         if (f === 'O3') return { decision: 'deny', class: 'unavailable', reason: 'unavailable:policy (injected)', state_before: null, state_after: null };
         const v = await target.merge(args);
@@ -58,7 +60,7 @@ const ACTIONS = ['Reserve', 'Charge', 'Cancel'];
 /** Runs `orders` orders, one batch per pass, under a fault schedule; returns the runtime, the handler log, the outages. */
 async function run(name, schedule) {
   const a = await admitted(name, SOURCES);
-  const state = { active: null };
+  const state = { active: null, hung: [] };
   const { rt, clock } = await loaded(a, { gate: { policy: { wrap: faulty(state), proposeTimeoutMs: 50 } }, worker: { leaseMs: 60_000 } });
   const log = [];
   const starts = [];
@@ -70,6 +72,7 @@ async function run(name, schedule) {
   const ids = [];
   for (pass = 1; pass <= schedule.length + 12; pass++) {
     state.active = schedule[pass - 1] ?? null;
+    if (state.active !== 'O2') { for (const answer of state.hung.splice(0)) answer(); await new Promise((r) => setTimeout(r, 5)); }
     if (pass <= schedule.length) for (let k = 0; k < 3; k++) {
       const id = `o${pass}-${k}`;
       ids.push(id);

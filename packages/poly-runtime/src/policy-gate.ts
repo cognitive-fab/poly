@@ -27,6 +27,11 @@ export interface ProgramView {
   decisions(run: string): Record<string, unknown>;
   /** Assigns the next session sequence of a session, durably (S146). */
   nextSseq(session: string): number;
+  /**
+   * Review C1, PT9.5: records an engine answer that came after the host's timeout, with its sseq, on the run that
+   * proposed it. The intent was held; the engine still decided, so the session's Σ moved and replay needs the event.
+   */
+  recordLate?(run: string, record: Record<string, unknown>): Promise<unknown> | void;
 }
 
 export interface PolicyGateOptions {
@@ -64,6 +69,8 @@ export interface SessionEvent {
   engineDecision?: string;
   engineClass?: string | null;
   stateBefore?: string | null;
+  /** Σ after it, where recorded (review C4). */
+  stateAfter?: string | null;
   /** Where it was recorded, for the report. */
   run: string;
   ledgerSeq: number;
@@ -82,6 +89,8 @@ const moduleOf = (machine: string) => machine.slice(0, machine.lastIndexOf('.'))
 
 export class PolicyGate implements Gate {
   private locks = new Map<string, Promise<unknown>>();
+  /** Review C1: an engine call of a session that outlived the host's timeout, until it answers. */
+  private inflight = new Map<string, Promise<unknown>>();
   private engine: any;
 
   private constructor(private readonly pxPackage: any, engine: any, private readonly view: ProgramView, private readonly reads: Map<string, string[]>, private readonly opts: PolicyGateOptions) {
@@ -107,19 +116,47 @@ export class PolicyGate implements Gate {
     return new PolicyGate(pxPackage, engine, view, reads, opts);
   }
 
-  /** One session at a time, in arrival order (PS11.0). */
+  /**
+   * One session at a time, in arrival order (PS11.0). While an engine call of the session that timed out is still
+   * outstanding, the session takes nothing: the call may yet decide, and nothing may be decided against a Σ that its
+   * answer moves without a record (review C1). Such a call is held with no sequence number, as an engine that does not
+   * answer is (PT9.5).
+   */
   private serial<T>(session: string, f: () => Promise<T>): Promise<T> {
     const prev = this.locks.get(session) ?? Promise.resolve();
-    const next = prev.then(f, f);
+    const guarded = async () => {
+      if (this.inflight.has(session)) throw new GateUnavailable(`the gate engine has not answered an earlier call of session ${session}, so the session takes nothing until it does (PT9.5)`);
+      return f();
+    };
+    const next = prev.then(guarded, guarded);
     this.locks.set(session, next.catch(() => undefined));
     return next;
   }
 
-  private timed<T>(p: Promise<T>): Promise<T> {
+  /**
+   * An engine call, raced against the host's timeout. When the timeout wins the call is not cancelled (the engine has
+   * no cancel): it is kept as the session's outstanding call, and `late` records its answer when it comes.
+   */
+  private timed<T>(session: string, p: Promise<T>, late?: (v: T) => Promise<unknown> | void): Promise<T> {
     const ms = this.opts.proposeTimeoutMs ?? 5_000;
     let t: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => { t = setTimeout(() => reject(new GateUnavailable(`the gate engine did not answer in ${ms}ms (PT9.5)`)), ms); t.unref?.(); });
-    return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+    let timedOut = false;
+    const timeout = new Promise<never>((_, reject) => { t = setTimeout(() => { timedOut = true; reject(new GateUnavailable(`the gate engine did not answer in ${ms}ms (PT9.5)`)); }, ms); t.unref?.(); });
+    return Promise.race([p, timeout]).finally(() => {
+      clearTimeout(t);
+      if (!timedOut) return;
+      const done = p.then(async (v) => { try { await late?.(v); } catch { /* not recorded: replay lists the sseq as a gap */ } }, () => undefined).finally(() => this.inflight.delete(session));
+      this.inflight.set(session, done);
+    });
+  }
+
+  /** The digest of a session's Σ as the engine holds it, or null when the session has no policy (S146, review C4). */
+  private sigma(session: string): string | null {
+    const raw = (this.engine.__raw ?? this.engine) as any;
+    for (const g of (raw._gates as Map<string, any> | undefined)?.values() ?? []) {
+      if (`scope:${g.scope}` === session && g.sessions) return digest(g.sessions.meta(session).state ?? null);
+    }
+    return null;
   }
 
   /** The engine action for a proposal: its fields, and the reserved fields its scope's policies read (S147). */
@@ -152,7 +189,7 @@ export class PolicyGate implements Gate {
         if (s) { machines[r] = s.state; reads[s.instance] = s.seq; singletons[r] = s.state; }
       }
       const action = actionOf({ proposal: 'send', send: { to: m.toMachine, action: m.action, scope: moduleOf(m.toMachine), instance: m.to, payloadDigest: digest(m.data ?? {}) }, machines, decisions: this.view.decisions(m.from) });
-      const { v, decision, reason } = await this.decideAction(session, moduleOf(m.fromMachine), action, m.id);
+      const { v, decision, reason } = await this.decideAction(session, moduleOf(m.fromMachine), action, m.id, undefined, m.from);
       const sseq = this.view.nextSseq(session);
       const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;
       if (held) throw new GateUnavailable(held, { session, sseq, action, engineDecision: v.decision, engineClass: v.class ?? null, engineRecord: v.record ?? null, stateBefore: v.state_before ?? null });
@@ -165,8 +202,12 @@ export class PolicyGate implements Gate {
   }
 
   /** One decision of the engine on an action, with PS8.3's precedence (S158); shared by the gate and session replay. */
-  async decideAction(session: string, scope: string, action: Record<string, unknown>, intent: string, approved?: { by: string }): Promise<{ v: any; decision: 'allow' | 'deny' | 'escalate'; reason: string | null }> {
-    const v: any = await this.timed<any>(this.engine.merge({ run_id: session, scope, action, meta: { tool_use_id: intent, tool: (action.effect as { kind?: string } | undefined)?.kind ?? 'poly' }, ...(approved ? { approved: { by: approved.by, ref: intent } } : {}) }));
+  async decideAction(session: string, scope: string, action: Record<string, unknown>, intent: string, approved?: { by: string }, run?: string): Promise<{ v: any; decision: 'allow' | 'deny' | 'escalate'; reason: string | null }> {
+    const late = (v: any) => {
+      if (!run || !this.view.recordLate) return;
+      return this.view.recordLate(run, { stage: 'gate', intent, outcome: 'late', late: 'propose', gateDecision: 'late', session, sseq: this.view.nextSseq(session), action, engineDecision: v.decision, engineClass: v.class ?? null, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, ...(approved ? { approvedBy: approved.by } : {}) });
+    };
+    const v: any = await this.timed<any>(session, this.engine.merge({ run_id: session, scope, action, meta: { tool_use_id: intent, tool: (action.effect as { kind?: string } | undefined)?.kind ?? 'poly' }, ...(approved ? { approved: { by: approved.by, ref: intent } } : {}) }), late);
     let decision = v.decision as 'allow' | 'deny' | 'escalate';
     let reason: string | null = v.reason ?? null;
     if (decision === 'escalate') {
@@ -182,7 +223,7 @@ export class PolicyGate implements Gate {
     return this.serial(session, async () => {
       const { action, reads, singletons } = this.action(proposal, snapshot);
       // An engine that throws or does not answer took no decision, and so no sequence number (PT9.5).
-      const { v, decision, reason } = await this.decideAction(session, moduleOf(proposal.machine), action, proposal.idempotencyKey, proposal.approved);
+      const { v, decision, reason } = await this.decideAction(session, moduleOf(proposal.machine), action, proposal.idempotencyKey, proposal.approved, proposal.instance);
       const sseq = this.view.nextSseq(session);
       // PT9.5: an answer the engine could not stand behind is no answer: the intent is held, and the answer is recorded
       // with its sequence number, so the session still replays (an `unavailable` answer moved nothing; a degraded
@@ -218,10 +259,12 @@ export class PolicyGate implements Gate {
     return this.serial(session, async () => {
       const { action } = this.action(proposal, {});
       const seen = { ok: observed.ok, effects: proposal.labels, output: observed.output };
-      await this.timed(this.engine.settle({ run_id: session, scope: moduleOf(proposal.machine), action, observed: seen }));
-      // A settle the engine did not take has no sequence number (PT9.5).
+      const stateBefore = this.sigma(session);
+      const late = () => this.view.recordLate?.(proposal.instance, { stage: 'gate', intent: proposal.idempotencyKey, outcome: 'late', late: 'settle', gateDecision: 'late', session, sseq: this.view.nextSseq(session), action, observed: seen, stateBefore, stateAfter: this.sigma(session) });
+      await this.timed(session, this.engine.settle({ run_id: session, scope: moduleOf(proposal.machine), action, observed: seen }), late);
+      // A settle the engine did not take has no sequence number (PT9.5). Review C4: Σ before and after it, as PS11.1 asks.
       const sseq = this.view.nextSseq(session);
-      return { result: 'ok' as const, record: { session, sseq, action, observed: seen } };
+      return { result: 'ok' as const, record: { session, sseq, action, observed: seen, stateBefore, stateAfter: this.sigma(session) } };
     });
   }
 
@@ -230,30 +273,44 @@ export class PolicyGate implements Gate {
    * policies; every decision and every Σ digest must be reproduced. A gap in the sequence stops that session's
    * replay, listed as not run, since Σ after it cannot be known.
    */
-  static async replaySessions(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[] }[], modules: string[], events: SessionEvent[]): Promise<SessionReplay[]> {
+  static async replaySessions(pxPackage: any, policies: { scope: string; doc: Record<string, unknown>; reads: string[] }[], modules: string[], events: SessionEvent[], counters: Record<string, number> = {}): Promise<SessionReplay[]> {
     const none: ProgramView = { singleton: () => null, decisions: () => ({}), nextSseq: () => 0 };
     const fresh = await PolicyGate.open(pxPackage, policies, modules, none, { store: ':memory:' });
-    const sessions = [...new Set(events.map((e) => e.session))].sort();
+    const sessions = [...new Set([...events.map((e) => e.session), ...Object.keys(counters)])].sort();
     const out: SessionReplay[] = [];
     for (const session of sessions) {
       const r: SessionReplay = { session, proposals: 0, settles: 0, diagnostics: [], notRun: [] };
       out.push(r);
       const list = events.filter((e) => e.session === session).sort((x, y) => x.sseq - y.sseq);
       let expected = 1;
+      let gap = false;
       for (const e of list) {
-        if (e.sseq !== expected) { r.notRun.push(`${session}: sseq ${expected} is missing from the ledger, so the session is not replayed past it (${list.length - r.proposals - r.settles} event(s) not run)`); break; }
+        if (e.sseq !== expected) { gap = true; r.notRun.push(`${session}: sseq ${expected} is missing from the ledger, so the session is not replayed past it (${list.length - r.proposals - r.settles} event(s) not run)`); break; }
         expected++;
         const scope = session.slice('scope:'.length);
-        if (e.kind === 'settle') { await fresh.engine.settle({ run_id: session, scope, action: e.action, observed: e.observed ?? {} }); r.settles++; continue; }
+        if (e.kind === 'settle') {
+          const before = fresh.sigma(session);
+          await fresh.engine.settle({ run_id: session, scope, action: e.action, observed: e.observed ?? {} });
+          r.settles++;
+          // Review C4: a settle's Σ before and after, when recorded.
+          if (e.stateBefore !== undefined && e.stateBefore !== before) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ before the settle was ${e.stateBefore}, and the session's replay has ${before}` });
+          if (e.stateAfter !== undefined && e.stateAfter !== fresh.sigma(session)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ after the settle was ${e.stateAfter}, and the session's replay has ${fresh.sigma(session)}` });
+          continue;
+        }
         // An `unavailable` answer moved nothing, so it is not re-applied (PT9.5).
         if (e.engineClass === 'unavailable') { r.proposals++; continue; }
         const { v, decision } = await fresh.decideAction(session, scope, e.action, e.intent, e.approvedBy ? { by: e.approvedBy } : undefined);
         r.proposals++;
-        if (e.gateDecision === 'held') {
+        if (e.gateDecision === 'held' || e.gateDecision === 'late') {
           if (v.decision !== e.engineDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the engine answered ${e.engineDecision} when the intent was held, and the session's replay answers ${v.decision}` });
         } else if (decision !== e.gateDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the gate decided ${e.gateDecision}, and the session's replay decides ${decision}` });
         if ((v.state_before ?? null) !== (e.stateBefore ?? null)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ before the decision was ${e.stateBefore}, and the session's replay has ${v.state_before}` });
+        if (e.stateAfter !== undefined && (v.state_after ?? null) !== (e.stateAfter ?? null)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ after the decision was ${e.stateAfter}, and the session's replay has ${v.state_after}` });
       }
+      // Review C4: sequence numbers the session assigned past its last recorded event (a decision whose event was never
+      // written) are a gap too, found against the session's counter.
+      const last = expected - 1;
+      if (!gap && (counters[session] ?? 0) > last) r.notRun.push(`${session}: sseq ${last + 1}${counters[session] > last + 1 ? ` to ${counters[session]}` : ''} has no event in the ledger, so the session's Σ after sseq ${last} is not known`);
     }
     return out;
   }

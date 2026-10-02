@@ -77,3 +77,69 @@ test('AC6: poly journal replay prints each session replayed in sseq order', { sk
   assert.match(r.stdout, /session scope:orders: 3 decision\(s\) and 2 settle\(s\) replayed in sseq order, every decision and Σ digest reproduced/, r.stdout + r.stderr);
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Review C1: a proposal the engine answers after the host's timeout is held, but the engine did decide. The session
+// stays closed to other proposals until the answer lands, and the late answer is recorded with its own sseq, so Σ
+// stays replayable and no decision rests on an unrecorded one.
+test('PT9.5: a late answer is recorded with an sseq, and the session takes no proposal while it is outstanding', { skip }, async () => {
+  const a = await admitted('late-answer', ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly']);
+  let slow = false;
+  const wrap = (raw) => new Proxy(raw, {
+    get(t, p) {
+      if (p === '__raw') return t;
+      if (p === 'merge') return async (args) => { const v = await t.merge(args); if (slow) { slow = false; await sleep(150); } return v; };
+      const v = t[p]; return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
+  const { rt, clock } = await loaded(a, { gate: { policy: { wrap, proposeTimeoutMs: 50 } }, worker: { leaseMs: 60_000 } });
+  try {
+    handleWith(rt, 'stock.reserve', () => 'ok');
+    rt.handle('payment.charge', rt.handlerExports('src/handlers.ts').handle);
+    await rt.create('orders.Order', { id: 'A' });
+    await rt.dispatch('A', 'Reserve');
+    slow = true;
+    await rt.worker.tick(); // timed out: held
+    await rt.create('orders.Order', { id: 'B' });
+    await rt.dispatch('B', 'Charge');
+    clock.advance(1);
+    await rt.worker.tick(); // A's answer is still outstanding, so B is held too
+    const verdicts = async (id) => (await rt.chain(id)).filter((e) => e.kind === 'verdict').map((e) => e.body);
+    assert.deepEqual((await verdicts('B')).filter((b) => b.outcome === 'allowed'), []);
+    await sleep(200); // the late answer lands
+    const late = (await verdicts('A')).find((b) => b.outcome === 'late');
+    assert.ok(late, JSON.stringify(await verdicts('A')));
+    assert.deepEqual([late.sseq, late.engineDecision], [1, 'allow']);
+    clock.advance(10 * 60_000);
+    await rt.worker.tick();
+    const [s] = await replaySessions(rt);
+    assert.deepEqual(s.diagnostics.map((d) => d.message), []);
+    assert.deepEqual(s.notRun, []);
+  } finally { await rt.close(); }
+});
+
+// Review C4: a decision whose event was never written at the end of a session is a gap too, found against the
+// session's counter; and a settle records Σ before and after it, which replay compares.
+test('S146: a missing last sseq is listed as not run; settled events carry Σ before and after', { skip }, async () => {
+  const a = await admitted('trailing-gap', ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly']);
+  const { rt } = await loaded(a, { worker: { leaseMs: 60_000 } });
+  try {
+    handleWith(rt, 'stock.reserve', () => 'ok');
+    rt.handle('payment.charge', rt.handlerExports('src/handlers.ts').handle);
+    await rt.create('orders.Order', { id: 'r0' });
+    await rt.dispatch('r0', 'Reserve');
+    await rt.worker.tick(); // allowed, settled
+    const settled = (await rt.chain('r0')).find((e) => e.kind === 'verdict' && e.body.outcome === 'settled').body;
+    assert.match(settled.stateBefore, /^sha256:/);
+    assert.match(settled.stateAfter, /^sha256:/);
+    const append = rt.store.appendEvent.bind(rt.store);
+    rt.store.appendEvent = (run, kind, body, at) => { if (kind === 'verdict' && body?.outcome === 'allowed') throw new Error('injected: the ledger cannot write'); return append(run, kind, body, at); };
+    await rt.create('orders.Order', { id: 'r2' });
+    await rt.dispatch('r2', 'Reserve');
+    await rt.worker.tick().catch(() => {});
+    const [s] = await replaySessions(rt);
+    assert.equal(s.notRun.length, 1, JSON.stringify(s));
+    assert.match(s.notRun[0], /sseq 3 .*no event/);
+  } finally { await rt.close(); }
+});

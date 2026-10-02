@@ -140,8 +140,9 @@ export class PolyRuntime {
       const b = JSON.parse(r.event).body as Record<string, any>;
       if (typeof b?.session !== 'string' || !b.action) continue;
       const action = await this.store.body(b.action) as Record<string, unknown>;
-      if (b.outcome === 'settled') out.push({ session: b.session, sseq: b.sseq, kind: 'settle', action, intent: b.intent, observed: b.observed, run: r.run, ledgerSeq: r.seq });
-      else out.push({ session: b.session, sseq: b.sseq, kind: 'propose', action, intent: b.intent, approvedBy: b.approvedBy, gateDecision: b.gateDecision, engineDecision: b.engineDecision, engineClass: b.engineClass ?? null, stateBefore: b.stateBefore, run: r.run, ledgerSeq: r.seq });
+      // Review C1: a late answer is a proposal or a settle the engine took after the host had held the intent.
+      if (b.outcome === 'settled' || b.late === 'settle') out.push({ session: b.session, sseq: b.sseq, kind: 'settle', action, intent: b.intent, observed: b.observed, stateBefore: b.stateBefore, stateAfter: b.stateAfter, run: r.run, ledgerSeq: r.seq });
+      else out.push({ session: b.session, sseq: b.sseq, kind: 'propose', action, intent: b.intent, approvedBy: b.approvedBy, gateDecision: b.gateDecision, engineDecision: b.engineDecision, engineClass: b.engineClass ?? null, stateBefore: b.stateBefore, stateAfter: b.stateAfter, run: r.run, ledgerSeq: r.seq });
     }
     return out;
   }
@@ -150,7 +151,9 @@ export class PolyRuntime {
   async replaySessions(): Promise<SessionReplay[]> {
     if (!this.policyGate) return [];
     const modules = [...new Set(this.verified.machines.map((m) => m.id.slice(0, m.id.lastIndexOf('.'))))];
-    return PolicyGate.replaySessions(await loadPolyaxion(), this.verified.policies, modules, await this.sessionEvents());
+    // Review C4: each session's counter, so a decision whose event was never written at the end is found.
+    const counters = Object.fromEntries((this.store.db.prepare('SELECT session, sseq FROM poly_gate_session').all() as { session: string; sseq: number }[]).map((r) => [r.session, r.sseq]));
+    return PolicyGate.replaySessions(await loadPolyaxion(), this.verified.policies, modules, await this.sessionEvents(), counters);
   }
 
   async gateReplays(instanceId: string): Promise<{ seq: number; decision: string; recompute: (() => string) | null; bySession?: boolean }[]> {
@@ -657,6 +660,10 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
         return out;
       },
       nextSseq: (session) => (store.db.prepare('INSERT INTO poly_gate_session (session, sseq) VALUES (?, 1) ON CONFLICT(session) DO UPDATE SET sseq = sseq + 1 RETURNING sseq').get(session) as { sseq: number }).sseq,
+      recordLate: (run, record) => {
+        const { action, ...rest } = record;
+        return store.txn(() => { store.appendEvent(run, 'verdict', { ...rest, action: store.keep(action) }, opts.now ? opts.now() : Date.now()); });
+      },
     };
     const gateStore = opts.gate?.policy?.store ?? (opts.store?.sqlite ? `${resolve(opts.store.sqlite)}.gate.db` : ':memory:');
     try { policyGate = await PolicyGate.open(await loadPolyaxion(), verified.policies, modules, view, { ...opts.gate?.policy, store: gateStore }); } catch (e) {
