@@ -397,17 +397,20 @@ export function checkNever(s: PolicyScope, facts: PolicyFacts, at: (node: string
       || [...reads.decisions].some(([d, fs]) => [...fs].some((f) => table.open.includes(`decision ${d}.${f}`)));
     if (touchesOpen) { runtimeOnly.push(`${p.name}.${it.name}`); continue; }
     let applies = false;
-    let hit: { path: WitnessStep[]; row: Record<string, any>; sigma: Sigma } | null = null;
+    let hit: { path: WitnessStep[]; row: Record<string, any>; sigma: Sigma; verdict: string } | null = null;
     for (const st of states) {
       for (const row of table.rows) {
         if (truth(evalPolicyExpr(it.when, row, vars)) !== true) continue;
         applies = true;
-        if (evaluate(s, st.sigma, row).decision === 'allow') { hit = { path: st.path, row, sigma: st.sigma }; break; }
+        // An escalated proposal is allowed once a person approves it (PT12.5), so it violates the statement too.
+        const d = evaluate(s, st.sigma, row).decision;
+        const verdict = d === 'allow' ? 'allow' : d === 'escalate' && evaluate(s, st.sigma, row, { approved: true }).decision === 'allow' ? 'allow (approved)' : null;
+        if (verdict) { hit = { path: st.path, row, sigma: st.sigma, verdict }; break; }
       }
       if (hit) break;
     }
     if (hit) {
-      const trace = [...hit.path, { pre: hit.sigma, action: 'propose', data: hit.row, post: hit.sigma, verdict: 'allow' }];
+      const trace = [...hit.path, { pre: hit.sigma, action: 'propose', data: hit.row, post: hit.sigma, verdict: hit.verdict }];
       const n = at(it.id);
       findings.push({ code: 'PL6503', name: 'NEVER_VIOLATED', severity: 'finding', stage: 'policy', at: n, message: `policy ${p.name} allows a proposal its statement ${it.name} forbids ("${it.text}")`, property: `${p.name}.${it.name}`, witness: { id: '', length: trace.length, trace } } as Diagnostic);
     } else if (!applies) vacuous.push({ property: `${p.name}.${it.name}`, text: `no proposal of the program satisfies its condition` });

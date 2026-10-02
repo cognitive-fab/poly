@@ -263,3 +263,13 @@ test('PT8.2: a scope with no obligation to enforce is refused with a reason', as
   assert.ok(s.diagnostics.some((x) => x.code === 'PL1201' && /no obligation/.test(x.message)));
   assert.equal(s.verdict, 'REFUSED');
 });
+
+// Polywatch on review B1: an escalated proposal is allowed once a person approves it (PT12.5), so a never statement
+// whose forbidden proposal the policy only escalates is violated too.
+test('S149: a never statement whose forbidden proposal is only escalated is PL6503', async () => {
+  const pol = `module esc_never_policy\n\npolicy orders-esc-never {\n  scope "orders"\n  obligation fee-asks "A person approves every fee." rule {\n    when effect.kind == "payment.fee"\n    require false else escalate\n  }\n  never no-fee "No fee is ever allowed.": allow when effect.kind == "payment.fee"\n}\n`;
+  const s = scopeOf(await checkProject(projectOf('never-escalated', { 'orders.poly': ORDERS, 'orders.policy.poly': pol })), 'orders');
+  const f = s.diagnostics.find((d) => d.code === 'PL6503');
+  assert.ok(f, JSON.stringify(s.diagnostics.map((d) => d.message)));
+  assert.equal(f.witness.trace.at(-1).verdict, 'allow (approved)');
+});
