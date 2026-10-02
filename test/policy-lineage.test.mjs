@@ -56,6 +56,37 @@ test('PD5.2.3, S156: in a scope that requires attribution, an irreversible effec
   assert.equal(ok.verdict, 'CLEAN', JSON.stringify(ok.stages));
 });
 
+// S162: in a scope that requires attribution, an outside dispatch of an effect's completion or of a timer's target is
+// refused before any step, with an audit row, as K9 and K10 refuse theirs; the gate's deny stays as the second line.
+// Outside such a scope, the same dispatch is a step as before.
+test('S162: an outside dispatch of a completion or a timer target is refused in a scope that requires attribution', { skip }, async () => {
+  const { RefusedDispatch } = await import('@poly/runtime');
+  const person = { kind: 'Person', attest: 'Verified', assurance: 3, principal: 'ann' };
+  for (const [name, sources, machine, start, target] of [
+    ['s162-completion', ['conformance/m5/lineage-pay.poly', 'conformance/m5/lineage-pay.policy.poly'], 'lp.Order', 'Check', 'Checked'],
+    ['s162-timer', ['conformance/m5/lineage-timer.poly', 'conformance/m5/lineage-timer.policy.poly'], 'lt.Hold', 'Start', 'Due'],
+  ]) {
+    const a = await admitted(name, sources);
+    const { rt } = await loaded(a, { verifier: () => person });
+    try {
+      await rt.create(machine, { id: 'x' });
+      await rt.dispatch('x', start, {}, { actionId: 's', credentials: 'c' });
+      const before = (await rt.chain('x')).length;
+      await assert.rejects(rt.dispatch('x', target, {}, { actionId: 'outside' }), (e) => e instanceof RefusedDispatch && e.rule === 'S162' && e.message.includes(target), name);
+      assert.ok((await rt.audit('x')).some((r) => r.rule === 'S162' && r.action === target), name);
+      assert.equal((await rt.chain('x')).length, before, name);
+    } finally { await rt.close(); }
+  }
+  // Without the policy the scope does not require attribution, and the completion is dispatched as before.
+  const open = await admitted('s162-open', ['conformance/m5/lineage-pay.poly']);
+  const { rt } = await loaded(open, { verifier: () => person });
+  try {
+    await rt.create('lp.Order', { id: 'y' });
+    await rt.dispatch('y', 'Check', {}, { actionId: 's', credentials: 'c' });
+    assert.equal((await rt.dispatch('y', 'Checked', {}, { actionId: 'outside' })).stepKind, 'accepted');
+  } finally { await rt.close(); }
+});
+
 // ── review of M5b, part C ──────────────────────────────────────────────────
 
 // C2: a policy that reads step.claims or lineage.origin as a whole (unknown(step.claims)) reads every field: the

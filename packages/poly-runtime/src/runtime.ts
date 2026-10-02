@@ -327,6 +327,14 @@ export class PolyRuntime {
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'K10', reason });
       throw new RefusedDispatch(reason, 'K10');
     }
+    // S162: in a scope that requires attribution, an effect's completion and a timer's target are started only by
+    // their completion or timer, which carry the emitting step's origin. From outside they would start a chain with no
+    // origin, so they are refused before any step, as K9 and K10 refuse theirs; the gate's deny stays the second line.
+    if (inst && this.policyGate?.requiresAttribution(inst.machine_id.slice(0, inst.machine_id.lastIndexOf('.'))) && this.startedInside(inst.machine_id).has(action)) {
+      const reason = `S162: '${action}' on '${instanceId}' is started only by an effect's completion or a timer, and its scope requires attribution, so an outside dispatch of it would start a chain with no origin`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S162', reason });
+      throw new RefusedDispatch(reason, 'S162');
+    }
     // PD5.1.4, K11: an action with claims gets them from the verifier adapter, under $claims; the module's first acceptor
     // rejects missing or bad ones (PS3.2's claims row). A verifier that throws is no answer: no claims (O10).
     let payload = data;
@@ -397,6 +405,17 @@ export class PolyRuntime {
     const m = this.verified.machines.find((x) => x.id === machineId);
     for (const [kind, e] of Object.entries(m?.manifest?.effects ?? {})) if (e.decision && e.onSuccess?.action === action) return kind.slice('decision.'.length);
     return null;
+  }
+
+  /** S162: the actions an effect's completions and the machine's timers start, as the certified manifest names them. */
+  startedInside(machineId: string): Set<string> {
+    const m = this.verified.machines.find((x) => x.id === machineId);
+    const out = new Set<string>((m?.manifest as { timerTargets?: string[] } | null)?.timerTargets ?? []);
+    for (const e of Object.values(m?.manifest?.effects ?? {})) {
+      if (e.decision || e.outcome) continue;
+      for (const h of ['onSuccess', 'onFailure', 'onExhausted']) if (e[h]?.action) out.add(e[h].action);
+    }
+    return out;
   }
 
   /** The actions a machine's decisions complete with, which only the worker dispatches (K10). */

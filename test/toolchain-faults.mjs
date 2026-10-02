@@ -33,6 +33,8 @@ export const FAULT_SOURCES = {
   'widen-target': ['conformance/m5/capabilities.poly'],
   // PD5.1.2c: PS3.2's claims row, which the runtime applies before the module.
   'skip-claims': ['conformance/m5/refund.poly'],
+  // S162: the actions timers start, which the runtime refuses from outside in a scope that requires attribution.
+  'drop-timer-target': ['conformance/m5/lineage-timer.poly'],
   // S152: the generated sandbox policy, an artefact the sandbox reads.
   'widen-sandbox': ['conformance/m5/capabilities.poly'],
 };

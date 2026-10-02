@@ -97,7 +97,7 @@ export class PolicyGate implements Gate {
   private inflight = new Map<string, Promise<unknown>>();
   private engine: any;
 
-  private constructor(private readonly pxPackage: any, engine: any, private readonly view: ProgramView, private readonly reads: Map<string, string[]>, private readonly opts: PolicyGateOptions) {
+  private constructor(private readonly pxPackage: any, engine: any, private readonly view: ProgramView, private readonly reads: Map<string, string[]>, private readonly opts: PolicyGateOptions, private readonly attributed: Set<string> = new Set()) {
     this.engine = engine;
   }
 
@@ -117,7 +117,14 @@ export class PolicyGate implements Gate {
     }
     const reads = new Map<string, string[]>();
     for (const m of modules) reads.set(m, [...new Set(policies.filter((p) => core.scopeMatches(p.scope, m)).flatMap((p) => p.reads))].sort());
-    return new PolicyGate(pxPackage, engine, view, reads, opts);
+    // S162: the modules whose scope requires attribution: their certified document holds the scope's attribution rule.
+    const attributed = new Set(modules.filter((m) => policies.some((p) => core.scopeMatches(p.scope, m) && ((p.doc.obligations ?? []) as { source?: { obligation?: string } }[]).some((o) => o.source?.obligation === '$attribution'))));
+    return new PolicyGate(pxPackage, engine, view, reads, opts, attributed);
+  }
+
+  /** S162: whether a module's trust scope requires attribution. */
+  requiresAttribution(module: string): boolean {
+    return this.attributed.has(module);
   }
 
   /**

@@ -15,7 +15,7 @@ export interface LowerOptions {
   isolation?: 'openshell';
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target';
 
 export interface Lowered {
   machine: string;
@@ -216,7 +216,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // A machine that sends needs it too (S58): a send is an intent.
   if (facts.effects.size || facts.decisions.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls }, pre, opts.fault);
-    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data' }), null, 2) + '\n';
+    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data', fault: opts.fault }), null, 2) + '\n';
     // PT6.5, S152: the opt-in sandbox, one OpenShell policy per effect kind, from its labels and targets.
     // The broken variant widen-sandbox generates it too, so translation validation has a policy to catch.
     if (opts.isolation === 'openshell' || opts.fault === 'widen-sandbox') files['openshell.policies.yaml'] = JSON.stringify(sandboxPolicies(facts, opts.fault), null, 2) + '\n';
@@ -361,7 +361,7 @@ function emitsAny(body: A.Stmt[]): boolean {
 export const DEFAULT_RETRY = { maxAttempts: 5, baseMs: 500, timeoutMs: 30_000 } as const;
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels, targets (S151) and class. */
-function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Record<string, unknown> } {
+function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault }): { effects: Record<string, unknown>; timerTargets?: string[] } {
   // Kinds are the author's strings, so the manifest is built from entries: an assignment to a key such
   // as "__proto__" would set a prototype instead of adding the kind.
   const out: [string, unknown][] = [];
@@ -411,7 +411,25 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Recor
   for (const name of adjudicated(facts.machine)) {
     out.push([`outcome.${name}`, { payloadSchema: { outcome: { type: 'string', required: true } }, retry: { maxAttempts: 1, baseMs: 500, timeoutMs: 30_000 }, class: 'none', outcome: { decision: name } }]);
   }
-  return { effects: Object.fromEntries(out) };
+  // S162: the actions the machine's timers start, which only a timer starts in a scope that requires attribution.
+  const timers = timerTargets(facts.machine);
+  if (cx.fault === 'drop-timer-target') timers.pop();
+  return { effects: Object.fromEntries(out), ...(timers.length ? { timerTargets: timers } : {}) };
+}
+
+/** The actions a machine's timers start (PT6.3, S162), sorted. */
+export function timerTargets(m: A.Machine): string[] {
+  const found = new Set<string>();
+  const walk = (body: A.Stmt[]): void => {
+    for (const s of body) {
+      if (s.kind === 'Intent' && s.op === 'after') found.add(s.target);
+      if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); }
+      if (s.kind === 'Match') for (const a of s.arms) walk(a.body);
+      if (s.kind === 'For') walk(s.body);
+    }
+  };
+  for (const it of m.items) if (it.kind === 'Handler') walk(it.body);
+  return [...found].sort();
 }
 
 /** The decisions a machine's handlers adjudicate (PD2.4), sorted. */
