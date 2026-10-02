@@ -71,6 +71,35 @@ The build is accepted as reported: M4a to M4f pass, with three tests waiting on 
 
 **Next.** Build S137 to S140 and step 11, each with a test that fails first. Then M4's code review, as for earlier milestones, before M4 is closed. M5 is planned only after that.
 
+## Rulings on M4's code review (30 findings) and S141
+
+**Fix all 30**, each with a test that fails first, the nine high findings first. A finding whose fix would change the spec is not fixed silently: it is raised as an S-number and waits. The rulings below settle the findings that involve a design choice; the others are plain defects.
+
+**High findings**
+
+| Finding | Ruling |
+|---|---|
+| Admission hashes the build after the check | **Hash first, check the hashed bytes.** `poly admit` reads every artefact once into a snapshot, digests it, runs every check on the snapshot, and certifies those digests. A file rewritten during the check no longer matches and admission is refused. |
+| `poly journal verify` passes with signed heads deleted, and ignores the anchor | **Verify requires both.** A run must be signed through the `seq` the report states, and the anchor must cover the run's latest signed head. A missing head, a gap or a run absent from its anchor is `PL9002 LEDGER_BROKEN`, and the command exits non-zero. |
+| A decision's completion commits without a `decision` event | **No decision without its record.** `load` refuses a decision whose handler is not registered through the provider host (`provide`), and the completion's commit is refused if no decision record is held for it. |
+| The chosen answer gets the top answer's confidence | **`conf` is the calibrated probability of the answer returned**, not of the most probable one. `margin` is that probability minus the highest probability of any other answer, floored at 0. The test: an engine that picks Refund at 0.1 gets `conf` 100, and the refund gate holds. |
+| A crash after a permanent failure's completion re-runs the effect | **One transaction.** The intent's transition and the completion's step commit together (K1 extended to the hosted `OutboxIntent`). On recovery, an intent whose completion exists is advanced, never re-run. |
+| A worker whose claim was taken over still dispatches its completion | **Fence the completion.** The completion's dispatch checks the claim in the same transaction; a stale holder's completion is refused and recorded. |
+| An approval racing the escalation timeout reports `PL2401` and parks the intent | **A race is not drift.** Whichever of `Approve` and `EscalationTimeout` commits first wins; the other is a rejected step of the machine, journaled with its reason, and the caller of the late approval gets an error saying the escalation timed out. `PL2401` is reserved for a transition the model does not have. No intent is parked without a bound: every park has a retry deadline. |
+| `rt.dispatch` accepts outside actions on hosted `OutboxIntent` instances | **Refused, like K9.** Those instances are internal to the runtime: an outside dispatch to them is refused before any step, with an audit row. |
+| `outcome.<d>` is not a reserved effect kind | **Reserve `outcome.*` and `decision.*`.** A program that declares an effect kind with either prefix is `PL1208 RESERVED_EFFECT_KIND`. Generated kinds are lowered and checked as the toolchain's own. |
+
+**Medium findings that need a choice**
+
+- **K10 bypassed by sending the completion as a message.** Closed at both ends: a `send` of a decision's completion action is refused by the checker with its own code, and a delivered message carrying one is refused at runtime like S130.
+- **A throwing gate starves every intent.** A gate exception affects only the intent being proposed: it stays `Proposed` with a backoff, is never allowed, and every other intent, timer and message pass continues. This is the fail-closed behavior M5's outage test will measure.
+- **The CLI replays gate decisions with the allow-all gate.** Replay never substitutes a gate. It compares against the decisions recorded in the ledger. If it cannot, that part of the replay is reported as not run.
+- **`fit` does not pool tied values; `PL6203` has a false negative and a false positive; compose invariants are not checked for vacuity.** Defects: fix, each with a failing test.
+
+**S141 Configuration witnesses and spawning machines.** **Accepted as an M4 limit.** These witnesses are walked on the certified lowered artefacts, and the exported test says so in its header; they are not reported as runtime-API tests. Starting an instance from a configuration's initial values, with its children, is a runtime capability on M5's planning list.
+
+**Closing M4.** M4 closes when the 30 findings are fixed, the gate is rerun from a clean build with the counts reported, and polywatch's findings on the fixes are resolved. M5 is then planned.
+
 ## Conclusion
 
 Building M4 and M5 alongside M3 saves calendar time without touching the experiment. The worktree keeps the frozen toolchain where the runner reads it, the merge waits for M3's result, and the stop rule keeps its force over everything built in the meantime. The M4 plan is ruled: the runtime hosts the checked outbox machine itself, writes the ledger inside each step's transaction, and needs two engine changes, tombstones in polyrun and four ledger kinds in polyflow.
