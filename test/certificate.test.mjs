@@ -3,33 +3,13 @@
 // Keys are generated here, at test time, outside the repository; none is committed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, copyFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { admit, AdmitError, CERTIFICATE_FAULTS } from '@poly/check';
 import { certificateProblems, certificateDigest, publicKeyOf } from '@poly/core';
 import { ROOT } from './helpers.mjs';
 import { CERTIFICATE_FAULT_LIST } from './toolchain-faults.mjs';
-
-const KEYS = mkdtempSync(join(tmpdir(), 'poly-keys-'));
-export function makeKey(name = 'admission') {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  const file = join(KEYS, `${name}.pem`);
-  writeFileSync(file, privateKey.export({ type: 'pkcs8', format: 'pem' }));
-  return { id: `test-${name}`, file, publicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
-}
-
-/** A project directory under .poly with the given sources copied in, a clean handler module and an admission key. */
-export function project(name, sources, key) {
-  const dir = join(ROOT, '.poly', 'test-cert', name);
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(join(dir, 'src'), { recursive: true });
-  for (const s of sources) copyFileSync(join(ROOT, s), join(dir, 'src', s.split('/').pop()));
-  writeFileSync(join(dir, 'src', 'handlers.ts'), 'export async function handle(payload: unknown) { return { ok: true, payload } }\n');
-  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` } } }, null, 2));
-  return dir;
-}
+import { makeKey, project } from './runtime-helpers.mjs';
 
 const key = makeKey();
 

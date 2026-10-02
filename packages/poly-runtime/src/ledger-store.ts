@@ -1,0 +1,142 @@
+// LedgerStore (S121): polyrun's SQLite store, subclassed so that the ledger is written in each step's own
+// transaction. Every journal row reaches polyrun's store through `insertJournal`, inside the dispatch
+// transaction (`commitStep`, `_createInTxn`, `recordUndeliverable`), so writing the `step` event there makes K1
+// cover the ledger: the step and its events commit together or not at all. Nothing in polyrun changes (E4 is
+// dropped); the subclass adds tables of its own to the same database.
+//
+// The content store keeps each body by digest, so the chain holds digests only (PT16, PD2.2a).
+import { Store, type InsertJournal, type CommitStep } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
+import { digest } from '@cognitive-fab/polyflow-kernel/digest';
+import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
+import { nextEvent, runOf, type LedgerEvent, type Run } from './ledger.js';
+
+const LEDGER_SCHEMA = `
+CREATE TABLE IF NOT EXISTS poly_ledger (
+  run   TEXT NOT NULL,
+  seq   INTEGER NOT NULL,
+  kind  TEXT NOT NULL,
+  event TEXT NOT NULL,
+  hash  TEXT NOT NULL,
+  PRIMARY KEY (run, seq)
+);
+CREATE TABLE IF NOT EXISTS poly_run (
+  run TEXT PRIMARY KEY,
+  ns  TEXT NOT NULL,
+  wf  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS poly_content (
+  digest TEXT PRIMARY KEY,
+  body   TEXT NOT NULL
+);
+`;
+
+/** Events the runtime adds around a step, keyed by the step's action id (the decision record, PD2.2). */
+export interface StepEvents {
+  before?: { kind: string; body: unknown }[];
+  after?: { kind: string; body: unknown }[];
+}
+
+export class LedgerStore extends Store {
+  /** Events to write with the step whose `(instance, actionId)` is the key; set by the worker before it dispatches. */
+  readonly pending = new Map<string, StepEvents>();
+  /** Builds the events of a step's outbox rows inside its transaction (the outcome event, PD2.4). */
+  onOutbox: ((instanceId: string, rows: CommitStep['outboxRows'], seq: number, now: number) => { kind: string; body: unknown }[]) | null = null;
+
+  override initSync(): this {
+    super.initSync();
+    this.db.exec(LEDGER_SCHEMA);
+    return this;
+  }
+
+  /** The digest of a body, stored in the content store under it. Called inside a transaction. */
+  keep(body: unknown): string {
+    const d = digest(body ?? null);
+    this.db.prepare('INSERT OR IGNORE INTO poly_content (digest, body) VALUES (?, ?)').run(d, canonical(body ?? null));
+    return d;
+  }
+
+  /** The run of an instance, remembered at its first event so that it outlives an archive. */
+  private runOfInstance(instanceId: string): Run {
+    const known = this.db.prepare('SELECT ns, wf FROM poly_run WHERE run = ?').get(instanceId);
+    if (known) return { ns: known.ns, wf: known.wf, run: instanceId };
+    const inst = this.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId);
+    if (!inst) throw new Error(`ledger: no instance '${instanceId}' to chain an event on`);
+    const run = runOf(instanceId, inst.machine_id);
+    this.db.prepare('INSERT INTO poly_run (run, ns, wf) VALUES (?, ?, ?)').run(instanceId, run.ns, run.wf);
+    return run;
+  }
+
+  /** Appends one event to a run's chain. Must be called inside a transaction of this store. */
+  appendEvent(instanceId: string, kind: string, body: unknown, at: number): LedgerEvent {
+    const run = this.runOfInstance(instanceId);
+    const last = this.db.prepare('SELECT seq, hash FROM poly_ledger WHERE run = ? ORDER BY seq DESC LIMIT 1').get(instanceId) ?? null;
+    const event = nextEvent(run, last, kind, body, at);
+    this.db.prepare('INSERT INTO poly_ledger (run, seq, kind, event, hash) VALUES (?, ?, ?, ?, ?)').run(instanceId, event.seq, kind, JSON.stringify(event), event.hash);
+    return event;
+  }
+
+  /** Every journal row, with its `step` event (and the events the worker set for it) in the same transaction. */
+  override async insertJournal(row: InsertJournal): Promise<unknown> {
+    const result = await super.insertJournal(row);
+    const extra = this.pending.get(`${row.instanceId}\u0000${row.actionId}`);
+    for (const e of extra?.before ?? []) this.appendEvent(row.instanceId, e.kind, e.body, row.now);
+    this.appendEvent(row.instanceId, 'step', {
+      seq: row.seq,
+      action: row.action,
+      actionId: row.actionId,
+      machineVersion: row.machineVersion,
+      data: this.keep(row.data),
+      stepKind: row.stepKind,
+      rejectReason: row.rejectReason ?? null,
+      pre: this.keep(row.pre),
+      post: this.keep(row.post),
+      ...(extra?.before?.length ? { decision: this.lastHash(row.instanceId, 'decision') } : {}),
+    }, row.now);
+    for (const e of extra?.after ?? []) this.appendEvent(row.instanceId, e.kind, e.body, row.now);
+    return result;
+  }
+
+  /** The step's outbox rows can carry events of their own (an adjudication's outcome, PD2.4). */
+  override async commitStep(step: CommitStep): Promise<void> {
+    return this.txn(async () => {
+      await super.commitStep(step);
+      if (!this.onOutbox || !step.outboxRows.length) return;
+      for (const e of this.onOutbox(step.instanceId, step.outboxRows, step.seq, step.now)) this.appendEvent(step.instanceId, e.kind, e.body, step.now);
+    });
+  }
+
+  /** S122: a poisoning is an observation, written with the poison mark. */
+  override async markPoisoned(instanceId: string, now: number): Promise<void> {
+    return this.txn(async () => {
+      await super.markPoisoned(instanceId, now);
+      this.appendEvent(instanceId, 'observation', { poisoned: true }, now);
+    });
+  }
+
+  /** The hash of the run's most recent event of a kind, or null. */
+  lastHash(instanceId: string, kind: string): string | null {
+    return this.db.prepare('SELECT hash FROM poly_ledger WHERE run = ? AND kind = ? ORDER BY seq DESC LIMIT 1').get(instanceId, kind)?.hash ?? null;
+  }
+
+  /** A run's chain, in order. */
+  async chain(instanceId: string): Promise<LedgerEvent[]> {
+    return this.txn(() => this.db.prepare('SELECT event FROM poly_ledger WHERE run = ? ORDER BY seq').all(instanceId).map((r) => JSON.parse(r.event) as LedgerEvent));
+  }
+
+  /** Every run with a chain. */
+  async runs(): Promise<Run[]> {
+    return this.txn(() => this.db.prepare('SELECT run, ns, wf FROM poly_run ORDER BY run').all().map((r) => ({ ns: r.ns, wf: r.wf, run: r.run })));
+  }
+
+  /** A body from the content store, or undefined when retention has removed it. */
+  async body(d: string): Promise<unknown> {
+    return this.txn(() => {
+      const r = this.db.prepare('SELECT body FROM poly_content WHERE digest = ?').get(d);
+      return r ? JSON.parse(r.body) : undefined;
+    });
+  }
+}
+
+export function openLedgerStore(dbPath: string): LedgerStore {
+  return new LedgerStore(dbPath).initSync();
+}
