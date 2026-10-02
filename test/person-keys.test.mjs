@@ -65,7 +65,7 @@ test('PT12.5, S150: unsigned, agent-signed, unknown-key, wrong-kind, other-escal
     // A record that names no escalation is audited without an instance; all six are in the audit log.
     assert.equal((await rt.audit()).filter((r) => r.rule === 'PT12.5').length, cases.length);
     await rt.approve(good);
-    await assert.rejects(rt.approve(good), (e) => e.name === 'ApprovalRefused' && /not waiting/.test(e.message), 'replayed');
+    await assert.rejects(rt.approve(good), (e) => e.name === 'ApprovalRefused' && /already used/.test(e.message), 'replayed');
   } finally { await rt.close(); }
 });
 
@@ -137,4 +137,43 @@ test('PT12.5: poly approve signs an approval of the stored escalation; poly acce
     assert.equal(acc.status, 0, acc.stderr);
     assert.equal((await admit(dir)).certificate.boundAccepted.length, 1);
   } finally { try { rmSync(keys, { recursive: true, force: true }); } catch { /* the store file may still be held on Windows */ } }
+});
+
+// Review A1 and C3: a record lifts the escalation it names, once. After a Recheck the intent escalates again, and the
+// first record, which names the first escalation, is refused for the second.
+test('S150: an approval of an earlier escalation of the same intent does not lift a later one', async () => {
+  let stale = 0;
+  const { rt } = await loaded(a, { gate: { gate: escalating, escalationTimeoutMs: 600_000 }, worker: { isStale: () => stale++ === 0 } });
+  try {
+    let runs = 0;
+    handleWith(rt, 'w.work', () => { runs++; return 'done'; });
+    await rt.create('outbox.Job', { id: 'job-twice' });
+    await rt.dispatch('job-twice', 'Go');
+    await rt.worker.tick();
+    const [row] = await rt.outbox('job-twice');
+    const r1 = await approvalFor(rt, row.intent_id);
+    await rt.approve(r1);
+    await rt.worker.tick(); // allowed, found stale, rechecked, escalated again
+    assert.equal((await rt.worker.intentState(row)).intent, 'Escalated');
+    assert.equal(runs, 0);
+    await assert.rejects(rt.approve(r1), /current escalation|already/);
+    assert.equal((await rt.worker.intentState(row)).intent, 'Escalated');
+    await rt.approve(await approvalFor(rt, row.intent_id));
+    await rt.worker.tick();
+    assert.equal(runs, 1);
+  } finally { await rt.close(); }
+});
+
+// Review C2: PT9.2, an escalation not approved within its timeout is denied, even when the approval reaches the
+// runtime before the worker's next pass.
+test('PT9.2: an approval that arrives after the escalation timeout is refused, and the intent is denied', async () => {
+  const { rt, clock } = await escalated('job-late');
+  try {
+    const [row] = await rt.outbox('job-late');
+    const record = await approvalFor(rt, row.intent_id);
+    clock.advance(60 * 60_000);
+    await assert.rejects(rt.approve(record), /timed out/);
+    await rt.worker.tick();
+    assert.equal((await rt.worker.intentState(row)).intent, 'Denied');
+  } finally { await rt.close(); }
 });

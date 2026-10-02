@@ -207,6 +207,12 @@ export class PolyRuntime {
       return refuse(v.problem);
     }
     if (!found || body?.outcome !== 'escalated') return refuse(`the record names no escalation (${subject})`);
+    // Review A1, C3: one record lifts one escalation, once. After a Recheck an intent escalates again, and a record
+    // naming the earlier escalation, or one already used, does not lift the new one.
+    const current = await this.escalationOf(body.intent);
+    if (current?.hash !== subject) return refuse(`the record names escalation ${subject}, and the intent's current escalation is ${current?.hash ?? 'none'}`);
+    const used = this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict'`).all(found.run).some((x: any) => { const b = JSON.parse(x.event).body; return b?.outcome === 'approved' && b?.record === v.digest; });
+    if (used) return refuse(`the record ${v.digest} was already used`);
     try {
       await this.worker.approve(body.intent, { by: v.person.keyId, person: v.person.name, record: v.digest, subject, at: (record as { at: string }).at });
     } catch (e) { return refuse((e as Error).message); }

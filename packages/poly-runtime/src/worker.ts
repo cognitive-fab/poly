@@ -278,6 +278,12 @@ export class EffectWorker {
     if (!row) throw new Error(`no intent ${intentId}`);
     const r = { ...row, payload: JSON.parse(row.payload) } as OutboxRow;
     // Review C3: Approve and EscalationTimeout race; whichever commits first wins, and the other is a rejected step.
+    // Review C2, PT9.2: the escalation's deadline is the time the worker was set to take EscalationTimeout. An approval
+    // after it is refused, whether or not a pass has taken the timeout yet.
+    const st = await this.intentState(r);
+    if (st?.intent === 'Escalated' && !st.intent_approved && row.next_attempt_at !== null && this.now >= row.next_attempt_at) {
+      throw new Error(`intent ${intentId}: the escalation timed out at ${new Date(row.next_attempt_at).toISOString()}, before the approval (PT9.2)`);
+    }
     const res = await this.store.txn(async () => {
       const a = await this.attempt(r, 'Approve');
       if (!a.accepted) return a;
