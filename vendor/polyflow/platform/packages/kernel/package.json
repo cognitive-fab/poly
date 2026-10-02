@@ -1,0 +1,14 @@
+{
+  "name": "@cognitive-fab/polyflow-kernel",
+  "version": "0.1.0",
+  "description": "The ledger files of the polyflow platform kernel that poly uses, vendored unchanged; see vendor/polyflow/PROVENANCE.md",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "main": "src/ledger.mjs",
+  "exports": {
+    ".": "./src/ledger.mjs",
+    "./digest": "./src/digest.mjs",
+    "./canonical": "./src/canonical.mjs"
+  }
+}

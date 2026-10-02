@@ -14,6 +14,7 @@ import { ROOT } from './helpers.mjs';
 const VENDORED = [
   { dir: 'polygraph', source: 'C:/Users/jjdub/code/polygraph', commit: '4949de4' },
   { dir: 'sam-pattern', source: 'C:/Users/jjdub/code/sam/sam-lib', commit: '3047024' },
+  { dir: 'polyflow', source: 'C:/Users/jjdub/code/polyflow', commit: '5170add' },
 ];
 
 const table = (dir) => {
@@ -44,6 +45,9 @@ test('poly resolves the engines to the vendored copies', () => {
   const req = createRequire(join(ROOT, 'packages', 'poly-check', 'package.json'));
   assert.equal(req.resolve('@cognitive-fab/sam-pattern').split('\\').join('/'), join(ROOT, 'vendor', 'sam-pattern', 'dist', 'SAM.js').split('\\').join('/'));
   assert.ok(req.resolve('@cognitive-fab/polygraph/scripts/check.mjs').split('\\').join('/').startsWith(join(ROOT, 'vendor', 'polygraph').split('\\').join('/')));
+  for (const pkg of ['@cognitive-fab/polyflow-kernel', '@cognitive-fab/polyflow-verify']) {
+    assert.ok(req.resolve(pkg).split('\\').join('/').startsWith(join(ROOT, 'vendor', 'polyflow').split('\\').join('/')), pkg);
+  }
 });
 
 // Review finding P1: a pinned file that is ignored by git exists only on the disk that vendored it.
