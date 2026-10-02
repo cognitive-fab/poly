@@ -102,3 +102,16 @@ test('PD5-A3: principal representatives reproduce the evidence', async () => {
   assert.equal(r.verdict, 'CLEAN', render(r));
   assert.match(render(r), /3 principal representatives/);
 });
+
+// S155: $claims and $lineage are the runtime's keys. The standalone surface cannot spell them; the embedded surface can,
+// and a program that declares either is refused at check.
+test('S155: a program that declares $claims or $lineage is PL1208', async () => {
+  const { readEmbedded } = await import('@poly/embed');
+  const ts = (name) => `import { action, field, machine, module, on, set, t } from '@cognitive-fab/poly/embed';\nexport default module("t", [machine("M", { state: { x: field(t.range(0, 1), ($) => 0) }, items: [action("Go", { ${name}: t.range(0, 1) }), on("Go", ($) => [set("x", 1)])] })]);\n`;
+  const ok = readEmbedded(ts('n'), 'ok.ts');
+  assert.deepEqual(checkModule(ok.module).diagnostics.map((d) => d.code), []);
+  for (const name of ['"$claims"', '"$lineage"']) {
+    const r = readEmbedded(ts(name), 'bad.ts');
+    assert.deepEqual(checkModule(r.module).diagnostics.map((d) => d.code), ['PL1208'], name);
+  }
+});

@@ -409,6 +409,8 @@ class Checker {
       if (Array.isArray(x)) { x.forEach(proto); return; }
       const n = x as { kind?: string; name?: string; members?: string[]; id?: string };
       if (n.kind && n.kind !== 'Name' && (n.name === '__proto__' || n.members?.includes('__proto__'))) this.err('PL1201', n as A.NodeBase, '__proto__ cannot be a name: it is not a safe JSON key');
+      // S155: $claims and $lineage are the runtime's reserved data keys; no program declares them.
+      if (n.kind && n.kind !== 'Name' && (n.name === '$claims' || n.name === '$lineage')) this.err('PL1208', n as A.NodeBase, `${n.name} is reserved: the runtime writes it, and no program declares it (S155)`);
       for (const [k, v] of Object.entries(x)) if (k !== 'span') proto(v);
     };
     proto(this.module.decls);
