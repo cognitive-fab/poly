@@ -131,3 +131,22 @@ test('polywatch: a certificate whose handler files are null is refused at load w
   writeFileSync(r.certificatePath, JSON.stringify(forged));
   await assert.rejects(load(join(dir, '.poly', 'build'), opts(dir, r)), (e) => e instanceof LoadError && /PL6403/.test(e.message));
 });
+
+// Review of M5b, D-F4: the runtime imports the verified copy of the handlers, so the certified package files are
+// copied beside it as they sit beside the handlers; an uncertified package elsewhere in the project is not what runs.
+test('S154: a handler imports the certified package, not another one the project holds', async () => {
+  const dir = project('nested-modules', SOURCES, key, 'test-handlers');
+  writeFileSync(join(dir, 'src', 'handlers.ts'), "import tag from 'lib';\nexport async function handle(payload: unknown) { return { ok: true, tag, payload }; }\nexport function which() { return tag; }\n");
+  const pkg = (where, value) => {
+    mkdirSync(join(where, 'node_modules', 'lib'), { recursive: true });
+    writeFileSync(join(where, 'node_modules', 'lib', 'package.json'), JSON.stringify({ name: 'lib', main: 'index.js' }));
+    writeFileSync(join(where, 'node_modules', 'lib', 'index.js'), `module.exports = ${JSON.stringify(value)};\n`);
+  };
+  pkg(join(dir, 'src'), 'certified');
+  pkg(dir, 'not certified');
+  writeFileSync(join(dir, 'package-lock.json'), '{}');
+  const r = await admit(dir);
+  assert.deepEqual(Object.keys(r.certificate.poly.handlers.packageFiles).sort(), ['src/node_modules/lib/index.js', 'src/node_modules/lib/package.json']);
+  const rt = await load(join(dir, '.poly', 'build'), opts(dir, r));
+  try { assert.equal(rt.handlerExports('src/handlers.ts').which(), 'certified'); } finally { await rt.close(); }
+});

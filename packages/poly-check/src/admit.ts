@@ -128,14 +128,14 @@ function moduleOf(file: string): A.Module | null {
 }
 
 /** What a certificate is issued from: the root its paths are relative to, the checked reports, the source files, the keyrings. */
-interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings }
+interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell' }
 
 /** A project directory, or one module file checked alone (its handler lint is then not run, S72). */
 async function checkTarget(target: string, root?: string): Promise<Checked> {
   const abs = resolve(target);
   if (existsSync(join(abs, 'poly.json'))) {
     const { manifest, files } = loadProject(abs);
-    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs }), keyrings: keyringsOf(abs, manifest) };
+    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}) };
   }
   const dir = resolve(root ?? dirname(abs));
   const r = await checkFile(abs, { root: dir });
@@ -354,7 +354,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })) },
+    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);

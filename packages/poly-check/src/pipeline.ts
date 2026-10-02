@@ -828,7 +828,7 @@ export interface ProjectReport {
    */
   handlers: {
     status: 'ran'; files: number; diagnostics: Diagnostic[];
-    roots: string[]; digests: Record<string, string>; packages: string[]; packageFiles: Record<string, string>; lockfile: { path: string; digest: string } | null;
+    roots: string[]; digests: Record<string, string>; packages: string[]; packageFiles: Record<string, string>; packageUnresolved: string[]; lockfile: { path: string; digest: string } | null;
   } | { status: 'not-run'; reason: string } | null;
   verdict: CheckReport['verdict'];
   exit: number;
@@ -900,7 +900,7 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
   let handlers: ProjectReport['handlers'] = null;
   if (handlerFiles) {
     const c = handlerClosure(dir, handlerFiles);
-    handlers = { status: 'ran', files: c.bytes.size, diagnostics: c.diagnostics, roots: c.roots, digests: c.digests, packages: c.packages, packageFiles: c.packageFiles, lockfile: c.lockfile };
+    handlers = { status: 'ran', files: c.bytes.size, diagnostics: c.diagnostics, roots: c.roots, digests: c.digests, packages: c.packages, packageFiles: c.packageFiles, packageUnresolved: c.packageUnresolved, lockfile: c.lockfile };
   }
   else if (hasEffects) handlers = { status: 'not-run', reason: 'the project has effects, and poly.json names no handlers (S72)' };
   const lintVerdict: Verdict[] = handlers?.status === 'ran' ? [verdictOf(handlers.diagnostics)] : [];

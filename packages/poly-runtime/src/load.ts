@@ -76,10 +76,13 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     handlerBytes.set(p, b);
   }
   // S154: and every certified file of an installed package.
+  const packageBytes = new Map<string, Buffer>();
   for (const [p, want] of Object.entries(h.packageFiles ?? {})) {
     const f = join(root, p);
-    const have = existsSync(f) ? sha256OfBytes(readFileSync(f)) : null;
+    const b = existsSync(f) ? readFileSync(f) : null;
+    const have = b ? sha256OfBytes(b) : null;
     if (have !== want) changed.push(`${p} is not the certified package file (certified ${want}, found ${have ?? 'nothing'})`);
+    else if (!p.startsWith('../')) packageBytes.set(p, b!);
   }
   if (h.lockfile) {
     const f = join(root, h.lockfile.path);
@@ -103,6 +106,13 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     mkdirSync(dirname(copy), { recursive: true });
     writeFileSync(copy, b);
     if (h.roots.includes(p)) handlers.set(p, copy);
+  }
+  // Review D-F4: the runtime imports the copy, so a bare import resolves from there. The certified package files inside
+  // the project are copied beside it as they sit beside the handlers, so the package that runs is the certified one.
+  for (const [p, b] of packageBytes) {
+    const copy = join(runDir, 'handlers', ...p.split('/'));
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, b);
   }
   const machines: VerifiedBuild['machines'] = [];
   for (const m of certificate.subject.machines) {
@@ -142,6 +152,12 @@ export function recheckCopy(v: VerifiedBuild): void {
       const have = sha256OfBytes(readFileSync(join(v.runDir, m.id, name)));
       if (have !== want) throw new LoadError(`refused at load: the verified copy of ${m.dir}/${name} changed before it was registered (certified ${want}, found ${have})`);
     }
+  }
+  // S154: and the package copies.
+  for (const [p, want] of Object.entries(v.certificate.poly.handlers.packageFiles ?? {})) {
+    if (p.startsWith('../')) continue;
+    const have = sha256OfBytes(readFileSync(join(v.runDir, 'handlers', ...p.split('/'))));
+    if (have !== want) throw new LoadError(`refused at load: PL6403 HANDLER_CHANGED: the verified copy of ${p} changed before it was imported (certified ${want}, found ${have})`);
   }
   // S142: the handler copies too, before the runtime imports them.
   for (const [p, want] of Object.entries(v.certificate.poly.handlers.files)) {

@@ -46,6 +46,8 @@ test('S152: admission certifies the generated policy, and translation validation
   const admitted = await admit(dir);
   const certified = Object.keys(admitted.certificate.artefacts).filter((p) => p.endsWith('openshell.policies.yaml'));
   assert.deepEqual(certified, ['.poly/build/caps.Order/openshell.policies.yaml']);
+  // Review D-F5: the certificate says the policy is not enforced by this runtime (not run), never leaves it implied.
+  assert.ok(admitted.certificate.poly.limits.some((l) => /does not enforce them[\s\S]*not run/.test(l)));
   const r = await checkFile(SRC, { root: join(ROOT, '.poly', 'test-sandbox'), isolation: 'openshell' });
   assert.equal(r.verdict, 'CLEAN');
   const m = r.machines[0];
