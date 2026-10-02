@@ -55,8 +55,11 @@ export function parseType(text: string): TypeNode {
   throw new Error(`unreadable type '${t}'`);
 }
 
-/** Why `v` is not in `t`, or null when it is. */
-export function outside(t: TypeNode, v: unknown, at = 'the value'): string | null {
+/** Whether an instance id names a live instance of a machine (by its name in the program); review C9. */
+export type InstanceOf = (machine: string, id: string) => boolean;
+
+/** Why `v` is not in `t`, or null when it is. Without `exists`, an address is only checked to be a string. */
+export function outside(t: TypeNode, v: unknown, at = 'the value', exists?: InstanceOf): string | null {
   switch (t.k) {
     case 'lit': return v === t.value ? null : `${at} is ${JSON.stringify(v)}, not '${t.value}'`;
     case 'range': return Number.isInteger(v) && (v as number) >= t.lo && (v as number) <= t.hi ? null : `${at} is ${JSON.stringify(v)}, outside ${t.lo}..${t.hi}`;
@@ -64,19 +67,29 @@ export function outside(t: TypeNode, v: unknown, at = 'the value'): string | nul
     case 'string': return typeof v === 'string' ? null : `${at} is ${JSON.stringify(v)}, not a string`;
     case 'bool': return typeof v === 'boolean' ? null : `${at} is ${JSON.stringify(v)}, not a boolean`;
     case 'null': return v === null ? null : `${at} is ${JSON.stringify(v)}, not none`;
-    case 'address': return typeof v === 'string' && v !== '' ? null : `${at} is ${JSON.stringify(v)}, not an address of ${t.machine}`;
+    case 'address': {
+      if (typeof v !== 'string' || v === '') return `${at} is ${JSON.stringify(v)}, not an address of ${t.machine}`;
+      // Review C9, PS2.1: Ref<M> holds the addresses of instances of M, so an id naming no instance of M is outside it.
+      return !exists || exists(t.machine, v) ? null : `${at} is ${JSON.stringify(v)}, and there is no instance of ${t.machine} with that id`;
+    }
     case 'record': {
       if (v === null || typeof v !== 'object' || Array.isArray(v)) return `${at} is ${JSON.stringify(v)}, not a record`;
       const o = v as Record<string, unknown>;
       for (const [k, ft] of t.fields) {
         if (!(k in o)) return `${at} has no ${k}`;
-        const p = outside(ft, o[k], `${at}.${k}`);
+        const p = outside(ft, o[k], `${at}.${k}`, exists);
         if (p) return p;
       }
       const extra = Object.keys(o).filter((k) => !t.fields.some(([f]) => f === k));
       return extra.length ? `${at} has ${extra.join(', ')}, which its type does not` : null;
     }
-    case 'union': return t.alts.some((x) => outside(x, v, at) === null) ? null : `${at} is ${JSON.stringify(v)}, in none of its type's alternatives`;
+    case 'union': {
+      if (t.alts.some((x) => outside(x, v, at, exists) === null)) return null;
+      // A Ref<M> with none: say why the address is not one, rather than that no alternative matched.
+      const address = t.alts.find((x) => x.k === 'address');
+      if (address && typeof v === 'string' && v !== '') return outside(address, v, at, exists);
+      return `${at} is ${JSON.stringify(v)}, in none of its type's alternatives`;
+    }
   }
 }
 
@@ -93,14 +106,14 @@ export function actionTypes(contract: { actions?: Record<string, { dataFields?: 
  * Why `data` is outside the type of action `a`, or null. Keys that are not parameters are left to the kernel,
  * which supplies some itself (a child's completion, a failure's reason).
  */
-export function dataOutside(types: Map<string, [string, TypeNode][]>, action: string, data: unknown): string | null {
+export function dataOutside(types: Map<string, [string, TypeNode][]>, action: string, data: unknown, exists?: InstanceOf): string | null {
   const params = types.get(action);
   if (!params) return null; // not in the module: the kernel answers it (unhandled, PS9.1a)
   if (data !== undefined && data !== null && (typeof data !== 'object' || Array.isArray(data))) return `${action}'s data is ${JSON.stringify(data)}, not a record of its parameters`;
   const d = (data ?? {}) as Record<string, unknown>;
   for (const [p, t] of params) {
     if (!(p in d)) return `${action} has no ${p}`;
-    const why = outside(t, d[p], `${action}.${p}`);
+    const why = outside(t, d[p], `${action}.${p}`, exists);
     if (why) return why;
   }
   return null;

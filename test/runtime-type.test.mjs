@@ -89,3 +89,18 @@ test('polywatch: a failure completion outside its type is audited (S140) and the
     assert.ok((await rt.audit('tp')).some((r) => r.rule === 'S140' && r.action === 'RouteFailed'));
   } finally { await rt.close(); }
 });
+
+// Review C9: an address is in Ref<M> only when it names an existing instance of M (PS2.1); none is always in it.
+test('review C9: a Ref parameter naming no instance, or an instance of another machine, is refused before any step', async () => {
+  const r = await admitted('types-refs', ['test/fixtures/review-m4/refs.poly']);
+  const { rt } = await loaded(r);
+  try {
+    await rt.create('refs.Peer', { id: 'p1' });
+    await rt.create('refs.Keeper', { id: 'k' });
+    await assert.rejects(rt.dispatch('k', 'Link', { r: 'nobody' }, { actionId: 'c9-1' }), (e) => e instanceof RefusedDispatch && e.rule === 'S140' && /no instance of Peer/.test(e.message));
+    await assert.rejects(rt.dispatch('k', 'Link', { r: 'k' }, { actionId: 'c9-2' }), (e) => e instanceof RefusedDispatch && e.rule === 'S140');
+    assert.equal((await rt.getJournal('k')).length, 1);
+    assert.equal((await rt.dispatch('k', 'Link', { r: 'p1' })).stepKind, 'accepted');
+    assert.equal((await rt.dispatch('k', 'Link', { r: null })).stepKind, 'accepted');
+  } finally { await rt.close(); }
+});

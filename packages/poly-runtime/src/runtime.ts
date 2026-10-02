@@ -194,7 +194,11 @@ export class PolyRuntime {
   outsideType(instanceId: string, action: string, data: unknown, machineId?: string): string | null {
     const id = machineId ?? (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined);
     const m = this.verified.machines.find((x) => x.id === id);
-    return m ? dataOutside(m.types, action, data) : null;
+    if (!m) return null;
+    // Review C9: an address names a live instance of its machine, in the module of the machine that receives it.
+    const module = m.id.slice(0, m.id.lastIndexOf('.'));
+    const exists = (machine: string, ref: string) => this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(ref)?.machine_id === `${module}.${machine}`;
+    return dataOutside(m.types, action, data, exists);
   }
 
   /** The manifest entry of an effect kind on an instance's machine, or null. */
