@@ -3,8 +3,9 @@
 // the runtime loads are the handlers the lint read (the hash-first rule of review A1, applied to handlers).
 //
 // What the certificate cannot cover is refused here, as PL6402: a relative import that resolves to no file, or to a
-// file outside the project, and an absolute path or URL. An installed package (a bare specifier) is not hashed in
-// M4; it is listed, and the lockfile's digest is recorded instead (an M4 limit; hashing the packages is M5's).
+// file outside the project, and an absolute path or URL. S154: an installed package (a bare specifier) is followed
+// through Node's resolution into node_modules; every file reached there, and each package's package.json, is hashed
+// and certified under packageFiles. Packages are hashed, not linted. The nearest lockfile's digest is recorded too.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isBuiltin } from 'node:module';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -23,8 +24,10 @@ export interface HandlerClosure {
   /** Every file of the closure, relative to the project root, with its bytes as read. */
   bytes: Map<string, Buffer>;
   digests: Record<string, string>;
-  /** Installed packages the closure imports (bare specifiers), not hashed in M4. */
+  /** Installed packages the closure imports (bare specifiers). */
   packages: string[];
+  /** S154: every file reached inside installed packages, and each package's package.json, by path relative to the root. */
+  packageFiles: Record<string, string>;
   /** The nearest lockfile above the project, relative to its root, and its digest; null when there is none. */
   lockfile: { path: string; digest: string } | null;
   /** PL6402 for what cannot be certified, and the lint's PL6401 over every file. */
@@ -60,6 +63,36 @@ function resolveRelative(from: string, spec: string): string | null {
   return null;
 }
 
+/** S154: the directory of an installed package, found as Node finds it, walking up from a file's directory. */
+function packageDir(from: string, name: string): string | null {
+  for (let d = dirname(from); ; d = dirname(d)) {
+    const p = join(d, 'node_modules', ...name.split('/'));
+    if (existsSync(join(p, 'package.json'))) return p;
+    if (dirname(d) === d) return null;
+  }
+}
+
+/** S154: the file an import of a package (and a subpath of it) names, by its exports map, or its main. */
+function packageEntry(dir: string, subpath: string): string | null {
+  let pkg: { exports?: unknown; main?: string; module?: string };
+  try { pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')); } catch { return null; }
+  const pick = (x: unknown): string | null => {
+    if (typeof x === 'string') return x;
+    if (Array.isArray(x)) { for (const y of x) { const r = pick(y); if (r) return r; } return null; }
+    if (x && typeof x === 'object') for (const c of ['import', 'node', 'default', 'require']) if (c in (x as object)) { const r = pick((x as Record<string, unknown>)[c]); if (r) return r; }
+    return null;
+  };
+  const key = subpath ? `./${subpath}` : '.';
+  let target: string | null = null;
+  if (pkg.exports !== undefined) {
+    const ex = pkg.exports as Record<string, unknown>;
+    const sugar = typeof ex === 'string' || Array.isArray(ex) || (ex && typeof ex === 'object' && !Object.keys(ex).some((k) => k.startsWith('.')));
+    target = sugar ? (key === '.' ? pick(ex) : null) : pick(ex[key]);
+  }
+  if (!target) target = subpath || pkg.main || 'index.js';
+  return resolveRelative(join(dir, 'package.json'), target.startsWith('.') ? target : `./${target}`);
+}
+
 function nearestLockfile(root: string): { path: string; digest: string } | null {
   for (let d = resolve(root); ; d = dirname(d)) {
     for (const name of LOCKFILES) {
@@ -75,6 +108,8 @@ export function handlerClosure(root: string, files: string[]): HandlerClosure {
   const absRoot = resolve(root);
   const bytes = new Map<string, Buffer>();
   const packages = new Set<string>();
+  const packageBytes = new Map<string, Buffer>();
+  const packageQueue: string[] = [];
   const diagnostics: Diagnostic[] = [];
   const uncertifiable = (file: string, message: string) => diagnostics.push(diag('PL6402', { line: 1, col: 1 }, `${rel(absRoot, file)}: ${message} (S142)`));
   const queue = files.map((f) => resolve(f));
@@ -98,12 +133,37 @@ export function handlerClosure(root: string, files: string[]): HandlerClosure {
       } else if (!isBuiltin(spec)) {
         // A bare specifier: an installed package. Its name is the first segment, or the first two for a scope.
         const parts = spec.split('/');
-        packages.add(spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]);
+        const name = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+        packages.add(name);
+        // S154: followed into the package, which is hashed with what it reaches.
+        const pdir = packageDir(file, name);
+        const entry = pdir ? packageEntry(pdir, parts.slice(spec.startsWith('@') ? 2 : 1).join('/')) : null;
+        if (!pdir || !entry) { uncertifiable(file, `the import '${spec}' resolves to no installed package file, so the certificate cannot name it`); continue; }
+        packageQueue.push(join(pdir, 'package.json'), entry);
       }
+    }
+  }
+  // S154: the files reached inside installed packages, through their relative imports and the packages they import.
+  while (packageQueue.length) {
+    const file = packageQueue.shift()!;
+    const path = rel(absRoot, file);
+    if (packageBytes.has(path)) continue;
+    const b = readFileSync(file);
+    packageBytes.set(path, b);
+    if (file.endsWith('package.json')) continue;
+    for (const spec of specifiers(b.toString('utf8'), file)) {
+      if (spec.startsWith('./') || spec.startsWith('../')) { const t = resolveRelative(file, spec); if (t) packageQueue.push(t); continue; }
+      if (spec.startsWith('/') || /^[a-z]+:/i.test(spec) || isBuiltin(spec)) continue;
+      const parts = spec.split('/');
+      const name = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+      const pdir = packageDir(file, name);
+      const entry = pdir ? packageEntry(pdir, parts.slice(spec.startsWith('@') ? 2 : 1).join('/')) : null;
+      if (pdir && entry) packageQueue.push(join(pdir, 'package.json'), entry);
     }
   }
   const lockfile = nearestLockfile(absRoot);
   if (packages.size && !lockfile) diagnostics.push(diag('PL6402', { line: 1, col: 1 }, `the handlers import ${[...packages].sort().join(', ')}, and no lockfile is above the project to record (S142)`));
   const digests = Object.fromEntries([...bytes].sort(([x], [y]) => (x < y ? -1 : 1)).map(([p, b]) => [p, sha256OfBytes(b)]));
-  return { roots: files.map((f) => rel(absRoot, resolve(f))).sort(), bytes, digests, packages: [...packages].sort(), lockfile, diagnostics };
+  const packageFiles = Object.fromEntries([...packageBytes].sort(([x], [y]) => (x < y ? -1 : 1)).map(([p, b]) => [p, sha256OfBytes(b)]));
+  return { roots: files.map((f) => rel(absRoot, resolve(f))).sort(), bytes, digests, packages: [...packages].sort(), packageFiles, lockfile, diagnostics };
 }

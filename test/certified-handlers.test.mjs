@@ -93,14 +93,29 @@ test('S142: a witness certificate binds the handlers too', async () => {
   try { assert.throws(() => rt.handle('w.work', () => 'ok'), /PL6404/); } finally { await rt.close(); }
 });
 
-test('S142: an installed package is not hashed in M4; the certificate records it and the lockfile\'s digest', async () => {
-  const dir = withClosure('package', "import ts from 'typescript';\nexport function shape(p: unknown) { return { ok: true, p, v: ts.version }; }\n");
+// S154 (M5b step 16): an installed package a handler imports is hashed: the closure follows the bare import through
+// Node's resolution into node_modules, every file it reaches there and each package's package.json, and certifies them
+// under packageFiles; load refuses a change (PL6403). Packages are hashed, not linted: the limits say the sandbox is
+// what stops a package's own I/O.
+test('S154: an installed package is hashed; a changed file inside it is PL6403 at load', async () => {
+  const dir = withClosure('package', "import { pad } from 'leftpad-poly';\nexport function shape(p: unknown) { return { ok: true, p, s: pad('x') }; }\n");
+  const pkg = join(dir, 'node_modules', 'leftpad-poly');
+  mkdirSync(join(pkg, 'lib'), { recursive: true });
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'leftpad-poly', version: '1.0.0', type: 'module', exports: { '.': './lib/index.js' } }));
+  writeFileSync(join(pkg, 'lib', 'index.js'), "import { fill } from './fill.js';\nexport function pad(s) { return fill(s); }\n");
+  writeFileSync(join(pkg, 'lib', 'fill.js'), "export function fill(s) { return ' ' + s; }\n");
+  writeFileSync(join(pkg, 'lib', 'unused.js'), 'export const unused = 1;\n');
   const r = await admit(dir);
   const h = r.certificate.poly.handlers;
-  assert.deepEqual(h.packages, ['typescript']);
+  assert.deepEqual(h.packages, ['leftpad-poly']);
+  assert.deepEqual(Object.keys(h.packageFiles).sort(), ['node_modules/leftpad-poly/lib/fill.js', 'node_modules/leftpad-poly/lib/index.js', 'node_modules/leftpad-poly/package.json']);
+  for (const [p, d] of Object.entries(h.packageFiles)) assert.equal(d, sha256OfBytes(readFileSync(join(dir, p))), p);
   assert.ok(h.lockfile && /package-lock\.json$/.test(h.lockfile.path), JSON.stringify(h.lockfile));
-  assert.equal(h.lockfile.digest, sha256OfBytes(readFileSync(join(dir, h.lockfile.path))));
-  assert.ok(r.certificate.poly.limits.some((l) => /installed packages/.test(l)));
+  assert.ok(r.certificate.poly.limits.some((l) => /packages are hashed, not linted/.test(l)));
+  const rt = await load(join(dir, '.poly', 'build'), opts(dir, r));
+  await rt.close();
+  writeFileSync(join(pkg, 'lib', 'fill.js'), "export function fill(s) { return '!' + s; }\n");
+  await assert.rejects(load(join(dir, '.poly', 'build'), opts(dir, r)), (e) => e instanceof LoadError && /PL6403/.test(e.message) && /leftpad-poly\/lib\/fill\.js/.test(e.message));
 });
 
 // Polywatch on S142: a signed certificate whose handlers block is malformed is refused as PL6403, never a TypeError.

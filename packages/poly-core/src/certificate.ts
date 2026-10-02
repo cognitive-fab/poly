@@ -54,13 +54,15 @@ export interface Certificate {
      * S142: the handlers the certificate binds. `files` holds each handler file poly.json names (`roots`) and every
      * file reached from them through relative imports, by path relative to the project root and SHA-256; `load`
      * refuses any difference, and `rt.handle` takes only exports of the roots as loaded. The lint ran over `files`.
-     * Installed packages are named, not hashed (an M4 limit): `lockfile` is the nearest lockfile and its digest.
+     * S154: installed packages are named, and every file reached inside them and each package.json is hashed under
+     * `packageFiles`; `lockfile` is the nearest lockfile and its digest.
      */
     handlers: {
       roots: string[];
       files: Record<string, string>;
       lint: { version: string; verdict: 'CLEAN' | 'FINDINGS' | 'not-run'; reason?: string };
       packages: string[];
+      packageFiles: Record<string, string>;
       lockfile: { path: string; digest: string } | null;
     };
     /** PT8, S146: each trust scope's lowered policy document (its digest is under `artefacts`), and the machines it reads. */

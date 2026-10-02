@@ -75,6 +75,12 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (have !== want) { changed.push(`${p} is not the certified handler (certified ${want}, found ${have})`); continue; }
     handlerBytes.set(p, b);
   }
+  // S154: and every certified file of an installed package.
+  for (const [p, want] of Object.entries(h.packageFiles ?? {})) {
+    const f = join(root, p);
+    const have = existsSync(f) ? sha256OfBytes(readFileSync(f)) : null;
+    if (have !== want) changed.push(`${p} is not the certified package file (certified ${want}, found ${have ?? 'nothing'})`);
+  }
   if (h.lockfile) {
     const f = join(root, h.lockfile.path);
     const have = existsSync(f) ? sha256OfBytes(readFileSync(f)) : null;

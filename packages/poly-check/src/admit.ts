@@ -32,7 +32,7 @@ export const MAX_ATTEMPTS = 10;
 export const M4_LIMITS = [
   'capabilities are bound in-process to the declared targets; what stops a handler reaching around them is the lint, a discipline, until the opt-in sandbox (PT6.5, S134, S152)',
   'the store is SQLite only; Postgres is not built (S135)',
-  'installed packages the handlers import are not hashed; the certificate records the lockfile\'s digest, and hashing them is M5\'s (S142)',
+  'installed packages are hashed, not linted: a package\'s own I/O is stopped only by the opt-in sandbox (S154)',
 ];
 
 export interface AdmitOptions {
@@ -316,13 +316,17 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // S142: the handlers, as the lint read them. A file that differs on disk now is refused, never certified.
   const lint = report.handlers;
   const handlers: Certificate['poly']['handlers'] = lint?.status === 'ran'
-    ? { roots: lint.roots, files: lint.digests, lint: { version: LINT_VERSION, verdict: lint.diagnostics.length ? 'FINDINGS' : 'CLEAN' }, packages: lint.packages, lockfile: lint.lockfile }
-    : { roots: [], files: {}, lint: { version: LINT_VERSION, verdict: 'not-run', reason: lint?.status === 'not-run' ? lint.reason : 'the program has no effects and poly.json names no handlers' }, packages: [], lockfile: null };
+    ? { roots: lint.roots, files: lint.digests, lint: { version: LINT_VERSION, verdict: lint.diagnostics.length ? 'FINDINGS' : 'CLEAN' }, packages: lint.packages, packageFiles: lint.packageFiles, lockfile: lint.lockfile }
+    : { roots: [], files: {}, lint: { version: LINT_VERSION, verdict: 'not-run', reason: lint?.status === 'not-run' ? lint.reason : 'the program has no effects and poly.json names no handlers' }, packages: [], packageFiles: {}, lockfile: null };
   const handlerProblems = (): string[] => {
     const out: string[] = [];
     for (const [p, want] of Object.entries(handlers.files)) {
       const f = join(dir, p);
       if (!existsSync(f) || sha256OfBytes(readFileSync(f)) !== want) out.push(`${p} on disk is not the handler the lint read`);
+    }
+    for (const [p, want] of Object.entries(handlers.packageFiles)) {
+      const f = join(dir, p);
+      if (!existsSync(f) || sha256OfBytes(readFileSync(f)) !== want) out.push(`${p} changed during the check`);
     }
     if (handlers.lockfile) {
       const f = join(dir, handlers.lockfile.path);
