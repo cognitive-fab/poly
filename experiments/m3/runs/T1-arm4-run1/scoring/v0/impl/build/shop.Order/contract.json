@@ -1,0 +1,69 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:535f25c32f44522b778d92e8d96f3df328a06d4c2964d2d69f17af5f525550da",
+  "stateKeys": [
+    {
+      "name": "status",
+      "type": "'unborn' | 'draft' | 'placed' | 'paid' | 'shipped' | 'cancelled' | 'failed'"
+    },
+    {
+      "name": "items",
+      "type": "0..3"
+    },
+    {
+      "name": "charges",
+      "type": "0..1"
+    },
+    {
+      "name": "refunds",
+      "type": "0..1"
+    },
+    {
+      "name": "refundAnswered",
+      "type": "boolean"
+    }
+  ],
+  "initState": {
+    "status": "unborn",
+    "items": 0,
+    "charges": 0,
+    "refunds": 0,
+    "refundAnswered": false
+  },
+  "actions": {
+    "Create": {
+      "dataFields": {}
+    },
+    "AddItem": {
+      "dataFields": {}
+    },
+    "RemoveItem": {
+      "dataFields": {}
+    },
+    "Place": {
+      "dataFields": {}
+    },
+    "Ship": {
+      "dataFields": {}
+    },
+    "Cancel": {
+      "dataFields": {}
+    },
+    "ChargeOk": {
+      "dataFields": {}
+    },
+    "ChargeFailed": {
+      "dataFields": {}
+    },
+    "RefundAnswered": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [
+    "shipped",
+    "cancelled",
+    "failed"
+  ],
+  "dataDomain": {},
+  "invariants": "invariants.mjs"
+}

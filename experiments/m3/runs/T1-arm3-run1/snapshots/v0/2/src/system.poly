@@ -1,0 +1,87 @@
+// T1, order lifecycle: one Order machine per order id.
+module shop
+
+enum Status { New, Draft, Placed, Paid, Shipped, Cancelled, Failed }
+
+machine Order {
+  state {
+    status  : Status = New
+    items   : 0..3   = 0
+    charges : 0..1   = 0
+    refunds : 0..1   = 0
+  }
+  terminal status in { Shipped, Cancelled, Failed }
+
+  action Create()
+  action AddItem()
+  action RemoveItem()
+  action Place()
+  action Ship()
+  action Cancel()
+  action PaymentOk()
+  action PaymentFailed()
+
+  on Create {
+    require status == New else reject "exists"
+    status' = Draft
+  }
+  on AddItem {
+    require status == Draft else reject "not-draft"
+    require items < 3 else reject "order-full"
+    items' = items + 1
+  }
+  on RemoveItem {
+    require status == Draft else reject "not-draft"
+    require items > 0 else reject "order-empty"
+    items' = items - 1
+  }
+  on Place {
+    require status == Draft else reject "not-draft"
+    require items > 0 else reject "order-empty"
+    require charges == 0 else reject "already-charged"
+    status' = Placed
+    charges' = charges + 1
+    emit charge(items)
+  }
+  on PaymentOk {
+    require status == Placed else reject "not-placed"
+    status' = Paid
+  }
+  on PaymentFailed {
+    require status == Placed else reject "not-placed"
+    status' = Failed
+  }
+  on Ship {
+    require status == Paid else reject "not-paid"
+    status' = Shipped
+  }
+  on Cancel {
+    require status in { Draft, Paid } else reject "not-cancellable"
+    require refunds == 0 else reject "already-refunded"
+    if status == Paid {
+      refunds' = refunds + 1
+      emit refund(items)
+    }
+    status' = Cancelled
+  }
+
+  invariant shipped-was-charged: status in { Paid, Shipped } implies charges == 1
+  invariant refund-after-charge: refunds <= charges
+  invariant draft-not-charged: status in { New, Draft } implies charges == 0
+  path property charge-at-most-once: count("payment.charge") <= 1
+  path property refund-at-most-once: count("payment.refund") <= 1
+  path property refund-after-charge-path: before("payment.charge", "payment.refund")
+
+  effect charge(amount: int) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+    ok -> PaymentOk()
+    failed -> PaymentFailed()
+  }
+  effect refund(amount: int) {
+    kind "payment.refund"
+    labels { egress:external }
+    class irreversible
+  }
+}
