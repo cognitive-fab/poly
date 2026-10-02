@@ -53,6 +53,20 @@ The decision-table check proves statements a policy states. In M5a, PT8.1 gains 
 - Controls, as for every check: a seeded program with the trifecta and no gate must be a finding with a witness, and the same program with the egress effect gated must be clean.
 - `never` statements keep the state-dependent cases (S149).
 
+## For M6's planning list
+
+- **A second agent host.** M6 (PT18: workflow lowering, MCP server, language server, Claude Code plugin, `poly new`) is planned so that the MCP server and the language server are host-neutral, and the Claude Code plugin is one thin adapter over them. A DeepSeek Harness plugin is planned as a second adapter, built once its plugin API is declared stable. M6's gate then shows the same workflow running unchanged under both hosts.
+
+## M5a closed
+
+**M5a is closed** on `m4` at 038fe86. The gate passes from a clean build: 1,247 tests, 1,243 pass, 0 fail, 4 waiting (E1, E2, FROZEN, and outage O10, which is M5b's). The 28 review fixes and the defect found while fixing them are accepted, each with a test that failed first. The stated limits stand: cross-scope sends tested by injection until S153, escalated sends denied, capabilities enforced in process until the sandbox.
+
+**E8 goes on the owner's engine list.** Polyaxion's discharge check treats an escalation as a deny, so it refuses a scope whose only way to complete a mandate passes through a person's approval. The engine should count an escalation as a path that completes when approved. Until E8 lands, poly's refusal as `PL6001`, with its reason, is correct: it fails closed.
+
+**B13 is deferred to M5b**, fixed with the embedded surface's policy form, with a test that fails first. It changes no meaning and the output is stable.
+
+**Next: M5b**, steps 11 to 18 as ruled, after merging `main` into `m4`. S141 and S153 wait on E5 and are listed as waiting.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.

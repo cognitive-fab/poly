@@ -59,3 +59,32 @@ test('a usage limit and an authentication failure are recognised, so the run is 
   for (const e of journal('P1-arm1-run1').filter((x) => x.type === 'stream')) fine.add(e.event);
   assert.equal(fine.status(), null);
 });
+
+test('a run recorded as limited is not scored, and the scorer says so instead of failing', async () => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'poly-m3-limited-'));
+  try {
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({ id: 'P1-arm1-run1', arm: 1, task: 'P1', unscored: 'limited', versions: [{ n: 0, attempted: true, stopped: 'limited' }] }));
+    const r = spawnSync(process.execPath, ['--no-warnings', join(M3, 'runner', 'score.mjs'), dir], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /not scored: limited/);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).scores, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a turn the CLI stops at the dollar cap: its result event reports no usage, so the running count is recorded, and the stop is the cap', () => {
+  // Measured: on the subscription, --max-budget-usd 0.0001 stopped the turn after its first call, with
+  // subtype error_max_budget_usd, total_cost_usd 0.200628 and every usage part 0 in the result event.
+  const a = turnAccount();
+  a.add({ type: 'assistant', message: { id: 'm1', usage: { input_tokens: 3, cache_creation_input_tokens: 40000, cache_read_input_tokens: 0, output_tokens: 10 } } });
+  a.add({ type: 'result', subtype: 'error_max_budget_usd', is_error: true, total_cost_usd: 0.200628, usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } });
+  const f = a.final();
+  assert.equal(f.source, 'running');
+  assert.equal(f.usage.cache_creation_input_tokens, 40000);
+  assert.equal(a.capStop(), 'usd');
+  assert.equal(a.status(), null);
+});

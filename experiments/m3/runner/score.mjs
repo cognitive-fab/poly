@@ -176,5 +176,6 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const dir = process.argv[2];
   const i = process.argv.indexOf('--timeout');
   const r = await scoreRun(dir, i > 0 ? { timeoutMs: Number(process.argv[i + 1]) * 1000 } : {});
-  for (const s of r.scores) console.log(`v${s.n}: delivered ${s.delivered}${s.admitted !== null ? `, admitted ${s.admitted}` : ''}, O3 ${s.o3 ? `${s.o3.failed}/${s.o3.traces} failed` : 'not run'}, O2 ${s.o2 ? `${s.o2.violated.length} violated` : 'not run'}, O1 ${s.o1?.ran ? `${s.o1.failed}/${s.o1.tests} failed` : `not run (${s.o1?.reason ?? s.reason})`}`);
+  if (r.unscored) console.log(`not scored: ${r.unscored}; rerun from the start (4210fa6)`);
+  for (const s of r.scores ?? []) console.log(`v${s.n}: delivered ${s.delivered}${s.admitted !== null ? `, admitted ${s.admitted}` : ''}, O3 ${s.o3 ? `${s.o3.failed}/${s.o3.traces} failed` : 'not run'}, O2 ${s.o2 ? `${s.o2.violated.length} violated` : 'not run'}, O1 ${s.o1?.ran ? `${s.o1.failed}/${s.o1.tests} failed` : `not run (${s.o1?.reason ?? s.reason})`}`);
 }
