@@ -80,7 +80,9 @@ export async function fit(reader: JournalReader, decision: string, model: string
   if (!pts.length) throw new Error(`no adjudicated ${decision} decision of ${model} to fit a map on`);
   const blocks: { x: number; sum: number; n: number }[] = [];
   for (const p of pts) {
-    blocks.push({ x: p.x, sum: p.y, n: 1 });
+    // Review B4: samples at one raw value are one block before any violator is pooled, so order cannot matter.
+    const last = blocks[blocks.length - 1];
+    if (last && last.x === p.x) { last.sum += p.y; last.n += 1; } else blocks.push({ x: p.x, sum: p.y, n: 1 });
     while (blocks.length > 1 && blocks[blocks.length - 2].sum / blocks[blocks.length - 2].n > blocks[blocks.length - 1].sum / blocks[blocks.length - 1].n) {
       const b = blocks.pop()!;
       const a = blocks[blocks.length - 1];
