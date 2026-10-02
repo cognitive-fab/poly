@@ -177,6 +177,24 @@ export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Rec
   return { run, verdict, chain, signedThrough, unsignedTail: Math.max(0, last - (signedThrough ?? -1)), closed, problems };
 }
 
+/**
+ * Review B1: what `poly journal verify` requires of a run, beyond verifyRun. A run must be signed (a run with no
+ * signed head is not vouched for, whatever deleted its heads), and the latest anchor must verify and cover the
+ * run's latest signed head, so a run dropped, truncated or re-signed since is found. Each problem is PL9002.
+ */
+export function ledgerProblems(run: string, heads: SignedHead[], latestAnchor: { anchor: Anchor; heads: SignedHead[] } | null, trust: Record<string, string>): string[] {
+  const problems: string[] = [];
+  const good = heads.filter((h) => verifyHead(h, trust).ok);
+  const newest = good.length ? good.reduce((x, y) => (y.seq > x.seq ? y : x)) : null;
+  if (!newest) problems.push('no signed head vouches for the run');
+  if (!latestAnchor) { problems.push(`no anchor covers ${run}`); return problems; }
+  for (const p of verifyAnchor(latestAnchor.anchor, latestAnchor.heads, trust)) problems.push(`the latest anchor: ${p}`);
+  const anchored = latestAnchor.heads.find((h) => h.run.run === run);
+  if (!anchored) problems.push(`no anchor covers ${run}`);
+  else if (newest && (anchored.seq !== newest.seq || anchored.hash !== newest.hash)) problems.push(`the latest anchor covers ${run} at seq ${anchored.seq}, and its latest signed head is at seq ${newest.seq}`);
+  return problems;
+}
+
 /** A store opened for reading its ledger and journal only, with the types a tool outside the runtime needs. */
 export interface JournalReader {
   runs(): Promise<Run[]>;
@@ -185,6 +203,8 @@ export interface JournalReader {
   /** The journal while the instance exists; null after an archive. */
   journal(instanceId: string): Promise<JournalRow[] | null>;
   body(digest: string): Promise<unknown>;
+  /** The anchors published, oldest first. */
+  anchors(): Promise<{ anchor: Anchor; heads: SignedHead[] }[]>;
   close(): Promise<void>;
 }
 
@@ -195,6 +215,7 @@ export function readerOf(store: LedgerStore): JournalReader {
     heads: (id) => headsOf(store, id),
     journal: async (id) => ((await store.getInstance(id)) ? store.getJournal(id) : null),
     body: (d) => store.body(d),
+    anchors: () => anchors(store),
     close: () => store.close(),
   };
 }

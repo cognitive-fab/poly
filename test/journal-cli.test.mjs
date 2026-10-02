@@ -32,6 +32,7 @@ async function populate() {
   await rt.dispatch(p.id, 'Seal');
   await rt.archive(p.id);
   await rt.signHeads();
+  await rt.publishAnchor({ from: 0, to: 1 });
   await rt.close();
 }
 
@@ -64,4 +65,35 @@ test('replay: every live run reproduced through the certified build; export: one
   assert.ok(bundle.heads.length >= 1);
   assert.equal(poly('journal', 'verify', '--db', db).code, 1, 'no trusted key: nothing is vouched for');
   assert.equal(poly('journal', 'export', '--db', db).code, 64);
+});
+
+// Review B1: verify requires a signed head for every run and an anchor that covers each run's latest head.
+test('review B1: deleted heads, a missing anchor, or a head the anchor does not cover are PL9002, and verify exits 1', async () => {
+  const run = (...extra) => poly('journal', 'verify', '--db', db, '--trust', `${signer.id}=${pub}`, ...extra);
+  await populate();
+  assert.equal(run().code, 0, run().out);
+  // Heads deleted: what remains is no longer vouched for.
+  let sql = new DatabaseSync(db);
+  sql.prepare(`DELETE FROM poly_head WHERE run = 'p-1'`).run();
+  sql.close();
+  let r = run('--run', 'p-1');
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /PL9002 LEDGER_BROKEN  run p-1: no signed head/);
+  // No anchor at all.
+  await populate();
+  sql = new DatabaseSync(db);
+  sql.prepare('DELETE FROM poly_anchor').run();
+  sql.close();
+  r = run('--run', 'o-1');
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /no anchor covers/);
+  // A head signed after the last anchor.
+  await populate();
+  const rt = await load(a.build, { certificate: a.certificate, trust: a.trust, store: { sqlite: db }, ledger: { keyId: signer.id, privateKeyPem: readFileSync(signer.file, 'utf8') } });
+  await rt.dispatch('o-1', 'Hurry');
+  await rt.signHeads();
+  await rt.close();
+  r = run('--run', 'o-1');
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /the latest anchor covers o-1 at seq \d+, and its latest signed head is at seq \d+/);
 });

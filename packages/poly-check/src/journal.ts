@@ -34,7 +34,7 @@ function trustOf(args: string[]): Record<string, string> {
 
 export async function journalCommand(sub: string, args: string[], write: (s: string) => void): Promise<number> {
   // The runtime is loaded only here, so `poly check` and its tests run in a toolchain without it.
-  const { load, openJournal, verifyRun } = await import('@poly/runtime');
+  const { load, openJournal, verifyRun, ledgerProblems } = await import('@poly/runtime');
   const db = one(args, '--db');
   if (!db) throw new JournalUsageError('poly journal needs --db <store>');
   const only = one(args, '--run');
@@ -46,7 +46,11 @@ export async function journalCommand(sub: string, args: string[], write: (s: str
       if (only && !runs.length) throw new JournalUsageError(`no run ${only} in ${db}`);
       const found: Diagnostic[] = [];
       for (const r of runs) {
-        const v = verifyRun(await store.chain(r.run), await store.heads(r.run), trust, await store.journal(r.run));
+        const heads = await store.heads(r.run);
+        const v = verifyRun(await store.chain(r.run), heads, trust, await store.journal(r.run));
+        const all = await store.anchors();
+        // Review B1: a run must be signed, and covered by the latest anchor at its latest signed head.
+        v.problems.push(...ledgerProblems(r.run, heads, all.length ? all[all.length - 1] : null, trust));
         write(`${r.run} (${r.wf}): ${v.verdict}${v.signedThrough !== null ? `, signed through seq ${v.signedThrough}` : ''}${v.unsignedTail ? `, ${v.unsignedTail} event(s) not yet signed` : ''}\n`);
         for (const p of v.problems) { const d = diag('PL9002', { module: r.ns, machine: r.wf.slice(r.wf.indexOf('.') + 1) }, `run ${r.run}: ${p}`); found.push(d); write(`  ${d.code} ${d.name}  ${d.message}\n`); }
       }
