@@ -95,6 +95,17 @@ FROZEN waits on M3-6 to M3-9 and a clean control 4 on all 40 versions.
 3. **O1 stays as written; the new range refusals get a separate, labeled check.** O1 was written from the briefs before M3-7 and M3-8 amended them, and its author removed out-of-range tests where the brief was silent (T2, T3 authorize). Its independence matters more than its completeness, so O1 is not edited or rewritten. The out-of-range refusals the amended briefs now state are checked by **O1-R**, generated mechanically from the M3-8 list through the host interface, the same in every arm. O1-R is reported as a secondary measure, beside O1, and never added into the primary count of escaped defects pre-registered in S96. The analysis script reports it separately, with a test.
 4. **The environment rule is narrowed.** The runner keeps refusing a run when the Node version, the `claude` CLI version or the model id differs from the record. A change of operating system release is recorded in the run's record and reported, not refused: an OS patch does not change what the agent sees. Before FROZEN, the owner disables the CLI's automatic updates and pauses operating system updates for the duration of the runs; the freeze is then regenerated once, recording the pinned versions.
 
+## M3-10 accepted, and the steps to FROZEN
+
+**M3-10 is accepted** (3d0f877, be30381). Controls 1 to 4 pass on all 40 versions (160 of 160) with the adapter at 7378c3d, and no mutant stopped failing. O1-R is secondary as ruled: built mechanically from the M3-8 range list, the same in every arm, outside every workspace, feeding no rule, no verdict and no S96 count. A refused setup step skips the O1-R test rather than failing it, because reaching the starting state is O1's to measure. A version passes the controls only when all four are present and passed. A change of OS release is recorded, not refused.
+
+**Removing the empty instance a refused creating command leaves is the adapter's job**, for arms 3 and 4 alike, and the report says so.
+
+**Steps to FROZEN, in order.**
+1. Pin the CLI: `"env": {"DISABLE_AUTOUPDATER": "1"}` in `%USERPROFILE%\.claude\settings.json`; `claude doctor` shows auto-updates disabled by that variable; record `claude --version`. Pause Windows updates for the run window.
+2. Regenerate `freeze.json` once, with `--model claude-opus-5-5`; `freeze.mjs --check` then reports no change.
+3. Pilots on P1 (`experiments/m3/PILOT`), then the budget, then FROZEN, then the runs.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
