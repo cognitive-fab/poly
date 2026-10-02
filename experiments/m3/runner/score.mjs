@@ -82,18 +82,27 @@ export function buildImpl(arm, v, delivery, work) {
   return { impl: join(work, 'host.gen.ts') };
 }
 
-/** For the poly arms: diagnostic codes the agent saw, and fixes offered and applied, from the journal's tool results. */
+/** A shell command that runs poly's toolchain in a workspace: `npm run poly` or its CLI directly. */
+const POLY_COMMAND = /\bnpm\s+run\s+(--silent\s+)?poly\b|@poly[\\/]check[\\/]dist[\\/]src[\\/]cli\.js/;
+
+/** For the poly arms: diagnostic codes the agent saw, and fixes offered and applied, from the output of its poly commands. */
 export function toolchainUse(journalText) {
   const codes = {};
   const offered = new Set();
   const applied = new Set();
+  // Only the output of poly commands counts (d28afc3): codes the agent read in the manual or grepped for are not
+  // diagnostics it was shown. Arm 3's pilot counted 28 codes before this, among them PL5401, which its module cannot raise.
+  const polyCalls = new Set();
   for (const line of journalText.split('\n')) {
     if (!line) continue;
     const e = JSON.parse(line);
     const ev = e.event;
+    if (ev?.type === 'assistant') {
+      for (const c of ev.message?.content ?? []) if (c.type === 'tool_use' && c.name === 'Bash' && POLY_COMMAND.test(String(c.input?.command ?? ''))) polyCalls.add(c.id);
+    }
     if (ev?.type === 'user') {
       for (const c of ev.message?.content ?? []) {
-        if (c.type !== 'tool_result') continue;
+        if (c.type !== 'tool_result' || !polyCalls.has(c.tool_use_id)) continue;
         const text = typeof c.content === 'string' ? c.content : (c.content ?? []).map((x) => x.text ?? '').join('\n');
         for (const m of text.matchAll(/\b(PL\d{4})\b/g)) codes[m[1]] = (codes[m[1]] ?? 0) + 1;
         for (const m of text.matchAll(/\b([a-z]+(?:-[a-z]+)*@[0-9a-f]{12})\b/g)) offered.add(m[1]);
@@ -107,6 +116,8 @@ export function toolchainUse(journalText) {
 
 export async function scoreRun(dir, { timeoutMs = 30 * 60 * 1000, o1Dir } = {}) {
   const record = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+  // A run ended by the plan's usage limit or a failed login measures nothing: it is not scored, and is rerun (4210fa6).
+  if (record.unscored) return record;
   const vs = versions(record.task);
   const scores = [];
   for (const rv of record.versions) {

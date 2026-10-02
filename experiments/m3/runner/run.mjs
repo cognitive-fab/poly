@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { M3, versions } from '../lib/task.mjs';
 import { currentEnvironment, environmentDiff, isExactModelId, refusalDiff } from '../lib/environment.mjs';
+import { ARM_CONFIG_DIR, apiKeyProblems, configProblems, loginOf, loginProblems } from './isolation.mjs';
 import { changeSources, deliveryFiles, listFiles, makeWorkspace, takeDelivery } from './workspace.mjs';
 import { runTurn } from './agent.mjs';
 
@@ -48,7 +49,7 @@ export function promptOf(arm, version) {
   return fill(readFileSync(join(M3, 'prompts', 'change.md'), 'utf8'), { CHANGE: readFileSync(version.briefs[version.n], 'utf8').trim(), HOST: host });
 }
 
-export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, agent, maxBudgetUsd, environment }) {
+export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, agent, maxBudgetUsd, environment, isolation }) {
   const id = `${task}-arm${arm}-run${run}`;
   const dir = join(out, id);
   const ws = join(tmpdir(), 'poly-m3-ws', id);
@@ -57,9 +58,12 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
   const vs = versions(task);
   const { files } = makeWorkspace(ws, arm, vs[0]);
   const journal = join(dir, 'journal.jsonl');
-  const record = { id, arm, task, run, model, budget: { tokens, wallMs }, agent: agent.kind, started: new Date().toISOString(), workspace: files, versions: [] };
+  // The dollar cap is passed to the CLI only when given; the token cap and the wall time are the runner's own (4210fa6).
+  const record = { id, arm, task, run, model, budget: { tokens, wallMs, maxBudgetUsd: maxBudgetUsd ?? null }, agent: agent.kind, started: new Date().toISOString(), workspace: files, versions: [] };
   // M3-10: the environment the run ran in, and what of it differs from freeze.json (an OS release, at most).
   if (environment) record.environment = environment;
+  // 4210fa6: the arms' configuration folder and the kind of login, never a credential.
+  if (isolation) record.isolation = isolation;
   let sessionId = null;
   let spent = { tokens: 0, wallMs: 0 };
   let stopped = null;
@@ -68,7 +72,7 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
       for (const s of changeSources(v)) copyFileSync(s.from, join(ws, s.to));
     }
     const prompt = promptOf(arm, v);
-    if (stopped) { record.versions.push({ n: v.n, attempted: false, reason: `the run's ${stopped} was spent` }); continue; }
+    if (stopped) { record.versions.push({ n: v.n, attempted: false, reason: stopped === 'limited' || stopped === 'auth' ? `the run stopped: ${stopped}` : `the run's ${stopped} was spent` }); continue; }
     let last = deliveryDigest(ws, arm);
     let k = 0;
     const onToolResult = () => {
@@ -77,18 +81,31 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
       last = now;
       takeDelivery(ws, arm, join(dir, 'snapshots', `v${v.n}`, String(++k)));
     };
-    const t = await runTurn({ agent, ws, journal, arm, model, prompt, sessionId, turn: v.n, maxBudgetUsd, onToolResult, limits: { tokens: tokens - spent.tokens, wallMs: wallMs - spent.wallMs } });
+    const t = await runTurn({ agent, ws, journal, arm, model, prompt, sessionId, turn: v.n, maxBudgetUsd, onToolResult, configDir: isolation?.configDir, limits: { tokens: tokens - spent.tokens, wallMs: wallMs - spent.wallMs } });
     sessionId = t.sessionId;
-    spent = { tokens: spent.tokens + t.tokens, wallMs: spent.wallMs + t.wallMs };
+    spent = { tokens: spent.tokens + t.tokens, wallMs: spent.wallMs + t.wallMs, costUsd: t.costUsd === null || spent.costUsd === null ? null : (spent.costUsd ?? 0) + t.costUsd };
     stopped = t.stopped;
     const taken = takeDelivery(ws, arm, join(dir, 'deliveries', `v${v.n}`));
-    record.versions.push({ n: v.n, attempted: true, promptSha256: sha(prompt), usage: t.usage, tokens: t.tokens, wallMs: t.wallMs, stopped: t.stopped, exitCode: t.exitCode, delivered: taken, snapshots: k });
+    // The usage is the CLI's result event's; `running` and `differs` record where the cut-off's running count differed.
+    record.versions.push({ n: v.n, attempted: true, promptSha256: sha(prompt), usage: t.usage, tokens: t.tokens, costUsd: t.costUsd, cliCostUsd: t.cliCostUsd, usageSource: t.usageSource, running: t.running, differs: t.differs, wallMs: t.wallMs, stopped: t.stopped, exitCode: t.exitCode, delivered: taken, snapshots: k });
   }
+  // A usage limit or a failed login: recorded as such, never scored, rerun from the start (4210fa6, aad9a23).
+  if (stopped === 'limited' || stopped === 'auth') record.unscored = stopped === 'limited' ? 'limited' : 'authentication failure';
   record.spent = spent;
   record.finished = new Date().toISOString();
   writeFileSync(join(dir, 'run.json'), JSON.stringify(record, null, 2) + '\n');
   rmSync(ws, { recursive: true, force: true });
   return { dir, record };
+}
+
+/**
+ * Why a real run of `task` may not start: a pilot runs only on a practice task (P1, ...) once the owner writes
+ * experiments/m3/PILOT, and a run of T1 to T10 only once the owner approves the freeze and writes FROZEN.
+ */
+export function gateProblem(task, m3 = M3) {
+  const practice = /^P\d+$/.test(task);
+  if (existsSync(join(m3, practice ? 'PILOT' : 'FROZEN'))) return null;
+  return practice ? 'a pilot run needs the owner\'s approval (experiments/m3/PILOT)' : 'a real run needs the freeze (experiments/m3/FROZEN), which the owner approves';
 }
 
 const flag = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -101,8 +118,9 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   }
   const stub = flag('stub');
   const agent = stub ? { kind: 'stub', turns: JSON.parse(readFileSync(stub, 'utf8')).turns } : { kind: 'claude' };
-  // A real run spends money: a pilot runs only on a practice task (P1, ...) once the owner writes
-  // experiments/m3/PILOT, and a run of T1 to T10 only once the owner approves the freeze and writes FROZEN.
+  // 4210fa6: no API billing. Refused first, before anything else runs; the variable is named, its value never shown.
+  const keys = apiKeyProblems(process.env);
+  if (!stub && keys.length) { for (const k of keys) console.error(k); process.exit(2); }
   // S116, M3-10: a run, a pilot included, needs the Node version, the CLI version and the model freeze.json
   // records, with the model given by its exact id. An OS release change is recorded in the run and reported.
   let environment;
@@ -119,9 +137,17 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     environment = { current, differs: environmentDiff(recorded, current) };
     for (const k of environment.differs) console.error(`environment differs from freeze.json in ${k}, recorded in the run: ${JSON.stringify(recorded?.[k])}, now ${JSON.stringify(current[k])}`);
   }
-  const practice = /^P\d+$/.test(task);
-  const gate = practice ? 'PILOT' : 'FROZEN';
-  if (!stub && !existsSync(join(M3, gate))) { console.error(practice ? 'a pilot run needs the owner\'s approval (experiments/m3/PILOT)' : 'a real run needs the freeze (experiments/m3/FROZEN), which the owner approves'); process.exit(2); }
-  const { dir } = await runOne({ arm, task, run: Number(flag('run') ?? 1), model: flag('model'), tokens: Number(flag('tokens')), wallMs: Number(flag('wall')) * 1000, out: flag('out'), agent, environment, maxBudgetUsd: flag('max-budget-usd') ? Number(flag('max-budget-usd')) : undefined });
+  const gate = gateProblem(task);
+  if (!stub && gate) { console.error(gate); process.exit(2); }
+  // 4210fa6: the arms' folder holds only the login, the settings and the CLI's own state, and the login is a subscription.
+  let isolation;
+  if (!stub) {
+    const problems = configProblems(ARM_CONFIG_DIR);
+    const login = problems.length ? null : loginOf(ARM_CONFIG_DIR);
+    problems.push(...(login ? loginProblems(login) : []));
+    if (problems.length) { for (const p of problems) console.error(`isolation: ${p}`); process.exit(2); }
+    isolation = { configDir: ARM_CONFIG_DIR, authMethod: login.authMethod, subscriptionType: login.subscriptionType };
+  }
+  const { dir } = await runOne({ arm, task, run: Number(flag('run') ?? 1), model: flag('model'), tokens: Number(flag('tokens')), wallMs: Number(flag('wall')) * 1000, out: flag('out'), agent, environment, isolation, maxBudgetUsd: flag('max-budget-usd') ? Number(flag('max-budget-usd')) : undefined });
   console.log(dir);
 }

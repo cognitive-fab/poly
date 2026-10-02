@@ -2,12 +2,17 @@
 // replays a recorded script. Either way the turn is written to the journal as stream-json events, its tokens
 // are counted, and it is stopped when the run's token budget or wall time runs out.
 //
-// Tokens are counted as input + cache creation + cache read + output, from the usage of each assistant message,
-// which is what the budget and PT13's "tokens per delivered task" measure. Nothing here calls a model on a
-// check or decision path: the agent is the arm under test.
+// Tokens are input + cache creation + cache read + output (S99). The recorded measure of a turn is the usage of the
+// CLI's final result event, and its cost is computed from those counts at list price (d28afc3, 4210fa6). During a
+// turn the cut-off uses a running count that takes each message's usage once, by message id: the CLI streams one
+// event per content block, each repeating its message's usage, and the pilots' first count, which added every
+// event, was 2.4 to 2.6 times the CLI's. A streamed message carries its output count before it is final, so the
+// running output is low; the record says where the running count and the result differ. Nothing here calls a
+// model on a check or decision path: the agent is the arm under test.
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { armEnv } from './isolation.mjs';
 
 /** The allowed tools of each arm: the file tools and a shell for the arm's commands, nothing else (plan-m3 §6). */
 export const ALLOWED_TOOLS = {
@@ -17,11 +22,13 @@ export const ALLOWED_TOOLS = {
   4: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash(node *)', 'Bash(npx tsc *)', 'Bash(npm test*)', 'Bash(npm run poly *)', 'Bash(npm run adapter*)'],
 };
 
-/** The CLI's arguments for one turn. `--bare` keeps the owner's settings, memory, hooks and plugins out of the arm. */
+/**
+ * The CLI's arguments for one turn. The arms run on the owner's subscription, so without `--bare` (which takes only
+ * an API key); the owner's setup is kept out by the configuration folder and the environment of isolation.mjs.
+ */
 export function claudeArgs({ arm, model, prompt, sessionId, maxBudgetUsd }) {
   return [
     '-p', prompt,
-    '--bare',
     '--output-format', 'stream-json', '--verbose',
     '--model', model,
     '--allowedTools', ALLOWED_TOOLS[arm].join(','),
@@ -33,26 +40,83 @@ export function claudeArgs({ arm, model, prompt, sessionId, maxBudgetUsd }) {
   ];
 }
 
-export const tokensOf = (u) => (u?.input_tokens ?? 0) + (u?.cache_creation_input_tokens ?? 0) + (u?.cache_read_input_tokens ?? 0) + (u?.output_tokens ?? 0);
+/** The four parts of a turn's tokens (S99), as the API names them. */
+export const PARTS = ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens'];
+export const tokensOf = (u) => PARTS.reduce((n, k) => n + (u?.[k] ?? 0), 0);
+const partsOf = (u) => Object.fromEntries(PARTS.map((k) => [k, u?.[k] ?? 0]));
+
+/**
+ * List prices in dollars per million tokens. Claude Opus 5.5: $4 input, $20 output, $0.20 cache read, cache writes at
+ * 1.25 times input for five minutes and twice input for an hour. The pilots' CLI figures (costBasis "list") agree
+ * with these to the micro-dollar on every turn (test/m3-count.test.mjs).
+ */
+export const PRICES = { 'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite5m: 5, cacheWrite1h: 8 } };
+
+/** A turn's cost at list price, from its token counts; a cache write not split by duration is priced as five-minute. */
+export function costOfUsage(u, model) {
+  const p = PRICES[model];
+  if (!p) throw new Error(`no list price for ${model}`);
+  const write = u?.cache_creation_input_tokens ?? 0;
+  const hour = u?.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+  return ((u?.input_tokens ?? 0) * p.input + (u?.output_tokens ?? 0) * p.output + (u?.cache_read_input_tokens ?? 0) * p.cacheRead + (write - hour) * p.cacheWrite5m + hour * p.cacheWrite1h) / 1e6;
+}
+
+const LIMITED = /usage limit reached|hit your (usage )?limit/i;
+const AUTH = /not logged in|please run \/login|authentication_failed|invalid api key|oauth token (has )?expired/i;
+
+/**
+ * The accounting of one turn, fed every stream event: the running count (each message once, by id), the result
+ * event's usage, and whether the turn hit the plan's usage limit or failed to authenticate.
+ */
+export function turnAccount() {
+  const messages = new Map();
+  let anon = 0;
+  let result = null;
+  let status = null;
+  const running = () => {
+    const out = partsOf();
+    for (const u of messages.values()) for (const k of PARTS) out[k] += u[k] ?? 0;
+    return out;
+  };
+  return {
+    add(e) {
+      if (e.type === 'assistant' && e.message?.usage) messages.set(e.message.id ?? `anon-${++anon}`, e.message.usage);
+      const text = e.type === 'assistant' ? (e.message?.content ?? []).map((c) => c.text ?? '').join(' ') : e.type === 'result' ? String(e.result ?? '') : '';
+      if (e.error === 'rate_limit' || ((e.error || e.is_error) && LIMITED.test(text))) status = 'limited';
+      else if (!status && (e.error === 'authentication_failed' || ((e.error || e.is_error) && AUTH.test(text)))) status = 'auth';
+      if (e.type === 'result') result = e;
+    },
+    running,
+    status: () => status,
+    final() {
+      const r = running();
+      if (!result?.usage) return { source: 'running', usage: r, running: r, differs: [], cliCostUsd: result?.total_cost_usd ?? null, cacheCreation: null };
+      const usage = partsOf(result.usage);
+      return { source: 'result', usage, running: r, differs: PARTS.filter((k) => r[k] !== usage[k]), cliCostUsd: result.total_cost_usd ?? null, cacheCreation: result.usage.cache_creation ?? null };
+    },
+  };
+}
 
 /**
  * Runs one turn. `agent` is { kind: 'claude', bin?: 'claude' } or { kind: 'stub', turns: [...] } (see stubTurn).
- * `limits` is { tokens, wallMs }, what is left of the run's budget. Resolves to { sessionId, usage, tokens,
- * wallMs, stopped: null | 'budget' | 'wall', exitCode }.
+ * `limits` is { tokens, wallMs }, what is left of the run's budget. Resolves to { sessionId, usage, tokens, costUsd,
+ * cliCostUsd, usageSource, running, differs, wallMs, stopped: null | 'budget' | 'wall' | 'limited' | 'auth', exitCode }.
+ * `configDir` is the arms' configuration folder (isolation.mjs).
  */
-export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionId, limits, turn, maxBudgetUsd, onToolResult }) {
+export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionId, limits, turn, maxBudgetUsd, onToolResult, configDir }) {
   mkdirSync(dirname(journal), { recursive: true });
   const t0 = Date.now();
   const log = (event) => appendFileSync(journal, JSON.stringify({ at: Date.now() - t0, turn, ...event }) + '\n');
   log({ type: 'runner.prompt', prompt });
-  const state = { sessionId: sessionId ?? null, usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 }, stopped: null };
-  const count = (u) => { for (const k of Object.keys(state.usage)) state.usage[k] += u?.[k] ?? 0; };
-  const over = () => (tokensOf(state.usage) > limits.tokens ? 'budget' : Date.now() - t0 > limits.wallMs ? 'wall' : null);
+  const state = { sessionId: sessionId ?? null, stopped: null };
+  const account = turnAccount();
+  // A usage limit or a failed login ends the turn at once: the run is recorded, not scored, and rerun (4210fa6, aad9a23).
+  const over = () => account.status() ?? (tokensOf(account.running()) > limits.tokens ? 'budget' : Date.now() - t0 > limits.wallMs ? 'wall' : null);
   const onEvent = (e) => {
     log({ type: 'stream', event: e });
     if (e.type === 'system' && e.session_id) state.sessionId = e.session_id;
     if (e.type === 'result' && e.session_id) state.sessionId = e.session_id;
-    if (e.type === 'assistant' && e.message?.usage) count(e.message.usage);
+    account.add(e);
     // After a tool ran, the runner may snapshot the delivery, for the regressions caught before delivery (PT13).
     if (e.type === 'user' && (e.message?.content ?? []).some((c) => c.type === 'tool_result')) onToolResult?.();
   };
@@ -61,7 +125,7 @@ export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionI
     exitCode = await stubTurn(agent.turns[turn] ?? { events: [] }, ws, onEvent, () => (state.stopped = over()));
   } else {
     exitCode = await new Promise((resolve) => {
-      const child = spawn(agent.bin ?? 'claude', claudeArgs({ arm, model, prompt, sessionId, maxBudgetUsd }), { cwd: ws, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } });
+      const child = spawn(agent.bin ?? 'claude', claudeArgs({ arm, model, prompt, sessionId, maxBudgetUsd }), { cwd: ws, stdio: ['ignore', 'pipe', 'pipe'], env: armEnv(process.env, configDir) });
       let buf = '';
       child.stdout.on('data', (d) => {
         buf += d;
@@ -80,8 +144,11 @@ export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionI
     });
   }
   const wallMs = Date.now() - t0;
-  log({ type: 'runner.turn-end', usage: state.usage, tokens: tokensOf(state.usage), wallMs, stopped: state.stopped, exitCode });
-  return { sessionId: state.sessionId, usage: state.usage, tokens: tokensOf(state.usage), wallMs, stopped: state.stopped, exitCode };
+  const f = account.final();
+  const stopped = state.stopped ?? account.status();
+  const out = { usage: f.usage, tokens: tokensOf(f.usage), costUsd: PRICES[model] ? costOfUsage({ ...f.usage, cache_creation: f.cacheCreation }, model) : null, cliCostUsd: f.cliCostUsd, usageSource: f.source, running: f.running, differs: f.differs, wallMs, stopped, exitCode };
+  log({ type: 'runner.turn-end', ...out });
+  return { sessionId: state.sessionId, ...out };
 }
 
 /**
