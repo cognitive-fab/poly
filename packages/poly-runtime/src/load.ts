@@ -82,7 +82,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     const b = existsSync(f) ? readFileSync(f) : null;
     const have = b ? sha256OfBytes(b) : null;
     if (have !== want) changed.push(`${p} is not the certified package file (certified ${want}, found ${have ?? 'nothing'})`);
-    else if (!p.startsWith('../')) packageBytes.set(p, b!);
+    else packageBytes.set(p, b!);
   }
   if (h.lockfile) {
     const f = join(root, h.lockfile.path);
@@ -101,16 +101,19 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
 
   const runDir = join(root, '.poly', 'run', certificate.buildId);
   const handlers = new Map<string, string>();
+  const base = handlerCopyRoot(runDir, h.packageFiles ?? {});
   for (const [p, b] of handlerBytes) {
-    const copy = join(runDir, 'handlers', ...p.split('/'));
+    const copy = join(base, ...p.split('/'));
     mkdirSync(dirname(copy), { recursive: true });
     writeFileSync(copy, b);
     if (h.roots.includes(p)) handlers.set(p, copy);
   }
   // Review D-F4: the runtime imports the copy, so a bare import resolves from there. The certified package files inside
   // the project are copied beside it as they sit beside the handlers, so the package that runs is the certified one.
+  // Polywatch: a package above the project ('../node_modules/…') is copied too, above the copy's root, which sits
+  // that many directories deep, so Node finds the copy before it leaves the run directory.
   for (const [p, b] of packageBytes) {
-    const copy = join(runDir, 'handlers', ...p.split('/'));
+    const copy = join(base, ...p.split('/'));
     mkdirSync(dirname(copy), { recursive: true });
     writeFileSync(copy, b);
   }
@@ -143,6 +146,16 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   return { certificate, root, runDir, machines, handlers, policies };
 }
 
+/**
+ * Where the project's root sits in the handlers' copy: as many directories below `handlers` as the deepest certified
+ * package lies above the project, so every '../' path stays inside the copy (polywatch on S154).
+ */
+function handlerCopyRoot(runDir: string, packageFiles: Record<string, string>): string {
+  let up = 0;
+  for (const p of Object.keys(packageFiles)) up = Math.max(up, (p.match(/^(\.\.\/)*/)![0].length) / 3);
+  return join(runDir, 'handlers', ...Array.from({ length: up }, (_, k) => `up${k}`));
+}
+
 /** After registration: the copy polyrun read is still the certified bytes (a check of the copy, not of the build). */
 export function recheckCopy(v: VerifiedBuild): void {
   for (const m of v.certificate.subject.machines) {
@@ -154,14 +167,14 @@ export function recheckCopy(v: VerifiedBuild): void {
     }
   }
   // S154: and the package copies.
+  const base = handlerCopyRoot(v.runDir, v.certificate.poly.handlers.packageFiles ?? {});
   for (const [p, want] of Object.entries(v.certificate.poly.handlers.packageFiles ?? {})) {
-    if (p.startsWith('../')) continue;
-    const have = sha256OfBytes(readFileSync(join(v.runDir, 'handlers', ...p.split('/'))));
+    const have = sha256OfBytes(readFileSync(join(base, ...p.split('/'))));
     if (have !== want) throw new LoadError(`refused at load: PL6403 HANDLER_CHANGED: the verified copy of ${p} changed before it was imported (certified ${want}, found ${have})`);
   }
   // S142: the handler copies too, before the runtime imports them.
   for (const [p, want] of Object.entries(v.certificate.poly.handlers.files)) {
-    const have = sha256OfBytes(readFileSync(join(v.runDir, 'handlers', ...p.split('/'))));
+    const have = sha256OfBytes(readFileSync(join(base, ...p.split('/'))));
     if (have !== want) throw new LoadError(`refused at load: PL6403 HANDLER_CHANGED: the verified copy of ${p} changed before it was imported (certified ${want}, found ${have})`);
   }
 }

@@ -175,6 +175,10 @@ export function handlerClosure(root: string, files: string[]): HandlerClosure {
         queue.push(target);
       } else if (spec.startsWith('/') || (/^[a-z]+:/i.test(spec) && !spec.startsWith('node:'))) {
         uncertifiable(file, `the import '${spec}' is an absolute path or URL, which the certificate cannot name`);
+      } else if (spec.startsWith('#')) {
+        // Polywatch: the runtime imports a verified copy of the handlers, and the project's imports map would resolve
+        // from it to the original files, which are not what was re-checked before import.
+        uncertifiable(file, `the import '${spec}' goes through the project's imports map, which would resolve to the original files and not the verified copy the runtime imports; import the file by a relative path`);
       } else if (!isBuiltin(spec)) {
         // A bare specifier: an installed package. Its name is the first segment, or the first two for a scope.
         const parts = spec.split('/');

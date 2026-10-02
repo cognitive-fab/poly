@@ -150,3 +150,33 @@ test('S154: a handler imports the certified package, not another one the project
   const rt = await load(join(dir, '.poly', 'build'), opts(dir, r));
   try { assert.equal(rt.handlerExports('src/handlers.ts').which(), 'certified'); } finally { await rt.close(); }
 });
+
+// Polywatch on the M5b fixes: a package Node resolves from a node_modules above the project is certified under a
+// '../' path. The runtime imports the handlers' verified copy, so that package must be copied and re-checked too,
+// or the handler would import the original file outside the run directory.
+test('S154: a certified package above the project is imported from the verified copy', async () => {
+  const dir = project('package-above', SOURCES, key, 'test-handlers-above');
+  const above = join(dir, '..', 'node_modules', 'above-poly');
+  mkdirSync(above, { recursive: true });
+  writeFileSync(join(above, 'package.json'), JSON.stringify({ name: 'above-poly', version: '1.0.0', type: 'module', exports: './index.js' }));
+  writeFileSync(join(above, 'index.js'), 'export const where = import.meta.url;\n');
+  writeFileSync(join(dir, 'src', 'handlers.ts'), "import { where } from 'above-poly';\nexport async function handle(payload: unknown) { return { ok: true, payload }; }\nexport function which() { return where; }\n");
+  const r = await admit(dir);
+  assert.deepEqual(Object.keys(r.certificate.poly.handlers.packageFiles).sort(), ['../node_modules/above-poly/index.js', '../node_modules/above-poly/package.json']);
+  const rt = await load(join(dir, '.poly', 'build'), opts(dir, r));
+  try {
+    const where = rt.handlerExports('src/handlers.ts').which();
+    assert.ok(where.startsWith(pathToFileURL(join(dir, '.poly', 'run')).href), where);
+  } finally { await rt.close(); }
+});
+
+// Polywatch on the M5b fixes: an imports-map specifier ('#…') in a handler would resolve through the project's
+// package.json to the original files, not the verified copy, so it is refused as such, never as a missing package.
+test('S154: an imports-map specifier in a handler is PL6402 with its reason', async () => {
+  const { checkProject } = await import('@poly/check');
+  const dir = withClosure('imports-map', "import { x } from '#internal';\nexport function shape(p: unknown) { return { ok: true, p, x }; }\n");
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'imports-map', type: 'module', imports: { '#internal': './src/lib/deep.ts' } }));
+  const report = await checkProject(dir, { root: dir });
+  const d = report.handlers.diagnostics.find((x) => x.code === 'PL6402');
+  assert.ok(d && /imports map/.test(d.message) && !/no installed package/.test(d.message), JSON.stringify(report.handlers.diagnostics));
+});
