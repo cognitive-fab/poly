@@ -273,3 +273,11 @@ test('S149: a never statement whose forbidden proposal is only escalated is PL65
   assert.ok(f, JSON.stringify(s.diagnostics.map((d) => d.message)));
   assert.equal(f.witness.trace.at(-1).verdict, 'allow (approved)');
 });
+
+// B13 (review of M5a, ruled to M5b): a comment written inside an obligation body stays where it was written. The
+// formatter printed it after the obligation, since the expressions it sits beside were not comment anchors.
+test('B13: comments inside an obligation body keep their place through the formatter', () => {
+  const src = 'module c\n\npolicy p {\n  scope "orders"\n  // before the rule\n  obligation r "R." rule {\n    // inside the rule, before when\n    when effect.kind == "payment.fee"  // trailing on when\n    // before require\n    require false else deny\n  }  // after the rule\n  obligation m "M." machine {\n    states a, b\n    initial a\n    // before a transition\n    from a when effect.kind == "stock.reserve" -> b  // trailing on the transition\n    // before a guard\n    deny in a when effect.kind == "payment.charge" reason "r"\n    end a, b\n  }\n}\n';
+  const r = parse(src);
+  assert.equal(format(r.module, r.trivia), src);
+});

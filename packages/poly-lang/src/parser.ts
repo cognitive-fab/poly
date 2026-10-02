@@ -234,9 +234,10 @@ class Parser {
           this.next();
           this.expect('{');
           let when: A.Expr | null = null;
-          if (this.at('when')) { this.next(); when = this.expr(); }
+          if (this.at('when')) { this.next(); when = this.expr(); this.attachable.push(when); }
           this.expect('require');
           const require = this.expr();
+          this.attachable.push(require);
           this.expect('else');
           const sev = this.ident('deny, warn or escalate');
           if (sev !== 'deny' && sev !== 'warn' && sev !== 'escalate') this.fail('expected deny, warn or escalate', this.t[this.i - 1]);
@@ -266,6 +267,7 @@ class Parser {
               if (this.atPunct('*')) { this.next(); from = '*'; } else from = this.identList('a state');
               this.expect('when');
               const when = this.expr();
+              this.attachable.push(when);
               this.expect('->');
               transitions.push({ from, when, to: this.ident('a state') });
             } else {
@@ -274,6 +276,7 @@ class Parser {
               const inStates = this.identList('a state');
               this.expect('when');
               const when = this.expr();
+              this.attachable.push(when);
               this.expect('reason');
               guards.push({ in: inStates, when, reason: this.str('a reason') });
             }

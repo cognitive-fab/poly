@@ -90,21 +90,22 @@ class Printer {
     for (const v of p.vars) this.emit(v, INDENT, [`var ${v.name}: ${this.type(v.type)} = ${this.expr(v.init, 0)}`]);
     for (const it of p.items) {
       switch (it.kind) {
+        // B13: each line of a body carries the comments of the expression on it, before it and at its end.
         case 'RuleObligation': {
-          const lines = [`obligation ${it.name} ${q(it.text)} rule {`];
-          if (it.when) lines.push(`${INDENT}when ${this.expr(it.when, 0)}`);
-          lines.push(`${INDENT}require ${this.expr(it.require, 0)} else ${it.severity}`);
-          if (it.onUnknown) lines.push(`${INDENT}on unknown ${it.onUnknown}`);
-          lines.push('}');
-          this.emit(it, INDENT, lines);
+          this.lead(it, INDENT);
+          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} rule {`);
+          if (it.when) this.emit(it.when, INDENT + INDENT, [`when ${this.expr(it.when, 0)}`]);
+          this.emit(it.require, INDENT + INDENT, [`require ${this.expr(it.require, 0)} else ${it.severity}`]);
+          if (it.onUnknown) this.out.push(`${INDENT}${INDENT}on unknown ${it.onUnknown}`);
+          this.out.push(`${INDENT}}${this.trail(it)}`);
           break;
         }
         case 'MachineObligation': {
-          const lines = [`obligation ${it.name} ${q(it.text)} machine {`, `${INDENT}states ${it.states.join(', ')}`, `${INDENT}initial ${it.initial}`];
-          for (const t of it.transitions) lines.push(`${INDENT}from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`);
-          for (const g of it.guards) lines.push(`${INDENT}deny in ${g.in.join(', ')} when ${this.expr(g.when, 0)} reason ${q(g.reason)}`);
-          lines.push(`${INDENT}end ${it.end.join(', ')}`, '}');
-          this.emit(it, INDENT, lines);
+          this.lead(it, INDENT);
+          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} machine {`, `${INDENT}${INDENT}states ${it.states.join(', ')}`, `${INDENT}${INDENT}initial ${it.initial}`);
+          for (const t of it.transitions) this.emit(t.when, INDENT + INDENT, [`from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`]);
+          for (const g of it.guards) this.emit(g.when, INDENT + INDENT, [`deny in ${g.in.join(', ')} when ${this.expr(g.when, 0)} reason ${q(g.reason)}`]);
+          this.out.push(`${INDENT}${INDENT}end ${it.end.join(', ')}`, `${INDENT}}${this.trail(it)}`);
           break;
         }
         case 'InvariantObligation':
