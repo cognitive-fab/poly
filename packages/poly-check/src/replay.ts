@@ -124,10 +124,18 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
   const out: RunReplay[] = [];
   for (const inst of instances) {
     if (opts.runs && !opts.runs.includes(inst.id)) continue;
+    const rows = (await rt.getJournal(inst.id)) as unknown as JournalRowLike[];
+    const model = rt.modelOf(inst.machineId);
+    if (model) {
+      // A worker's intent: its journal is the worker's trace, replayed against the OutboxIntent model (M4b).
+      const parsed = parse(model.source).module;
+      if (!parsed) throw new Error(`${inst.machineId}: the model does not parse`);
+      out.push(replayRun(parsed, inst.machineId, inst.id, rows, { modulePath: model.module, snapshot: inst.state }));
+      continue;
+    }
     const module = modules.get(inst.machineId.slice(0, inst.machineId.indexOf('.')));
     if (!module) throw new Error(`${inst.id}: machine ${inst.machineId} is not in the certified sources`);
-    const rows = (await rt.getJournal(inst.id)) as unknown as JournalRowLike[];
-    out.push(replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: rt.gateReplays(inst.id) }));
+    out.push(replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id) }));
   }
   return out;
 }

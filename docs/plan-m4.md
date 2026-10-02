@@ -141,6 +141,8 @@ Each issue gives a proposal. Nothing is built on an issue before it is ruled.
 
 - **S137. The retry bound of an effect with no `retry` clause** (open, built as proposed). S120 has `load` refuse a manifest entry without `maxAttempts`, and most effects declare no `retry`, so the lowering wrote none and polyrun applied its hidden default (5). *Proposal:* the lowering writes that default out, `{ maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }`, and poly-ref's read-back expects it from PT6.1. The runtime behaves as before, and every bound is declared. One consequence of S120 is not changed: the oms example declares `attempts 6` on `chargeCard` (copied from the hand-written polyrun-oms manifest, AC1), so it is refused at admission; the runtime tests use other sources.
 
+- **S138. OutboxIntent has no permanent failure** (open, built without it). polyrun lets a handler throw `{ permanent: true }` to stop retrying (a declined card is a result, not an infrastructure failure), and dispatches the `failed` completion at once. PT9.7 has no such transition: from `Running`, `HandlerFailed` returns to `Allowed` below the bound. The worker hosts the machine, so it cannot add the path without the machine first (PL2401). *As built:* a permanent failure is an ordinary failure, retried up to the bound, and then `exhausted`. *Proposal:* PT9.7 gains `action HandlerRefused()`, `Running { attempt: n } => intent' = Dead`, with the `failed` completion; the model, its checks and the worker change together.
+
 ## 7. Risks
 
 - **Subclassing polyrun's `Store`** (S121) depends on `commitStep` and `insertJournal` keeping their names and call pattern. `test/vendor.test.mjs` pins the bytes; a re-vendoring that changes either fails the ledger tests first.

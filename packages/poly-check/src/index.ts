@@ -6,3 +6,4 @@ export { applyFixById, findFix, type FixResult } from './fix.js';
 export { lintHandlers, lintHandlerText } from './lint.js';
 export { admit, artefactsOnDisk, AdmitError, CERTIFICATE_FAULTS, MAX_ATTEMPTS, M4_LIMITS, type AdmitOptions, type AdmitResult, type CertificateFault } from './admit.js';
 export { replayRun, replayRuntime, certifiedModules, type RunReplay, type JournalRowLike } from './replay.js';
+export { workerConformance, workerActions, type Conformance } from './conformance.js';

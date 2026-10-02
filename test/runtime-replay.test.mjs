@@ -43,7 +43,9 @@ test('every run of every program replays: each verdict, reason and post-state, b
   try {
     await drive(rt, clock);
     const runs = await replayRuntime(rt);
-    assert.ok(runs.length === 6, `${runs.length} runs`);
+    // Six program runs, and one OutboxIntent run per effect the account emitted (its worker's trace, M4b).
+    assert.equal(runs.filter((r) => !r.machine.endsWith('.OutboxIntent')).length, 6);
+    assert.ok(runs.some((r) => r.machine.endsWith('.OutboxIntent')));
     for (const r of runs) assert.deepEqual(r.diagnostics.map((d) => d.message), [], r.run);
     const total = runs.reduce((n, r) => n + r.rows, 0);
     assert.equal(runs.reduce((n, r) => n + r.folded, 0), total, 'every row is folded');

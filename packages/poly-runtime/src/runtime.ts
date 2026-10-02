@@ -14,6 +14,8 @@ import type { Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore } from './ledger-store.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
+import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
+import { verifiedModels, modelSource } from './model.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
 
 export { LoadError };
@@ -25,11 +27,14 @@ export interface LoadOptions {
   /** S135: SQLite only. ':memory:' when omitted. */
   store?: { sqlite: string };
   now?: () => number;
+  /** S118: the gate interface; allow-all when omitted. */
+  gate?: { gate?: Gate; escalationTimeoutMs?: number };
+  worker?: { leaseMs?: number; batch?: number; drift?: WorkerDrift };
   /** S123: the head signer, and how often heads are signed and anchors published, off the step path. */
   ledger?: LedgerSigner & { headMs?: number; anchorMs?: number };
 }
 
-export type Handler = (payload: any, caps: Readonly<Record<string, never>>, ctx: { idempotencyKey: string; instanceId: string; seq: number; attempt: number }) => unknown;
+export type Handler = EffectHandler;
 
 /** An outside dispatch that the runtime refuses before any step, with an audit row (K9, K10). */
 export class RefusedDispatch extends Error {
@@ -38,10 +43,12 @@ export class RefusedDispatch extends Error {
 
 export class PolyRuntime {
   readonly handlers = new Map<string, Handler>();
+  readonly worker: EffectWorker;
   private readonly inputSubscribers = new Map<string, Set<(step: unknown) => void>>();
   private timers: NodeJS.Timeout[] = [];
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> = {}) {
+    this.worker = new EffectWorker(kernel, store, this.handlers, { gate: opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker });
     kernel.events.on('step', (step) => {
       for (const f of this.inputSubscribers.get(step.instanceId) ?? []) f(step);
     });
@@ -57,8 +64,40 @@ export class PolyRuntime {
     if (!m) throw new Error(`machine ${machineId} is not in the certificate`);
     return m.module;
   }
-  /** S118: each recorded gate decision of a run, with a way to recompute it from its proposal and snapshot. */
-  gateReplays(_instanceId: string): { seq: number; decision: string; recompute: () => string }[] { return []; }
+  /** S118: each recorded gate decision of a run, recomputed from its recorded proposal and snapshot (K6). */
+  async gateReplays(instanceId: string): Promise<{ seq: number; decision: string; recompute: () => string }[]> {
+    const out: { seq: number; decision: string; recompute: () => string }[] = [];
+    for (const e of await this.chain(instanceId)) {
+      const b = e.body as Record<string, any>;
+      if (e.kind !== 'verdict' || b?.stage !== 'gate' || !b.proposal) continue;
+      const proposal = await this.store.body(b.proposal) as any;
+      const snapshot = await this.store.body(b.snapshot) as Record<string, unknown>;
+      let g = await this.worker.gate.propose(proposal, snapshot);
+      if (b.decision === 2 && g.decision === 'escalate') g = { decision: 'deny', reason: 'escalate-once' };
+      const again = g.decision === 'allow' ? 'allowed' : g.decision === 'deny' ? 'denied' : 'escalated';
+      out.push({ seq: e.seq, decision: b.outcome, recompute: () => again });
+    }
+    return out;
+  }
+
+  /** PT9.2: a recorded approval of an escalated intent (S118: no person-key signature until M5). */
+  approve(intentId: string, approval: { by: string; ref: string }): Promise<void> { return this.worker.approve(intentId, approval); }
+
+  /** The outbox rows of an instance (polyrun's), for hosts and tests that watch the intents. */
+  outbox(instanceId: string) { return this.store.getOutbox(instanceId); }
+
+  /** One outbox row by its intent id (its status and attempts), or null. */
+  async outboxRow(intentId: string): Promise<{ intent_id: string; instance_id: string; kind: string; status: string; attempts: number; last_error: string | null } | null> {
+    return this.store.txn(() => this.store.db.prepare('SELECT intent_id, instance_id, kind, status, attempts, last_error FROM pr_outbox WHERE intent_id = ?').get(intentId) ?? null);
+  }
+
+  /** The runtime's own model behind a machine id (an OutboxIntent instance), or null for a program's machine. */
+  modelOf(machineId: string): { source: string; module: string } | null {
+    const m = /^runtime(\d?)\.OutboxIntent$/.exec(machineId);
+    if (!m) return null;
+    const bound = m[1] ? Number(m[1]) : 3;
+    return { source: modelSource(bound), module: verifiedModels([bound])[0].module };
+  }
 
   /** PT15: a handler for an effect kind. It runs only from the outbox worker, after the gate allows (PT9.2). */
   handle(kind: string, handler: Handler): void { this.handlers.set(kind, handler); }
@@ -154,12 +193,15 @@ export class PolyRuntime {
   }
 
   /** Timers and messages run on polyrun's own workers; effects never do (S119). */
-  async tick(now = this.now()): Promise<{ timers: number; messages: number }> {
-    return { timers: await this.kernel.workers.tickTimers(now), messages: await this.kernel.workers.tickMessages(now) };
+  async tick(now = this.now()): Promise<{ effects: number; timers: number; messages: number }> {
+    return { effects: await this.worker.tick(now), timers: await this.kernel.workers.tickTimers(now), messages: await this.kernel.workers.tickMessages(now) };
   }
 
-  startWorkers({ timerPollMs = 200, messagePollMs = 200 }: { timerPollMs?: number; messagePollMs?: number } = {}): void {
+  startWorkers({ effectPollMs = 200, timerPollMs = 200, messagePollMs = 200 }: { effectPollMs?: number; timerPollMs?: number; messagePollMs?: number } = {}): void {
     const report = (e: unknown) => console.error('[poly-runtime]', (e as Error)?.message ?? e);
+    const w = setInterval(() => { this.worker.tick().catch(report); }, effectPollMs);
+    w.unref?.();
+    this.timers.push(w);
     const t = setInterval(() => { this.kernel.workers.tickTimers().catch(report); }, timerPollMs);
     const m = setInterval(() => { this.kernel.workers.tickMessages().catch(report); }, messagePollMs);
     t.unref?.(); m.unref?.();
@@ -186,7 +228,11 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   try {
     kernel = await createRuntime({
       store,
-      machines: verified.machines.map((m) => ({ machineId: m.id, module: m.module, ...(m.contract ? { contract: m.contract } : {}), ...(m.effects ? { effects: m.effects } : {}) })),
+      machines: [
+        ...verified.machines.map((m) => ({ machineId: m.id, module: m.module, ...(m.contract ? { contract: m.contract } : {}), ...(m.effects ? { effects: m.effects } : {}) })),
+        // S119, S120: the OutboxIntent instance for every retry bound the build declares.
+        ...verifiedModels(verified.machines.flatMap((m) => Object.values(m.manifest?.effects ?? {}).map((e) => e.retry.maxAttempts as number))).map((x) => ({ machineId: x.machineId, module: x.module, contract: x.contract })),
+      ],
       ...(opts.now ? { now: opts.now } : {}),
     });
     recheckCopy(verified);
@@ -195,5 +241,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (e instanceof LoadError) throw e;
     throw new LoadError(`refused at load: polyrun did not register the certified machines: ${(e as Error).message}`);
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger);
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker });
 }

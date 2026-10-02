@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./model": {
+      "types": "./dist/src/model.d.ts",
+      "default": "./dist/src/model.js"
     }
   },
   "dependencies": {

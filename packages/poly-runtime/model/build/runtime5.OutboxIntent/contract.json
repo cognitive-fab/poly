@@ -1,0 +1,75 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:41561923c216281253c4908c08d697fd29407015e5e56b5b30da06215f15f051",
+  "stateKeys": [
+    {
+      "name": "intent",
+      "type": "{ $: 'Pending' } | { $: 'Proposed', decision: 1..2 } | { $: 'Escalated', approved: boolean } | { $: 'Allowed', attempts: 0..4 } | { $: 'Running', attempt: 1..5 } | { $: 'Settled', attempt: 1..5 } | { $: 'Done' } | { $: 'Denied' } | { $: 'Dead' }"
+    },
+    {
+      "name": "intent_decision",
+      "type": "1..2 | null (payload of Proposed)"
+    },
+    {
+      "name": "intent_approved",
+      "type": "boolean | null (payload of Escalated)"
+    },
+    {
+      "name": "intent_attempts",
+      "type": "0..4 | null (payload of Allowed)"
+    },
+    {
+      "name": "intent_attempt",
+      "type": "1..5 | null (payload of Running, Settled)"
+    }
+  ],
+  "initState": {
+    "intent": "Pending",
+    "intent_decision": null,
+    "intent_approved": null,
+    "intent_attempts": null,
+    "intent_attempt": null
+  },
+  "actions": {
+    "Propose": {
+      "dataFields": {}
+    },
+    "GateAllow": {
+      "dataFields": {}
+    },
+    "GateDeny": {
+      "dataFields": {}
+    },
+    "GateEscalate": {
+      "dataFields": {}
+    },
+    "Approve": {
+      "dataFields": {}
+    },
+    "EscalationTimeout": {
+      "dataFields": {}
+    },
+    "Start": {
+      "dataFields": {}
+    },
+    "HandlerOk": {
+      "dataFields": {}
+    },
+    "HandlerFailed": {
+      "dataFields": {}
+    },
+    "SettleOk": {
+      "dataFields": {}
+    },
+    "SettleFailed": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [
+    "Done",
+    "Denied",
+    "Dead"
+  ],
+  "dataDomain": {},
+  "invariants": "invariants.mjs"
+}
