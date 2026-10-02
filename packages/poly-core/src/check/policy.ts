@@ -49,7 +49,8 @@ const CLASSES = ['none', 'reversible', 'compensable', 'irreversible'];
 export function policyProgram(modules: A.Module[]): PolicyProgram {
   const machines = new Map<string, PolicyMachine>();
   const decisions = new Map<string, { machine: string; result: PType }>();
-  const claims: Record<string, PType> = {};
+  // Polywatch: no prototype, so a field named like an Object member (constructor) is a field like any other.
+  const claims: Record<string, PType> = Object.create(null);
   const claimsOwner = new Map<string, string>();
   const claimsConflicts = new Map<string, string[]>();
   const intents: string[] = [];

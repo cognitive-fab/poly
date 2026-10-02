@@ -1504,7 +1504,9 @@ class Checker {
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
     // PD5.1.2: `by c: C` binds the claims, a claims type's value, in the handler.
     if (h.by) {
-      const rec = this.module.decls.find((d): d is A.RecordDecl => d.kind === 'RecordDecl' && d.name === h.by!.type);
+      // Polywatch: the binder is not a node, so the reserved-name walk misses it; the embedded surface can spell it.
+      if (h.by.name === '$claims' || h.by.name === '$lineage') this.err('PL1208', h, `on ${h.action} by ${h.by.name}: ${h.by.name} is reserved: the runtime writes it, and no program declares it (S155)`);
+      const rec =this.module.decls.find((d): d is A.RecordDecl => d.kind === 'RecordDecl' && d.name === h.by!.type);
       // A binder whose type is wrong is still bound, as an error, so its uses are not reported again.
       if (!rec && !this.env.unions.has(h.by.type)) { this.err('PL1001', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: no claims type ${h.by.type}`); scope.params.set(h.by.name, ERR); }
       else if (!rec?.claims) { this.err('PL1201', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: ${h.by.type} is not a claims type (PD5.1.2)`); scope.params.set(h.by.name, ERR); }

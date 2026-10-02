@@ -183,3 +183,15 @@ test('polywatch: comments on claims fields keep their place', () => {
   const out = format(r.module, r.trivia);
   assert.equal(out, src);
 });
+
+// Polywatch on the M5b fixes: the embedded surface spells a binder as a string, so it can name a reserved key. A binder
+// named $claims or $lineage is PL1208, as a declared one is (S155).
+test('polywatch: a by binder named $claims or $lineage is PL1208', () => {
+  for (const name of ['$claims', '$lineage']) {
+    const r = parse(readFileSync(join(ROOT, 'conformance/m5/refund.poly'), 'utf8'));
+    const h = r.module.decls.flatMap((d) => d.kind === 'Machine' ? d.items : []).find((x) => x.kind === 'Handler' && x.by);
+    h.by.name = name;
+    const codes = checkModule(r.module).diagnostics.map((d) => d.code);
+    assert.ok(codes.includes('PL1208'), `${name}: ${codes.join(', ')}`);
+  }
+});

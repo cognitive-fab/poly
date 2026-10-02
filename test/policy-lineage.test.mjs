@@ -82,6 +82,50 @@ test('review C3: a claims field with two types is refused in a policy, in either
   }
 });
 
+// Polywatch on the M5b fixes: claims fields were kept in a plain object and tested with `in`, so a field named like an
+// Object.prototype member (constructor) was a conflict with a type named undefined.
+test('polywatch: a claims field named constructor is read from a policy like any other', async () => {
+  const prog = `module ctor
+
+enum Kind { Person, Agent }
+
+claims A {
+  constructor: Kind
+}
+
+enum Status { Idle, Done }
+
+machine Pay {
+  state { status : Status = Idle }
+  terminal status == Done
+  action Go()
+  on Go() by a: A {
+    require status == Idle else reject "busy"
+    status' = Done
+    emit pay(1)
+  }
+  effect pay(n: 0..1) {
+    kind "ctor.pay"
+    labels { egress:external }
+    class irreversible
+  }
+}
+`;
+  const pol = `module ctorp
+
+policy ctorp {
+  scope "ctor"
+  obligation who "Who." rule {
+    when effect.kind == "ctor.pay"
+    require step.claims.constructor == Person else deny
+  }
+}
+`;
+  const p = await checkProject(projectOf('ctor-field', { 'ctor.poly': prog, 'p.policy.poly': pol }));
+  const s = p.files.flatMap((x) => x.policies ?? []).find((z) => z.scope === 'ctor');
+  assert.ok(!s.diagnostics.some((d) => d.code === 'PL1201' || d.code === 'PL1001'), JSON.stringify(s.diagnostics.map((d) => d.message)));
+});
+
 // C4: an author's obligation named attribution is the author's; the scope's attribution rule has its own source.
 test('review C4: an obligation named attribution does not take the attribution rule\'s place', { skip }, async () => {
   const pol = read('conformance/m5/lineage-pay.policy.poly').replace('obligation person-pays', 'obligation attribution');
