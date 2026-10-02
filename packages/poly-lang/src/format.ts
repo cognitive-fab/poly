@@ -63,7 +63,14 @@ class Printer {
         return this.emit(d, '', [`enum ${d.name} { ${d.members.join(', ')} }`]);
       case 'RecordDecl':
         // PD5.1.2: a claims type, one field per line.
-        if (d.claims) return this.emit(d, '', [`claims ${d.name} {`, ...d.fields.map((f) => `${INDENT}${f.name}: ${this.type(f.type)}`), '}']);
+        if (d.claims) {
+          // Polywatch: each field line carries its own comments, as a machine's fields do.
+          this.lead(d, '');
+          this.out.push(`claims ${d.name} {`);
+          for (const f of d.fields) this.emit(f, INDENT, [`${f.name}: ${this.type(f.type)}`]);
+          this.out.push(`}${this.trail(d)}`);
+          return;
+        }
         return this.emit(d, '', [`type ${d.name} = { ${d.fields.map((f) => `${f.name}: ${this.type(f.type)}`).join(', ')} }`]);
       case 'TypeDecl': {
         const ctors = d.ctors.map((c) => this.ctor(c));

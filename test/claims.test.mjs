@@ -175,3 +175,11 @@ test('review A-F7: a claims binder named pre, post, action, self or none is refu
     assert.deepEqual(codes(prog('  kind: Kind\n  principal: Principal', 'first\' = ' + b + '.principal').replace('by caller: Caller', `by ${b}: Caller`)).filter((c) => c === 'PL1201').length >= 1, true, b);
   }
 });
+
+// Polywatch on the M5b fixes: a comment on a claims field stays on that field through the formatter (PT1.4a).
+test('polywatch: comments on claims fields keep their place', () => {
+  const src = 'module c\n\n// who calls\nclaims Caller {\n  // the kind\n  kind: Kind  // inline\n  who: Principal  // the principal\n}\n\nenum Kind { Person, Agent }\n';
+  const r = parse(src);
+  const out = format(r.module, r.trivia);
+  assert.equal(out, src);
+});

@@ -424,7 +424,8 @@ class Parser {
       const fname = this.ident('a claims field');
       this.expect(':');
       const type = this.type();
-      fields.push(this.node<A.PayloadField>(fs, { kind: 'PayloadField', name: fname, type }));
+      // Polywatch: each field is a comment anchor, as a machine's fields are.
+      fields.push(this.node<A.PayloadField>(fs, { kind: 'PayloadField', name: fname, type }, true));
       if (this.atPunct(',')) this.next();
     }
     this.next();
