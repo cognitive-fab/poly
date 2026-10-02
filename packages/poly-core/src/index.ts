@@ -7,3 +7,4 @@ export * from './types.js';
 export * from './diagnostics.js';
 export { checkModule, tyToString, boundPath, effectKind, effectClass, effectSignature, childSpec, type ChildSpec, durationMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
 export { parseManifest, loadProject, ManifestError, type Manifest } from './manifest.js';
+export { CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, certificateMessage, buildIdOf, signDigest, publicKeyOf, certificateProblems, type Certificate, type CertifiedMachine, type CertificateSignature, type CertificateProblem } from './certificate.js';

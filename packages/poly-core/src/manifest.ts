@@ -19,18 +19,23 @@ export interface Manifest {
   engines?: Record<string, string>;
   /** S72: the effect handler modules `poly lint handlers` reads (PT6.5). */
   handlers?: string[];
+  /**
+   * S126: the admission key, named by id and location, never by value. A location is `env:NAME` (a variable
+   * holding the private key, PEM) or `file:PATH` (a file outside version control). No private key is committed.
+   */
+  keys?: { admission: { id: string; location: string } };
 }
 
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys']);
 
 export function parseManifest(text: string, where = 'poly.json'): Manifest {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch (e) { throw new ManifestError(`${where}: not JSON (${(e as Error).message})`); }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ManifestError(`${where}: expected an object`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys)`);
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
   if (!Array.isArray(m.modules) || m.modules.length === 0 || !m.modules.every((x) => typeof x === 'string' && x)) {
@@ -51,6 +56,13 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
     if (e === null || typeof e !== 'object' || Array.isArray(e) || !Object.values(e).every((v) => typeof v === 'string')) {
       throw new ManifestError(`${where}: "engines" must map engine names to version ranges`);
     }
+  }
+  if (m.keys !== undefined) {
+    const k = m.keys as Record<string, unknown>;
+    const a = (k && typeof k === 'object' && !Array.isArray(k) ? k.admission : undefined) as Record<string, unknown> | undefined;
+    const ok = a && typeof a === 'object' && Object.keys(k).length === 1 && Object.keys(a).sort().join(',') === 'id,location'
+      && typeof a.id === 'string' && a.id !== '' && typeof a.location === 'string' && /^(env|file):./.test(a.location);
+    if (!ok) throw new ManifestError(`${where}: "keys" must be { "admission": { "id": "...", "location": "env:NAME" or "file:PATH" } } (S126)`);
   }
   return m as unknown as Manifest;
 }

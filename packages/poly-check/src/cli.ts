@@ -4,6 +4,7 @@
 //   poly check <file.poly | project dir> [--json] [--root <dir>]
 //   poly witness <id> --trace | --test [--root <dir>] [--out <file>]
 //   poly fix <id> [--root <dir>]
+//   poly admit <project dir>
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -14,11 +15,13 @@ import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
 import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
 import { applyFixById } from './fix.js';
+import { admit, AdmitError } from './admit.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
+       poly admit <project dir>
 
   check    Parses, types and lowers each module; runs strict validate(), translation
            validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
@@ -32,6 +35,9 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
   --json        print the report as JSON (diagnostics in poly.diagnostic/1 form)
   --root <dir>  where .poly/ lives (default: the project directory, or the working directory)
   --out <file>  where \`poly witness\` writes (default: .poly/witness/<id prefix>.<ext>)
+
+  admit    Checks the project and, when it is CLEAN, writes .poly/certificate.json, signed
+           with the admission key poly.json names by location (keys.admission, S126).
 
   lint     Reads the effect handler modules poly.json names and refuses any reach for
            ambient authority (PL6401): fs, net, http, child_process, fetch, process.env.
@@ -113,6 +119,12 @@ export async function main(argv: string[]): Promise<number> {
       process.stdout.write(`handlers: lint ${ds.length ? 'REFUSED' : 'CLEAN'} over ${handlers.length} file${handlers.length === 1 ? '' : 's'} (PT6.5)\n`);
       return ds.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN;
     }
+    if (positional[0] === 'admit' && positional.length === 2) {
+      const r = await admit(positional[1]);
+      process.stdout.write(`admitted ${r.certificate.subject.project}: ${r.certificate.buildId}, ${r.certificate.digest}\n  ${r.certificatePath}\n`);
+      for (const l of r.certificate.poly.limits) process.stdout.write(`  limit: ${l}\n`);
+      return EXIT_CODES.CLEAN;
+    }
     if (positional[0] === 'fix' && positional.length === 2) {
       const base = root ?? process.cwd();
       const r = applyFixById(readReport(base), positional[1]);
@@ -125,6 +137,7 @@ export async function main(argv: string[]): Promise<number> {
     const err = e as Error & { nondeterministic?: boolean };
     process.stderr.write(`poly: ${err.message}\n`);
     if (err instanceof ManifestError || err instanceof UsageError || err instanceof WitnessExportError) return EXIT_CODES.USAGE;
+    if (err instanceof AdmitError) return EXIT_CODES.REFUSED;
     return err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;
   }
 }

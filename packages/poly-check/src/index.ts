@@ -4,3 +4,4 @@ export { render, renderDiagnostic } from './render.js';
 export { applyFix, attachFixes, fixId, type FixOutcome } from './fixes.js';
 export { applyFixById, findFix, type FixResult } from './fix.js';
 export { lintHandlers, lintHandlerText } from './lint.js';
+export { admit, artefactsOnDisk, AdmitError, CERTIFICATE_FAULTS, MAX_ATTEMPTS, M4_LIMITS, type AdmitOptions, type AdmitResult, type CertificateFault } from './admit.js';

@@ -36,3 +36,7 @@ export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);
 export function toolchainFaults(diagnostics) {
   return diagnostics.filter((d) => d.code === 'PL2501' || d.code === 'PL2001');
 }
+
+// S126 and the standing rule: the certificate is an artefact the runtime reads, so each broken certificate writer
+// is listed here and must be caught by poly admit's read-back (test/certificate.test.mjs).
+export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message'];
