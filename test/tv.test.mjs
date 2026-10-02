@@ -39,7 +39,7 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
       for (const [k, b] of bad.entries()) {
         // The effects mapper is an artefact too (PS9.2): a fault that changes only it must be caught as well.
         const read = (dir, f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null);
-        const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs', 'contract.json', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs'].some((f) => read(b.dir, f) !== read(good[k].dir, f));
+        const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs', 'contract.json', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'openshell.policies.yaml'].some((f) => read(b.dir, f) !== read(good[k].dir, f));
         if (!changed) continue;
         const r = await translationValidate(b.module, b.machine, b.dir);
         if (r.mismatches.length === 0) { equivalent.push(basename(file)); continue; }

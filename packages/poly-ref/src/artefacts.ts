@@ -125,6 +125,37 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     }
   }
 
+  // ── openshell.policies.yaml (PT6.5, S152): present only when isolation is asked for; then exactly the source's ──
+  const sandboxFile = join(dir, 'openshell.policies.yaml');
+  if (existsSync(sandboxFile)) {
+    let got: unknown = null;
+    try { got = JSON.parse(readFileSync(sandboxFile, 'utf8')); } catch { out.push('openshell.policies.yaml is not readable'); }
+    const want: Record<string, unknown> = {};
+    const m = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === M.name)!;
+    for (const e of [...m.items.filter((x): x is A.EffectDecl => x.kind === 'EffectDecl')].sort((x, y) => (M.effects.get(x.name)!.kind < M.effects.get(y.name)!.kind ? -1 : 1))) {
+      const labels = new Set(e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])));
+      const t = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
+      const of = (k: string) => t?.targets.find((x) => x.key === k)?.values ?? [];
+      const prefixes = labels.has('egress:external') || labels.has('egress:public') ? of('egress') : [];
+      const secrets = labels.has('read:private') ? of('secrets') : [];
+      const endpoints: unknown[] = [];
+      for (const p of prefixes) {
+        const u = new URL(p);
+        const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
+        const globs = u.pathname.endsWith('/') ? [u.pathname + '**'] : [u.pathname, u.pathname + '/**'];
+        for (const g of globs) for (const s of secrets.length ? secrets : [null]) endpoints.push({ host: u.hostname, port, path: g, protocol: 'rest', access: 'full', ...(s ? { credential_binding: { provider: s } } : {}) });
+      }
+      want[M.effects.get(e.name)!.kind] = {
+        version: 1,
+        filesystem_policy: { include_workdir: false, read_only: ['/usr', '/lib', '/etc/ssl'], read_write: ['/sandbox/scratch'] },
+        landlock: { compatibility: 'hard_requirement' },
+        process: { run_as_user: 'sandbox', run_as_group: 'sandbox' },
+        network_policies: endpoints.length ? { egress: { endpoints, binaries: [{ path: '**/node' }] } } : {},
+      };
+    }
+    if (got !== null) differ('openshell.policies.yaml', got, want);
+  }
+
   // ── effect-invariants.mjs (PS5.4) ──
   const pathFile = join(dir, 'effect-invariants.mjs');
   if (M.pathProperties.length) {

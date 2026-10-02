@@ -11,13 +11,15 @@ import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './
 export interface LowerOptions {
   /** Test-only fault injection; `poly check` never sets it (faults.ts). */
   fault?: Fault;
+  /** PT6.5, S152: generate an OpenShell policy per effect kind (`isolation: "openshell"` in poly.json). */
+  isolation?: 'openshell';
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -211,6 +213,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   if (facts.effects.size || facts.decisions.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls }, pre, opts.fault);
     files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data' }), null, 2) + '\n';
+    // PT6.5, S152: the opt-in sandbox, one OpenShell policy per effect kind, from its labels and targets.
+    // The broken variant widen-sandbox generates it too, so translation validation has a policy to catch.
+    if (opts.isolation === 'openshell' || opts.fault === 'widen-sandbox') files['openshell.policies.yaml'] = JSON.stringify(sandboxPolicies(facts, opts.fault), null, 2) + '\n';
   }
   const pathProps = mutated.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'path');
   if (pathProps.length) files['effect-invariants.mjs'] = effectInvariantsModule(m.name, pathProps);
@@ -635,6 +640,37 @@ function dataDomainOf(a: A.Action, env: TypeEnv, facts?: MachineFacts): Record<s
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
   return recs;
+}
+
+/**
+ * PT6.5, S152: an OpenShell policy for each effect kind, generated from its labels and targets, deterministically
+ * (written as JSON, which is YAML). The filesystem is a scratch directory and the system's read-only trees; each
+ * declared egress prefix is a REST endpoint by host, port and path (the prefix and below it), bound to each declared
+ * secret as a credential provider; a kind with no egress label has no network policy at all. OpenShell has no
+ * per-command allowlist, so the declared commands stay enforced in process only (the capability object).
+ */
+function sandboxPolicies(facts: MachineFacts, fault?: Fault): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const e of facts.effects.values()) {
+    const labels = e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : []));
+    const targets = Object.fromEntries(e.items.flatMap((x) => (x.kind === 'EffTargets' ? x.targets.map((t) => [t.key, t.values]) : [])));
+    const egress = labels.includes('egress:external') || labels.includes('egress:public') ? (targets.egress ?? []) : [];
+    const secrets: string[] = labels.includes('read:private') ? (targets.secrets ?? []) : [];
+    const endpoints = egress.flatMap((p: string) => {
+      const u = new URL(p);
+      const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
+      const paths = fault === 'widen-sandbox' ? ['/**'] : u.pathname.endsWith('/') ? [`${u.pathname}**`] : [u.pathname, `${u.pathname}/**`];
+      return paths.flatMap((path) => (secrets.length ? secrets : [null]).map((s) => ({ host: u.hostname, port, path, protocol: 'rest', access: 'full', ...(s ? { credential_binding: { provider: s } } : {}) })));
+    });
+    out[effectKind(e)] = {
+      version: 1,
+      filesystem_policy: { include_workdir: false, read_only: ['/usr', '/lib', '/etc/ssl'], read_write: ['/sandbox/scratch'] },
+      landlock: { compatibility: 'hard_requirement' },
+      process: { run_as_user: 'sandbox', run_as_group: 'sandbox' },
+      network_policies: endpoints.length ? { egress: { endpoints, binaries: [{ path: '**/node' }] } } : {},
+    };
+  }
+  return Object.fromEntries(Object.entries(out).sort(([x], [y]) => (x < y ? -1 : 1)));
 }
 
 function principalPositions(t: Ty, env: TypeEnv, seen: Set<string>): number {

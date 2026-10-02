@@ -141,6 +141,8 @@ export interface CheckOptions {
   root?: string;
   /** PT8: the modules the policies of this file govern; the file's own module when it is checked alone. */
   program?: Module[];
+  /** PT6.5, S152: generate the OpenShell sandbox policies (poly.json's `isolation`). */
+  isolation?: 'openshell';
 }
 
 const HERE_REQUIRE = createRequire(import.meta.url);
@@ -279,7 +281,7 @@ function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
 async function checkMachineStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, opts: CheckOptions, engines: Record<string, string>): Promise<void> {
   // ── lower ─────────────────────────────────────────────────────────────
   let t0 = performance.now();
-  const { lowered, diagnostics } = lowerMachine(module, checked, machine);
+  const { lowered, diagnostics } = lowerMachine(module, checked, machine, opts.isolation ? { isolation: opts.isolation } : {});
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
@@ -870,7 +872,7 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
     const m = (f.endsWith('.ts') ? readEmbedded(text, f) : parse(text)).module;
     if (m) program.push(m);
   }
-  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program }));
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, ...(manifest.isolation ? { isolation: manifest.isolation } : {}) }));
   // PT8.2: a scope's policies lower to one document, so they live in one module.
   const scopes = new Map<string, CheckReport>();
   for (const report of reports) {

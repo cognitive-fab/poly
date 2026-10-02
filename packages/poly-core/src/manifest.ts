@@ -20,6 +20,8 @@ export interface Manifest {
   engines?: Record<string, string>;
   /** S72: the effect handler modules `poly lint handlers` reads (PT6.5). */
   handlers?: string[];
+  /** PT6.5, S152: `"openshell"` generates an OpenShell sandbox policy per effect kind. */
+  isolation?: 'openshell';
   /**
    * S126: the admission key, named by id and location, never by value. A location is `env:NAME` (a variable
    * holding the private key, PEM) or `file:PATH` (a file outside version control). No private key is committed.
@@ -35,14 +37,14 @@ export interface Manifest {
 
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation']);
 
 export function parseManifest(text: string, where = 'poly.json'): Manifest {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch (e) { throw new ManifestError(`${where}: not JSON (${(e as Error).message})`); }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ManifestError(`${where}: expected an object`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation)`);
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
   if (!Array.isArray(m.modules) || m.modules.length === 0 || !m.modules.every((x) => typeof x === 'string' && x)) {
@@ -64,6 +66,7 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
       throw new ManifestError(`${where}: "engines" must map engine names to version ranges`);
     }
   }
+  if (m.isolation !== undefined && m.isolation !== 'openshell') throw new ManifestError(`${where}: "isolation" is "openshell" or absent (PT6.5, S152)`);
   if (m.keys !== undefined) {
     const k = m.keys as Record<string, unknown>;
     const a = (k && typeof k === 'object' && !Array.isArray(k) ? k.admission : undefined) as Record<string, unknown> | undefined;
