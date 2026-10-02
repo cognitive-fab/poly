@@ -1,0 +1,4 @@
+The M3 freeze is approved by the owner (decisions-m3.md, 4c630d2). freeze.json was written at afcace1 and committed in
+84d905e; freeze.mjs --check reported no change before this file was written. The runs use the owner's subscription,
+with the caps of 15,000,000 tokens, $15 at list price and one hour per run, in blocks of four in the order plan-m3.md
+fixes (by run number, then by task). A file of the freeze that changes after this is a deviation and is reported.
