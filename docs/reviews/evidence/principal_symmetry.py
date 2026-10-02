@@ -180,7 +180,7 @@ def main():
         print(f'== {name}')
         print(f'   operations on principals: {sorted(set(ops)) or "none"}')
         if outside:
-            print(f'   OUTSIDE THE EQUALITY-ONLY RULE ({", ".join(outside)}): PD5.1.2b would refuse it (PL6702), and symmetry does not hold, so these verdicts are not trusted:')
+            print(f'   OUTSIDE THE EQUALITY-ONLY RULE ({", ".join(outside)}): PD5.1.2b would refuse it (PL1206), and symmetry does not hold, so these verdicts are not trusted:')
         rows = []
         for n in (1, 2, 3, 4):
             r = explore(n, guard)
