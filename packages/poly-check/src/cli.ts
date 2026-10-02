@@ -5,6 +5,7 @@
 //   poly witness <id> --trace | --test [--root <dir>] [--out <file>]
 //   poly fix <id> [--root <dir>]
 //   poly admit <project dir>
+//   poly journal verify | replay | export --db <store> …
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -16,12 +17,16 @@ import { render } from './render.js';
 import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
 import { applyFixById } from './fix.js';
 import { admit, AdmitError } from './admit.js';
+import { journalCommand, JournalUsageError } from './journal.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
        poly admit <project dir>
+       poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
+       poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
+       poly journal export --db <store> --run <id>
 
   check    Parses, types and lowers each module; runs strict validate(), translation
            validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
@@ -38,6 +43,10 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
 
   admit    Checks the project and, when it is CLEAN, writes .poly/certificate.json, signed
            with the admission key poly.json names by location (keys.admission, S126).
+
+  journal  verify: the chain, signed heads, closure and journal binding of every run (PL9002).
+           replay: every run folded again through poly-ref and polygraph (PL9001).
+           export: one run's chain, heads and bodies, as JSON.
 
   lint     Reads the effect handler modules poly.json names and refuses any reach for
            ambient authority (PL6401): fs, net, http, child_process, fetch, process.env.
@@ -119,6 +128,9 @@ export async function main(argv: string[]): Promise<number> {
       process.stdout.write(`handlers: lint ${ds.length ? 'REFUSED' : 'CLEAN'} over ${handlers.length} file${handlers.length === 1 ? '' : 's'} (PT6.5)\n`);
       return ds.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN;
     }
+    if (positional[0] === 'journal' && positional.length >= 2) {
+      return await journalCommand(positional[1], argv, (s) => process.stdout.write(s));
+    }
     if (positional[0] === 'admit' && positional.length === 2) {
       const r = await admit(positional[1]);
       process.stdout.write(`admitted ${r.certificate.subject.project}: ${r.certificate.buildId}, ${r.certificate.digest}\n  ${r.certificatePath}\n`);
@@ -138,6 +150,7 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write(`poly: ${err.message}\n`);
     if (err instanceof ManifestError || err instanceof UsageError || err instanceof WitnessExportError) return EXIT_CODES.USAGE;
     if (err instanceof AdmitError) return EXIT_CODES.REFUSED;
+    if (err instanceof JournalUsageError) return EXIT_CODES.USAGE;
     return err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;
   }
 }

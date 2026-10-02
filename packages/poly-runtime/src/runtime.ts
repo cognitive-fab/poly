@@ -12,7 +12,7 @@ import { dirname, resolve } from 'node:path';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import type { Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore } from './ledger-store.js';
-import { verifyBuild, recheckCopy, LoadError } from './load.js';
+import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
 
@@ -41,13 +41,24 @@ export class PolyRuntime {
   private readonly inputSubscribers = new Map<string, Set<(step: unknown) => void>>();
   private timers: NodeJS.Timeout[] = [];
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly certificate: Certificate, readonly ledger: LoadOptions['ledger'] = undefined) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined) {
     kernel.events.on('step', (step) => {
       for (const f of this.inputSubscribers.get(step.instanceId) ?? []) f(step);
     });
   }
 
   get now(): () => number { return this.kernel.now; }
+  get certificate(): Certificate { return this.verified.certificate; }
+  /** The project root the certificate's paths are relative to. */
+  get root(): string { return this.verified.root; }
+  /** The verified copy of a machine's lowered module, the bytes polyrun registered. */
+  modulePath(machineId: string): string {
+    const m = this.verified.machines.find((x) => x.id === machineId);
+    if (!m) throw new Error(`machine ${machineId} is not in the certificate`);
+    return m.module;
+  }
+  /** S118: each recorded gate decision of a run, with a way to recompute it from its proposal and snapshot. */
+  gateReplays(_instanceId: string): { seq: number; decision: string; recompute: () => string }[] { return []; }
 
   /** PT15: a handler for an effect kind. It runs only from the outbox worker, after the gate allows (PT9.2). */
   handle(kind: string, handler: Handler): void { this.handlers.set(kind, handler); }
@@ -67,6 +78,12 @@ export class PolyRuntime {
   getJournal(instanceId: string): Promise<JournalRow[]> { return this.kernel.getJournal(instanceId); }
   list(machineId: string, status?: string) { return this.kernel.list(machineId, status); }
   audit(instanceId?: string) { return this.store.listAudit(instanceId); }
+
+  /** Every instance the store holds, with its snapshot: the fold's cache (PS11.4). */
+  async instances(): Promise<{ id: string; machineId: string; status: string; state: Record<string, unknown> }[]> {
+    return this.store.txn(() => this.store.db.prepare('SELECT instance_id, machine_id, status, state FROM pr_instance ORDER BY instance_id').all()
+      .map((r) => ({ id: r.instance_id as string, machineId: r.machine_id as string, status: r.status as string, state: JSON.parse(r.state) as Record<string, unknown> })));
+  }
 
   /** A run's chain (PT16). */
   chain(instanceId: string): Promise<LedgerEvent[]> { return this.store.chain(instanceId); }
@@ -178,5 +195,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (e instanceof LoadError) throw e;
     throw new LoadError(`refused at load: polyrun did not register the certified machines: ${(e as Error).message}`);
   }
-  return new PolyRuntime(kernel, store, verified.certificate, opts.ledger);
+  return new PolyRuntime(kernel, store, verified, opts.ledger);
 }

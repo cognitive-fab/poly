@@ -23,6 +23,9 @@
     },
     {
       "path": "../poly-embed"
+    },
+    {
+      "path": "../poly-runtime"
     }
   ]
 }

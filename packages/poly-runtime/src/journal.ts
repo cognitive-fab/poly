@@ -176,3 +176,25 @@ export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Rec
   const verdict: RunVerdict = problems.length ? 'not-ok' : closed ? 'closed-and-signed' : signedThrough === null ? 'open-unsigned' : 'open-and-signed';
   return { run, verdict, chain, signedThrough, unsignedTail: Math.max(0, last - (signedThrough ?? -1)), closed, problems };
 }
+
+/** A store opened for reading its ledger and journal only, with the types a tool outside the runtime needs. */
+export interface JournalReader {
+  runs(): Promise<Run[]>;
+  chain(instanceId: string): Promise<LedgerEvent[]>;
+  heads(instanceId: string): Promise<SignedHead[]>;
+  /** The journal while the instance exists; null after an archive. */
+  journal(instanceId: string): Promise<JournalRow[] | null>;
+  body(digest: string): Promise<unknown>;
+  close(): Promise<void>;
+}
+
+export function readerOf(store: LedgerStore): JournalReader {
+  return {
+    runs: () => store.runs(),
+    chain: (id) => store.chain(id),
+    heads: (id) => headsOf(store, id),
+    journal: async (id) => ((await store.getInstance(id)) ? store.getJournal(id) : null),
+    body: (d) => store.body(d),
+    close: () => store.close(),
+  };
+}

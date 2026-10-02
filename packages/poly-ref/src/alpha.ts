@@ -70,6 +70,13 @@ export function flattenData(d: Record<string, Value>, action: string, M: RMachin
   return Object.fromEntries(a.params.map((p) => [p.name, flatValue(d[p.name], p.type, M)]));
 }
 
+/** Structured data for an action's parameters from its flat data, as a journal row records it (replay, PS11.4); keys that are not parameters are left out. */
+export function alphaData(flat: Record<string, unknown>, action: string, M: RMachine): Record<string, Value> {
+  const a = M.actions.find((x) => x.name === action);
+  if (!a) throw new Error(`poly-ref: no action ${action}`);
+  return Object.fromEntries(a.params.filter((p) => p.name in flat).map((p) => [p.name, structValue(flat[p.name], p.type, M)]));
+}
+
 function structValue(x: unknown, t: RType, M: RMachine): Value {
   if (t.k === 'union' && x && typeof x === 'object' && '$' in (x as object)) {
     // S65: { $: C, payloads } back to (C, r); a key the constructor does not have is left out here and

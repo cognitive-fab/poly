@@ -8,7 +8,7 @@ export { explore, machineSystem, pathTo, type System, type Graph, type Edge, typ
 export { checkMachine, pathViolation, instanceOf, alphabetSize, machineVacuity, ENGINE, type MachineReport, type InstanceLine } from './check.js';
 export { antecedents, conjunction, judge, type Antecedent, type Vacuous } from './vacuity.js';
 export { keyOf, stateKey, statePlain, toPlain, type Value, type State, type UnionValue, type MapValue } from './values.js';
-export { alpha, flatten, flattenData, flatValue } from './alpha.js';
+export { alpha, alphaData, flatten, flattenData, flatValue } from './alpha.js';
 export { translationValidate, type TvResult } from './tv.js';
 export { loadLoweredModule } from './load.js';
 export { confirmWitness, confirmEffectsWitness, stateDigestOf, type Confirmation, type WitnessToConfirm, type FlatStep } from './confirm.js';
