@@ -35,6 +35,8 @@ export interface PolicyProgram {
   decisions: Map<string, { machine: string; result: PType }>;
   effectKinds: string[];
   labels: string[];
+  /** PD5.1.2d, S104: the fields of the program's claims types a policy can read as step.claims.f (a Principal is not). */
+  claims: Record<string, PType>;
 }
 
 const CLASSES = ['none', 'reversible', 'compensable', 'irreversible'];
@@ -43,6 +45,7 @@ const CLASSES = ['none', 'reversible', 'compensable', 'irreversible'];
 export function policyProgram(modules: A.Module[]): PolicyProgram {
   const machines = new Map<string, PolicyMachine>();
   const decisions = new Map<string, { machine: string; result: PType }>();
+  const claims: Record<string, PType> = {};
   for (const m of modules) {
     const enums = new Map<string, string[]>();
     for (const d of m.decls) {
@@ -59,6 +62,7 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
         default: return null;
       }
     };
+    for (const d of m.decls) if (d.kind === 'RecordDecl' && d.claims) for (const f of d.fields) { const t = typeOf(f.type); if (t && !(f.name in claims)) claims[f.name] = t; }
     for (const d of m.decls) {
       if (d.kind !== 'Machine') continue;
       const id = `${m.name}.${d.name}`;
@@ -76,7 +80,7 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
     }
   }
   const all = [...machines.values()].flatMap((m) => m.effects);
-  return { machines, decisions, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
+  return { machines, decisions, claims, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
 }
 
 const DECISION_FIELDS = (result: PType): Record<string, PType> => ({
@@ -125,7 +129,7 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
         case 'String': return { k: 'str', values: [e.value] };
         case 'Name': {
           if (vars.has(e.name)) return vars.get(e.name)!;
-          if (e.name === 'effect' || e.name === 'proposal' || e.name === 'send') { err('PL1201', e, `${e.name} is read by its fields (effect.kind, effect.class, effect.labels, effect.machine, proposal.kind)`); return null; }
+          if (e.name === 'effect' || e.name === 'proposal' || e.name === 'send' || e.name === 'step') { err('PL1201', e, `${e.name} is read by its fields (effect.kind, effect.class, effect.labels, effect.machine, proposal.kind)`); return null; }
           if (expect?.k === 'enum') {
             if (expect.members.includes(e.name)) return expect;
             err('PL1001', e, `${e.name} is not a constructor of ${expect.name} (${expect.members.join(', ')})`);
@@ -148,6 +152,12 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (e.prop === 'to') return { k: 'str', values: [...program.machines.keys()] };
             if (e.prop === 'action' || e.prop === 'scope') return { k: 'str', values: null };
             err('PL1001', e, `send has no field ${e.prop} (to, action, scope)`);
+            return null;
+          }
+          // PD5.1.2d, S104: the claims of the step that emitted the proposal.
+          if (e.object.kind === 'Name' && e.object.name === 'step' && !vars.has('step')) {
+            if (e.prop === 'claims') return { k: 'record', fields: program.claims };
+            err('PL1001', e, `step has no field ${e.prop} (claims)`);
             return null;
           }
           if (e.object.kind === 'Name' && e.object.name === 'proposal' && !vars.has('proposal')) {

@@ -17,7 +17,7 @@ export type V = string | number | boolean | null | string[];
 export type Decision = 'allow' | 'deny' | 'escalate';
 
 export interface PolicyFacts {
-  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[] }[] }>;
+  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[] }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
   decisions: Map<string, { answers: (string | number | boolean)[] | null }>;
   /** PT9.9: each send a machine's handlers make to an address of a known machine. */
   sends: { from: string; to: string; action: string }[];
@@ -64,7 +64,10 @@ export function policyFacts(modules: Module[]): PolicyFacts {
           decisions.set(it.name, { answers: values(it.result) });
         }
       }
-      machines.set(`${m.name}.${d.name}`, { service: d.service, fields, effects });
+      // PD5.1.2d: the claims types the machine's actions require, each field's values (a Principal's are not read).
+      const claimsTypes = [...new Set(d.items.flatMap((i) => (i.kind === 'Handler' && i.by ? [i.by.type] : [])))];
+      const claims = claimsTypes.map((t) => { const rec = m.decls.find((x) => x.kind === 'RecordDecl' && x.name === t) as { fields: { name: string; type: TypeExpr }[] } | undefined; return Object.fromEntries((rec?.fields ?? []).map((f) => [f.name, values(f.type)])); });
+      machines.set(`${m.name}.${d.name}`, { service: d.service, fields, effects, claims });
       // A send's target machine, when its address is a field or a parameter of type Ref<M>.
       const refs = new Map<string, string>();
       for (const f of d.fields) if (f.type.kind === 'TRef') refs.set(f.name, f.type.machine.length > 1 ? f.type.machine.join('.') : `${m.name}.${f.type.machine[0]}`);
@@ -104,6 +107,7 @@ export function evalPolicyExpr(e: Expr, proposal: Record<string, any>, vars: Rec
       if (o.kind === 'Name' && o.name === 'effect' && !('effect' in vars)) return e.prop === 'labels' ? (proposal.effects ?? null) : (proposal.effect?.[e.prop] ?? null);
       if (o.kind === 'Name' && o.name === 'proposal' && !('proposal' in vars)) return proposal.proposal ?? null;
       if (o.kind === 'Name' && o.name === 'send' && !('send' in vars)) return proposal.send?.[e.prop] ?? null;
+      if (o.kind === 'Name' && o.name === 'step' && !('step' in vars)) return (proposal.step?.[e.prop] ?? null) as V;
       if (o.kind === 'Call' && o.callee === 'machine') return proposal.machines?.[(o.args[0] as { value: string }).value]?.[e.prop] ?? null;
       if (o.kind === 'Call' && o.callee === 'decision') {
         const d = proposal.decisions?.[(o.args[0] as { value: string }).value];
@@ -115,7 +119,9 @@ export function evalPolicyExpr(e: Expr, proposal: Record<string, any>, vars: Rec
         return inner && typeof inner === 'object' ? (inner[e.prop] ?? null) : null;
       }
       if (o.kind === 'Name') return e.prop; // a qualified constructor, Type.C
-      return null;
+      // A field of a record the proposal carries (step.claims.f).
+      const inner = r(o) as unknown;
+      return inner && typeof inner === 'object' && !Array.isArray(inner) ? ((inner as Record<string, V>)[e.prop] ?? null) : null;
     }
     case 'Call':
       if (e.callee === 'unknown') return r(e.args[0]) === null;
@@ -208,10 +214,10 @@ export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, an
 
 // ── The decision table (S149) ──────────────────────────────────────────────
 
-interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>> }
+interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>>; claims: Set<string> }
 
 function readsOf(s: PolicyScope): Reads {
-  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map() };
+  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map(), claims: new Set() };
   const walk = (e: Expr | null | undefined): void => {
     if (!e) return;
     if (e.kind === 'Member' && e.object.kind === 'Call' && (e.object.callee === 'machine' || e.object.callee === 'decision')) {
@@ -220,6 +226,8 @@ function readsOf(s: PolicyScope): Reads {
       if (!map.has(name)) map.set(name, new Set());
       map.get(name)!.add(e.prop);
     }
+    // PD5.1.2d: step.claims.f.
+    if (e.kind === 'Member' && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'step' && e.object.prop === 'claims') reads.claims.add(e.prop);
     if (e.kind === 'Binary' && ['<', '<=', '>', '>=', '==', '!='].includes(e.op)) {
       for (const [x, c] of [[e.left, e.right], [e.right, e.left]] as const) {
         if (c.kind === 'Decimal' && x.kind === 'Member' && x.object.kind === 'Call' && x.object.callee === 'decision') {
@@ -298,14 +306,23 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
         }
         decisionChoices.push([d, options]);
       }
-      const combos = product([...machineChoices.map(([, l]) => l as unknown[]), ...decisionChoices.map(([, l]) => l as unknown[])]);
+      // PD5.1.2d: the emitting step's claims: none (an action without claims), or each value of the read fields.
+      const stepChoices: (Record<string, V> | null)[] = [null];
+      if (reads.claims.size) {
+        for (const c of m.claims ?? []) {
+          const perField = [...reads.claims].map((f) => (c[f] ?? [null]).map((v) => [f, v] as [string, V]));
+          for (const pairs of product(perField)) stepChoices.push(Object.fromEntries(pairs));
+        }
+      }
+      const combos = product([...machineChoices.map(([, l]) => l as unknown[]), ...decisionChoices.map(([, l]) => l as unknown[]), stepChoices as unknown[]]);
       for (const c of combos) {
         if (rows.length >= maxRows) { capHit = true; break; }
         const machines: Record<string, unknown> = {};
         machineChoices.forEach(([rm], k) => { if (Object.keys(c[k] as object).length) machines[rm] = c[k]; });
         const decisions: Record<string, unknown> = {};
         decisionChoices.forEach(([d], k) => { const v = c[machineChoices.length + k]; if (v) decisions[d] = v; });
-        rows.push(build(machines, decisions));
+        const claims = c[machineChoices.length + decisionChoices.length];
+        rows.push({ ...build(machines, decisions), ...(claims ? { step: { claims } } : {}) });
       }
     }
   }

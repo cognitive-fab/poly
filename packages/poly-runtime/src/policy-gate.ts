@@ -27,6 +27,8 @@ export interface ProgramView {
   decisions(run: string): Record<string, unknown>;
   /** Assigns the next session sequence of a session, durably (S146). */
   nextSseq(session: string): number;
+  /** PD5.1.2d, S104: the claims of a run's step at a seq (its journal row's $claims), or null. */
+  stepClaims?(run: string, seq: number): Record<string, unknown> | null;
   /**
    * Review C1, PT9.5: records an engine answer that came after the host's timeout, with its sseq, on the run that
    * proposed it. The intent was held; the engine still decided, so the session's Σ moved and replay needs the event.
@@ -160,7 +162,7 @@ export class PolicyGate implements Gate {
   }
 
   /** The engine action for a proposal: its fields, and the reserved fields its scope's policies read (S147). */
-  action(proposal: Proposal, snapshot: Record<string, unknown>): { action: Record<string, unknown>; reads: Record<string, number>; singletons: Record<string, unknown> } {
+  action(proposal: Proposal, snapshot: Record<string, unknown>): { action: Record<string, unknown>; reads: Record<string, number>; singletons: Record<string, unknown>; claims: Record<string, unknown> | null } {
     const machines: Record<string, unknown> = {};
     const reads: Record<string, number> = {};
     const singletons: Record<string, unknown> = {};
@@ -169,8 +171,10 @@ export class PolicyGate implements Gate {
       const s = this.view.singleton(m);
       if (s) { machines[m] = s.state; reads[s.instance] = s.seq; singletons[m] = s.state; }
     }
-    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance) };
-    return { action: actionOf(row), reads, singletons };
+    // PD5.1.2d, S104: the claims of the step that emitted the effect travel beside the snapshot.
+    const claims = this.view.stepClaims?.(proposal.instance, proposal.seq) ?? null;
+    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(claims ? { step: { claims } } : {}) };
+    return { action: actionOf(row), reads, singletons, claims };
   }
 
   /**
@@ -221,7 +225,7 @@ export class PolicyGate implements Gate {
   async propose(proposal: Proposal, snapshot: Record<string, unknown>): Promise<GateDecision> {
     const session = sessionOf(proposal.machine);
     return this.serial(session, async () => {
-      const { action, reads, singletons } = this.action(proposal, snapshot);
+      const { action, reads, singletons, claims } = this.action(proposal, snapshot);
       // An engine that throws or does not answer took no decision, and so no sequence number (PT9.5).
       const { v, decision, reason } = await this.decideAction(session, moduleOf(proposal.machine), action, proposal.idempotencyKey, proposal.approved, proposal.instance);
       const sseq = this.view.nextSseq(session);
@@ -231,7 +235,8 @@ export class PolicyGate implements Gate {
       const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;
       if (held) throw new GateUnavailable(held, { session, sseq, action, engineDecision: v.decision, engineClass: v.class ?? null, engineRecord: v.record ?? null, stateBefore: v.state_before ?? null, ...approvedOf(proposal) });
       // PD4-A1: the singletons the decision read (a mode, say), in the verdict event itself.
-      const record = { session, sseq, action, singletons, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
+      // PD5-A4: the verdict records the digest of the claims the decision read.
+      const record = { session, sseq, action, singletons, ...(claims ? { claims: digest(claims) } : {}), stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
       if (decision === 'allow') return { decision, reads, record };
       if (decision === 'deny') return { decision, reason: reason ?? 'denied', witnessDigest: v.witnesses?.length ? digest(v.witnesses) : undefined, reads, record };
       return { decision, reason: reason ?? undefined, reads, record };

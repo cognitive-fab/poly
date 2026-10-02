@@ -688,6 +688,7 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
         }
         return out;
       },
+      stepClaims: (run, seq) => { const r = store.db.prepare('SELECT data FROM pr_journal WHERE instance_id = ? AND seq = ?').get(run, seq) as { data: string } | undefined; const c = r ? JSON.parse(r.data)?.$claims : null; return c && typeof c === 'object' ? c : null; },
       nextSseq: (session) => (store.db.prepare('INSERT INTO poly_gate_session (session, sseq) VALUES (?, 1) ON CONFLICT(session) DO UPDATE SET sseq = sseq + 1 RETURNING sseq').get(session) as { sseq: number }).sseq,
       recordLate: (run, record) => {
         const { action, ...rest } = record;

@@ -42,6 +42,8 @@ export function px(e: A.Expr, vars: Set<string>): string {
       if (o.kind === 'Name' && o.name === 'effect' && !vars.has('effect')) return e.prop === 'labels' ? 'action.effects' : `action.effect.${e.prop}`;
       if (o.kind === 'Name' && o.name === 'proposal' && !vars.has('proposal')) return 'action.proposal';
       if (o.kind === 'Name' && o.name === 'send' && !vars.has('send')) return `action.send.${e.prop}`;
+      // PD5.1.2d: the emitting step's claims, a reserved action field the gate host fills.
+      if (o.kind === 'Name' && o.name === 'step' && !vars.has('step')) return `action.step.${e.prop}`;
       if (o.kind === 'Call' && o.callee === 'machine') return `action.machines[${q((o.args[0] as A.StringLit).value)}].${e.prop}`;
       if (o.kind === 'Call' && o.callee === 'decision') {
         const d = `action.decisions[${q((o.args[0] as A.StringLit).value)}]`;

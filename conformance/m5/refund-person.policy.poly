@@ -1,0 +1,11 @@
+// PD5-A4 (S104): a policy reads the claims of the step that emitted the effect. A refund emitted by an agent's step is
+// denied; one emitted by a person's step is allowed.
+module refund_policy
+
+policy refund-by-person {
+  scope "refund"
+  obligation person-refunds "Only a person's step may emit a refund." rule {
+    when effect.kind == "payments.refund"
+    require step.claims.kind == Person else deny
+  }
+}
