@@ -17,7 +17,7 @@ import { dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
 import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
-import { verifiedModels, modelSource } from './model.js';
+import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { decisionHandler, type DecisionRecord, type ProviderConfig } from './provider.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
 
@@ -152,6 +152,12 @@ export class PolyRuntime {
   async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string } = {}): Promise<DispatchResult> {
     const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
     const inst = await this.store.getInstance(instanceId);
+    // Review C4: the hosted OutboxIntent instances are internal to the runtime; only its worker steps them.
+    if (inst && this.modelOf(inst.machine_id)) {
+      const reason = `${action} on ${instanceId}: an OutboxIntent instance is internal to the runtime, and only its worker takes its transitions (S119)`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S119', reason });
+      throw new RefusedDispatch(reason, 'S119');
+    }
     const why = this.outsideType(instanceId, action, data, inst?.machine_id);
     if (why) {
       const reason = `${action} on ${instanceId}: ${why}, so it is no step (PS3.2, S140)`;
@@ -181,6 +187,12 @@ export class PolyRuntime {
     const id = machineId ?? (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined);
     const m = this.verified.machines.find((x) => x.id === id);
     return m ? dataOutside(m.types, action, data) : null;
+  }
+
+  /** The manifest entry of an effect kind on an instance's machine, or null. */
+  effectDeclaration(instanceId: string, kind: string): any {
+    const id = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined;
+    return this.verified.machines.find((x) => x.id === id)?.manifest?.effects?.[kind] ?? null;
   }
 
   /** The decision whose ok completion an action is, on a machine, or null. */
@@ -333,8 +345,15 @@ export class PolyRuntime {
 
   /** Timers and messages run on polyrun's own workers; effects never do (S119). */
   async tick(now = this.now()): Promise<{ effects: number; timers: number; messages: number }> {
-    await this.recoverMessages(now);
-    return { effects: await this.worker.tick(now), timers: await this.kernel.workers.tickTimers(now), messages: await this.kernel.workers.tickMessages(now) };
+    // Review C6: each pass runs whatever another one threw; the first error is reported after all three.
+    const errors: unknown[] = [];
+    const pass = async (f: () => Promise<number>) => { try { return await f(); } catch (e) { errors.push(e); return 0; } };
+    await pass(() => this.recoverMessages(now));
+    const effects = await pass(() => this.worker.tick(now));
+    const timers = await pass(() => this.kernel.workers.tickTimers(now));
+    const messages = await pass(() => this.kernel.workers.tickMessages(now));
+    if (errors.length) throw errors[0];
+    return { effects, timers, messages };
   }
 
   /**
@@ -380,7 +399,8 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
       machines: [
         ...verified.machines.map((m) => ({ machineId: m.id, module: m.module, ...(m.contract ? { contract: m.contract } : {}), ...(m.effects ? { effects: m.effects } : {}) })),
         // S119, S120: the OutboxIntent instance for every retry bound the build declares.
-        ...verifiedModels(verified.machines.flatMap((m) => Object.values(m.manifest?.effects ?? {}).map((e) => e.retry.maxAttempts as number))).map((x) => ({ machineId: x.machineId, module: x.module, contract: x.contract })),
+        // Review C8: every bound, so an intent created under an earlier build's bound keeps its own machine after a redeploy.
+        ...verifiedModels(BOUNDS).map((x) => ({ machineId: x.machineId, module: x.module, contract: x.contract })),
       ],
       ...(opts.now ? { now: opts.now } : {}),
     });

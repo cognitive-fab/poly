@@ -56,6 +56,8 @@ export interface WorkerOptions {
   batch?: number;
   /** S140: why a completion's data is outside its action's type, or null. */
   outsideType?: (instanceId: string, action: string, data: unknown) => string | null;
+  /** How long a row whose transition the machine refused waits before it is tried again (every park has a deadline). */
+  faultRetryMs?: number;
   /** Built-in handlers by kind, which run without a host handler (the outcome of an adjudication, PD2.4). */
   builtins?: Record<string, EffectHandler>;
   /** Called with a completion's action id and the handler's result just before the completion is dispatched. */
@@ -122,21 +124,51 @@ export class EffectWorker {
     return inst ? inst.state as IntentState : null;
   }
 
-  /** One transition of the hosted machine. Inside a transaction when the caller opened one. */
-  private async transition(row: OutboxRow, action: string): Promise<IntentState> {
-    const id = this.intentId(row);
-    // The claim is the fence: a transition is taken only while the row is still ours, as polyrun fences its marks on 'inflight'.
+  /** The claim is the fence: a transition or a completion is taken only while the row is still ours (review C2). */
+  private checkFence(row: OutboxRow): void {
     const fence = (row as Fenced).fence;
-    if (fence !== undefined) {
-      const cur = this.store.db.prepare('SELECT status, claimed_until FROM pr_outbox WHERE intent_id = ?').get(row.intent_id);
-      if (!cur || cur.status !== 'inflight' || cur.claimed_until !== fence) throw new StaleClaim(`the claim on ${row.intent_id} was taken over`);
-    }
+    if (fence === undefined) return;
+    const cur = this.store.db.prepare('SELECT status, claimed_until FROM pr_outbox WHERE intent_id = ?').get(row.intent_id);
+    if (!cur || cur.status !== 'inflight' || cur.claimed_until !== fence) throw new StaleClaim(`the claim on ${row.intent_id} was taken over`);
+  }
+
+  /** One step of the hosted machine, accepted or (in a race the machine settles, review C3) rejected and journaled. */
+  private async attempt(row: OutboxRow, action: string): Promise<{ accepted: boolean; reason: string | null; from: string }> {
+    const id = this.intentId(row);
+    this.checkFence(row);
     const inst = await this.store.getInstance(id);
     if (!inst) throw new RuntimeFault(`no OutboxIntent instance for ${row.intent_id}`);
     // The action id is the transition and the seq it is taken from, so a repeat after a crash dedupes.
     const r = await this.kernel.dispatch(id, action, {}, `${action}@${inst.seq}`);
-    if (r.stepKind !== 'accepted') throw new RuntimeFault(`the worker took ${action} on intent ${row.intent_id} in state ${(inst.state as IntentState).intent}, and OutboxIntent refuses it (${r.stepKind}${r.rejectReason ? ` "${r.rejectReason}"` : ''}): PL2401 RUNTIME_MODEL_DRIFT`);
-    return r.state as IntentState;
+    return { accepted: r.stepKind === 'accepted', reason: r.rejectReason ?? null, from: (inst.state as IntentState).intent };
+  }
+
+  /** One transition of the hosted machine. Inside a transaction when the caller opened one. */
+  private async transition(row: OutboxRow, action: string): Promise<void> {
+    const r = await this.attempt(row, action);
+    if (!r.accepted) throw new RuntimeFault(`the worker took ${action} on intent ${row.intent_id} in state ${r.from}, and OutboxIntent refuses it (rejected${r.reason ? ` "${r.reason}"` : ''}): PL2401 RUNTIME_MODEL_DRIFT`);
+  }
+
+  /**
+   * Review C1, C2: a terminal transition and the completion it delivers commit in one transaction (K1 extended to
+   * the hosted OutboxIntent), behind the claim's fence: neither exists without the other, and a stale holder delivers
+   * nothing.
+   */
+  private async finish(row: OutboxRow, action: string, completion: { hook: any; suffix: string; data: Record<string, unknown> } | null, after: () => Promise<void> | void): Promise<void> {
+    await this.store.txn(async () => {
+      this.checkFence(row);
+      await this.transition(row, action);
+      if (completion) await this.dispatchCompletion(row, completion.hook, completion.suffix, completion.data);
+      await after();
+    });
+  }
+
+  /** S120, review C8: the bound an intent was created under, from its own machine, whatever the manifest says now. */
+  private async boundOf(row: OutboxRow): Promise<number> {
+    const inst = await this.store.getInstance(this.intentId(row));
+    const m = /^runtime(\d*)\.OutboxIntent$/.exec(inst?.machine_id ?? '');
+    if (!m) throw new RuntimeFault(`intent ${row.intent_id} is not an OutboxIntent instance`);
+    return m[1] ? Number(m[1]) : 3;
   }
 
   private verdict(row: OutboxRow, body: Record<string, unknown>): void {
@@ -204,18 +236,21 @@ export class EffectWorker {
   async tick(now = this.now): Promise<number> {
     await this.recover(now);
     const claimed = await this.store.claimEffects(now, this.batch, this.leaseMs);
+    const errors: unknown[] = [];
     for (const row of claimed) {
       (row as Fenced).fence = now + this.leaseMs; // the claimed_until polyrun's claimEffects wrote
       try {
         await this.run(row, now);
       } catch (e) {
         if (e instanceof StaleClaim) continue;
-        if (!(e instanceof RuntimeFault)) throw e;
-        // The worker stops on this intent: parked far ahead, the fault recorded, never the refused transition.
-        await this.store.markEffectRetry(row.intent_id, row.attempts, now + 365 * 24 * 60 * 60_000, e.message);
+        if (!(e instanceof RuntimeFault)) { errors.push(e); continue; } // review C6: the rest of the batch still runs
+        // The worker stops on this intent, the fault recorded, never the refused transition; every park has a deadline.
+        await this.store.markEffectRetry(row.intent_id, row.attempts, now + (this.opts.faultRetryMs ?? 60 * 60_000), e.message);
         await this.store.insertAudit({ at: now, instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule: 'PL2401', reason: e.message });
       }
     }
+    // An unexpected error (a crash of the pass) is reported once the batch is done; its row recovers by its lease.
+    if (errors.length) throw errors[0];
     return claimed.length;
   }
 
@@ -224,11 +259,17 @@ export class EffectWorker {
     const row = await this.store.txn(() => this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(intentId));
     if (!row) throw new Error(`no intent ${intentId}`);
     const r = { ...row, payload: JSON.parse(row.payload) } as OutboxRow;
-    await this.store.txn(async () => {
-      await this.transition(r, 'Approve');
+    // Review C3: Approve and EscalationTimeout race; whichever commits first wins, and the other is a rejected step.
+    const res = await this.store.txn(async () => {
+      const a = await this.attempt(r, 'Approve');
+      if (!a.accepted) return a;
       this.verdict(r, { outcome: 'approved', by: approval.by, ref: approval.ref, signed: false });
       this.store.db.prepare(`UPDATE pr_outbox SET next_attempt_at = ? WHERE intent_id = ? AND status = 'pending'`).run(this.now, intentId);
+      return a;
     });
+    if (!res.accepted) {
+      throw new Error(res.from === 'Denied' ? `intent ${intentId}: the escalation timed out and the intent was denied before the approval (PT9.2)` : `intent ${intentId} is ${res.from}, not waiting for an approval`);
+    }
   }
 
   private async run(row: OutboxRow, now: number): Promise<void> {
@@ -237,9 +278,11 @@ export class EffectWorker {
       await this.store.markEffectRetry(row.intent_id, row.attempts, now + 30_000, `parked: machine or manifest unavailable for effect '${row.kind}', not executed`);
       return;
     }
-    const m = decl.retry?.maxAttempts;
-    if (!Number.isInteger(m)) throw new RuntimeFault(`effect ${row.kind} declares no retry.maxAttempts (S120)`);
-    if (!(await this.store.getInstance(this.intentId(row)))) await this.kernel.create(machineOfBound(m), this.intentId(row));
+    const declared = decl.retry?.maxAttempts;
+    if (!Number.isInteger(declared)) throw new RuntimeFault(`effect ${row.kind} declares no retry.maxAttempts (S120)`);
+    if (!(await this.store.getInstance(this.intentId(row)))) await this.kernel.create(machineOfBound(declared), this.intentId(row));
+    // Review C8: the intent keeps the bound it was created under, across a redeploy that changes the manifest's.
+    const m = await this.boundOf(row);
     let result: unknown;
     let ran = false;
     for (;;) {
@@ -250,19 +293,35 @@ export class EffectWorker {
           continue;
         case 'Escalated':
           if (st.intent_approved) { await this.store.txn(() => this.transition(row, 'Propose')); continue; }
-          // Claimed while waiting: the escalation's time is up (PT9.2), so it is denied.
-          await this.dispatchCompletion(row, decl.onFailure, ':failed', mapCompletion(decl.onFailure ?? {}, { error: { message: 'escalation-timeout', reason: 'escalation-timeout' } }, { reason: 'escalation-timeout' }));
-          await this.store.txn(async () => {
-            await this.transition(row, 'EscalationTimeout');
-            this.verdict(row, { outcome: 'denied', reason: 'escalation-timeout' });
-            await this.store.markEffectDead(row.intent_id, row.attempts, 'denied: escalation-timeout');
-          });
-          return;
+          {
+            // Claimed while waiting: the escalation's time is up (PT9.2), so it is denied, unless an approval committed
+            // first, in which case the timeout is a rejected step and the approved intent is proposed again (review C3).
+            const won = await this.store.txn(async () => {
+              const t = await this.attempt(row, 'EscalationTimeout');
+              if (!t.accepted) return false;
+              await this.dispatchCompletion(row, decl.onFailure, ':failed', mapCompletion(decl.onFailure ?? {}, { error: { message: 'escalation-timeout', reason: 'escalation-timeout' } }, { reason: 'escalation-timeout' }));
+              this.verdict(row, { outcome: 'denied', reason: 'escalation-timeout' });
+              await this.store.markEffectDead(row.intent_id, row.attempts, 'denied: escalation-timeout');
+              return true;
+            });
+            if (won) return;
+            continue;
+          }
         case 'Proposed': {
           const d = st.intent_decision!;
           const approval = d === 2 ? this.lastApproval(row) : undefined;
           const { proposal, snapshot } = await this.proposalOf(row, decl, approval);
-          let g = await this.gate.propose(proposal, snapshot);
+          let g: GateDecision;
+          try {
+            g = await this.gate.propose(proposal, snapshot);
+          } catch (e) {
+            // Review C6: a gate that fails holds only this intent, Proposed with a backoff, and never allows it (PT9.5).
+            await this.store.txn(async () => {
+              this.checkFence(row);
+              this.store.db.prepare(`UPDATE pr_outbox SET status = 'pending', claimed_until = NULL, next_attempt_at = ?, last_error = ? WHERE intent_id = ?`).run(now + this.backoff(decl, 1), `gate unavailable: ${String((e as Error)?.message ?? e)}`, row.intent_id);
+            });
+            return;
+          }
           // Rule 2 of PT9.7: an approved re-proposal is allowed or denied, never escalated again.
           if (d === 2 && g.decision === 'escalate') g = { decision: 'deny', reason: 'escalate-once' };
           const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot) };
@@ -273,9 +332,7 @@ export class EffectWorker {
           }
           if (g.decision === 'deny') {
             const deny = { reason: g.reason, witnessDigest: g.witnessDigest ?? null };
-            await this.dispatchCompletion(row, decl.onFailure, ':failed', mapCompletion(decl.onFailure ?? {}, { error: { message: g.reason, ...deny } }, deny));
-            await this.store.txn(async () => {
-              await this.transition(row, 'GateDeny');
+            await this.finish(row, 'GateDeny', { hook: decl.onFailure, suffix: ':failed', data: mapCompletion(decl.onFailure ?? {}, { error: { message: g.reason, ...deny } }, deny) }, async () => {
               this.verdict(row, { outcome: 'denied', reason: g.reason, witness: g.witnessDigest ?? null, ...recorded });
               if (this.opts.drift === 'denied-marked-done') { await this.store.markEffectDone(row.intent_id); return; }
               await this.store.markEffectDead(row.intent_id, row.attempts, `denied: ${g.reason}`);
@@ -301,38 +358,38 @@ export class EffectWorker {
             const message = String((e as Error)?.message ?? e);
             // S138: a permanent error is final, and a drifting worker that retries it is what PL2401 is about.
             if ((e as { permanent?: boolean })?.permanent && this.opts.drift !== 'retry-permanent') await this.permanent(row, decl, n, message);
-            else await this.failed(row, decl, n, message, now, (e as { permanent?: boolean })?.permanent ? 'permanent' : 'failed');
+            else await this.failed(row, decl, n, message, now, (e as { permanent?: boolean })?.permanent ? 'permanent' : 'failed', m);
             return;
           }
           await this.store.txn(async () => { await this.transition(row, 'HandlerOk'); this.observed(row, (await this.intentState(row))!.intent_attempt!, 'ok'); });
           continue;
         case 'Running':
           // Found running at a claim: the previous attempt crashed (S119).
-          await this.failed(row, decl, st.intent_attempt!, 'found running at claim (a crash)', now, 'lost');
+          await this.failed(row, decl, st.intent_attempt!, 'found running at claim (a crash)', now, 'lost', m);
           return;
         case 'Settled': {
           const n = st.intent_attempt!;
           if (!ran) {
             // Recovered: the result is gone. A completion already journaled is done; otherwise the settle failed.
             if (this.journaled(row, ':done')) { await this.settled(row); return; }
-            await this.settleFailed(row, decl, n, 'settled before a crash, result lost', now);
+            await this.settleFailed(row, decl, n, 'settled before a crash, result lost', now, m);
             return;
           }
-          const s = await this.gate.settle({ ok: true, output: digest(result ?? null) }, (await this.proposalOf(row, decl)).proposal);
-          if (s !== 'ok') { await this.settleFailed(row, decl, n, 'the gate refused the settle', now); return; }
+          let s: 'ok' | 'failed';
+          try { s = await this.gate.settle({ ok: true, output: digest(result ?? null) }, (await this.proposalOf(row, decl)).proposal); } catch { s = 'failed'; }
+          if (s !== 'ok') { await this.settleFailed(row, decl, n, 'the gate refused the settle', now, m); return; }
           this.opts.beforeCompletion?.(row, decl, result);
           try {
-            await this.dispatchCompletion(row, decl.onSuccess, ':done', mapCompletion(decl.onSuccess ?? {}, { result }, result && typeof result === 'object' ? result as Record<string, unknown> : {}));
+            await this.finish(row, 'SettleOk', { hook: decl.onSuccess, suffix: ':done', data: mapCompletion(decl.onSuccess ?? {}, { result }, result && typeof result === 'object' ? result as Record<string, unknown> : {}) }, () => this.store.markEffectDone(row.intent_id).then(() => undefined));
           } catch (e) {
             if (!(e instanceof InputOutsideType) && !(e instanceof DecisionWithoutRecord)) throw e;
             // S140, review B2: a completion that cannot be a step (outside its type, or a decision with no record) takes
             // none; the settle failed, and the intent retries or dies.
             const rule = e instanceof InputOutsideType ? 'S140' : 'K10';
             await this.store.insertAudit({ at: now, instanceId: row.instance_id, action: decl.onSuccess.action, actionId: `${row.intent_id}:done`, rule, reason: e.message });
-            await this.settleFailed(row, decl, n, rule === 'S140' ? 'the completion is outside its type (S140)' : 'the decision has no record (K10)', now);
+            await this.settleFailed(row, decl, n, rule === 'S140' ? 'the completion is outside its type (S140)' : 'the decision has no record (K10)', now, m);
             return;
           } finally { this.opts.afterCompletion?.(row); }
-          await this.settled(row);
           return;
         }
         case 'Done':
@@ -373,17 +430,15 @@ export class EffectWorker {
 
   /** S138: HandlerFailedPermanent, Running to Dead, with the failed completion first and no further attempt. */
   private async permanent(row: OutboxRow, decl: any, n: number, message: string): Promise<void> {
-    await this.dispatchCompletion(row, decl.onFailure, ':failed', mapCompletion(decl.onFailure ?? {}, { error: { message, permanent: true } }, { reason: message }));
-    await this.store.txn(async () => {
-      await this.transition(row, 'HandlerFailedPermanent');
+    await this.finish(row, 'HandlerFailedPermanent', { hook: decl.onFailure, suffix: ':failed', data: mapCompletion(decl.onFailure ?? {}, { error: { message, permanent: true } }, { reason: message }) }, async () => {
       this.observed(row, n, 'permanent');
       await this.store.markEffectDead(row.intent_id, n, `permanent: ${message}`);
     });
   }
 
   /** HandlerFailed: back to Allowed with the attempt counted, or Dead at the bound with the exhausted completion first. */
-  private async failed(row: OutboxRow, decl: any, n: number, message: string, now: number, outcome: 'failed' | 'lost' | 'permanent' = 'failed'): Promise<void> {
-    const m = decl.retry.maxAttempts;
+  private async failed(row: OutboxRow, decl: any, n: number, message: string, now: number, outcome: 'failed' | 'lost' | 'permanent' = 'failed', bound?: number): Promise<void> {
+    const m = bound ?? await this.boundOf(row);
     if (n < m) {
       await this.store.txn(async () => {
         await this.transition(row, 'HandlerFailed');
@@ -393,16 +448,14 @@ export class EffectWorker {
       return;
     }
     const hook = decl.onExhausted || decl.onFailure;
-    await this.dispatchCompletion(row, hook, ':exhausted', mapCompletion(hook ?? {}, { error: { message } }, { reason: 'exhausted' }));
-    await this.store.txn(async () => {
-      await this.transition(row, 'HandlerFailed');
+    await this.finish(row, 'HandlerFailed', { hook, suffix: ':exhausted', data: mapCompletion(hook ?? {}, { error: { message } }, { reason: 'exhausted' }) }, async () => {
       this.observed(row, n, outcome);
       await this.store.markEffectDead(row.intent_id, n, message);
     });
   }
 
-  private async settleFailed(row: OutboxRow, decl: any, n: number, message: string, now: number): Promise<void> {
-    const m = decl.retry.maxAttempts;
+  private async settleFailed(row: OutboxRow, decl: any, n: number, message: string, now: number, bound?: number): Promise<void> {
+    const m = bound ?? await this.boundOf(row);
     if (n < m) {
       await this.store.txn(async () => {
         await this.transition(row, 'SettleFailed');
@@ -411,9 +464,7 @@ export class EffectWorker {
       return;
     }
     const hook = decl.onExhausted || decl.onFailure;
-    await this.dispatchCompletion(row, hook, ':exhausted', mapCompletion(hook ?? {}, { error: { message } }, { reason: 'exhausted' }));
-    await this.store.txn(async () => {
-      await this.transition(row, 'SettleFailed');
+    await this.finish(row, 'SettleFailed', { hook, suffix: ':exhausted', data: mapCompletion(hook ?? {}, { error: { message } }, { reason: 'exhausted' }) }, async () => {
       await this.store.markEffectDead(row.intent_id, n, message);
     });
   }

@@ -33,7 +33,7 @@ const AT = { module: 'runtime', machine: 'OutboxIntent' };
 
 /** The actions a worker source can take: every `transition(row, 'Action')`. */
 export function workerActions(source: string): string[] {
-  return [...new Set([...source.matchAll(/transition\(\s*\w+\s*,\s*'(\w+)'\s*\)/g)].map((m) => m[1]))].sort();
+  return [...new Set([...source.matchAll(/(?:transition|attempt|finish)\(\s*\w+\s*,\s*'(\w+)'/g)].map((m) => m[1]))].sort();
 }
 
 export async function workerConformance(rt: PolyRuntime, workerSourcePath: string): Promise<Conformance> {
@@ -54,6 +54,8 @@ export async function workerConformance(rt: PolyRuntime, workerSourcePath: strin
     const rows = (await rt.getJournal(inst.id)) as unknown as JournalRowLike[];
     for (const r of rows) {
       if (r.action === '$create') { states.add(canonicalize(r.post)); continue; }
+      // Review C3: Approve and EscalationTimeout race, and the one that loses is a rejected step of the machine, not drift.
+      if (r.step_kind !== 'accepted' && (r.action === 'Approve' || r.action === 'EscalationTimeout')) continue;
       if (r.step_kind !== 'accepted') { diagnostics.push(diag('PL2401', AT, `intent ${inst.id}, seq ${r.seq}: the worker took ${r.action} in ${String(r.pre.intent)}, and the machine refuses it (${r.step_kind}${r.reject_reason ? ` "${r.reject_reason}"` : ''})`)); continue; }
       edges.add(`${canonicalize(r.pre)} -${r.action}->`);
       states.add(canonicalize(r.post));
@@ -79,6 +81,27 @@ export async function workerConformance(rt: PolyRuntime, workerSourcePath: strin
     seen.forEach((o, k) => {
       if (taken[k] !== undefined && taken[k] !== expected[o.outcome]) diagnostics.push(diag('PL2401', AT, `intent ${inst.id}: handler outcome ${o.outcome} at attempt ${o.attempt}, and the worker took ${taken[k]}`));
     });
+  }
+  // Review C7: each intent's end and the program's completion steps tell one story. Done has its success completion
+  // and no failure; Denied and Dead have a failure (failed or exhausted) and no success; an intent still in flight has
+  // none. A completion the manifest does not declare is not looked for.
+  for (const inst of await rt.instances()) {
+    if (!rt.modelOf(inst.machineId)) continue;
+    const intentId = inst.id.replace(/^intent:/, '');
+    const row = await rt.outboxRow(intentId);
+    if (!row) continue;
+    const hooks = rt.effectDeclaration(row.instance_id, row.kind) ?? {};
+    const steps = new Set(((await rt.getJournal(row.instance_id)) as unknown as JournalRowLike[]).map((r) => r.action_id).filter((a) => a.startsWith(`${intentId}:`)).map((a) => a.slice(intentId.length)));
+    const tag = String(inst.state.intent);
+    const failure = steps.has(':failed') || steps.has(':exhausted');
+    const say = (what: string) => diagnostics.push(diag('PL2401', AT, `intent ${inst.id} is ${tag}, and ${what}`));
+    if (tag === 'Done') {
+      if (failure) say('the program took a failure completion for it');
+      if (hooks.onSuccess?.action && !steps.has(':done')) say('the program took no success completion for it');
+    } else if (tag === 'Denied' || tag === 'Dead') {
+      if (steps.has(':done')) say('the program took a success completion for it');
+      if ((hooks.onFailure?.action || hooks.onExhausted?.action) && !failure) say('the program took no failure completion for it');
+    } else if (steps.size) say(`the program already took ${[...steps].join(', ')} for it`);
   }
   // A transition the machine refused rolls back with its transaction; the worker records it as a runtime fault.
   for (const r of await rt.audit()) if (r.rule === 'PL2401') diagnostics.push(diag('PL2401', AT, r.reason));
