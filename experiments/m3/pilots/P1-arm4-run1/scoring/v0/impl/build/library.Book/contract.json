@@ -1,0 +1,37 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:a167d217b160e475f6d819f8bb63c6aef8c3a4a6409d117245a74af5761af81b",
+  "stateKeys": [
+    {
+      "name": "status",
+      "type": "'absent' | 'available' | 'lent' | 'retired'"
+    },
+    {
+      "name": "loans",
+      "type": "0..3"
+    }
+  ],
+  "initState": {
+    "status": "absent",
+    "loans": 0
+  },
+  "actions": {
+    "Add": {
+      "dataFields": {}
+    },
+    "Lend": {
+      "dataFields": {}
+    },
+    "GiveBack": {
+      "dataFields": {}
+    },
+    "Retire": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [
+    "retired"
+  ],
+  "dataDomain": {},
+  "invariants": "invariants.mjs"
+}
