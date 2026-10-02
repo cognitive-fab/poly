@@ -69,3 +69,20 @@ test('PD5-A5: a cross-scope send whose lineage is missing or broken is SendDenie
     assert.deepEqual(broken, [['denied', 'lineage']]);
   } finally { await rt.close(); }
 });
+
+// PD5-A5, S105: a configuration is checked over origin classes. Each message in transit carries its origin class (the
+// origin's claims and the intent), never a hop, so the state stays finite. Here the send from a Person's step and the
+// one from an Agent's step are two messages, so every global state with the send in transit (pending, held or turned
+// into SendDenied) is counted once per origin: the count without lineage plus those states again.
+test('PD5-A5: a configuration with a cross-scope send is checked over origin classes', async () => {
+  const { checkConfiguration, toPlain } = await import('@poly/ref');
+  const { parse } = await import('@poly/lang');
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../conformance/m5/split-claims.poly', import.meta.url), 'utf8');
+  const withClaims = checkConfiguration(parse(src).module, 'split');
+  const plain = checkConfiguration(parse(src.replace('on Send() by c: Caller {', 'on Send() {')).module, 'split');
+  const inTransit = plain.graph.states.filter((s) => s.mu.length > 0).length;
+  assert.equal(withClaims.states, plain.states + inTransit);
+  const origins = new Set(withClaims.graph.states.flatMap((s) => s.mu.map((m) => JSON.stringify(m.origin ? { claims: toPlain(m.origin.claims), intent: m.origin.intent } : null))));
+  assert.deepEqual([...origins].sort(), [JSON.stringify({ claims: { kind: 'Agent' }, intent: 'xc.Sender.Send' }), JSON.stringify({ claims: { kind: 'Person' }, intent: 'xc.Sender.Send' })].sort());
+});

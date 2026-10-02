@@ -333,7 +333,7 @@ function usesPrincipals(M: RMachine): boolean {
   const deep = (x: RType, seen: Set<string>): boolean => x.k === 'principal' || (x.k === 'map' && deep(x.value, seen))
     || (x.k === 'record' && !seen.has(x.name) && (M.records.get(x.name)?.fields ?? []).some((f) => deep(f.type, new Set([...seen, x.name]))))
     || (x.k === 'union' && !seen.has(x.name) && (M.unions.get(x.name)?.ctors ?? []).some((c) => c.fields.some((f) => deep(f.type, new Set([...seen, x.name])))));
-  return M.actions.some((a) => a.claims) || M.fields.some((f) => deep(f.type, new Set()));
+  return M.actions.some((a) => a.claims && deep(a.claims.type, new Set())) || M.fields.some((f) => deep(f.type, new Set()));
 }
 
 /** The checked instance a verdict holds for (PS4.3, PT12.3a). */

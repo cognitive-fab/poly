@@ -51,6 +51,11 @@ export interface Message {
    */
   gate?: 'pending' | 'held';
   from?: number;
+  /**
+   * PD5.2.3, S105: the message's origin class, the claims that started its chain and that step's intent. Absent when
+   * the chain started with no claims. No hop is kept: nothing a property or policy reads depends on one.
+   */
+  origin?: { claims: Value; intent: string };
 }
 
 export interface GlobalState {
@@ -113,7 +118,7 @@ export interface ConfigReport {
   vacuous: Vacuous[];
 }
 
-const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
+const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
 export function buildConfiguration(module: Module, name: string): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
@@ -217,8 +222,12 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       inputs.push({ instance: k, action: r.action, data: dataOf(instances[k].machine, r.action) });
     }
   }
-  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
+  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin']): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
     const inst = instances[k];
+    // PD5.2.2a: an input with claims starts a chain whose origin class is its claims and its intent; a delivered message's
+    // step inherits the message's origin class.
+    const claimed = inst.machine.actions.find((x) => x.name === action)?.claims;
+    const origin: Message['origin'] = via === 'input' ? (claimed && data.$claims !== undefined && data.$claims !== null ? { claims: data.$claims, intent: `${inst.machine.id}.${action}` } : undefined) : from;
     const st = transition(inst.machine, s.sigma[k]!, action, data, inst.name);
     const sigma = [...s.sigma];
     sigma[k] = st.next;
@@ -237,7 +246,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
         if (sigma.filter((y) => y !== null).length + 1 > N) { over = true; break; }
         if (t === undefined) throw new Error(`poly-ref: ${inst.name} creates ${x.address}, which is outside the instances the bound admits`);
         sigma[t] = instances[t].init;
-        if (x.create) next.push({ target: t, action: x.create.action, data: x.create.data, creation: true });
+        if (x.create) next.push({ target: t, action: x.create.action, data: x.create.data, creation: true, ...(origin ? { origin } : {}) });
         continue;
       }
       if (x.type !== 'send') continue; // S61: other intents are completed only through declared inputs
@@ -245,7 +254,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       const t = index.get(x.target as string);
       if (t === undefined || sigma[t] === null) throw new Error(`poly-ref: ${inst.name} sends to ${keyOf(x.target)}, which is no instance of the configuration`);
       // PS8.7: a send between two trust scopes waits for the gate.
-      next.push(inst.scope !== instances[t].scope ? { target: t, action: x.action, data: x.data, gate: 'pending', from: k } : { target: t, action: x.action, data: x.data });
+      next.push({ ...(inst.scope !== instances[t].scope ? { target: t, action: x.action, data: x.data, gate: 'pending' as const, from: k } : { target: t, action: x.action, data: x.data }), ...(origin ? { origin } : {}) });
     }
     const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone, ...(creation ? { creation } : {}) };
     const g: GlobalState = { sigma, mu: sortMu(next) };
@@ -282,12 +291,12 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
         if (seen.has(key) || (!m.creation && waiting.has(m.target))) return;
         seen.add(key);
         const rest = [...s.mu.slice(0, j), ...s.mu.slice(j + 1)];
-        out.push(step(s, m.target, m.action, m.data, rest, 'deliver', m.creation === true));
+        out.push(step(s, m.target, m.action, m.data, rest, 'deliver', m.creation === true, m.origin));
         if (m.gate) {
           // PS8.7, PS4.4: the gate's decision is an environment choice: deny delivers SendDenied to the sender, as an
           // ordinary message; escalate holds the message, which is then approved (delivered) or timed out (denied).
           const reason = m.gate === 'held' ? 'escalation-timeout' : 'denied';
-          const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason } };
+          const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason }, ...(m.origin ? { origin: m.origin } : {}) };
           const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu) } }) as Outcome<GlobalState> });
           out.push(gateStep('deny', [...rest, denied]));
           if (m.gate === 'pending') out.push(gateStep('escalate', [...rest, { ...m, gate: 'held' }]));
@@ -476,6 +485,8 @@ export function inputData(instances: ConfigInstance[], M: RMachine, action: stri
     const vs = p.check ?? (p.type.k === 'ref' ? [null, ...instances.filter((x) => x.machine.name === (p.type as { machine: string }).machine).map((x) => x.name)] : valuesOf(p.type, M));
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
+  // PD5.1.2c: an input with claims offers every claims value, as a machine's check does.
+  if (a.claims) { const cs = valuesOf(a.claims.type, M); recs = recs.flatMap((r) => cs.map((c) => ({ ...r, $claims: c }))); }
   return recs;
 }
 

@@ -1,0 +1,43 @@
+// PD5.2.3, S105, PD5-A5: a configuration whose cross-scope send starts from an action with claims. In check, lineage is
+// its origin class: the message carries the origin's claims and the intent, never a hop.
+module xc
+
+enum Kind { Person, Agent }
+
+claims Caller {
+  kind: Kind
+}
+
+service machine Receiver {
+  state { got : 0..1 = 0 }
+  action Got()
+  on Got {
+    require got == 0 else reject "again"
+    got' = 1
+  }
+}
+
+service machine Sender {
+  state {
+    sent   : 0..1 = 0
+    denied : bool = false
+    peer   : Ref<Receiver> = none
+  }
+  action Send()
+  action SendDenied(to: string check { "r" }, action: string check { "Got" }, reason: string check { "denied", "escalation-timeout" })
+  on Send() by c: Caller {
+    require sent == 0 else reject "sent"
+    sent' = 1
+    send peer <- Got()
+  }
+  on SendDenied(to, action, reason) {
+    denied' = true
+  }
+}
+
+configuration split {
+  s : Sender { peer: r } scope "front"
+  r : Receiver scope "back"
+  inputs { s.Send }
+  bounds { transit 2 }
+}
