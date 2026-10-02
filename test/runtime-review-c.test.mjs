@@ -91,10 +91,12 @@ test('review C3: an approval that wins the race makes the timeout a rejected ste
     await rt.worker.tick(); // escalated
     clock.advance(61_000);
     const { row } = await intentOf(rt, 'j');
-    // The timeout pass reads the intent as waiting, then the approval commits before its EscalationTimeout does.
+    // The timeout pass reads the intent as waiting, then the approval commits before its EscalationTimeout does. Since
+    // review C2 an approval past the deadline is refused, so the approval is made as of 2s before it: one that arrived
+    // in time and commits after the pass's read.
     const read = rt.worker.intentState.bind(rt.worker);
     let raced = false;
-    rt.worker.intentState = async (r) => { const s = await read(r); if (!raced && s?.intent === 'Escalated' && !s.intent_approved) { raced = true; await approveAs(rt, row.intent_id); } return s; };
+    rt.worker.intentState = async (r) => { const s = await read(r); if (!raced && s?.intent === 'Escalated' && !s.intent_approved) { raced = true; clock.advance(-2_000); try { await approveAs(rt, row.intent_id); } finally { clock.advance(2_000); } } return s; };
     await rt.worker.tick();
     rt.worker.intentState = read;
     assert.ok(raced);
