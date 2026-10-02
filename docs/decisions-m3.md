@@ -106,6 +106,8 @@ FROZEN waits on M3-6 to M3-9 and a clean control 4 on all 40 versions.
 2. Regenerate `freeze.json` once, with `--model claude-opus-5-5`; `freeze.mjs --check` then reports no change.
 3. Pilots on P1 (`experiments/m3/PILOT`), then the budget, then FROZEN, then the runs.
 
+**Authentication for the pilots and the runs: an API key.** The arms keep `--bare`, and the runner and the freeze (d1cba58) are unchanged. `--bare` accepts only `ANTHROPIC_API_KEY`, so every pilot and every run authenticates the same way, and the CLI reports each run's cost directly. The key is set by JJ in the environment of the shell that runs the commands. It is never written to a file in the repository, a settings file or a run record, and the M3 session never handles it. Dropping `--bare` for a logged-in configuration directory is rejected: it changes the frozen runner, and the cost would have to be reconstructed from token counts.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
