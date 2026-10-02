@@ -298,3 +298,20 @@ test('review C5: a send of a decision\'s completion is PL6204, and a delivered m
     assert.ok((await rt.audit('c5')).some((r) => r.rule === 'K10' && r.action === 'RouteFailed'));
   } finally { await rt.close(); }
 });
+
+// Review B10: the map a decision event names is the map applied: its digest is its own, and it is non-decreasing.
+test('review B10: provide refuses a calibration map whose digest is not its own, or whose points are not monotone', async () => {
+  const { mapDigest } = await import('@poly/runtime');
+  const { rt } = await loaded(a);
+  try {
+    const provider = () => ({ answer: 'Refund', distribution: [['Refund', 0.6], ['Other', 0.1]] });
+    const good = { decision: 'route', version: 1, fittedFor: 'm', points: [[0, 0], [900, 500]] };
+    rt.provide('route', { model: 'm', calibration: { ...good, digest: mapDigest(good) }, provider });
+    const swapped = { decision: 'route', version: 1, fittedFor: 'm', points: [[0, 0], [500, 990]] };
+    assert.throws(() => rt.provide('route', { model: 'm', calibration: { ...swapped, digest: mapDigest(good) }, provider }), /digest/);
+    const bent = { decision: 'route', version: 1, fittedFor: 'm', points: [[0, 0], [500, 990], [900, 100]] };
+    assert.throws(() => rt.provide('route', { model: 'm', calibration: { ...bent, digest: mapDigest(bent) }, provider }), /non-decreasing/);
+    const unsorted = { decision: 'route', version: 1, fittedFor: 'm', points: [[900, 500], [0, 0]] };
+    assert.throws(() => rt.provide('route', { model: 'm', calibration: { ...unsorted, digest: mapDigest(unsorted) }, provider }), /ascending/);
+  } finally { await rt.close(); }
+});

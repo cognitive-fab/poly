@@ -18,7 +18,7 @@ import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
 import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
 import { verifiedModels, modelSource, BOUNDS } from './model.js';
-import { decisionHandler, type DecisionRecord, type ProviderConfig } from './provider.js';
+import { decisionHandler, mapDigest, type DecisionRecord, type ProviderConfig } from './provider.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
 
 export { LoadError };
@@ -232,6 +232,16 @@ export class PolyRuntime {
     const entry = this.verified.machines.map((m) => m.manifest?.effects?.[kind]).find(Boolean);
     if (!entry) throw new Error(`no decision ${decision} in the certified build`);
     if (config.calibration && config.calibration.decision !== decision) throw new Error(`the calibration map is for ${config.calibration.decision}, not ${decision}`);
+    // Review B10, PD1.6: the decision event names the map by its digest, so the digest must be the map applied, and
+    // the map must be the non-decreasing step function calibrate reads.
+    if (config.calibration) {
+      const c = config.calibration;
+      if (c.digest !== mapDigest(c)) throw new Error(`the calibration map for ${decision} states digest ${c.digest}, and its points have ${mapDigest(c)}`);
+      for (let i = 1; i < c.points.length; i++) {
+        if (!(c.points[i][0] > c.points[i - 1][0])) throw new Error(`the calibration map for ${decision}: its raw values are not strictly ascending at point ${i}`);
+        if (c.points[i][1] < c.points[i - 1][1]) throw new Error(`the calibration map for ${decision} is not non-decreasing at point ${i}: ${c.points[i - 1][1]} then ${c.points[i][1]}`);
+      }
+    }
     this.handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records));
   }
 
