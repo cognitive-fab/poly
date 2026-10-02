@@ -140,7 +140,7 @@ export class PolicyGate implements Gate {
    * PS8.7, PT9.9: a send between two trust scopes, proposed in the sender's session. The sender's latest snapshot is
    * the emitter's; a singleton it reads is recorded as for an effect.
    */
-  async proposeSend(m: { id: string; from: string; fromMachine: string; toMachine: string; action: string; senderState: Record<string, unknown> }): Promise<GateDecision> {
+  async proposeSend(m: { id: string; from: string; to: string; fromMachine: string; toMachine: string; action: string; data: unknown; senderState: Record<string, unknown> }): Promise<GateDecision> {
     const session = sessionOf(m.fromMachine);
     return this.serial(session, async () => {
       const machines: Record<string, unknown> = {};
@@ -151,7 +151,7 @@ export class PolicyGate implements Gate {
         const s = this.view.singleton(r);
         if (s) { machines[r] = s.state; reads[s.instance] = s.seq; singletons[r] = s.state; }
       }
-      const action = actionOf({ proposal: 'send', send: { to: m.toMachine, action: m.action, scope: moduleOf(m.toMachine) }, machines, decisions: this.view.decisions(m.from) });
+      const action = actionOf({ proposal: 'send', send: { to: m.toMachine, action: m.action, scope: moduleOf(m.toMachine), instance: m.to, payloadDigest: digest(m.data ?? {}) }, machines, decisions: this.view.decisions(m.from) });
       const { v, decision, reason } = await this.decideAction(session, moduleOf(m.fromMachine), action, m.id);
       const sseq = this.view.nextSseq(session);
       const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;

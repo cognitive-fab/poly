@@ -517,10 +517,15 @@ export class PolyRuntime {
         if (await this.kernel.workers.deliverMessage(m.id, now)) n++;
         continue;
       }
+      // Review D1, D2: a message has one gate decision. A delivery retried after an allow (the receiver's step committed
+      // and the mark did not) is delivered under the recorded allow; a recorded deny is finished, not proposed again.
+      const recorded = this.sendDecision(m.from, m.id);
+      if (recorded?.outcome === 'allowed') { if (await this.kernel.workers.deliverMessage(m.id, now)) n++; continue; }
+      if (recorded?.outcome === 'denied') { await this.sendDenied(m, recorded.reason ?? 'denied'); n++; continue; }
       const sender = await this.store.getInstance(m.from);
       let g;
       try {
-        g = await this.policyGate.proposeSend({ id: m.id, from: m.from, fromMachine, toMachine, action: m.action, senderState: sender?.state ?? {} });
+        g = await this.policyGate.proposeSend({ id: m.id, from: m.from, to: m.to, fromMachine, toMachine, action: m.action, data: m.data, senderState: sender?.state ?? {} });
       } catch (e) {
         const held = (e as { record?: Record<string, unknown> }).record;
         if (held) await this.store.txn(() => { const { action, ...rest } = held; this.store.appendEvent(m.from, 'verdict', { stage: 'gate', kind: 'send', intent: m.id, outcome: 'held', reason: String((e as Error).message), ...rest, gateDecision: 'held', action: this.store.keep(action) }, this.now()); });
@@ -531,13 +536,30 @@ export class PolyRuntime {
       const reason = g.decision === 'allow' ? null : g.decision === 'escalate' ? `escalate:${g.reason ?? ''}: a send has no approval path in M5a, so it is denied` : g.reason;
       await this.store.txn(() => { this.store.appendEvent(m.from, 'verdict', { stage: 'gate', kind: 'send', intent: m.id, to: m.to, message: m.action, outcome, reason, ...rest, gateDecision: g.decision, action: this.store.keep(action) }, this.now()); });
       if (g.decision === 'allow') { if (await this.kernel.workers.deliverMessage(m.id, now)) n++; continue; }
-      await this.store.markEffectDead(m.id, 1, `send denied: ${reason}`);
-      try { await this.kernel.dispatch(m.from, 'SendDenied', { to: m.to, action: m.action, reason }, `${m.id}:send-denied`); } catch (e) {
-        await this.store.insertAudit({ at: this.now(), instanceId: m.from, action: 'SendDenied', actionId: `${m.id}:send-denied`, rule: 'PT9.9', reason: String((e as Error).message) });
-      }
+      await this.sendDenied(m, reason ?? 'denied');
       n++;
     }
     return n;
+  }
+
+  /** The gate's recorded decision on a message, from the sender's verdict events, or null (a held answer is none). */
+  private sendDecision(from: string, id: string): { outcome: 'allowed' | 'denied'; reason: string | null } | null {
+    for (const r of this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict' ORDER BY seq DESC`).all(from) as { event: string }[]) {
+      const b = JSON.parse(r.event).body as { kind?: string; intent?: string; outcome?: string; reason?: string | null };
+      if (b?.kind === 'send' && b.intent === id && (b.outcome === 'allowed' || b.outcome === 'denied')) return { outcome: b.outcome, reason: b.reason ?? null };
+    }
+    return null;
+  }
+
+  /**
+   * PT9.9: SendDenied to the sender, with its own action id (so a second dispatch is deduped), then the message is
+   * dead. The message is pending and unclaimed, so it is marked here, not through polyrun's mark for a claimed row.
+   */
+  private async sendDenied(m: { id: string; from: string; to: string; action: string }, reason: string): Promise<void> {
+    try { await this.kernel.dispatch(m.from, 'SendDenied', { to: m.to, action: m.action, reason }, `${m.id}:send-denied`); } catch (e) {
+      await this.store.insertAudit({ at: this.now(), instanceId: m.from, action: 'SendDenied', actionId: `${m.id}:send-denied`, rule: 'PT9.9', reason: String((e as Error).message) });
+    }
+    await this.store.txn(() => { this.store.db.prepare("UPDATE pr_outbox SET status = 'dead', claimed_until = NULL, attempts = attempts + 1, last_error = ? WHERE intent_id = ? AND status = 'pending'").run(`send denied: ${reason}`, m.id); });
   }
 
   async recoverMessages(now = this.now()): Promise<number> {
