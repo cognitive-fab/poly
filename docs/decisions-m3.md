@@ -108,6 +108,8 @@ FROZEN waits on M3-6 to M3-9 and a clean control 4 on all 40 versions.
 
 **Authentication for the pilots and the runs: an API key.** The arms keep `--bare`, and the runner and the freeze (d1cba58) are unchanged. `--bare` accepts only `ANTHROPIC_API_KEY`, so every pilot and every run authenticates the same way, and the CLI reports each run's cost directly. The key is set by JJ in the environment of the shell that runs the commands. It is never written to a file in the repository, a settings file or a run record, and the M3 session never handles it. Dropping `--bare` for a logged-in configuration directory is rejected: it changes the frozen runner, and the cost would have to be reconstructed from token counts.
 
+**The pilots (ab9d2d0).** The four P1 pilots run concurrently, each capped at 30M tokens, 3 hours and $60, with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` set in the operator's window. The pilot report states that they ran concurrently. Before FROZEN, the scrub moves into the runner: `run.mjs` sets it in each arm's environment and `run.json` records that it was set, so the full runs never depend on the operator's window. That change is part of the one regeneration of the freeze that follows the pilots. The key used for the pilots outlives the wall cap, so that no run can end on an expired key instead of its own limits.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
