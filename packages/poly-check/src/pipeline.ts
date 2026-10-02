@@ -25,7 +25,7 @@ import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
 import { lintHandlers } from './lint.js';
-import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type Vacuous } from '@poly/ref';
+import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, conjunction, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type Vacuous } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
@@ -71,7 +71,8 @@ function vacuousRecords(list: Vacuous[]): VacuousRecord[] {
   return list.map((v) => ({
     property: v.property,
     reason: 'vacuous',
-    antecedent: v.text ?? v.parts.map((p) => printExpr(p)).join(' && '),
+    // Review D5: printed as one conjunction, so a part that needs parentheses keeps them.
+    antecedent: v.text ?? printExpr(conjunction(v.parts)),
     ...(v.member !== undefined ? { member: v.member } : {}),
   }));
 }
