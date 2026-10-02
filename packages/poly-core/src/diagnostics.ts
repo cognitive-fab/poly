@@ -170,7 +170,7 @@ export interface WitnessStep {
   /** The kinds of the step's intents, in order, when it emits (PS2.1). */
   effects?: string[];
   /** A global step of a configuration (PS13.3): an input or a delivery, at its instance. */
-  global?: { kind: 'input' | 'deliver'; instance: string; text: string };
+  global?: { kind: 'input' | 'deliver' | 'gate'; instance: string; text: string };
 }
 
 export interface Witness {

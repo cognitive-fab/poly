@@ -373,7 +373,10 @@ class Parser {
           }
           this.next();
         }
-        instances.push(this.node<A.ConfigInstance>(is, { kind: 'ConfigInstance', name: iname, count, machine, init }, true));
+        // PS8.7, S160: `scope "x"` assigns the instance a trust scope; absent, it is its machine's module.
+        let scope: string | undefined;
+        if (this.at('scope') && this.peek(1).kind === 'string') { this.next(); scope = this.str(); }
+        instances.push(this.node<A.ConfigInstance>(is, { kind: 'ConfigInstance', name: iname, count, machine, init, ...(scope !== undefined ? { scope } : {}) }, true));
       }
     }
     this.next();

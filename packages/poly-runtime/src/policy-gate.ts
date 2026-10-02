@@ -135,6 +135,32 @@ export class PolicyGate implements Gate {
     return { action: actionOf(row), reads };
   }
 
+  /**
+   * PS8.7, PT9.9: a send between two trust scopes, proposed in the sender's session. The sender's latest snapshot is
+   * the emitter's; a singleton it reads is recorded as for an effect.
+   */
+  async proposeSend(m: { id: string; from: string; fromMachine: string; toMachine: string; action: string; senderState: Record<string, unknown> }): Promise<GateDecision> {
+    const session = sessionOf(m.fromMachine);
+    return this.serial(session, async () => {
+      const machines: Record<string, unknown> = {};
+      const reads: Record<string, number> = {};
+      for (const r of this.reads.get(moduleOf(m.fromMachine)) ?? []) {
+        if (r === m.fromMachine) { machines[r] = m.senderState; continue; }
+        const s = this.view.singleton(r);
+        if (s) { machines[r] = s.state; reads[s.instance] = s.seq; }
+      }
+      const action = actionOf({ proposal: 'send', send: { to: m.toMachine, action: m.action, scope: moduleOf(m.toMachine) }, machines, decisions: this.view.decisions(m.from) });
+      const { v, decision, reason } = await this.decideAction(session, moduleOf(m.fromMachine), action, m.id);
+      const sseq = this.view.nextSseq(session);
+      const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;
+      if (held) throw new GateUnavailable(held, { session, sseq, action, engineDecision: v.decision, engineClass: v.class ?? null, engineRecord: v.record ?? null, stateBefore: v.state_before ?? null });
+      const record = { session, sseq, action, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null };
+      if (decision === 'allow') return { decision, reads, record };
+      if (decision === 'deny') return { decision, reason: reason ?? 'denied', reads, record };
+      return { decision, reason: reason ?? undefined, reads, record };
+    });
+  }
+
   /** One decision of the engine on an action, with PS8.3's precedence (S158); shared by the gate and session replay. */
   async decideAction(session: string, scope: string, action: Record<string, unknown>, intent: string, approved?: { by: string }): Promise<{ v: any; decision: 'allow' | 'deny' | 'escalate'; reason: string | null }> {
     const v: any = await this.timed<any>(this.engine.merge({ run_id: session, scope, action, meta: { tool_use_id: intent, tool: (action.effect as { kind?: string } | undefined)?.kind ?? 'poly' }, ...(approved ? { approved: { by: approved.by, ref: intent } } : {}) }));

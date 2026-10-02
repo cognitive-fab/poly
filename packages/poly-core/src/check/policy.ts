@@ -125,13 +125,13 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
         case 'String': return { k: 'str', values: [e.value] };
         case 'Name': {
           if (vars.has(e.name)) return vars.get(e.name)!;
-          if (e.name === 'effect' || e.name === 'proposal') { err('PL1201', e, `${e.name} is read by its fields (effect.kind, effect.class, effect.labels, effect.machine, proposal.kind)`); return null; }
+          if (e.name === 'effect' || e.name === 'proposal' || e.name === 'send') { err('PL1201', e, `${e.name} is read by its fields (effect.kind, effect.class, effect.labels, effect.machine, proposal.kind)`); return null; }
           if (expect?.k === 'enum') {
             if (expect.members.includes(e.name)) return expect;
             err('PL1001', e, `${e.name} is not a constructor of ${expect.name} (${expect.members.join(', ')})`);
             return null;
           }
-          err('PL1001', e, `unknown name ${e.name} in a policy: its inputs are effect, proposal, machine("…") and decision("…") (PT8.1)`);
+          err('PL1001', e, `unknown name ${e.name} in a policy: its inputs are effect, send, proposal, machine("…") and decision("…") (PT8.1)`);
           return null;
         }
         case 'Member': {
@@ -141,6 +141,13 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (e.prop === 'machine') return { k: 'str', values: [...program.machines.keys()] };
             if (e.prop === 'labels') return { k: 'labels' };
             err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine)`);
+            return null;
+          }
+          if (e.object.kind === 'Name' && e.object.name === 'send' && !vars.has('send')) {
+            // PS8.7, PT9.9: a send between trust scopes, proposed like an effect.
+            if (e.prop === 'to') return { k: 'str', values: [...program.machines.keys()] };
+            if (e.prop === 'action' || e.prop === 'scope') return { k: 'str', values: null };
+            err('PL1001', e, `send has no field ${e.prop} (to, action, scope)`);
             return null;
           }
           if (e.object.kind === 'Name' && e.object.name === 'proposal' && !vars.has('proposal')) {
@@ -220,7 +227,7 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
           }
           if (['==', '!=', '<', '<=', '>', '>='].includes(e.op)) {
             // A bare constructor takes the other side's type (S22): it is typed after the side that fixes it.
-            const bare = (x: A.Expr) => x.kind === 'Name' && !vars.has(x.name) && x.name !== 'effect' && x.name !== 'proposal';
+            const bare = (x: A.Expr) => x.kind === 'Name' && !vars.has(x.name) && x.name !== 'effect' && x.name !== 'proposal' && x.name !== 'send';
             let l: PType | null;
             let r: PType | null;
             // When the side that fixes it is already wrong, the constructor is not reported a second time.

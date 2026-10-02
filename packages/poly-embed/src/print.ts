@@ -179,6 +179,7 @@ class Printer {
     const opts: string[] = [];
     if (i.count !== null) opts.push(`count: ${i.count}`);
     if (i.init.length) opts.push(`init: (${this.p}) => ({ ${i.init.map((x) => `${this.key(x.field)}: ${this.expr(x.value, 0)}`).join(', ')} })`);
+    if (i.scope !== undefined) opts.push(`scope: ${q(i.scope)}`);
     return `${this.use('instance')}(${q(i.name)}, ${q(i.machine.join('.'))}${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
   }
 

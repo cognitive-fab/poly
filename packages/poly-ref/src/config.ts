@@ -44,6 +44,13 @@ export interface Message {
   data: Record<string, Value>;
   /** S60: the creation action of a detached child, delivered before any other message to it. */
   creation?: boolean;
+  /**
+   * PS8.7: a message between instances of different trust scopes waits for the gate: `pending`, then delivered
+   * (allow), turned into SendDenied (deny) or `held` (escalate), and a held one is delivered (approved) or denied.
+   * `from` is its sender. Absent on a message within one scope.
+   */
+  gate?: 'pending' | 'held';
+  from?: number;
 }
 
 export interface GlobalState {
@@ -63,11 +70,13 @@ export interface ConfigInstance {
   spawned: { parent: number; key: string } | null;
   /** S60: its name as a member of its group, `Worker[0]`, when it is spawned. */
   member: string | null;
+  /** PS8.7, S160: its trust scope: the configuration's assignment, or its machine's module. */
+  scope: string;
 }
 
 /** A global step's label: the step at its instance, and what kind of global step it was (PS13.3). */
 export interface GlobalLabel extends Label {
-  via: 'input' | 'deliver';
+  via: 'input' | 'deliver' | 'gate';
   instance: number;
   /** A send of this step to none (S29). */
   toNone: boolean;
@@ -104,7 +113,7 @@ export interface ConfigReport {
   vacuous: Vacuous[];
 }
 
-const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
+const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
 export function buildConfiguration(module: Module, name: string): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
@@ -120,7 +129,7 @@ export function buildConfiguration(module: Module, name: string): { decl: A.Conf
   for (const i of decl.instances) {
     const M = machineOf(i.machine);
     const names = i.count === null ? [i.name] : Array.from({ length: i.count }, (_, k) => `${i.name}[${k}]`);
-    for (const n of names) instances.push({ name: n, group: i.count === null ? null : i.name, machine: M, init: {}, spawned: null, member: null });
+    for (const n of names) instances.push({ name: n, group: i.count === null ? null : i.name, machine: M, init: {}, spawned: null, member: null, scope: i.scope ?? module.name });
   }
   // S60: the instances detached spawns can create within N, breadth first; those of machine T are the group T.
   const declared = instances.length;
@@ -133,7 +142,7 @@ export function buildConfiguration(module: Module, name: string): { decl: A.Conf
       for (const d of instances[p].machine.detached) {
         const k = members.get(d.machine) ?? 0;
         members.set(d.machine, k + 1);
-        instances.push({ name: `${instances[p].name}/${d.key}`, group: d.machine, machine: machineOf([d.machine]), init: {}, spawned: { parent: p, key: d.key }, member: `${d.machine}[${k}]` });
+        instances.push({ name: `${instances[p].name}/${d.key}`, group: d.machine, machine: machineOf([d.machine]), init: {}, spawned: { parent: p, key: d.key }, member: `${d.machine}[${k}]`, scope: module.name });
         next.push(instances.length - 1);
       }
     }
@@ -235,7 +244,8 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       if (x.target === null) { toNone = true; continue; } // S29: nothing joins μ
       const t = index.get(x.target as string);
       if (t === undefined || sigma[t] === null) throw new Error(`poly-ref: ${inst.name} sends to ${keyOf(x.target)}, which is no instance of the configuration`);
-      next.push({ target: t, action: x.action, data: x.data });
+      // PS8.7: a send between two trust scopes waits for the gate.
+      next.push(inst.scope !== instances[t].scope ? { target: t, action: x.action, data: x.data, gate: 'pending', from: k } : { target: t, action: x.action, data: x.data });
     }
     const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone, ...(creation ? { creation } : {}) };
     const g: GlobalState = { sigma, mu: sortMu(next) };
@@ -271,7 +281,17 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
         const key = msgKey(m);
         if (seen.has(key) || (!m.creation && waiting.has(m.target))) return;
         seen.add(key);
-        out.push(step(s, m.target, m.action, m.data, [...s.mu.slice(0, j), ...s.mu.slice(j + 1)], 'deliver', m.creation === true));
+        const rest = [...s.mu.slice(0, j), ...s.mu.slice(j + 1)];
+        out.push(step(s, m.target, m.action, m.data, rest, 'deliver', m.creation === true));
+        if (m.gate) {
+          // PS8.7, PS4.4: the gate's decision is an environment choice: deny delivers SendDenied to the sender, as an
+          // ordinary message; escalate holds the message, which is then approved (delivered) or timed out (denied).
+          const reason = m.gate === 'held' ? 'escalation-timeout' : 'denied';
+          const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason } };
+          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu) } }) as Outcome<GlobalState> });
+          out.push(gateStep('deny', [...rest, denied]));
+          if (m.gate === 'pending') out.push(gateStep('escalate', [...rest, { ...m, gate: 'held' }]));
+        }
       });
       return out;
     },

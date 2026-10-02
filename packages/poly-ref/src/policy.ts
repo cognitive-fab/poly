@@ -19,12 +19,15 @@ export type Decision = 'allow' | 'deny' | 'escalate';
 export interface PolicyFacts {
   machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[] }[] }>;
   decisions: Map<string, { answers: (string | number | boolean)[] | null }>;
+  /** PT9.9: each send a machine's handlers make to an address of a known machine. */
+  sends: { from: string; to: string; action: string }[];
 }
 
 /** The program facts a policy reads, from the modules' ASTs. */
 export function policyFacts(modules: Module[]): PolicyFacts {
   const machines: PolicyFacts['machines'] = new Map();
   const decisions: PolicyFacts['decisions'] = new Map();
+  const sends: PolicyFacts['sends'] = [];
   for (const m of modules) {
     const enums = new Map<string, string[]>();
     for (const d of m.decls) {
@@ -54,9 +57,21 @@ export function policyFacts(modules: Module[]): PolicyFacts {
         }
       }
       machines.set(`${m.name}.${d.name}`, { service: d.service, fields, effects });
+      // A send's target machine, when its address is a field or a parameter of type Ref<M>.
+      const refs = new Map<string, string>();
+      for (const f of d.fields) if (f.type.kind === 'TRef') refs.set(f.name, f.type.machine.length > 1 ? f.type.machine.join('.') : `${m.name}.${f.type.machine[0]}`);
+      for (const it of d.items) if (it.kind === 'Action') for (const p of it.params) if (p.type.kind === 'TRef') refs.set(p.name, p.type.machine.length > 1 ? p.type.machine.join('.') : `${m.name}.${p.type.machine[0]}`);
+      const walk = (x: unknown): void => {
+        if (!x || typeof x !== 'object') return;
+        if (Array.isArray(x)) { x.forEach(walk); return; }
+        const n = x as { kind?: string; op?: string; to?: { kind: string; name?: string }; target?: string };
+        if (n.kind === 'Intent' && n.op === 'send' && n.to?.kind === 'Name' && refs.has(n.to.name!)) sends.push({ from: `${m.name}.${d.name}`, to: refs.get(n.to.name!)!, action: n.target! });
+        for (const v of Object.values(n)) walk(v);
+      };
+      for (const it of d.items) if (it.kind === 'Handler') walk(it.body);
     }
   }
-  return { machines, decisions };
+  return { machines, decisions, sends };
 }
 
 // ── PS8.1: Kleene values ────────────────────────────────────────────────────
@@ -80,6 +95,7 @@ export function evalPolicyExpr(e: Expr, proposal: Record<string, any>, vars: Rec
       const o = e.object;
       if (o.kind === 'Name' && o.name === 'effect' && !('effect' in vars)) return e.prop === 'labels' ? (proposal.effects ?? null) : (proposal.effect?.[e.prop] ?? null);
       if (o.kind === 'Name' && o.name === 'proposal' && !('proposal' in vars)) return proposal.proposal ?? null;
+      if (o.kind === 'Name' && o.name === 'send' && !('send' in vars)) return proposal.send?.[e.prop] ?? null;
       if (o.kind === 'Call' && o.callee === 'machine') return proposal.machines?.[(o.args[0] as { value: string }).value]?.[e.prop] ?? null;
       if (o.kind === 'Call' && o.callee === 'decision') {
         const d = proposal.decisions?.[(o.args[0] as { value: string }).value];
@@ -228,8 +244,14 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
   };
   const rows: Record<string, any>[] = [];
   let capHit = false;
-  for (const [machine, m] of facts.machines) {
-    for (const eff of m.effects) {
+  // PT9.9: each send the program makes is a proposal too, from its sender machine.
+  const proposals: { machine: string; row: (machines: Record<string, unknown>, decisions: Record<string, unknown>) => Record<string, any> }[] = [];
+  for (const [machine, m] of facts.machines) for (const eff of m.effects) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine }, effects: eff.labels, machines, decisions }) });
+  for (const s of facts.sends) proposals.push({ machine: s.from, row: (machines, decisions) => ({ proposal: 'send', send: { to: s.to, action: s.action, scope: s.to.slice(0, s.to.lastIndexOf('.')) }, machines, decisions }) });
+  for (const { machine, row: build } of proposals) {
+    const m = facts.machines.get(machine)!;
+    void m;
+    {
       // Each read machine: the emitter's snapshot, a service machine's (a singleton), or nothing (unknown).
       const machineChoices: [string, Record<string, V>[]][] = [];
       for (const [rm, fieldsRead] of reads.machines) {
@@ -265,7 +287,7 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
         machineChoices.forEach(([rm], k) => { if (Object.keys(c[k] as object).length) machines[rm] = c[k]; });
         const decisions: Record<string, unknown> = {};
         decisionChoices.forEach(([d], k) => { const v = c[machineChoices.length + k]; if (v) decisions[d] = v; });
-        rows.push({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine }, effects: eff.labels, machines, decisions });
+        rows.push(build(machines, decisions));
       }
     }
   }

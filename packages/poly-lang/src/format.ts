@@ -214,7 +214,7 @@ class Printer {
     const width = Math.max(0, ...heads.map((h) => h.length));
     c.instances.forEach((i, k) => {
       const init = i.init.length ? ` { ${i.init.map((x) => `${x.field}: ${this.expr(x.value, 0)}`).join(', ')} }` : '';
-      this.emit(i, INDENT, [`${heads[k].padEnd(width)} : ${i.machine.join('.')}${init}`]);
+      this.emit(i, INDENT, [`${heads[k].padEnd(width)} : ${i.machine.join('.')}${init}${i.scope !== undefined ? ` scope ${JSON.stringify(i.scope)}` : ''}`]);
     });
     if (c.inputs.length) {
       const refs = c.inputs.map((r) => `${r.instance}${r.index === null ? '' : `[${r.index}]`}.${r.action}`);

@@ -53,7 +53,7 @@ export declare function machine(name: string, body: { service?: true; version?: 
 export declare function field(type: Type, init: Arrow, opts?: { check?: Literal[] | { lo: number; hi: number }; mode?: Mode; flag?: 'internal' | 'derived' }): Field;
 export declare function name(ctor: string): NameLiteral;
 export declare function configuration(name: string, body: { instances: Instance[]; inputs?: string[]; bounds?: { transit: number; instances?: number }; properties?: Item[] }): Decl;
-export declare function instance(name: string, machine: string, opts?: { count?: number; init?: (scope: Scope) => { [field: string]: Expr } }): Instance;
+export declare function instance(name: string, machine: string, opts?: { count?: number; init?: (scope: Scope) => { [field: string]: Expr }; scope?: string }): Instance;
 
 // ── machine items ──────────────────────────────────────────────────────────
 export declare function action(name: string, params: { [param: string]: Type }): Item;

@@ -41,6 +41,7 @@ export function px(e: A.Expr, vars: Set<string>): string {
       const o = e.object;
       if (o.kind === 'Name' && o.name === 'effect' && !vars.has('effect')) return e.prop === 'labels' ? 'action.effects' : `action.effect.${e.prop}`;
       if (o.kind === 'Name' && o.name === 'proposal' && !vars.has('proposal')) return 'action.proposal';
+      if (o.kind === 'Name' && o.name === 'send' && !vars.has('send')) return `action.send.${e.prop}`;
       if (o.kind === 'Call' && o.callee === 'machine') return `action.machines[${q((o.args[0] as A.StringLit).value)}].${e.prop}`;
       if (o.kind === 'Call' && o.callee === 'decision') {
         const d = `action.decisions[${q((o.args[0] as A.StringLit).value)}]`;

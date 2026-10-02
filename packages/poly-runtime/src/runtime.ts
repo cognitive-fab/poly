@@ -474,7 +474,7 @@ export class PolyRuntime {
     await pass(() => this.recoverMessages(now));
     const effects = await pass(() => this.worker.tick(now));
     const timers = await pass(() => this.kernel.workers.tickTimers(now));
-    const messages = await pass(() => this.kernel.workers.tickMessages(now));
+    const messages = await pass(() => this.tickMessages(now));
     await this.auditRefusals();
     if (errors.length) throw errors[0];
     return { effects, timers, messages };
@@ -485,6 +485,46 @@ export class PolyRuntime {
    * before the mark) goes back to pending and is sent again; the receiver dedupes it (K4, PT9.8). polyrun does this
    * in its effect tick, which poly-runtime does not run (S119), so the runtime does it here.
    */
+  /**
+   * PS8.7, PT9.9: delivers the messages in transit. A message between two trust scopes is first proposed to the
+   * policy gate in the sender's session: allowed, it is delivered; denied, it is not, and SendDenied(to, action,
+   * reason) is dispatched to the sender with its own action id. An escalation of a send has no approval path in M5a,
+   * so it is denied, and says so. A gate that cannot decide leaves the message pending (PT9.5). Within one scope,
+   * and without policies, messages are delivered as polyrun delivers them.
+   */
+  async tickMessages(now = this.now()): Promise<number> {
+    let n = 0;
+    for (const m of await this.kernel.workers.pendingMessages()) {
+      const fromMachine = (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(m.from) as { machine_id: string } | undefined)?.machine_id;
+      const toMachine = (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(m.to) as { machine_id: string } | undefined)?.machine_id;
+      const scope = (x: string | undefined) => (x ? x.slice(0, x.lastIndexOf('.')) : null);
+      if (!this.policyGate || !fromMachine || !toMachine || scope(fromMachine) === scope(toMachine)) {
+        if (await this.kernel.workers.deliverMessage(m.id, now)) n++;
+        continue;
+      }
+      const sender = await this.store.getInstance(m.from);
+      let g;
+      try {
+        g = await this.policyGate.proposeSend({ id: m.id, from: m.from, fromMachine, toMachine, action: m.action, senderState: sender?.state ?? {} });
+      } catch (e) {
+        const held = (e as { record?: Record<string, unknown> }).record;
+        if (held) await this.store.txn(() => { const { action, ...rest } = held; this.store.appendEvent(m.from, 'verdict', { stage: 'gate', kind: 'send', intent: m.id, outcome: 'held', reason: String((e as Error).message), ...rest, gateDecision: 'held', action: this.store.keep(action) }, this.now()); });
+        continue; // PT9.5: held, still pending
+      }
+      const { action, ...rest } = (g.record ?? {}) as Record<string, unknown>;
+      const outcome = g.decision === 'allow' ? 'allowed' : 'denied';
+      const reason = g.decision === 'allow' ? null : g.decision === 'escalate' ? `escalate:${g.reason ?? ''}: a send has no approval path in M5a, so it is denied` : g.reason;
+      await this.store.txn(() => { this.store.appendEvent(m.from, 'verdict', { stage: 'gate', kind: 'send', intent: m.id, to: m.to, message: m.action, outcome, reason, ...rest, gateDecision: g.decision, action: this.store.keep(action) }, this.now()); });
+      if (g.decision === 'allow') { if (await this.kernel.workers.deliverMessage(m.id, now)) n++; continue; }
+      await this.store.markEffectDead(m.id, 1, `send denied: ${reason}`);
+      try { await this.kernel.dispatch(m.from, 'SendDenied', { to: m.to, action: m.action, reason }, `${m.id}:send-denied`); } catch (e) {
+        await this.store.insertAudit({ at: this.now(), instanceId: m.from, action: 'SendDenied', actionId: `${m.id}:send-denied`, rule: 'PT9.9', reason: String((e as Error).message) });
+      }
+      n++;
+    }
+    return n;
+  }
+
   async recoverMessages(now = this.now()): Promise<number> {
     return this.store.txn(() => this.store.db.prepare("UPDATE pr_outbox SET status = 'pending', claimed_until = NULL WHERE kind = 'sendTo' AND status = 'inflight' AND claimed_until < ?").run(now).changes);
   }
@@ -499,7 +539,7 @@ export class PolyRuntime {
     // the message pass nor the audit of its K10 refusals.
     const m = setInterval(() => {
       void (async () => {
-        for (const pass of [() => this.recoverMessages(), () => this.kernel.workers.tickMessages(), () => this.auditRefusals()]) await pass().catch(report);
+        for (const pass of [() => this.recoverMessages(), () => this.tickMessages(), () => this.auditRefusals()]) await pass().catch(report);
       })();
     }, messagePollMs);
     t.unref?.(); m.unref?.();

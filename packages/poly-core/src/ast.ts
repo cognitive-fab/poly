@@ -105,6 +105,8 @@ export interface ConfigInstance extends NodeBase {
   machine: string[];
   /** Initial values that replace the machine's own, addresses included (PS13.1). */
   init: { field: string; value: Expr }[];
+  /** PS8.7, S160: the trust scope the configuration assigns; absent, the scope is the machine's module. */
+  scope?: string;
 }
 
 /** `x.A`, `g[i].A` or `g[*].A` (S31): an action the environment may inject at those instances. */

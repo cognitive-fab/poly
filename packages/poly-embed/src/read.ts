@@ -432,9 +432,9 @@ class Reader {
   private instance(node: ts.Expression): A.ConfigInstance {
     const c = this.call(node, 'instance');
     const [name, machine, opts] = this.argsOf(c, 2, 3);
-    const o = this.opts(opts, ['count', 'init']);
+    const o = this.opts(opts, ['count', 'init', 'scope']);
     const init: A.ConfigInstance['init'] = o.has('init') ? this.arrow(o.get('init')!, (b) => this.obj(b).map(([k, v]) => ({ field: k, value: this.expr(v) }))) : [];
-    return this.mk<A.ConfigInstance>(c.node, { kind: 'ConfigInstance', name: this.str(name), count: o.has('count') ? this.int(o.get('count')!) : null, machine: this.str(machine).split('.'), init });
+    return this.mk<A.ConfigInstance>(c.node, { kind: 'ConfigInstance', name: this.str(name), count: o.has('count') ? this.int(o.get('count')!) : null, machine: this.str(machine).split('.'), init, ...(o.has('scope') ? { scope: this.str(o.get('scope')!) } : {}) });
   }
 
   // ── statements ───────────────────────────────────────────────────────────

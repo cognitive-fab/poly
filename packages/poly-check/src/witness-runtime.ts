@@ -40,7 +40,7 @@ export interface WitnessStepSpec {
   action: string;
   data: Record<string, unknown>;
   verdict: string;
-  global?: { kind: 'input' | 'deliver'; instance: string; text: string };
+  global?: { kind: 'input' | 'deliver' | 'gate'; instance: string; text: string };
 }
 
 export interface WitnessSpec {
@@ -350,6 +350,8 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
       if (holds(prop.expr, sigma)) return;
       visited.push({ sigma: new Map(sigma), mu: [...mu] });
     }
+    // PS8.7: a gate's decision on a cross-scope send is not walked by an exported test in M5a; say so, never pass.
+    if (g.kind === 'gate') throw new Error(`the witness takes the gate's ${s.action} on a cross-scope send (PS8.7), which an exported test does not walk in M5a`);
     const inst = byName.get(g.instance)!;
     const l = lowered.get(inst.machine.name)!;
     if (!sigma.has(g.instance)) return; // that instance is no longer created
