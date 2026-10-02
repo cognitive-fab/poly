@@ -125,6 +125,18 @@ FROZEN waits on M3-6 to M3-9 and a clean control 4 on all 40 versions.
 
 **Order.** Fix points 1 and 3, each with its failing test; regenerate the freeze once; rerun the four P1 pilots as one block to confirm the counts; report. FROZEN is written only after that report is ruled.
 
+## The full runs use the owner's subscription, not an API key
+
+The owner's budget is $100 a month, so the runs use the owner's Claude subscription (Max 20x). This supersedes the API-key ruling (7c5d7e7) for the full runs and the confirming pilots.
+
+1. **Isolation without `--bare`.** The runner starts each arm without `--bare`, with `CLAUDE_CONFIG_DIR` set to a dedicated folder outside the repository that holds only the login and a `settings.json` with `DISABLE_AUTOUPDATER=1`: no `CLAUDE.md`, memory, hooks, plugins, MCP servers or skills. Before each run the runner checks that the folder holds nothing else and refuses to start if it does. A test that fails first shows that an arm sees none of the owner's own setup: a marker placed in the owner's user `CLAUDE.md`, settings and skills never reaches the arm.
+2. **No API billing by accident.** The runner refuses to start if `ANTHROPIC_API_KEY` is set or an `apiKeyHelper` is configured, so a run can never bill an API key.
+3. **Cost.** Each run's cost is reported at list price from the token counts of the CLI's result events (as fixed in the previous ruling). Nothing is billed per token.
+4. **Caps.** 6,000,000 tokens and 1 hour of wall time per run. The dollar cap is kept only if the CLI enforces it under a subscription; otherwise the token cap is the cut-off, and the report says so.
+5. **Usage limits.** A run interrupted by the subscription's usage limit is recorded as `limited`, not scored, and rerun from the start, like an authentication failure: its wall time includes waiting and measures nothing. Blocks of four continue, so a limit slows every arm alike.
+
+These changes join the token-count and scorer fixes in the one regeneration of the freeze. The four P1 pilots are then rerun as one block, on the subscription, to confirm isolation and the counts. FROZEN waits for that report.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
