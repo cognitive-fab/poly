@@ -8,6 +8,7 @@
 //
 // What M4's runtime does not do is stated in the certificate's `limits` and printed with it (S118, S134, S135).
 import { personKeyVerifier, type Verifier } from './verifier.js';
+import type { Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -312,6 +313,8 @@ export class PolyRuntime {
       }
       payload = { ...((data ?? {}) as object), $claims: claims ?? null };
     }
+    // PD5.2.2a: an outside dispatch starts a chain, whatever its action id.
+    this.store.outside.add(`${instanceId}\u0000${actionId}`);
     try {
       return await this.kernel.dispatch(instanceId, action, payload, actionId);
     } catch (e) {
@@ -322,7 +325,20 @@ export class PolyRuntime {
       if (!(e instanceof OutcomeWithoutDecision)) throw e;
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'PD2.4', reason: e.message });
       throw new RefusedDispatch(e.message, 'PD2.4');
+    } finally {
+      this.store.outside.delete(`${instanceId}\u0000${actionId}`);
     }
+  }
+
+  /** PD5.2.2: a step's lineage, with its seq, or null. */
+  lineageOf(run: string, seq: number): (Lineage & { seq: number }) | null {
+    const l = this.store.lineage(run, seq);
+    return l ? { seq, ...l } : null;
+  }
+
+  /** PD5.2.2b: whether a step's lineage chain is whole, and how many hops it has. */
+  verifyLineage(run: string, seq: number): { ok: true; hops: number } | { ok: false; problem: string } {
+    return this.store.verifyLineage(run, seq);
   }
 
   /** PD5.1.2: whether an action of a machine requires claims (its contract has the field $claims). */
@@ -554,6 +570,15 @@ export class PolyRuntime {
       const recorded = this.sendDecision(m.from, m.id);
       if (recorded?.outcome === 'allowed') { if (await this.kernel.workers.deliverMessage(m.id, now)) n++; continue; }
       if (recorded?.outcome === 'denied') { await this.sendDenied(m, recorded.reason ?? 'denied'); n++; continue; }
+      // PD5.2.2b: the sender's step's lineage must be whole; a missing or broken chain is a deny with reason lineage.
+      const outRow = this.store.db.prepare('SELECT seq FROM pr_outbox WHERE intent_id = ?').get(m.id) as { seq: number } | undefined;
+      const chain = outRow ? this.store.verifyLineage(m.from, outRow.seq) : { ok: false as const, problem: 'the message has no sending step' };
+      if (!chain.ok) {
+        await this.store.txn(() => { this.store.appendEvent(m.from, 'verdict', { stage: 'gate', kind: 'send', intent: m.id, to: m.to, message: m.action, outcome: 'denied', reason: 'lineage', problem: chain.problem, gateDecision: 'lineage' }, this.now()); });
+        await this.sendDenied(m, 'lineage');
+        n++;
+        continue;
+      }
       const sender = await this.store.getInstance(m.from);
       let g;
       try {

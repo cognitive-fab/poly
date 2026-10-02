@@ -33,7 +33,30 @@ CREATE TABLE IF NOT EXISTS poly_gate_session (
   session TEXT PRIMARY KEY,
   sseq    INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS poly_lineage (
+  run    TEXT NOT NULL,
+  seq    INTEGER NOT NULL,
+  origin TEXT NOT NULL,
+  intent TEXT NOT NULL,
+  prev   TEXT,
+  digest TEXT NOT NULL,
+  PRIMARY KEY (run, seq)
+);
+CREATE INDEX IF NOT EXISTS poly_lineage_digest ON poly_lineage (digest);
+CREATE TABLE IF NOT EXISTS poly_timer_cause (
+  timer_id TEXT PRIMARY KEY,
+  run      TEXT NOT NULL,
+  seq      INTEGER NOT NULL
+);
 `;
+
+/** PD5.2.2: a step's lineage: the origin (the claims that started the chain), the intent (that step's machine and action) and the previous hop's digest. */
+export interface Lineage { origin: Record<string, unknown> | null; intent: string; prev: string | null; digest: string }
+
+/** The digest of one hop: what it binds is the run, the step, the origin, the intent and the hop before it. */
+export function lineageDigest(run: string, seq: number, origin: unknown, intent: string, prev: string | null): string {
+  return digest({ run, seq, origin: origin ?? null, intent, prev });
+}
 
 /**
  * S140: PS3.2 defines steps only for data in the action's type. The SAM strict profile refuses data outside it
@@ -81,6 +104,53 @@ export class LedgerStore extends Store {
   /** Review C5: refusals made inside a transaction that rolled back, for the runtime to audit after it. */
   readonly refused: DecisionCompletionRefused[] = [];
   onOutbox: ((instanceId: string, rows: CommitStep['outboxRows'], seq: number, now: number) => { kind: string; body: unknown }[]) | null = null;
+  /** PD5.2.2a: the action ids of outside dispatches in flight; their steps start a chain, whatever their id looks like. */
+  readonly outside = new Set<string>();
+
+  /** PD5.2.2a: the step that caused a step, from its action id: a completion, a delivered message or a fired timer. */
+  private causeOf(row: InsertJournal): { run: string; seq: number } | null {
+    if (this.outside.has(`${row.instanceId}\u0000${row.actionId}`)) return null;
+    const timer = /^timer:(.+)$/.exec(row.actionId);
+    if (timer) {
+      const t = this.db.prepare('SELECT run, seq FROM poly_timer_cause WHERE timer_id = ?').get(timer[1]) as { run: string; seq: number } | undefined;
+      return t && t.run === row.instanceId ? t : null;
+    }
+    const completion = /^(.+):(done|failed|exhausted|send-denied)$/.exec(row.actionId);
+    if (completion) {
+      const o = this.db.prepare('SELECT instance_id, seq FROM pr_outbox WHERE intent_id = ?').get(completion[1]) as { instance_id: string; seq: number } | undefined;
+      return o && o.instance_id === row.instanceId ? { run: o.instance_id, seq: o.seq } : null;
+    }
+    // A delivered message's action id is its intent id; the message must be addressed to this instance with this action.
+    const m = this.db.prepare("SELECT instance_id, seq, payload FROM pr_outbox WHERE intent_id = ? AND kind = 'sendTo'").get(row.actionId) as { instance_id: string; seq: number; payload: string } | undefined;
+    if (m) {
+      const p = JSON.parse(m.payload) as { target?: string; action?: string };
+      if (p.target === row.instanceId && p.action === row.action) return { run: m.instance_id, seq: m.seq };
+    }
+    return null;
+  }
+
+  /** A step's lineage, or null when it has none. */
+  lineage(run: string, seq: number): Lineage | null {
+    const r = this.db.prepare('SELECT origin, intent, prev, digest FROM poly_lineage WHERE run = ? AND seq = ?').get(run, seq) as { origin: string; intent: string; prev: string | null; digest: string } | undefined;
+    return r ? { origin: JSON.parse(r.origin), intent: r.intent, prev: r.prev, digest: r.digest } : null;
+  }
+
+  /** PD5.2.2b: whether a step's chain is whole: every hop recomputes to its digest, and each previous hop is present. */
+  verifyLineage(run: string, seq: number): { ok: true; hops: number } | { ok: false; problem: string } {
+    let at: { run: string; seq: number } | null = { run, seq };
+    let hops = 0;
+    for (let guard = 0; at && guard < 100_000; guard++) {
+      const r = this.db.prepare('SELECT run, seq, origin, intent, prev, digest FROM poly_lineage WHERE run = ? AND seq = ?').get(at.run, at.seq) as { run: string; seq: number; origin: string; intent: string; prev: string | null; digest: string } | undefined;
+      if (!r) return { ok: false, problem: `${at.run} has no lineage at seq ${at.seq}` };
+      if (lineageDigest(r.run, r.seq, JSON.parse(r.origin), r.intent, r.prev) !== r.digest) return { ok: false, problem: `the lineage of ${r.run} at seq ${r.seq} does not recompute to its digest` };
+      hops++;
+      if (r.prev === null) return { ok: true, hops };
+      const p = this.db.prepare('SELECT run, seq FROM poly_lineage WHERE digest = ?').get(r.prev) as { run: string; seq: number } | undefined;
+      if (!p) return { ok: false, problem: `the hop before ${r.run} at seq ${r.seq} is missing` };
+      at = p;
+    }
+    return { ok: false, problem: 'the chain does not end' };
+  }
 
   override initSync(): this {
     super.initSync();
@@ -152,6 +222,17 @@ export class LedgerStore extends Store {
       }
     }
     const result = await super.insertJournal(row);
+    // PD5.2.2a: the step's lineage. An outside action starts a chain with its claims as the origin; a step a completion,
+    // a delivered message or a fired timer started inherits the causing step's origin and intent, one hop on.
+    const cause = this.causeOf(row);
+    const parent = cause ? this.lineage(cause.run, cause.seq) : null;
+    const machine = (this.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(row.instanceId)?.machine_id as string | undefined) ?? '';
+    const claims = (row.data as { $claims?: unknown } | null)?.$claims;
+    const origin = parent ? parent.origin : claims && typeof claims === 'object' ? claims as Record<string, unknown> : null;
+    const intent = parent ? parent.intent : `${machine}.${row.action}`;
+    const prev = parent ? parent.digest : null;
+    const lineage = lineageDigest(row.instanceId, row.seq, origin, intent, prev);
+    this.db.prepare('INSERT OR REPLACE INTO poly_lineage (run, seq, origin, intent, prev, digest) VALUES (?, ?, ?, ?, ?, ?)').run(row.instanceId, row.seq, JSON.stringify(origin), intent, prev, lineage);
     // A decision event keeps its question in the content store and carries its digest as `request` (PD2.2a).
     for (const e of extra?.before ?? []) {
       const { question, ...rest } = (e.body ?? {}) as Record<string, unknown>;
@@ -168,6 +249,8 @@ export class LedgerStore extends Store {
       pre: this.keep(row.pre),
       post: this.keep(row.post),
       ...(extra?.before?.length ? { decision: this.lastHash(row.instanceId, 'decision') } : {}),
+      // PD5-A11: the step's lineage digest.
+      lineage,
     }, row.now);
     for (const e of extra?.after ?? []) this.appendEvent(row.instanceId, e.kind, e.body, row.now);
     return result;
@@ -177,6 +260,8 @@ export class LedgerStore extends Store {
   override async commitStep(step: CommitStep): Promise<void> {
     return this.txn(async () => {
       await super.commitStep(step);
+      // PD5.2.2a: a timer's step inherits the lineage of the step that set it.
+      for (const t of step.timerRows as { timerId: string }[]) this.db.prepare('INSERT OR REPLACE INTO poly_timer_cause (timer_id, run, seq) VALUES (?, ?, ?)').run(t.timerId, step.instanceId, step.seq);
       if (!this.onOutbox || !step.outboxRows.length) return;
       for (const e of this.onOutbox(step.instanceId, step.outboxRows, step.seq, step.now)) this.appendEvent(step.instanceId, e.kind, e.body, step.now);
     });

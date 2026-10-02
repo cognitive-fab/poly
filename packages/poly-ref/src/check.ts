@@ -330,7 +330,10 @@ function domainText(check: unknown[] | null, t: RType, M: RMachine): string {
 
 /** Whether the machine's labels or state hold a principal (PD5.1.3c), so its instance names the representatives. */
 function usesPrincipals(M: RMachine): boolean {
-  return M.actions.some((a) => a.claims) || JSON.stringify([...M.fields.map((f) => f.type), ...[...M.records.values()], ...[...M.unions.values()]]).includes('"principal"');
+  const deep = (x: RType, seen: Set<string>): boolean => x.k === 'principal' || (x.k === 'map' && deep(x.value, seen))
+    || (x.k === 'record' && !seen.has(x.name) && (M.records.get(x.name)?.fields ?? []).some((f) => deep(f.type, new Set([...seen, x.name]))))
+    || (x.k === 'union' && !seen.has(x.name) && (M.unions.get(x.name)?.ctors ?? []).some((c) => c.fields.some((f) => deep(f.type, new Set([...seen, x.name])))));
+  return M.actions.some((a) => a.claims) || M.fields.some((f) => deep(f.type, new Set()));
 }
 
 /** The checked instance a verdict holds for (PS4.3, PT12.3a). */
