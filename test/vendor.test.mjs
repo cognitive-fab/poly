@@ -60,3 +60,28 @@ test('every vendored file is tracked by git, and none is ignored', () => {
     }
   }
 });
+
+// S145: Polyaxion, polyman and polysec-core are an optional peer, pinned like a vendored engine but not copied in.
+// Where the sibling checkout is absent, the checks are listed as not run, never passed.
+const PEER = { table: join(ROOT, 'peers', 'polyaxion', 'PROVENANCE.md'), commit: 'c37c60e' };
+const peerRows = () => [...readFileSync(PEER.table, 'utf8').matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \|$/gm)].map((m) => ({ file: m[1], sha: m[2] }));
+
+test('peers/polyaxion: the pins name the commit and cover the three packages', () => {
+  const text = readFileSync(PEER.table, 'utf8');
+  assert.match(text, new RegExp(`commit \`${PEER.commit}\``));
+  const rows = peerRows();
+  for (const pkg of ['packages/polyaxion/src/engine.mjs', 'packages/polysec-core/src/polysec-harden.mjs', 'packages/polysec/polyman/src/kernel.ts']) assert.ok(rows.some((r) => r.file === pkg), pkg);
+  const tracked = execFileSync('git', ['-C', ROOT, 'ls-files', '--', 'peers/polyaxion/PROVENANCE.md'], { encoding: 'utf8' }).trim();
+  assert.equal(tracked, 'peers/polyaxion/PROVENANCE.md');
+});
+
+test('peers/polyaxion: the checkout matches every pin, and each pin is the file at the commit', async () => {
+  const { polyaxionPeer, pinDigest } = await import('@poly/runtime');
+  const peer = polyaxionPeer();
+  if (!peer.ok) { assert.match(peer.reason, /not run|absent|differs/); return; }
+  for (const { file, sha } of peerRows()) {
+    // A Windows checkout may hold CRLF where the commit holds LF: the pin reads CRLF as LF (peers.ts pinDigest).
+    assert.equal(pinDigest(readFileSync(join(peer.dir, file))), sha, file);
+    assert.equal(pinDigest(execFileSync('git', ['-C', peer.dir, 'show', `${PEER.commit}:${file}`], { maxBuffer: 1 << 26 })), sha, file);
+  }
+});

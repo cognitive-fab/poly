@@ -10,3 +10,4 @@ import { openLedgerStore } from './ledger-store.js';
 import { readerOf } from './journal.js';
 /** Opens a store for its ledger and journal (poly journal verify, export). */
 export const openJournal = (dbPath: string) => readerOf(openLedgerStore(dbPath));
+export { polyaxionPeer, loadPolyaxion, pinDigest, PeerUnavailable, REPO_ROOT, type PeerStatus } from './peers.js';
