@@ -142,3 +142,11 @@ test('review A4: a key reached through a junction from outside the repository is
     await assert.rejects(admit(dir), (e) => e instanceof AdmitError && /inside a tree under version control/.test(e.message));
   } finally { rmSync(real, { recursive: true, force: true }); rmSync(via, { force: true, recursive: false }); }
 });
+
+// Polywatch on review A1: a checked artefact removed after the check is refused, never left out of the certificate.
+test('polywatch: an artefact the check checked and that is gone at admission is refused, not omitted', async () => {
+  const { rmSync } = await import('node:fs');
+  const dir = project('race-artefact-gone', ['conformance/m1/effects.poly'], key);
+  const remove = () => rmSync(join(dir, '.poly', 'build', 'effects.Account', 'invariants.mjs'));
+  await assert.rejects(admit(dir, { afterCheck: remove }), (e) => e instanceof AdmitError && /invariants\.mjs.*not the bytes the check checked/.test(e.message));
+});

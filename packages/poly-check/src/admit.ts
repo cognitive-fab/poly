@@ -241,6 +241,12 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
       const want = m.artefactDigests?.[path.slice(prefix.length + 1)];
       if (!opts.fault && want !== have) throw new AdmitError(`not admitted: ${path} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
     }
+    // Polywatch on review A1: and the other way round, so a checked artefact gone from disk is refused, not left out.
+    for (const name of CERTIFIED_ARTEFACTS) {
+      if (m.artefactDigests?.[name] !== undefined && artefacts[`${prefix}/${name}`] === undefined && !opts.fault) {
+        throw new AdmitError(`not admitted: ${prefix}/${name} is gone from disk, so it is not the bytes the check checked (certified bytes must be the checked bytes)`);
+      }
+    }
   }
   // S142: the handlers, as the lint read them. A file that differs on disk now is refused, never certified.
   const lint = report.handlers;
