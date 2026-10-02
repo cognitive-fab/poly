@@ -79,6 +79,26 @@ export const defaultOnUnknown = (s: A.RuleObligation['severity']) => (s === 'war
 export const POLICY_FAULTS = ['drop-unknown-rule', 'deny-as-warn', 'drop-guard'] as const;
 export type PolicyFault = (typeof POLICY_FAULTS)[number];
 
+/**
+ * A machine obligation's transitions, as the engine must take them (review B7, B12). PS8's machine takes, from a
+ * state, the first transition whose condition is true, as written; the engine applies every matching transition, so
+ * the last would win. Each transition is therefore split per source state (`*` is every state) and conjoined with the
+ * negation of every earlier transition out of the same state. Each also carries the proposal conjunct, which gives the
+ * engine an action condition to route by when the written one reads only a var, and leaves the engine's own actions
+ * (the end of a session) out, as poly-ref does.
+ */
+function transitionsOf(it: A.MachineObligation, names: Set<string>): { from: string[]; when: string; to: string }[] {
+  const out: { from: string[]; when: string; to: string }[] = [];
+  for (const state of it.states) {
+    const here = it.transitions.filter((t) => t.from === '*' || t.from.includes(state));
+    here.forEach((t, k) => {
+      const earlier = here.slice(0, k).map((e) => ` && !coalesce(${px(e.when, names)}, false)`).join('');
+      out.push({ from: [state], when: `${PROPOSAL} && coalesce(${px(t.when, names)}, false)${earlier}`, to: t.to });
+    });
+  }
+  return out;
+}
+
 export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDigest: string, fault?: PolicyFault): PolicyDoc {
   const vars: PolicyDoc['vars'] = {};
   for (const p of policies) for (const v of p.vars) {
@@ -111,7 +131,7 @@ export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDige
           id, kind: 'machine', text: it.text, source,
           machine: {
             states: it.states, initial: it.initial,
-            transitions: it.transitions.map((t) => ({ from: t.from === '*' ? '*' : t.from, when: px(t.when, names), to: t.to })),
+            transitions: transitionsOf(it, names),
             guards: fault === 'drop-guard' ? [] : it.guards.map((g) => ({ in: g.in, when: px(g.when, names), reason: g.reason })),
             discharge: it.end,
           },

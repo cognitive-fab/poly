@@ -222,3 +222,22 @@ test('PT8.1: an effect kind, class or label the program does not have is PL1001'
     assert.ok(s.diagnostics.some((d) => d.code === 'PL1001' && d.message.includes(what)), `${bad}: ${JSON.stringify(s.diagnostics.map((d) => d.message))}`);
   }
 });
+
+// Review B7: two transitions out of one state that both match a proposal. PS8's machine takes the first, as written;
+// the lowering makes the engine agree, so the legal policy is not refused as a toolchain fault.
+test('PT8.2: of two matching transitions out of a state, the first is taken, and the engine agrees', async (t) => {
+  if (!peer.ok) { t.skip(peer.reason); return; }
+  const pol = `module two_policy\n\npolicy orders-two {\n  scope "orders"\n  obligation track "Track reserve." machine {\n    states open, a, b\n    initial open\n    from open when effect.kind == "stock.reserve" -> a\n    from open when effect.class == "compensable" -> b\n    deny in b when effect.kind == "payment.charge" reason "charge-in-b"\n    end open, a, b\n  }\n}\n`;
+  const s = scopeOf(await checkProject(projectOf('two-transitions', { 'orders.poly': ORDERS, 'p.policy.poly': pol })), 'orders');
+  assert.deepEqual(s.diagnostics.filter((d) => d.code === 'PL2501').map((d) => d.message), []);
+  assert.equal(s.stages.find((x) => x.stage === 'policy-tv').verdict, 'CLEAN');
+});
+
+// Review B12: a transition whose condition reads only a policy var is lowered with the proposal conjunct, so the
+// engine can route it, and the stage reports rather than the check throwing.
+test('PT8.2: a transition that reads only a var is lowered and validated', async (t) => {
+  if (!peer.ok) { t.skip(peer.reason); return; }
+  const pol = `module vr_policy\n\npolicy orders-vr {\n  scope "orders"\n  var lenient: bool = true\n  obligation reserve-first "Charge only after reserve." machine {\n    states open, done\n    initial open\n    from open when lenient -> done\n    deny in open when effect.kind == "payment.charge" reason "charge-first"\n    end open, done\n  }\n}\n`;
+  const s = scopeOf(await checkProject(projectOf('var-transition', { 'orders.poly': ORDERS, 'p.policy.poly': pol })), 'orders');
+  assert.equal(s.stages.find((x) => x.stage === 'policy-tv').verdict, 'CLEAN', JSON.stringify(s.diagnostics.map((d) => d.message)));
+});
