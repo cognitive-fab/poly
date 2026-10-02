@@ -27,7 +27,7 @@ export interface JournalRowLike {
   reject_reason: string | null;
 }
 
-export interface GateDecisionLike { seq: number; decision: string; recompute: (() => string) | null }
+export interface GateDecisionLike { seq: number; decision: string; recompute: (() => string) | null; bySession?: boolean }
 
 export interface RunReplay {
   run: string;
@@ -101,6 +101,7 @@ export function replayRun(module: A.Module, machineId: string, instanceId: strin
   // Gate decisions (S118): each recorded verdict, recomputed from its proposal and its snapshot.
   let gateNotRun = 0;
   for (const g of opts.gate ?? []) {
+    if (g.bySession) continue; // replayed with its session (S146)
     if (!g.recompute) { gateNotRun++; continue; }
     const again = g.recompute();
     if (again !== g.decision) out.push(diag('PL9001', at, `run ${instanceId}: the gate decision at ledger seq ${g.seq} was ${g.decision}, and replay gives ${again}`));
@@ -121,6 +122,11 @@ export function certifiedModules(root: string, sources: Record<string, string>):
     out.set(m.name, m);
   }
   return out;
+}
+
+/** S118, S146: each gate session the runs touched, replayed in sseq order; PL9001 for a decision or Σ that differs. */
+export async function replaySessions(rt: PolyRuntime): Promise<{ session: string; proposals: number; settles: number; diagnostics: Diagnostic[]; notRun: string[] }[]> {
+  return (await rt.replaySessions()).map((s) => ({ ...s, diagnostics: s.diagnostics.map((d) => diag(d.code, { node: s.session }, d.message)) }));
 }
 
 /** Every run a runtime's store holds, replayed: its journal, its snapshot, and the certified module it ran. */

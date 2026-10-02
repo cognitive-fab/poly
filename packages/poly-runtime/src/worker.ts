@@ -340,7 +340,9 @@ export class EffectWorker {
           }
           // Rule 2 of PT9.7: an approved re-proposal is allowed or denied, never escalated again.
           if (d === 2 && g.decision === 'escalate') g = { decision: 'deny', reason: 'escalate-once' };
-          const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot), ...(g.reads ? { reads: g.reads } : {}), ...(g.record ?? {}) };
+          // S146: the gate's own record, its action kept by digest, and the gate's decision before rule 2 of PT9.7.
+          const { action: gateAction, ...gateRecord } = (g.record ?? {}) as Record<string, unknown>;
+          const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot), ...(g.reads ? { reads: g.reads } : {}), ...gateRecord, ...(gateAction ? { action: this.store.keep(gateAction), gateDecision: g.decision } : {}) };
           if (g.decision === 'allow') {
             await this.store.txn(async () => { await this.transition(row, 'GateAllow'); this.verdict(row, { outcome: 'allowed', ...recorded }); });
             this.opts.onAllowed?.(row, proposal);
@@ -409,7 +411,10 @@ export class EffectWorker {
             const r = await this.gate.settle({ ok: true, output: digest(result ?? null) }, (await this.proposalOf(row, decl)).proposal);
             s = typeof r === 'string' ? r : r.result;
             // S146: the gate's settle is a ledger event, with its session sequence.
-            if (typeof r === 'object' && r.record) await this.store.txn(() => this.verdict(row, { outcome: 'settled', result: s, ...r.record }));
+            if (typeof r === 'object' && r.record) {
+              const { action: settleAction, ...settleRecord } = r.record as Record<string, unknown>;
+              await this.store.txn(() => this.verdict(row, { outcome: 'settled', result: s, ...settleRecord, ...(settleAction ? { action: this.store.keep(settleAction) } : {}) }));
+            }
           } catch { s = 'failed'; }
           if (s !== 'ok') { await this.settleFailed(row, decl, n, 'the gate refused the settle', now, m); return; }
           this.opts.beforeCompletion?.(row, decl, result);

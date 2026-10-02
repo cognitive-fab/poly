@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url';
 import { diag, EXIT_CODES, type Diagnostic } from '@poly/core';
 import type { JournalReader, Provider } from '@poly/runtime';
 import { evaluate, fit } from './evaluate.js';
-import { replayRuntime } from './replay.js';
+import { replayRuntime, replaySessions } from './replay.js';
 
 export class JournalUsageError extends Error {}
 
@@ -76,6 +76,13 @@ export async function journalCommand(sub: string, args: string[], write: (s: str
         // PD2.2d, S131: every decision completion links its decision event, with the data it records.
         for (const p of await rt.verifyProvenance(r.run)) { n++; const d = diag('PL9003', { machine: r.machine }, `run ${r.run}: ${p}`); write(`  ${d.code} ${d.name}  ${d.message}\n`); }
       }
+      // S118, S146: the gate's sessions, each replayed in sseq order: every decision and Σ digest reproduced (AC6).
+      for (const s of only ? [] : await replaySessions(rt)) {
+        write(`session ${s.session}: ${s.proposals} decision(s) and ${s.settles} settle(s) replayed in sseq order${s.diagnostics.length || s.notRun.length ? '' : ', every decision and Σ digest reproduced'}\n`);
+        for (const d of s.diagnostics) { n++; write(`  ${d.code} ${d.name}  ${d.message}\n`); }
+        for (const x of s.notRun) { notRun++; write(`  ${x} (not run)\n`); }
+      }
+      if (only && rt.policyGate) { notRun++; write('  the gate sessions are replayed only with every run (not run with --run)\n'); }
       write(`replay: ${runs.length} run(s), ${n ? 'FINDINGS' : notRun ? 'every replayed post-state reproduced, and some of the replay not run' : 'every post-state reproduced'}\n`);
       return n ? EXIT_CODES.FINDINGS : notRun ? EXIT_CODES.INCONCLUSIVE : EXIT_CODES.CLEAN;
     } finally { await rt.close(); }

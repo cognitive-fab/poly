@@ -19,7 +19,7 @@ import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
 import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
 import { verifiedModels, modelSource, BOUNDS } from './model.js';
-import { PolicyGate, type PolicyGateOptions, type ProgramView } from './policy-gate.js';
+import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionRecord, type ProviderConfig } from './provider.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
@@ -123,11 +123,34 @@ export class PolyRuntime {
     return m.module;
   }
   /** S118: each recorded gate decision of a run, recomputed from its recorded proposal and snapshot (K6). */
-  async gateReplays(instanceId: string): Promise<{ seq: number; decision: string; recompute: (() => string) | null }[]> {
-    const out: { seq: number; decision: string; recompute: (() => string) | null }[] = [];
+  /** S118, S146: every recorded event of every gate session, from every run's chain, with its bodies. */
+  async sessionEvents(): Promise<SessionEvent[]> {
+    const out: SessionEvent[] = [];
+    const rows = this.store.db.prepare("SELECT run, seq, event FROM poly_ledger WHERE kind = 'verdict'").all() as { run: string; seq: number; event: string }[];
+    for (const r of rows) {
+      const b = JSON.parse(r.event).body as Record<string, any>;
+      if (typeof b?.session !== 'string' || !b.action) continue;
+      const action = await this.store.body(b.action) as Record<string, unknown>;
+      if (b.outcome === 'settled') out.push({ session: b.session, sseq: b.sseq, kind: 'settle', action, intent: b.intent, observed: b.observed, run: r.run, ledgerSeq: r.seq });
+      else out.push({ session: b.session, sseq: b.sseq, kind: 'propose', action, intent: b.intent, approvedBy: b.approvedBy, gateDecision: b.gateDecision, stateBefore: b.stateBefore, run: r.run, ledgerSeq: r.seq });
+    }
+    return out;
+  }
+
+  /** S118, S146: the sessions, replayed in sseq order on a fresh gate engine with the certified policies. */
+  async replaySessions(): Promise<SessionReplay[]> {
+    if (!this.policyGate) return [];
+    const modules = [...new Set(this.verified.machines.map((m) => m.id.slice(0, m.id.lastIndexOf('.'))))];
+    return PolicyGate.replaySessions(await loadPolyaxion(), this.verified.policies, modules, await this.sessionEvents());
+  }
+
+  async gateReplays(instanceId: string): Promise<{ seq: number; decision: string; recompute: (() => string) | null; bySession?: boolean }[]> {
+    const out: { seq: number; decision: string; recompute: (() => string) | null; bySession?: boolean }[] = [];
     for (const e of await this.chain(instanceId)) {
       const b = e.body as Record<string, any>;
       if (e.kind !== 'verdict' || b?.stage !== 'gate' || !b.proposal) continue;
+      // S146: a policy gate's decisions depend on its session, so they are replayed by their session, in sseq order.
+      if (this.policyGate) { out.push({ seq: e.seq, decision: b.outcome, recompute: null, bySession: true }); continue; }
       // Review B5: replay never substitutes a gate. Without the gate the runtime ran with, the decision is not replayed.
       if (!this.gateGiven) { out.push({ seq: e.seq, decision: b.outcome, recompute: null }); continue; }
       const proposal = await this.store.body(b.proposal) as any;
