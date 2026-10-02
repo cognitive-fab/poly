@@ -1,0 +1,10 @@
+// PD4.2: the operating mode, a singleton the policies read. Declare is signed in M5b (PD4-A3, by op: Caller).
+module ops
+
+enum Mode { Normal, Complex, Crisis }
+
+service machine OpsMode {
+  state { mode : Mode = Normal }
+  action Declare(mode: Mode)
+  on Declare(mode) { mode' = mode }
+}

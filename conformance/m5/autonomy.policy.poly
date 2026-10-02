@@ -1,0 +1,24 @@
+// PD4.3: mode-dependent policy over the router's refunds, and PD3-A2's map fitted for the model.
+module autonomy_policy
+
+policy autonomy {
+  scope "support"
+  obligation route-once "A ticket is routed by the model once." rule {
+    when effect.kind == "decision.route"
+    require decision("route").taken == false else deny
+  }
+  obligation calibrated-for-model "A gated decision acts only with a map fitted for its model." rule {
+    when (effect.class == "compensable" || effect.class == "irreversible") && decision("route").taken
+    require decision("route").calibration.fittedFor == decision("route").model.reported else escalate
+    on unknown escalate
+  }
+  obligation refund-by-mode "Refunds need a person below the mode's confidence floor." rule {
+    when effect.kind == "payments.refund"
+    require (machine("ops.OpsMode").mode == Normal && decision("route").conf >= 0.8) || (machine("ops.OpsMode").mode == Complex && decision("route").conf >= 0.9) else escalate
+    on unknown escalate
+  }
+  obligation crisis-irreversible "In a crisis, every irreversible effect needs a person." rule {
+    when effect.class == "irreversible" && machine("ops.OpsMode").mode == Crisis
+    require false else escalate
+  }
+}

@@ -123,16 +123,17 @@ export class PolicyGate implements Gate {
   }
 
   /** The engine action for a proposal: its fields, and the reserved fields its scope's policies read (S147). */
-  action(proposal: Proposal, snapshot: Record<string, unknown>): { action: Record<string, unknown>; reads: Record<string, number> } {
+  action(proposal: Proposal, snapshot: Record<string, unknown>): { action: Record<string, unknown>; reads: Record<string, number>; singletons: Record<string, unknown> } {
     const machines: Record<string, unknown> = {};
     const reads: Record<string, number> = {};
+    const singletons: Record<string, unknown> = {};
     for (const m of this.reads.get(moduleOf(proposal.machine)) ?? []) {
       if (m === proposal.machine) { machines[m] = snapshot; continue; }
       const s = this.view.singleton(m);
-      if (s) { machines[m] = s.state; reads[s.instance] = s.seq; }
+      if (s) { machines[m] = s.state; reads[s.instance] = s.seq; singletons[m] = s.state; }
     }
     const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance) };
-    return { action: actionOf(row), reads };
+    return { action: actionOf(row), reads, singletons };
   }
 
   /**
@@ -144,17 +145,19 @@ export class PolicyGate implements Gate {
     return this.serial(session, async () => {
       const machines: Record<string, unknown> = {};
       const reads: Record<string, number> = {};
+      const singletons: Record<string, unknown> = {};
       for (const r of this.reads.get(moduleOf(m.fromMachine)) ?? []) {
         if (r === m.fromMachine) { machines[r] = m.senderState; continue; }
         const s = this.view.singleton(r);
-        if (s) { machines[r] = s.state; reads[s.instance] = s.seq; }
+        if (s) { machines[r] = s.state; reads[s.instance] = s.seq; singletons[r] = s.state; }
       }
       const action = actionOf({ proposal: 'send', send: { to: m.toMachine, action: m.action, scope: moduleOf(m.toMachine) }, machines, decisions: this.view.decisions(m.from) });
       const { v, decision, reason } = await this.decideAction(session, moduleOf(m.fromMachine), action, m.id);
       const sseq = this.view.nextSseq(session);
       const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;
       if (held) throw new GateUnavailable(held, { session, sseq, action, engineDecision: v.decision, engineClass: v.class ?? null, engineRecord: v.record ?? null, stateBefore: v.state_before ?? null });
-      const record = { session, sseq, action, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null };
+      // PD4-A1: the singletons the decision read (a mode, say), in the verdict event itself.
+      const record = { session, sseq, action, singletons, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null };
       if (decision === 'allow') return { decision, reads, record };
       if (decision === 'deny') return { decision, reason: reason ?? 'denied', reads, record };
       return { decision, reason: reason ?? undefined, reads, record };
@@ -177,7 +180,7 @@ export class PolicyGate implements Gate {
   async propose(proposal: Proposal, snapshot: Record<string, unknown>): Promise<GateDecision> {
     const session = sessionOf(proposal.machine);
     return this.serial(session, async () => {
-      const { action, reads } = this.action(proposal, snapshot);
+      const { action, reads, singletons } = this.action(proposal, snapshot);
       // An engine that throws or does not answer took no decision, and so no sequence number (PT9.5).
       const { v, decision, reason } = await this.decideAction(session, moduleOf(proposal.machine), action, proposal.idempotencyKey, proposal.approved);
       const sseq = this.view.nextSseq(session);
@@ -186,7 +189,8 @@ export class PolicyGate implements Gate {
       // allow moved Σ).
       const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;
       if (held) throw new GateUnavailable(held, { session, sseq, action, engineDecision: v.decision, engineClass: v.class ?? null, engineRecord: v.record ?? null, stateBefore: v.state_before ?? null, ...approvedOf(proposal) });
-      const record = { session, sseq, action, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
+      // PD4-A1: the singletons the decision read (a mode, say), in the verdict event itself.
+      const record = { session, sseq, action, singletons, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
       if (decision === 'allow') return { decision, reads, record };
       if (decision === 'deny') return { decision, reason: reason ?? 'denied', witnessDigest: v.witnesses?.length ? digest(v.witnesses) : undefined, reads, record };
       return { decision, reason: reason ?? undefined, reads, record };

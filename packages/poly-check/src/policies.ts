@@ -74,8 +74,9 @@ export function regionCheck(scope: string, ps: Policy[], program: Module[], mode
     for (const d of m.decls) {
       if (d.kind !== 'Machine') continue;
       for (const it of d.items) {
-        if (it.kind !== 'EffectDecl') continue;
-        const kind = (it.items.find((x) => x.kind === 'EffKind') as { value: string } | undefined)?.value ?? it.name;
+        // A decision is an effect of kind decision.<d> with its labels (PD1.7).
+        if (it.kind !== 'EffectDecl' && it.kind !== 'Decision') continue;
+        const kind = it.kind === 'Decision' ? `decision.${it.name}` : (it.items.find((x) => x.kind === 'EffKind') as { value: string } | undefined)?.value ?? it.name;
         const flags = [...new Set(it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])).map((l) => REGION_FLAGS[l]).filter(Boolean))];
         actions.push({ tool: kind, specifier: null, effects: flags, gateKind: gated.has(kind) ? 'ask' : null, source: `${m.name}.${d.name}`, tag: null });
       }
@@ -162,6 +163,54 @@ export function mandates(doc: PolicyDoc, policies: Policy[], discharge: (d: Poli
   return { findings, mandates: machines.length, checks };
 }
 
+/**
+ * PD4.4a, PD4.4b, S148: consistency per mode. A mode is an enum field of a service machine (a singleton) the scope's
+ * policies read. For each value (each combination, when they read several), the document is evaluated with that value
+ * fixed, its examples narrowed to the proposals made in it, and the mandates checked there; a finding names the mode.
+ * A mandate undischargeable in every mode is reported once, without one.
+ */
+export function mandatesPerMode(doc: PolicyDoc, policies: Policy[], facts: PolicyFacts, discharge: Parameters<typeof mandates>[2]): ReturnType<typeof mandates> {
+  const reads = new Map<string, Set<string>>();
+  const walk = (e: any): void => {
+    if (!e || typeof e !== 'object') return;
+    if (e.kind === 'Member' && e.object?.kind === 'Call' && e.object.callee === 'machine') {
+      const m = e.object.args[0]?.value as string;
+      const target = facts.machines.get(m);
+      const f = target?.fields.get(e.prop);
+      if (target?.service && f?.values && f.values.every((v) => typeof v === 'string')) { if (!reads.has(m)) reads.set(m, new Set()); reads.get(m)!.add(e.prop); }
+    }
+    for (const v of Object.values(e)) { if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') walk(v); }
+  };
+  for (const p of policies) for (const it of p.items) walk(it);
+  const modes = [...reads].flatMap(([m, fs]) => [...fs].map((f) => ({ machine: m, field: f, values: facts.machines.get(m)!.fields.get(f)!.values as string[] })));
+  if (!modes.length) return mandates(doc, policies, discharge);
+  const combos = modes.reduce<Record<string, string>[]>((acc, md) => acc.flatMap((a) => md.values.map((v) => ({ ...a, [`${md.machine}.${md.field}`]: v }))), [{}]);
+  const pathOf = (key: string) => { const i = key.lastIndexOf('.'); return `action.machines['${key.slice(0, i)}'].${key.slice(i + 1)}`; };
+  const fix = (s: unknown, combo: Record<string, string>): unknown => typeof s === 'string' ? Object.entries(combo).reduce((t, [k, v]) => t.split(pathOf(k)).join(`'${v}'`), s) : s;
+  const per = combos.map((combo) => {
+    const obligations = doc.obligations.map((o) => {
+      const x: any = JSON.parse(JSON.stringify(o));
+      for (const k of ['when', 'require', 'invariant']) if (k in x) x[k] = fix(x[k], combo);
+      if (x.machine) { x.machine.transitions = x.machine.transitions.map((t: any) => ({ ...t, when: fix(t.when, combo) })); x.machine.guards = x.machine.guards.map((g: any) => ({ ...g, when: fix(g.when, combo) })); }
+      if (x.examples) {
+        const keep = (seq: any[]) => seq.every((a) => Object.entries(combo).every(([k, v]) => { const i = k.lastIndexOf('.'); const got = a.machines?.[k.slice(0, i)]?.[k.slice(i + 1)]; return got === undefined || got === v; }));
+        x.examples = { allow: x.examples.allow.filter(keep), deny: x.examples.deny.filter(keep) };
+      }
+      return x;
+    });
+    return { combo, r: mandates({ ...doc, obligations }, policies, discharge) };
+  });
+  const findings: ReturnType<typeof mandates>['findings'] = [];
+  const name = (c: Record<string, string>) => Object.entries(c).map(([k, v]) => `${k} == ${v}`).join(', ');
+  const ids = new Set(per.flatMap((p) => p.r.findings.map((f) => f.mandate)));
+  for (const id of ids) {
+    const hits = per.filter((p) => p.r.findings.some((f) => f.mandate === id));
+    if (hits.length === per.length) { const f = hits[0].r.findings.find((x) => x.mandate === id)!; findings.push({ ...f, message: `${f.message}; in every mode` }); continue; }
+    for (const h of hits) { const f = h.r.findings.find((x) => x.mandate === id)!; findings.push({ ...f, message: `in mode ${name(h.combo)}: ${f.message} (PD4.4b)` }); }
+  }
+  return { findings, mandates: per[0]?.r.mandates ?? 0, checks: per.reduce((n, p) => n + p.r.checks, 0) };
+}
+
 /** The policies of `module`, checked against `program` (the project's modules), one report per scope. */
 export async function policyReports(module: Module, program: Module[], root: string): Promise<PolicyReport[]> {
   const policies = module.decls.filter((d): d is Policy => d.kind === 'Policy');
@@ -210,7 +259,7 @@ export async function policyReports(module: Module, program: Module[], root: str
       const admission = await px.admitPolicy(doc, {});
       // Stage 5b (PT8.5, S148): an undischargeable mandate is PL6501 with its minimal conflicting subset, not a refusal.
       const { checkDischarge } = await loadPolyaxionModule('compile/discharge.mjs');
-      const consistency = mandates(doc, ps, (d) => checkDischarge(px.compileToTriple(d).plan, {}));
+      const consistency = mandatesPerMode(doc, ps, refFacts, (d) => checkDischarge(px.compileToTriple(d).plan, {}));
       for (const m of consistency.findings) r.diagnostics.push({ ...diag('PL6501', { module: module.name, node: m.node, line: m.line }, m.message), property: m.mandate, witness: { id: '', length: m.path.length, trace: m.path } });
       const errors = (admission.findings ?? []).filter((f: { level: string; message: string }) => f.level === 'error' && !/not lawfully dischargeable \(m2\)/.test(f.message));
       for (const f of errors) r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `Polyaxion refuses the policies of scope ${scope} at admission: ${f.obligation ? `${f.obligation}: ` : ''}${f.message} (PT8.4)`));
