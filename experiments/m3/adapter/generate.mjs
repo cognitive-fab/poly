@@ -245,11 +245,18 @@ export default async function createHost() {
     const spec = MAP.methods[name];
     const id = idOf(spec, args);
     const family = MAP.instances[spec.instance];
-    if (id !== null && family?.createdBy === name && !(await rt.store.getInstance(id))) await make(id, family);
-    if (id === null || !(await rt.store.getInstance(id))) return spec.returns === 'nothing' ? undefined : { ok: false, reason: 'unknown' };
+    const created = id !== null && family?.createdBy === name && !(await rt.store.getInstance(id));
+    if (created) await make(id, family);
+    if (id === null || !(await rt.store.getInstance(id))) return spec.returns === 'nothing' ? undefined : spec.returns === 'state' ? null : { ok: false, reason: 'unknown' };
     const data = Object.fromEntries(Object.entries(spec.params ?? {}).map(([p, v]) => [p, valueOf(v, args)]));
     const r = await rt.dispatch(id, spec.action, data, actionId());
+    // A refused command changes nothing, so a creating command that is refused leaves no instance: a strict
+    // domain refuses it before the handler, with the instance already made (PT3.4, M3-6).
+    const purged = created && r.stepKind !== 'accepted';
+    if (purged) await rt.store.purgeInstance(id);
     if (spec.returns === 'nothing') return undefined;
+    // A purged instance has no state, as a query of an id never created answers null.
+    if (spec.returns === 'state' && purged) return null;
     if (spec.returns === 'state') return (await rt.getState(id)).state;
     return r.stepKind === 'accepted' ? { ok: true } : { ok: false, reason: r.rejectReason ?? r.stepKind };
   };

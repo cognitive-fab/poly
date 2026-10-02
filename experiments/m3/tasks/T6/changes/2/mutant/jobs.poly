@@ -11,7 +11,7 @@ machine Job {
   }
   terminal status in { succeeded, failed, cancelled }
 
-  action Submit(maxTries: 1..3)
+  action Submit(maxTries: int check { 1, 2, 3 } strict)
   action Claim()
   action Succeed()
   action Fail()

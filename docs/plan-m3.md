@@ -134,7 +134,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 **Step 8 is done.** `experiments/m3/analysis/analyse.mjs` computes PT13's measures per arm and task, the five escaped-defect comparisons by the exact Wilcoxon signed-rank test with Holm's correction (tokens as a second family), and the win (S96), surface and stop rules; a task with no delivered run for an arm is left out of that comparison and listed. `stats.mjs` is tested on known values, and `test/m3-analysis.test.mjs` on synthetic records whose answer is known: a clear win, a reduction that is not significant, a win denied by tokens, a null result, the surface decision each way, a stop, a left-out task, and the four token parts with their cost.
 
-**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 740 files of the experiment (365; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`ce7cdc1`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
+**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 781 files of the experiment (365, and the 41 of O1 since M3-9; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`9c185f5`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
 
 | Part | Digest |
 |---|---|
@@ -142,34 +142,34 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | T1 v1 | `6959d7b6c3c7dda1` |
 | T1 v2 | `17e5b1ba0c5e28d8` |
 | T1 v3 | `ce92c22f83bb4434` |
-| T2 v0 | `c7dba7aefe2f06b5` |
-| T2 v1 | `0e59606899df8300` |
-| T2 v2 | `ed77f9977969a944` |
-| T2 v3 | `02919574923855a2` |
-| T3 v0 | `eb1e039b19adeeae` |
-| T3 v1 | `26998968ae478780` |
-| T3 v2 | `8bcd90f31b18b4bf` |
-| T3 v3 | `b97c7c2f19da1939` |
+| T2 v0 | `be446fce3cc4ce76` |
+| T2 v1 | `eeb9992ad35817c5` |
+| T2 v2 | `b4e9ea73390a26a4` |
+| T2 v3 | `d0a22b4ef4a0a43f` |
+| T3 v0 | `579fc56e9d73956f` |
+| T3 v1 | `e506bd0d16e77709` |
+| T3 v2 | `eada58077eb9f35d` |
+| T3 v3 | `82c93074328d6e19` |
 | T4 v0 | `425326faee24cb09` |
 | T4 v1 | `411ed868022b1f98` |
 | T4 v2 | `216228a23473d4a7` |
 | T4 v3 | `d8faad9e279d3d93` |
-| T5 v0 | `cdfc854429402d05` |
+| T5 v0 | `e38eee0045a68981` |
 | T5 v1 | `19ae94a5137c422d` |
 | T5 v2 | `f591844725f8c57e` |
 | T5 v3 | `04b38baf06aa7d4f` |
-| T6 v0 | `8cad1868b35d862a` |
-| T6 v1 | `27cfc9aba33fe869` |
-| T6 v2 | `15b8b64eeca96216` |
-| T6 v3 | `39f3aa44e7db7400` |
+| T6 v0 | `8cf90e74276e4447` |
+| T6 v1 | `a5c0e3296ecf9b44` |
+| T6 v2 | `e319e65a89973c31` |
+| T6 v3 | `c5158bd01341befc` |
 | T7 v0 | `ec9e505c80805559` |
 | T7 v1 | `835d28af88c2659b` |
 | T7 v2 | `58e22d61579224c7` |
-| T7 v3 | `d1e252f422ab9100` |
-| T8 v0 | `12260ffbe085a6c0` |
-| T8 v1 | `f7a8097fe177b109` |
-| T8 v2 | `7bac9f64b1951d89` |
-| T8 v3 | `33380a3713c42740` |
+| T7 v3 | `7864d13cf9de7af5` |
+| T8 v0 | `efcf05f02b4f318f` |
+| T8 v1 | `0374c748c16978ee` |
+| T8 v2 | `9589ed35461c1f5d` |
+| T8 v3 | `d172e07d49552f0d` |
 | T9 v0 | `5a6f5fc129e939d7` |
 | T9 v1 | `50c2c646e45014f7` |
 | T9 v2 | `1abe77d4fb7b16a0` |
@@ -180,10 +180,11 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | T10 v3 | `95561d8f9cf16aa2` |
 | P1 v0 | `a32c6f4ee46bc974` |
 | P1 v1 | `0c2f87ea81498248` |
+| O1 (M3-9) | `9cf4892024085325` |
 | O1 prompt | `7b3997f818de199b` |
 | template | `2d43b4899af7aa53` |
-| controls | `531ed9b4c2adb0de` |
-| adapter | `56bff45dcf872922` |
+| controls | `44b6d89fadd68f93` |
+| adapter | `843a9d1994789861` |
 | runner and prompts | `d1c6bff0844fce12` |
 | analysis | `07eed61ee87a20d7` |
 | toolchain (S100) | `246ec34ee8e2dc7f` |
@@ -213,7 +214,30 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 The modelled tasks are **T1, T2, T3, T4 and T6**, all from material only arms 3 and 4 receive. The polygraph README names its examples (the turnstile, the cart checkout, etcd raft), but the archive does not include them. The tasks left for the sensitivity analysis are **T5, T7, T8, T9 and T10**. Over five tasks the smallest two-sided exact p of the signed-rank test is 2/32 = 0.0625, so a second significance test on them could never reject at 0.05; with Holm over five comparisons a win needs at least eight tasks (5 × 2/256 = 0.039). S117 therefore makes the sensitivity analysis an effect check. Significance is decided once, by the primary comparison over all ten tasks (S96). A primary win of an arm stands only if, on T5, T7, T8, T9 and T10, its mean escaped defects per delivered task is also at least 30% below that of arm 1 and of arm 2 (`sensitivity.holds`); otherwise `reported` gives `win only with the modelled tasks`, never a win. The subset's comparisons and p-values are reported as descriptive, with the note that five tasks cannot reach 0.05. `test/m3-sensitivity.test.mjs` covers a win that holds on both, a win carried by the modelled tasks only, and a subset reduction of 29% (does not hold) beside one of exactly 30% (holds), and keeps the minimum p as documentation.
 
-*The environment (S116).* `freeze.json` records the environment every arm shares: Node `v24.12.0`, the claude CLI `2.1.286`, the model `claude-opus-5-5` (the exact id passed to the CLI, the one proposed below and still to be confirmed) and the operating system (`win32`, release `10.0.26200`, `x64`). The runner refuses a run, pilots included, when any of them differs from the record or the model is not an exact id, and `--check` reports any change of the environment. `freeze.mjs` now needs `--model <exact id>` to write the freeze.
+*The environment (S116).* `freeze.json` records the environment every arm shares: Node `v24.12.0`, the claude CLI `2.1.287`, the model `claude-opus-5-5` (the exact id passed to the CLI, the one proposed below and still to be confirmed) and the operating system (`win32`, release `10.0.26300`, `x64`). The runner refuses a run, pilots included, when any of them differs from the record or the model is not an exact id, and `--check` reports any change of the environment. `freeze.mjs` now needs `--model <exact id>` to write the freeze. Between S116 and M3-9 the claude CLI updated itself from `2.1.286` and Windows from release `10.0.26200`, and the freeze written at M3-9 records the new values. An update after FROZEN would stop every run until the freeze is written again, so the CLI's version should be pinned before FROZEN.
+
+*Out-of-range inputs and the audit of stated ranges (M3-6 to M3-8).* Control 4 first failed on T3 and T6: O1 sent values outside the ranges the briefs state (a capture of 0 units, a refund of 3, `maxTries` 4), and the references took them. The references declared those ranges only as parameter types, and a type range is a constraint at run time only when PT3.4a makes it `strict`, which it does only for a value that reaches an irreversible or compensable effect; elsewhere the domain is `disclosed` and the value is accepted. O3 explores only in-range values, so controls 1 to 3 could not see it. The audit lists every action parameter a caller sets through the host interface whose brief states a range or a set of values; parameters only another machine sets (`Reserve`, `Granted` and the like) are not caller inputs.
+
+| Task | Versions | Command and parameter | The brief states | Before | Change |
+|---|---|---|---|---|---|
+| T2 | v0 to v3 | `place` qty | 1 or 2, refusal not stated | accepted | brief amended; `strict` |
+| T3 | v0 to v3 | `authorize` amount | 1 or 2, refusal not stated | accepted | brief amended; `strict` |
+| T3 | v0 | `capture` amount | 1 or 2, "Refused otherwise" | accepted | `strict` |
+| T3 | v1 to v3 | `capture` amount | 1 to 3 (change 1), "Refused otherwise" | accepted | `strict` |
+| T3 | v0 to v3 | `refund` amount | 1 or 2, "Refused otherwise" | accepted | `strict` |
+| T5 | v0 to v3 | `taskStarted`, `taskCompleted`, `taskFailed`, `taskEvicted`, `taskRequeued` task; `taskRetried` (v1 on), `cancelTask` (v2 on) | tasks 0, 1 and 2, refusal not stated | refused by a `require` | brief amended |
+| T6 | v0 to v3 | `submit` maxTries | 1 to 3, refusal not stated | accepted | brief amended (M3-7); `strict` |
+| T7 | v2, v3 | `taskTimeout` task | 0 or 1, "Refused otherwise" | refused by a `require` | none |
+| T7 | v3 | `workDone` items | 1 or 2 (change 3), refusal not stated | accepted | brief amended; `strict` |
+| T8 | v0 to v3 | `newerTermSeen` term | 1 to 3, "Refused when the term is not newer" | 4 accepted | brief amended; `strict` |
+| T8 | v1 to v3 | `voteRequested` term | 1 to 3 (change 1), refusal not stated | 4 accepted | brief amended; `strict` |
+| T8 | v1 to v3 | `voteRequested` candidate | `"n1"` or `"n2"` (change 1), refusal not stated | refused by a `require` | brief amended |
+
+Seven briefs are amended: T2, T3, T5, T6 and T8 (base), T7 change 3 and T8 change 1; each now says that a value outside the stated range is refused. Every `strict` parameter is declared `int check { ... } strict`, since a range type takes no check clause; the mutants get the same change, so each still differs from its reference only by its seeded bug. Thirty-four modules changed (the reference and the mutant of T2, T3, T6 and T8 in all versions, and of T7 v3). The adapter now removes the instance a refused creating command made, since a refused command changes nothing and a strict domain refuses after the instance exists. O3 was regenerated for T2, T3, T6, T7 and T8 and is byte-identical. `test/m3-ranges.test.mjs` checks every row in the reference and the mutant of every version it applies to: out-of-range values are refused and change nothing, an in-range value is taken, and the brief says so. Controls 1 to 4 pass on all forty versions after the change; no mutant stopped failing.
+
+**For the report.** The reference author made this defect with the spec at hand: a type range on a parameter reads like a constraint, and is one only when the value reaches an irreversible or compensable effect. The poly arms will meet the same trap. An escaped defect caused by a disclosed range is counted like any other. Making action parameters `strict` by default, or warning when a disclosed range guards nothing, is a candidate language change after M3.
+
+*O1 in the freeze (M3-9).* The part `O1` covers every file under `experiments/m3/o1/`, and `o1-check.mjs` lists only the flags under each task and version: the T10 sentence, in v0 to v3. The scorer runs each O1 suite with a timeout of 30 minutes (`scoreRun`'s default), more than five times the longest reference time measured: T9 v2 took 207.8 s and 349.8 s in two runs on this machine.
 
 *The proposed budget.* Each run (base brief and three changes, one session) gets **30,000,000 tokens**, counted as all tokens processed (S99), and **3 hours** of wall time, with `--max-budget-usd 60` as the CLI's own cap. The dry run's tokens are scripted, so they say nothing about real use, and the budget cannot be computed from them as section 8 first planned. The figures above are a ceiling for a session that reads its toolchain's manual, writes and tests a small system, and takes three changes; the pilots are there to replace them with measured ones.
 

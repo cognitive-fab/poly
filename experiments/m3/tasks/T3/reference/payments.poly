@@ -13,13 +13,13 @@ machine Payment {
   }
   terminal status in { declined, failed, voided, refunded }
 
-  action Authorize(amount: 1..2)
+  action Authorize(amount: int check { 1, 2 } strict)
   action Approved()
   action Declined()
   action TimedOut()
-  action Capture(amount: 1..2)
+  action Capture(amount: int check { 1, 2 } strict)
   action Void()
-  action Refund(amount: 1..2)
+  action Refund(amount: int check { 1, 2 } strict)
 
   on Authorize(amount) {
     require status == unset else reject "exists"

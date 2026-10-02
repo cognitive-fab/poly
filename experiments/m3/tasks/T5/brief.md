@@ -18,7 +18,7 @@ Each command returns `{ ok: true }` when it takes effect, and `{ ok: false, reas
 - `taskRequeued(run, task)`: an evicted task becomes queued.
 - `cancel(run)`: every task in flight becomes cancelled. Refused when no task is in flight.
 
-A task report that does not follow these moves is refused.
+A task report that does not follow these moves is refused, and so is a command naming a task other than 0, 1 or 2.
 
 ## The run's status
 

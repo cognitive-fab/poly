@@ -15,10 +15,10 @@ machine Node {
   action ElectionTimeout()
   action ElectionWon()
   action ElectionLost()
-  action NewerTermSeen(term: 1..3)
+  action NewerTermSeen(term: int check { 1, 2, 3 } strict)
   action QuorumLost()
   action Shutdown()
-  action VoteRequested(candidate: Voter, term: 1..3)
+  action VoteRequested(candidate: Voter, term: int check { 1, 2, 3 } strict)
 
   on ElectionTimeout {
     require role in { follower, candidate } else reject "leader"

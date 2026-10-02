@@ -28,9 +28,29 @@ export function suiteProblems(text, file = 'suite.test.mjs') {
   return problems;
 }
 
-/** The flags of o1/LEAKS.md (M3-1): every line that is not a heading, blank or `none`. */
+/**
+ * The flags of o1/LEAKS.md (M3-1, M3-9), as { task, version, flag }: what is written under a `## T<n>` and
+ * `### v<n>` heading. The preamble before the first task is not a flag, and a `none` is no flag. A list item starts a
+ * flag, and the lines after it, up to the next item, continue it. A first line without a list marker is a flag too:
+ * a flag the session wrote as prose is still a flag, and dropping it would hide it from the owner.
+ */
 export function leakFlags(text) {
-  return text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !/^[-*]?\s*none\.?$/i.test(l) && !/:\s*none\.?$/i.test(l));
+  const out = [];
+  let task = null;
+  let version = null;
+  for (const raw of text.split('\n')) {
+    const l = raw.trim();
+    const t = /^##\s+(T\d+)\s*$/.exec(l);
+    const v = /^###\s+v(\d+)\s*$/.exec(l);
+    if (t) { task = t[1]; version = null; continue; }
+    if (v) { version = Number(v[1]); continue; }
+    if (l.startsWith('#')) { task = null; version = null; continue; }
+    if (task === null || version === null || !l || /^[-*]?\s*none\.?$/i.test(l)) continue;
+    const last = out[out.length - 1];
+    if (/^[-*]\s/.test(l) || !last || last.task !== task || last.version !== version) out.push({ task, version, flag: l });
+    else last.flag += ` ${l}`;
+  }
+  return out;
 }
 
 export function checkO1() {
@@ -52,6 +72,6 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const leaks = join(M3, 'o1', 'LEAKS.md');
   const flags = existsSync(leaks) ? leakFlags(readFileSync(leaks, 'utf8')) : null;
   if (flags === null) console.log('o1/LEAKS.md: missing');
-  else for (const f of flags) console.log(`flagged: ${f}`);
+  else for (const f of flags) console.log(`flagged: ${f.task} v${f.version}: ${f.flag}`);
   process.exitCode = report.every((r) => r.problems.length === 0) && flags !== null ? 0 : 1;
 }

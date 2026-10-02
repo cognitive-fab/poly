@@ -13,7 +13,7 @@ The inventory starts with 1 unit available and none reserved, and it holds at mo
 
 Each command returns `{ ok: true }` when it takes effect, and `{ ok: false, reason }` when it is refused. A refused command changes nothing. A command on an order id that was never placed is refused.
 
-- `place(order, qty)`: creates the order for `qty` units (1 or 2) as **pending**, and asks the inventory to reserve them. Refused if an order with that id exists.
+- `place(order, qty)`: creates the order for `qty` units (1 or 2) as **pending**, and asks the inventory to reserve them. Refused if `qty` is not 1 or 2, or if an order with that id exists.
 - When the inventory answers that the units are reserved, a pending order becomes **confirmed**. When it answers that they are out of stock, a pending order becomes **rejected**.
 - `cancel(order)`:
   - a confirmed order becomes **cancelled** and gives its units back to the inventory;

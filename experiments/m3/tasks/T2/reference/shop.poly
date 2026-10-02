@@ -42,7 +42,7 @@ machine Order {
   }
   terminal status is rejected | cancelled
 
-  action Place(qty: 1..2)
+  action Place(qty: int check { 1, 2 } strict)
   action Cancel()
   action Reserved()
   action OutOfStock()
