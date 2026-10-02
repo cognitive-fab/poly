@@ -25,6 +25,18 @@ The plan is accepted with the rulings below. The outage test (section 6) and PD5
 
 **Next.** Build M5a, steps 0 to 10, each with a test that fails first, then M5a's code review, a clean gate and its close. M5b is not started before M5a closes.
 
+## S147 amended: a stale allow is rechecked a bounded number of times
+
+PT9.7's `OutboxIntent` has no transition from `Allowed` back to `Proposed`, its step property `no-reproposal-after-allow` forbids one, and an unbounded re-proposal breaks `settles`. **The machine changes, with a bound.** A new action `Recheck` takes `Allowed{attempts: n}` back to `Proposed{decision: 1}`, keeping `n`, at most twice per intent. When the bound is spent, the intent is `Denied` with reason `stale-allow` and the failed completion. `no-reproposal-after-allow` becomes "no re-proposal except by `Recheck`". `settles` must still hold, and the state count is re-checked at every bound from 1 to 10, with PT9.7's figures updated in the same commit. The PT9.7 digest pinned for `RESERVED_NAME` (S143) is updated with it.
+
+## PD4-A3 moves to M5b
+
+PD4-A3 ("`Declare` is dispatched only with a person's signature") is met in M5b, where `Declare` is written `on Declare(m) by op: Caller` with the person-key adapter (S107). No interim `signed` modifier is added: grammar that M5b would retire is not built. M5a builds and tests the signed-record half (keyrings, verification, the signer journaled) through approvals. M5a's gate is PD4-A1, PD4-A2 and PD3-A2; PT18 is amended in this commit.
+
+## S149 amended: `never` statements in policies
+
+The decision-table check proves statements a policy states. In M5a, PT8.1 gains `never <id> "<text>": allow when <expr>`. poly-ref proves it over the decision table and gives a witness proposal when the policy allows one. The seeded control drops the rule that enforces a `never`. Two rules carry over: a statement whose `<expr>` is never true over the table is `INCONCLUSIVE` (`vacuous`), never clean (S113); a statement over an open domain is `runtime-only`. PD5.3.3a is written as a `never` in M5b.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.

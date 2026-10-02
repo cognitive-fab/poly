@@ -1,0 +1,45 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:142e728d99a6c8264a57766823940b73a0db224e252664d86f25459404350b8d",
+  "stateKeys": [
+    {
+      "name": "status",
+      "type": "'absent' | 'available' | 'lent' | 'retired'"
+    },
+    {
+      "name": "loans",
+      "type": "0..3"
+    },
+    {
+      "name": "renewed",
+      "type": "boolean"
+    }
+  ],
+  "initState": {
+    "status": "absent",
+    "loans": 0,
+    "renewed": false
+  },
+  "actions": {
+    "Add": {
+      "dataFields": {}
+    },
+    "Lend": {
+      "dataFields": {}
+    },
+    "GiveBack": {
+      "dataFields": {}
+    },
+    "Retire": {
+      "dataFields": {}
+    },
+    "Renew": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [
+    "retired"
+  ],
+  "dataDomain": {},
+  "invariants": "invariants.mjs"
+}
