@@ -558,8 +558,12 @@ class Checker {
     }
     // PD1.7: a decision is an effect of kind decision.<name>.
     const kinds = new Set([...[...facts.effects.values()].map(effectKind), ...[...facts.decisions.keys()].map((d) => `decision.${d}`)]);
-    // PD1.7, S41: a decision's kind decision.<d> is its own; an effect declaring it would share a manifest entry (review A6).
-    for (const e of facts.effects.values()) if (facts.decisions.has(effectKind(e).replace(/^decision\./, '')) && effectKind(e).startsWith('decision.')) this.err('PL1002', e, `effect ${e.name} has kind "${effectKind(e)}", which is the kind of decision ${effectKind(e).slice(9)} (PD1.7, S41)`);
+    // M4 review D1: decision.* and outcome.* are the toolchain's own kinds (PD1.7, PD2.4); an effect declaring one
+    // would share a manifest entry, or pose as a decision or an adjudication.
+    for (const e of facts.effects.values()) {
+      const k = effectKind(e);
+      if (k.startsWith('decision.') || k.startsWith('outcome.')) this.err('PL1208', e, `effect ${e.name} has kind "${k}": the prefixes decision. and outcome. are reserved for the kinds the toolchain generates (PD1.7, PD2.4)`);
+    }
     // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
     // Keys are declared by their use (PT6.3, PT6.4); an indexed key k[i] declares the family k (S49).
     const loops: Loop[] = [];

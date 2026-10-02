@@ -49,3 +49,11 @@ test('PL6203: an adjudication reachable before its decision is a finding with it
   const fixed = await checkFile(join(ROOT, 'conformance', 'm4', 'seeded', 'adjudication', 'fixed.poly'), { root: OUT });
   assert.equal(fixed.verdict, 'CLEAN');
 });
+
+test('review D1: a declared effect kind with a reserved prefix is PL1208, so it cannot pose as an adjudication', async () => {
+  const src = readFileSync(join(ROOT, 'conformance', 'm0', 'errors', 'PL1208-reserved-effect-kind.poly'), 'utf8');
+  const codes = checkModule(parse(src).module).diagnostics.map((d) => d.code);
+  assert.deepEqual(codes, ['PL1208', 'PL1208']);
+  const collide = readFileSync(ROUTER, 'utf8').replace('kind "support.reply"', 'kind "outcome.route"');
+  assert.deepEqual(checkModule(parse(collide).module).diagnostics.map((d) => d.code), ['PL1208']);
+});

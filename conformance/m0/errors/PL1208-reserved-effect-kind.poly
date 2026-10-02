@@ -1,0 +1,22 @@
+// expect: PL1208 (an effect kind with a prefix the toolchain generates: decision.* and outcome.* are reserved)
+module errors
+enum S { A, B }
+
+machine M {
+  state { s : S = A }
+  action Go()
+  on Go {
+    require s == A else reject "gone"
+    s' = B
+    emit note(1)
+    emit judge(1)
+  }
+  effect note(n: 0..1) {
+    kind "outcome.route"
+    labels { exec }
+  }
+  effect judge(n: 0..1) {
+    kind "decision.route"
+    labels { exec }
+  }
+}

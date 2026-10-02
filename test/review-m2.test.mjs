@@ -80,8 +80,8 @@ test('A4, A5: a Conf is only a completion parameter bound from a reply (PD1.3b, 
   assert.deepEqual(codes(swap(swap(ROUTER, '  action RouteFailed()\n', '  action RouteFailed()\n  action Poke(c: Conf)\n'), '  on RouteFailed {', '  on Poke(c) { require c >= 0.5 else reject "low"   status\' = Handled }\n  on RouteFailed {')), ['PL1205']);
 });
 
-test('A6: an effect whose kind is a decision\'s kind is PL1002 (PD1.7, S41)', () => {
-  assert.deepEqual(codes(swap(ROUTER, 'kind "support.reply"', 'kind "decision.route"')), ['PL1002']);
+test('A6: an effect whose kind is a decision\'s kind is PL1208 since M4 review D1 (PD1.7, S41)', () => {
+  assert.deepEqual(codes(swap(ROUTER, 'kind "support.reply"', 'kind "decision.route"')), ['PL1208']);
 });
 
 test('A7: one key, one child, whatever the order of the handlers (PT6.4, S60)', () => {
