@@ -1,0 +1,42 @@
+// PD5.3 (S106, S107): revocation. Security signals arrive as actions on a mode machine; a verified person at assurance
+// 3 leaves Halted by Restore.
+module security
+
+enum Level { Normal, Restricted, Halted }
+enum Kind { Person, Agent, Service }
+enum Attest { Verified, Failed, Absent }
+
+claims Caller {
+  kind: Kind
+  attest: Attest
+  assurance: 0..3
+  principal: Principal
+}
+
+service machine Trust {
+  state {
+    level      : Level     = Normal
+    revoked    : Principal = none
+    restoredBy : Principal = none
+  }
+
+  action CredentialRevoked(p: Principal)
+  action AttestationFailed()
+  action Restore()
+
+  on CredentialRevoked(p) {
+    level' = Halted
+    revoked' = p
+  }
+  on AttestationFailed {
+    level' = Halted
+  }
+  on Restore() by op: Caller {
+    require level == Halted else reject "not-halted"
+    require op.kind == Person else reject "person-required"
+    require op.attest == Verified else reject "not-attested"
+    require op.assurance == 3 else reject "low-assurance"
+    level' = Normal
+    restoredBy' = op.principal
+  }
+}
