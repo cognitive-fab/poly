@@ -1,0 +1,51 @@
+// Two decisions complete at one action; only b is ever decided, then a is adjudicated.
+module shared
+
+enum Branch { Yes, No }
+enum S { New, Waiting, Answered, Done }
+
+machine T {
+  state {
+    s : S = New
+  }
+  terminal s in { Done }
+
+  action Ask(text: string check { "q" })
+  action Answered(branch: Branch, conf: Conf, margin: Conf)
+  action Failed()
+  action Close()
+
+  on Ask(text) {
+    require s == New else reject "not-new"
+    s' = Waiting
+    decide b(text)
+  }
+  on Answered(branch, conf, margin) {
+    require s == Waiting else reject "not-waiting"
+    s' = Answered
+  }
+  on Close {
+    require s == Answered else reject "not-answered"
+    s' = Done
+    adjudicate a as Correct
+  }
+  on Failed {
+    require s == Waiting else reject "not-waiting"
+    s' = Done
+  }
+
+  decision a(text: string) -> Branch {
+    provider "jev"
+    labels { egress:external }
+    timeout 800ms
+    ok(r) -> Answered(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Failed()
+  }
+  decision b(text: string) -> Branch {
+    provider "jev"
+    labels { egress:external }
+    timeout 800ms
+    ok(r) -> Answered(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Failed()
+  }
+}

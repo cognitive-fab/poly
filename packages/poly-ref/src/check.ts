@@ -179,9 +179,10 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   // PD2.4, S129: an accepted adjudication of d is reachable only after an accepted ok completion of d on the same
   // path, or the runtime would have no decision event to link the outcome to. Decided on the product of the graph
   // with one bit per decision, "taken"; BFS gives a shortest witness.
+  const ds = [...M.decisions.values()].map((x) => ({ name: x.name, kind: x.kind, ok: x.ok?.action ?? null }));
   for (const d of M.decisions.values()) {
-    const hit = adjudicationWithoutDecision(g, d.name, d.ok?.action ?? null);
-    if (hit) findings.push(finding('PL6203', d.id, `${hit[hit.length - 1].label.action} adjudicates ${d.name} on a path where no ${d.ok?.action ?? 'ok completion'} was accepted, so there is no decision to link the outcome to (PD2.4)`, trace(hit), { property: d.name, state: g.states[hit[hit.length - 1].from] }));
+    const hit = adjudicationWithoutDecision(g, d.name, ds);
+    if (hit) findings.push(finding('PL6203', d.id, `${hit[hit.length - 1].label.action} adjudicates ${d.name} on a path where no ${d.ok?.action ?? 'ok completion'} answering ${d.name} was accepted, so there is no decision to link the outcome to (PD2.4)`, trace(hit), { property: d.name, state: g.states[hit[hit.length - 1].from] }));
   }
 
   // Liveness (PS6.4): each fair component that never reaches the goal, with its lasso.
@@ -234,23 +235,39 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   };
 }
 
-/** PL6203: the shortest path to an accepted step that adjudicates `decision` with no accepted `okAction` before it. */
-export function adjudicationWithoutDecision(g: Graph<State>, decision: string, okAction: string | null): Edge<State>[] | null {
-  const kind = `outcome.${decision}`;
-  const seen = new Set<string>(['0:0']);
-  const queue: { node: number; taken: boolean; path: Edge<State>[] }[] = [{ node: 0, taken: false, path: [] }];
+/**
+ * PL6203: the shortest path to an accepted step that adjudicates `decision` before the runtime has a decision event
+ * for it. Decided on the product of the graph with two bits per decision: asked (a `decide` is outstanding) and
+ * taken (its ok completion was accepted). An ok completion takes the decision it answers: the one asked, of the
+ * decisions sharing that action (review D2); when two are asked it cannot tell which, and takes neither, so the check
+ * stays sound. The completion's own step counts before its adjudication, since the runtime writes the decision event
+ * before the step (review D3).
+ */
+export function adjudicationWithoutDecision(g: Graph<State>, decision: string, decisions: { name: string; kind: string; ok: string | null }[]): Edge<State>[] | null {
+  const outcome = `outcome.${decision}`;
+  const at = new Map(decisions.map((d, i) => [d.name, i]));
+  const me = at.get(decision)!;
+  const start = { node: 0, asked: 0, taken: 0, path: [] as Edge<State>[] };
+  const seen = new Set<string>(['0:0:0']);
+  const queue = [start];
   while (queue.length) {
-    const { node, taken, path } = queue.shift()!;
+    const { node, asked, taken, path } = queue.shift()!;
     for (const k of g.out[node]) {
       const e = g.edges[k];
       const accepted = e.label.verdict.kind === 'accepted';
-      if (accepted && !taken && e.label.effects.some((x) => x.kind === kind)) return [...path, e];
+      let a = asked;
+      let t = taken;
+      if (accepted) {
+        const answering = decisions.map((d, i) => (d.ok !== null && d.ok === e.label.action && (a & (1 << i)) ? i : -1)).filter((i) => i >= 0);
+        if (answering.length === 1) { t |= 1 << answering[0]; a &= ~(1 << answering[0]); }
+        for (const x of e.label.effects) { const i = decisions.findIndex((d) => d.kind === x.kind); if (i >= 0) a |= 1 << i; }
+        if (e.label.effects.some((x) => x.kind === outcome) && !(t & (1 << me))) return [...path, e];
+      }
       if (e.to === null) continue;
-      const next = taken || (accepted && okAction !== null && e.label.action === okAction);
-      const key = `${e.to}:${next ? 1 : 0}`;
+      const key = `${e.to}:${a}:${t}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      queue.push({ node: e.to, taken: next, path: [...path, e] });
+      queue.push({ node: e.to, asked: a, taken: t, path: [...path, e] });
     }
   }
   return null;
