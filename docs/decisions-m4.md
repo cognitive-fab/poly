@@ -100,6 +100,21 @@ The build is accepted as reported: M4a to M4f pass, with three tests waiting on 
 
 **Closing M4.** M4 closes when the 30 findings are fixed, the gate is rerun from a clean build with the counts reported, and polywatch's findings on the fixes are resolved. M5 is then planned.
 
+## Rulings on S142 and the C8 fix
+
+**S142 Handlers are not bound by the certificate.** **The proposal, extended to imports.** Detection alone is not enough: a certificate that still loads a changed handler does not certify the handler.
+
+- `poly admit` lists, for each handler file, its path and SHA-256, and the same for every file it reaches through relative imports. The handler lint runs over that closure at admission, and the certificate records the lint's version and its verdict.
+- `load` reads the certified handler files itself, hashes them first and refuses any mismatch (the same hash-first rule as admission).
+- `rt.handle` accepts only a function that is, by identity, an export of a certified file loaded this way. An inline closure, or a function from any other module, is refused before any step.
+- The rule applies wherever a certificate is loaded, witness certificates included (S139). Runs without a certificate are unchanged.
+- **M4 limit:** imports of installed packages (bare specifiers) are not hashed; the certificate records the lockfile's digest instead. Hashing the dependency closure goes on M5's planning list.
+- The new refusals take the next free codes in their family. The spec text (certificate contents, `load`, `rt.handle`) is updated in the same commits on `m4`.
+
+**S143 The C8 fix: reserve `runtime.*`.** Accepted with one change. Whether a program machine clashes with the runtime's should not depend on which bounds the build declares or which intents are in the store: the same program could load today and be refused tomorrow. So a program machine whose id starts with `runtime.` is refused by the checker under `PL1208`, which now reserves `outcome.*`, `decision.*` and `runtime.*`. The AC3 liveness example renames its machine. The runtime keeps registering only the bounds it needs.
+
+**Closing M4.** After S142 and S143 are built (each with a test that fails first), the gate is rerun from a clean build and polywatch reviews the changes. Then M4 closes and M5 is planned.
+
 ## Conclusion
 
 Building M4 and M5 alongside M3 saves calendar time without touching the experiment. The worktree keeps the frozen toolchain where the runner reads it, the merge waits for M3's result, and the stop rule keeps its force over everything built in the meantime. The M4 plan is ruled: the runtime hosts the checked outbox machine itself, writes the ledger inside each step's transaction, and needs two engine changes, tombstones in polyrun and four ledger kinds in polyflow.
