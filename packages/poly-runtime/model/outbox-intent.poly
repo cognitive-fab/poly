@@ -19,7 +19,7 @@ machine OutboxIntent {
 
   action Propose()   action GateAllow()   action GateDeny()   action GateEscalate()
   action Approve()   action EscalationTimeout()
-  action Start()     action HandlerOk()   action HandlerFailed()
+  action Start()     action HandlerOk()   action HandlerFailed()   action HandlerFailedPermanent()
   action SettleOk()  action SettleFailed()
 
   on Propose {
@@ -52,6 +52,9 @@ machine OutboxIntent {
                       Running { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
                                                 else     { intent' = Dead }
                       _                      => reject "not-running" } }
+  on HandlerFailedPermanent { match intent {
+                      Running => intent' = Dead
+                      _       => reject "not-running" } }
   on SettleOk     { require intent is Settled else reject "not-settled"
                     intent' = Done }
   on SettleFailed { match intent {
@@ -64,5 +67,5 @@ machine OutboxIntent {
       implies !(post.intent is Proposed)
   liveness settles: eventually intent is Done | Denied | Dead
     under fair { Propose, GateAllow | GateDeny | GateEscalate, EscalationTimeout, Start,
-                 HandlerOk | HandlerFailed, SettleOk | SettleFailed }
+                 HandlerOk | HandlerFailed | HandlerFailedPermanent, SettleOk | SettleFailed }
 }

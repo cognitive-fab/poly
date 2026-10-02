@@ -737,7 +737,7 @@ This is the only new engine integration (architecture section 7.2).
 
     action Propose()   action GateAllow()   action GateDeny()   action GateEscalate()
     action Approve()   action EscalationTimeout()
-    action Start()     action HandlerOk()   action HandlerFailed()
+    action Start()     action HandlerOk()   action HandlerFailed()   action HandlerFailedPermanent()
     action SettleOk()  action SettleFailed()
 
     on Propose {
@@ -770,6 +770,9 @@ This is the only new engine integration (architecture section 7.2).
                         Running { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
                                                   else     { intent' = Dead }
                         _                      => reject "not-running" } }
+    on HandlerFailedPermanent { match intent {
+                        Running => intent' = Dead
+                        _       => reject "not-running" } }
     on SettleOk     { require intent is Settled else reject "not-settled"
                       intent' = Done }
     on SettleFailed { match intent {
@@ -782,7 +785,7 @@ This is the only new engine integration (architecture section 7.2).
         implies !(post.intent is Proposed)
     liveness settles: eventually intent is Done | Denied | Dead
       under fair { Propose, GateAllow | GateDeny | GateEscalate, EscalationTimeout, Start,
-                   HandlerOk | HandlerFailed, SettleOk | SettleFailed }
+                   HandlerOk | HandlerFailed | HandlerFailedPermanent, SettleOk | SettleFailed }
   }
   ```
 
@@ -792,17 +795,20 @@ This is the only new engine integration (architecture section 7.2).
   - a deny after execution cannot be written, because `GateDeny` only matches `Proposed`;
   - `executed` is not a field, because it is `intent is Running || intent is Settled || …`.
 
-  One step property is kept as a regression guard, and the liveness property is unchanged. An independent exploration ([`reviews/evidence/outbox_sum_check.py`](reviews/evidence/outbox_sum_check.py)) confirms 17 reachable states, no deadlock and no fair cycle outside the terminal states.
+  One step property is kept as a regression guard, and the liveness property holds with `HandlerFailedPermanent` in the fair group of the handler's outcomes (S138), which adds three transitions and no state: 17 states and 27 accepted transitions at the bound 3. An independent exploration of the machine before S138 ([`reviews/evidence/outbox_sum_check.py`](reviews/evidence/outbox_sum_check.py)) confirms 17 reachable states, no deadlock and no fair cycle outside the terminal states.
 
   Three rules follow from the machine and are normative:
 
   1. **One decision per execution.** Once the gate allows an intent, a retry after a timeout or a failed settle goes back to `Allowed`, not to `Proposed`. The gate is not asked again for the same idempotency key, so "allowed, executed, then denied" cannot happen. In v0.4 this is a consequence of the type.
   2. **Escalation happens once and has a timeout.** An approved re-proposal can be allowed or denied, never escalated again, so an intent takes at most two gate decisions. `escalation.timeoutMs` (the polyflow platform policy field) fires `EscalationTimeout`, which denies the intent.
   3. **Denial is final and only precedes execution.** A deny can only happen from `Proposed`, before any attempt ran.
+  4. **A permanent failure is final (S138).** A handler may report a permanent error (a declined card is a result, not an infrastructure failure). `HandlerFailedPermanent` takes `Running` to `Dead` whatever attempt it is, the worker dispatches the effect's `failed` completion, and no further attempt is made. A crash is never permanent: it is `HandlerFailed`.
 
   **The worker hosts the machine (S119).** poly-runtime runs its own effect worker, and polyrun's `tickEffects` is never started. Each intent's state is an `OutboxIntent` value in a poly-runtime table, and every worker transition is an action on the lowered `OutboxIntent` module, written in one transaction with the matching `pr_outbox` change. An action the module rejects is a runtime fault: the worker stops on that intent and reports it, and never takes the transition. A completion is dispatched first and the transition written second, fenced on the completion's journal row. A crash or lease expiry while `Running` is `HandlerFailed` and counts an attempt; the idempotency key (PT15) keeps a re-run of an effect that did execute from repeating it. A row the worker cannot place (machine or manifest unavailable) takes no transition. `Dead` is terminal: an operator who wants another try creates a new intent through a governed action, never by resurrecting a dead one.
 
   **The attempt bound (S120).** The machine above is the instance with `maxAttempts` 3. The runtime's CI checks it once per distinct `retry.maxAttempts` in the build, with `Allowed`, `Running` and `Settled` ranged over that bound, and the worker conformance runs at each. `load` refuses a manifest entry without `maxAttempts`, and admission refuses one above 10 (PT19, S137). The runtime's CI checks every bound from 1 to 10 and records the state count of each.
+
+  **Each handler outcome is observed (S138).** With every `HandlerOk`, `HandlerFailed` and `HandlerFailedPermanent`, the worker writes an `observation` event on the emitting run, in the same transaction, naming the intent, the attempt and the outcome the handler gave (`ok`, `failed`, `permanent`, or `lost` for a crash). The runtime's CI pairs each observation with the transition taken, so a worker that retries a permanent error is `PL2401`.
 
   The check of this machine is gate M4b in PT18. Adding a state or a transition to the worker without changing this machine first is `PL2401 RUNTIME_MODEL_DRIFT` in the runtime's own CI.
 

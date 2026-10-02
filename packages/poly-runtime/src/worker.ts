@@ -45,7 +45,7 @@ export type EffectHandler = (payload: any, caps: Readonly<Record<string, never>>
 const NO_CAPABILITIES: Readonly<Record<string, never>> = Object.freeze({});
 
 /** Deliberately drifting workers, for the runtime CI's PL2401 test only (test/runtime-drift.test.mjs). */
-export const WORKER_DRIFTS = ['repropose-after-failure', 'resurrect-dead', 'denied-marked-done'] as const;
+export const WORKER_DRIFTS = ['repropose-after-failure', 'resurrect-dead', 'denied-marked-done', 'retry-permanent'] as const;
 export type WorkerDrift = (typeof WORKER_DRIFTS)[number];
 
 export interface WorkerOptions {
@@ -180,7 +180,7 @@ export class EffectWorker {
       (row as Fenced).fence = fence;
       const st = await this.intentState(row);
       try {
-        if (st?.intent === 'Running') await this.failed(row, this.decl(row), st.intent_attempt!, 'lease expired while running (a crash)', now);
+        if (st?.intent === 'Running') await this.failed(row, this.decl(row), st.intent_attempt!, 'lease expired while running (a crash)', now, 'lost');
         else await this.store.txn(() => this.store.db.prepare(`UPDATE pr_outbox SET status = 'pending', claimed_until = NULL WHERE intent_id = ? AND status = 'inflight'`).run(row.intent_id));
       } catch (e) { if (!(e instanceof StaleClaim)) throw e; }
     }
@@ -283,14 +283,18 @@ export class EffectWorker {
             result = await this.execute(row, decl, (await this.intentState(row))!.intent_attempt!);
             ran = true;
           } catch (e) {
-            await this.failed(row, decl, (await this.intentState(row))!.intent_attempt!, String((e as Error)?.message ?? e), now);
+            const n = (await this.intentState(row))!.intent_attempt!;
+            const message = String((e as Error)?.message ?? e);
+            // S138: a permanent error is final, and a drifting worker that retries it is what PL2401 is about.
+            if ((e as { permanent?: boolean })?.permanent && this.opts.drift !== 'retry-permanent') await this.permanent(row, decl, n, message);
+            else await this.failed(row, decl, n, message, now, (e as { permanent?: boolean })?.permanent ? 'permanent' : 'failed');
             return;
           }
-          await this.store.txn(() => this.transition(row, 'HandlerOk'));
+          await this.store.txn(async () => { await this.transition(row, 'HandlerOk'); this.observed(row, (await this.intentState(row))!.intent_attempt!, 'ok'); });
           continue;
         case 'Running':
           // Found running at a claim: the previous attempt crashed (S119).
-          await this.failed(row, decl, st.intent_attempt!, 'found running at claim (a crash)', now);
+          await this.failed(row, decl, st.intent_attempt!, 'found running at claim (a crash)', now, 'lost');
           return;
         case 'Settled': {
           const n = st.intent_attempt!;
@@ -340,12 +344,28 @@ export class EffectWorker {
     } finally { clearTimeout(timer); }
   }
 
+  /** S138: each handler outcome, observed on the emitting run in the transaction of the transition it leads to. */
+  private observed(row: OutboxRow, attempt: number, outcome: 'ok' | 'failed' | 'permanent' | 'lost'): void {
+    this.store.appendEvent(row.instance_id, 'observation', { stage: 'handler', intent: row.intent_id, attempt, outcome }, this.now);
+  }
+
+  /** S138: HandlerFailedPermanent, Running to Dead, with the failed completion first and no further attempt. */
+  private async permanent(row: OutboxRow, decl: any, n: number, message: string): Promise<void> {
+    await this.dispatchCompletion(row, decl.onFailure, ':failed', mapCompletion(decl.onFailure ?? {}, { error: { message, permanent: true } }, { reason: message }));
+    await this.store.txn(async () => {
+      await this.transition(row, 'HandlerFailedPermanent');
+      this.observed(row, n, 'permanent');
+      await this.store.markEffectDead(row.intent_id, n, `permanent: ${message}`);
+    });
+  }
+
   /** HandlerFailed: back to Allowed with the attempt counted, or Dead at the bound with the exhausted completion first. */
-  private async failed(row: OutboxRow, decl: any, n: number, message: string, now: number): Promise<void> {
+  private async failed(row: OutboxRow, decl: any, n: number, message: string, now: number, outcome: 'failed' | 'lost' | 'permanent' = 'failed'): Promise<void> {
     const m = decl.retry.maxAttempts;
     if (n < m) {
       await this.store.txn(async () => {
         await this.transition(row, 'HandlerFailed');
+        this.observed(row, n, outcome);
         this.store.db.prepare(`UPDATE pr_outbox SET status = 'pending', attempts = ?, next_attempt_at = ?, claimed_until = NULL, last_error = ? WHERE intent_id = ?`).run(n, now + this.backoff(decl, n), message, row.intent_id);
       });
       return;
@@ -354,6 +374,7 @@ export class EffectWorker {
     await this.dispatchCompletion(row, hook, ':exhausted', mapCompletion(hook ?? {}, { error: { message } }, { reason: 'exhausted' }));
     await this.store.txn(async () => {
       await this.transition(row, 'HandlerFailed');
+      this.observed(row, n, outcome);
       await this.store.markEffectDead(row.intent_id, n, message);
     });
   }

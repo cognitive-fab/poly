@@ -22,6 +22,7 @@ async function run(jobs, opts = {}) {
     const k = (tries.get(ctx.instanceId) ?? 0) + 1;
     tries.set(ctx.instanceId, k);
     if (ctx.instanceId.includes('fail') && k === 1) throw new Error('first try fails');
+    if (ctx.instanceId.includes('declined')) throw Object.assign(new Error('card declined'), { permanent: true });
     return 'ok';
   });
   for (const id of jobs) { await rt.create('outbox.Job', { id }); await rt.dispatch(id, 'Go'); }
@@ -30,13 +31,14 @@ async function run(jobs, opts = {}) {
 }
 
 test('the real worker has no drift', async () => {
-  const { rt } = await run(['job-ok', 'job-fail', 'job-deny']);
+  const { rt } = await run(['job-ok', 'job-fail', 'job-deny', 'job-declined']);
   try { assert.deepEqual((await workerConformance(rt, WORKER_SOURCE)).diagnostics, []); } finally { await rt.close(); }
 });
 
 const EXPECT = {
   'repropose-after-failure': [['job-fail'], /took Propose on intent \S+ in state Allowed, and OutboxIntent refuses it \(rejected "not-proposable"\)/],
   'denied-marked-done': [['job-deny'], /is Denied and its outbox row is done/],
+  'retry-permanent': [['job-declined'], /handler outcome permanent at attempt 1, and the worker took HandlerFailed/],
   'resurrect-dead': [['job-deny'], /took Propose on intent \S+ in state Denied, and OutboxIntent refuses it \(rejected "terminal"\)/],
 };
 
@@ -73,6 +75,6 @@ test('the real worker refuses to revive a dead intent after polyrun\'s DLQ retry
 });
 
 test('a worker source that names an action the machine does not have is PL2401', async () => {
-  assert.deepEqual(workerActions(readFileSync(WORKER_SOURCE, 'utf8')), ['Approve', 'EscalationTimeout', 'GateAllow', 'GateDeny', 'GateEscalate', 'HandlerFailed', 'HandlerOk', 'Propose', 'SettleFailed', 'SettleOk', 'Start']);
+  assert.deepEqual(workerActions(readFileSync(WORKER_SOURCE, 'utf8')), ['Approve', 'EscalationTimeout', 'GateAllow', 'GateDeny', 'GateEscalate', 'HandlerFailed', 'HandlerFailedPermanent', 'HandlerOk', 'Propose', 'SettleFailed', 'SettleOk', 'Start']);
   assert.deepEqual(workerActions("await this.transition(row, 'Retry')"), ['Retry']);
 });

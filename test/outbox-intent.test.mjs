@@ -88,6 +88,10 @@ const SCRIPT = {
   'job-settle-then-ok': { propose: ['allow'], handler: ['ok', 'ok'], settle: ['failed', 'ok'] },
   'job-settle-third-ok': { propose: ['allow'], handler: ['ok', 'ok', 'ok'], settle: ['failed', 'failed', 'ok'] },
   'job-crash': { propose: ['allow'], handler: ['hang', 'ok'] },
+  // S138: a permanent error (a declined card) is not retried: Running to Dead, with the failed completion.
+  'job-permanent': { propose: ['allow'], handler: ['permanent', 'ok'] },
+  'job-fail-then-permanent': { propose: ['allow'], handler: ['fail', 'permanent'] },
+  'job-fail-twice-then-permanent': { propose: ['allow'], handler: ['fail', 'fail', 'permanent'] },
 };
 
 async function corpus(extra = {}) {
@@ -103,6 +107,7 @@ async function corpus(extra = {}) {
     const what = SCRIPT[job]?.handler?.[k] ?? 'ok';
     assert.deepEqual(caps, {}, 'S134: no capabilities');
     if (what === 'fail') throw new Error('scripted failure');
+    if (what === 'permanent') throw Object.assign(new Error('card declined'), { permanent: true });
     if (what === 'hang') return new Promise((resolve) => hung.push(() => resolve(`${job}|late`)));
     return `${job}|${k}`;
   });
@@ -137,10 +142,17 @@ test('the worker conforms: every intent\'s trace replays through OutboxIntent, a
     assert.equal(states.size, 17);
     assert.deepEqual([...states].filter((s) => !c.states.has(s)), [], 'every state visited');
     assert.deepEqual([...edges].filter((e) => !c.edges.has(e)), [], 'every accepted transition taken');
+    assert.equal(edges.size, 27, 'S138: 24 transitions and HandlerFailedPermanent from each Running');
+    // S138: a permanent error is never retried: one handler call, and the failed completion, not exhausted.
+    for (const id of ['job-permanent', 'job-fail-then-permanent']) {
+      const rows = (await rt.getJournal(id)).map((r) => r.action);
+      assert.ok(rows.includes('Gave'), id);
+      assert.ok((await rt.getJournal(id)).some((r) => r.action === 'Gave' && r.action_id.endsWith(':failed')), `${id}: the failed completion`);
+    }
     console.log(`# corpus: ${c.intents} intents, ${c.states.size} of ${states.size} states, ${c.edges.size} of ${edges.size} accepted transitions`);
     // The outcomes the scripts ask for, as the program sees them.
     const phase = async (id) => (await rt.getState(id)).state.phase;
-    for (const [id, want] of Object.entries({ 'job-ok': 'Done', 'job-deny': 'Failed', 'job-escalate-allow': 'Done', 'job-escalate-deny': 'Failed', 'job-escalate-again': 'Failed', 'job-escalate-timeout': 'Failed', 'job-fail-thrice': 'Failed', 'job-fail-then-ok': 'Done', 'job-settle-fails': 'Failed', 'job-settle-then-ok': 'Done', 'job-settle-third-ok': 'Done', 'job-crash': 'Done' })) {
+    for (const [id, want] of Object.entries({ 'job-ok': 'Done', 'job-deny': 'Failed', 'job-escalate-allow': 'Done', 'job-escalate-deny': 'Failed', 'job-escalate-again': 'Failed', 'job-escalate-timeout': 'Failed', 'job-fail-thrice': 'Failed', 'job-fail-then-ok': 'Done', 'job-settle-fails': 'Failed', 'job-settle-then-ok': 'Done', 'job-settle-third-ok': 'Done', 'job-crash': 'Done', 'job-permanent': 'Failed', 'job-fail-then-permanent': 'Failed', 'job-fail-twice-then-permanent': 'Failed' })) {
       assert.equal(await phase(id), want, id);
     }
     // A stale worker (the hung handler's pass) took no transition after its claim was taken over.

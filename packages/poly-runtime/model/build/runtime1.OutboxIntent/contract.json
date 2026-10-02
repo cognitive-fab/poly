@@ -1,6 +1,6 @@
 {
   "lang": "javascript",
-  "machineVersion": "sha256:4373acf1047db80db4466ba68db5cd86a5e64b14a3486066acea373f836d311e",
+  "machineVersion": "sha256:743c5f6dc7b72a5b0bfc180362ffbfc69464de3de1b43a0a1bd1f123e2c6a1e1",
   "stateKeys": [
     {
       "name": "intent",
@@ -56,6 +56,9 @@
       "dataFields": {}
     },
     "HandlerFailed": {
+      "dataFields": {}
+    },
+    "HandlerFailedPermanent": {
       "dataFields": {}
     },
     "SettleOk": {

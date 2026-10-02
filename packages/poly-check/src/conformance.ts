@@ -4,6 +4,8 @@
 //   1. every action the worker's source can take is an action of the machine;
 //   2. every transition the worker took was accepted by the machine and replays through poly-ref's δ: a
 //      rejected row is a transition the worker attempted and the machine refuses;
+//   2b. every handler outcome the worker observed matches the transition it took (S138): ok is HandlerOk, a
+//       failure or a crash HandlerFailed, a permanent error HandlerFailedPermanent;
 //   2a. a transition the machine refused at runtime, which the worker recorded in the audit log;
 //   3. every intent's state agrees with its outbox row: an intent still in flight is pending or inflight, a Done
 //      intent is done, a Denied or Dead intent is dead. A status the machine does not account for is drift.
@@ -63,6 +65,20 @@ export async function workerConformance(rt: PolyRuntime, workerSourcePath: strin
     const tag = String(inst.state.intent);
     if (!row) diagnostics.push(diag('PL2401', AT, `intent ${inst.id} has no outbox row`));
     else if (!(STATUS[tag] ?? []).includes(row.status)) diagnostics.push(diag('PL2401', AT, `intent ${inst.id} is ${tag} and its outbox row is ${row.status}, a pair OutboxIntent does not account for`));
+  }
+  // S138: each handler outcome observed on the emitting run is paired, in order, with the transition the worker took.
+  const expected: Record<string, string> = { ok: 'HandlerOk', failed: 'HandlerFailed', lost: 'HandlerFailed', permanent: 'HandlerFailedPermanent' };
+  for (const inst of await rt.instances()) {
+    if (!rt.modelOf(inst.machineId)) continue;
+    const intentId = inst.id.replace(/^intent:/, '');
+    const row = await rt.outboxRow(intentId);
+    if (!row) continue;
+    const taken = ((await rt.getJournal(inst.id)) as unknown as JournalRowLike[]).filter((r) => r.step_kind === 'accepted' && /^Handler/.test(r.action)).map((r) => r.action);
+    const seen = (await rt.chain(row.instance_id)).filter((e) => e.kind === 'observation' && (e.body as { stage?: string; intent?: string }).stage === 'handler' && (e.body as { intent: string }).intent === intentId).map((e) => e.body as { attempt: number; outcome: string });
+    if (taken.length !== seen.length) diagnostics.push(diag('PL2401', AT, `intent ${inst.id} took ${taken.length} handler transitions and observed ${seen.length} handler outcomes`));
+    seen.forEach((o, k) => {
+      if (taken[k] !== undefined && taken[k] !== expected[o.outcome]) diagnostics.push(diag('PL2401', AT, `intent ${inst.id}: handler outcome ${o.outcome} at attempt ${o.attempt}, and the worker took ${taken[k]}`));
+    });
   }
   // A transition the machine refused rolls back with its transaction; the worker records it as a runtime fault.
   for (const r of await rt.audit()) if (r.rule === 'PL2401') diagnostics.push(diag('PL2401', AT, r.reason));
