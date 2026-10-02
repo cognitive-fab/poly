@@ -91,6 +91,12 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
   }
   // A usage limit or a failed login: recorded as such, never scored, rerun from the start (4210fa6, aad9a23).
   if (stopped === 'limited' || stopped === 'auth') record.unscored = stopped === 'limited' ? 'limited' : 'authentication failure';
+  // 4c630d2: the folder is checked after the run as before it. Anything synced into it during the run (the account's
+  // plugins or skills, a memory, an MCP server) may have reached the arm, so the run is unscored and rerun.
+  if (isolation) {
+    record.isolation = { ...isolation, after: configProblems(isolation.configDir) };
+    if (record.isolation.after.length && !record.unscored) record.unscored = 'synced';
+  }
   record.spent = spent;
   record.finished = new Date().toISOString();
   writeFileSync(join(dir, 'run.json'), JSON.stringify(record, null, 2) + '\n');

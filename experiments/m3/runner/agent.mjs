@@ -164,6 +164,8 @@ export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionI
  * budget or wall time is spent, as the CLI's process would be killed.
  */
 async function stubTurn(script, ws, onEvent, stop) {
+  // A test's stand-in for what happens around the CLI during a turn (test/m3-after.test.mjs).
+  script.before?.();
   onEvent({ type: 'system', subtype: 'init', session_id: 'stub-session' });
   for (const e of script.events) {
     if (e.type === 'write') {

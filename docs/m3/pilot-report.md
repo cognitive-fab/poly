@@ -41,6 +41,29 @@ P1 has two versions and one machine; a task of the ten has four versions, and fi
 
 The caps are about three times the costliest run these figures predict (arm 2 on a hard task: about $5, 5 million tokens, 15 to 20 minutes), so an ordinary run never meets them, and the ceiling bounds the worst case. The token cap only works as intended once the runner counts tokens as the CLI does (item 1); with the current count it would stop runs at about 6 million real tokens.
 
+## The confirming block: the subscription
+
+After the token count, the scorer and the subscription's isolation were fixed (`3110ae1`, `9a84d55`, freeze `10cad95`), the four pilots ran again as one block on the owner's Max 20x subscription, as run 2, from 18:58:33 to 19:02:03 UTC on 2 October 2026. The four started together.
+
+| Pilot | Cost at list price | Turn 0 / turn 1 | Wall time | Input | Output | Cache read | Cache write | Tokens |
+|---|---|---|---|---|---|---|---|---|
+| arm 1 | $0.36 | $0.23 / $0.13 | 85 s | 16 | 4,910 | 169,851 | 28,365 | 203,142 |
+| arm 2 | $0.98 | $0.68 / $0.31 | 209 s | 50 | 19,026 | 1,066,945 | 48,739 | 1,134,760 |
+| arm 3 | $0.43 | $0.31 / $0.12 | 111 s | 24 | 6,643 | 398,888 | 26,733 | 432,288 |
+| arm 4 | $0.49 | $0.37 / $0.12 | 138 s | 32 | 7,459 | 571,211 | 28,390 | 607,092 |
+| all four | $2.26 | | 3 min 30 s for the block | | | | | |
+
+- **Completed.** Every pilot completed both turns (exit 0) within its caps (6,000,000 tokens, one hour, `--max-budget-usd 6`), delivered both versions and passed O3 with no O2 violation; arms 3 and 4 were admitted on both. None was limited or failed to log in.
+- **The counts.** Every turn's tokens are the CLI's result event's, and the cost computed from them equals the CLI's own figure on every turn. The running count differs from the result in output only, on every turn, as the record says.
+- **Isolation.** Every turn ran in `dontAsk` mode with no API key (`apiKeySource: none`), no MCP server, no skill, no memory path, and no plugin besides the CLI's two built-in ones. The arms' folder holds only the login, the settings and the CLI's own state before and after the block, and passes the runner's check. No pilot file contains `sk-ant-`.
+- **Diagnostics seen**, counted from poly commands only: arm 3 saw `PL0001` once (a syntax error it then fixed), arm 4 `PL1201` four times.
+- **Denied commands.** Arm 1 one, arm 2 three, arm 3 one, arm 4 three, all `Bash` commands outside the allowed patterns, as designed.
+- **Measured once, for the caps.** The CLI enforces `--max-budget-usd` on the subscription, but only after a call returns, so a run can pass its cap by one call.
+
+**The budget, from this block.** At P1's difficulty a run of a base and three changes would take the base turn and three change turns: on these means, $0.40 + 3 × $0.17 = $0.90 and about 1.0 million tokens. Allowing two to three times that for the ten tasks gives $1.80 to $2.70 and 2 to 3 million tokens per run on average; the 200 runs of the plan come to about $360 to $540 at list price, which the subscription does not bill per token. One risk needs a ruling: arm 2 used about twice the mean on P1, and on that ratio a hard task could need about 5 to 6 million tokens and $4.80, close to the 6,000,000-token and $6 caps. A run a cap stops is recorded as stopped and never rerun with a higher cap (`74eff31`), so if the caps bind it is arm 2 they bind first. The wall-time cap of one hour is far from binding: the longest pilot took 3.5 minutes. The plan's usage limits are the other bound: 200 runs of 2 to 3 million tokens each is 400 to 600 million tokens, and a run the limit interrupts is recorded as limited and rerun from the start.
+
 ## Conclusion
 
 All four pilots completed both turns, delivered, passed O3 and O2, and the poly arms were admitted on both versions, for $2.29 in all and under five minutes each. Three attempts failed to authenticate and were rerun; they are recorded as authentication failures. No pilot record contains a key. Two measurement defects need a ruling before FROZEN: the runner's token count, which is 2.4 to 2.6 times the CLI's and drives the budget cut-off, and the scorer's count of diagnostics seen, which includes the manual. The pilots ran with the permission mode forced to `default` by the scrub; the full runs will not. The proposed budget is $15, 15 million tokens and one hour per run, with an expected total of about $400 to $550 for 200 runs and a ceiling of $3,000.
+
+The confirming block on the subscription, after the fixes, completed every turn of all four pilots for $2.26 at list price in 3.5 minutes, with tokens and cost equal to the CLI's own on every turn and none of the owner's setup in any arm. On the ruled caps of 6 million tokens, one hour and $6, the 200 runs come to about $360 to $540 at list price, not billed per token; arm 2 on a hard task may come close to the token and dollar caps, which needs a ruling before FROZEN.

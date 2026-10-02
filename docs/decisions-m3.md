@@ -139,6 +139,14 @@ These changes join the token-count and scorer fixes in the one regeneration of t
 
 **Runner fixes accepted (3110ae1, freeze f65bbef).** `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` are part of the arm's environment: the config folder alone let the owner's `CLAUDE.md` through, and the marker test proves the pair keeps it out. This holds only if no arm's own material is delivered through a `CLAUDE.md`; the report confirms that. The skill check rests on two facts, both asserted by the test: slash commands are off, and the `Skill` tool is in no arm's allowed tools. One call at a fraction of a cent settles whether the CLI enforces `--max-budget-usd` under a subscription.
 
+## The subscription pilots (f227e86), the caps, and FROZEN
+
+**Accepted.** All four P1 pilots on the subscription completed both turns, recorded counts equal the CLI's, and no part of the owner's setup reached any arm.
+
+**Caps are raised so they do not bind.** On the subscription a cap is no longer a spending limit, and a cap that binds on one arm more than the others censors that arm's result. The caps per run are 15,000,000 tokens, $15 at list price and 1 hour of wall time. A run stopped by a cap is still recorded as stopped and never rerun; the report states, per arm, how many runs a cap stopped and which cap.
+
+**Before FROZEN:** the folder check runs after every run as well as before, and a run during which anything was synced is unscored and rerun (test fails first). The caps above go into the plan. The freeze is regenerated once with both. No further pilots are needed: when `freeze.mjs --check` reports no change after that regeneration, FROZEN may be written, and the runs start in blocks of four as ruled.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.

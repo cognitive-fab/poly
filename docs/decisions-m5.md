@@ -67,6 +67,20 @@ The decision-table check proves statements a policy states. In M5a, PT8.1 gains 
 
 **Next: M5b**, steps 11 to 18 as ruled, after merging `main` into `m4`. S141 and S153 wait on E5 and are listed as waiting.
 
+## M5b build steps (11 to 17): two corrections to the record
+
+**No embedded policy form.** PT1.1a stands: policies live in `.policy.poly` files only. The M5a closing ruling's phrase "with the embedded surface's policy form" repeated a wording error from the M5a report and is withdrawn. B13 is fixed in the formatter alone (bbe7ad9), with a test that failed first.
+
+**Confirmation tests.** PD5-A3 (numbers already printed by the evidence script) and PD5-A6, A7, A8 (Restore) and A12 (met by steps 11 and 12 with no new code) could not fail first. They are accepted as confirmation tests and are labelled so in the M5b record. Each still gets a seeded control that must fail: a mutant that breaks the property each one checks.
+
+## S162 and closing M5b
+
+**S162 accepted.** In a scope that requires attribution, the runtime refuses an outside dispatch of an effect's completion or of a timer's target before any step, with an audit row, as K9 and K10 refuse theirs. The gate's deny stays as the second line. Built with a test that fails first; PT8's limit is replaced by the rule.
+
+**M5b closes** on `m4` when three things are in the record: S162 built; the seeded controls ruled in de66918 for PD5-A3, A6, A7, A8 (Restore) and A12, each shown to fail its test; and polywatch's findings on the M5b fixes resolved. The gate at 09a7042 (1,322 tests, 0 fail, one skipped for the sandbox gateway, four waiting on E1, E2 and E5) is accepted, rerun once after those changes. The stated limits stand: a configuration's completion input has no origin class, a child created in a cascade starts its own chain, the sandbox policy is generated but not enforced here, and `exec` stays enforced in process.
+
+**M5 then closes.** Next is M6, planned from PT18's row and the M6 planning list in this file (a host-neutral core with thin host adapters).
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
