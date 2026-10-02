@@ -3,12 +3,12 @@
 // Keys are generated here, at test time, outside the repository; none is committed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { admit, AdmitError, CERTIFICATE_FAULTS } from '@poly/check';
 import { certificateProblems, certificateDigest, publicKeyOf } from '@poly/core';
 import { ROOT } from './helpers.mjs';
-import { CERTIFICATE_FAULT_LIST, POLICY_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
+import { CERTIFICATE_FAULT_LIST, PACKAGE_CERTIFICATE_FAULTS, POLICY_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
 import { polyaxionPeer } from '@poly/runtime';
 import { makeKey, project } from './runtime-helpers.mjs';
 
@@ -84,10 +84,22 @@ test('each broken certificate writer is caught by the read-back, and nothing is 
     // A policy fault acts on a lowered policy, which needs the gate engine to admit (S145): not run without it.
     if (POLICY_CERTIFICATE_FAULTS.includes(fault) && !polyaxionPeer().ok) continue;
     const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ['conformance/m1/effects.poly'], key);
+    if (PACKAGE_CERTIFICATE_FAULTS.includes(fault)) withPackage(dir);
     await assert.rejects(admit(dir, { fault }), (e) => e instanceof AdmitError && /read-back/.test(e.message), fault);
     assert.throws(() => readFileSync(join(dir, '.poly', 'certificate.json')), fault);
   }
 });
+
+/** A handler that imports an installed package of two files (S154). */
+function withPackage(dir) {
+  const pkg = join(dir, 'node_modules', 'pad-poly');
+  mkdirSync(join(pkg, 'lib'), { recursive: true });
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'pad-poly', version: '1.0.0', type: 'module', exports: { '.': './lib/index.js' } }));
+  writeFileSync(join(pkg, 'lib', 'index.js'), "import { fill } from './fill.js';\nexport function pad(s) { return fill(s); }\n");
+  writeFileSync(join(pkg, 'lib', 'fill.js'), "export function fill(s) { return ' ' + s; }\n");
+  const h = join(dir, 'src', 'handlers.ts');
+  writeFileSync(h, "import { pad } from 'pad-poly';\nexport const padded = pad;\n" + readFileSync(h, 'utf8'));
+}
 
 test('the public key of the admission key is what verifies, and only it', () => {
   const other = makeKey('other');
@@ -118,7 +130,7 @@ test('review A2: a source edited after the check ran is refused, so no unchecked
 // Review A3, A4: a private key under version control is refused however it is named (S126, S139).
 test('review A3: poly admit --witness refuses a key file inside a tree under version control', async () => {
   const { spawnSync } = await import('node:child_process');
-  const { mkdirSync, copyFileSync, rmSync } = await import('node:fs');
+  const { copyFileSync, rmSync } = await import('node:fs');
   const dir = project('witness-key-in-repo', ['conformance/m1/effects.poly'], key);
   const inside = join(dir, 'k.pem');
   copyFileSync(key.file, inside);

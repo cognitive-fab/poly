@@ -22,7 +22,7 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -337,10 +337,12 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const changed = handlerProblems();
   if (changed.length) throw new AdmitError(`not admitted: ${changed.join('; ')} (S142)`);
   // S142, the standing rule on artefacts: the broken variants a read-back must catch.
-  const certifiedHandlers: Certificate['poly']['handlers'] = { ...handlers, files: { ...handlers.files } };
+  const certifiedHandlers: Certificate['poly']['handlers'] = { ...handlers, files: { ...handlers.files }, packageFiles: { ...handlers.packageFiles } };
   const handlerPaths = Object.keys(certifiedHandlers.files);
   if (opts.fault === 'stale-handler-digest' && handlerPaths.length) certifiedHandlers.files[handlerPaths[0]] = sha256OfBytes(handlerPaths[0]);
   if (opts.fault === 'omit-handler-file' && handlerPaths.length) delete certifiedHandlers.files[handlerPaths[handlerPaths.length - 1]];
+  const packagePaths = Object.keys(certifiedHandlers.packageFiles);
+  if (opts.fault === 'omit-package-file' && packagePaths.length) delete certifiedHandlers.packageFiles[packagePaths[packagePaths.length - 1]];
   const toolchain = { ...(report.files[0]?.engines ?? {}) };
   const body: Omit<Certificate, 'digest' | 'signatures'> = {
     v: 1,
@@ -375,6 +377,8 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   if (lint?.status === 'ran') {
     const now = handlerClosure(dir, lint.roots.map((p) => join(dir, p)));
     if (JSON.stringify(back.poly.handlers.files) !== JSON.stringify(now.digests)) problems.push({ name: 'handlers', problem: 'the certified handler files are not the closure of the handlers on disk' });
+    // Review of M5b, D: and the certified package files are every package file the closure reaches (S154).
+    if (JSON.stringify(back.poly.handlers.packageFiles) !== JSON.stringify(now.packageFiles)) problems.push({ name: 'handlers', problem: 'the certified package files are not the package files the handlers reach on disk' });
   } else if (Object.keys(back.poly.handlers.files).length) problems.push({ name: 'handlers', problem: 'handler files certified with no lint run' });
   if (problems.length) {
     rmSync(tmp, { force: true });

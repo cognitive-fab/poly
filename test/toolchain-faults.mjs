@@ -54,6 +54,8 @@ export function toolchainFaults(diagnostics) {
 
 // S126 and the standing rule: the certificate is an artefact the runtime reads, so each broken certificate writer
 // is listed here and must be caught by poly admit's read-back (test/certificate.test.mjs).
-export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy'];
+export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file'];
 // The faults that need a project with policies to act on (PT8).
 export const POLICY_CERTIFICATE_FAULTS = ['stale-policy-digest', 'omit-policy'];
+// Review of M5b, D: the faults that need a handler importing an installed package (S154).
+export const PACKAGE_CERTIFICATE_FAULTS = ['omit-package-file'];
