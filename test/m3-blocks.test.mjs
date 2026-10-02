@@ -53,3 +53,14 @@ test('overlap: tests or a review outside the batch are flagged; the batch\'s own
   assert.deepEqual(overlapping(ps, 10).length, 3);
   assert.ok(!overlapping(ps, 10).some((c) => c.includes('test/host.test.mjs')));
 });
+
+test('an unreadable run.json stops the batch with its reason, not a crash', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'poly-m3-blocks-bad-'));
+  try {
+    for (const arm of [1, 2, 3, 4]) { mkdirSync(join(dir, `T1-arm${arm}-run1`), { recursive: true }); writeFileSync(join(dir, `T1-arm${arm}-run1`, 'run.json'), arm === 2 ? '{"versions": [' : '{"versions": []}'); }
+    const r = firstToRun(blockOrder(['T1'], 1), dir);
+    assert.match(r.problems[0], /T1-arm2-run1: run\.json is unreadable/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

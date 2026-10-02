@@ -31,7 +31,9 @@ export function blockOrder(tasks = taskIds(), runs = 5) {
 const id = (task, arm, run) => `${task}-arm${arm}-run${run}`;
 const readRecord = (dir, task, arm, run) => {
   const f = join(dir, id(task, arm, run), 'run.json');
-  return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null;
+  if (!existsSync(f)) return null;
+  // A truncated record stops the batch with its reason, rather than by a crash.
+  try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { return { unreadable: String(e.message) }; }
 };
 
 /** Why a finished block stops the batch, or null: a refused run, an unscored run, or a run a cap stopped. */
@@ -41,6 +43,7 @@ export function blockProblems(block, records, exits = {}) {
     const r = records[arm];
     const name = id(block.task, arm, block.run);
     if (!r) out.push(`${name}: refused (no run.json${exits[arm] !== undefined ? `, exit ${exits[arm]}` : ''})`);
+    else if (r.unreadable) out.push(`${name}: run.json is unreadable (${r.unreadable})`);
     else if (r.unscored) out.push(`${name}: unscored (${r.unscored})`);
     else {
       const cap = (r.versions ?? []).find((v) => ['budget', 'wall', 'usd'].includes(v.stopped));

@@ -1,0 +1,65 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:202ed102b3b20ba95ae11e752390e0bade570f6a58999a80b08cd1e36cbc2285",
+  "stateKeys": [
+    {
+      "name": "available",
+      "type": "0..3"
+    },
+    {
+      "name": "reserved",
+      "type": "0..3"
+    },
+    {
+      "name": "open",
+      "type": "boolean"
+    }
+  ],
+  "initState": {
+    "available": 1,
+    "reserved": 0,
+    "open": true
+  },
+  "actions": {
+    "Restock": {
+      "dataFields": {}
+    },
+    "Close": {
+      "dataFields": {}
+    },
+    "Open": {
+      "dataFields": {}
+    },
+    "Reserve": {
+      "dataFields": {
+        "from": "address of Order | null",
+        "qty": "1..2"
+      }
+    },
+    "Release": {
+      "dataFields": {
+        "qty": "1..2"
+      }
+    }
+  },
+  "terminalStates": [],
+  "dataDomain": {
+    "Reserve": {
+      "from": [
+        null,
+        "Order#1"
+      ],
+      "qty": [
+        1,
+        2
+      ]
+    },
+    "Release": {
+      "qty": [
+        1,
+        2
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

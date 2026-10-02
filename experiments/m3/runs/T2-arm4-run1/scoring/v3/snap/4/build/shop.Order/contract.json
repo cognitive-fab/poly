@@ -1,0 +1,59 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:623e4a28f9ae2da3c5c9ac76f3e0b0513387876c5261b92fe9d03d217a584240",
+  "stateKeys": [
+    {
+      "name": "status",
+      "type": "'new' | 'pending' | 'confirmed' | 'rejected' | 'cancelling' | 'cancelled' | 'expired'"
+    },
+    {
+      "name": "qty",
+      "type": "0..2"
+    },
+    {
+      "name": "inv",
+      "type": "address of Inventory | null"
+    }
+  ],
+  "initState": {
+    "status": "new",
+    "qty": 0,
+    "inv": null
+  },
+  "actions": {
+    "Place": {
+      "dataFields": {
+        "qty": "number"
+      }
+    },
+    "Cancel": {
+      "dataFields": {}
+    },
+    "Expire": {
+      "dataFields": {}
+    },
+    "Reduce": {
+      "dataFields": {}
+    },
+    "Reserved": {
+      "dataFields": {}
+    },
+    "OutOfStock": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [
+    "rejected",
+    "cancelled",
+    "expired"
+  ],
+  "dataDomain": {
+    "Place": {
+      "qty": [
+        1,
+        2
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}
