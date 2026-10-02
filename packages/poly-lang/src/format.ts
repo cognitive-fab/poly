@@ -86,7 +86,7 @@ class Printer {
   private policy(p: A.Policy): void {
     const q = (s: string) => JSON.stringify(s);
     this.emit(p, '', [`policy ${p.name} {`]);
-    this.out.push(`${INDENT}scope ${q(p.scope)}`);
+    this.out.push(`${INDENT}scope ${q(p.scope)}${p.requiresAttribution ? ' requires attribution' : ''}`);
     for (const v of p.vars) this.emit(v, INDENT, [`var ${v.name}: ${this.type(v.type)} = ${this.expr(v.init, 0)}`]);
     for (const it of p.items) {
       switch (it.kind) {

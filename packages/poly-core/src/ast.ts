@@ -39,6 +39,8 @@ export interface Policy extends NodeBase {
   kind: 'Policy';
   name: string;
   scope: string;
+  /** S156: `scope "s" requires attribution`: a compensable or irreversible effect needs an origin with claims (PD5.2.3). */
+  requiresAttribution?: true;
   vars: PolicyVar[];
   items: PolicyItem[];
 }

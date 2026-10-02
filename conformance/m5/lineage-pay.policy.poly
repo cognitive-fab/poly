@@ -1,0 +1,10 @@
+// PD5.2.2c: no irreversible effect whose origin is not a person. S156: the scope requires attribution.
+module lp_policy
+
+policy person-origin {
+  scope "lp" requires attribution
+  obligation person-pays "An irreversible effect has a person at its origin." rule {
+    when effect.class == "irreversible"
+    require lineage.origin.kind == Person else deny
+  }
+}

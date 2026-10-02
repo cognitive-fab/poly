@@ -129,6 +129,8 @@ export const CODES: Record<string, CodeInfo> = {
   // PT8.4, S161: polycheck reaches a forbidden region over the scope's effects with no gate crossed.
   PL7001: { name: 'REGION_WITNESS', stage: 'policy', severity: 'finding' },
   // PT8.5, PS8.6: a mandate no path discharges under the obligations together (the minimal subset is named).
+  // PD5.2.3, S156: in a scope that requires attribution, a compensable or irreversible effect from an origin with no claims.
+  PL6701: { name: 'UNATTRIBUTED_EFFECT', stage: 'policy', severity: 'finding' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
   PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },

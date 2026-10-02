@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkPolicies, policyProgram, diag, type Diagnostic, type Module, type Policy, type Verdict, type WitnessStep } from '@poly/core';
 import { lowerPolicyScope, type PolicyDoc } from '@poly/lower';
-import { policyFacts, checkNever, validatePolicy, proposalTable, evalPolicyExpr, initialSigma, dischargeCheck, type PolicyFacts } from '@poly/ref';
+import { policyFacts, checkNever, validatePolicy, proposalTable, evalPolicyExpr, initialSigma, dischargeCheck, unattributedEffects, type PolicyFacts } from '@poly/ref';
 
 export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'consistency' | 'regions' | 'policy-tv' | 'never';
 
@@ -277,6 +277,15 @@ export async function policyReports(module: Module, program: Module[], root: str
             r.diagnostics.push(diag('PL6302', { module: m.name, node: it.id, line: it.span?.line }, `effect ${kind} of ${m.name}.${d.name} has no labels, and the obligations of scope ${scope} read labels or class; it is refused at admission (PS8.4)`));
           }
         }
+      }
+    }
+
+    // S156, PD5.2.3: in a scope that requires attribution, a compensable or irreversible effect from an origin with no
+    // claims is a finding, with the path from the unattributed action to the effect.
+    if (ps.some((p) => p.requiresAttribution)) {
+      for (const m of program) {
+        if (!scopeGoverns(scope, m.name)) continue;
+        for (const d of m.decls) if (d.kind === 'Machine') for (const f of unattributedEffects(m, d.name)) r.diagnostics.push(f);
       }
     }
 

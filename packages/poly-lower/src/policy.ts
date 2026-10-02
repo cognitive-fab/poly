@@ -44,6 +44,8 @@ export function px(e: A.Expr, vars: Set<string>): string {
       if (o.kind === 'Name' && o.name === 'send' && !vars.has('send')) return `action.send.${e.prop}`;
       // PD5.1.2d: the emitting step's claims, a reserved action field the gate host fills.
       if (o.kind === 'Name' && o.name === 'step' && !vars.has('step')) return `action.step.${e.prop}`;
+      // PD5.2.2c: the emitting step's lineage, a reserved action field the gate host fills.
+      if (o.kind === 'Name' && o.name === 'lineage' && !vars.has('lineage')) return `action.lineage.${e.prop}`;
       if (o.kind === 'Call' && o.callee === 'machine') return `action.machines[${q((o.args[0] as A.StringLit).value)}].${e.prop}`;
       if (o.kind === 'Call' && o.callee === 'decision') {
         const d = `action.decisions[${q((o.args[0] as A.StringLit).value)}]`;
@@ -149,6 +151,8 @@ export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDige
         break; // proved by poly-ref over the decision table (S149); nothing to enforce
     }
   }
+  // S156, PD5.2.3: a scope that requires attribution denies a compensable or irreversible effect whose origin has no claims.
+  if (policies.some((p) => p.requiresAttribution)) rules.push({ rank: rank.deny, o: { id: `${scope}.attribution`, kind: 'rule', text: 'A compensable or irreversible effect has an origin with claims (PD5.2.3).', severity: 'deny', when: `${PROPOSAL} && (action.proposal == 'effect') && (action.effect.class in ['compensable', 'irreversible'])`, require: 'coalesce(!isNull(action.lineage.origin), false)', source: { policy: policies.find((p) => p.requiresAttribution)!.name, obligation: 'attribution' } } });
   const obligations = [...rules.sort((a, b) => a.rank - b.rank).map((r) => r.o), ...others];
   return { polyaxion: '2', id: `poly/${scope}`, version: sourceDigest, scope, description: `The policies of scope ${scope}: ${policies.map((p) => p.name).join(', ')}.`, vars, obligations };
 }

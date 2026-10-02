@@ -212,6 +212,9 @@ class Parser {
     this.expect('{');
     this.expect('scope');
     const scope = this.str('the policy\'s scope');
+    // S156: `requires attribution`.
+    let requiresAttribution = false;
+    if (this.at('requires')) { this.next(); this.expect('attribution'); requiresAttribution = true; }
     const vars: A.PolicyVar[] = [];
     const items: A.PolicyItem[] = [];
     while (!this.atPunct('}')) {
@@ -301,7 +304,7 @@ class Parser {
       } else this.fail('expected var, obligation, recalled or never');
     }
     this.next();
-    return this.node<A.Policy>(start, { kind: 'Policy', name, scope, vars, items }, true);
+    return this.node<A.Policy>(start, { kind: 'Policy', name, scope, ...(requiresAttribution ? { requiresAttribution: true as const } : {}), vars, items }, true);
   }
 
   private identList(what: string): string[] {

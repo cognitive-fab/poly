@@ -15,3 +15,4 @@ export { confirmWitness, confirmEffectsWitness, stateDigestOf, type Confirmation
 export { checkJoint, jointStep, stimuliAt, jointKey, jointPlain, MAX_CASCADE_DEPTH, type Joint, type JointReport, type Stimulus, type CascadeStep } from './joint.js';
 export { checkConfiguration, buildConfiguration, configurationSystem, globalPlain, globalView, inputData, type ConfigReport, type ConfigInstance, type GlobalState, type GlobalLabel, type Message } from './config.js';
 export { policyFacts, evalPolicyExpr, decide, initialSigma, proposalTable, checkNever, validatePolicy, dischargeCheck, type PolicyFacts, type PolicyScope, type Sigma, type TableResult } from './policy.js';
+export { unattributedEffects } from './attribution.js';

@@ -21,6 +21,9 @@ export interface PolicyFacts {
   decisions: Map<string, { answers: (string | number | boolean)[] | null }>;
   /** PT9.9: each send a machine's handlers make to an address of a known machine. */
   sends: { from: string; to: string; action: string }[];
+  /** PD5.2.2c: every action of the program as an intent, and the values of every claims type's fields. */
+  intents?: string[];
+  claimsValues?: Record<string, (string | number | boolean)[] | null>[];
 }
 
 /** The program facts a policy reads, from the modules' ASTs. */
@@ -82,7 +85,9 @@ export function policyFacts(modules: Module[]): PolicyFacts {
       for (const it of d.items) if (it.kind === 'Handler') walk(it.body);
     }
   }
-  return { machines, decisions, sends };
+  const intents = modules.flatMap((m) => m.decls.flatMap((d) => (d.kind === 'Machine' ? d.items.filter((i) => i.kind === 'Action').map((i) => `${m.name}.${d.name}.${(i as { name: string }).name}`) : []))).sort();
+  const claimsValues = [...machines.values()].flatMap((x) => x.claims ?? []);
+  return { machines, decisions, sends, intents, claimsValues };
 }
 
 // ── PS8.1: Kleene values ────────────────────────────────────────────────────
@@ -108,6 +113,7 @@ export function evalPolicyExpr(e: Expr, proposal: Record<string, any>, vars: Rec
       if (o.kind === 'Name' && o.name === 'proposal' && !('proposal' in vars)) return proposal.proposal ?? null;
       if (o.kind === 'Name' && o.name === 'send' && !('send' in vars)) return proposal.send?.[e.prop] ?? null;
       if (o.kind === 'Name' && o.name === 'step' && !('step' in vars)) return (proposal.step?.[e.prop] ?? null) as V;
+      if (o.kind === 'Name' && o.name === 'lineage' && !('lineage' in vars)) return (proposal.lineage?.[e.prop] ?? null) as V;
       if (o.kind === 'Call' && o.callee === 'machine') return proposal.machines?.[(o.args[0] as { value: string }).value]?.[e.prop] ?? null;
       if (o.kind === 'Call' && o.callee === 'decision') {
         const d = proposal.decisions?.[(o.args[0] as { value: string }).value];
@@ -193,6 +199,8 @@ export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, an
     const q = truth(evalPolicyExpr(it.require, proposal, vars));
     if (q !== true) outcomes.push({ o: `${p.name}.${it.name}`, out: it.severity });
   }
+  // S156, PD5.2.3: in a scope that requires attribution, a compensable or irreversible effect needs an origin with claims.
+  if (s.policies.some((p) => p.requiresAttribution) && proposal.proposal === 'effect' && ['compensable', 'irreversible'].includes(proposal.effect?.class) && !(proposal.lineage?.origin)) outcomes.push({ o: `${s.scope}.attribution`, out: 'deny' });
   for (const { id, o } of machineObligations(s)) {
     for (const g of o.guards) {
       if (!g.in.includes(sigma[id])) continue;
@@ -214,10 +222,10 @@ export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, an
 
 // ── The decision table (S149) ──────────────────────────────────────────────
 
-interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>>; claims: Set<string> }
+interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>>; claims: Set<string>; origin: Set<string>; intent: boolean; attribution: boolean }
 
 function readsOf(s: PolicyScope): Reads {
-  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map(), claims: new Set() };
+  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map(), claims: new Set(), origin: new Set(), intent: false, attribution: s.policies.some((p) => p.requiresAttribution) };
   const walk = (e: Expr | null | undefined): void => {
     if (!e) return;
     if (e.kind === 'Member' && e.object.kind === 'Call' && (e.object.callee === 'machine' || e.object.callee === 'decision')) {
@@ -228,6 +236,9 @@ function readsOf(s: PolicyScope): Reads {
     }
     // PD5.1.2d: step.claims.f.
     if (e.kind === 'Member' && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'step' && e.object.prop === 'claims') reads.claims.add(e.prop);
+    // PD5.2.2c: lineage.origin.f and lineage.intent.
+    if (e.kind === 'Member' && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'lineage' && e.object.prop === 'origin') reads.origin.add(e.prop);
+    if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'lineage' && e.prop === 'intent') reads.intent = true;
     if (e.kind === 'Binary' && ['<', '<=', '>', '>=', '==', '!='].includes(e.op)) {
       for (const [x, c] of [[e.left, e.right], [e.right, e.left]] as const) {
         if (c.kind === 'Decimal' && x.kind === 'Member' && x.object.kind === 'Call' && x.object.callee === 'decision') {
@@ -314,7 +325,22 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
           for (const pairs of product(perField)) stepChoices.push(Object.fromEntries(pairs));
         }
       }
-      const combos = product([...machineChoices.map(([, l]) => l as unknown[]), ...decisionChoices.map(([, l]) => l as unknown[]), stepChoices as unknown[]]);
+      // PD5.2.2c, S156: the emitting step's lineage: an origin with no claims, or each value of the read origin fields;
+      // and each intent of the program, when the policies read it.
+      const originChoices: (Record<string, V> | null)[] = [null];
+      if (reads.origin.size || reads.attribution) {
+        const fieldsRead = reads.origin.size ? [...reads.origin] : [];
+        for (const c of facts.claimsValues ?? []) {
+          const perField = fieldsRead.map((f) => (c[f] ?? [null]).map((v) => [f, v] as [string, V]));
+          for (const pairs of product(perField)) originChoices.push(Object.fromEntries(pairs));
+        }
+        if (originChoices.length === 1) originChoices.push({});
+      }
+      const intentChoices: (string | null)[] = reads.intent ? [...(facts.intents ?? [])] : [null];
+      const lineageChoices: (Record<string, V> | null)[] = (reads.origin.size || reads.intent || reads.attribution) ? product([originChoices as unknown[], intentChoices as unknown[]]).map(([o, i]) => ({ origin: o as V, ...(i ? { intent: i as V } : {}) })) : [null];
+      const seen = new Set<string>();
+      const lineages = lineageChoices.filter((l) => { const k = JSON.stringify(l); if (seen.has(k)) return false; seen.add(k); return true; });
+      const combos = product([...machineChoices.map(([, l]) => l as unknown[]), ...decisionChoices.map(([, l]) => l as unknown[]), stepChoices as unknown[], lineages as unknown[]]);
       for (const c of combos) {
         if (rows.length >= maxRows) { capHit = true; break; }
         const machines: Record<string, unknown> = {};
@@ -322,7 +348,8 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
         const decisions: Record<string, unknown> = {};
         decisionChoices.forEach(([d], k) => { const v = c[machineChoices.length + k]; if (v) decisions[d] = v; });
         const claims = c[machineChoices.length + decisionChoices.length];
-        rows.push({ ...build(machines, decisions), ...(claims ? { step: { claims } } : {}) });
+        const lineage = c[machineChoices.length + decisionChoices.length + 1];
+        rows.push({ ...build(machines, decisions), ...(claims ? { step: { claims } } : {}), ...(lineage ? { lineage } : {}) });
       }
     }
   }

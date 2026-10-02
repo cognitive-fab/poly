@@ -582,7 +582,8 @@ export class PolyRuntime {
       const sender = await this.store.getInstance(m.from);
       let g;
       try {
-        g = await this.policyGate.proposeSend({ id: m.id, from: m.from, to: m.to, fromMachine, toMachine, action: m.action, data: m.data, senderState: sender?.state ?? {} });
+        const l = outRow ? this.store.lineage(m.from, outRow.seq) : null;
+        g = await this.policyGate.proposeSend({ id: m.id, from: m.from, to: m.to, fromMachine, toMachine, action: m.action, data: m.data, senderState: sender?.state ?? {}, lineage: l ? { origin: l.origin, intent: l.intent } : null });
       } catch (e) {
         const held = (e as { record?: Record<string, unknown> }).record;
         if (held) await this.store.txn(() => { const { action, ...rest } = held; this.store.appendEvent(m.from, 'verdict', { stage: 'gate', kind: 'send', intent: m.id, outcome: 'held', reason: String((e as Error).message), ...rest, gateDecision: 'held', action: this.store.keep(action) }, this.now()); });
@@ -713,6 +714,7 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
         }
         return out;
       },
+      lineage: (run, seq) => { const l = store.lineage(run, seq); return l ? { origin: l.origin, intent: l.intent } : null; },
       stepClaims: (run, seq) => { const r = store.db.prepare('SELECT data FROM pr_journal WHERE instance_id = ? AND seq = ?').get(run, seq) as { data: string } | undefined; const c = r ? JSON.parse(r.data)?.$claims : null; return c && typeof c === 'object' ? c : null; },
       nextSseq: (session) => (store.db.prepare('INSERT INTO poly_gate_session (session, sseq) VALUES (?, 1) ON CONFLICT(session) DO UPDATE SET sseq = sseq + 1 RETURNING sseq').get(session) as { sseq: number }).sseq,
       recordLate: (run, record) => {

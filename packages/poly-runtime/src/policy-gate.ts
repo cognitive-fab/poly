@@ -29,6 +29,8 @@ export interface ProgramView {
   nextSseq(session: string): number;
   /** PD5.1.2d, S104: the claims of a run's step at a seq (its journal row's $claims), or null. */
   stepClaims?(run: string, seq: number): Record<string, unknown> | null;
+  /** PD5.2.2c: the lineage of a run's step at a seq, as a policy reads it: its origin and intent. */
+  lineage?(run: string, seq: number): { origin: Record<string, unknown> | null; intent: string } | null;
   /**
    * Review C1, PT9.5: records an engine answer that came after the host's timeout, with its sseq, on the run that
    * proposed it. The intent was held; the engine still decided, so the session's Σ moved and replay needs the event.
@@ -173,7 +175,9 @@ export class PolicyGate implements Gate {
     }
     // PD5.1.2d, S104: the claims of the step that emitted the effect travel beside the snapshot.
     const claims = this.view.stepClaims?.(proposal.instance, proposal.seq) ?? null;
-    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(claims ? { step: { claims } } : {}) };
+    // PD5.2.2c: the emitting step's lineage, its origin and intent.
+    const lineage = this.view.lineage?.(proposal.instance, proposal.seq) ?? null;
+    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(claims ? { step: { claims } } : {}), ...(lineage ? { lineage } : {}) };
     return { action: actionOf(row), reads, singletons, claims };
   }
 
@@ -181,7 +185,7 @@ export class PolicyGate implements Gate {
    * PS8.7, PT9.9: a send between two trust scopes, proposed in the sender's session. The sender's latest snapshot is
    * the emitter's; a singleton it reads is recorded as for an effect.
    */
-  async proposeSend(m: { id: string; from: string; to: string; fromMachine: string; toMachine: string; action: string; data: unknown; senderState: Record<string, unknown> }): Promise<GateDecision> {
+  async proposeSend(m: { id: string; from: string; to: string; fromMachine: string; toMachine: string; action: string; data: unknown; senderState: Record<string, unknown>; lineage?: { origin: Record<string, unknown> | null; intent: string } | null }): Promise<GateDecision> {
     const session = sessionOf(m.fromMachine);
     return this.serial(session, async () => {
       const machines: Record<string, unknown> = {};
@@ -192,7 +196,7 @@ export class PolicyGate implements Gate {
         const s = this.view.singleton(r);
         if (s) { machines[r] = s.state; reads[s.instance] = s.seq; singletons[r] = s.state; }
       }
-      const action = actionOf({ proposal: 'send', send: { to: m.toMachine, action: m.action, scope: moduleOf(m.toMachine), instance: m.to, payloadDigest: digest(m.data ?? {}) }, machines, decisions: this.view.decisions(m.from) });
+      const action = actionOf({ proposal: 'send', send: { to: m.toMachine, action: m.action, scope: moduleOf(m.toMachine), instance: m.to, payloadDigest: digest(m.data ?? {}) }, machines, decisions: this.view.decisions(m.from), ...(m.lineage ? { lineage: m.lineage } : {}) });
       const { v, decision, reason } = await this.decideAction(session, moduleOf(m.fromMachine), action, m.id, undefined, m.from);
       const sseq = this.view.nextSseq(session);
       const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;
