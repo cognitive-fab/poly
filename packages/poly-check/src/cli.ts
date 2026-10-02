@@ -16,7 +16,7 @@ import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
 import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
 import { applyFixById } from './fix.js';
-import { admit, admitWitness, AdmitError } from './admit.js';
+import { admit, admitWitness, witnessKey, AdmitError } from './admit.js';
 import { journalCommand, JournalUsageError } from './journal.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
@@ -142,7 +142,7 @@ export async function main(argv: string[]): Promise<number> {
       if (!keyFile) { process.stderr.write('poly: admit --witness needs --key <private key file>\n'); return EXIT_CODES.USAGE; }
       const target = positional[1];
       const base = root ?? (statSync(target).isDirectory() ? target : dirname(target));
-      const r = await admitWitness(target, { root: root ?? undefined, key: { id: 'witness', privateKeyPem: readFileSync(keyFile, 'utf8') }, out: out ?? join(base, '.poly', 'witness.certificate.json') });
+      const r = await admitWitness(target, { root: root ?? undefined, key: witnessKey(keyFile), out: out ?? join(base, '.poly', 'witness.certificate.json') });
       process.stdout.write(`witness certificate for ${r.certificate.subject.project}: ${r.certificate.findings?.length ?? 0} finding(s), ${r.certificate.digest}\n  ${r.certificatePath}\n  the runtime loads it only with allowWitness, never in production (S139)\n`);
       return EXIT_CODES.CLEAN;
     }

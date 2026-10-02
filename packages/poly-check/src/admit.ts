@@ -5,8 +5,8 @@
 // version-controlled tree is refused. The certificate is written to a temporary name, read back against the
 // files it describes and the signature it carries, and only then renamed into place: a certificate that does not
 // read back is a toolchain fault, and nothing is left behind (the standing rule on artefacts the runtime reads).
-import { readFileSync, writeFileSync, existsSync, renameSync, rmSync, mkdirSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, renameSync, rmSync, mkdirSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import {
   CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, buildIdOf, signDigest, publicKeyOf, certificateProblems,
   loadProject, type Certificate, type CertifiedMachine,
@@ -54,12 +54,26 @@ export interface AdmitResult {
 
 const rel = (root: string, p: string) => relative(root, p).split(sep).join('/');
 
-/** A key file inside a version-controlled tree could be committed; it is refused whatever it holds (S126). */
+/**
+ * A key file inside a version-controlled tree could be committed; it is refused whatever it holds (S126). The test
+ * walks the file's real path, so a junction or a symbolic link from outside the tree does not hide it (review A4).
+ */
 function insideVersionControl(file: string): boolean {
-  for (let d = dirname(resolve(file)); ; d = dirname(d)) {
+  const lexical = resolve(file);
+  let real = lexical;
+  try { real = realpathSync.native(lexical); } catch {
+    try { real = join(realpathSync.native(dirname(lexical)), basename(lexical)); } catch { /* no such directory: the lexical path */ }
+  }
+  for (let d = dirname(real); ; d = dirname(d)) {
     if (existsSync(join(d, '.git'))) return true;
     if (dirname(d) === d) return false;
   }
+}
+
+/** Review A3, S139: the test key of `poly admit --witness`, read from a file never under version control. */
+export function witnessKey(file: string): { id: string; privateKeyPem: string } {
+  if (insideVersionControl(file)) throw new AdmitError(`the witness key is at ${resolve(file)}, inside a tree under version control; a private key is never committed (S126)`);
+  return { id: 'witness', privateKeyPem: readFileSync(file, 'utf8') };
 }
 
 function admissionKey(dir: string, named: { id: string; location: string } | undefined, given: AdmitOptions['key']): { id: string; privateKeyPem: string } {

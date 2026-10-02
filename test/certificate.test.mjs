@@ -111,3 +111,34 @@ test('review A2: a source edited after the check ran is refused, so no unchecked
   };
   await assert.rejects(admit(dir, { afterCheck: edit }), (e) => e instanceof AdmitError && /effects\.poly.*not the source the check checked/.test(e.message));
 });
+
+// Review A3, A4: a private key under version control is refused however it is named (S126, S139).
+test('review A3: poly admit --witness refuses a key file inside a tree under version control', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdirSync, copyFileSync, rmSync } = await import('node:fs');
+  const dir = project('witness-key-in-repo', ['conformance/m1/effects.poly'], key);
+  const inside = join(dir, 'k.pem');
+  copyFileSync(key.file, inside);
+  try {
+    const cli = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
+    const r = spawnSync(process.execPath, [cli, 'admit', '--witness', join(dir, 'src', 'effects.poly'), '--key', inside, '--root', dir], { encoding: 'utf8' });
+    assert.notEqual(r.status, 0, r.stdout);
+    assert.match(r.stderr, /inside a tree under version control/);
+    assert.throws(() => readFileSync(join(dir, '.poly', 'witness.certificate.json')));
+  } finally { rmSync(inside, { force: true }); }
+});
+
+test('review A4: a key reached through a junction from outside the repository is refused', async (t) => {
+  const { mkdtempSync, mkdirSync, copyFileSync, symlinkSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const real = join(ROOT, '.poly', 'test-cert', 'junction-target');
+  rmSync(real, { recursive: true, force: true });
+  mkdirSync(real, { recursive: true });
+  copyFileSync(key.file, join(real, 'k.pem'));
+  const via = join(mkdtempSync(join(tmpdir(), 'poly-junction-')), 'link');
+  try {
+    try { symlinkSync(real, via, 'junction'); } catch (e) { t.skip(`no junction or symbolic link here: ${e.code}`); return; }
+    const dir = project('key-via-junction', ['conformance/m1/effects.poly'], { ...key, file: join(via, 'k.pem') });
+    await assert.rejects(admit(dir), (e) => e instanceof AdmitError && /inside a tree under version control/.test(e.message));
+  } finally { rmSync(real, { recursive: true, force: true }); rmSync(via, { force: true, recursive: false }); }
+});
