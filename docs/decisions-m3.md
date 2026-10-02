@@ -147,6 +147,17 @@ These changes join the token-count and scorer fixes in the one regeneration of t
 
 **Before FROZEN:** the folder check runs after every run as well as before, and a run during which anything was synced is unscored and rerun (test fails first). The caps above go into the plan. The freeze is regenerated once with both. No further pilots are needed: when `freeze.mjs --check` reports no change after that regeneration, FROZEN may be written, and the runs start in blocks of four as ruled.
 
+## Hold after block 2: a sync into the arms' folder
+
+The arms' folder gained `plugins/synced`, `skills/synced` and a new `.claude.json` at 21:25:52 UTC, two seconds after T2 arm 2 finished (21:25:50). No T2 run is marked unscored, so the after-run check either ran before the sync or did not see it.
+
+**The runs stop until this is explained.** Block 3 does not start. The M3 session:
+1. Keeps the synced folders as evidence (a listing with hashes in the run record), and leaves them in place until step 3 is done.
+2. Finds which process wrote them, and when, from the journals and file times.
+3. Checks, for every turn of every T1 and T2 run, the CLI's init event: whether any synced plugin, skill or MCP server appeared in what the model saw. A run whose model saw any is unscored and rerun.
+4. Proposes a fix. A fix that changes the frozen runner or the arms' environment is a deviation, ruled before any further block and reported.
+5. Then removes the synced folders, and the folder check passes before block 3.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
