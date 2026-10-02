@@ -186,3 +186,29 @@ test('S149: a never statement violated after an approved escalation is PL6503', 
   assert.ok(f, JSON.stringify(s.diagnostics.map((d) => d.message)));
   assert.ok(f.witness.trace.some((st) => st.verdict === 'allow (approved)'), JSON.stringify(f.witness.trace.map((st) => st.verdict)));
 });
+
+// Review B2: a decision's model id is compared with the ids the policies name, not one placeholder, so a never
+// statement violated on another model's routing is found.
+test('S149: a never statement over decision(d).model.id is checked against the ids the policies name', async () => {
+  const pol = `module legacy_policy\n\npolicy no-legacy {\n  scope "support"\n  obligation refund-after-route "A refund follows a routing decision." rule {\n    when effect.kind == "payments.refund"\n    require decision("route").taken else deny\n  }\n  never no-legacy-refund "No refund on the legacy model's routing.": allow when effect.kind == "payments.refund" && decision("route").model.id == "m-legacy"\n}\n`;
+  const s = scopeOf(await checkProject(projectOf('never-model-id', { 'router.poly': read('conformance/m4/router.poly'), 'p.policy.poly': pol })), 'support');
+  assert.ok(s.diagnostics.some((d) => d.code === 'PL6503'), JSON.stringify(s.stages));
+});
+
+// Review B5: a string field's check domain is its domain in the decision table; a rule over a field with no finite
+// domain is listed as runtime-only, not validated clean over its unknown case alone.
+test('S149: a string field with a check domain is enumerated; a rule over an open field is runtime-only', async () => {
+  const prog = (dom) => `module tagger\n\nmachine Tagger {\n  state { tag : string${dom} = "none" }\n  action Tag(t: string check { "none", "hold", "vip" })\n  action Ship()\n  on Tag(t) { tag' = t }\n  on Ship { emit ship(1) }\n  effect ship(k: 0..1) {\n    kind "goods.ship"\n    labels { write:store }\n    class irreversible\n  }\n}\n`;
+  const pol = `module tagger_policy\n\npolicy tag-hold {\n  scope "tagger"\n  obligation hold-vip "A shipment tagged hold is denied." rule {\n    when effect.kind == "goods.ship" && machine("tagger.Tagger").tag == "hold"\n    require false else deny\n  }\n}\n`;
+  const facts = policyFacts([parse(prog(' check { "none", "hold", "vip" }')).module]);
+  assert.deepEqual(facts.machines.get('tagger.Tagger').fields.get('tag').values, ['none', 'hold', 'vip']);
+  const tagged = scopeOf(await checkProject(projectOf('tagged-rule', { 'tagger.poly': prog(' check { "none", "hold", "vip" }'), 'p.policy.poly': pol })), 'tagger');
+  assert.match(tagged.stages.find((x) => x.stage === 'never').note, /^\d+ proposals|no never/);
+  // A machine field always has a finite domain (PL1101); a decision's answer may not. A rule over one is runtime-only.
+  const { openReads } = await import('../packages/poly-check/dist/src/policies.js');
+  const router = parse(read('conformance/m4/router.poly')).module;
+  const routed = parse('module p\npolicy route-rule {\n  scope "support"\n  obligation no-refund "No refund answer." rule {\n    when decision("route").answer == "Refund"\n    require false else deny\n  }\n}\n').module;
+  const rf = policyFacts([router]);
+  rf.decisions.set('route', { answers: null });
+  assert.deepEqual(openReads({ scope: 'support', policies: routed.decls.filter((d) => d.kind === 'Policy') }, rf), ['decision route.answer']);
+});

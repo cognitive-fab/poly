@@ -133,6 +133,14 @@ export function withExamples(doc: PolicyDoc, scope: { scope: string; policies: P
   }
 }
 
+/**
+ * S149, review B5: the values with no finite domain that the scope's obligations (not its never statements) read.
+ * Translation validation compares such a rule only on its unknown case, so it is listed as runtime-only.
+ */
+export function openReads(scope: { scope: string; policies: Policy[] }, facts: PolicyFacts): string[] {
+  return proposalTable({ scope: scope.scope, policies: scope.policies.map((p) => ({ ...p, items: p.items.filter((i) => i.kind !== 'Never') })) }, facts).open;
+}
+
 type Discharge = (set: string[], mandate: string) => { trap: { sigma: unknown; path: WitnessStep[] } | null; capHit: boolean };
 type Mandates = { findings: { mandate: string; node: string; line?: number; message: string; path: WitnessStep[] }[]; mandates: number; checks: number; bounded: string[] };
 
@@ -278,7 +286,9 @@ export async function policyReports(module: Module, program: Module[], root: str
         r.diagnostics.push({ ...diag('PL2501', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `the lowered policies of scope ${scope} disagree with PS8: ${tv.detail} (addressed to the toolchain, not the author)`), witness: { id: '', length: tv.mismatch.length, trace: tv.mismatch } });
       }
       if (tv.capHit) r.diagnostics.push(diag('PL3901', { module: module.name, node: ps[0].id }, `translation validation of scope ${scope} stopped at its bound (${tv.pairs} state pairs)`));
-      r.stages.push({ stage: 'policy-tv', status: 'ran', engine: `poly-ref, polyaxion@${peer.commit}`, verdict: tv.mismatch ? 'REFUSED' : tv.capHit ? 'INCONCLUSIVE' : 'CLEAN', note: `${tv.rows} proposals over ${tv.pairs} state pairs agree` });
+      const open = openReads({ scope, policies: ps }, refFacts);
+      for (const o of open) r.notRun.push({ property: `${scope}: ${o}`, reason: 'runtime-only: an obligation reads a value with no finite domain, so translation validation compared only its unknown case (S149)' });
+      r.stages.push({ stage: 'policy-tv', status: 'ran', engine: `poly-ref, polyaxion@${peer.commit}`, verdict: tv.mismatch ? 'REFUSED' : tv.capHit || open.length ? 'INCONCLUSIVE' : 'CLEAN', note: `${tv.rows} proposals over ${tv.pairs} state pairs agree` });
     }
 
     // Stage 5a (PT8.4, S161): polycheck's default regions over the effects of the modules the scope governs.

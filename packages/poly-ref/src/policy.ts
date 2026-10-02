@@ -43,7 +43,15 @@ export function policyFacts(modules: Module[]): PolicyFacts {
     for (const d of m.decls) {
       if (d.kind !== 'Machine') continue;
       const fields = new Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>();
-      for (const f of d.fields) fields.set(f.name, { values: values(f.type), conf: f.type.kind === 'TConf' });
+      // Review B5: a field with a check domain (a string field must have one, PL1101) takes its values from it.
+      const checked = (f: { check: { domain: { kind: string; values?: { kind: string; value?: unknown }[]; lo?: number; hi?: number } } | null }): (string | number | boolean)[] | null => {
+        const dom = f.check?.domain;
+        if (!dom) return null;
+        if (dom.kind === 'DomainRange') return Array.from({ length: dom.hi! - dom.lo! + 1 }, (_, k) => dom.lo! + k);
+        const vs = dom.values!.map((v) => (v.kind === 'String' || v.kind === 'Int' || v.kind === 'Bool' ? v.value : undefined));
+        return vs.every((v) => v !== undefined) ? (vs as (string | number | boolean)[]) : null;
+      };
+      for (const f of d.fields) fields.set(f.name, { values: values(f.type) ?? checked(f as never), conf: f.type.kind === 'TConf' });
       const effects: { kind: string; class: string; labels: string[] }[] = [];
       for (const it of d.items) {
         if (it.kind === 'EffectDecl') {
@@ -267,7 +275,14 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
         });
         machineChoices.push([rm, product(perField).map((pairs) => Object.fromEntries(pairs))]);
       }
-      const decisionChoices: [string, (Record<string, V> | null)[]][] = [];
+      // Review B2: a model id is an open string. The ids a policy can tell apart are the strings it names, so the table
+  // takes each of them and one more, each once with a map fitted for it and once with a map fitted for another.
+  const strings = new Set<string>();
+  const lits = (x: unknown): void => { if (!x || typeof x !== 'object') return; if (Array.isArray(x)) { x.forEach(lits); return; } const n = x as { kind?: string; value?: unknown }; if (n.kind === 'String' && typeof n.value === 'string') strings.add(n.value); for (const v of Object.values(n)) lits(v); };
+  for (const p of s.policies) lits(p.items);
+  const ids = ['m-a', 'm-b', ...[...strings].filter((x) => x !== 'm-a' && x !== 'm-b').sort()];
+  const modelPairs: [string | null, string | null][] = ids.flatMap((x) => [[x, x], [x, ids.find((y) => y !== x)!]] as [string, string][]);
+  const decisionChoices: [string, (Record<string, V> | null)[]][] = [];
       for (const [d, fieldsRead] of reads.decisions) {
         const info = facts.decisions.get(d);
         const options: (Record<string, V> | null)[] = [null];
@@ -275,7 +290,7 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
         for (const answer of fieldsRead.has('answer') ? answers : [null]) {
           for (const conf of fieldsRead.has('conf') ? confReps(`${d}.conf`) : [null]) {
             for (const margin of fieldsRead.has('margin') ? confReps(`${d}.margin`) : [null]) {
-              for (const [model, fitted] of (fieldsRead.has('model') || fieldsRead.has('calibration')) ? [['m-a', 'm-a'], ['m-a', 'm-b']] : [[null, null]]) {
+              for (const [model, fitted] of (fieldsRead.has('model') || fieldsRead.has('calibration')) ? modelPairs : [[null, null]]) {
                 options.push({ answer, conf, margin, ...(model ? { model: { id: model, reported: model } as unknown as V, calibration: { fittedFor: fitted, version: 1 } as unknown as V } : {}) });
               }
             }
