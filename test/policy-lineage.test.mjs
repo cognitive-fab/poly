@@ -55,3 +55,37 @@ test('PD5.2.3, S156: in a scope that requires attribution, an irreversible effec
   assert.deepEqual(ok.diagnostics.filter((d) => d.code === 'PL6701'), []);
   assert.equal(ok.verdict, 'CLEAN', JSON.stringify(ok.stages));
 });
+
+// ── review of M5b, part C ──────────────────────────────────────────────────
+
+// C2: a policy that reads step.claims or lineage.origin as a whole (unknown(step.claims)) reads every field: the
+// decision table offers claims and origins for it, so a never statement it violates is found.
+test('review C2: a whole-record read of step.claims or lineage.origin is explored', { skip }, async () => {
+  for (const req of ['!unknown(step.claims)', '!unknown(lineage.origin)']) {
+    const pol = `module rp\n\npolicy whole {\n  scope "refund"\n  obligation r "A refund has claims." rule {\n    when effect.kind == "payments.refund"\n    require ${req} else deny\n  }\n  never no-refund "No refund is allowed.": allow when effect.kind == "payments.refund"\n}\n`;
+    const p = await checkProject(projectOf(`whole-${req.includes('step') ? 'step' : 'origin'}`, { 'refund.poly': read('conformance/m5/refund.poly'), 'p.policy.poly': pol }));
+    const s = p.files.flatMap((f) => f.policies ?? []).find((x) => x.scope === 'refund');
+    assert.ok(s.diagnostics.some((d) => d.code === 'PL6503'), `${req}: ${JSON.stringify(s.stages.find((x) => x.stage === 'never'))}`);
+  }
+});
+
+// C3: a field two claims types declare with different types cannot be read from a policy, whichever comes first.
+test('review C3: a claims field with two types is refused in a policy, in either order', async () => {
+  const prog = (first, second) => `module two\n\nenum Kind { Person, Agent }\n\nclaims ${first}\n\nclaims ${second}\n\nenum Status { Idle, Done }\n\nmachine Pay {\n  state { status : Status = Idle }\n  terminal status == Done\n  action ByA()\n  action ByB()\n  on ByA() by a: A {\n    require status == Idle else reject "busy"\n    status' = Done\n    emit pay(1)\n  }\n  on ByB() by b: B {\n    require status == Idle else reject "busy"\n    status' = Done\n    emit pay(1)\n  }\n  effect pay(n: 0..1) {\n    kind "two.pay"\n    labels { egress:external }\n    class irreversible\n  }\n}\n`;
+  const A = 'A {\n  level: Kind\n}';
+  const B = 'B {\n  level: 0..3\n}';
+  const pol = `module twop\n\npolicy twop {\n  scope "two"\n  obligation lv "Level." rule {\n    when effect.kind == "two.pay"\n    require step.claims.level >= 2 else deny\n  }\n}\n`;
+  for (const [x, y] of [[A, B], [B, A]]) {
+    const p = await checkProject(projectOf('shared-field', { 'two.poly': prog(x, y), 'p.policy.poly': pol }));
+    const s = p.files.flatMap((f) => f.policies ?? []).find((z) => z.scope === 'two');
+    assert.ok(s.diagnostics.some((d) => d.code === 'PL1201' && /level/.test(d.message) && /A/.test(d.message) && /B/.test(d.message)), JSON.stringify(s.diagnostics.map((d) => d.message)));
+  }
+});
+
+// C4: an author's obligation named attribution is the author's; the scope's attribution rule has its own source.
+test('review C4: an obligation named attribution does not take the attribution rule\'s place', { skip }, async () => {
+  const pol = read('conformance/m5/lineage-pay.policy.poly').replace('obligation person-pays', 'obligation attribution');
+  const p = await checkProject(projectOf('attribution-name', { 'lp.poly': read('conformance/m5/lineage-pay.poly'), 'p.policy.poly': pol }));
+  const s = p.files.flatMap((f) => f.policies ?? []).find((x) => x.scope === 'lp');
+  assert.equal(s.verdict, 'CLEAN', JSON.stringify(s.diagnostics.map((d) => d.message)));
+});

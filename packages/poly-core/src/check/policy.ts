@@ -37,6 +37,8 @@ export interface PolicyProgram {
   labels: string[];
   /** PD5.1.2d, S104: the fields of the program's claims types a policy can read as step.claims.f (a Principal is not). */
   claims: Record<string, PType>;
+  /** Review C3: fields that two claims types declare with different types, with those types' names. */
+  claimsConflicts: Map<string, string[]>;
   /** PD5.2.2c: every action of the program as an intent, `module.Machine.Action`. */
   intents: string[];
 }
@@ -48,6 +50,8 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
   const machines = new Map<string, PolicyMachine>();
   const decisions = new Map<string, { machine: string; result: PType }>();
   const claims: Record<string, PType> = {};
+  const claimsOwner = new Map<string, string>();
+  const claimsConflicts = new Map<string, string[]>();
   const intents: string[] = [];
   for (const m of modules) {
     const enums = new Map<string, string[]>();
@@ -65,7 +69,13 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
         default: return null;
       }
     };
-    for (const d of m.decls) if (d.kind === 'RecordDecl' && d.claims) for (const f of d.fields) { const t = typeOf(f.type); if (t && !(f.name in claims)) claims[f.name] = t; }
+    for (const d of m.decls) if (d.kind === 'RecordDecl' && d.claims) for (const f of d.fields) {
+      const t = typeOf(f.type);
+      if (!t) continue;
+      if (!(f.name in claims) && !claimsConflicts.has(f.name)) { claims[f.name] = t; claimsOwner.set(f.name, d.name); continue; }
+      if (claims[f.name] && JSON.stringify(claims[f.name]) !== JSON.stringify(t)) { claimsConflicts.set(f.name, [claimsOwner.get(f.name)!, d.name]); delete claims[f.name]; }
+      else if (claimsConflicts.has(f.name)) claimsConflicts.get(f.name)!.push(d.name);
+    }
     for (const d of m.decls) {
       if (d.kind !== 'Machine') continue;
       const id = `${m.name}.${d.name}`;
@@ -84,7 +94,7 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
     }
   }
   const all = [...machines.values()].flatMap((m) => m.effects);
-  return { machines, decisions, claims, intents: intents.sort(), effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
+  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
 }
 
 const DECISION_FIELDS = (result: PType): Record<string, PType> => ({
@@ -196,6 +206,9 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             return f;
           }
           if (o.k === 'record') {
+            // Review C3: a claims field two claims types declare with different types has no one type to read it at.
+            const claimsRead = e.object.kind === 'Member' && e.object.object.kind === 'Name' && ((e.object.object.name === 'step' && e.object.prop === 'claims') || (e.object.object.name === 'lineage' && e.object.prop === 'origin'));
+            if (claimsRead && program.claimsConflicts.has(e.prop)) { err('PL1201', e, `${e.prop} is a field of the claims types ${program.claimsConflicts.get(e.prop)!.join(' and ')} with different types, so a policy cannot read it`); return null; }
             const f = o.fields[e.prop];
             if (!f) { err('PL1001', e, `no field ${e.prop} here (${Object.keys(o.fields).join(', ')})`); return null; }
             return f;

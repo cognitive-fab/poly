@@ -236,6 +236,9 @@ function readsOf(s: PolicyScope): Reads {
     }
     // PD5.1.2d: step.claims.f.
     if (e.kind === 'Member' && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'step' && e.object.prop === 'claims') reads.claims.add(e.prop);
+    // Review C2: step.claims or lineage.origin read as a whole (unknown(step.claims), say) reads every field.
+    if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'step' && e.prop === 'claims') reads.claims.add('*');
+    if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'lineage' && e.prop === 'origin') reads.origin.add('*');
     // PD5.2.2c: lineage.origin.f and lineage.intent.
     if (e.kind === 'Member' && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'lineage' && e.object.prop === 'origin') reads.origin.add(e.prop);
     if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'lineage' && e.prop === 'intent') reads.intent = true;
@@ -321,7 +324,8 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
       const stepChoices: (Record<string, V> | null)[] = [null];
       if (reads.claims.size) {
         for (const c of m.claims ?? []) {
-          const perField = [...reads.claims].map((f) => (c[f] ?? [null]).map((v) => [f, v] as [string, V]));
+          const fieldsRead = reads.claims.has('*') ? Object.keys(c) : [...reads.claims];
+          const perField = fieldsRead.map((f) => (c[f] ?? [null]).map((v) => [f, v] as [string, V]));
           for (const pairs of product(perField)) stepChoices.push(Object.fromEntries(pairs));
         }
       }
@@ -329,8 +333,8 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
       // and each intent of the program, when the policies read it.
       const originChoices: (Record<string, V> | null)[] = [null];
       if (reads.origin.size || reads.attribution) {
-        const fieldsRead = reads.origin.size ? [...reads.origin] : [];
         for (const c of facts.claimsValues ?? []) {
+          const fieldsRead = reads.origin.has('*') ? Object.keys(c) : [...reads.origin];
           const perField = fieldsRead.map((f) => (c[f] ?? [null]).map((v) => [f, v] as [string, V]));
           for (const pairs of product(perField)) originChoices.push(Object.fromEntries(pairs));
         }

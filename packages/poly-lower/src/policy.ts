@@ -152,7 +152,7 @@ export function lowerPolicyScope(scope: string, policies: A.Policy[], sourceDige
     }
   }
   // S156, PD5.2.3: a scope that requires attribution denies a compensable or irreversible effect whose origin has no claims.
-  if (policies.some((p) => p.requiresAttribution)) rules.push({ rank: rank.deny, o: { id: `${scope}.attribution`, kind: 'rule', text: 'A compensable or irreversible effect has an origin with claims (PD5.2.3).', severity: 'deny', when: `${PROPOSAL} && (action.proposal == 'effect') && (action.effect.class in ['compensable', 'irreversible'])`, require: 'coalesce(!isNull(action.lineage.origin), false)', source: { policy: policies.find((p) => p.requiresAttribution)!.name, obligation: 'attribution' } } });
+  if (policies.some((p) => p.requiresAttribution)) rules.push({ rank: rank.deny, o: { id: `${scope}.attribution`, kind: 'rule', text: 'A compensable or irreversible effect has an origin with claims (PD5.2.3).', severity: 'deny', when: `${PROPOSAL} && (action.proposal == 'effect') && (action.effect.class in ['compensable', 'irreversible'])`, require: 'coalesce(!isNull(action.lineage.origin), false)', source: { policy: policies.find((p) => p.requiresAttribution)!.name, obligation: '$attribution' } } });
   const obligations = [...rules.sort((a, b) => a.rank - b.rank).map((r) => r.o), ...others];
   return { polyaxion: '2', id: `poly/${scope}`, version: sourceDigest, scope, description: `The policies of scope ${scope}: ${policies.map((p) => p.name).join(', ')}.`, vars, obligations };
 }
