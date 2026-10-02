@@ -131,7 +131,9 @@ async function witnessRuntime(spec: WitnessSpec): Promise<PolyRuntime> {
   const key = { id: 'witness-run', privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() };
   const out = join(spec.buildRoot, '.poly', 'witness', `${spec.id.slice('sha256:'.length, 'sha256:'.length + 12)}.certificate.json`);
   await admitWitness(spec.source, { root: spec.buildRoot, key, out });
-  return loadRuntime(join(spec.buildRoot, '.poly', 'build'), { certificate: out, trust: { [key.id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() }, allowWitness: true });
+  // The walk's verifier asserts the claims the witness carries (PD5.1.4): the witness was found over them.
+  const verifier = (c: unknown) => (c && typeof c === 'object' && '$witness' in (c as object) ? ((c as { $witness: Record<string, unknown> | null }).$witness ?? null) : null);
+  return loadRuntime(join(spec.buildRoot, '.poly', 'build'), { certificate: out, trust: { [key.id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() }, allowWitness: true, verifier });
 }
 
 /** Whether a machine's handlers spawn children, which a witness drives itself and the runtime would run (S141). */
@@ -175,7 +177,9 @@ async function runtimeStep(rt: PolyRuntime, machineId: string, i: number, s: Wit
       if (decision !== null) rt.store.pending.set(`${id}\u0000${actionId}`, { before: [{ kind: 'decision', body: { decision, witness: true, data: s.data } }] });
       try { r = await rt.kernel.dispatch(id, s.action, s.data, actionId); } finally { rt.store.pending.delete(`${id}\u0000${actionId}`); }
     } else {
-      r = await rt.dispatch(id, s.action, s.data, { actionId });
+      // PD5.1.4, review B2: a witness's claims go to the walk's verifier, as a host's credentials would, never as data (S155).
+      const { $claims, ...data } = (s.data ?? {}) as Record<string, unknown>;
+      r = await rt.dispatch(id, s.action, data, { actionId, ...($claims !== undefined ? { credentials: { $witness: $claims } } : {}) });
     }
     const verdict = r.stepKind === 'rejected' ? `rejected(${r.rejectReason})` : r.stepKind;
     return { verdict, post: r.state as Flat };

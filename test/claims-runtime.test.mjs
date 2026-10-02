@@ -95,3 +95,49 @@ test('PD5.1.2c: a run with claims, rejected and accepted, replays', async () => 
     assert.equal(run.folded, run.rows);
   } finally { await rt.close(); }
 });
+
+// Review of M5b, B1: rt.create with a creation action is a dispatch from outside too. Caller-supplied $claims are
+// refused (S155), and a creation action with claims gets them from the verifier, with the creation's credentials.
+test('S155: a creation action takes its claims from the verifier, never from the caller\'s data', async () => {
+  const k = await admitted('claims-create', ['conformance/m5/kids.poly']);
+  const { rt } = await loaded(k, { verifier: (c) => (c === 'ann' ? { kind: 'Person', attest: 'Verified', assurance: 3, principal: 'ann' } : null) });
+  try {
+    const forged = { kind: 'Person', attest: 'Verified', assurance: 3, principal: 'mallory' };
+    await assert.rejects(rt.create('kids.Shipment', { id: 's1', creation: { action: 'Start', data: { $claims: forged } } }), (e) => e instanceof RefusedDispatch && /S155/.test(e.message));
+    assert.ok((await rt.audit('s1')).some((x) => x.rule === 'S155'));
+    await rt.create('kids.Shipment', { id: 's2', creation: { action: 'Start', data: {} }, credentials: 'ann' });
+    assert.equal((await rt.getState('s2')).state.owner, 'ann');
+    assert.equal(rt.lineageOf('s2', 1).origin.principal, 'ann');
+  } finally { await rt.close(); }
+});
+
+// Review of M5b, B3: K11 is kept by a machine whose actions take claims, whatever other stage sets its assumptions.
+test('PD5-A10: a machine with claims that spawns children still lists K11', async () => {
+  const { checkFile } = await import('@poly/check');
+  const { join } = await import('node:path');
+  const { ROOT } = await import('./helpers.mjs');
+  const r = await checkFile(join(ROOT, 'conformance/m5/kids.poly'), { root: join(ROOT, '.poly', 'test-kids-k11') });
+  const order = r.machines.find((m) => m.machine === 'Order');
+  assert.ok(order.instance.kernelAssumptions.includes('K11'), JSON.stringify(order.instance.kernelAssumptions));
+});
+
+// Review of M5b, B2: an exported witness of a machine with claims walks through the runtime with its claims given to
+// the verifier, so the walk reproduces the finding instead of stopping at a refusal.
+test('S139: an exported witness test of a machine with claims fails while the defect is there', async () => {
+  const { readFileSync, writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { ROOT } = await import('./helpers.mjs');
+  const { checkFile, findWitness, witnessSpec } = await import('@poly/check');
+  const { runWitness } = await import('../packages/poly-check/dist/src/witness-runtime.js');
+  const dir = join(ROOT, '.poly', 'test-claims-witness');
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'refund.poly');
+  writeFileSync(file, readFileSync(join(ROOT, 'conformance/m5/refund.poly'), 'utf8').replace('    require caller.principal != requester else reject "self-approval"\n', ''));
+  const r = await checkFile(file, { root: dir });
+  const d = r.machines.flatMap((m) => m.diagnostics).find((x) => x.code === 'PL3001');
+  const spec = witnessSpec(findWitness(r, d.witness.id), dir);
+  const log = console.log;
+  console.log = () => {};
+  try { await assert.rejects(runWitness(spec), /not-self-approved/); } finally { console.log = log; }
+});

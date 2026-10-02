@@ -267,8 +267,31 @@ export class PolyRuntime {
     this.handlers.set(kind, handler);
   }
 
-  async create(machineId: string, opts: { id?: string; creation?: { action: string; data?: unknown } } = {}): Promise<{ id: string; state: Record<string, unknown> }> {
-    const r = await this.kernel.create(machineId, opts.id, opts.creation);
+  /**
+   * A creation action is a dispatch from outside too (review B1): caller-supplied $claims or $lineage are refused (S155),
+   * and an action with claims gets them from the verifier, with the creation's credentials (PD5.1.4).
+   */
+  async create(machineId: string, opts: { id?: string; creation?: { action: string; data?: unknown }; credentials?: unknown } = {}): Promise<{ id: string; state: Record<string, unknown> }> {
+    let creation = opts.creation;
+    if (creation) {
+      const id = opts.id ?? '';
+      const actionId = `$create:${creation.action}`;
+      const d = creation.data;
+      const reserved = d && typeof d === 'object' && !Array.isArray(d) ? ['$claims', '$lineage'].filter((k) => k in (d as object)) : [];
+      if (reserved.length) {
+        const reason = `PL1208 RESERVED_NAME: the creation ${creation.action} of ${id || machineId} supplies ${reserved.join(' and ')}, which only the runtime writes (S155)`;
+        await this.store.insertAudit({ at: this.now(), instanceId: id, action: creation.action, actionId, rule: 'S155', reason });
+        throw new RefusedDispatch(reason, 'S155');
+      }
+      if (this.claimed(machineId, creation.action)) {
+        let claims: Record<string, unknown> | null = null;
+        if (opts.credentials !== undefined) {
+          try { claims = await this.verifier(opts.credentials, { instance: id, action: creation.action, data: d ?? {}, actionId }); } catch { claims = null; }
+        }
+        creation = { ...creation, data: { ...((d ?? {}) as object), $claims: claims ?? null } };
+      }
+    }
+    const r = await this.kernel.create(machineId, opts.id, creation);
     return { id: r.instanceId, state: r.state };
   }
 
@@ -505,7 +528,9 @@ export class PolyRuntime {
   /** The chain, the signed heads, the closure and the binding to the journal while it exists (PT16). */
   async verifyRun(instanceId: string, trust: Record<string, string>): Promise<RunVerification> {
     const exists = await this.store.getInstance(instanceId);
-    return verifyRun(await this.chain(instanceId), await this.heads(instanceId), trust, exists ? await this.getJournal(instanceId) : null);
+    // PD5-A11, review B4: with the run's lineage records, so the lineage digest is bound here as in poly journal verify.
+    const lineage = new Map((this.store.db.prepare('SELECT seq, origin, intent, prev, digest FROM poly_lineage WHERE run = ?').all(instanceId) as { seq: number; origin: string; intent: string; prev: string | null; digest: string }[]).map((r) => [r.seq, { origin: JSON.parse(r.origin), intent: r.intent, prev: r.prev, digest: r.digest }]));
+    return verifyRun(await this.chain(instanceId), await this.heads(instanceId), trust, exists ? await this.getJournal(instanceId) : null, lineage);
   }
 
   /**

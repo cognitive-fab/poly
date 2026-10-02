@@ -86,3 +86,29 @@ test('PD5-A5: a configuration with a cross-scope send is checked over origin cla
   const origins = new Set(withClaims.graph.states.flatMap((s) => s.mu.map((m) => JSON.stringify(m.origin ? { claims: toPlain(m.origin.claims), intent: m.origin.intent } : null))));
   assert.deepEqual([...origins].sort(), [JSON.stringify({ claims: { kind: 'Agent' }, intent: 'xc.Sender.Send' }), JSON.stringify({ claims: { kind: 'Person' }, intent: 'xc.Sender.Send' })].sort());
 });
+
+// Review of M5b, B4: a hop inherits its previous hop's origin and intent, so a hop whose origin was rewritten and its
+// digest recomputed is a broken chain; and rt.verifyRun binds the step event's lineage digest.
+test('PD5.2.2a: a rewritten hop with a recomputed digest is a broken chain, and verifyRun binds the lineage digest', async () => {
+  const { lineageDigest } = await import('../packages/poly-runtime/dist/src/ledger-store.js');
+  const a = await admitted('lineage-rewrite', ['conformance/m5/lineage.poly']);
+  const { rt, clock } = await loaded(a, { verifier: () => ANN, ledger: undefined });
+  try {
+    handleWith(rt, 'lin.work', () => 'done');
+    await rt.create('lin.Peer', { id: 'peer' });
+    await rt.create('lin.Job', { id: 'job' });
+    await rt.dispatch('job', 'Start', { to: 'peer' }, { actionId: 's1', credentials: 'x' });
+    clock.advance(2_000);
+    await rt.worker.tick();
+    await rt.tick();
+    const seq = rt.store.db.prepare("SELECT seq FROM pr_journal WHERE instance_id = 'peer' AND action = 'Ping'").get().seq;
+    const l = rt.lineageOf('peer', seq);
+    const origin = { ...ANN, principal: 'the-cfo' };
+    rt.store.db.prepare('UPDATE poly_lineage SET origin = ?, intent = ?, digest = ? WHERE run = ? AND seq = ?').run(JSON.stringify(origin), 'lin.Job.Approve', lineageDigest('peer', seq, origin, 'lin.Job.Approve', l.prev), 'peer', seq);
+    const v = rt.verifyLineage('peer', seq);
+    assert.equal(v.ok, false);
+    assert.match(v.problem, /inherit/);
+    const run = await rt.verifyRun('peer');
+    assert.ok(run.problems.some((p) => /lineage/.test(p)), JSON.stringify(run));
+  } finally { await rt.close(); }
+});

@@ -145,9 +145,11 @@ export class LedgerStore extends Store {
       if (lineageDigest(r.run, r.seq, JSON.parse(r.origin), r.intent, r.prev) !== r.digest) return { ok: false, problem: `the lineage of ${r.run} at seq ${r.seq} does not recompute to its digest` };
       hops++;
       if (r.prev === null) return { ok: true, hops };
-      const p = this.db.prepare('SELECT run, seq FROM poly_lineage WHERE digest = ?').get(r.prev) as { run: string; seq: number } | undefined;
+      const p = this.db.prepare('SELECT run, seq, origin, intent FROM poly_lineage WHERE digest = ?').get(r.prev) as { run: string; seq: number; origin: string; intent: string } | undefined;
       if (!p) return { ok: false, problem: `the hop before ${r.run} at seq ${r.seq} is missing` };
-      at = p;
+      // PD5.2.2a, review B4: a hop inherits its previous hop's origin and intent.
+      if (p.origin !== r.origin || p.intent !== r.intent) return { ok: false, problem: `the hop of ${r.run} at seq ${r.seq} does not inherit the origin and intent of the hop before it` };
+      at = { run: p.run, seq: p.seq };
     }
     return { ok: false, problem: 'the chain does not end' };
   }

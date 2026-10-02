@@ -417,7 +417,8 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const at = { module: module.name, machine };
   const engine = `polyrun@${engines.polygraph}`;
   const joint = checkJoint(module, machine);
-  mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9'];
+  // Review B3: K11 stays when the machine's actions take claims (PD5.5).
+  mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9', ...(mc.instance!.kernelAssumptions.includes('K11') ? ['K11'] : [])];
   mc.instance!.jointStates = joint.states;
   mc.vacuous.push(...vacuousRecords(joint.vacuous));
   const out: Diagnostic[] = [];
