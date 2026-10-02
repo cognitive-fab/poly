@@ -76,3 +76,8 @@ test('a manifest entry without its retry bound is refused at load (S120)', async
   writeFileSync(b.certificate, JSON.stringify(cert));
   await assert.rejects(load(b.build, { certificate: b.certificate, trust: b.trust }), /declares no retry\.maxAttempts.*S120/);
 });
+
+test('polyrun\'s own workers cannot be started beside the OutboxIntent worker (S119)', async () => {
+  const rt = await load(a.build, { certificate: a.certificate, trust: a.trust });
+  try { assert.throws(() => rt.kernel.startWorkers(), /use rt\.startWorkers \(S119\)/); } finally { await rt.close(); }
+});

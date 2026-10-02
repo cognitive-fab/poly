@@ -352,6 +352,8 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
       ...(opts.now ? { now: opts.now } : {}),
     });
     recheckCopy(verified);
+    // S119: polyrun's own effect worker must never run beside the one that hosts OutboxIntent.
+    (kernel as unknown as { startWorkers: () => never }).startWorkers = () => { throw new Error('polyrun\'s workers do not run under poly-runtime; use rt.startWorkers (S119)'); };
   } catch (e) {
     await store.close();
     if (e instanceof LoadError) throw e;
