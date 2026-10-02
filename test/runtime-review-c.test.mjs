@@ -199,8 +199,9 @@ test('polywatch: a failing message recovery does not starve the message pass or 
   const { rt } = await loaded(a);
   const seen = { messages: 0, audits: 0 };
   rt.recoverMessages = async () => { throw new Error('recovery down'); };
-  const tm = rt.kernel.workers.tickMessages.bind(rt.kernel.workers);
-  rt.kernel.workers.tickMessages = async (...x) => { seen.messages++; return tm(...x); };
+  // M5a step 7 (PT9.9): the message pass is the runtime's, which gates cross-scope messages before polyrun delivers.
+  const tm = rt.tickMessages.bind(rt);
+  rt.tickMessages = async (...x) => { seen.messages++; return tm(...x); };
   const au = rt.auditRefusals.bind(rt);
   rt.auditRefusals = async () => { seen.audits++; return au(); };
   const err = console.error;
