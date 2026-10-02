@@ -9,8 +9,10 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+assertNotExperimentTree(ROOT);
 const [source = 'C:/Users/jjdub/code/polyaxion', commit = 'c37c60e'] = process.argv.slice(2);
 const PATHS = [
   'packages/polyaxion/src', 'packages/polyaxion/package.json', 'packages/polyaxion/LICENSE',

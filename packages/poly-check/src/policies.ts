@@ -15,7 +15,6 @@ import { join } from 'node:path';
 import { checkPolicies, policyProgram, diag, type Diagnostic, type Module, type Policy, type Verdict } from '@poly/core';
 import { lowerPolicyScope, type PolicyDoc } from '@poly/lower';
 import { policyFacts, checkNever, validatePolicy } from '@poly/ref';
-import { polyaxionPeer, loadPolyaxion, policyEngine } from '@poly/runtime';
 
 export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'policy-tv' | 'never';
 
@@ -43,6 +42,7 @@ export async function policyReports(module: Module, program: Module[], root: str
   const typed = checkPolicies(module, facts);
   const scopes = new Map<string, Policy[]>();
   for (const p of policies) { if (!scopes.has(p.scope)) scopes.set(p.scope, []); scopes.get(p.scope)!.push(p); }
+  const { polyaxionPeer, loadPolyaxion, policyEngine } = await import('@poly/runtime');
   const refFacts = policyFacts(program);
   const out: PolicyReport[] = [];
   for (const [scope, ps] of scopes) {

@@ -45,6 +45,8 @@ test(`S71: every conformance and example source (${SOURCES.length}) prints as Ty
   for (const f of SOURCES) {
     const p = parse(readFileSync(f, 'utf8'));
     if (!p.module) continue; // a syntax-error case has no AST to print
+    // PT1.1a: a policy has no embedded form; its module is a .policy.poly file.
+    if (p.module.decls.some((d) => d.kind === 'Policy')) continue;
     const r = readEmbedded(printModule(p.module), f);
     assert.ok(r.module, `${f}: ${JSON.stringify(r.diagnostics)}`);
     assert.equal(digest(r.module), digest(p.module), `${f}\n${firstDifference(p.module, r.module)}`);
@@ -59,7 +61,7 @@ test('S71, S84: every printed source passes tsc --noEmit against the declaration
   mkdirSync(dir, { recursive: true });
   SOURCES.forEach((f, i) => {
     const p = parse(readFileSync(f, 'utf8'));
-    if (p.module) writeFileSync(join(dir, `${String(i).padStart(3, '0')}-${basename(f, '.poly')}.ts`), printModule(p.module));
+    if (p.module && !p.module.decls.some((d) => d.kind === 'Policy')) writeFileSync(join(dir, `${String(i).padStart(3, '0')}-${basename(f, '.poly')}.ts`), printModule(p.module));
   });
   const r = tsc(tsconfig(dir, ['*.ts']));
   // S84: a record or map literal as an operand is lit({ … }), so no exemption is needed.

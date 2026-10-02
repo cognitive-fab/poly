@@ -11,7 +11,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { signRecord, type SignedRecord } from '@poly/core';
-import { openJournal } from '@poly/runtime';
 import { personKey } from './admit.js';
 import { lookupWitness } from './witness.js';
 
@@ -21,6 +20,7 @@ const now = () => new Date().toISOString();
 
 /** The approval record for an intent's latest escalation in a store. */
 export async function approvalRecord(db: string, intentId: string, by: string, keyFile: string): Promise<SignedRecord> {
+  const { openJournal } = await import('@poly/runtime');
   const reader = openJournal(db);
   try {
     let found: { hash: string; seq: number } | null = null;
