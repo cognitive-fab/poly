@@ -443,7 +443,7 @@ class Reader {
   }
 
   private stmt(node: ts.Expression): A.Stmt {
-    const c = this.call(node, 'require', 'reject', 'let_', 'set', 'setEntry', 'when', 'match', 'forEach', 'emit', 'decide', 'after', 'cancel', 'spawn', 'send', 'signal');
+    const c = this.call(node, 'require', 'reject', 'let_', 'set', 'setEntry', 'when', 'match', 'forEach', 'emit', 'decide', 'adjudicate', 'after', 'cancel', 'spawn', 'send', 'signal');
     const n = c.node;
     switch (c.name) {
       case 'require': {
@@ -517,6 +517,14 @@ class Reader {
         const [k, args] = this.argsOf(c, 2, 2);
         base.target = this.str(k);
         base.args = this.args(args);
+        break;
+      }
+      case 'adjudicate': {
+        // PD2.4, S129: adjudicate('d', 'Correct' | 'Wrong').
+        const [d, o] = this.argsOf(c, 2, 2);
+        base.target = this.str(d);
+        base.modifier = this.str(o);
+        if (base.modifier !== 'Correct' && base.modifier !== 'Wrong') this.fail(o, 'an adjudication is Correct or Wrong');
         break;
       }
       case 'after': {

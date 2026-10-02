@@ -368,7 +368,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   // ── stage 3b: decisions (PD1.4d, S75) ─────────────────────────────────
   if (ref.model.decisions.size) {
     t0 = performance.now();
-    const ungated = ref.findings.filter((f) => f.code === 'PL6201');
+    const ungated = ref.findings.filter((f) => f.code === 'PL6201' || f.code === 'PL6203');
     mc.diagnostics.push(...ungated);
     mc.stages.push({ stage: 'decisions', status: 'ran', engine: 'poly-ref', verdict: verdictOf(ungated), ms: performance.now() - t0, note: `${ref.model.decisions.size} decision${ref.model.decisions.size === 1 ? '' : 's'}, each answer at each interval of its confidence and margin (PD1.4b); the completion step alone (S75)` });
   }
@@ -660,7 +660,7 @@ export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]
   const out = [...fromPolygraph];
   const have = new Set(out.map(mergeKey));
   for (const f of fromRef) {
-    if (f.code === 'PL3201' || f.code === 'PL3301' || f.code === 'PL4001' || f.code === 'PL4002' || f.code === 'PL6201') continue; // stages 2b and 2c report deadlocks and liveness, stage 3 path properties
+    if (f.code === 'PL3201' || f.code === 'PL3301' || f.code === 'PL4001' || f.code === 'PL4002' || f.code === 'PL6201' || f.code === 'PL6203') continue; // stages 2b and 2c report deadlocks and liveness, stage 3 path properties
     if (have.has(mergeKey(f))) continue;
     // Finding 6: an escape or bound is kept per field, and poly-ref's exploration cap (no field) on its own.
     if (f.code === 'PL3003' && f.property && refOnly.has(f.property)) {

@@ -56,7 +56,7 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
   implies: { prec: 9, assoc: 'right' },
 };
 
-const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for', 'decide']);
+const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for', 'decide', 'adjudicate']);
 const LATER_TOP_LEVEL = new Set(['policy', 'workflow', 'world']);
 
 export function parse(src: string): ParseResult {
@@ -895,6 +895,13 @@ class Parser {
       case 'decide':
         base.target = this.ident('a decision name');
         base.args = this.args();
+        break;
+      case 'adjudicate':
+        // PD2.4, S129: `adjudicate d as Correct | Wrong`.
+        base.target = this.ident('a decision name');
+        this.expect('as');
+        if (!this.at('Correct') && !this.at('Wrong')) this.fail('expected Correct or Wrong');
+        base.modifier = this.ident();
         break;
       case 'signal':
         base.extra.push(this.ident('a child key'));

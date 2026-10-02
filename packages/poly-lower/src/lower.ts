@@ -13,7 +13,7 @@ export interface LowerOptions {
   fault?: Fault;
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry';
 
 export interface Lowered {
   machine: string;
@@ -252,6 +252,12 @@ function breakArtefact(fault: Fault, files: Lowered['files'], contract: Record<s
     const entry = Object.values(man.effects).find((e) => e.onSuccess);
     if (entry) { entry.onSuccess = { ...entry.onSuccess, action: `${entry.onSuccess.action}Broken` }; files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
   }
+  // PD2.4, S129: an outcome kind that names another decision; the read-back expects the one the handlers adjudicate.
+  if (fault === 'outcome-entry' && files['effects.manifest.json']) {
+    const man = JSON.parse(files['effects.manifest.json']) as { effects: Record<string, { outcome?: { decision: string } }> };
+    const entry = Object.values(man.effects).find((e) => e.outcome);
+    if (entry) { entry.outcome = { decision: `${entry.outcome!.decision}Broken` }; files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
+  }
   if (fault === 'path-invariant') rewrite('effect-invariants.mjs', /<= (\d+)/, (m) => `<= ${Number(m.slice(3)) + 1}`);
   if (fault === 'compose-invariant') rewrite('invariants.compose.mjs', /pred: \(joint\) => /, () => 'pred: (joint) => !');
   if (fault === 'liveness-goal') rewrite('liveness.mjs', /goal: \(s\) => /, () => 'goal: (s) => !');
@@ -309,7 +315,7 @@ function mapUpdated(body: A.Stmt[]): Set<string> {
 }
 
 function emitsAny(body: A.Stmt[]): boolean {
-  return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel' || s.op === 'spawn' || s.op === 'signal' || s.op === 'send' || s.op === 'decide')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))) || (s.kind === 'For' && emitsAny(s.body)));
+  return body.some((s) => (s.kind === 'Intent' && (s.op === 'emit' || s.op === 'after' || s.op === 'cancel' || s.op === 'spawn' || s.op === 'signal' || s.op === 'send' || s.op === 'decide' || s.op === 'adjudicate')) || (s.kind === 'If' && (emitsAny(s.then) || emitsAny(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => emitsAny(a.body))) || (s.kind === 'For' && emitsAny(s.body)));
 }
 
 /** PT6.1, S137: the retry of an effect with no retry clause, polyrun's own default written out. */
@@ -359,7 +365,27 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Recor
     entry.decision = { provider: provider?.value ?? null, result: resultValues(tyOfTypeExpr(d.result, env), env, facts), ...(band ? { band: [band.lo, band.hi] } : {}) };
     out.push([`decision.${d.name}`, entry]);
   }
+  // PD2.4, S129: each adjudicated decision's outcome kind, class none, tried once, with no completion; its handler is
+  // built into the runtime, which writes the outcome event in the adjudicating step's transaction.
+  for (const name of adjudicated(facts.machine)) {
+    out.push([`outcome.${name}`, { payloadSchema: { outcome: { type: 'string', required: true } }, retry: { maxAttempts: 1, baseMs: 500, timeoutMs: 30_000 }, class: 'none', outcome: { decision: name } }]);
+  }
   return { effects: Object.fromEntries(out) };
+}
+
+/** The decisions a machine's handlers adjudicate (PD2.4), sorted. */
+export function adjudicated(m: A.Machine): string[] {
+  const found = new Set<string>();
+  const walk = (body: A.Stmt[]): void => {
+    for (const s of body) {
+      if (s.kind === 'Intent' && s.op === 'adjudicate') found.add(s.target);
+      if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); }
+      if (s.kind === 'Match') for (const a of s.arms) walk(a.body);
+      if (s.kind === 'For') walk(s.body);
+    }
+  };
+  for (const it of m.items) if (it.kind === 'Handler') walk(it.body);
+  return [...found].sort();
 }
 
 /** A completion as the manifest carries it: constants as `data`, and a bound reply as `map` (PD1.7, S79). */

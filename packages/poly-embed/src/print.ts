@@ -218,6 +218,7 @@ class Printer {
     switch (s.op) {
       case 'emit': return `${this.use('emit')}(${q(s.target)}, ${this.args(s.args)})`;
       case 'decide': return `${this.use('decide')}(${q(s.target)}, ${this.args(s.args)})`;
+      case 'adjudicate': return `${this.use('adjudicate')}(${q(s.target)}, ${q(s.modifier!)})`;
       case 'after': return `${this.use('after')}(${q(s.modifier!)}, ${q(s.target)}, ${this.args(s.args)}, ${q(s.as!)}${idx})`;
       case 'cancel': return `${this.use('cancel')}(${q(s.target)}${idx})`;
       case 'send': return `${this.use('send')}(${this.expr(s.to!, 0)}, ${q(s.target)}, ${this.args(s.args)}${s.as ? `, ${q(s.as)}` : ''})`;

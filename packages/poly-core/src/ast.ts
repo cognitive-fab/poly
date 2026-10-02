@@ -304,13 +304,13 @@ export interface PCtor extends NodeBase {
 /** emit, after, cancel, spawn, send, signal (PS2.2, PT6). Parsed in M0, lowered from M1 (PL0901). */
 export interface IntentStmt extends NodeBase {
   kind: 'Intent';
-  op: 'emit' | 'after' | 'cancel' | 'spawn' | 'send' | 'signal' | 'decide';
-  /** emit/after/send/signal: the action or effect name; spawn: the machine; cancel: the timer key; decide: the decision. */
+  op: 'emit' | 'after' | 'cancel' | 'spawn' | 'send' | 'signal' | 'decide' | 'adjudicate';
+  /** emit/after/send/signal: the action or effect name; spawn: the machine; cancel: the timer key; decide, adjudicate: the decision. */
   target: string;
   args: NamedArg[];
   /** send: the address expression. */
   to: Expr | null;
-  /** after: the duration literal; spawn: 'detached' or null. */
+  /** after: the duration literal; spawn: 'detached' or null; adjudicate: 'Correct' or 'Wrong' (PD2.4, S129). */
   modifier: string | null;
   /** after/spawn/send: the `as` name. */
   as: string | null;

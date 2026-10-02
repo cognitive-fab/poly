@@ -277,6 +277,7 @@ class Printer {
       case 'send': return `send ${this.expr(s.to!, 0)} <- ${call}${s.as ? ` as ${s.as}` : ''}`;
       case 'signal': return `signal ${s.extra[0]}${idx} -> ${call}`;
       case 'decide': return `decide ${call}`;
+      case 'adjudicate': return `adjudicate ${s.target} as ${s.modifier}`;
       case 'spawn': {
         let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}${idx}`;
         for (let k = 0; k < s.extra.length; k += 2) {

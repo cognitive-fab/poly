@@ -433,6 +433,10 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
           `${ind}__E.push({ kind: "timer", key: ${keyOf(s.as)}, fireIn: ${q(isoDuration(durationMs(s.modifier)!))}, action: ${q(s.target)}, data: { ${data.join(', ')} } });`,
         ];
       }
+      if (s.op === 'adjudicate') {
+        // PD2.4, S129: an outcome intent of kind outcome.<d>; the runtime links it to the decision's event.
+        return [`${ind}__E.push({ kind: ${q(`outcome.${s.target}`)}, payload: { outcome: ${q(s.modifier!)} } });`];
+      }
       if (s.op === 'decide') {
         // PD1.7: a decision is an effect intent of kind decision.<d>.
         const d = cx.facts.decisions.get(s.target);

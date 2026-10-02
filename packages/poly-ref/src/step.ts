@@ -141,7 +141,11 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
           });
           return out;
         };
-        if (st.op === 'decide') {
+        if (st.op === 'adjudicate') {
+          // PD2.4, S129: an effect of class none, kind outcome.<d>, carrying the outcome.
+          if (!M.decisions.has(st.target)) throw new EvalError(`poly-ref: no decision ${st.target}`);
+          E.push({ type: 'effect', kind: `outcome.${st.target}`, payload: { outcome: st.modifier! } });
+        } else if (st.op === 'decide') {
           // PD1.7: an effect intent of kind decision.<d>, its payload the decision's arguments.
           const d = M.decisions.get(st.target);
           if (!d) throw new EvalError(`poly-ref: no decision ${st.target}`);

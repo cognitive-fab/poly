@@ -84,6 +84,8 @@ export declare function provider(kind: string): DecisionItem;
 export declare function timeout(duration: string): DecisionItem;
 export declare function band(lo: number, hi: number): DecisionItem;
 export declare function decide(decision: string, args: Args): Stmt;
+/** `adjudicate d as Correct | Wrong` (PD2.4, S129). */
+export declare function adjudicate(decision: string, outcome: 'Correct' | 'Wrong'): Stmt;
 
 // ── statements ─────────────────────────────────────────────────────────────
 export declare function require(cond: Expr, reason: string): Stmt;

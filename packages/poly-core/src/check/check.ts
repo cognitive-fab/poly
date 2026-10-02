@@ -1528,6 +1528,10 @@ class Checker {
         else if (s.op === 'signal') this.signal(s, scope);
         else if (s.op === 'send') this.send(s, scope);
         else if (s.op === 'decide') this.decide(s, scope);
+        else if (s.op === 'adjudicate') {
+          // PD2.4, S129: the decision is the machine's own.
+          if (!this.facts!.decisions.has(s.target)) this.err('PL1001', s, `adjudicate ${s.target}: ${s.target} is not a declared decision`);
+        }
         else if (s.op === 'cancel') {
           const armedKey = s.index ? [...this.facts!.timerKeys].some((k) => k.startsWith(s.target) && /^\d+$/.test(k.slice(s.target.length))) : this.facts!.timerKeys.has(s.target);
           if (!armedKey) this.err('PL1001', s, `cancel ${s.target}${s.index ? '[…]' : ''}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);

@@ -26,6 +26,7 @@ const CODE = {
   PL4001: ['PATH_PROPERTY', 'finding', 'effects'],
   PL4002: ['EMIT_WITHOUT_STATE_CHANGE', 'finding', 'effects'],
   PL6201: ['UNGATED_DECISION', 'finding', 'effects'],
+  PL6203: ['ADJUDICATION_WITHOUT_DECISION', 'finding', 'effects'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -175,6 +176,14 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     }
   }
 
+  // PD2.4, S129: an accepted adjudication of d is reachable only after an accepted ok completion of d on the same
+  // path, or the runtime would have no decision event to link the outcome to. Decided on the product of the graph
+  // with one bit per decision, "taken"; BFS gives a shortest witness.
+  for (const d of M.decisions.values()) {
+    const hit = adjudicationWithoutDecision(g, d.name, d.ok?.action ?? null);
+    if (hit) findings.push(finding('PL6203', d.id, `${hit[hit.length - 1].label.action} adjudicates ${d.name} on a path where no ${d.ok?.action ?? 'ok completion'} was accepted, so there is no decision to link the outcome to (PD2.4)`, trace(hit), { property: d.name, state: g.states[hit[hit.length - 1].from] }));
+  }
+
   // Liveness (PS6.4): each fair component that never reaches the goal, with its lasso.
   for (const p of M.liveness) {
     if (p.quant || !p.fair) continue; // refused by the checker in a machine (S56)
@@ -223,6 +232,28 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     model: M,
     identityEmits,
   };
+}
+
+/** PL6203: the shortest path to an accepted step that adjudicates `decision` with no accepted `okAction` before it. */
+export function adjudicationWithoutDecision(g: Graph<State>, decision: string, okAction: string | null): Edge<State>[] | null {
+  const kind = `outcome.${decision}`;
+  const seen = new Set<string>(['0:0']);
+  const queue: { node: number; taken: boolean; path: Edge<State>[] }[] = [{ node: 0, taken: false, path: [] }];
+  while (queue.length) {
+    const { node, taken, path } = queue.shift()!;
+    for (const k of g.out[node]) {
+      const e = g.edges[k];
+      const accepted = e.label.verdict.kind === 'accepted';
+      if (accepted && !taken && e.label.effects.some((x) => x.kind === kind)) return [...path, e];
+      if (e.to === null) continue;
+      const next = taken || (accepted && okAction !== null && e.label.action === okAction);
+      const key = `${e.to}:${next ? 1 : 0}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push({ node: e.to, taken: next, path: [...path, e] });
+    }
+  }
+  return null;
 }
 
 /**

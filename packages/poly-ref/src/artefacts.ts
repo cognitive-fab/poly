@@ -72,7 +72,14 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     else {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { effects: Record<string, Record<string, unknown>> };
       const byKind = new Map(effects.map((e) => [M.effects.get(e.name)!.kind, e]));
-      differ('effects.manifest.json kinds', Object.keys(manifest.effects).sort(), [...byKind.keys(), ...decisions.map((d) => M.decisions.get(d.name)!.kind)].sort());
+      // PD2.4, S129: an adjudicated decision's outcome kind, read from the handlers here, not from the lowering.
+      const judged = new Set<string>();
+      const walk = (body: A.Stmt[]): void => { for (const s of body) { if (s.kind === 'Intent' && s.op === 'adjudicate') judged.add(s.target); if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); } if (s.kind === 'Match') for (const a of s.arms) walk(a.body); if (s.kind === 'For') walk(s.body); } };
+      for (const h of M.handlers.values()) walk(h.body);
+      differ('effects.manifest.json kinds', Object.keys(manifest.effects).sort(), [...byKind.keys(), ...decisions.map((d) => M.decisions.get(d.name)!.kind), ...[...judged].map((d) => `outcome.${d}`)].sort());
+      for (const d of judged) {
+        differ(`effects.manifest.json outcome.${d}`, manifest.effects[`outcome.${d}`] ?? null, { payloadSchema: { outcome: { type: 'string', required: true } }, retry: { maxAttempts: 1, baseMs: 500, timeoutMs: 30000 }, class: 'none', outcome: { decision: d } });
+      }
       for (const [kind, e] of byKind) {
         const entry = manifest.effects[kind];
         if (!entry) continue;

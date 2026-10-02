@@ -33,7 +33,7 @@ function sources(dir) {
 }
 
 // Every directory that holds poly sources, and nothing filtered out of them.
-const ALL = ['examples', 'conformance', join('test', 'fixtures'), 'experiments'].flatMap((d) => sources(join(ROOT, d)));
+const ALL = ['examples', 'conformance', join('test', 'fixtures'), 'experiments', join('packages', 'poly-runtime', 'model')].flatMap((d) => sources(join(ROOT, d)));
 const OUT = join(ROOT, '.poly', 'test-build', 'standing');
 
 test('the exception is an explicit list, equal to poly-lower\'s faults', () => {
