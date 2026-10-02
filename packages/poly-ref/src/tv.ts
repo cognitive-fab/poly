@@ -174,6 +174,14 @@ export async function translationValidate(module: Module, machineName: string, b
       ['missing', Object.fromEntries(Object.entries(good).filter(([k]) => k !== '$claims'))],
       ['malformed', { ...good, $claims: 'not-claims' }],
       ...fields.map((f): [string, Record<string, unknown>] => [`${f.name} outside its domain`, { ...good, $claims: { ...(good.$claims as object), [f.name]: f.type.k === 'principal' ? '' : '__outside__' } }]),
+      // Review A-F5: just past an integer range, a null or non-string principal, an enum name spelt otherwise.
+      ...fields.flatMap((f): [string, Record<string, unknown>][] => {
+        const withValue = (why: string, v: unknown): [string, Record<string, unknown>] => [why, { ...good, $claims: { ...(good.$claims as object), [f.name]: v } }];
+        if (f.type.k === 'int') { const hi = f.type.hi; return [withValue(`${f.name} = hi + 1`, hi + 1), withValue(`${f.name} as a string`, String(hi))]; }
+        if (f.type.k === 'principal') return [withValue(`${f.name}: null`, null), withValue(`${f.name}: 7`, 7)];
+        if (f.type.k === 'union') { const c = M.unions.get(f.type.name)!.ctors[0].name; return [withValue(`${f.name} spelt otherwise`, c.toLowerCase() === c ? c.toUpperCase() : c.toLowerCase()), withValue(`${f.name} tagged`, { $: c })]; }
+        return [];
+      }),
       ['with an extra field', { ...good, $claims: { ...(good.$claims as object), extra: 1 } }],
     ];
     for (const [i, s] of g.states.entries()) {

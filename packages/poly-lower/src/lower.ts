@@ -93,6 +93,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const rec = env.records.get(by.type)!;
     claimed.set(a.name, Object.fromEntries(rec.fields.map((f) => { const ty = tyOfTypeExpr(f.type, env); return [f.name, ty.k === 'principal' ? 'principal' : ty.k === 'int' ? Array.from({ length: ty.hi - ty.lo + 1 }, (_, k) => ty.lo + k) : ty.k === 'bool' ? [false, true] : env.unions.get((ty as { name: string }).name)!.ctors.map((c) => c.name)]; })));
   }
+  // PS3.2's claims row as one expression: an object with exactly the type's fields, each in its domain.
+  const claimsOkText = "((c, spec) => !!c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length === Object.keys(spec).length && Object.entries(spec).every(([f, d]) => d === 'principal' ? typeof c[f] === 'string' && c[f].length > 0 : d.includes(c[f])))";
   const claimsOf = (action: string): Ty | null => { const by = handlers.get(action)?.by; return by ? { k: 'record', name: by.type } : null; };
   const acceptors: string[] = [];
   if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length || claimed.size) {
@@ -110,7 +112,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     // PS3.2's claims row (S101): claims missing, malformed or outside their domains, after row 2 and before the guards.
     for (const [name, spec] of claimed) {
       if (opts.fault === 'skip-claims') continue;
-      lines.push(`      if (action === ${JSON.stringify(name)} && !((c, spec) => !!c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length === Object.keys(spec).length && Object.entries(spec).every(([f, d]) => d === 'principal' ? typeof c[f] === 'string' && c[f].length > 0 : d.includes(c[f])))(proposal.$claims, ${JSON.stringify(spec)})) return reject('claims-unverified');`);
+      lines.push(`      if (action === ${JSON.stringify(name)} && !${claimsOkText}(proposal.$claims, ${JSON.stringify(spec)})) return reject('claims-unverified');`);
     }
     if (guards.length) {
       for (const g of guards) lines.push(`      if (${expr(g.cond, stateCx)}) return reject(${JSON.stringify(g.reason)});`);
@@ -123,7 +125,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const hcx: Cx = { ...base, mode: 'handler', stateVar: 'model', dataVar: 'proposal' };
     const body = stmts(h.body, hcx, '      ', emitOpts);
     // PD5.1.2: the claims binder reads the label's claims, carried under $claims (S155).
-    if (h.by) body.unshift(`      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims ?? {} };`);
+    // Review A-F2: sam-pattern runs this acceptor even after the first one rejects, so the body is guarded by the row too.
+    if (h.by) body.unshift(`      if (!${claimsOkText}(proposal.$claims, ${JSON.stringify(claimed.get(a.name))})) return reject('claims-unverified');`, `      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims };`);
     // S55: each map the handler writes entry by entry gathers its entries in an accumulator.
     for (const f of mapUpdated(h.body)) body.unshift(`      let __m_${f} = model[${JSON.stringify(f)}];`);
     const written = mayWrite(h.body, layout);
@@ -587,7 +590,11 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
   // PD5.1.3c: the principal representatives p1..pn, n the Principal positions of the state plus one, at least 2.
   if (t.k === 'principal') {
     if (!m) throw new Error('poly-lower: a principal domain needs its machine (PD5.1.3c)');
-    const n = Math.max(2, m.fields.reduce((k, f) => k + principalPositions(tyOfTypeExpr(f.type, env), env, new Set()), 0) + 1);
+    const state = m.fields.reduce((k, f) => k + principalPositions(tyOfTypeExpr(f.type, env), env, new Set()), 0);
+    // Review A-F3: plus the most principals one label carries (its parameters and its claims), at least one.
+    const handlers = m.items.filter((i): i is A.Handler => i.kind === 'Handler');
+    const label = Math.max(1, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.reduce((k, p) => k + principalPositions(tyOfTypeExpr(p.type, env), env, new Set()), 0) + (handlers.find((h) => h.action === a.name)?.by ? principalPositions({ k: 'record', name: handlers.find((h) => h.action === a.name)!.by!.type }, env, new Set()) : 0)));
+    const n = Math.max(2, state + label);
     return Array.from({ length: n }, (_, i) => `p${i + 1}`);
   }
   if (t.k === 'ref') {
@@ -677,7 +684,8 @@ function principalPositions(t: Ty, env: TypeEnv, seen: Set<string>): number {
   if (t.k === 'principal') return 1;
   if (t.k === 'record' && !seen.has(t.name)) return env.records.get(t.name)!.fields.reduce((n, f) => n + principalPositions(tyOfTypeExpr(f.type, env), env, new Set([...seen, t.name])), 0);
   if (t.k === 'union' && !seen.has(t.name)) return env.unions.get(t.name)!.ctors.reduce((n, c) => n + c.fields.reduce((k, f) => k + principalPositions(tyOfTypeExpr(f.type, env), env, new Set([...seen, t.name])), 0), 0);
-  if (t.k === 'map') return principalPositions(t.value, env, seen);
+  // Review A-F3: a map holds one value per key.
+  if (t.k === 'map') return principalPositions(t.value, env, seen) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? env.unions.get(t.key.name)!.ctors.length : 1);
   return 0;
 }
 

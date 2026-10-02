@@ -284,7 +284,7 @@ export function transition(M: RMachine, s: State, action: string, d: Record<stri
     if (p.strict && !inCheckDomain(d[p.name], p, M)) return { verdict: { kind: 'rejected', reason: 'outside-check-domain' }, next: s, effects: [] };
   }
   // PD5.1.2c, S101: claims missing, malformed or outside their domains, applied before the module like row 2.
-  if (a.claims && !inType(d.$claims ?? null, a.claims.type, M)) return { verdict: { kind: 'rejected', reason: 'claims-unverified' }, next: s, effects: [] };
+  if (a.claims && !claimsInType(d.$claims ?? null, a.claims.type, M)) return { verdict: { kind: 'rejected', reason: 'claims-unverified' }, next: s, effects: [] };
   const h = M.handlers.get(action);
   if (!h) return { verdict: { kind: 'unhandled' }, next: s, effects: [] };
   const r = runHandler(M, h, s, d, self);
@@ -293,6 +293,12 @@ export function transition(M: RMachine, s: State, action: string, d: Record<stri
   const next: State = {};
   for (const f of M.fieldNames) next[f] = r.w.has(f) ? r.w.get(f)! : s[f];
   return { verdict: { kind: 'accepted' }, next, effects: r.E };
+}
+
+/** PS3.2's claims row: a value of the claims type in which every principal is asserted, a non-empty string (review A-F6). */
+function claimsInType(v: Value, t: RType, M: RMachine): boolean {
+  if (!inType(v, t, M) || t.k !== 'record' || !v || typeof v !== 'object' || !('fields' in v)) return false;
+  return M.records.get(t.name)!.fields.every((f) => f.type.k !== 'principal' || (typeof (v as { fields: Record<string, Value> }).fields[f.name] === 'string' && ((v as { fields: Record<string, Value> }).fields[f.name] as string).length > 0));
 }
 
 /** The initial state: each field's initial value (PS1.1). */

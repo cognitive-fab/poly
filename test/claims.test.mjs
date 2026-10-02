@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, format } from '@poly/lang';
 import { checkModule } from '@poly/core';
-import { ROOT } from './helpers.mjs';
+import { ROOT, build } from './helpers.mjs';
 
 const SRC = readFileSync(join(ROOT, 'conformance/m5/refund.poly'), 'utf8');
 const codes = (src) => { const r = parse(src); return r.module ? [...r.diagnostics, ...checkModule(r.module).diagnostics].map((d) => d.code) : r.diagnostics.map((d) => d.code); };
@@ -113,5 +113,65 @@ test('S155: a program that declares $claims or $lineage is PL1208', async () => 
   for (const name of ['"$claims"', '"$lineage"']) {
     const r = readEmbedded(ts(name), 'bad.ts');
     assert.deepEqual(checkModule(r.module).diagnostics.map((d) => d.code), ['PL1208'], name);
+  }
+});
+
+// ── review of M5b, part A ──────────────────────────────────────────────────
+
+// A-F2: a correct program that matches on a claims field is CLEAN: the handler's body never runs on bad claims.
+test('review A-F2: a handler that matches on a claims field checks CLEAN, and bad claims never reach its body', async () => {
+  const { checkFile } = await import('@poly/check');
+  const r = await checkFile(join(ROOT, 'conformance/m5/match-claims.poly'), { root: join(ROOT, '.poly', 'test-match-claims') });
+  assert.equal(r.verdict, 'CLEAN', JSON.stringify(r.machines.flatMap((m) => m.diagnostics).map((d) => d.message).slice(0, 2)));
+});
+
+// A-F3: the representatives cover the principals a state holds (a map counts each key) and the most a label carries.
+test('review A-F3: representatives cover a map of principals and a label with two principals', async () => {
+  const { checkMachine } = await import('@poly/ref');
+  for (const f of ['conformance/m5/reps-map.poly', 'conformance/m5/reps-label.poly']) {
+    const m = parse(readFileSync(join(ROOT, f), 'utf8')).module;
+    const r = checkMachine(m, 'M');
+    assert.deepEqual(r.findings.map((x) => x.code), ['PL3001'], f);
+  }
+});
+
+// A-F4: a claims field is an enum without payloads, an integer range or a Principal (PD5.1.2a, S103).
+test('review A-F4: a claims field of record, map, payload union, bool or claims type is refused', () => {
+  const p = (field, extra = '') => `module t\n\nenum Kind { Person, Agent }\ntype Inner = { k: Kind }\ntype Who = Nobody | Someone { k: Kind }\n${extra}claims Caller {\n  kind: Kind\n  ${field}\n}\n\nmachine M {\n  state { n : 0..1 = 0 }\n  action Go()\n  on Go() by caller: Caller {\n    n' = 1\n  }\n}\n`;
+  for (const f of ['inner: Inner', 'flags: map<Kind, bool>', 'who: Who', 'ok: bool', 'other: Other']) {
+    assert.deepEqual(codes(p(f, 'claims Other {\n  kind: Kind\n}\n')), ['PL1201'], f);
+  }
+});
+
+// A-F5, A-F6: translation validation probes a value just outside an integer range, a null or non-string principal, and
+// an enum spelt otherwise; poly-ref's row agrees with the lowered one on each.
+test('review A-F5, A-F6: the claims row is compared on out-of-range, null, non-string and misspelt claims', async () => {
+  const { checkMachine, transition } = await import('@poly/ref');
+  const m = parse(SRC).module;
+  const M = checkMachine(m, 'Refund').model;
+  const s = { status: { ctor: 'Idle', payload: {} }, requester: null, approver: null, amount: 0 };
+  const ok = { fields: { kind: { ctor: 'Person', payload: {} }, attest: { ctor: 'Verified', payload: {} }, assurance: 3, principal: 'p1' } };
+  assert.equal(transition(M, s, 'Request', { a: 2, $claims: ok }).verdict.kind, 'accepted');
+  for (const bad of [{ ...ok.fields, principal: null }, { ...ok.fields, assurance: 4 }]) {
+    assert.deepEqual(transition(M, s, 'Request', { a: 2, $claims: { fields: bad } }).verdict, { kind: 'rejected', reason: 'claims-unverified' });
+  }
+  // A lowered row that accepts more than the type (4 for 0..3; a null principal) is caught by translation validation.
+  const { translationValidate } = await import('@poly/ref');
+  const { writeFileSync: wf, readFileSync: rf } = await import('node:fs');
+  for (const [what, from, to] of [['assurance 4', '[0,1,2,3]', '[0,1,2,3,4]'], ['a null principal', "typeof c[f] === 'string' && c[f].length > 0", "c[f] !== ''"]]) {
+    const [b] = build(join(ROOT, 'conformance/m5/refund.poly'), `claims-tv-${what.split(' ').join('-')}`);
+    const file = join(b.dir, 'next.cjs');
+    const text = rf(file, 'utf8');
+    assert.ok(text.includes(from), what);
+    wf(file, text.split(from).join(to));
+    const r = await translationValidate(b.module, 'Refund', b.dir);
+    assert.ok(r.mismatches.length > 0, what);
+  }
+});
+
+// A-F7: a claims binder may not be a name the language reserves (pre, post, action, self, none).
+test('review A-F7: a claims binder named pre, post, action, self or none is refused', () => {
+  for (const b of ['pre', 'post', 'action', 'self', 'none']) {
+    assert.deepEqual(codes(prog('  kind: Kind\n  principal: Principal', 'first\' = ' + b + '.principal').replace('by caller: Caller', `by ${b}: Caller`)).filter((c) => c === 'PL1201').length >= 1, true, b);
   }
 });

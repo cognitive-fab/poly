@@ -432,6 +432,8 @@ class Checker {
         for (const f of d.fields) {
           // PD5.1.2a, S103: a claims field is an enum, an integer range or a Principal; Tri is refused as everywhere.
           if (d.claims && f.type.kind === 'TName' && f.type.name === 'Tri') { this.err('PL1203', f, `claims field ${d.name}.${f.name} is Tri; a claim is verified, so it is an enum such as Attest { Verified, Failed, Absent } (S103)`); continue; }
+          // Review A-F4, PD5.1.2a: an enum without payloads, an integer range or a Principal; int and string are PL1101 below.
+          if (d.claims && f.type.kind !== 'TInt' && f.type.kind !== 'TString' && f.type.kind !== 'TRange' && !(f.type.kind === 'TName' && (f.type.name === 'Principal' || this.env.unions.get(f.type.name)?.isEnum))) { this.err('PL1201', f, `claims field ${d.name}.${f.name} is ${f.type.kind === 'TName' ? f.type.name : f.type.kind.slice(1).toLowerCase()}; a claims field is an enum, an integer range or a Principal (PD5.1.2a, S103)`); continue; }
           if (this.tyOf(f.type).k === 'ref') this.err('PL0901', f, `an address inside a record is lowered after milestone M1: ${d.name}.${f.name}`);
           if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `field ${d.name}.${f.name} has no finite domain; give it a range or an enum type`);
         }
@@ -1505,6 +1507,8 @@ class Checker {
       if (!rec && !this.env.unions.has(h.by.type)) { this.err('PL1001', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: no claims type ${h.by.type}`); scope.params.set(h.by.name, ERR); }
       else if (!rec?.claims) { this.err('PL1201', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: ${h.by.type} is not a claims type (PD5.1.2)`); scope.params.set(h.by.name, ERR); }
       else if (scope.params.has(h.by.name)) this.err('PL1002', h, `on ${h.action}: ${h.by.name} names a parameter and the claims`);
+      // Review A-F7: a name the language gives a meaning is not a binder.
+      else if (['pre', 'post', 'action', 'self', 'none'].includes(h.by.name)) { this.err('PL1201', h, `on ${h.action} by ${h.by.name}: ${h.by.name} is a name of the language, not a binder`); scope.params.set(h.by.name, ERR); }
       else scope.params.set(h.by.name, { k: 'record', name: rec.name });
     }
     this.handlerAction = act;

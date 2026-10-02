@@ -78,8 +78,24 @@ export function alphaData(flat: Record<string, unknown>, action: string, M: RMac
   const a = M.actions.find((x) => x.name === action);
   if (!a) throw new Error(`poly-ref: no action ${action}`);
   const out: Record<string, Value> = Object.fromEntries(a.params.filter((p) => p.name in flat).map((p) => [p.name, structValue(flat[p.name], p.type, M)]));
-  if (a.claims && '$claims' in flat) out.$claims = flat.$claims === null ? null : structValue(flat.$claims, a.claims.type, M);
+  // Review A-F6: claims that are not exactly the type's flat form (a tagged object for an enum, say) are not claims.
+  if (a.claims && '$claims' in flat) out.$claims = flatClaims(flat.$claims, a.claims.type, M) ? structValue(flat.$claims, a.claims.type, M) : null;
   return out;
+}
+
+/** Whether a flat value is exactly a claims record: its fields, each an enum name, an integer in range, or a principal. */
+function flatClaims(x: unknown, t: RType, M: RMachine): boolean {
+  if (t.k !== 'record' || !x || typeof x !== 'object' || Array.isArray(x)) return false;
+  const fs = M.records.get(t.name)!.fields;
+  const o = x as Record<string, unknown>;
+  if (Object.keys(o).length !== fs.length) return false;
+  return fs.every((f) => {
+    const v = o[f.name];
+    if (f.type.k === 'principal') return typeof v === 'string' && v.length > 0;
+    if (f.type.k === 'int') return Number.isInteger(v) && (v as number) >= f.type.lo && (v as number) <= f.type.hi;
+    if (f.type.k === 'union') return typeof v === 'string' && !!M.unions.get(f.type.name)?.ctors.some((c) => c.name === v && c.fields.length === 0);
+    return false;
+  });
 }
 
 function structValue(x: unknown, t: RType, M: RMachine): Value {

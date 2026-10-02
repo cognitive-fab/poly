@@ -352,10 +352,14 @@ export function buildMachine(module: A.Module, machineName: string, opts: { prin
     if (t.k === 'principal') return 1;
     if (t.k === 'record' && !seen.has(t.name)) return (records.get(t.name)?.fields ?? []).reduce((n, f) => n + positions(f.type, new Set([...seen, t.name])), 0);
     if (t.k === 'union' && !seen.has(t.name)) return (unions.get(t.name)?.ctors ?? []).reduce((n, c) => n + c.fields.reduce((k, f) => k + positions(f.type, new Set([...seen, t.name])), 0), 0);
-    if (t.k === 'map') return positions(t.value, seen);
+    // Review A-F3: a map holds one value per key.
+    if (t.k === 'map') return positions(t.value, seen) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? (unions.get(t.key.name)?.ctors.length ?? 1) : 1);
     return 0;
   };
-  const principals = opts.principals ?? Math.max(2, fields.reduce((n, f) => n + positions(f.type, new Set()), 0) + 1);
+  // PS4.1c: the Principal positions of the state plus the most principals one label carries (at least one), and never
+  // fewer than 2 (S102, review A-F3).
+  const label = Math.max(1, ...actions.map((a) => a.params.reduce((n, p) => n + positions(p.type, new Set()), 0) + (a.claims ? positions(a.claims.type, new Set()) : 0)));
+  const principals = opts.principals ?? Math.max(2, fields.reduce((n, f) => n + positions(f.type, new Set()), 0) + label);
   return {
     principals,
     name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
