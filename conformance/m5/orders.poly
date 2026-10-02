@@ -1,0 +1,51 @@
+// AC4's program (PT8.1): an order whose charge the policies of scope "orders" govern. Charge is offered before the
+// stock is reserved, and a cancellation charges a fee, so the gate has something to deny.
+module orders
+
+enum Status { Open, Reserving, Reserved, Charging, Done, Cancelled }
+
+machine Order {
+  state { status : Status = Open }
+  terminal status in { Done, Cancelled }
+
+  action Reserve()
+  action Charge()
+  action Finish()
+  action Cancel()
+
+  on Reserve {
+    require status == Open else reject "not-open"
+    status' = Reserving
+    emit reserve(1)
+  }
+  on Charge {
+    require status in { Open, Reserving, Reserved } else reject "not-chargeable"
+    status' = Charging
+    emit charge(1)
+  }
+  on Finish {
+    require status == Charging else reject "not-charging"
+    status' = Done
+  }
+  on Cancel {
+    require status in { Open, Reserving, Reserved } else reject "too-late"
+    status' = Cancelled
+    emit fee(1)
+  }
+
+  effect reserve(n: 0..1) {
+    kind "stock.reserve"
+    labels { write:store }
+    class compensable
+  }
+  effect charge(n: 0..1) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+  }
+  effect fee(n: 0..1) {
+    kind "payment.fee"
+    labels { egress:external }
+    class irreversible
+  }
+}

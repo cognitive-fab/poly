@@ -1,0 +1,63 @@
+// The smallest program whose policy exercises each deliberately broken policy lowering (test/toolchain-faults.mjs):
+// a rule read through a machine that is not the emitter (an unknown condition, PS8.2), a deny rule, and a guard.
+module pf
+
+enum Level { Low, High }
+
+machine Meter {
+  state { level : Level = Low }
+  terminal level in { High }
+  action Raise()
+  action Alarm()
+  on Raise {
+    require level == Low else reject "high"
+    level' = High
+    emit ping(1)
+  }
+  on Alarm {
+    require level == Low else reject "high"
+    level' = High
+    emit alarm(1)
+  }
+  effect ping(n: 0..1) {
+    kind "meter.ping"
+    labels { exec }
+    class none
+  }
+  effect alarm(n: 0..1) {
+    kind "meter.alarm"
+    labels { egress:external }
+    class irreversible
+  }
+}
+
+machine Pump {
+  state { on : bool = false }
+  terminal on
+  action Start()
+  on Start {
+    require !on else reject "on"
+    on' = true
+    emit run(1)
+  }
+  effect run(n: 0..1) {
+    kind "pump.run"
+    labels { egress:external }
+    class irreversible
+  }
+}
+
+policy pf-policy {
+  scope "pf"
+  obligation high-blocks "No irreversible effect while the meter is high." rule {
+    when machine("pf.Meter").level == High
+    require effect.class != "irreversible" else deny
+  }
+  obligation ping-first "The pump runs only after a ping." machine {
+    states idle, pinged
+    initial idle
+    from idle when effect.kind == "meter.ping" -> pinged
+    deny in idle when effect.kind == "pump.run" reason "no-ping"
+    end idle, pinged
+  }
+}

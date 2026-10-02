@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { admit, AdmitError, CERTIFICATE_FAULTS } from '@poly/check';
 import { certificateProblems, certificateDigest, publicKeyOf } from '@poly/core';
 import { ROOT } from './helpers.mjs';
-import { CERTIFICATE_FAULT_LIST } from './toolchain-faults.mjs';
+import { CERTIFICATE_FAULT_LIST, POLICY_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
+import { polyaxionPeer } from '@poly/runtime';
 import { makeKey, project } from './runtime-helpers.mjs';
 
 const key = makeKey();
@@ -80,7 +81,9 @@ test('S137: the cap is 10, so the oms example (attempts 6) is admitted, and a re
 test('each broken certificate writer is caught by the read-back, and nothing is left behind (standing rule)', async () => {
   assert.deepEqual([...CERTIFICATE_FAULTS].sort(), [...CERTIFICATE_FAULT_LIST].sort());
   for (const fault of CERTIFICATE_FAULTS) {
-    const dir = project(`fault-${fault}`, ['conformance/m1/effects.poly'], key);
+    // A policy fault acts on a lowered policy, which needs the gate engine to admit (S145): not run without it.
+    if (POLICY_CERTIFICATE_FAULTS.includes(fault) && !polyaxionPeer().ok) continue;
+    const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ['conformance/m1/effects.poly'], key);
     await assert.rejects(admit(dir, { fault }), (e) => e instanceof AdmitError && /read-back/.test(e.message), fault);
     assert.throws(() => readFileSync(join(dir, '.poly', 'certificate.json')), fault);
   }

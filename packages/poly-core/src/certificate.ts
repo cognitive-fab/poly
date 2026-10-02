@@ -63,6 +63,8 @@ export interface Certificate {
       packages: string[];
       lockfile: { path: string; digest: string } | null;
     };
+    /** PT8, S146: each trust scope's lowered policy document (its digest is under `artefacts`), and the machines it reads. */
+    policies: { scope: string; policies: string[]; path: string; reads: string[] }[];
     /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */
     keyrings: { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] };
   };

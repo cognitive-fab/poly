@@ -21,6 +21,8 @@ export interface VerifiedBuild {
   machines: { id: string; module: string; contract?: string; effects?: { mapper: string; manifest: string }; manifest: { effects?: Record<string, any> } | null; types: Map<string, [string, TypeNode][]> }[];
   /** S142: each certified handler file (poly.json's), by its certified path, at its verified copy. */
   handlers: Map<string, string>;
+  /** PT8, PT9: each trust scope's certified policy document, from the verified bytes, and the machines it reads. */
+  policies: { scope: string; policies: string[]; doc: Record<string, unknown>; reads: string[] }[];
 }
 
 /** `load('./.poly/build', …)` (PT15) names the build; the certificate's paths are relative to the project above it. */
@@ -47,6 +49,11 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
       const p = join(root, m.dir, name);
       if (existsSync(p)) bytes.set(`${m.dir}/${name}`, readFileSync(p));
     }
+  }
+  // PT8: each scope's lowered policy, read once like any artefact.
+  for (const p of certificate.poly?.policies ?? []) {
+    const f = join(root, p.path);
+    if (existsSync(f)) bytes.set(p.path, readFileSync(f));
   }
   const actual = Object.fromEntries([...bytes].map(([k, b]) => [k, sha256OfBytes(b)]));
   const problems = certificateProblems(certificate, actual, trust);
@@ -116,7 +123,8 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
       manifest,
     });
   }
-  return { certificate, root, runDir, machines, handlers };
+  const policies = (certificate.poly?.policies ?? []).map((p) => ({ scope: p.scope, policies: p.policies, reads: p.reads, doc: JSON.parse(bytes.get(p.path)!.toString('utf8')) as Record<string, unknown> }));
+  return { certificate, root, runDir, machines, handlers, policies };
 }
 
 /** After registration: the copy polyrun read is still the certified bytes (a check of the copy, not of the build). */

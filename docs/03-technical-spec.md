@@ -656,6 +656,24 @@ policy repo-hygiene {
 }
 ```
 
+**The policy production (M5a).** A policy is a declaration of a module, by convention alone in a `.policy.poly` file:
+
+```ebnf
+Policy      = "policy" Name "{" "scope" String { PolicyItem } "}" ;
+PolicyItem  = "var" Ident ":" Type "=" Expr
+            | "obligation" Name String ( RuleBody | MachineBody | "invariant" "{" Expr "}" )
+            | "recalled" Name String
+            | "never" Name String ":" "allow" "when" Expr ;                  (* S149 *)
+RuleBody    = "rule" "{" [ "when" Expr ] "require" Expr "else" ( "deny" | "warn" | "escalate" )
+              [ "on" "unknown" ( "escalate" | "deny" | "skip" ) ] "}" ;
+MachineBody = "machine" "{" "states" Ident { "," Ident } "initial" Ident
+              { "from" ( "*" | Ident { "," Ident } ) "when" Expr "->" Ident
+              | "deny" "in" Ident { "," Ident } "when" Expr "reason" String }
+              "end" Ident { "," Ident } "}" ;
+```
+
+The inputs of a poly policy are the runtime's proposal (PT9.1): `effect.kind`, `effect.class`, `effect.labels` (`effect.labels has "egress:external"`), `effect.machine`, `proposal.kind`, `machine("m.M").f` (PT8.3) and `decision("d").f` (PD4.3: `taken`, `answer`, `conf`, `margin`, `model.id`, `model.reported`, `calibration.fittedFor`). Each name and field is checked against the program (`PL1001`, `PL1201`). The scope's policies are declared in one module, since they lower to one document. A `never` statement is proved by poly-ref over the decision table (S149): the finite product of the proposals the program can make and of every value its policies can read; a policy that allows a proposal its `never` forbids is `PL6503 NEVER_VIOLATED`, with the proposal and the policy states that lead to it as the witness; a `never` whose condition no proposal meets is `INCONCLUSIVE` (`vacuous`), and one over a value with no finite domain is `runtime-only`. The Claude Code vocabulary of the example below (`action.path`, `glob`, `history`) is not part of M5a's surface (S159).
+
 In PX, `glob(action.path, …)` is unknown when `action.path` is missing. What an unknown `when` does is fixed by the rule's `on unknown` (PS8.2), so no `?? ""` default is needed, and none is accepted.
 
 ### PT8.2 Lowering
@@ -669,9 +687,11 @@ In PX, `glob(action.path, …)` is unknown when `action.path` is missing. What a
 
 Closed history predicates are lifted into counters and model-checked by Polyaxion. Open ones must be declared `coverage runtime-only`, exactly as Polyaxion requires.
 
+**One document per scope, and PS8 by rewriting (M5a).** The policies of one trust scope lower to one document, `.poly/build/policies/<scope>.policy.json`, with every deny rule before every escalate rule and every warn rule, so that the engine's first refusal is PS8.3's. Polyaxion applies a rule whose `when` is unknown and refuses an unknown `require` as `indeterminate`, so PS8.2 is carried by rewriting: `when W require Q else s on unknown u` lowers to a rule `when P && coalesce(W, false) require coalesce(Q, false)` with severity `s`, and, unless `u` is `skip`, a rule `when P && isNull(W) require false` with severity `u`, where `P` holds only for the runtime's proposals (`custom.poly.effect` and `custom.poly.send`), so the engine's own actions, such as the end of a session, pass. A guard refuses when its condition is true or unknown, and a transition fires only when its condition is true. The proposal's fields are reserved action fields the gate host fills (S147). Engine change E7 (S158) would let Polyaxion combine a rule's escalation with a guard's deny itself; until then the host does it (PT9). Each lowered document is translation-validated: poly-ref's PS8 decisions and the engine's plan interpreter must agree over every reachable pair of policy states and every proposal of the decision table, or the program is refused with `PL2501`; three deliberately broken policy lowerings are listed in `test/toolchain-faults.mjs`.
+
 ### PT8.3 Referencing program state
 
-`machine("<module>.<Machine>")` is new. It reads the snapshot of the instance that emitted the effect under decision, **as of the step that emitted it** (PT9.3). It never reads a later snapshot. The value is unknown (Kleene) when the proposal is not an effect of that machine.
+`machine("<module>.<Machine>")` is new. It reads the snapshot of the instance that emitted the effect under decision, **as of the step that emitted it** (PT9.3). It never reads a later snapshot. **Singletons (S147).** It may also name a `service machine`, a singleton: the proposal then carries that instance's latest snapshot and `seq` at proposal time, recorded in the `verdict` event. Otherwise the value is unknown (Kleene) when the proposal is not an effect of that machine. A read that can never be known (a machine that is neither a service machine nor the emitter of any effect) is `PL6502 UNKNOWABLE_MACHINE_READ`, a finding: the policy form of a vacuous property.
 
 ### PT8.4 Admission
 
@@ -979,7 +999,7 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` (effects, timers and child intents; not `send`, S63) |
 | PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5405 FIFO_WITHOUT_IN_ORDER_WORKER` (S125), `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5105 DUPLICATE_SIGNAL`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5303 CONFIGURATION_WITHOUT_BOUNDS`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
-| PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6201 UNGATED_DECISION`, `PL6202 DECISION_WITHOUT_FAILURE`, `PL6203 ADJUDICATION_WITHOUT_DECISION` (S129), `PL6204 DECISION_COMPLETION_SENT` (M4 review C5: a `send` of an action that completes one of the receiver's decisions), `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6402 HANDLER_NOT_CERTIFIABLE` (S142: a handler import the certificate cannot name), `PL6403 HANDLER_CHANGED` (S142: at load, a certified handler file or the lockfile that differs), `PL6404 HANDLER_NOT_CERTIFIED` (S142: `rt.handle` given a function that is not an export of a certified handler file as loaded), `PL6405 KEYRING_CHANGED` (S150: at load, a people or agents keyring that differs from the certified one), `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
+| PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED` (M5a: any refusal of Polyaxion's admission, with its reason), `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6502 UNKNOWABLE_MACHINE_READ` (S147), `PL6503 NEVER_VIOLATED` (S149), `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6201 UNGATED_DECISION`, `PL6202 DECISION_WITHOUT_FAILURE`, `PL6203 ADJUDICATION_WITHOUT_DECISION` (S129), `PL6204 DECISION_COMPLETION_SENT` (M4 review C5: a `send` of an action that completes one of the receiver's decisions), `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6402 HANDLER_NOT_CERTIFIABLE` (S142: a handler import the certificate cannot name), `PL6403 HANDLER_CHANGED` (S142: at load, a certified handler file or the lockfile that differs), `PL6404 HANDLER_NOT_CERTIFIED` (S142: `rt.handle` given a function that is not an export of a certified handler file as loaded), `PL6405 KEYRING_CHANGED` (S150: at load, a people or agents keyring that differs from the certified one), `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
 | PL9xxx | replay and verification | `PL9001 SPEC_DIVERGENCE` (a post-state that differs from the fold, PS11.4), `PL9002 LEDGER_BROKEN` (a chain, signature or anchor that does not verify), `PL9003 DECISION_PROVENANCE` (PD2.2d), `PL9101 CONTROL_FAILED` |

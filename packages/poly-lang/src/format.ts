@@ -75,7 +75,48 @@ class Printer {
         return this.machine(d);
       case 'Configuration':
         return this.configuration(d);
+      case 'Policy':
+        return this.policy(d);
     }
+  }
+
+  /** PT8.1: one canonical text per policy. */
+  private policy(p: A.Policy): void {
+    const q = (s: string) => JSON.stringify(s);
+    this.emit(p, '', [`policy ${p.name} {`]);
+    this.out.push(`${INDENT}scope ${q(p.scope)}`);
+    for (const v of p.vars) this.emit(v, INDENT, [`var ${v.name}: ${this.type(v.type)} = ${this.expr(v.init, 0)}`]);
+    for (const it of p.items) {
+      switch (it.kind) {
+        case 'RuleObligation': {
+          const lines = [`obligation ${it.name} ${q(it.text)} rule {`];
+          if (it.when) lines.push(`${INDENT}when ${this.expr(it.when, 0)}`);
+          lines.push(`${INDENT}require ${this.expr(it.require, 0)} else ${it.severity}`);
+          if (it.onUnknown) lines.push(`${INDENT}on unknown ${it.onUnknown}`);
+          lines.push('}');
+          this.emit(it, INDENT, lines);
+          break;
+        }
+        case 'MachineObligation': {
+          const lines = [`obligation ${it.name} ${q(it.text)} machine {`, `${INDENT}states ${it.states.join(', ')}`, `${INDENT}initial ${it.initial}`];
+          for (const t of it.transitions) lines.push(`${INDENT}from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`);
+          for (const g of it.guards) lines.push(`${INDENT}deny in ${g.in.join(', ')} when ${this.expr(g.when, 0)} reason ${q(g.reason)}`);
+          lines.push(`${INDENT}end ${it.end.join(', ')}`, '}');
+          this.emit(it, INDENT, lines);
+          break;
+        }
+        case 'InvariantObligation':
+          this.emit(it, INDENT, [`obligation ${it.name} ${q(it.text)} invariant { ${this.expr(it.expr, 0)} }`]);
+          break;
+        case 'Recalled':
+          this.emit(it, INDENT, [`recalled ${it.name} ${q(it.text)}`]);
+          break;
+        case 'Never':
+          this.emit(it, INDENT, [`never ${it.name} ${q(it.text)}: allow when ${this.expr(it.when, 0)}`]);
+          break;
+      }
+    }
+    this.out.push('}');
   }
 
   private ctor(c: A.Ctor): string {
@@ -319,7 +360,8 @@ class Printer {
       case 'Primed': return `${e.name}'`;
       case 'Member': return `${this.expr(e.object, 1, noStruct)}.${e.prop}`;
       case 'Index': return `${this.expr(e.object, 1, noStruct)}[${this.expr(e.index, 0)}]`;
-      case 'Call': return `${e.callee}(${e.args.map((a) => this.expr(a, 0)).join(', ')})`;
+      // PT8.1: `s has x`, which the parser reads as the call has(s, x).
+      case 'Call': return e.callee === 'has' && e.args.length === 2 ? wrap(`${this.expr(e.args[0], 4, noStruct)} has ${this.expr(e.args[1], 4, noStruct)}`, 5) : `${e.callee}(${e.args.map((a) => this.expr(a, 0)).join(', ')})`;
       case 'Unary': return wrap(`${e.op}${this.expr(e.arg, 2, noStruct)}`, 2);
       case 'Spawned': return `${e.key}${e.index ? `[${this.expr(e.index, 0)}]` : ''} spawned`;
       case 'Star': return '*';

@@ -14,6 +14,7 @@ export type Stage =
   | 'deadlock'
   | 'liveness'
   | 'lint'
+  | 'policy'
   | 'runtime'
   | 'replay';
 
@@ -118,6 +119,14 @@ export const CODES: Record<string, CodeInfo> = {
   PL6403: { name: 'HANDLER_CHANGED', stage: 'runtime', severity: 'error' },
   // S142: rt.handle given a function that is not an export of a certified handler file the runtime loaded.
   PL6404: { name: 'HANDLER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },
+  // PT8.4: Polyaxion refuses a policy at admission (not fully mediated, an example that fails, an unreachable discharge).
+  PL6001: { name: 'NOT_FULLY_MEDIATED', stage: 'policy', severity: 'error' },
+  // PT8.5, PS8.6: a mandate no path discharges under the obligations together (the minimal subset is named).
+  PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
+  // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
+  PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },
+  // S149: a policy allows a proposal its own `never` statement forbids.
+  PL6503: { name: 'NEVER_VIOLATED', stage: 'policy', severity: 'finding' },
   // S150: at load, a people or agents keyring that differs from the one the certificate binds.
   PL6405: { name: 'KEYRING_CHANGED', stage: 'runtime', severity: 'error' },
   PL6201: { name: 'UNGATED_DECISION', stage: 'effects', severity: 'finding' },

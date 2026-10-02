@@ -25,6 +25,7 @@ import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
 import { handlerClosure } from './handlers.js';
+import { policyReports, type PolicyReport } from './policies.js';
 import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, conjunction, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type Vacuous } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
@@ -129,6 +130,8 @@ export interface CheckReport {
   configurations: ConfigCheck[];
   error?: string;
   engines: Record<string, string>;
+  /** Stage 5 (PT8): the module's policies, one report per trust scope. */
+  policies: PolicyReport[];
   /** S41: each effect kind the module declares, with what must agree across the project's modules. */
   effectKinds?: { kind: string; signature: string; effect: string; line?: number; col?: number }[];
 }
@@ -136,6 +139,8 @@ export interface CheckReport {
 export interface CheckOptions {
   /** Where `.poly/build` goes; the working directory by default (PT1.5). */
   root?: string;
+  /** PT8: the modules the policies of this file govern; the file's own module when it is checked alone. */
+  program?: Module[];
 }
 
 const HERE_REQUIRE = createRequire(import.meta.url);
@@ -171,7 +176,7 @@ export function engineVersions(): Record<string, string> {
 export async function checkFile(file: string, opts: CheckOptions = {}): Promise<CheckReport> {
   const src = readFileSync(file, 'utf8');
   // The source's absolute path, so a later `poly witness` or `poly fix` finds it from any directory (review D4).
-  const report: CheckReport = { file: resolve(file), module: null, sourceDigest: 'sha256:' + createHash('sha256').update(src, 'utf8').digest('hex'), verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
+  const report: CheckReport = { file: resolve(file), module: null, sourceDigest: 'sha256:' + createHash('sha256').update(src, 'utf8').digest('hex'), verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], policies: [], engines: engineVersions() };
 
   // ── stage 0: parse, type, domains ─────────────────────────────────────
   // S71: a .ts module is read by poly-embed into the same AST; everything after this line is shared.
@@ -222,6 +227,20 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // ── stage 4b: configurations (PS13) ─────────────────────────────────────
   const configs = configurationReports(module, refused);
   report.configurations.push(...configs.configurations);
+  // ── stage 5: policies (PT8) ─────────────────────────────────────────────
+  if (module.decls.some((d) => d.kind === 'Policy')) {
+    if (refused) {
+      for (const d of module.decls) if (d.kind === 'Policy') report.policies.push({ scope: d.scope, policies: [d.name], stages: [{ stage: 'policy-types', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE', reads: [] });
+    } else {
+      try { report.policies.push(...await policyReports(module, opts.program ?? [module], resolve(opts.root ?? process.cwd()))); } catch (e) {
+        finish(report, module);
+        report.error = `policies: ${(e as Error).message}`;
+        report.verdict = 'ERROR';
+        report.exit = EXIT_CODES.ERROR;
+        return report;
+      }
+    }
+  }
   if (configs.error) {
     // As for a machine's stages: a throw is an ERROR report, never a rejected check (review finding).
     finish(report, module);
@@ -733,6 +752,7 @@ function finish(report: CheckReport, module?: Module): CheckReport {
       ...report.diagnostics.map((d) => ({ d, subject: d.at.machine ?? null })),
       ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, subject: m.machine }))),
       ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, subject: c.configuration }))),
+      ...report.policies.flatMap((p) => p.diagnostics.map((d) => ({ d, subject: `policy:${p.scope}` }))),
     ];
     for (const { d, subject } of scoped) {
       // Ruling after the M2 review: a witness no exported test can judge yet is marked, and its export refused.
@@ -779,7 +799,12 @@ function finish(report: CheckReport, module?: Module): CheckReport {
   }
   // A property not run keeps the verdict from CLEAN: INCONCLUSIVE at best, FINDINGS if a safety check failed (M1-2).
   for (const m of [...report.machines, ...report.configurations]) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length || m.vacuous.length ? ['INCONCLUSIVE' as Verdict] : [])]);
-  const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict), ...report.configurations.map((c) => c.verdict)]);
+  // PT8: a policy scope folds like a machine: its diagnostics, its stages, and anything not run or vacuous.
+  for (const p of report.policies) {
+    if (p.verdict === 'INCONCLUSIVE' && p.stages.every((s) => s.status === 'not-run')) continue;
+    p.verdict = fold([verdictOf(p.diagnostics), ...p.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(p.notRun.length || p.vacuous.length || p.stages.some((s) => s.status === 'not-run') ? ['INCONCLUSIVE' as Verdict] : [])]);
+  }
+  const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict), ...report.configurations.map((c) => c.verdict), ...report.policies.map((p) => p.verdict)]);
   report.verdict = v;
   report.exit = EXIT_CODES[v];
   return report;
@@ -836,7 +861,23 @@ function refold(report: CheckReport): void {
 export async function checkProject(dir: string, opts: CheckOptions = {}): Promise<ProjectReport> {
   const { manifest, files, handlers: handlerFiles } = loadProject(dir);
   const reports: CheckReport[] = [];
-  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir }));
+  // PT8: policies govern the whole project, so every module is read first and given to each file's policy stage.
+  const program: Module[] = [];
+  for (const f of files) {
+    const text = readFileSync(f, 'utf8');
+    const m = (f.endsWith('.ts') ? readEmbedded(text, f) : parse(text)).module;
+    if (m) program.push(m);
+  }
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program }));
+  // PT8.2: a scope's policies lower to one document, so they live in one module.
+  const scopes = new Map<string, CheckReport>();
+  for (const report of reports) {
+    for (const p of report.policies) {
+      const prev = scopes.get(p.scope);
+      if (prev && prev !== report) { report.diagnostics.push(diag('PL1002', { module: report.module ?? undefined, line: 1, col: 1 }, `scope "${p.scope}" also has policies in ${prev.file}; a scope's policies lower to one document, so they are declared in one module (PT8.2)`)); refold(report); }
+      else scopes.set(p.scope, report);
+    }
+  }
   projectKindConflicts(reports);
   // PT1.3, PT1.5: a module is named once in a project; two modules of one name would share their build
   // directory and their machine ids (review finding P3).

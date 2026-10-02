@@ -48,6 +48,8 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
   '>': { prec: 5, assoc: 'none' },
   '>=': { prec: 5, assoc: 'none' },
   in: { prec: 5, assoc: 'none' },
+  // PT8.1: `effect.labels has "egress:external"`, a policy's set membership, written as a call `has(s, x)` in the AST.
+  has: { prec: 5, assoc: 'none' },
   is: { prec: 5, assoc: 'none' },
   '==': { prec: 6, assoc: 'none' },
   '!=': { prec: 6, assoc: 'none' },
@@ -57,7 +59,7 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
 };
 
 const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for', 'decide', 'adjudicate']);
-const LATER_TOP_LEVEL = new Set(['policy', 'workflow', 'world']);
+const LATER_TOP_LEVEL = new Set(['workflow', 'world']);
 
 export function parse(src: string): ParseResult {
   const trivia: Trivia = { leading: new Map(), trailing: new Map(), end: [] };
@@ -189,6 +191,7 @@ class Parser {
     if (this.at('machine')) return this.machine(false);
     if (this.at('service') && this.at('machine', 1)) { this.next(); return this.machine(true, start); }
     if (this.at('configuration') && this.peek(1).kind === 'ident') return this.configuration();
+    if (this.at('policy') && this.peek(1).kind === 'ident') return this.policy();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -198,7 +201,112 @@ class Parser {
       this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
       return null;
     }
-    this.fail('expected a declaration (type, enum, machine, use)');
+    this.fail('expected a declaration (type, enum, machine, configuration, policy, use)');
+  }
+
+  /** `policy p { scope "s" var … obligation … recalled … never … }` (PT8.1, S149). */
+  private policy(): A.Policy {
+    const start = this.next();
+    const name = this.dashedName();
+    this.expect('{');
+    this.expect('scope');
+    const scope = this.str('the policy\'s scope');
+    const vars: A.PolicyVar[] = [];
+    const items: A.PolicyItem[] = [];
+    while (!this.atPunct('}')) {
+      const s = this.peek();
+      if (this.at('var')) {
+        this.next();
+        const v = this.ident('a variable');
+        this.expect(':');
+        const type = this.type();
+        this.expect('=');
+        vars.push(this.node<A.PolicyVar>(s, { kind: 'PolicyVar', name: v, type, init: this.expr() }, true));
+      } else if (this.at('obligation')) {
+        this.next();
+        const oname = this.dashedName();
+        const text = this.str('the obligation\'s text');
+        if (this.at('rule')) {
+          this.next();
+          this.expect('{');
+          let when: A.Expr | null = null;
+          if (this.at('when')) { this.next(); when = this.expr(); }
+          this.expect('require');
+          const require = this.expr();
+          this.expect('else');
+          const sev = this.ident('deny, warn or escalate');
+          if (sev !== 'deny' && sev !== 'warn' && sev !== 'escalate') this.fail('expected deny, warn or escalate', this.t[this.i - 1]);
+          let onUnknown: A.RuleObligation['onUnknown'] = null;
+          if (this.at('on')) {
+            this.next();
+            this.expect('unknown');
+            const u = this.ident('escalate, deny or skip');
+            if (u !== 'escalate' && u !== 'deny' && u !== 'skip') this.fail('expected escalate, deny or skip', this.t[this.i - 1]);
+            onUnknown = u;
+          }
+          this.expect('}');
+          items.push(this.node<A.RuleObligation>(s, { kind: 'RuleObligation', name: oname, text, when, require, severity: sev, onUnknown }, true));
+        } else if (this.at('machine')) {
+          this.next();
+          this.expect('{');
+          this.expect('states');
+          const states = this.identList('a state');
+          this.expect('initial');
+          const initial = this.ident('the initial state');
+          const transitions: A.MachineObligation['transitions'] = [];
+          const guards: A.MachineObligation['guards'] = [];
+          while (this.at('from') || this.at('deny')) {
+            if (this.at('from')) {
+              this.next();
+              let from: string[] | '*';
+              if (this.atPunct('*')) { this.next(); from = '*'; } else from = this.identList('a state');
+              this.expect('when');
+              const when = this.expr();
+              this.expect('->');
+              transitions.push({ from, when, to: this.ident('a state') });
+            } else {
+              this.next();
+              this.expect('in');
+              const inStates = this.identList('a state');
+              this.expect('when');
+              const when = this.expr();
+              this.expect('reason');
+              guards.push({ in: inStates, when, reason: this.str('a reason') });
+            }
+          }
+          this.expect('end');
+          const end = this.identList('a state');
+          this.expect('}');
+          items.push(this.node<A.MachineObligation>(s, { kind: 'MachineObligation', name: oname, text, states, initial, transitions, guards, end }, true));
+        } else if (this.at('invariant')) {
+          this.next();
+          this.expect('{');
+          const expr = this.expr();
+          this.expect('}');
+          items.push(this.node<A.InvariantObligation>(s, { kind: 'InvariantObligation', name: oname, text, expr }, true));
+        } else this.fail('expected rule, machine or invariant');
+      } else if (this.at('recalled')) {
+        this.next();
+        const rname = this.dashedName();
+        items.push(this.node<A.Recalled>(s, { kind: 'Recalled', name: rname, text: this.str('the recalled text') }, true));
+      } else if (this.at('never')) {
+        this.next();
+        const nname = this.dashedName();
+        const text = this.str('the statement\'s text');
+        this.expect(':');
+        this.expect('allow');
+        this.expect('when');
+        items.push(this.node<A.Never>(s, { kind: 'Never', name: nname, text, when: this.expr() }, true));
+      } else this.fail('expected var, obligation, recalled or never');
+    }
+    this.next();
+    return this.node<A.Policy>(start, { kind: 'Policy', name, scope, vars, items }, true);
+  }
+
+  private identList(what: string): string[] {
+    const out = [this.ident(what)];
+    while (this.atPunct(',')) { this.next(); out.push(this.ident(what)); }
+    return out;
   }
 
   /** `configuration c { instances, inputs, bounds, properties }` (PT2, PT7a, S31). */
@@ -947,7 +1055,7 @@ class Parser {
       }
       return tok.text in BINARY ? tok.text : null;
     }
-    if (tok.kind === 'ident' && (tok.text === 'implies' || tok.text === 'in' || tok.text === 'is')) return tok.text;
+    if (tok.kind === 'ident' && (tok.text === 'implies' || tok.text === 'in' || tok.text === 'is' || tok.text === 'has')) return tok.text;
     return null;
   }
 
@@ -966,6 +1074,9 @@ class Parser {
         const ctors = [this.ident('a constructor')];
         while (this.atPunct('|')) { this.next(); ctors.push(this.ident('a constructor')); }
         left = this.node<A.Is>(start, { kind: 'Is', expr: left, ctors });
+      } else if (op === 'has') {
+        const right = this.binary(info.prec - 1, noStruct, arrow);
+        left = this.node<A.Call>(start, { kind: 'Call', callee: 'has', args: [left, right] });
       } else if (op === 'in') {
         this.expect('{');
         const set: A.Expr[] = [];

@@ -41,6 +41,8 @@ class Printer {
       case 'Use': return `${this.use('use')}(${q(d.path.join('.'))})`;
       case 'Machine': return this.machine(d, ind);
       case 'Configuration': return this.configuration(d, ind);
+      // PT1.1a: a policy lives in a .policy.poly file; the embedded surface has none (PT2.5).
+      case 'Policy': throw new Error('policy ' + d.name + ' has no embedded form: policies are written in .policy.poly files (PT1.1a)');
     }
   }
 

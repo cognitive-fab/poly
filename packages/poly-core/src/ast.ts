@@ -27,7 +27,61 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy;
+
+// ── Policies (PT8, PS8) ────────────────────────────────────────────────────
+
+/**
+ * `policy p { scope "s" … }` (PT8.1): obligations the gate enforces on the proposals of a trust scope. Its
+ * expressions are PX: their inputs are optional, so they have type `Tri` (PT2.3, PS8.0).
+ */
+export interface Policy extends NodeBase {
+  kind: 'Policy';
+  name: string;
+  scope: string;
+  vars: PolicyVar[];
+  items: PolicyItem[];
+}
+
+/** `var n: T = e`: policy state with a finite domain (PT8.1). */
+export interface PolicyVar extends NodeBase { kind: 'PolicyVar'; name: string; type: TypeExpr; init: Expr }
+
+export type PolicyItem = RuleObligation | MachineObligation | InvariantObligation | Recalled | Never;
+
+/** `obligation o "text" rule { when W require Q else s on unknown u }` (PS8.2). */
+export interface RuleObligation extends NodeBase {
+  kind: 'RuleObligation';
+  name: string;
+  text: string;
+  when: Expr | null;
+  require: Expr;
+  severity: 'deny' | 'warn' | 'escalate';
+  /** null when not written: the default of PS8.2. */
+  onUnknown: 'escalate' | 'deny' | 'skip' | null;
+}
+
+/** `obligation o "text" machine { states … initial … from … deny in … end … }` (PT8.1, PT8.2). */
+export interface MachineObligation extends NodeBase {
+  kind: 'MachineObligation';
+  name: string;
+  text: string;
+  states: string[];
+  initial: string;
+  /** `from s1, s2 when e -> t`; `from *` is every state. */
+  transitions: { from: string[] | '*'; when: Expr; to: string }[];
+  /** `deny in s1, s2 when e reason "r"`. */
+  guards: { in: string[]; when: Expr; reason: string }[];
+  end: string[];
+}
+
+/** `obligation o "text" invariant { e }` over the policy's vars. */
+export interface InvariantObligation extends NodeBase { kind: 'InvariantObligation'; name: string; text: string; expr: Expr }
+
+/** `recalled o "text"`: durable text, not enforced. */
+export interface Recalled extends NodeBase { kind: 'Recalled'; name: string; text: string }
+
+/** `never n "text": allow when e` (S149): the gate never allows a proposal for which e holds; proved, never lowered. */
+export interface Never extends NodeBase { kind: 'Never'; name: string; text: string; when: Expr }
 
 /**
  * `configuration c { … }` (PS13, PT7a): named instances of machines of this module, the inputs the
@@ -387,4 +441,4 @@ export interface MapLit extends NodeBase { kind: 'MapLit'; entries: { key: Expr;
 /** `[v0, …, vn]` for maps keyed by 0..n (PT2.2, S4). */
 export interface ArrayLit extends NodeBase { kind: 'ArrayLit'; items: Expr[] }
 
-export type AnyNode = Module | Decl | Ctor | PayloadField | TypeExpr | CheckClause | Domain | Field | MachineItem | EffectItem | Param | Stmt | Arm | Pattern | Expr | FairGroup | ConfigInstance | InputRef | ConfigBounds;
+export type AnyNode = Module | Decl | Ctor | PayloadField | TypeExpr | CheckClause | Domain | Field | MachineItem | EffectItem | Param | Stmt | Arm | Pattern | Expr | FairGroup | ConfigInstance | InputRef | ConfigBounds | PolicyVar | PolicyItem;

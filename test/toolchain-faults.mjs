@@ -33,6 +33,14 @@ export const FAULT_SOURCES = {
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);
 
+// PT8.2 and the standing rule: the lowered policy is an artefact the runtime's gate reads, so each broken policy
+// lowering is listed here with the source that exercises it, and translation validation must catch it with PL2501.
+export const POLICY_FAULT_SOURCES = {
+  'drop-unknown-rule': ['conformance/m5/policy-faults.poly'],
+  'deny-as-warn': ['conformance/m5/policy-faults.poly'],
+  'drop-guard': ['conformance/m5/policy-faults.poly'],
+};
+
 /** The toolchain-fault diagnostics among a list (S20: addressed to the toolchain, never to the author). */
 export function toolchainFaults(diagnostics) {
   return diagnostics.filter((d) => d.code === 'PL2501' || d.code === 'PL2001');
@@ -40,4 +48,6 @@ export function toolchainFaults(diagnostics) {
 
 // S126 and the standing rule: the certificate is an artefact the runtime reads, so each broken certificate writer
 // is listed here and must be caught by poly admit's read-back (test/certificate.test.mjs).
-export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file'];
+export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy'];
+// The faults that need a project with policies to act on (PT8).
+export const POLICY_CERTIFICATE_FAULTS = ['stale-policy-digest', 'omit-policy'];

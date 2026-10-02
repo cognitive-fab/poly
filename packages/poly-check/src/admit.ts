@@ -22,7 +22,7 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -100,22 +100,26 @@ function admissionKey(dir: string, named: { id: string; location: string } | und
 }
 
 /** The certified files of each machine's build directory, by path relative to the project root. */
-function artefactsOf(root: string, machines: CertifiedMachine[], fault?: CertificateFault): Record<string, string> {
+function artefactsOf(root: string, machines: CertifiedMachine[], fault?: CertificateFault, policies: string[] = []): Record<string, string> {
   const out: Record<string, string> = {};
+  // PT8: each scope's lowered policy is an artefact the runtime's gate reads.
+  for (const p of policies) if (existsSync(join(root, p))) out[p] = sha256OfBytes(readFileSync(join(root, p)));
   for (const m of machines) {
     for (const name of CERTIFIED_ARTEFACTS) {
       const p = join(root, m.dir, name);
       if (existsSync(p)) out[`${m.dir}/${name}`] = sha256OfBytes(readFileSync(p));
     }
   }
+  if (fault === 'stale-policy-digest' && policies.length) out[policies[0]] = sha256OfBytes(policies[0]);
+  if (fault === 'omit-policy' && policies.length) delete out[policies[0]];
   if (fault === 'omit-artefact') delete out[Object.keys(out)[0]];
   if (fault === 'stale-artefact-digest') { const k = Object.keys(out)[0]; out[k] = sha256OfBytes(k); }
   return out;
 }
 
 /** What the runtime reads, re-read from disk: every certified name in every machine directory. */
-export function artefactsOnDisk(root: string, machines: CertifiedMachine[]): Record<string, string> {
-  return artefactsOf(root, machines);
+export function artefactsOnDisk(root: string, machines: CertifiedMachine[], policies: string[] = []): Record<string, string> {
+  return artefactsOf(root, machines, undefined, policies);
 }
 
 function moduleOf(file: string): A.Module | null {
@@ -188,6 +192,7 @@ function acceptedFindings(c: Checked): NonNullable<Certificate['boundAccepted']>
     const subjects = [
       ...r.machines.map((m) => ({ name: `${r.module}.${m.machine}`, m })),
       ...r.configurations.map((k) => ({ name: `${r.module}.${k.configuration}`, m: k })),
+      ...(r.policies ?? []).map((p) => ({ name: `policy:${p.scope}`, m: { notRun: [...p.notRun, ...p.stages.filter((s) => s.status === 'not-run').map((s) => ({ property: s.stage, reason: s.reason ?? '' }))], vacuous: p.vacuous, diagnostics: p.diagnostics } })),
     ];
     for (const { name, m } of subjects) {
       if (m.notRun.length || m.vacuous.length) throw new AdmitError(`not admitted: ${name} has checks not run or vacuous, which no acceptance covers (PT12.5)`);
@@ -285,7 +290,14 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     if (want && sha256OfBytes(readFileSync(f)) !== want) throw new AdmitError(`not admitted: ${rel(dir, f)} on disk is not the source the check checked (it changed during the check)`);
   }
   const sources = Object.fromEntries(files.map((f) => [rel(dir, f), checkedSource.get(resolve(f)) ?? sha256OfBytes(readFileSync(f))]));
-  const artefacts = artefactsOf(dir, machines, opts.fault);
+  // PT8: the policies of every scope, as the check lowered them.
+  const policyReports = report.files.flatMap((r) => r.policies ?? []);
+  for (const p of policyReports) if (!p.artefact) throw new AdmitError(`not admitted: the policies of scope ${p.scope} were not lowered`);
+  const policyPaths = policyReports.map((p) => p.artefact!.path);
+  const artefacts = artefactsOf(dir, machines, opts.fault, policyPaths);
+  for (const p of policyReports) {
+    if (!opts.fault && artefacts[p.artefact!.path] !== p.artefact!.digest) throw new AdmitError(`not admitted: ${p.artefact!.path} on disk is not the policy the check checked (certified bytes must be the checked bytes)`);
+  }
   for (const r of report.files) for (const m of r.machines) {
     if (!m.buildDir) continue;
     const prefix = rel(dir, m.buildDir);
@@ -338,7 +350,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS], handlers: certifiedHandlers, keyrings: c.keyrings },
+    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -349,7 +361,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const tmp = `${out}.tmp`;
   writeFileSync(tmp, JSON.stringify(certificate, null, 2) + '\n');
   const back = JSON.parse(readFileSync(tmp, 'utf8')) as Certificate;
-  const problems = certificateProblems(back, artefactsOnDisk(dir, machines), { [key.id]: publicKeyOf(key.privateKeyPem) });
+  const problems = certificateProblems(back, artefactsOnDisk(dir, machines, policyPaths), { [key.id]: publicKeyOf(key.privateKeyPem) });
   const sourcesNow = Object.fromEntries(files.map((f) => [rel(dir, f), sha256OfBytes(readFileSync(f))]));
   if (JSON.stringify(back.poly.sources) !== JSON.stringify(sourcesNow)) problems.push({ name: 'sources', problem: 'the sources changed while the program was admitted' });
   for (const p of handlerProblems()) problems.push({ name: 'handlers', problem: p });
@@ -366,5 +378,5 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   }
   rmSync(out, { force: true });
   renameSync(tmp, out);
-  return { verdict: 'CLEAN', certificatePath: out, certificate: back, artefacts: artefactsOnDisk(dir, machines), report };
+  return { verdict: 'CLEAN', certificatePath: out, certificate: back, artefacts: artefactsOnDisk(dir, machines, policyPaths), report };
 }

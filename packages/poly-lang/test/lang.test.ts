@@ -189,7 +189,7 @@ test('syntax errors are PL0001 with a position', () => {
 });
 
 test('later-milestone top-level forms are refused with PL0901, not a syntax error', () => {
-  const r = parse('module m\npolicy p {\n  rule r { when true then deny }\n}\n');
+  const r = parse('module m\nworkflow p {\n  step s { }\n}\n');
   assert.ok(r.module);
   assert.deepEqual(r.diagnostics.map((d) => d.code), ['PL0901']);
 });

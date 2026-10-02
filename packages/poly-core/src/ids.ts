@@ -25,6 +25,13 @@ const NAMED: Record<string, string> = {
   EffectDecl: 'effect',
   Configuration: 'configuration',
   ConfigInstance: 'instance',
+  Policy: 'policy',
+  PolicyVar: 'var',
+  RuleObligation: 'obligation',
+  MachineObligation: 'obligation',
+  InvariantObligation: 'obligation',
+  Recalled: 'recalled',
+  Never: 'never',
 };
 
 function segmentOf(node: Obj, key: string, index: number): string {

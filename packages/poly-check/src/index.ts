@@ -9,3 +9,4 @@ export { admit, admitWitness, witnessKey, artefactsOnDisk, AdmitError, CERTIFICA
 export { replayRun, replayRuntime, certifiedModules, type RunReplay, type JournalRowLike } from './replay.js';
 export { workerConformance, workerActions, type Conformance } from './conformance.js';
 export { evaluate, fit, samples, type Evaluation, type Sample } from './evaluate.js';
+export { policyReports, policySlug, type PolicyReport, type PolicyStage } from './policies.js';
