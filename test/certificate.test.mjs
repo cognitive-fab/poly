@@ -70,9 +70,11 @@ test('an admission key is found only by location, and a key file under version c
   await assert.rejects(admit(dir), /version control/);
 });
 
-test('a retry above 5 is refused at admission (S120): the oms example declares attempts 6', async () => {
+test('S137: the cap is 10, so the oms example (attempts 6) is admitted, and a retry above 10 is refused', async () => {
   const dir = project('retry', ['examples/oms/oms.poly'], key);
-  await assert.rejects(admit(dir), /chargeCard.*maxAttempts 6.*at most 5/);
+  assert.equal((await admit(dir)).verdict, 'CLEAN');
+  writeFileSync(join(dir, 'src', 'oms.poly'), readFileSync(join(dir, 'src', 'oms.poly'), 'utf8').replace('attempts 6', 'attempts 11'));
+  await assert.rejects(admit(dir), /chargeCard.*maxAttempts 11.*at most 10/);
 });
 
 test('each broken certificate writer is caught by the read-back, and nothing is left behind (standing rule)', async () => {

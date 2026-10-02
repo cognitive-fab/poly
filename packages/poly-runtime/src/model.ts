@@ -12,8 +12,8 @@ import { sha256OfBytes } from '@poly/core';
 export const MODEL_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'model');
 export const MODEL_SOURCE = join(MODEL_DIR, 'outbox-intent.poly');
 export const MODEL_BUILD = join(MODEL_DIR, 'build');
-/** S120: admission refuses a maxAttempts above 5, so these are every bound a build can declare. */
-export const BOUNDS = [1, 2, 3, 4, 5] as const;
+/** S120, S137: admission refuses a maxAttempts above 10, so these are every bound a build can declare. */
+export const BOUNDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 export const MODEL_FILES = ['contract.json', 'next.cjs', 'invariants.mjs', 'liveness.mjs'] as const;
 
 export const moduleOfBound = (m: number): string => (m === 3 ? 'runtime' : `runtime${m}`);
@@ -44,8 +44,8 @@ export function verifiedModels(bounds: readonly number[]): ModelBuild[] {
   const manifestPath = join(MODEL_BUILD, 'MANIFEST.json');
   if (!existsSync(manifestPath)) throw new Error('the OutboxIntent builds have no MANIFEST.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, string>;
-  return [...new Set(bounds)].sort().map((m) => {
-    if (!BOUNDS.includes(m as 1)) throw new Error(`no OutboxIntent build for maxAttempts ${m}; at most 5 (S120)`);
+  return [...new Set(bounds)].sort((x, y) => x - y).map((m) => {
+    if (!BOUNDS.includes(m as 1)) throw new Error(`no OutboxIntent build for maxAttempts ${m}; at most 10 (S120, S137)`);
     const dir = join(MODEL_BUILD, machineOfBound(m));
     for (const f of MODEL_FILES) {
       const rel = `${machineOfBound(m)}/${f}`;

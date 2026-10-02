@@ -24,9 +24,11 @@ test('the model is PT9.7, word for word', () => {
   assert.equal(model.trimEnd(), block.trimEnd());
 });
 
-test('OutboxIntent at every bound: CLEAN, 3m + 8 states, deadlock-free, settles under its fairness, nothing vacuous', async () => {
+test('S137: OutboxIntent at every bound from 1 to 10: CLEAN, 3m + 8 states, deadlock-free, settles under its fairness, nothing vacuous', async () => {
   const dir = join(ROOT, '.poly', 'test-outbox-model');
   mkdirSync(dir, { recursive: true });
+  assert.deepEqual([...BOUNDS], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const counts = {};
   for (const m of BOUNDS) {
     const f = join(dir, `outbox-${m}.poly`);
     writeFileSync(f, modelSource(m));
@@ -34,16 +36,18 @@ test('OutboxIntent at every bound: CLEAN, 3m + 8 states, deadlock-free, settles 
     const mc = r.machines[0];
     assert.equal(r.verdict, 'CLEAN', `bound ${m}`);
     assert.equal(mc.instance.states, 3 * m + 8, `bound ${m}`);
+    counts[m] = mc.instance.states;
     for (const stage of ['model-check', 'deadlock', 'liveness']) assert.equal(mc.stages.find((s) => s.stage === stage)?.verdict, 'CLEAN', `${m} ${stage}`);
     assert.deepEqual([mc.notRun, mc.vacuous], [[], []]);
   }
+  console.log(`# OutboxIntent states by bound: ${JSON.stringify(counts)}`);
 });
 
 test('the checked-in builds are the lowering of the model, byte for byte, and the runtime checks them (standing rule)', () => {
   const { files, manifest } = lowerModels();
   for (const [rel, text] of Object.entries(files)) assert.equal(readFileSync(join(MODEL_BUILD, rel), 'utf8'), text, rel);
   assert.deepEqual(JSON.parse(readFileSync(join(MODEL_BUILD, 'MANIFEST.json'), 'utf8')), manifest);
-  assert.equal(verifiedModels([1, 2, 3, 4, 5]).length, 5);
+  assert.equal(verifiedModels([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).length, 10);
   const f = join(MODEL_BUILD, 'runtime.OutboxIntent', 'next.cjs');
   const original = readFileSync(f);
   try {

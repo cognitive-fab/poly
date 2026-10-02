@@ -24,8 +24,8 @@ export class AdmitError extends Error {
 export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
-/** PT19, S120: the most attempts a manifest entry may declare. */
-export const MAX_ATTEMPTS = 5;
+/** PT19, S120, S137: the most attempts a manifest entry may declare. */
+export const MAX_ATTEMPTS = 10;
 
 /** The limits every M4 build states with its verdicts (S118, S134, S135). */
 export const M4_LIMITS = [

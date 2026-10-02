@@ -121,7 +121,7 @@ export class PolyRuntime {
 
   /** The runtime's own model behind a machine id (an OutboxIntent instance), or null for a program's machine. */
   modelOf(machineId: string): { source: string; module: string } | null {
-    const m = /^runtime(\d?)\.OutboxIntent$/.exec(machineId);
+    const m = /^runtime(\d*)\.OutboxIntent$/.exec(machineId);
     if (!m) return null;
     const bound = m[1] ? Number(m[1]) : 3;
     return { source: modelSource(bound), module: verifiedModels([bound])[0].module };
