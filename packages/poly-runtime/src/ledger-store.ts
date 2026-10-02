@@ -42,6 +42,11 @@ export class InputOutsideType extends Error {
 
 const SCHEMA_REJECTION = "Invalid proposal for intent '";
 
+/** Review B2, K10: a decision's completion with no decision record held for it; its commit is refused. */
+export class DecisionWithoutRecord extends Error {
+  constructor(message: string) { super(message); this.name = 'DecisionWithoutRecord'; }
+}
+
 /** Events the runtime adds around a step, keyed by the step's action id (the decision record, PD2.2). */
 export interface StepEvents {
   before?: { kind: string; body: unknown }[];
@@ -93,8 +98,16 @@ export class LedgerStore extends Store {
     if (row.stepKind === 'rejected' && typeof row.rejectReason === 'string' && row.rejectReason.startsWith(`${SCHEMA_REJECTION}${row.action}'`)) {
       throw new InputOutsideType(`${row.action} on ${row.instanceId}: the input is outside its type, so it is no step (PS3.2, S140): ${row.rejectReason}`, row.instanceId, row.action);
     }
-    const result = await super.insertJournal(row);
     const extra = this.pending.get(`${row.instanceId}\u0000${row.actionId}`);
+    // Review B2: the worker's success completion of a decision commits only with its decision record (K10, PD2.2).
+    const done = /^(.+):done$/.exec(row.actionId);
+    if (done && !extra?.before?.some((e) => e.kind === 'decision')) {
+      const intent = this.db.prepare('SELECT kind FROM pr_outbox WHERE intent_id = ? AND instance_id = ?').get(done[1], row.instanceId);
+      if (typeof intent?.kind === 'string' && intent.kind.startsWith('decision.')) {
+        throw new DecisionWithoutRecord(`${row.action} completes ${intent.kind} on ${row.instanceId} with no decision record: its provider is not the provider host's (K10, PD2.2)`);
+      }
+    }
+    const result = await super.insertJournal(row);
     // A decision event keeps its question in the content store and carries its digest as `request` (PD2.2a).
     for (const e of extra?.before ?? []) {
       const { question, ...rest } = (e.body ?? {}) as Record<string, unknown>;

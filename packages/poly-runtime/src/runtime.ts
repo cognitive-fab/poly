@@ -132,7 +132,12 @@ export class PolyRuntime {
   }
 
   /** PT15: a handler for an effect kind. It runs only from the outbox worker, after the gate allows (PT9.2). */
-  handle(kind: string, handler: Handler): void { this.handlers.set(kind, handler); }
+  handle(kind: string, handler: Handler): void {
+    // Review B2: a decision's handler is the provider host's, which keeps the record its completion commits with.
+    if (kind.startsWith('decision.')) throw new Error(`${kind} is a decision: register its provider with rt.provide, never rt.handle (PD2.2, K10)`);
+    if (kind.startsWith('outcome.')) throw new Error(`${kind} is an adjudication's outcome, handled by the runtime itself (PD2.4)`);
+    this.handlers.set(kind, handler);
+  }
 
   async create(machineId: string, opts: { id?: string; creation?: { action: string; data?: unknown } } = {}): Promise<{ id: string; state: Record<string, unknown> }> {
     const r = await this.kernel.create(machineId, opts.id, opts.creation);

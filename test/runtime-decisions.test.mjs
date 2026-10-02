@@ -243,3 +243,22 @@ test('PD3-A3: an evaluation over 100 recorded questions reports agreement and ca
   const m = JSON.parse(execFileSync(process.execPath, [cli, 'journal', 'fit', '--db', db, '--decision', 'route', '--model', 'jev-2026-09-18', '--version', '5'], { encoding: 'utf8' }));
   assert.equal(m.version, 5);
 });
+
+// Review B2: no decision without its record.
+test('review B2: a decision handler can only come from the provider host, and a completion with no record is refused', async () => {
+  const { rt, clock } = await loaded(a);
+  try {
+    assert.throws(() => rt.handle('decision.route', () => ({ answer: 'Refund', conf: 900, margin: 900 })), /provide/);
+    // Around the API, a handler that keeps no record: the completion's commit is refused, and no refund is issued.
+    rt.handlers.set('decision.route', () => ({ answer: 'Refund', conf: 900, margin: 900 }));
+    await rt.create('support.Ticket', { id: 'b2' });
+    await rt.dispatch('b2', 'Received', TEXT);
+    await rt.worker.tick();
+    clock.advance(61_000);
+    await rt.worker.tick();
+    const actions = (await rt.getJournal('b2')).map((r) => r.action);
+    assert.ok(!actions.includes('Routed'), actions.join(','));
+    assert.equal((await rt.outbox('b2')).filter((r) => r.kind === 'payments.refund').length, 0);
+    assert.ok((await rt.audit('b2')).some((r) => r.rule === 'K10' && r.action === 'Routed'));
+  } finally { await rt.close(); }
+});
