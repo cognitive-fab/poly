@@ -39,6 +39,9 @@ export function withinPrefix(url: string, prefixes: readonly string[]): string |
   let u: URL;
   try { u = new URL(url); } catch { return null; }
   if (u.username || u.password) return null;
+  // Review D4: an encoded slash or backslash, or a `..;` segment, survive WHATWG parsing, and some servers resolve them
+  // as separators or as `..`, outside the prefix. They are refused.
+  if (/%2f|%5c/i.test(u.pathname) || u.pathname.split('/').some((s) => /^\.\.?;/.test(s) || /^%2e%2e?;/i.test(s))) return null;
   for (const p of prefixes) {
     const q = new URL(p);
     if (q.protocol !== u.protocol || q.host !== u.host) continue;
@@ -79,7 +82,9 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
         // 303, and 301 or 302 after a POST, continue as a GET with no body, as fetch does; 307 and 308 keep both.
         const keep = res.status === 307 || res.status === 308;
         at = checked;
-        req = keep ? { ...req, url: at } : { method: 'GET', url: at, ...(headers ? { headers } : {}) };
+        // The body's own headers go with the body (review D4).
+        const rest = headers ? Object.fromEntries(Object.entries(headers).filter(([k]) => !/^content-(type|length|encoding|language|location)$/i.test(k))) : undefined;
+        req = keep ? { ...req, url: at } : { method: 'GET', url: at, ...(rest ? { headers: rest } : {}) };
       }
     };
     caps.egress = Object.freeze({

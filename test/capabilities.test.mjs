@@ -40,6 +40,8 @@ test('S151: a target the labels do not grant is PL6303, and an egress target tha
   assert.deepEqual(codes(eff('egress:external', 'egress: "https://user@a.example/"')), ['PL1201']);
   assert.deepEqual(codes(eff('egress:external', 'egress: "https://a.example/v1?x=1"')), ['PL1201']);
   assert.deepEqual(codes(eff('egress:external', 'egress: "/v1"')), ['PL1201']);
+  // Review D3: a prefix is written in its normalised form, so the text read is the prefix bound.
+  for (const p of ['https://a.example/v1/charges/..', 'https://a.example/v1/charges/%2e%2e', 'https://a.example/v1/charges\\\\..\\\\..', 'https://A.example/v1/', 'https://a.example:443/v1/']) assert.deepEqual(codes(eff('egress:external', `egress: "${p}"`)), ['PL1201'], p);
   assert.deepEqual(codes(eff('egress:external', 'egress: "https://a.example/", egress: "https://b.example/"')), ['PL1002']);
   assert.deepEqual(codes(eff('egress:external', 'mail: ["x"]')), ['PL1001']);
 });
@@ -86,6 +88,10 @@ test('S134: egress to the declared prefix reaches the host transport; any other 
     'https://api.psp.example:8443/v1/charges',
     'file:///etc/passwd',
     'not a url',
+    // Review D4: an encoded slash or backslash, and a `..;` segment, which some servers read as `..`.
+    'https://api.psp.example/v1/charges/..%2F..%2Fadmin',
+    'https://api.psp.example/v1/charges/%5c..%5cadmin',
+    'https://api.psp.example/v1/charges/..;/..;/admin',
   ];
   const { seen, calls, audit } = await run('caps-egress', 'payment.charge', 'Charge', async (caps) => {
     const ok = [await caps.egress.post('https://api.psp.example/v1/charges', { amount: 1 }), await caps.egress.get('https://API.psp.example:443/v1/charges/ch_1?expand=x')];
@@ -113,13 +119,18 @@ test('S151: every redirect hop is checked against the prefix; a hop outside it t
     'https://api.psp.example/v1/charges/c': { status: 307, headers: { location: 'https://evil.example/steal' } },
     'https://api.psp.example/v1/charges/d': { status: 301, headers: { location: '../admin' } },
     'https://api.psp.example/v1/charges/loop': { status: 302, headers: { location: '/v1/charges/loop' } },
+    'https://api.psp.example/v1/charges/p': { status: 303, headers: { location: '/v1/charges/q' } },
+    'https://api.psp.example/v1/charges/q': { status: 200, headers: {}, body: 'q' },
   };
   const { seen, calls, audit } = await run('caps-redirect', 'payment.charge', 'Charge', async (caps) => ({
     b: await caps.egress.get('https://api.psp.example/v1/charges/a'),
     c: await refused(caps.egress.post('https://api.psp.example/v1/charges/c', { x: 1 })),
     d: await refused(caps.egress.get('https://api.psp.example/v1/charges/d')),
     loop: await refused(caps.egress.get('https://api.psp.example/v1/charges/loop')),
+    q: await caps.egress.post('https://api.psp.example/v1/charges/p', { x: 1 }, { headers: { 'Content-Type': 'application/json', authorization: 'k' } }),
   }), answers);
+  // A 303 continues as a GET with no body and no body headers, as fetch does (review D4).
+  assert.deepEqual(calls.egress.find((r) => r.url.endsWith('/q')), { method: 'GET', url: 'https://api.psp.example/v1/charges/q', headers: { authorization: 'k' } });
   assert.equal(seen.out.b.body, 'b');
   assert.ok(seen.out.c instanceof CapabilityRefused && /redirect/.test(seen.out.c.message), String(seen.out.c));
   assert.ok(seen.out.d instanceof CapabilityRefused);
