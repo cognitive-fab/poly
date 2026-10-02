@@ -80,6 +80,7 @@ export function parse(src: string): ParseResult {
     return { module: null, trivia, diagnostics: [diag('PL0001', { line: e.tok.line, col: e.tok.col }, e.message)] };
   }
   assignIds(module as unknown as Record<string, unknown>);
+  for (const a of p.lineAnchors) a.node.id = `${a.owner.id}:${a.slot}`;
   attachComments(module, p.attachable, comments, trivia);
   for (const d of p.laterDiagnostics) d.at.module = module.name;
   return { module, trivia, diagnostics: p.laterDiagnostics };
@@ -90,6 +91,8 @@ class Parser {
   /** Nodes comments may attach to, in document order. */
   readonly attachable: A.NodeBase[] = [];
   readonly laterDiagnostics: Diagnostic[] = [];
+  /** Review D-F6: obligation body lines with no expression (on unknown, states, initial, end), as comment anchors outside the AST. */
+  readonly lineAnchors: { owner: A.NodeBase; slot: string; node: A.NodeBase }[] = [];
 
   constructor(private readonly t: Token[]) {}
 
@@ -131,6 +134,12 @@ class Parser {
   private spanFrom(start: Token): Span {
     const last = this.t[Math.max(0, this.i - 1)];
     return { line: start.line, col: start.col, endLine: last.endLine, endCol: last.endCol };
+  }
+  /** An anchor for the line from `start` to the last token read; its id is set from its owner's after assignIds. */
+  private lineAnchor(start: Token, slot: string, pending: { slot: string; node: A.NodeBase }[]): void {
+    const node: A.NodeBase = { id: '', span: this.spanFrom(start) };
+    this.attachable.push(node);
+    pending.push({ slot, node });
   }
   private node<T extends A.NodeBase>(start: Token, fields: Mk<T>, attach = false): T {
     const n = { id: '', ...fields, span: this.spanFrom(start) } as unknown as T;
@@ -242,22 +251,32 @@ class Parser {
           const sev = this.ident('deny, warn or escalate');
           if (sev !== 'deny' && sev !== 'warn' && sev !== 'escalate') this.fail('expected deny, warn or escalate', this.t[this.i - 1]);
           let onUnknown: A.RuleObligation['onUnknown'] = null;
+          const anchors: { slot: string; node: A.NodeBase }[] = [];
           if (this.at('on')) {
+            const at = this.peek();
             this.next();
             this.expect('unknown');
             const u = this.ident('escalate, deny or skip');
             if (u !== 'escalate' && u !== 'deny' && u !== 'skip') this.fail('expected escalate, deny or skip', this.t[this.i - 1]);
             onUnknown = u;
+            this.lineAnchor(at, 'onUnknown', anchors);
           }
           this.expect('}');
-          items.push(this.node<A.RuleObligation>(s, { kind: 'RuleObligation', name: oname, text, when, require, severity: sev, onUnknown }, true));
+          const rule = this.node<A.RuleObligation>(s, { kind: 'RuleObligation', name: oname, text, when, require, severity: sev, onUnknown }, true);
+          for (const a of anchors) this.lineAnchors.push({ owner: rule, ...a });
+          items.push(rule);
         } else if (this.at('machine')) {
           this.next();
           this.expect('{');
+          const anchors: { slot: string; node: A.NodeBase }[] = [];
+          const atStates = this.peek();
           this.expect('states');
           const states = this.identList('a state');
+          this.lineAnchor(atStates, 'states', anchors);
+          const atInitial = this.peek();
           this.expect('initial');
           const initial = this.ident('the initial state');
+          this.lineAnchor(atInitial, 'initial', anchors);
           const transitions: A.MachineObligation['transitions'] = [];
           const guards: A.MachineObligation['guards'] = [];
           while (this.at('from') || this.at('deny')) {
@@ -281,10 +300,14 @@ class Parser {
               guards.push({ in: inStates, when, reason: this.str('a reason') });
             }
           }
+          const atEnd = this.peek();
           this.expect('end');
           const end = this.identList('a state');
+          this.lineAnchor(atEnd, 'end', anchors);
           this.expect('}');
-          items.push(this.node<A.MachineObligation>(s, { kind: 'MachineObligation', name: oname, text, states, initial, transitions, guards, end }, true));
+          const machine = this.node<A.MachineObligation>(s, { kind: 'MachineObligation', name: oname, text, states, initial, transitions, guards, end }, true);
+          for (const a of anchors) this.lineAnchors.push({ owner: machine, ...a });
+          items.push(machine);
         } else if (this.at('invariant')) {
           this.next();
           this.expect('{');

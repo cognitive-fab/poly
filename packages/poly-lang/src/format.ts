@@ -22,6 +22,9 @@ export function printType(t: A.TypeExpr): string { return new Printer().type(t);
 export function printStmt(s: A.Stmt): string { return (new Printer() as unknown as { stmt(s: A.Stmt): string[] }).stmt(s).join('\n'); }
 export function printPattern(p: A.Pattern): string { return (new Printer() as unknown as { pattern(p: A.Pattern): string }).pattern(p); }
 
+/** Review D-F6: the comment anchor of an obligation body line with no expression, as the parser names it. */
+const lineOf = (n: A.NodeBase, slot: string): A.NodeBase => ({ id: `${n.id}:${slot}` });
+
 export function format(module: A.Module, trivia?: Trivia): string {
   return new Printer(trivia).module(module);
 }
@@ -96,16 +99,19 @@ class Printer {
           this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} rule {`);
           if (it.when) this.emit(it.when, INDENT + INDENT, [`when ${this.expr(it.when, 0)}`]);
           this.emit(it.require, INDENT + INDENT, [`require ${this.expr(it.require, 0)} else ${it.severity}`]);
-          if (it.onUnknown) this.out.push(`${INDENT}${INDENT}on unknown ${it.onUnknown}`);
+          if (it.onUnknown) this.emit(lineOf(it, 'onUnknown'), INDENT + INDENT, [`on unknown ${it.onUnknown}`]);
           this.out.push(`${INDENT}}${this.trail(it)}`);
           break;
         }
         case 'MachineObligation': {
           this.lead(it, INDENT);
-          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} machine {`, `${INDENT}${INDENT}states ${it.states.join(', ')}`, `${INDENT}${INDENT}initial ${it.initial}`);
+          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} machine {`);
+          this.emit(lineOf(it, 'states'), INDENT + INDENT, [`states ${it.states.join(', ')}`]);
+          this.emit(lineOf(it, 'initial'), INDENT + INDENT, [`initial ${it.initial}`]);
           for (const t of it.transitions) this.emit(t.when, INDENT + INDENT, [`from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`]);
           for (const g of it.guards) this.emit(g.when, INDENT + INDENT, [`deny in ${g.in.join(', ')} when ${this.expr(g.when, 0)} reason ${q(g.reason)}`]);
-          this.out.push(`${INDENT}${INDENT}end ${it.end.join(', ')}`, `${INDENT}}${this.trail(it)}`);
+          this.emit(lineOf(it, 'end'), INDENT + INDENT, [`end ${it.end.join(', ')}`]);
+          this.out.push(`${INDENT}}${this.trail(it)}`);
           break;
         }
         case 'InvariantObligation':

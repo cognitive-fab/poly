@@ -281,3 +281,13 @@ test('B13: comments inside an obligation body keep their place through the forma
   const r = parse(src);
   assert.equal(format(r.module, r.trivia), src);
 });
+
+// Review of M5b, D-F6: the lines with no expression (on unknown, states, initial, end) are comment anchors too.
+test('B13: comments on and before the on unknown, states, initial and end lines keep their place', () => {
+  const src = 'module c\n\npolicy p {\n  scope "orders"\n  obligation r "R." rule {\n    require effect.kind == "x" else deny\n    // why unknown denies\n    on unknown deny  // fail closed\n  }\n  obligation m "M." machine {\n    // the states\n    states a, b  // two states\n    // start\n    initial a  // here\n    from a when effect.kind == "x" -> b\n    // b is final\n    end a, b  // both\n  }\n}\n';
+  const r = parse(src);
+  const out = format(r.module, r.trivia);
+  assert.equal(out, src);
+  const again = parse(out);
+  assert.equal(format(again.module, again.trivia), out);
+});
