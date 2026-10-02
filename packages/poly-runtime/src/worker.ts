@@ -60,6 +60,8 @@ export interface WorkerOptions {
   beforeCompletion?: (row: OutboxRow, decl: any, result: unknown) => void;
   afterCompletion?: (row: OutboxRow) => void;
   drift?: WorkerDrift;
+  /** PT15: called with each intent the gate allowed, after its transaction commits. Observation only. */
+  onAllowed?: (row: OutboxRow, proposal: Proposal) => void;
 }
 
 /** A worker whose claim was taken over (its lease expired and another pass reclaimed the row) stops quietly. */
@@ -252,6 +254,7 @@ export class EffectWorker {
           const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot) };
           if (g.decision === 'allow') {
             await this.store.txn(async () => { await this.transition(row, 'GateAllow'); this.verdict(row, { outcome: 'allowed', ...recorded }); });
+            this.opts.onAllowed?.(row, proposal);
             continue;
           }
           if (g.decision === 'deny') {

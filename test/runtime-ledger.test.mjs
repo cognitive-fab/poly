@@ -104,3 +104,20 @@ test('M4d: an outside dispatch of a live child\'s completion is refused (K9): an
     assert.equal((await rt.verifyChain(o.id)).ok, true);
   } finally { await rt.close(); }
 });
+
+test('PT15 streams: every step of an instance, and every intent of a kind after the gate allowed it', async () => {
+  const b = await admitted('streams', ['conformance/m4/outbox.poly']);
+  const { rt } = await loaded(b);
+  try {
+    const steps = [];
+    const intents = [];
+    rt.inputs('job').subscribe((s) => steps.push(s.action));
+    rt.intents('w.work').subscribe((i) => intents.push([i.instance, i.proposal.effectKind]));
+    rt.handle('w.work', () => 'ok');
+    await rt.create('outbox.Job', { id: 'job' });
+    await rt.dispatch('job', 'Go');
+    await rt.worker.tick();
+    assert.deepEqual(steps, ['$create', 'Go', 'Worked']);
+    assert.deepEqual(intents, [['job', 'w.work']]);
+  } finally { await rt.close(); }
+});

@@ -54,6 +54,7 @@ export class PolyRuntime {
   /** PD2.2: each decision's record, from the provider's return to its completion's commit, by intent id. */
   private readonly records = new Map<string, DecisionRecord>();
   private readonly inputSubscribers = new Map<string, Set<(step: unknown) => void>>();
+  private readonly intentSubscribers = new Map<string, Set<(intent: unknown) => void>>();
   private timers: NodeJS.Timeout[] = [];
 
   constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> = {}) {
@@ -66,6 +67,7 @@ export class PolyRuntime {
         const record = decl?.decision ? this.records.get(row.intent_id) : undefined;
         if (record) this.store.pending.set(`${row.instance_id}\u0000${row.intent_id}:done`, { before: [{ kind: 'decision', body: record }] });
       },
+      onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
     });
     // PD2.4, S129: an adjudication's outcome event, linked to the run's most recent decision event for its decision.
@@ -272,6 +274,17 @@ export class PolyRuntime {
       for (const k of ['data', 'pre', 'post']) { const d = (e.body as Record<string, string>)[k]; bodies[d] = await this.store.body(d); }
     }
     return { events, heads: await this.heads(instanceId), bodies };
+  }
+
+  /** PT15 streams: every intent of a kind, after the gate allowed it. Handlers remain the only way to execute an effect. */
+  intents(kind: string): { subscribe(f: (intent: any) => void): () => void } {
+    return {
+      subscribe: (f) => {
+        if (!this.intentSubscribers.has(kind)) this.intentSubscribers.set(kind, new Set());
+        this.intentSubscribers.get(kind)!.add(f);
+        return () => this.intentSubscribers.get(kind)?.delete(f);
+      },
+    };
   }
 
   /** PT15 streams: every labelled step of an instance, after its transaction commits. */
