@@ -176,3 +176,13 @@ test('S149: a never statement over an open decision answer is runtime-only', () 
   assert.deepEqual(r.vacuous, []);
   assert.deepEqual(r.findings, []);
 });
+
+// Review B1: an escalated proposal a person approves is allowed and moves the policy machines (PT12.5). The never
+// check explores those states too, so a never statement violated only after an approval is a finding.
+test('S149: a never statement violated after an approved escalation is PL6503', async () => {
+  const pol = `module appr_policy\n\npolicy orders-appr {\n  scope "orders"\n  obligation reserve-first "Charge only after a reserve." machine {\n    states open, reserved\n    initial open\n    from open when effect.kind == "stock.reserve" -> reserved\n    deny in open when effect.kind == "payment.charge" reason "charge-before-reserve"\n    end open, reserved\n  }\n  obligation reserve-asks "A person approves every reserve." rule {\n    when effect.kind == "stock.reserve"\n    require false else escalate\n  }\n  never no-charge "No charge is ever allowed.": allow when effect.kind == "payment.charge"\n}\n`;
+  const s = scopeOf(await checkProject(projectOf('never-approved', { 'orders.poly': ORDERS, 'orders.policy.poly': pol })), 'orders');
+  const f = s.diagnostics.find((d) => d.code === 'PL6503');
+  assert.ok(f, JSON.stringify(s.diagnostics.map((d) => d.message)));
+  assert.ok(f.witness.trace.some((st) => st.verdict === 'allow (approved)'), JSON.stringify(f.witness.trace.map((st) => st.verdict)));
+});

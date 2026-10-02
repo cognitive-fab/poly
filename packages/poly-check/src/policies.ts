@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkPolicies, policyProgram, diag, type Diagnostic, type Module, type Policy, type Verdict, type WitnessStep } from '@poly/core';
 import { lowerPolicyScope, type PolicyDoc } from '@poly/lower';
-import { policyFacts, checkNever, validatePolicy, proposalTable, evalPolicyExpr, initialSigma, type PolicyFacts } from '@poly/ref';
+import { policyFacts, checkNever, validatePolicy, proposalTable, evalPolicyExpr, initialSigma, dischargeCheck, type PolicyFacts } from '@poly/ref';
 
 export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'consistency' | 'regions' | 'policy-tv' | 'never';
 
@@ -133,43 +133,51 @@ export function withExamples(doc: PolicyDoc, scope: { scope: string; policies: P
   }
 }
 
+type Discharge = (set: string[], mandate: string) => { trap: { sigma: unknown; path: WitnessStep[] } | null; capHit: boolean };
+type Mandates = { findings: { mandate: string; node: string; line?: number; message: string; path: WitnessStep[] }[]; mandates: number; checks: number; bounded: string[] };
+
 /**
  * PT8.5, PS8.6, S148: each mandate (a machine obligation with end states) that cannot be discharged under the
  * obligations together, with a minimal conflicting subset: obligations are tried for removal in declaration order, and
  * one is dropped when the mandate stays undischargeable without it. Minimal, not the smallest; the number of discharge
- * checks it took is reported. `discharge` is Polyaxion's m2 check over a document.
+ * checks it took is reported. `discharge` is poly-ref's PS8.6 check over a subset (review B3, B9: the policy
+ * machines explored together, an escalation not a deny). A check that hit its bound concludes nothing: the mandate
+ * is listed under `bounded` (review B11).
  */
-export function mandates(doc: PolicyDoc, policies: Policy[], discharge: (d: PolicyDoc) => { applicable: boolean; ok: boolean; trapped: { state: unknown; machines: { id: string; state: string; discharge: string[] }[]; path: { action: unknown; state: unknown }[] }[] }): { findings: { mandate: string; node: string; line?: number; message: string; path: WitnessStep[] }[]; mandates: number; checks: number } {
+export function mandates(policies: Policy[], discharge: Discharge): Mandates {
   let checks = 0;
   const units = policies.flatMap((p) => p.items.filter((i) => i.kind !== 'Never' && i.kind !== 'Recalled').map((i) => ({ id: `${p.name}.${i.name}`, node: i.id, line: i.span?.line, kind: i.kind })));
-  const ofUnit = (u: string) => doc.obligations.filter((o) => o.id === u || o.id === `${u}.unknown`);
-  const trappedIn = (set: string[], mandate: string) => {
-    checks++;
-    const d = discharge({ ...doc, obligations: set.flatMap(ofUnit) });
-    return d.applicable && !d.ok ? d.trapped.find((t) => t.machines.some((m) => m.id === mandate)) ?? null : null;
-  };
-  const findings: { mandate: string; node: string; line?: number; message: string; path: WitnessStep[] }[] = [];
+  const findings: Mandates['findings'] = [];
+  const bounded: string[] = [];
   const machines = units.filter((u) => u.kind === 'MachineObligation');
   for (const m of machines) {
     const all = units.map((u) => u.id);
-    const trap = trappedIn(all, m.id);
-    if (!trap) continue;
+    checks++;
+    const first = discharge(all, m.id);
+    if (first.capHit) { bounded.push(m.id); continue; }
+    if (!first.trap) continue;
     let rest = all.filter((u) => u !== m.id);
-    for (const u of [...rest]) if (trappedIn([m.id, ...rest.filter((x) => x !== u)], m.id)) rest = rest.filter((x) => x !== u);
+    for (const u of [...rest]) {
+      checks++;
+      const r = discharge([m.id, ...rest.filter((x) => x !== u)], m.id);
+      if (r.trap && !r.capHit) rest = rest.filter((x) => x !== u);
+    }
     const subset = [m.id, ...rest];
-    const path: WitnessStep[] = trap.path.map((s) => ({ pre: null, action: 'propose', data: s.action, post: s.state }));
-    findings.push({ mandate: m.id, node: m.node, line: m.line, path, message: `mandate ${m.id} cannot be discharged under the obligations ${subset.join(', ')}: from ${JSON.stringify(trap.state)} no allowed proposal leads to its end states (PS8.6; the subset is minimal by deletion in declaration order, not the smallest; ${checks} discharge check(s))` });
+    findings.push({ mandate: m.id, node: m.node, line: m.line, path: first.trap.path, message: `mandate ${m.id} cannot be discharged under the obligations ${subset.join(', ')}: from ${JSON.stringify(first.trap.sigma)} no allowed or approved proposal leads to its end states (PS8.6; the subset is minimal by deletion in declaration order, not the smallest; ${checks} discharge check(s))` });
   }
-  return { findings, mandates: machines.length, checks };
+  return { findings, mandates: machines.length, checks, bounded };
 }
+
+/** The scope with only the obligations named in `set` (the policies' vars kept). */
+const subsetOf = (scope: string, policies: Policy[], set: string[]) => ({ scope, policies: policies.map((p) => ({ ...p, items: p.items.filter((i) => set.includes(`${p.name}.${i.name}`)) })) });
 
 /**
  * PD4.4a, PD4.4b, S148: consistency per mode. A mode is an enum field of a service machine (a singleton) the scope's
- * policies read. For each value (each combination, when they read several), the document is evaluated with that value
- * fixed, its examples narrowed to the proposals made in it, and the mandates checked there; a finding names the mode.
- * A mandate undischargeable in every mode is reported once, without one.
+ * policies read. For each value (each combination, when they read several), the mandates are checked over the
+ * proposals made in that mode; a finding names the mode. A mandate undischargeable in every mode is reported once,
+ * without one.
  */
-export function mandatesPerMode(doc: PolicyDoc, policies: Policy[], facts: PolicyFacts, discharge: Parameters<typeof mandates>[2]): ReturnType<typeof mandates> {
+export function mandatesPerMode(scope: string, policies: Policy[], facts: PolicyFacts): Mandates {
   const reads = new Map<string, Set<string>>();
   const walk = (e: any): void => {
     if (!e || typeof e !== 'object') return;
@@ -182,25 +190,15 @@ export function mandatesPerMode(doc: PolicyDoc, policies: Policy[], facts: Polic
     for (const v of Object.values(e)) { if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') walk(v); }
   };
   for (const p of policies) for (const it of p.items) walk(it);
+  const check = (keep?: (row: Record<string, any>) => boolean): Discharge => (set, mandate) => dischargeCheck(subsetOf(scope, policies, set), facts, mandate, keep ? { keep } : {});
   const modes = [...reads].flatMap(([m, fs]) => [...fs].map((f) => ({ machine: m, field: f, values: facts.machines.get(m)!.fields.get(f)!.values as string[] })));
-  if (!modes.length) return mandates(doc, policies, discharge);
+  if (!modes.length) return mandates(policies, check());
   const combos = modes.reduce<Record<string, string>[]>((acc, md) => acc.flatMap((a) => md.values.map((v) => ({ ...a, [`${md.machine}.${md.field}`]: v }))), [{}]);
-  const pathOf = (key: string) => { const i = key.lastIndexOf('.'); return `action.machines['${key.slice(0, i)}'].${key.slice(i + 1)}`; };
-  const fix = (s: unknown, combo: Record<string, string>): unknown => typeof s === 'string' ? Object.entries(combo).reduce((t, [k, v]) => t.split(pathOf(k)).join(`'${v}'`), s) : s;
   const per = combos.map((combo) => {
-    const obligations = doc.obligations.map((o) => {
-      const x: any = JSON.parse(JSON.stringify(o));
-      for (const k of ['when', 'require', 'invariant']) if (k in x) x[k] = fix(x[k], combo);
-      if (x.machine) { x.machine.transitions = x.machine.transitions.map((t: any) => ({ ...t, when: fix(t.when, combo) })); x.machine.guards = x.machine.guards.map((g: any) => ({ ...g, when: fix(g.when, combo) })); }
-      if (x.examples) {
-        const keep = (seq: any[]) => seq.every((a) => Object.entries(combo).every(([k, v]) => { const i = k.lastIndexOf('.'); const got = a.machines?.[k.slice(0, i)]?.[k.slice(i + 1)]; return got === undefined || got === v; }));
-        x.examples = { allow: x.examples.allow.filter(keep), deny: x.examples.deny.filter(keep) };
-      }
-      return x;
-    });
-    return { combo, r: mandates({ ...doc, obligations }, policies, discharge) };
+    const keep = (row: Record<string, any>) => Object.entries(combo).every(([k, v]) => { const i = k.lastIndexOf('.'); const got = row.machines?.[k.slice(0, i)]?.[k.slice(i + 1)]; return got === undefined || got === null || got === v; });
+    return { combo, r: mandates(policies, check(keep)) };
   });
-  const findings: ReturnType<typeof mandates>['findings'] = [];
+  const findings: Mandates['findings'] = [];
   const name = (c: Record<string, string>) => Object.entries(c).map(([k, v]) => `${k} == ${v}`).join(', ');
   const ids = new Set(per.flatMap((p) => p.r.findings.map((f) => f.mandate)));
   for (const id of ids) {
@@ -208,7 +206,7 @@ export function mandatesPerMode(doc: PolicyDoc, policies: Policy[], facts: Polic
     if (hits.length === per.length) { const f = hits[0].r.findings.find((x) => x.mandate === id)!; findings.push({ ...f, message: `${f.message}; in every mode` }); continue; }
     for (const h of hits) { const f = h.r.findings.find((x) => x.mandate === id)!; findings.push({ ...f, message: `in mode ${name(h.combo)}: ${f.message} (PD4.4b)` }); }
   }
-  return { findings, mandates: per[0]?.r.mandates ?? 0, checks: per.reduce((n, p) => n + p.r.checks, 0) };
+  return { findings, mandates: per[0]?.r.mandates ?? 0, checks: per.reduce((n, p) => n + p.r.checks, 0), bounded: [...new Set(per.flatMap((p) => p.r.bounded))] };
 }
 
 /** The policies of `module`, checked against `program` (the project's modules), one report per scope. */
@@ -219,7 +217,7 @@ export async function policyReports(module: Module, program: Module[], root: str
   const typed = checkPolicies(module, facts);
   const scopes = new Map<string, Policy[]>();
   for (const p of policies) { if (!scopes.has(p.scope)) scopes.set(p.scope, []); scopes.get(p.scope)!.push(p); }
-  const { polyaxionPeer, polycheckPeer, loadPolyaxion, loadPolyaxionModule, loadPolycheck, policyEngine } = await import('@poly/runtime');
+  const { polyaxionPeer, polycheckPeer, loadPolyaxion, loadPolycheck, policyEngine } = await import('@poly/runtime');
   const refFacts = policyFacts(program);
   const out: PolicyReport[] = [];
   for (const [scope, ps] of scopes) {
@@ -248,23 +246,31 @@ export async function policyReports(module: Module, program: Module[], root: str
     const doc = JSON.parse(text) as PolicyDoc;
     r.stages.push({ stage: 'policy-lower', status: 'ran', engine: '@poly/lower', verdict: 'CLEAN', note: `${doc.obligations.length} obligation(s) in ${rel}` });
 
+    // Stage 5b (PT8.5, PS8.6, S148): an undischargeable mandate is PL6501 with its minimal conflicting subset, by
+    // poly-ref's check over the policy machines together (review B3, B4, B9); a bounded check is not clean (B11).
+    const consistency = mandatesPerMode(scope, ps, refFacts);
+    for (const m of consistency.findings) r.diagnostics.push({ ...diag('PL6501', { module: module.name, node: m.node, line: m.line }, m.message), property: m.mandate, witness: { id: '', length: m.path.length, trace: m.path } });
+    for (const m of consistency.bounded) r.notRun.push({ property: m, reason: 'the discharge check stopped at its bound (PS8.6)' });
+    r.stages.push({ stage: 'consistency', status: 'ran', engine: 'poly-ref', verdict: consistency.findings.length ? 'FINDINGS' : consistency.bounded.length ? 'INCONCLUSIVE' : 'CLEAN', note: `${consistency.mandates} mandate(s); ${consistency.checks} discharge check(s)` });
+
     // policy-admission and policy-tv need the engine.
     const peer = polyaxionPeer();
     if (!peer.ok) {
       r.stages.push({ stage: 'policy-admission', status: 'not-run', engine: '', reason: peer.reason });
-      r.stages.push({ stage: 'consistency', status: 'not-run', engine: '', reason: peer.reason });
       r.stages.push({ stage: 'policy-tv', status: 'not-run', engine: '', reason: peer.reason });
     } else {
       const px = await loadPolyaxion();
       const admission = await px.admitPolicy(doc, {});
-      // Stage 5b (PT8.5, S148): an undischargeable mandate is PL6501 with its minimal conflicting subset, not a refusal.
-      const { checkDischarge } = await loadPolyaxionModule('compile/discharge.mjs');
-      const consistency = mandatesPerMode(doc, ps, refFacts, (d) => checkDischarge(px.compileToTriple(d).plan, {}));
-      for (const m of consistency.findings) r.diagnostics.push({ ...diag('PL6501', { module: module.name, node: m.node, line: m.line }, m.message), property: m.mandate, witness: { id: '', length: m.path.length, trace: m.path } });
       const errors = (admission.findings ?? []).filter((f: { level: string; message: string }) => f.level === 'error' && !/not lawfully dischargeable \(m2\)/.test(f.message));
       for (const f of errors) r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `Polyaxion refuses the policies of scope ${scope} at admission: ${f.obligation ? `${f.obligation}: ` : ''}${f.message} (PT8.4)`));
-      if (!admission.servable && !errors.length && !consistency.findings.length) r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, `Polyaxion does not serve the policies of scope ${scope}: ${admission.refused?.message ?? 'not servable'} (PT8.4)`));
-      r.stages.push({ stage: 'consistency', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: consistency.findings.length ? 'FINDINGS' : 'CLEAN', note: `${consistency.mandates} mandate(s); ${consistency.checks} discharge check(s)` });
+      if (!admission.servable && !errors.length && !consistency.findings.length) {
+        // Review B9: the engine's own m2 check explores one machine at a time and counts an escalation as a deny, so
+        // it can refuse a scope PS8.6 finds dischargeable; the gate cannot serve it either way, so it stays PL6001.
+        const m2 = (admission.findings ?? []).filter((f: { message: string }) => /not lawfully dischargeable \(m2\)/.test(f.message));
+        r.diagnostics.push(diag('PL6001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, m2.length
+          ? `Polyaxion does not serve the policies of scope ${scope}: its m2 check finds ${m2.map((f: { obligation?: string }) => f.obligation ?? 'a mandate').join(', ')} not lawfully dischargeable, which PS8.6 finds dischargeable (the engine counts an escalation as a deny on the way; engine change E8) (PT8.4)`
+          : `Polyaxion does not serve the policies of scope ${scope}: ${admission.refused?.message ?? 'not servable'} (PT8.4)`));
+      }
       r.stages.push({ stage: 'policy-admission', status: 'ran', engine: `polyaxion@${peer.commit}`, verdict: errors.length ? 'REFUSED' : 'CLEAN', note: `coverage ${(admission.coverage ?? []).map((c: { id: string; grade: string }) => `${c.id}: ${c.grade}`).join(', ')}` });
       const engine = policyEngine(px, px.compileToTriple(doc).plan);
       const tv = validatePolicy({ scope, policies: ps }, refFacts, engine);

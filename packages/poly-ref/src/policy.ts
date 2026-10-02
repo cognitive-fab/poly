@@ -163,8 +163,11 @@ function varsOf(s: PolicyScope): Record<string, V> {
   return out;
 }
 
-/** PS8.2 per rule, PT8.2 per machine guard, PS8.3 combined; and Σ after an allowed proposal. */
-export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, any>): { decision: Decision; reasons: string[]; next: Sigma } {
+/**
+ * PS8.2 per rule, PT8.2 per machine guard, PS8.3 combined; and Σ after an allowed proposal. `approved`: the proposal
+ * carries a person's approval (PT12.5), which lifts every escalation and leaves a deny standing.
+ */
+export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, any>, opts: { approved?: boolean } = {}): { decision: Decision; reasons: string[]; next: Sigma } {
   const vars = varsOf(s);
   const outcomes: { o: string; out: 'deny' | 'escalate' | 'warn' }[] = [];
   for (const p of s.policies) for (const it of p.items) {
@@ -183,7 +186,7 @@ export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, an
     }
   }
   const deny = outcomes.filter((x) => x.out === 'deny');
-  const esc = outcomes.filter((x) => x.out === 'escalate');
+  const esc = opts.approved ? [] : outcomes.filter((x) => x.out === 'escalate');
   const decision: Decision = deny.length ? 'deny' : esc.length ? 'escalate' : 'allow';
   const next: Sigma = { ...sigma };
   if (decision === 'allow') {
@@ -305,24 +308,61 @@ export interface TableResult {
 
 const sigmaKey = (s: Sigma) => JSON.stringify(Object.entries(s).sort());
 
-/** The Σ reachable from the initial one by allowed proposals, each with the path to it (S149). */
-function explore(s: PolicyScope, rows: Record<string, any>[], maxStates: number): { states: { sigma: Sigma; path: WitnessStep[] }[]; capHit: boolean } {
+/**
+ * The proposals that move Σ from `sigma`: each allowed one, and each escalated one a person approves (PT12.5: the
+ * approval lifts the escalation, and the engine then moves its machines). Review B1.
+ */
+function moves(s: PolicyScope, sigma: Sigma, row: Record<string, any>): { next: Sigma; verdict: string } | null {
+  const d = decide(s, sigma, row);
+  if (d.decision === 'allow') return { next: d.next, verdict: 'allow' };
+  if (d.decision !== 'escalate') return null;
+  const a = decide(s, sigma, row, { approved: true });
+  return a.decision === 'allow' ? { next: a.next, verdict: 'allow (approved)' } : null;
+}
+
+/** The Σ reachable from the initial one by allowed or approved proposals, each with the path to it (S149). */
+function explore(s: PolicyScope, rows: Record<string, any>[], maxStates: number): { states: { sigma: Sigma; path: WitnessStep[] }[]; edges: [number, number][]; capHit: boolean } {
   const start = initialSigma(s);
   const seen = new Map<string, number>([[sigmaKey(start), 0]]);
   const states = [{ sigma: start, path: [] as WitnessStep[] }];
+  const edges: [number, number][] = [];
   let capHit = false;
   for (let i = 0; i < states.length; i++) {
     for (const row of rows) {
-      const d = decide(s, states[i].sigma, row);
-      if (d.decision !== 'allow') continue;
-      const k = sigmaKey(d.next);
-      if (seen.has(k)) continue;
+      const m = moves(s, states[i].sigma, row);
+      if (!m) continue;
+      const k = sigmaKey(m.next);
+      if (seen.has(k)) { edges.push([i, seen.get(k)!]); continue; }
       if (states.length >= maxStates) { capHit = true; continue; }
       seen.set(k, states.length);
-      states.push({ sigma: d.next, path: [...states[i].path, { pre: states[i].sigma, action: 'propose', data: row, post: d.next, verdict: 'allow' }] });
+      edges.push([i, states.length]);
+      states.push({ sigma: m.next, path: [...states[i].path, { pre: states[i].sigma, action: 'propose', data: row, post: m.next, verdict: m.verdict }] });
     }
   }
-  return { states, capHit };
+  return { states, edges, capHit };
+}
+
+/**
+ * PS8.6: whether a mandate (a machine obligation with end states) is dischargeable under the scope's obligations,
+ * explored together over the decision table: from every Σ reachable by allowed or approved proposals, some such path
+ * reaches a Σ where the mandate is in one of its end states. An escalation is not a deny on the way. Returns the first
+ * reachable Σ from which no path does (with the path to it), or null; `capHit` when the exploration stopped at its
+ * bound, in which case nothing is concluded. `keep` narrows the proposals (a mode, PD4.4b).
+ */
+export function dischargeCheck(s: PolicyScope, facts: PolicyFacts, mandate: string, opts: { keep?: (row: Record<string, any>) => boolean; maxStates?: number } = {}): { trap: { sigma: Sigma; path: WitnessStep[] } | null; capHit: boolean } {
+  const m = machineObligations(s).find((x) => x.id === mandate);
+  if (!m) return { trap: null, capHit: false };
+  const table = proposalTable(s, facts);
+  const rows = opts.keep ? table.rows.filter(opts.keep) : table.rows;
+  const { states, edges, capHit } = explore(s, rows, opts.maxStates ?? 10_000);
+  if (capHit || table.capHit) return { trap: null, capHit: true };
+  const good = new Set<number>(states.map((st, i) => (m.o.end.includes(st.sigma[mandate]) ? i : -1)).filter((i) => i >= 0));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [a, b] of edges) if (!good.has(a) && good.has(b)) { good.add(a); changed = true; }
+  }
+  const i = states.findIndex((_, k) => !good.has(k));
+  return { trap: i < 0 ? null : { sigma: states[i].sigma, path: states[i].path }, capHit: false };
 }
 
 /** S149: each `never` statement of the scope, proved over the decision table, with a witness when it fails. */
@@ -364,7 +404,7 @@ export function checkNever(s: PolicyScope, facts: PolicyFacts, at: (node: string
  * Translation validation of a lowered policy: over every reachable pair of Σ (poly-ref's, and the engine's own
  * model) and every proposal of the table, the engine's decision is PS8's. `engine` steps the lowered document.
  */
-export function validatePolicy(s: PolicyScope, facts: PolicyFacts, engine: { initial: () => unknown; step: (model: unknown, proposal: Record<string, any>) => { decision: Decision; next: unknown } }, opts: { maxStates?: number; evaluate?: typeof decide } = {}): { mismatch: WitnessStep[] | null; detail: string; pairs: number; rows: number; capHit: boolean } {
+export function validatePolicy(s: PolicyScope, facts: PolicyFacts, engine: { initial: () => unknown; step: (model: unknown, proposal: Record<string, any>, opts?: { approved?: boolean }) => { decision: Decision; next: unknown } }, opts: { maxStates?: number; evaluate?: typeof decide } = {}): { mismatch: WitnessStep[] | null; detail: string; pairs: number; rows: number; capHit: boolean } {
   const table = proposalTable(s, facts);
   const maxStates = opts.maxStates ?? 10_000;
   const start = { sigma: initialSigma(s), model: engine.initial(), path: [] as WitnessStep[] };
@@ -379,8 +419,16 @@ export function validatePolicy(s: PolicyScope, facts: PolicyFacts, engine: { ini
       const got = engine.step(cur.model, row);
       const step: WitnessStep = { pre: cur.sigma, action: 'propose', data: row, post: want.next, verdict: want.decision };
       if (got.decision !== want.decision) return { mismatch: [...cur.path, step], detail: `PS8 decides ${want.decision}${want.reasons.length ? ` (${want.reasons.join(', ')})` : ''} and the lowered policy ${got.decision}`, pairs: queue.length, rows: table.rows.length, capHit };
-      if (want.decision !== 'allow') continue;
-      const nx = { sigma: want.next, model: got.next, path: [...cur.path, step] };
+      // Review B1: an escalation a person approves is decided again with the approval, and its Σ explored.
+      let next = want.decision === 'allow' ? { sigma: want.next, model: got.next, verdict: 'allow' } : null;
+      if (want.decision === 'escalate') {
+        const wantA = (opts.evaluate ?? decide)(s, cur.sigma, row, { approved: true });
+        const gotA = engine.step(cur.model, row, { approved: true });
+        if (gotA.decision !== wantA.decision) return { mismatch: [...cur.path, { ...step, verdict: `${wantA.decision} (approved)` }], detail: `with a person's approval, PS8 decides ${wantA.decision} and the lowered policy ${gotA.decision}`, pairs: queue.length, rows: table.rows.length, capHit };
+        if (wantA.decision === 'allow') next = { sigma: wantA.next, model: gotA.next, verdict: 'allow (approved)' };
+      }
+      if (!next) continue;
+      const nx = { sigma: next.sigma, model: next.model, path: [...cur.path, { ...step, post: next.sigma, verdict: next.verdict }] };
       const k = key(nx);
       if (seen.has(k)) continue;
       if (queue.length >= maxStates) { capHit = true; continue; }

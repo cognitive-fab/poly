@@ -27,9 +27,15 @@ export function policyEngine(px: any, plan: any) {
   const core = px.core;
   const run = { id: 'poly', scope: plan.policy?.scope ?? '', step: 0 };
   const initial = () => Object.fromEntries(plan.keys.map((k: { key: string; initial: unknown }) => [k.key, k.initial]));
-  const step = (model: any, proposal: Record<string, any>) => {
+  // `approved`: the proposal carries a person's approval (PT12.5), as the gate passes it to the engine.
+  const step = (model: any, proposal: Record<string, any>, opts: { approved?: boolean } = {}) => {
     const canonical = core.normalizeAction(actionOf(proposal));
     const act = core.routeAction(plan, canonical);
+    if (opts.approved) {
+      const a = core.stepPlan(plan, model, act, { action: canonical, history: [], run, approved: { by: 'person', ref: 'approval' } });
+      const decision = decisionOfReject(a.reject);
+      return { decision, reason: a.reject as string | null, next: decision === 'allow' ? { ...model, ...a.next } : model };
+    }
     let r = core.stepPlan(plan, model, act, { action: canonical, history: [], run });
     let decision = decisionOfReject(r.reject);
     if (decision === 'escalate') {
