@@ -172,7 +172,7 @@ on RefundReversed(reason) {
 }
 ```
 
-- **PD2.4a** `adjudicate d as Correct | Wrong` lowers to an `outcome` intent. The runtime writes an `outcome` event linked to the hash of the most recent `decision` event for `d` on the run. With no such event, the step is rejected `no-decision-to-adjudicate`, and the checker reports a handler that can adjudicate a decision not taken on every path to it (`PL1201`, with the path).
+- **PD2.4a** `adjudicate d as Correct | Wrong` lowers to an `outcome` intent. The runtime writes an `outcome` event linked to the hash of the most recent `decision` event for `d` on the run. *Ruled (S129):* the checker reports an accepted adjudication reachable without a preceding accepted `ok` completion of `d` as `PL6203 ADJUDICATION_WITHOUT_DECISION`, with the path, and the runtime reason `no-decision-to-adjudicate` is dropped (PT6.1).
 - **PD2.4b** Evaluation, calibration fitting and drift monitoring read `decision` events joined with their `outcome` links. None of them writes to a run's chain.
 
 ### PD2.5 Acceptance (M4)
@@ -202,7 +202,7 @@ The certificate says what the system may do with any answer. It does not say how
 ### PD3.4 Acceptance (M4)
 
 - **PD3-A1** Swapping the router's provider configuration from one model to another changes no file under `.poly/build` and leaves the certificate's digest unchanged.
-- **PD3-A2** With the policy of PD4.3, the new model cannot take a gated refund decision until a map fitted for it is installed; after that it can, and its `decision` events record the new map.
+- **PD3-A2** *(Moved to M5 with PD4, S131.)* With the policy of PD4.3, the new model cannot take a gated refund decision until a map fitted for it is installed; after that it can, and its `decision` events record the new map.
 - **PD3-A3** An evaluation over 100 recorded router questions with outcomes reports agreement and calibration for the candidate model, and writes nothing to any run's chain.
 
 ## PD4. Operating modes

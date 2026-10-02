@@ -71,7 +71,8 @@ Stmt        = "require" Expr "else" "reject" String
             | "send" Expr "<-" Ident "(" [ Args ] ")" [ "as" Ident ]
             | "signal" Key "->" Ident "(" [ Args ] ")"
             | "for" Ident "in" Int ".." Expr Block
-            | "decide" Ident "(" [ Args ] ")" ;
+            | "decide" Ident "(" [ Args ] ")"
+            | "adjudicate" Ident "as" ( "Correct" | "Wrong" ) ;   (* PD2.4, S129 *)
 Key         = Ident [ "[" Expr "]" ] ;
 ChildWiring = "on" "complete" "->" Ident [ "on" "parent" "terminal" "->" Ident ] ;
 Arm         = Pattern "=>" ( Block | Stmt ) ;
@@ -195,6 +196,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   | `spawn [detached] M as k[i] -> A(args) on complete -> P on parent terminal -> C` | `spawn('M', 'k', { index?, detached?, create?: ['A', args], complete?: 'P', parentTerminal?: 'C' })` |
   | `signal k[i] -> A(args)`, `send r <- A(args)` | `signal('k', i \| null, 'A', args)`, `send(r, 'A', args)` |
   | `decision`, `decide` (PD1) | `decision('d', { p: T }, R, [provider('…'), labels([…]), timeout('800ms'), band(lo, hi), okWith('r', 'A', args), failed('A', args)])`, `decide('d', args)` |
+  | `adjudicate` (PD2.4, S129) | `adjudicate('d', 'Correct')` or `adjudicate('d', 'Wrong')` |
   | `configuration c { … }` | `configuration('c', { instances: [instance('x', 'M', { count?, init? })], inputs: ['g[*].A', …], bounds: { transit, instances? }, properties: [...] })` |
 
   - **Front end.** `poly-embed` reads the module with the TypeScript compiler API and accepts only the forms above; inside an arrow, only the PT2.2 subset. Anything else (a loop, a call to anything but a poly combinator, mutation, access beyond the arrow's parameter) is `PL0301 OUTSIDE_EMBEDDED_SUBSET`, with the offending node. The resulting AST goes through the same checks, lowering and translation validation as the standalone syntax.
@@ -436,6 +438,8 @@ The manifest for `charge` in PT4.5:
     "labels": ["egress:external"], "class": "irreversible" } } }
 ```
 
+**Adjudication (PD2.4, S129).** `adjudicate d as o` names a decision `d` of the same machine (`PL1001` otherwise) and lowers to an effect intent of kind `outcome.d` with payload `{ "outcome": "Correct" | "Wrong" }`. The manifest declares the kind with class `none`, no labels, no completions and `retry.maxAttempts` 1; its handler is built into poly-runtime and does nothing. The runtime writes the `outcome` event in the adjudicating step's transaction, linked to the hash of the run's most recent `decision` event for `d` (PT16). An accepted adjudication reachable without a preceding accepted `ok` completion of `d` on its path is `PL6203 ADJUDICATION_WITHOUT_DECISION`, a finding with the path as its witness. The runtime has no rejection reason for it: a checked program cannot reach the case, and if it is reached anyway the dispatch is refused before any step, like K9.
+
 `labels` and `class` are new manifest fields, read by the gate (PT9). M1 confirms whether polyrun's manifest loader tolerates unknown fields. If it does not, the two fields move to a sidecar `effects.labels.json`, and the manifest stays unchanged.
 
 ### PT6.2 Labels
@@ -603,7 +607,7 @@ With the order waiting for `Taken`, the configuration is clean over 44 global st
 - `self` is legal only as a whole argument of a `send`. It lowers to the marker `{ "$ref": "self" }`, which the kernel replaces with the sender's instance id when it writes the message, since neither the acceptor nor the mapper knows that id (S58). `send … as n` is `PL0901`.
 - The runtime delivers it through the outbox, at least once, as a `dispatch` to the target with the intent's idempotency key as its `actionId`. So each message takes exactly one step at its receiver (K4, PS14.3). The outbox row is keyed `<sender>:<seq>:<position>`, PS13.2's message identity, and the receiver's dedupe on it for the life of the instance is K4. There is no fixed delivery order: unordered is the default (PT9.8), and `fifo` needs the in-order worker. A send to an instance that does not exist goes to the dead-letter list and is journaled on the sender's run. Tests and the M3 adapter may deliver one message at a time (S89).
 - A delivery the receiver rejects is a rejected step there. The sender is not notified unless the receiver sends a reply, which is the actor discipline.
-- `fifo` between a pair of instances is available only when they share a kernel shard, and it is checked with the narrower arrival order.
+- `fifo` between a pair of instances is available only when they share a kernel shard, and it is checked with the narrower arrival order. **Not in v1's runtime (S125):** polyrun delivers messages with the parallel worker only, so `load` refuses a build that declares a `fifo` pair with `PL5405 FIFO_WITHOUT_IN_ORDER_WORKER` until an in-order worker exists.
 
 **Names in configuration properties (S32).** In a configuration property, `x.f` and `g[i].f` name field `f` of instance `x` or `g[i]`. `g[i] is C` and `g[*] is C` resolve `C` against the machine's fields: the test is legal when exactly one field's type has the constructor `C`, and it then tests that field; otherwise it is `PL1005 AMBIGUOUS_CONSTRUCTOR`, whose fix is `g[i].f is C`. So `count(order[*] is Done)` tests `st`, the one field of `Order` whose type has `Done`, and `init(inv.onHand)` is the inventory's initial stock. A field access on an instance is legal only in configuration properties, never inside a machine (PS1.6).
 
@@ -681,6 +685,8 @@ After compilation, stage 5b checks that each mandate in scope is **dischargeable
 ## PT9. The gate in the runtime
 
 This is the only new engine integration (architecture section 7.2).
+
+**The gate before M5 (S118).** M4 builds the gate interface in the worker (`propose(proposal, snapshot) → allow | deny | escalate`, `settle(observed) → ok | failed`), with an allow-all gate as the default and scripted, deterministic test gates; each decision is a `verdict` event in the run's chain. Session replay in `sseq` order, with Σ digests (PS11.1, PS11.2), comes with the policy gate in M5. Approvals in M4 are recorded API calls without a person-key signature, and the instance line states that limit until PT12.5 lands.
 
 - **PT9.1 Proposal.** When an outbox worker claims an intent, it calls the gate before the handler with:
 
@@ -792,6 +798,10 @@ This is the only new engine integration (architecture section 7.2).
   2. **Escalation happens once and has a timeout.** An approved re-proposal can be allowed or denied, never escalated again, so an intent takes at most two gate decisions. `escalation.timeoutMs` (the polyflow platform policy field) fires `EscalationTimeout`, which denies the intent.
   3. **Denial is final and only precedes execution.** A deny can only happen from `Proposed`, before any attempt ran.
 
+  **The worker hosts the machine (S119).** poly-runtime runs its own effect worker, and polyrun's `tickEffects` is never started. Each intent's state is an `OutboxIntent` value in a poly-runtime table, and every worker transition is an action on the lowered `OutboxIntent` module, written in one transaction with the matching `pr_outbox` change. An action the module rejects is a runtime fault: the worker stops on that intent and reports it, and never takes the transition. A completion is dispatched first and the transition written second, fenced on the completion's journal row. A crash or lease expiry while `Running` is `HandlerFailed` and counts an attempt; the idempotency key (PT15) keeps a re-run of an effect that did execute from repeating it. A row the worker cannot place (machine or manifest unavailable) takes no transition. `Dead` is terminal: an operator who wants another try creates a new intent through a governed action, never by resurrecting a dead one.
+
+  **The attempt bound (S120).** The machine above is the instance with `maxAttempts` 3. The runtime's CI checks it once per distinct `retry.maxAttempts` in the build, with `Allowed`, `Running` and `Settled` ranged over that bound, and the worker conformance runs at each. `load` refuses a manifest entry without `maxAttempts`, and admission refuses one above 5 (PT19).
+
   The check of this machine is gate M4b in PT18. Adding a state or a transition to the worker without changing this machine first is `PL2401 RUNTIME_MODEL_DRIFT` in the runtime's own CI.
 
 - **PT9.8 The delivery protocol is a checked machine.** "Each message takes exactly one step at its receiver" (PS14.3) depends on the outbox worker, the network path and the receiver's dedupe table working together, with retries and archiving in between. The protocol is specified as a poly machine, with the network's choices as the environment's inputs, and checked. Two messages from one sender to one receiver are enough to exhibit every interleaving that matters: loss, duplication by resend, acknowledgement loss, archiving and ordering.
@@ -881,7 +891,7 @@ This is the only new engine integration (architecture section 7.2).
   2. **`fifo` requires the in-order worker.** A pair declared `fifo` is served by a worker that sends a message only after the previous one to the same receiver is acknowledged. For co-located pairs this is local, in-order dispatch.
   3. **Unordered delivery is the default.** Without `fifo`, the parallel worker is used. Exactly-once still holds, and order is not promised.
 
-  The runtime's conformance to this machine is kernel assumption K8, checked by trace replay at M4.
+  The runtime's conformance to this machine is kernel assumption K8, checked by trace replay at M4. polyrun's message worker is the parallel one, so its traces replay against the parallel variant (`examples/delivery/delivery-parallel.poly`), through an abstraction function written down in the test: `Emit` is the sender's commit, `Send` a claim, `Resend` a claim after a lease recovery, `LoseReq` a crash before the receiver commits, `DeliverReq` the receiver's commit or dedupe hit, `LoseAck` a crash between that and the mark, `DeliverAck` the mark `done`, `Archive` the purge (S125).
 - **PT9.9 Sends across trust scopes.** A `send` from one trust scope to another is proposed to the gate like an effect (PS8.7). The proposal carries `kind: "send"`, the target's machine and scope, the action, and the payload digest. On deny, the runtime does not deliver the message. It delivers `SendDenied(to, action, reason)` to the sender instead, with its own idempotency key. Sends within one scope are not proposed.
 
 ## PT10. Workflows
@@ -956,15 +966,15 @@ Every diagnostic has this JSON form (schema `poly.diagnostic/1`):
 | Range | Stage | Examples |
 |---|---|---|
 | PL0xxx | parse, format, fixes, embedded subset, milestone | `PL0001 SYNTAX`, `PL0201 STALE_FIX`, `PL0301 OUTSIDE_EMBEDDED_SUBSET`, `PL0901 NOT_IN_MILESTONE` |
-| PL1xxx | names, types, domains | `PL1001 UNKNOWN_NAME`, `PL1002 DUPLICATE_DECLARATION`, `PL1005 AMBIGUOUS_CONSTRUCTOR`, `PL1101 UNBOUNDED_DOMAIN`, `PL1201 TYPE_MISMATCH`, `PL1202 READ_OF_PRIMED_FIELD`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1204 DIVISION_BY_ZERO`, `PL1207 RESERVED_REJECT_REASON` (S101, enforced from M4), `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1502 INCOMPLETE_MAP_LITERAL`, `PL1503 UNREACHABLE_ARM`, `PL1504 UNUSED_BINDER`, `PL1601 PAYLOAD_TYPE_CONFLICT`, `PL1602 ARRAY_MAP_NOT_ZERO_BASED`, `PL1701 NOT_PREFIX_CLOSED` |
+| PL1xxx | names, types, domains | `PL1001 UNKNOWN_NAME`, `PL1002 DUPLICATE_DECLARATION`, `PL1005 AMBIGUOUS_CONSTRUCTOR`, `PL1101 UNBOUNDED_DOMAIN`, `PL1201 TYPE_MISMATCH`, `PL1202 READ_OF_PRIMED_FIELD`, `PL1203 TRI_WHERE_BOOL_EXPECTED`, `PL1204 DIVISION_BY_ZERO`, `PL1207 RESERVED_REJECT_REASON` (S101, S127), `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1401 TERMINAL_NOT_ON_CONTROL_FIELD`, `PL1501 NON_EXHAUSTIVE_MATCH`, `PL1502 INCOMPLETE_MAP_LITERAL`, `PL1503 UNREACHABLE_ARM`, `PL1504 UNUSED_BINDER`, `PL1601 PAYLOAD_TYPE_CONFLICT`, `PL1602 ARRAY_MAP_NOT_ZERO_BASED`, `PL1701 NOT_PREFIX_CLOSED` |
 | PL2xxx | lowering, strict validate, translation validation | `PL2001 STRICT_VALIDATE`, `PL2101 WRITE_BEFORE_REQUIRE`, `PL2102 DOUBLE_WRITE`, `PL2201 SILENT_NOOP`, `PL2301 DUPLICATE_TIMER_KEY`, `PL2401 RUNTIME_MODEL_DRIFT`, `PL2501 LOWERING_MISMATCH` |
 | PL3xxx | model check, deadlock, liveness | `PL3001 INVARIANT_REACHABLE`, `PL3002 STEP_PROPERTY`, `PL3003 REJECT_PROPERTY`, `PL3102 DOMAIN_ESCAPE`, `PL3201 DEADLOCK`, `PL3301 LIVENESS_LASSO`, `PL3901 BOUND_HIT` |
 | PL4xxx | path properties | `PL4001 PATH_PROPERTY`, `PL4002 EMIT_WITHOUT_STATE_CHANGE` (effects, timers and child intents; not `send`, S63) |
-| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5105 DUPLICATE_SIGNAL`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5303 CONFIGURATION_WITHOUT_BOUNDS`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
-| PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
+| PL5xxx | composition, configurations | `PL5403 UNQUANTIFIED_GROUP`, `PL5405 FIFO_WITHOUT_IN_ORDER_WORKER` (S125), `PL5001 COMPOSE_INVARIANT`, `PL5101 CHILDKEY_COLLISION`, `PL5102 UNHANDLED_CASCADE_DELIVERY`, `PL5103 CHILD_READ_WITHOUT_SPAWNED`, `PL5104 SIGNAL_TO_ABSENT_CHILD`, `PL5105 DUPLICATE_SIGNAL`, `PL5201 CASCADE_DEPTH`, `PL5202 ATTACHED_ACROSS_SHARDS`, `PL5301 TRANSIT_BOUND_HIT`, `PL5302 INSTANCE_BOUND_HIT`, `PL5303 CONFIGURATION_WITHOUT_BOUNDS`, `PL5401 CONFIGURATION_INVARIANT`, `PL5402 STUCK`, `PL5404 SEND_TO_NONE` |
+| PL6xxx | policy admission, labels, capabilities | `PL6001 NOT_FULLY_MEDIATED`, `PL6101 COMPLETION_WITHOUT_HANDLER`, `PL6201 UNGATED_DECISION`, `PL6202 DECISION_WITHOUT_FAILURE`, `PL6203 ADJUDICATION_WITHOUT_DECISION` (S129), `PL6301 UNLABELLED_EFFECT`, `PL6302 UNLABELLED_IN_LABELLED_SCOPE`, `PL6401 AMBIENT_EFFECT_IN_HANDLER`, `PL6501 UNDISCHARGEABLE_MANDATE`, `PL6601 CROSS_SESSION_STATE` |
 | PL7xxx | capability proof | `PL7001 REGION_WITNESS` |
 | PL8xxx | version gate | `PL8001 LANE_FAILED`, `PL8101 MIGRATION_HOLE` |
-| PL9xxx | replay | `PL9001 SPEC_DIVERGENCE`, `PL9101 CONTROL_FAILED` |
+| PL9xxx | replay and verification | `PL9001 SPEC_DIVERGENCE` (a post-state that differs from the fold, PS11.4), `PL9002 LEDGER_BROKEN` (a chain, signature or anchor that does not verify), `PL9003 DECISION_PROVENANCE` (PD2.2d), `PL9101 CONTROL_FAILED` |
 
 `PL2001 STRICT_VALIDATE` and `PL2501 LOWERING_MISMATCH` are addressed to the toolchain, never to the author: a lowered module that fails strict `validate()`, or that disagrees with poly-ref, is a toolchain fault, and the verdict is `REFUSED` (S20). A user error must be reported at its source line with a user-facing code; a user program that reaches either code is a checker bug.
 
@@ -985,7 +995,11 @@ The verdicts and exit codes follow the polygents codes:
 | Error | 4 |
 | Usage | 64 |
 
-**Vacuous properties (S113).** A property whose antecedent is never true in the explored states (the left side of an implication or of `leads to`, or the trigger of an "after" property) is reported as `INCONCLUSIVE` with reason `vacuous`, naming the antecedent. It is never `CLEAN`. Enforced from M4.
+**Vacuous properties (S113, S128).** A property whose antecedent is never true where it is judged is reported as `INCONCLUSIVE` with reason `vacuous`, naming the property and its antecedent's source text. It is never `CLEAN`, and no new verdict or code is needed: the report lists it under `vacuous`, beside `notRun`, and the fold makes the verdict `INCONCLUSIVE` at best.
+
+- **The antecedent.** The antecedent of an implication is the conjunction of the left sides along its right spine: `a implies b implies c` has antecedent `a && b`. A property whose body is a conjunction is judged conjunct by conjunct, and one vacuous conjunct makes the property vacuous. An implication nested inside any other operator is not judged.
+- **Where it is judged.** An invariant over the reachable states; a step property over the accepted transitions; a reject property over all transitions; `P leads to Q` over the reachable states (`P` never true); `before(k1, k2)` over the explored paths (no `k2` ever emitted); a configuration property over the global states, and for a quantified one over every instance of its group. `eventually P` and `count` forms have no antecedent.
+- **Not judged.** The automatic properties (`domain:`, `shape:`, deadlock, emit without state change).
 
 ### PT12.3a Every verdict carries its instance
 
@@ -1071,12 +1085,14 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
 | `poly witness <id> --trace/--test` | `poly_witness` | PT12.4. |
 | `poly fix <id>` | `poly_fix` | Applies one typed fix if its precondition digest still holds (PT12.1). |
 | `poly grade` | `poly_grade` | polynv adequacy. |
-| `poly admit` | `poly_admit` | Writes and signs the certificate. |
+| `poly admit` | `poly_admit` | Writes and signs the certificate (PT15). In M4 only a `CLEAN` program is admitted (S126). |
 | `poly accept <finding> --by <person>` | (not exposed over MCP) | Records an accepted exception, signed with a person key (PT12.5). |
 | `poly deploy [--pin/--migrate/--upgrade]` | `poly_deploy` | Loads a certified version into a runtime, with the version gate against live snapshots. |
 | `poly run`, `poly dispatch` | `poly_dispatch` | Development runtime. |
 | `poly approve <intent> --by --ref` | (not exposed over MCP) | PT9.2 escalation approval, signed with a person key (PT12.5). |
-| `poly journal verify/replay/export` | `poly_journal` | Ledger verification and replay (PF8.6). |
+| `poly journal verify/replay/export` | `poly_journal` | Ledger verification and replay (PF8.6). Verify refuses with `PL9002` or `PL9003`; replay reports `PL9001`. |
+| `poly journal eval --decision d --candidate <provider>` | `poly_journal` | Replays recorded questions to a candidate provider and reports agreement and calibration (PD3.3, S132). Writes to no chain. |
+| `poly journal fit --decision d` | `poly_journal` | Fits a monotone calibration map by isotonic regression from `decision` events and their outcomes (PD1.6, S132). Writes to no chain. |
 | `poly export traces` | `poly_export` | PF10.1. |
 | `poly mine` | `poly_mine` | Passes journals to Polyx. Returns proposed obligations. |
 | `poly propose` | `poly_propose` | Passes agent journals to polyness. Returns proposed workflows. |
@@ -1116,6 +1132,10 @@ The API is polyrun's `createRuntime` with three additions:
 
 `rt.getState`, `rt.getStateAt(id, seq)` and `rt.list(machine, filter, status)` are unchanged.
 
+**The certificate (S126).** `poly admit` writes `.poly/certificate.json` in the polyflow certificate's shape (`v`, `subject`, `artefacts`, `guarantees`, `checks`, `domains`, `boundAccepted`, `toolchain`, `issuedAt`, `buildId`, `signatures`, `digest`), with poly's fields: the source and module digests, every artefact of every machine by path and SHA-256 (including `invariants.compose.mjs` and `liveness.mjs`), the instance of PT12.3a, the kernel assumptions, and `decisions` (PD3.2b). It is signed, ed25519, with the admission key `poly.json` names by id and location (`keys.admission`); **no private key is ever committed**, and test keys are generated at test time. At load, the runtime reads only public keys. It reads each artefact once, checks its digest and the signature, writes the verified bytes to a directory named by the build id, and registers polyrun's machines from that copy, so the bytes polyrun loads are the bytes checked. Any difference (a changed, missing or extra artefact, an edited certificate, a bad signature or an unknown key) refuses the load, naming the artefact and both digests.
+
+**What M4's runtime does not do.** Handlers receive an empty, frozen capability object, and the instance line says capabilities are not bound until M5 (S134). The store is SQLite only; Postgres is not built (S135). `poly-runtime`'s `dispatch` refuses an outside dispatch of a decision's completion (K10, S130), as polyrun refuses a child's (K9).
+
 **Streams.** The runtime is a stream transformer: inputs flow in, intents flow out, and the state is the fold of the step over the inputs (PS11.4). The API exposes both streams for host code that prefers that model:
 
 ```ts
@@ -1131,16 +1151,18 @@ The ledger uses the polyflow platform event format. It is **chained per run**: e
 
 ```json
 { "v": 1, "run": { "ns": "orders", "wf": "orders.Order", "run": "ord-81" }, "seq": 14,
-  "kind": "verdict", "at": "2026-09-29T18:02:11.412Z",
+  "kind": "verdict", "at": 1790704931412,
   "body": { "stage": "gate", "outcome": "denied", "reason": "wrong-state:orders-irreversible", "witness": "sha256:…" },
   "prev": "sha256:…", "hash": "sha256:…" }
 ```
 
-**Event kinds.** The existing kinds are `admission`, `proposal`, `verdict`, `effect`, `observation` and `closure`. poly adds `step`, which carries the polyrun journal row (`seq`, `action`, `data` digest, `stepKind`, `rejectReason`, pre and post digests), and `advice`, which carries the Polyx verdict with no write path (architecture section 9).
+**Event kinds.** The existing kinds are `admission`, `proposal`, `verdict`, `effect`, `observation` and `closure`. poly adds `step`, which carries the polyrun journal row (`seq`, `action`, `data` digest, `stepKind`, `rejectReason`, pre and post digests), `advice`, which carries the Polyx verdict with no write path (architecture section 9), `decision` (PD2.2) and `outcome` (PD2.4). The polyflow verifier accepts the four new kinds with engine change E2.
 
-**Signing and verification.** Signed heads are `{ run, seq, hash, keyId, alg: "ed25519", sig }`, one per run. Verification runs the four Polyaxion checks: signature, chain, binding and replay.
+**Format (S122).** `ns` is the module, `wf` the machine, `run` the instance id. `at` is a number of milliseconds, as polyflow writes it. The event's `seq` is its position in the run's chain, and a `step` event's body carries the journal's own `seq`. Bodies are kept in a content store by digest, under a retention setting; the chain holds digests only. Every event of a step is written in the step's transaction (K1, S121). `closure` is written when an instance is archived, not when it becomes terminal, since a terminal instance still takes rejected steps (PS3.2). A poisoning is an `observation`. A K9 or K10 refusal writes no event; it is in the audit log.
 
-**Runtime anchor.** When a runtime-wide statement is needed (for an audit period), the runtime publishes an **anchor**: a Merkle root over the current signed heads of all runs, itself signed. Anchoring is periodic and off the step path. A run's chain can be verified alone; the anchor proves that no run was dropped from the period.
+**Signing and verification.** Signed heads are `{ run, seq, hash, keyId, alg: "ed25519", sig }`, one per run. Verification runs the four Polyaxion checks: signature, chain, binding and replay. **Heads are signed off the step path (S123):** a signer loop signs the latest head of each run that moved since its last signature, every `ledger.headMs` and at closure, since a remote signer cannot sign inside a transaction. A live run verifies as `open-and-signed` through the `seq` its newest head covers, never as fully signed.
+
+**Runtime anchor.** When a runtime-wide statement is needed (for an audit period), the runtime publishes an **anchor**: a Merkle root over the current signed heads of all runs, itself signed. Anchoring is periodic and off the step path. The tree uses RFC 6962 hashing over the latest signed heads, ordered by run, and the anchor record is `{ v: 1, period, root, runs, keyId, alg: "ed25519", sig }` (S123). A run's chain can be verified alone; the anchor proves that no run was dropped from the period.
 
 **Trace export.** Export joins `step` events with the snapshots store to produce `{pre, action, data, post}` windows. Bodies are stored by digest, and a separate content store holds bodies under the operator's retention policy.
 
@@ -1193,8 +1215,8 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 | M1 · Effects, composition and configurations | `emit`, effect declarations, timers, attached and detached children, `Ref` and `send`, configurations explored by poly-ref, emission and compose invariants, maps | The `polyrun-oms` order machine in poly agrees window by window with the hand-written module on the copied corpus (53/81 each), replays at 100% the corpus that polyrun's kernel records from the hand-written artefacts, and gives the same `check-effects` and `check-product` results (AC1, decision S24). The `checkout` configuration finds the double-confirmation witness with the optimistic order and is clean with the waiting order (AC10). poly-ref reproduces the configuration and delivery evidence scripts: the checkout results (six-step witness; 44 states clean) and the safety results of all four `Delivery` variants of PT9.8 (state counts, `at-most-once`, `in-order`, and both violation witnesses). `exactly-once` is liveness and is checked in M2. A disagreement with a script is investigated until one side is shown wrong. |
 | M2 · Diagnostics and second surface | `poly-embed` front end producing the same AST; handler capability lint (PT6.5); diagnostic model, verdict fold with instances (PT12.3a), witness export to trace and test, node-addressed fixes with preconditions, liveness checks with lasso witnesses (PS6.4), `poly check` CLI; `spawn detached` (S60); typed decisions (proposal PD1: `decision`, `decide`, the `Conf` type explored by intervals, calibration maps, `PL1205`, `PL6201`, `PL6202`) | For every seeded defect in the conformance suite, the exported test fails before the fix and passes after it (AC3). Applying every fix in a random order never misapplies one. poly-ref reproduces the liveness evidence: `exactly-once` holds under the stated fairness for the two `Delivery` variants that keep dedupe records, and `settles` holds for the v0.3 and union forms of `OutboxIntent` and fails for the v0.2 form, with a fair cycle at each of its two deadlocked states. Typed decisions pass PD1-A1 to PD1-A4 of `docs/proposals/pd-model-decisions.md`, with a recorded provider: no test calls a model. |
 | **M3 · Experiment** | PT13, on the M0 to M2 toolchain. Prerequisites (M3-2, M3-3): polyrun's `sendTo` intent with `self` and child addresses resolved at commit and the K9 refusal (S88, S89), re-vendored; the fixes of S70 on embedded modules | Results published with every arm reported. **Go / stop decision** for M4 onward, by the rule fixed in PT13. |
-| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7; decision provenance and model independence (proposal PD2, PD3, K10); in the checker, the two rules ruled during M3 and frozen out of it: reserved reject reasons (`PL1207`, PS3.2, S101) and vacuous properties reported `INCONCLUSIVE` with reason `vacuous` (PT12.3, S113) | M4a: journal replay reproduces every post-state and gate decision (AC6); a tampered artefact is refused at load. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. M4c: the runtime's delivery traces replay against the `Delivery` machine of PT9.8 (K8), including traces captured across an archive. M4d: an external dispatch of an action wired as a child completion is refused (K9, S45, S80). M4e: PD2-A1 to PD2-A4 and PD3-A1 to PD3-A3. M4f: a handler that rejects with `terminal` or `outside-check-domain` is `PL1207`; a property whose antecedent is never true in the explored states is `INCONCLUSIVE` (`vacuous`, naming the antecedent), never `CLEAN`, and the conformance sources and M3's references are re-checked under both rules. |
-| M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, obligation consistency (PT8.5), escalation with timeout, person-key signatures (PT12.5), the gate proposing cross-scope sends with `SendDenied` (PS8.7, PT9.9; plain `sendTo` delivery is M3's, S93); operating modes (proposal PD4) | AC4. Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. PD4-A1 to PD4-A3. |
+| M4 · Runtime | `poly-runtime`: certificate check, polyrun host, per-run ledger, anchor, journal verify and replay; the outbox intent machine of PT9.7; decision provenance and model independence (proposal PD2, PD3, K10); in the checker, the two rules ruled during M3 and frozen out of it: reserved reject reasons (`PL1207`, PS3.2, S101) and vacuous properties reported `INCONCLUSIVE` with reason `vacuous` (PT12.3, S113) | M4a: journal replay reproduces every post-state and every gate decision of the M4 gates (S118); a tampered artefact is refused at load. Session replay in `sseq` order (AC6's second half) is M5's. M4b: the `OutboxIntent` machine is clean for its invariants and step properties, deadlock-free, and satisfies `settles` under its stated fairness; the worker conforms to it by trace replay. M4c: the runtime's delivery traces replay against the `Delivery` machine of PT9.8 (K8), including traces captured across an archive. M4d: an external dispatch of an action wired as a child completion is refused (K9, S45, S80). M4e: PD2-A1 to PD2-A4, PD3-A1 and PD3-A3 (PD3-A2 needs PD4.3 and is M5's, S131). M4f: a handler that rejects with `terminal` or `outside-check-domain` is `PL1207`; a property whose antecedent is never true in the explored states is `INCONCLUSIVE` (`vacuous`, naming the antecedent), never `CLEAN`, and the conformance sources and M3's references are re-checked under both rules. |
+| M5 · Governance | `.policy.poly` lowering, gate hook with emitting-step snapshots (PT9.3), polycheck stage, obligation consistency (PT8.5), escalation with timeout, person-key signatures (PT12.5), the gate proposing cross-scope sends with `SendDenied` (PS8.7, PT9.9; plain `sendTo` delivery is M3's, S93); operating modes (proposal PD4) | AC4. AC6's session replay: replaying the sessions a run touched, in `sseq` order, reproduces every gate decision and Σ digest (S118). Gate latency and throughput are reported (PT9.6). The gate never fails open under an injected outage. PD4-A1 to PD4-A3 and PD3-A2 (S131). |
 | M6 · Agents | Workflow lowering, MCP server, language server, Claude Code plugin, `poly new` | AC5. A workflow in poly runs through unchanged polyflow tools. |
 | M7 · Feedback | `poly mine`, `poly propose`, `poly export traces` | A Polyx rule adjudicated `real` round-trips to an admitted obligation. A polyness proposal arrives as poly source and is admitted or refused by the pipeline. |
 
@@ -1207,7 +1229,8 @@ Worlds (appendix A) are planned after M7 and are not part of v1.
 - **State explosion.** It is managed by small machines and atomic cascades, not by abstraction. A check that hits its bound reports `INCONCLUSIVE` (`PL3901 BOUND_HIT`).
 - **Liveness.** Liveness holds only under the fairness stated with each property plus the delivery guarantee of PS14. At runtime, delivery is obligation R1: it is monitored, and a missed delivery is a runtime fault, not a program fault.
 - **Configurations.** Checks cover the bounded fragment: finite instances and a declared bound on messages in transit (PS4.1e, PS13.5). A bound hit is reported. The state space of a configuration grows with its instances, and that growth is the cost of checking interactions.
-- **Kernel assumptions.** Every guarantee about a running program holds under the kernel assumptions K1 to K8 of PS10. Their evidence is listed there. poly does not verify the kernel.
+- **Retries.** A manifest's `retry.maxAttempts` is at most 5, refused at admission otherwise, so the `OutboxIntent` machine checked for each bound stays small (S120).
+- **Kernel assumptions.** Every guarantee about a running program holds under the kernel assumptions K1 to K10 of PS10. Their evidence is listed there. poly does not verify the kernel.
 - **Over-approximation.** The checked instance lets the environment offer any action at any time (PS4.4). Clean results are sound; some witnesses may be infeasible and are marked `environment: unconstrained`.
 - **Advice.** Advice is recorded but not enforced until it is promoted, adjudicated and admitted.
 - **Worlds.** Not in v1 (appendix A).

@@ -38,12 +38,13 @@ poly adds no new checking, simulation or governance engine. It is still a substa
 | | Lowering to seven artefact kinds (contract, module, invariants, effects mapper, manifest, emission and compose invariants, migration) plus policy and workflow descriptors | compiler back end |
 | | Verdict fold, diagnostic model, node-addressed fixes, witness export | toolchain |
 | | Certificate format, signer and verifier, person keyring | toolchain |
-| | Runtime host: certificate check at load, outbox worker with the gate hook, per-run ledger writer, anchors | runtime |
+| | Runtime host: certificate check at load, an effect worker that hosts the `OutboxIntent` machine with the gate interface (S119), per-run ledger writer in the step's transaction (S121), anchors | runtime |
 | | The outbox intent machine (PT9.7), written in poly | runtime model |
 | | `poly-ref`, poly's model checker: a reference interpreter written from 04-semantics; translation validation, deadlock, liveness (with per-value fairness and oldest-copy delivery), configuration exploration (arrival-order nondeterminism, declared bounds), possibility checks for obligation consistency | model checker (PA0.1) |
 | | The `Delivery` machine (PT9.8) and the `OutboxIntent` machine (PT9.7), both written in poly and checked; the runtime conforms to them by trace replay (K8) | runtime models |
 | | CLI, MCP server, language server, Claude Code plugin | agent interface |
-| **Changed code in engines** | polyrun: gate hook point in the outbox worker; ledger as a store option; a `sendTo` built-in intent beside `spawnChild` and `signalChild`; shard placement by attached-tree root | small, specified in PT7a, PT9 and PT16 |
+| **Changed code in engines** | polyrun: a `sendTo` built-in intent beside `spawnChild` and `signalChild` (M3); tombstones that keep dedupe keys at archive (E1, K4); shard placement by attached-tree root. The gate hook and the ledger store option are not needed: poly-runtime hosts its own effect worker and subclasses polyrun's store (S119, S121) | small, specified in PT7a, PT9 and PT16 |
+| | polyflow kernel and verifier: the ledger kinds `step`, `advice`, `decision` and `outcome` (E2) | small, PT16 |
 | | polyaxion: an `effect` proposal kind that carries the emitting-step snapshot | small, PT9.1 and PT9.3 |
 | | polyx: exporter from an adjudicated rule to a poly obligation | small |
 | | polyness: proposals emitted as poly source | small |
@@ -298,7 +299,7 @@ The aim is to change the engines as little as possible.
 
 | Repository | Change | Why |
 |---|---|---|
-| polygraph / polyrun | A gate hook in the outbox worker. The ledger writer as a store option. | Section 7.2 and AD-3. |
+| polygraph / polyrun | Tombstones at archive (E1). The gate is reached from poly-runtime's own effect worker, and the ledger is written by a subclass of polyrun's store, so neither needs an engine change (S119, S121). | Section 7.2 and AD-3. |
 | polyaxion | A proposal kind for effect intents that carries the emitting-step snapshot. | PF4.3 and PF8.4. |
 | polyflow | Load a workflow from lowered artefacts. This is already the six-file format, so no change is expected. | PF5. |
 | polyx | An exporter from an adjudicated rule to a poly obligation. | PF4.4. |
