@@ -59,6 +59,8 @@ class Printer {
       case 'EnumDecl':
         return this.emit(d, '', [`enum ${d.name} { ${d.members.join(', ')} }`]);
       case 'RecordDecl':
+        // PD5.1.2: a claims type, one field per line.
+        if (d.claims) return this.emit(d, '', [`claims ${d.name} {`, ...d.fields.map((f) => `${INDENT}${f.name}: ${this.type(f.type)}`), '}']);
         return this.emit(d, '', [`type ${d.name} = { ${d.fields.map((f) => `${f.name}: ${this.type(f.type)}`).join(', ')} }`]);
       case 'TypeDecl': {
         const ctors = d.ctors.map((c) => this.ctor(c));
@@ -180,7 +182,7 @@ class Printer {
       }
       case 'Liveness': return this.liveness(it);
       case 'Handler': {
-        const head = `on ${it.action}${it.params ? `(${it.params.join(', ')})` : ''}`;
+        const head = `on ${it.action}${it.params ? `(${it.params.join(', ')})` : ''}${it.by ? ` by ${it.by.name}: ${it.by.type}` : ''}`;
         return this.blockLines(head, it.body);
       }
       case 'EffectDecl': {

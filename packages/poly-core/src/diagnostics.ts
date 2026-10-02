@@ -46,6 +46,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL1204: { name: 'DIVISION_BY_ZERO', stage: 'types', severity: 'error' },
   PL1205: { name: 'CONFIDENCE_NOT_COMPARED', stage: 'types', severity: 'error' },
   // S101, S127: a reason the runtime uses (PS3.2), so a rejection always says who refused the step.
+  // PD5.1.2b, S109: a Principal used other than by equality, storage or passing.
+  PL1206: { name: 'PRINCIPAL_NOT_OPAQUE', stage: 'types', severity: 'error' },
   PL1207: { name: 'RESERVED_REJECT_REASON', stage: 'types', severity: 'error' },
   // M4 review D1: an effect kind with a prefix the toolchain generates (decision.*, outcome.*).
   PL1208: { name: 'RESERVED_NAME', stage: 'types', severity: 'error' },

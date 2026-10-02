@@ -37,7 +37,7 @@ class Printer {
     switch (d.kind) {
       case 'EnumDecl': return `${this.use('enumType')}(${q(d.name)}, [${d.members.map(q).join(', ')}])`;
       case 'TypeDecl': return `${this.use('union')}(${q(d.name)}, { ${d.ctors.map((c) => `${this.key(c.name)}: ${this.fields(c.fields)}`).join(', ')} })`;
-      case 'RecordDecl': return `${this.use('record')}(${q(d.name)}, ${this.fields(d.fields)})`;
+      case 'RecordDecl': return `${this.use(d.claims ? 'claims' : 'record')}(${q(d.name)}, ${this.fields(d.fields)})`;
       case 'Use': return `${this.use('use')}(${q(d.path.join('.'))})`;
       case 'Machine': return this.machine(d, ind);
       case 'Configuration': return this.configuration(d, ind);
@@ -119,7 +119,8 @@ class Printer {
     switch (i.kind) {
       case 'Terminal': return `${this.use('terminal')}(${this.arrow(i.expr)})`;
       case 'Action': return `${this.use('action')}(${q(i.name)}, ${this.params(i.params)})`;
-      case 'Handler': return `${this.use('on')}(${q(i.action)}, (${this.p}) => ${this.stmts(i.body, ind)}${i.params ? `, [${i.params.map(q).join(', ')}]` : ''})`;
+      // PD5.1.2: `by c: C` as an options argument; the parameter list is then written, or null.
+      case 'Handler': return `${this.use('on')}(${q(i.action)}, (${this.p}) => ${this.stmts(i.body, ind)}${i.params || i.by ? `, ${i.params ? `[${i.params.map(q).join(', ')}]` : 'null'}` : ''}${i.by ? `, { by: [${q(i.by.name)}, ${q(i.by.type)}] }` : ''})`;
       case 'Guard': return `${this.use('guard')}(${this.arrow(i.cond)}, ${q(i.reason)})`;
       case 'Property': return this.property(i);
       case 'Liveness': return this.liveness(i);

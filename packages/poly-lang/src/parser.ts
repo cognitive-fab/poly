@@ -188,6 +188,7 @@ class Parser {
     const start = this.peek();
     if (this.at('type')) return this.typeDecl();
     if (this.at('enum')) return this.enumDecl();
+    if (this.at('claims') && this.peek(1).kind === 'ident') return this.claimsDecl();
     if (this.at('machine')) return this.machine(false);
     if (this.at('service') && this.at('machine', 1)) { this.next(); return this.machine(true, start); }
     if (this.at('configuration') && this.peek(1).kind === 'ident') return this.configuration();
@@ -201,7 +202,7 @@ class Parser {
       this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
       return null;
     }
-    this.fail('expected a declaration (type, enum, machine, configuration, policy, use)');
+    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, use)');
   }
 
   /** `policy p { scope "s" var … obligation … recalled … never … }` (PT8.1, S149). */
@@ -381,6 +382,24 @@ class Parser {
     }
     this.next();
     return this.node<A.Configuration>(start, { kind: 'Configuration', name, instances, inputs, bounds, properties }, true);
+  }
+
+  /** `claims C { f: T … }` (PD5.1.2): fields one per line, or separated by commas. */
+  private claimsDecl(): A.RecordDecl {
+    const start = this.next();
+    const name = this.ident('a claims type name');
+    this.expect('{');
+    const fields: A.PayloadField[] = [];
+    while (!this.atPunct('}')) {
+      const fs = this.peek();
+      const fname = this.ident('a claims field');
+      this.expect(':');
+      const type = this.type();
+      fields.push(this.node<A.PayloadField>(fs, { kind: 'PayloadField', name: fname, type }));
+      if (this.atPunct(',')) this.next();
+    }
+    this.next();
+    return this.node<A.RecordDecl>(start, { kind: 'RecordDecl', name, fields, claims: true }, true);
   }
 
   private typeDecl(): A.TypeDecl | A.RecordDecl {
@@ -595,8 +614,16 @@ class Parser {
           }
           this.next();
         }
+        // PD5.1.2: `by c: C`, the claims the action requires.
+        let by: A.Handler['by'];
+        if (this.at('by')) {
+          this.next();
+          const bname = this.ident('the name of the claims');
+          this.expect(':');
+          by = { name: bname, type: this.ident('a claims type') };
+        }
         const body = this.block();
-        return this.node<A.Handler>(start, { kind: 'Handler', action, params, body }, true);
+        return this.node<A.Handler>(start, { kind: 'Handler', action, params, ...(by ? { by } : {}), body }, true);
       }
       case 'guard': {
         this.next();

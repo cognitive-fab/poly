@@ -48,6 +48,8 @@ export declare function module(name: string, decls: Decl[]): Decl;
 export declare function enumType(name: string, members: string[]): Decl;
 export declare function union(name: string, ctors: { [ctor: string]: { [payload: string]: Type } }): Decl;
 export declare function record(name: string, fields: { [field: string]: Type }): Decl;
+/** PD5.1.2: `claims C { f: T … }`, the claims a verifier asserts for an action's caller. */
+export declare function claims(name: string, fields: { [field: string]: Type }): Decl;
 export declare function use(path: string): Decl;
 export declare function machine(name: string, body: { service?: true; version?: number; state?: { [field: string]: Field }; items?: Item[] }): Decl;
 export declare function field(type: Type, init: Arrow, opts?: { check?: Literal[] | { lo: number; hi: number }; mode?: Mode; flag?: 'internal' | 'derived' }): Field;
@@ -57,7 +59,7 @@ export declare function instance(name: string, machine: string, opts?: { count?:
 
 // ── machine items ──────────────────────────────────────────────────────────
 export declare function action(name: string, params: { [param: string]: Type }): Item;
-export declare function on(action: string, body: (scope: Scope) => Stmt[], params?: string[]): Item;
+export declare function on(action: string, body: (scope: Scope) => Stmt[], params?: string[] | null, opts?: { by: [name: string, claims: string] }): Item;
 export declare function guard(cond: Arrow, reason: string): Item;
 export declare function terminal(cond: Arrow): Item;
 export declare function invariant(name: string, e: Arrow): Item;

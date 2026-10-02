@@ -26,6 +26,8 @@ export type Ty =
   | { k: 'action' }
   /** `Conf` (PD1.3): a confidence, and the type of a decimal literal (S76). */
   | { k: 'conf' }
+  /** `Principal` (PD5.1.2b): an opaque identity, or `none`. */
+  | { k: 'principal' }
   | { k: 'error' };
 
 const BOOL: Ty = { k: 'bool' };
@@ -49,6 +51,8 @@ function same(a: Ty, b: Ty): boolean {
   if (a.k === 'error' || b.k === 'error') return true;
   // PD1.3b: a Conf where it does not belong is PL1205, reported once by confUses, not also a type mismatch.
   if (a.k === 'conf' || b.k === 'conf') return true;
+  // PD5.1.2b: `none` is also the absent principal.
+  if ((a.k === 'principal' && b.k === 'ref' && b.machine === null) || (b.k === 'principal' && a.k === 'ref' && a.machine === null)) return true;
   if (a.k !== b.k) return false;
   if (a.k === 'union' || a.k === 'record') return a.name === (b as { name: string }).name;
   // `none` is an address of every machine (PS1.6).
@@ -424,6 +428,8 @@ class Checker {
           continue;
         }
         for (const f of d.fields) {
+          // PD5.1.2a, S103: a claims field is an enum, an integer range or a Principal; Tri is refused as everywhere.
+          if (d.claims && f.type.kind === 'TName' && f.type.name === 'Tri') { this.err('PL1203', f, `claims field ${d.name}.${f.name} is Tri; a claim is verified, so it is an enum such as Attest { Verified, Failed, Absent } (S103)`); continue; }
           if (this.tyOf(f.type).k === 'ref') this.err('PL0901', f, `an address inside a record is lowered after milestone M1: ${d.name}.${f.name}`);
           if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `field ${d.name}.${f.name} has no finite domain; give it a range or an enum type`);
         }
@@ -491,6 +497,8 @@ class Checker {
         // A recursive record was reported at its declaration; its uses say nothing more (one mistake, one diagnostic).
         if (this.recursive.has(t.name)) return ERR;
         if (this.env.records.has(t.name)) return { k: 'record', name: t.name };
+        // PD5.1.2b: Principal is built in, unless the module declares a type of that name.
+        if (t.name === 'Principal' && !this.env.unions.has(t.name)) return { k: 'principal' };
         if (!this.env.unions.has(t.name)) { this.errOnce('PL1001', t, `unknown type ${t.name}`); return ERR; }
         return { k: 'union', name: t.name };
       case 'TMap': {
@@ -500,6 +508,7 @@ class Checker {
           return { k: 'map', key: { k: 'int', lo: t.key.lo, hi: t.key.hi }, value, array: true };
         }
         const key = this.tyOf(t.key);
+        if (key.k === 'principal') this.errOnce('PL1206', t.key, 'a Principal is opaque, so it cannot key a map: it is compared by equality, stored or passed (PD5.1.2b)');
         if (key.k === 'union' && !this.env.unions.get(key.name)!.isEnum) this.errOnce('PL1201', t.key, `map key ${key.name} must be an enum (constructors without payload)`);
         // PT3.1: an enum or an integer range 0..n; a record has no key form in JSON.
         if (key.k === 'record') this.errOnce('PL1201', t.key, `map key ${key.name} is a record; a map is keyed by an enum or a range 0..n (PT3.1)`);
@@ -1487,6 +1496,15 @@ class Checker {
     }
     const scope = this.scope('handler');
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
+    // PD5.1.2: `by c: C` binds the claims, a claims type's value, in the handler.
+    if (h.by) {
+      const rec = this.module.decls.find((d): d is A.RecordDecl => d.kind === 'RecordDecl' && d.name === h.by!.type);
+      // A binder whose type is wrong is still bound, as an error, so its uses are not reported again.
+      if (!rec && !this.env.unions.has(h.by.type)) { this.err('PL1001', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: no claims type ${h.by.type}`); scope.params.set(h.by.name, ERR); }
+      else if (!rec?.claims) { this.err('PL1201', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: ${h.by.type} is not a claims type (PD5.1.2)`); scope.params.set(h.by.name, ERR); }
+      else if (scope.params.has(h.by.name)) this.err('PL1002', h, `on ${h.action}: ${h.by.name} names a parameter and the claims`);
+      else scope.params.set(h.by.name, { k: 'record', name: rec.name });
+    }
     this.handlerAction = act;
     this.stmts(h.body, scope);
     this.childAddressUses(h.body);
@@ -1995,6 +2013,7 @@ class Checker {
       case 'Unary': {
         if (e.op === '!') { this.expectBool(e.arg, scope); return BOOL; }
         const t = this.typeOf(e.arg, scope);
+        if (t.k === 'principal') { this.err('PL1206', e, 'a Principal is opaque: unary - is not defined on it (PD5.1.2b)'); return ERR; }
         if (t.k !== 'int') { if (t.k !== 'error' && t.k !== 'conf') this.err('PL1201', e, `unary - needs an int, not ${tyToString(t)}`); return ERR; }
         return { k: 'int', lo: -t.hi, hi: -t.lo };
       }
@@ -2185,6 +2204,8 @@ class Checker {
           r = this.typeOf(e.right, scope, l);
         }
         if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
+        // PD5.1.2b: a Principal is compared only with a Principal (or none).
+        if ((l.k === 'principal' || r.k === 'principal') && !same(l, r)) { this.err('PL1206', e, `a Principal is opaque: it is compared only with another Principal, not with ${tyToString(l.k === 'principal' ? r : l)} (PD5.1.2b)`); return BOOL; }
         if (!same(l, r)) this.err('PL1201', e, `cannot compare ${tyToString(l)} with ${tyToString(r)}`);
         return BOOL;
       }
@@ -2195,6 +2216,7 @@ class Checker {
         const l = this.typeOf(e.left, scope);
         const r = this.typeOf(e.right, scope);
         if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
+        if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque and has no order: ${e.op} is not defined on it (PD5.1.2b)`); return BOOL; }
         if ((l.k !== 'int' && l.k !== 'error') || (r.k !== 'int' && r.k !== 'error')) this.err('PL1201', e, `${e.op} compares ints, not ${tyToString(l)} and ${tyToString(r)}`);
         return BOOL;
       }
@@ -2203,6 +2225,7 @@ class Checker {
         const r = this.typeOf(e.right, scope);
         // PD1.3b: arithmetic on a Conf is PL1205, reported once at the Conf by confUses.
         if (l.k === 'conf' || r.k === 'conf') return ERR;
+        if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque: ${e.op} is not defined on it (PD5.1.2b)`); return ERR; }
         if (l.k !== 'int' || r.k !== 'int') {
           if (l.k !== 'error' && r.k !== 'error') this.err('PL1201', e, `${e.op} needs ints, not ${tyToString(l)} and ${tyToString(r)}`);
           return ERR;

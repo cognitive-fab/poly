@@ -171,7 +171,7 @@ class Reader {
 
   // ── declarations ─────────────────────────────────────────────────────────
   private decl(node: ts.Expression): A.Decl {
-    const c = this.call(node, 'enumType', 'union', 'record', 'use', 'machine', 'configuration');
+    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration');
     switch (c.name) {
       case 'enumType': {
         const [name, members] = this.argsOf(c, 2, 2);
@@ -181,9 +181,10 @@ class Reader {
         const [name, ctors] = this.argsOf(c, 2, 2);
         return this.mk<A.TypeDecl>(c.node, { kind: 'TypeDecl', name: this.str(name), ctors: this.obj(ctors).map(([k, v, kn]) => this.mk<A.Ctor>(kn, { kind: 'Ctor', name: k, fields: this.payload(v) })) });
       }
-      case 'record': {
+      case 'record':
+      case 'claims': {
         const [name, fields] = this.argsOf(c, 2, 2);
-        return this.mk<A.RecordDecl>(c.node, { kind: 'RecordDecl', name: this.str(name), fields: this.payload(fields) });
+        return this.mk<A.RecordDecl>(c.node, { kind: 'RecordDecl', name: this.str(name), fields: this.payload(fields), ...(c.name === 'claims' ? { claims: true as const } : {}) });
       }
       case 'use': {
         const [path] = this.argsOf(c, 1, 1);
@@ -308,8 +309,16 @@ class Reader {
         return this.mk<A.Action>(c.node, { kind: 'Action', name: this.str(name), params: this.paramList(params) });
       }
       case 'on': {
-        const [action, body, params] = this.argsOf(c, 2, 3);
-        return this.mk<A.Handler>(c.node, { kind: 'Handler', action: this.str(action), params: params ? this.arr(params).map((p) => this.str(p)) : null, body: this.arrow(body, (b) => this.stmts(b)) });
+        const [action, body, params, opts] = this.argsOf(c, 2, 4);
+        const none = !params || this.unparen(params).kind === ts.SyntaxKind.NullKeyword;
+        // PD5.1.2: `{ by: ['c', 'C'] }` is `by c: C`.
+        let by: A.Handler['by'];
+        for (const [k, v] of opts ? this.obj(opts) : []) {
+          if (k !== 'by') throw new Outside(v, `on(…) takes the option by, not ${k}`);
+          const [bn, bt] = this.arr(v);
+          by = { name: this.str(bn), type: this.str(bt) };
+        }
+        return this.mk<A.Handler>(c.node, { kind: 'Handler', action: this.str(action), params: none ? null : this.arr(params).map((p) => this.str(p)), ...(by ? { by } : {}), body: this.arrow(body, (b) => this.stmts(b)) });
       }
       case 'guard': {
         const [cond, reason] = this.argsOf(c, 2, 2);

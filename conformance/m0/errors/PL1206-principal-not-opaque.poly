@@ -1,0 +1,18 @@
+// expect: PL1206 (a Principal is opaque: compared by equality, stored or passed, never ordered, PD5.1.2b)
+module errors
+
+enum Kind { Person, Agent }
+
+claims Caller {
+  kind: Kind
+  principal: Principal
+}
+
+machine M {
+  state { first : Principal = none }
+  action Go()
+  on Go() by caller: Caller {
+    require caller.principal < first else reject "later"
+    first' = caller.principal
+  }
+}

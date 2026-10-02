@@ -129,6 +129,11 @@ export interface RecordDecl extends NodeBase {
   kind: 'RecordDecl';
   name: string;
   fields: PayloadField[];
+  /**
+   * PD5.1.2: `claims C { f: T … }`, a record of finite fields (enums, integer ranges, `Principal`) that a verifier
+   * outside poly asserts for an action's caller. Absent on a plain record.
+   */
+  claims?: true;
 }
 
 /** `type U = C1 { p: T } | C2` (PT2, PS1.4). */
@@ -256,6 +261,8 @@ export interface Handler extends NodeBase {
   action: string;
   /** The written parameter list, or null when omitted (PT2.4a). */
   params: string[] | null;
+  /** PD5.1.2: `on A(…) by c: C`, the claims the action requires, bound to `c`. */
+  by?: { name: string; type: string };
   body: Stmt[];
 }
 
