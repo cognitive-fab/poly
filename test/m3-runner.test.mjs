@@ -26,6 +26,8 @@ function secrets() {
     for (const f of walk(join(tasks, t))) if (/[\\/](reference|mutant|o3)[\\/]|[\\/]o2\.mjs$/.test(f)) out.add(sha(readFileSync(f)));
   }
   if (existsSync(join(M3, 'o1'))) for (const f of walk(join(M3, 'o1'))) out.add(sha(readFileSync(f)));
+  // O1-R (M3-10) is hidden like O1.
+  for (const f of walk(join(M3, 'o1r'))) out.add(sha(readFileSync(f)));
   return out;
 }
 

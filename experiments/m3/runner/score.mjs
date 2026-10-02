@@ -1,5 +1,6 @@
 // Scores a finished run (PT13), outside its workspace: for each version, whether a delivery exists, whether it
-// is admitted (the poly arms: `poly check` CLEAN and the adapter builds), and its O1, O2 and O3 results. For the
+// is admitted (the poly arms: `poly check` CLEAN and the adapter builds), and its O1, O2 and O3 results, with O1-R
+// beside O1 as a secondary measure (M3-10). For the
 // poly arms it also counts, from the journal, the diagnostics the agent saw by code and the typed fixes it was
 // offered and applied with `poly fix`. The results are written into run.json as `scores`.
 //
@@ -11,6 +12,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { checkFile } from '@poly/check';
 import { generate } from '../adapter/generate.mjs';
 import { M3, POLYRUN, versions } from '../lib/task.mjs';
+import { rangesOf } from '../o1r/ranges.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 
@@ -39,11 +41,26 @@ export function tapResults(text) {
 export function runO1(task, n, impl, timeoutMs, o1Dir = join(M3, 'o1')) {
   const suite = join(o1Dir, task, `v${n}.test.mjs`);
   if (!existsSync(suite)) return { ran: false, reason: 'O1 does not exist yet' };
-  const r = spawnSync(process.execPath, ['--no-warnings', '--test', '--test-reporter=tap', suite], { encoding: 'utf8', timeout: timeoutMs, env: cleanEnv({ M3_IMPL: impl }) });
+  return runSuite(suite, { M3_IMPL: impl }, timeoutMs);
+}
+
+/**
+ * O1-R's result for an implementation (M3-10): the out-of-range refusals of the M3-8 list that apply to this
+ * version, a secondary measure kept apart from O1. A version no entry applies to runs no test.
+ */
+export function runO1R(task, n, impl, timeoutMs) {
+  // node --test counts a file with no test as one test, so a version with no entry is not run.
+  if (!rangesOf(task, n).length) return { ran: true, tests: 0, failed: 0, skipped: 0, passed: [], failing: [] };
+  return runSuite(join(M3, 'o1r', 'o1r.test.mjs'), { M3_IMPL: impl, M3_TASK: task, M3_VERSION: String(n) }, timeoutMs);
+}
+
+/** A suite's result under `node --test`: its tests, failing and skipped counts, and each test's result. */
+function runSuite(suite, env, timeoutMs) {
+  const r = spawnSync(process.execPath, ['--no-warnings', '--test', '--test-reporter=tap', suite], { encoding: 'utf8', timeout: timeoutMs, env: cleanEnv(env) });
   const num = (k) => Number((new RegExp(`^# ${k} (\\d+)$`, 'm').exec(r.stdout ?? '') ?? [])[1] ?? NaN);
   if (r.error) return { ran: false, reason: String(r.error.message) };
   const results = tapResults(r.stdout);
-  return { ran: true, tests: num('tests'), failed: num('fail') + (num('cancelled') || 0), passed: [...results].filter(([, ok]) => ok).map(([n]) => n).sort(), failing: [...results].filter(([, ok]) => !ok).map(([n]) => n).sort() };
+  return { ran: true, tests: num('tests'), failed: num('fail') + (num('cancelled') || 0), skipped: num('skipped') || 0, passed: [...results].filter(([, ok]) => ok).map(([n]) => n).sort(), failing: [...results].filter(([, ok]) => !ok).map(([n]) => n).sort() };
 }
 
 /** The implementation module of a delivery, built into `work`: the TypeScript file, or the generated adapter. */
@@ -111,6 +128,8 @@ export async function scoreRun(dir, { timeoutMs = 30 * 60 * 1000, o1Dir } = {}) 
     const one = spawnSync(process.execPath, ['--no-warnings', join(HERE, 'score-one.mjs'), record.task, String(rv.n), built.impl], { encoding: 'utf8', timeout: timeoutMs });
     try { Object.assign(s, JSON.parse(one.stdout.trim().split('\n').at(-1))); } catch { s.o3 = null; s.o2 = null; s.error = one.error ? String(one.error.message) : `scorer exited ${one.status}: ${one.stderr.slice(0, 500)}`; }
     s.o1 = runO1(record.task, rv.n, built.impl, timeoutMs, o1Dir);
+    // M3-10: the range refusals of the amended briefs, scored beside O1 and never into it.
+    s.o1r = runO1R(record.task, rv.n, built.impl, timeoutMs);
     scores.push(s);
   }
   // Regressions (PT13): a test of version n that passed at version n-1 and fails at delivery n was introduced;

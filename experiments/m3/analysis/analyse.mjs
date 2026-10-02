@@ -78,10 +78,13 @@ export function runMeasures(r, prices) {
   const scores = r.scores ?? [];
   const delivered = scores.length === 4 && scores.every((s) => s.delivered && s.withinBudget);
   const o1Ran = scores.length === 4 && scores.every((s) => s.o1?.ran);
+  const o1rRan = scores.length === 4 && scores.every((s) => s.o1r?.ran);
   return {
     delivered,
     admitted: r.arm >= 3 ? delivered && scores.every((s) => s.admitted === true) : null,
     escaped: o1Ran ? scores.reduce((n, s) => n + s.o1.failed, 0) : null,
+    // M3-10: O1-R failures, a secondary measure beside O1, never added into `escaped`.
+    o1r: o1rRan ? scores.reduce((n, s) => n + s.o1r.failed, 0) : null,
     tokens: r.spent?.tokens ?? 0,
     tokenParts: tokenParts(r),
     cost: prices ? costOf(tokenParts(r), prices) : null,
@@ -98,7 +101,7 @@ export function perTask(records, prices) {
   const out = {};
   for (const r of records) {
     const m = runMeasures(r, prices);
-    const cell = ((out[r.arm] ??= {})[r.task] ??= { runs: 0, deliveredRuns: 0, admittedRuns: 0, escapedDelivered: [], tokens: 0, parts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, wallMs: [], o2: [], o3: [], introduced: [], caught: [] });
+    const cell = ((out[r.arm] ??= {})[r.task] ??= { runs: 0, deliveredRuns: 0, admittedRuns: 0, escapedDelivered: [], o1rDelivered: [], tokens: 0, parts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, wallMs: [], o2: [], o3: [], introduced: [], caught: [] });
     cell.runs++;
     cell.tokens += m.tokens;
     for (const k of Object.keys(cell.parts)) cell.parts[k] += m.tokenParts[k];
@@ -108,6 +111,7 @@ export function perTask(records, prices) {
     if (m.delivered) {
       cell.deliveredRuns++;
       if (m.escaped !== null) cell.escapedDelivered.push(m.escaped);
+      if (m.o1r !== null) cell.o1rDelivered.push(m.o1r);
       cell.o2.push(m.o2); cell.o3.push(m.o3); cell.introduced.push(m.introduced); cell.caught.push(m.caught);
     }
   }
@@ -120,6 +124,7 @@ export function perTask(records, prices) {
         deliveryRate: c.deliveredRuns / c.runs,
         admittedRate: Number(arm) >= 3 ? c.admittedRuns / c.runs : null,
         escapedPerDelivered: c.escapedDelivered.length ? mean(c.escapedDelivered) : null,
+        o1rPerDelivered: c.o1rDelivered.length ? mean(c.o1rDelivered) : null,
         tokensPerDelivered: c.deliveredRuns ? c.tokens / c.deliveredRuns : null,
         tokenPartsPerDelivered: c.deliveredRuns ? Object.fromEntries(Object.entries(c.parts).map(([k, v]) => [k, v / c.deliveredRuns])) : null,
         costPerDelivered: prices && c.deliveredRuns ? c.cost / c.deliveredRuns : null,
@@ -203,7 +208,8 @@ export function analyse(records, prices, { modelled = modelledTasks() } = {}) {
   for (const p of [3, 4]) win[p] = !all.rules.win[p].win ? 'no win' : holds[p] ? 'win' : 'only with the modelled tasks';
   const values = Object.values(win);
   const verdict = all.rules.verdict !== 'win' ? all.rules.verdict : values.includes('win') ? 'win' : 'win only with the modelled tasks';
-  return { ...all, sensitivity, reported: { verdict, win } };
+  // M3-10: O1-R compared the same way, reported apart as a secondary measure, in no rule and no verdict.
+  return { ...all, sensitivity, reported: { verdict, win }, secondary: { o1r: compare(all.table, 'o1rPerDelivered') } };
 }
 
 /** Every scored run record under a directory. */
@@ -226,5 +232,6 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   for (const c of s.comparisons.escapedDefects) console.log(`  escaped defects, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)} (descriptive)`);
   console.log(`  ${s.note}`);
   console.log(`  at least 30% below arms 1 and 2 (S117): arm 3 ${s.holds[3]}, arm 4 ${s.holds[4]}`);
+  for (const c of a.secondary.o1r) console.log(`secondary (M3-10), O1-R failures, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)}`);
   console.log(`reported (S115, S117): ${a.reported.verdict}; arm 3 ${a.reported.win[3]}, arm 4 ${a.reported.win[4]}`);
 }

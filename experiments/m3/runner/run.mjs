@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { M3, versions } from '../lib/task.mjs';
-import { currentEnvironment, environmentDiff, isExactModelId } from '../lib/environment.mjs';
+import { currentEnvironment, environmentDiff, isExactModelId, refusalDiff } from '../lib/environment.mjs';
 import { changeSources, deliveryFiles, listFiles, makeWorkspace, takeDelivery } from './workspace.mjs';
 import { runTurn } from './agent.mjs';
 
@@ -48,7 +48,7 @@ export function promptOf(arm, version) {
   return fill(readFileSync(join(M3, 'prompts', 'change.md'), 'utf8'), { CHANGE: readFileSync(version.briefs[version.n], 'utf8').trim(), HOST: host });
 }
 
-export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, agent, maxBudgetUsd }) {
+export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, agent, maxBudgetUsd, environment }) {
   const id = `${task}-arm${arm}-run${run}`;
   const dir = join(out, id);
   const ws = join(tmpdir(), 'poly-m3-ws', id);
@@ -58,6 +58,8 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
   const { files } = makeWorkspace(ws, arm, vs[0]);
   const journal = join(dir, 'journal.jsonl');
   const record = { id, arm, task, run, model, budget: { tokens, wallMs }, agent: agent.kind, started: new Date().toISOString(), workspace: files, versions: [] };
+  // M3-10: the environment the run ran in, and what of it differs from freeze.json (an OS release, at most).
+  if (environment) record.environment = environment;
   let sessionId = null;
   let spent = { tokens: 0, wallMs: 0 };
   let stopped = null;
@@ -101,21 +103,25 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const agent = stub ? { kind: 'stub', turns: JSON.parse(readFileSync(stub, 'utf8')).turns } : { kind: 'claude' };
   // A real run spends money: a pilot runs only on a practice task (P1, ...) once the owner writes
   // experiments/m3/PILOT, and a run of T1 to T10 only once the owner approves the freeze and writes FROZEN.
-  // S116: a run, a pilot included, needs the environment freeze.json records, with the model given by its exact id.
+  // S116, M3-10: a run, a pilot included, needs the Node version, the CLI version and the model freeze.json
+  // records, with the model given by its exact id. An OS release change is recorded in the run and reported.
+  let environment;
   if (!stub) {
     const model = flag('model');
     const recorded = JSON.parse(readFileSync(join(M3, 'freeze.json'), 'utf8')).environment;
     const current = currentEnvironment({ model });
-    const differs = environmentDiff(recorded, current);
-    if (!isExactModelId(model) || differs.length) {
+    const refused = refusalDiff(recorded, current);
+    if (!isExactModelId(model) || refused.length) {
       if (!isExactModelId(model)) console.error(`environment: the model must be an exact id, never an alias: ${model}`);
-      for (const k of differs) console.error(`environment differs from freeze.json in ${k}: recorded ${JSON.stringify(recorded?.[k])}, now ${JSON.stringify(current[k])}`);
+      for (const k of refused) console.error(`environment differs from freeze.json in ${k}: recorded ${JSON.stringify(recorded?.[k])}, now ${JSON.stringify(current[k])}`);
       process.exit(2);
     }
+    environment = { current, differs: environmentDiff(recorded, current) };
+    for (const k of environment.differs) console.error(`environment differs from freeze.json in ${k}, recorded in the run: ${JSON.stringify(recorded?.[k])}, now ${JSON.stringify(current[k])}`);
   }
   const practice = /^P\d+$/.test(task);
   const gate = practice ? 'PILOT' : 'FROZEN';
   if (!stub && !existsSync(join(M3, gate))) { console.error(practice ? 'a pilot run needs the owner\'s approval (experiments/m3/PILOT)' : 'a real run needs the freeze (experiments/m3/FROZEN), which the owner approves'); process.exit(2); }
-  const { dir } = await runOne({ arm, task, run: Number(flag('run') ?? 1), model: flag('model'), tokens: Number(flag('tokens')), wallMs: Number(flag('wall')) * 1000, out: flag('out'), agent, maxBudgetUsd: flag('max-budget-usd') ? Number(flag('max-budget-usd')) : undefined });
+  const { dir } = await runOne({ arm, task, run: Number(flag('run') ?? 1), model: flag('model'), tokens: Number(flag('tokens')), wallMs: Number(flag('wall')) * 1000, out: flag('out'), agent, environment, maxBudgetUsd: flag('max-budget-usd') ? Number(flag('max-budget-usd')) : undefined });
   console.log(dir);
 }

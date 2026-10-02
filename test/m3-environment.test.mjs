@@ -48,3 +48,17 @@ test('S116: the runner refuses a run, a pilot included, whose model differs from
     assert.match(r.stderr, /model/, `${task} ${model}: ${r.stderr}`);
   }
 });
+
+test('M3-10: an OS release change is recorded, not refused; the Node, CLI and model changes still refuse', async () => {
+  const { refusalDiff } = await import('../experiments/m3/lib/environment.mjs');
+  const e = frozen.environment;
+  assert.deepEqual(refusalDiff(e, { ...e, os: { ...e.os, release: '0' } }), []);
+  assert.deepEqual(refusalDiff(e, { ...e, node: 'v0.0.0', claude: '0.0.0', model: 'claude-other-1', os: { ...e.os, release: '0' } }), ['claude', 'model', 'node']);
+  assert.deepEqual(refusalDiff(undefined, e), ['claude', 'model', 'node']);
+  // The run's record keeps the environment it ran in, and names what differs from the freeze.
+  const { runOne } = await import('../experiments/m3/runner/run.mjs');
+  const { DRY, stubScript } = await import('../experiments/m3/runner/dry-run.mjs');
+  const environment = { ...e, os: { ...e.os, release: '0' } };
+  const { record } = await runOne({ arm: 1, task: 'T1', run: 0, model: 'stub', tokens: DRY.tokens, wallMs: DRY.wallMs, out: join(tmpdir(), 'poly-m3-env-record'), agent: { kind: 'stub', turns: stubScript(1).turns }, environment: { current: environment, differs: environmentDiff(e, environment) } });
+  assert.deepEqual(record.environment, { current: environment, differs: ['os'] });
+});
