@@ -179,6 +179,78 @@ Numbered from S144. Each has a proposal; nothing is built on an issue before it 
 - **PD5 grows the semantics** (the label, a PS3.2 row, a lemma, K11). It enters 04-semantics in M5b only, after M5a closes.
 - **E5 is in polyrun.** Until it is vendored, S141 waits and is listed as waiting.
 
+## 10. Record of M5a
+
+M5a was built as ruled: S144 to S157 (730f672), with the amendments to S147 (b26a27a) and S149 (fabf8fe), PD4-A3 moved to M5b (aad1cad), S160 (e11215e) and S161 (cb26b5c). `main` was merged into `m4` before the build (0a3062c, 0d4e550) and again for S160 and S161 (e02f4b6), never the reverse. Each step has a test that failed before it.
+
+| Step | What was built | Commits |
+|---|---|---|
+| 0 | Polyaxion as a pinned optional peer (S145): 65 files at c37c60e, hash-checked, listed as not run where absent | d604bee |
+| 1 | Signed approvals and acceptances (PT12.5, S150): keyrings certified, `PL6405` at load, `rt.approve`, `poly approve`, `poly accept`, accepted findings in the certificate | a9bc5d6, 6251911 |
+| 2 | The policy front end: grammar, typing, `PL6502`, `never` statements (S149 amended), one lowered document per scope, admission, translation validation against the engine, three broken lowerings listed | f902583, 2d95025 |
+| 3 | OutboxIntent gains `Recheck` (S147 amended): 17m + 8 states, 59 at bound 3 and 178 at 10, checked at every bound; the gate in process with sessions, `sseq`, singletons and held verdicts | c9beea2, 2149c43, 56d991a |
+| 4 | Session replay in `sseq` order (S118, AC6) | 128557c |
+| 5 | The outage test (section 6) | 4923320 |
+| 6 | Consistency with a minimal subset (S148); polycheck pinned at 678b120 and run as stage 5a (S161) | 5762119, 39cec17 |
+| 7 | Trust scopes from modules and configurations; cross-scope sends proposed, `SendDenied` (S160) | f5ef52c, b9455c3 |
+| 8 | Operating modes and the fitted map (PD4, PD3-A2); consistency per mode | 8049488 |
+| 9 | Capabilities bound to declared targets, every redirect hop checked (S134, S151) | b931652 |
+| 10 | `poly bench gate` and `docs/m5/gate-bench.json` (AC4, PT9.6) | 3db54e8 |
+
+**The gate, item by item.**
+
+| Item | Status | Measured |
+|---|---|---|
+| AC4 | **passes** | `orders-irreversible` compiles and is admitted; the gate denies `payment.charge` on a cancelled order with `wrong-state:orders-irreversible`, a witness and a notary receipt that verifies; a mutant policy without the rule allows it. |
+| AC4, measured | **reported** | Propose p50 0.67 ms and p99 16.0 ms, settle p50 0.52 ms, the whole path p50 5.2 ms (146 proposals); 112 effects per second with no policy and 90 in the one session at 64 instances. Throughput is bound by the runtime's steps and SQLite writes, which the no-policy baseline shows. No threshold. |
+| AC6, second half | **passes** | Two runs share a session; replay in `sseq` order reproduces every decision and Σ digest; a swapped `sseq` or an edited digest is `PL9001`; a missing `sseq`, in the middle or at the end, is listed as not run. |
+| Never fails open | **passes** | The seeded schedule (seed 20261002) injects O1, O2, O3, O6 and O8 for 3, 4, 6, 5 and 5 passes over 90 handler calls; no allow is recorded in an outage pass, no handler runs without a prior allow, every order ends as in the fault-free run, every intent trace replays through OutboxIntent, and the session replays its 164 proposals (two of them late answers to O2) and 72 settles with no diagnostic. O4, O5, O7 and O9 are separate tests. O10 is M5b's. |
+| PT12.5 | **passes** | An approval signed by a keyring person lifts the escalation and is journaled with the key id; unsigned, agent-signed, unknown-key, wrong-kind, other-escalation, forged, replayed, earlier-escalation and late records are refused with an audit row, and the intent stays `Escalated` or is denied at its timeout. |
+| PT8.5 | **passes** | Two obligations that trap a mandate give `PL6501` naming exactly them, with a path and the number of discharge checks; each alone is clean; a trap set by another machine's guard is found; an escalation is not a deny on the way. |
+| PS8.7, PT9.9 | **passes, with the M5a limit S160 states** | An injected message from scope A to B is proposed once, denied, marked dead, not delivered, and `SendDenied` reaches the sender; a retried delivery goes under its recorded allow; a send within one scope is not proposed; the configuration check explores allow, deny and escalate. |
+| PD4-A1, PD4-A2 | **pass** | A refund at 0.91 is allowed in Normal and escalated in Crisis, and the verdict records the mode; a policy that traps the refund flow in Crisis is `PL6501` naming Crisis. PD4-A3 is M5b's. |
+| PD3-A2 | **passes** | With a map fitted for another model the gated refund escalates; with one fitted for the reported model it is allowed, and the decision event names the new map. |
+| S134 | **passes** | `egress.post` to the declared prefix reaches the transport; thirteen escapes and two redirects out of bounds throw before it with a `PL6406` audit row; a handler with no egress label gets no `egress`; `poly-runtime` imports no network module. |
+| S161 | **passes** | The trifecta with no gate is `PL7001` with its path; with its egress gated it is clean; a kind named only with `!=` or in a `never` is not gated. |
+
+**Raised during the build.**
+- **S158.** Polyaxion reports an escalate rule before a guard's deny, against PS8.3. The host asks the engine's own interpreter, with the escalations lifted, whether a deny stands behind, and decides deny when one does. Engine change **E7** would let Polyaxion do it.
+- **S159.** PT8.1's Claude Code vocabulary (`action.path`, `glob`, `history`) is not in M5a's surface.
+- **E8** (new, for the owner's list). Polyaxion's m2 check explores one machine at a time and counts an escalation as a deny. poly's consistency stage is now poly-ref's (review B3, B9), so the findings follow PS8.6, but the engine still refuses to serve a scope whose only discharging path is escalated; the refusal is `PL6001` and says so.
+
+**Limits, stated.** A send's escalation has no approval path in M5a, so it is denied with a reason that says so. No program makes a cross-scope send at run time before S153 (E5): the runtime path is tested with a message injected below the language, and M5b adds the end-to-end test. PD4-A3, a signed `Declare`, is M5b's. Capabilities are bound in-process; what keeps a handler from reaching around them is the lint, until the sandbox (S152), and the certificate's limits say so.
+
+### The code review of M5a
+
+Four reviewers read `d604bee..3db54e8` in four parts (peers, records and loading; the policy front end and its static checks; the gate at run time; sends, modes, capabilities and the bench), and each reproduced every finding with a script under `.poly/review-m5-a` to `review-m5-d`. They found 27. Polywatch found two more: a `never` over an open decision answer was proved (4eb6c2c), and a `never` whose forbidden proposal is only escalated was clean (6598736). Each finding was fixed with a test that failed first, except B13.
+
+| Part | High | Medium | Low |
+|---|---|---|---|
+| A, peers, records, loading | 1 (a replayed approval lifts a later escalation of the same intent) | 2 (an installed polysec-core shadows the pinned one; a private key is certified as a keyring's public key) | 2 (an agent key listed again as a person's; the pin tests pass when the peer differs) |
+| B, policy front end and checks | 4 (a `never` violated after an approved escalation is proved; a `never` over `model.id` is proved; consistency ignores other machines' guards; consistency stops at 400 table rows) | 5 (a rule over a string field passes translation validation on its unknown case; misspelt kinds, classes and labels pass; two matching transitions are a toolchain fault; `PL6302` is not built; an escalation counts as a deny in the discharge check) | 4 (a kind named with `!=` or in a `never` counts as gated; a bounded discharge check is clean; a transition reading only a var ends the stage in ERROR; comments inside an obligation body move after it) |
+| C, the gate at run time | none | 3 (a timed-out engine call still decides and moves Σ, unrecorded; an approval after the escalation timeout is accepted; the replayed approval of part A) | 1 (a missing last `sseq` replays clean; settled events carry no Σ) |
+| D, sends, modes, capabilities, bench | 1 (a denied cross-scope message is never marked dead and is proposed on every pass) | 1 (a retried delivery is proposed again) | 3 (a prefix with dot segments binds wider than it reads; encoded slashes and `..;` pass the prefix; the send proposal has no payload digest) |
+
+| Findings | Fix | Commit |
+|---|---|---|
+| A1, C2, C3 | a record must name the intent's current escalation and not be used before; an approval at or past the escalation's deadline is refused | aee9baf |
+| D1, D2, D5 | a message has one gate decision: a recorded allow delivers, a recorded deny finishes, and a deny marks the pending row dead; the proposal carries the target instance and the payload digest | 42a8702 |
+| C1, C4 | a timed-out call stays the session's outstanding call, and the session takes nothing until it answers; the late answer is recorded with its own `sseq`; replay checks the session's counter and Σ after decisions and settles | a0e2184 |
+| A3, A4 | keyrings certify the parsed SPKI only, refuse private keys, and refuse one key under two ids | 8ad307d |
+| A2, A5 | a peer whose polysec-core package is not the pinned directory is refused; a present peer that differs fails the pin test | 96afa7a |
+| D3, D4 | egress prefixes are written as parsed; encoded separators and `..;` segments are refused; a 303 drops the body's headers | 0f6bc42 |
+| B1, B3, B4, B9, B11 | consistency is poly-ref's, over the policy machines together and the whole table, with approved escalations; the `never` check and translation validation follow approvals; a bounded check is listed | 3020799 |
+| B2, B5 | the table takes the model ids the policies name and each field's check domain; a rule over an open value is runtime-only | 41004dc |
+| B6 | strings compared with kinds, classes, machines and labels are checked | 819e65d |
+| B7, B12 | transitions lowered so the engine takes the first match, each with the proposal conjunct | b308221 |
+| B8, B10 | `PL6302` built; only `==` and `in` in obligations gate a kind; a scope with only `never` statements is refused with a reason | 69031c9 |
+| C2 (follow-up) | the M4 race test approved past the deadline, which C2 now refuses; its approval now arrives before the deadline and commits after the pass reads, the race the model settles | 144137e |
+| B13 | **not fixed.** Policy expressions are not trivia nodes, so a comment inside an obligation body prints after it. The AST is unchanged and the output is idempotent. Proposed for M5b with the embedded surface's policy form. | |
+
+**The gate, from a clean build.** Every `dist` directory, build-info file and test build directory was removed; `npm test` built, ran the boundary check (passed) and ran 1247 tests: 1243 pass, 0 fail, and 4 are listed as waiting (the archive trace on E1, polyflow's verifier on E2, M3's references on FROZEN, and outage O10, the claims verifier, which is M5b's).
+
+M5a is ready to close. M5b does not start before the owner closes it.
+
 ## Conclusion
 
-M5 turns M4's gate interface into a governed gate. Policies get a front end and a checked lowering. Polyaxion decides in process, with a session sequence and state digests that make every decision replayable, and approvals are signed by people. The outage test shows by its log, not by assertion, that no effect runs without a recorded allow. Polyaxion needs no change if program-state reads are carried as reserved action fields, and polyrun needs one, for instances started at given values. Identity follows in M5b, on top of the gate and the signatures, with twelve acceptance criteria drawn from the PD5 rulings. Fourteen issues need rulings before the build, and the first two decide its shape: whether M5 is split (S144), and whether a BUSL engine can be vendored (S145).
+M5 turns M4's gate interface into a governed gate. Policies get a front end and a checked lowering. Polyaxion decides in process, with a session sequence and state digests that make every decision replayable, and approvals are signed by people. The outage test shows by its log, not by assertion, that no effect runs without a recorded allow. Polyaxion needs no change if program-state reads are carried as reserved action fields, and polyrun needs one, for instances started at given values. Identity follows in M5b, on top of the gate and the signatures, with twelve acceptance criteria drawn from the PD5 rulings. Fourteen issues need rulings before the build, and the first two decide its shape: whether M5 is split (S144), and whether a BUSL engine can be vendored (S145). M5a is built as ruled, reviewed, and clean from a clean build (section 10); it closes when the owner rules on E8 and B13.
