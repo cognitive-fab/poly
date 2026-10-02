@@ -55,6 +55,8 @@ export interface MachineCheck {
   verdict: Verdict;
   instance?: InstanceRecord;
   buildDir?: string;
+  /** Review A1: the SHA-256 of each artefact as the lowering wrote it, the bytes every later stage checked. */
+  artefactDigests?: Record<string, string>;
 }
 
 /** A vacuous property (PT12.3, S128): its name, its antecedent's source text, and the member it never held for. */
@@ -116,6 +118,8 @@ export interface CheckReport {
   module: string | null;
   /** The module digest (PT1.4) the witnesses and fixes of this report were computed on (S69). */
   moduleDigest?: string;
+  /** Review A2: the SHA-256 of the source text the check read. */
+  sourceDigest?: string;
   verdict: Verdict | 'NONDETERMINISM' | 'ERROR';
   exit: number;
   diagnostics: Diagnostic[];
@@ -166,7 +170,7 @@ export function engineVersions(): Record<string, string> {
 export async function checkFile(file: string, opts: CheckOptions = {}): Promise<CheckReport> {
   const src = readFileSync(file, 'utf8');
   // The source's absolute path, so a later `poly witness` or `poly fix` finds it from any directory (review D4).
-  const report: CheckReport = { file: resolve(file), module: null, verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
+  const report: CheckReport = { file: resolve(file), module: null, sourceDigest: 'sha256:' + createHash('sha256').update(src, 'utf8').digest('hex'), verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
 
   // ── stage 0: parse, type, domains ─────────────────────────────────────
   // S71: a .ts module is read by poly-embed into the same AST; everything after this line is shared.
@@ -268,6 +272,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   mkdirSync(dir, { recursive: true });
   for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);
   mc.buildDir = dir;
+  mc.artefactDigests = Object.fromEntries(Object.entries(lowered.files).map(([f, text]) => [f, 'sha256:' + createHash('sha256').update(text, 'utf8').digest('hex')]));
   mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'CLEAN', ms: performance.now() - t0 });
 
   // ── stage 1: strict validate() ────────────────────────────────────────

@@ -39,6 +39,8 @@ export interface AdmitOptions {
   key?: { id: string; privateKeyPem: string };
   now?: () => Date;
   fault?: CertificateFault;
+  /** For tests only: runs between the check and the certificate, as an edit during the check would land. */
+  afterCheck?: () => void;
 }
 
 export interface AdmitResult {
@@ -130,6 +132,7 @@ export async function admit(target: string, opts: AdmitOptions & { root?: string
   const out = join(projectDir ?? resolve(opts.root ?? dirname(abs)), '.poly', 'certificate.json');
   rmSync(out, { force: true });
   const c = await checkTarget(abs, opts.root);
+  opts.afterCheck?.();
   if (c.report.verdict !== 'CLEAN') {
     throw new AdmitError(`not admitted: the verdict is ${c.report.verdict}; in M4 only a CLEAN program is admitted, since accepting a finding needs a person's signature (PT12.5, S126)`);
   }
@@ -205,8 +208,24 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   }
   if (decisions.length) kernel.add('K10');
 
-  const sources = Object.fromEntries(files.map((f) => [rel(dir, f), sha256OfBytes(readFileSync(f))]));
+  // Review A1, A2: certify what the check checked. Each source is the text the check read, and each artefact the
+  // bytes the lowering wrote and every later stage read; a file that differs on disk now is refused, never certified.
+  const checkedSource = new Map(report.files.map((r) => [resolve(r.file), r.sourceDigest]));
+  for (const f of files) {
+    const want = checkedSource.get(resolve(f));
+    if (want && sha256OfBytes(readFileSync(f)) !== want) throw new AdmitError(`not admitted: ${rel(dir, f)} on disk is not the source the check checked (it changed during the check)`);
+  }
+  const sources = Object.fromEntries(files.map((f) => [rel(dir, f), checkedSource.get(resolve(f)) ?? sha256OfBytes(readFileSync(f))]));
   const artefacts = artefactsOf(dir, machines, opts.fault);
+  for (const r of report.files) for (const m of r.machines) {
+    if (!m.buildDir) continue;
+    const prefix = rel(dir, m.buildDir);
+    for (const [path, have] of Object.entries(artefacts)) {
+      if (!path.startsWith(prefix + '/')) continue;
+      const want = m.artefactDigests?.[path.slice(prefix.length + 1)];
+      if (!opts.fault && want !== have) throw new AdmitError(`not admitted: ${path} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
+    }
+  }
   const toolchain = { ...(report.files[0]?.engines ?? {}) };
   const body: Omit<Certificate, 'digest' | 'signatures'> = {
     v: 1,

@@ -91,3 +91,23 @@ test('the public key of the admission key is what verifies, and only it', () => 
   assert.equal(publicKeyOf(readFileSync(key.file, 'utf8')), key.publicKey);
   assert.notEqual(other.publicKey, key.publicKey);
 });
+
+// Review A1, A2: admission certifies what the check checked, never what is on disk after it.
+test('review A1: an artefact rewritten after the check ran is refused, not certified', async () => {
+  const dir = project('race-artefact', ['conformance/m1/effects.poly'], key);
+  const tamper = () => {
+    const f = join(dir, '.poly', 'build', 'effects.Account', 'next.cjs');
+    writeFileSync(f, readFileSync(f, 'utf8').replace('"not-open"', '"tampered"'));
+  };
+  await assert.rejects(admit(dir, { afterCheck: tamper }), (e) => e instanceof AdmitError && /next\.cjs.*not the bytes the check checked/.test(e.message));
+  assert.throws(() => readFileSync(join(dir, '.poly', 'certificate.json')));
+});
+
+test('review A2: a source edited after the check ran is refused, so no unchecked guarantee is certified', async () => {
+  const dir = project('race-source', ['conformance/m1/effects.poly'], key);
+  const edit = () => {
+    const f = join(dir, 'src', 'effects.poly');
+    writeFileSync(f, readFileSync(f, 'utf8').replace('  path property few-notices', '  path property no-invoice: count("billing.invoice") < 1\n  path property few-notices'));
+  };
+  await assert.rejects(admit(dir, { afterCheck: edit }), (e) => e instanceof AdmitError && /effects\.poly.*not the source the check checked/.test(e.message));
+});
