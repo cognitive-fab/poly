@@ -174,3 +174,19 @@ test('review C7: conformance relates each intent\'s end to the program\'s comple
     assert.match((await workerConformance(rt, WORKER)).diagnostics.map((d) => d.message).join('\n'), /is Done, and the program took a failure completion for it/);
   } finally { await rt.close(); }
 });
+
+// Review C4 and C8 met a program machine named as the runtime's own model: the internal ids are reserved only where
+// the runtime registers that model, and a program machine with one of those ids is refused at load, never shadowed.
+test('review C4, C8: a program machine with the id of a model the runtime needs is refused at load; with no such need it runs as the program\'s', async () => {
+  const { load, LoadError } = await import('@poly/runtime');
+  const clash = await admitted('review-c-collide', ['test/fixtures/review-m4/collide.poly']);
+  await assert.rejects(load(clash.build, { certificate: clash.certificate, trust: clash.trust }), (e) => e instanceof LoadError && /runtime\.OutboxIntent/.test(e.message));
+  const own = await admitted('review-c-own', ['conformance/m2/seeded/liveness/fixed.poly']);
+  const { rt } = await loaded(own);
+  try {
+    const o = await rt.create('runtime.OutboxIntent', { id: 'mine' });
+    const r = await rt.dispatch(o.id, 'Propose');
+    assert.equal(r.kind ?? r.verdict?.kind ?? 'accepted', 'accepted');
+    assert.equal((await rt.getState(o.id)).state.status, 'Proposed');
+  } finally { await rt.close(); }
+});

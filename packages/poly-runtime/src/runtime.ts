@@ -133,7 +133,8 @@ export class PolyRuntime {
   /** The runtime's own model behind a machine id (an OutboxIntent instance), or null for a program's machine. */
   modelOf(machineId: string): { source: string; module: string } | null {
     const m = /^runtime(\d*)\.OutboxIntent$/.exec(machineId);
-    if (!m) return null;
+    // A program may name a machine runtime.OutboxIntent; load refuses it only where the runtime needs that model.
+    if (!m || this.verified.machines.some((x) => x.id === machineId)) return null;
     const bound = m[1] ? Number(m[1]) : 3;
     return { source: modelSource(bound), module: verifiedModels([bound])[0].module };
   }
@@ -408,15 +409,27 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   const dbPath = opts.store?.sqlite ?? ':memory:';
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true });
   const store = openLedgerStore(dbPath);
+  // S119, S120: the OutboxIntent instance for every retry bound the build declares. Review C8: and every bound an
+  // intent in the store started under, so it keeps its own machine after a redeploy changes the bound.
+  const bounds = new Set<number>(verified.machines.flatMap((m) => Object.values(m.manifest?.effects ?? {}).map((e) => e.retry.maxAttempts as number)));
+  for (const r of store.db.prepare("SELECT DISTINCT machine_id FROM pr_instance WHERE machine_id LIKE 'runtime%.OutboxIntent'").all() as { machine_id: string }[]) {
+    const m = /^runtime(\d*)\.OutboxIntent$/.exec(r.machine_id);
+    if (m && !verified.machines.some((x) => x.id === r.machine_id)) bounds.add(m[1] ? Number(m[1]) : 3);
+  }
+  const models = verifiedModels([...bounds].filter((b) => BOUNDS.includes(b as 1)).sort((x, y) => x - y));
+  // Review C4, C8: a program machine with the id of a model the runtime registers would shadow it, or be stepped as it.
+  const clash = models.find((x) => verified.machines.some((m) => m.id === x.machineId));
+  if (clash) {
+    await store.close();
+    throw new LoadError(`refused at load: the program's machine ${clash.machineId} has the id of the runtime's own OutboxIntent model, which this build needs (S119)`);
+  }
   let kernel: Runtime;
   try {
     kernel = await createRuntime({
       store,
       machines: [
         ...verified.machines.map((m) => ({ machineId: m.id, module: m.module, ...(m.contract ? { contract: m.contract } : {}), ...(m.effects ? { effects: m.effects } : {}) })),
-        // S119, S120: the OutboxIntent instance for every retry bound the build declares.
-        // Review C8: every bound, so an intent created under an earlier build's bound keeps its own machine after a redeploy.
-        ...verifiedModels(BOUNDS).map((x) => ({ machineId: x.machineId, module: x.module, contract: x.contract })),
+        ...models.map((x) => ({ machineId: x.machineId, module: x.module, contract: x.contract })),
       ],
       ...(opts.now ? { now: opts.now } : {}),
     });
