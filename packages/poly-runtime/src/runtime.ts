@@ -19,6 +19,8 @@ import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
 import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
 import { verifiedModels, modelSource, BOUNDS } from './model.js';
+import { PolicyGate, type PolicyGateOptions, type ProgramView } from './policy-gate.js';
+import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionRecord, type ProviderConfig } from './provider.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
 
@@ -33,8 +35,11 @@ export interface LoadOptions {
   now?: () => number;
   /** S139: load a witness certificate, for an exported witness test only; refused when NODE_ENV is production. */
   allowWitness?: boolean;
-  /** S118: the gate interface; allow-all when omitted. */
-  gate?: { gate?: Gate; escalationTimeoutMs?: number };
+  /**
+   * S118: the gate interface; allow-all when omitted, and the policy gate when the build has policies (PT9). `policy`
+   * configures the policy gate; a build with policies takes no other gate.
+   */
+  gate?: { gate?: Gate; escalationTimeoutMs?: number; policy?: PolicyGateOptions };
   worker?: { leaseMs?: number; batch?: number; drift?: WorkerDrift };
   /** S123: the head signer, and how often heads are signed and anchors published, off the step path. */
   ledger?: LedgerSigner & { headMs?: number; anchorMs?: number };
@@ -72,16 +77,20 @@ export class PolyRuntime {
   private readonly certified: Map<string, Readonly<Record<string, unknown>>>;
   private readonly certifiedFunctions: Set<unknown>;
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> & { certified?: Map<string, Readonly<Record<string, unknown>>> } = {}) {
+  /** PT9: the policy gate, when the build has policies. */
+  readonly policyGate: PolicyGate | null;
+
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
+    this.policyGate = opts.policyGate ?? null;
     this.certified = opts.certified ?? new Map();
     this.certifiedFunctions = new Set([...this.certified.values()].flatMap((ns) => Object.values(ns).filter((v) => typeof v === 'function')));
-    this.gateGiven = opts.gate?.gate !== undefined;
+    this.gateGiven = opts.gate?.gate !== undefined || this.policyGate !== null;
     store.decisionCompletions = (machineId) => this.decisionCompletions(machineId);
     store.allowWitnessCompletions = verified.certificate.purpose === 'witness';
     const builtins: Record<string, EffectHandler> = {};
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
     this.worker = new EffectWorker(kernel, store, this.handlers, {
-      gate: opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
+      gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
       // PD2.2, K10: the decision event is written with the completion step, in its transaction.
       beforeCompletion: (row, decl) => {
@@ -525,5 +534,33 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (e instanceof LoadError) throw e;
     throw new LoadError(`refused at load: polyrun did not register the certified machines: ${(e as Error).message}`);
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified });
+  // PT9: a build with policies runs behind the policy gate, and only behind it.
+  let policyGate: PolicyGate | null = null;
+  if (verified.policies.length) {
+    if (opts.gate?.gate) { await kernel.close(); throw new LoadError('refused at load: the build has policies, so its gate is the policy gate, and no other gate is taken (PT9)'); }
+    const peer = polyaxionPeer();
+    if (!peer.ok) { await kernel.close(); throw new LoadError(`refused at load: the build has policies, and the gate engine is not available: ${peer.reason}`); }
+    const modules = [...new Set(verified.machines.map((m) => m.id.slice(0, m.id.lastIndexOf('.'))))];
+    const view: ProgramView = {
+      singleton: (machineId) => {
+        const rows = store.db.prepare("SELECT instance_id, seq, state FROM pr_instance WHERE machine_id = ? AND status != 'poisoned'").all(machineId) as { instance_id: string; seq: number; state: string }[];
+        return rows.length === 1 ? { instance: rows[0].instance_id, seq: rows[0].seq, state: JSON.parse(rows[0].state) } : null;
+      },
+      decisions: (run) => {
+        const out: Record<string, unknown> = {};
+        for (const r of store.db.prepare("SELECT event FROM poly_ledger WHERE run = ? AND kind = 'decision' ORDER BY seq").all(run) as { event: string }[]) {
+          const b = JSON.parse(r.event).body as { decision: string };
+          out[b.decision] = b;
+        }
+        return out;
+      },
+      nextSseq: (session) => (store.db.prepare('INSERT INTO poly_gate_session (session, sseq) VALUES (?, 1) ON CONFLICT(session) DO UPDATE SET sseq = sseq + 1 RETURNING sseq').get(session) as { sseq: number }).sseq,
+    };
+    const gateStore = opts.gate?.policy?.store ?? (opts.store?.sqlite ? `${resolve(opts.store.sqlite)}.gate.db` : ':memory:');
+    try { policyGate = await PolicyGate.open(await loadPolyaxion(), verified.policies, modules, view, { ...opts.gate?.policy, store: gateStore }); } catch (e) {
+      await kernel.close();
+      throw new LoadError(`refused at load: the policy gate did not open: ${(e as Error).message}`);
+    }
+  }
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate });
 }

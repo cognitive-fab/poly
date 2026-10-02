@@ -40,8 +40,11 @@ export type GateDecision = ({ decision: 'allow' } | { decision: 'deny'; reason: 
 export interface Gate {
   propose(proposal: Proposal, snapshot: Record<string, unknown>): GateDecision | Promise<GateDecision>;
   /** PT9.4: the observed result of the handler for this proposal, by digest. */
-  settle(observed: { ok: boolean; output: string }, proposal: Proposal): 'ok' | 'failed' | Promise<'ok' | 'failed'>;
+  settle(observed: { ok: boolean; output: string }, proposal: Proposal): SettleResult | Promise<SettleResult>;
 }
+
+/** A settle's outcome, with what the gate adds to the ledger (its session and `sseq`, S146). */
+export type SettleResult = 'ok' | 'failed' | { result: 'ok' | 'failed'; record?: Record<string, unknown> };
 
 /** S118: the default gate allows every proposal and every settle. */
 export const ALLOW_ALL: Gate = { propose: () => ({ decision: 'allow' }), settle: () => 'ok' };
@@ -402,7 +405,12 @@ export class EffectWorker {
             return;
           }
           let s: 'ok' | 'failed';
-          try { s = await this.gate.settle({ ok: true, output: digest(result ?? null) }, (await this.proposalOf(row, decl)).proposal); } catch { s = 'failed'; }
+          try {
+            const r = await this.gate.settle({ ok: true, output: digest(result ?? null) }, (await this.proposalOf(row, decl)).proposal);
+            s = typeof r === 'string' ? r : r.result;
+            // S146: the gate's settle is a ledger event, with its session sequence.
+            if (typeof r === 'object' && r.record) await this.store.txn(() => this.verdict(row, { outcome: 'settled', result: s, ...r.record }));
+          } catch { s = 'failed'; }
           if (s !== 'ok') { await this.settleFailed(row, decl, n, 'the gate refused the settle', now, m); return; }
           this.opts.beforeCompletion?.(row, decl, result);
           try {

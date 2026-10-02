@@ -708,6 +708,8 @@ After compilation, stage 5b checks that each mandate in scope is **dischargeable
 
 This is the only new engine integration (architecture section 7.2).
 
+**The policy gate (M5a, S146, S147).** A build with policies runs behind the policy gate, and only behind it: `load` refuses another gate, and refuses the build when the gate engine is not available (S145). Polyaxion decides in process. An instance's trust scope is its machine's module (S160): the policies whose scope selector matches the module govern it, and a module no policy matches is declared open at load, so a governed scope whose policy is missing refuses while an ungoverned one does not. Each scope has one session, `scope:<module>`, which the host serialises; it assigns `sseq` on every proposal and every settle, durably, and every `verdict` and `settled` event carries the session, its `sseq`, and Polyaxion's Σ digests before and after. The engine sees each proposal as a `custom.poly.effect` action whose reserved fields hold what the scope's policies read: the emitting step's snapshot for its own machine, the latest snapshot of a service machine (a singleton) with the `seq` read, and the run's latest `decision` events. The singletons read are recorded in the `allowed` event, and before each start of the handler the worker compares them with their current `seq`: an allow one of them has outlived is not acted on but rechecked (PT9.7), as a new proposal with a new `sseq`. An escalation is lifted only by a person's signed approval (PT12.5), passed to the engine with the approver's key id. The engine refusing, hanging past `proposeTimeoutMs`, answering `unavailable` or failing to journal its decision is an outage, and the intent is held (PT9.5). Polyaxion reports an escalate rule before a guard's deny; until engine change E7, the host asks the engine's own interpreter, with the escalations lifted, whether a deny stands behind, and decides deny when one does (PS8.3, S158). Each session's windows are signed by the engine's notary into receipts (AC4).
+
 **The gate before M5 (S118).** M4 builds the gate interface in the worker (`propose(proposal, snapshot) → allow | deny | escalate`, `settle(observed) → ok | failed`), with an allow-all gate as the default and scripted, deterministic test gates; each decision is a `verdict` event in the run's chain. Session replay in `sseq` order, with Σ digests (PS11.1, PS11.2), comes with the policy gate in M5. Approvals in M4 are recorded API calls without a person-key signature, and the instance line states that limit until PT12.5 lands.
 
 - **PT9.1 Proposal.** When an outbox worker claims an intent, it calls the gate before the handler with:
@@ -718,7 +720,7 @@ This is the only new engine integration (architecture section 7.2).
     "seq": 14, "idempotencyKey": "…", "payloadDigest": "sha256:…", "stateDigest": "sha256:…" }
   ```
 
-  The payload body is not sent. Only its digest is, following the polyflow platform ledger rule "only digests are stored".
+  An approved re-proposal carries `approved: { by, ref }`, and a rechecked one the count of its rechecks, `rechecks` (S147). The payload body is not sent. Only its digest is, following the polyflow platform ledger rule "only digests are stored".
 
 - **PT9.2 Decisions.**
   - **allow:** the handler runs.

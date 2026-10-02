@@ -11,4 +11,5 @@ import { readerOf } from './journal.js';
 /** Opens a store for its ledger and journal (poly journal verify, export). */
 export const openJournal = (dbPath: string) => readerOf(openLedgerStore(dbPath));
 export { polyaxionPeer, loadPolyaxion, pinDigest, PeerUnavailable, REPO_ROOT, type PeerStatus } from './peers.js';
+export { PolicyGate, GateUnavailable, type PolicyGateOptions, type ProgramView } from './policy-gate.js';
 export { policyEngine, actionOf, decisionOfReject, type EngineDecision } from './policy-engine.js';

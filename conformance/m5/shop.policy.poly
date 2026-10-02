@@ -1,0 +1,10 @@
+// S147: the till charges only while the switch is on.
+module shop_policy
+
+policy till-switch {
+  scope "shop"
+  obligation switch-on "Charge only while the switch is on." rule {
+    when effect.kind == "till.charge"
+    require machine("ops.Switch").on == true else deny
+  }
+}

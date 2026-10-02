@@ -1,0 +1,34 @@
+// S147: a charge whose allow reads ops.Switch; the charge is retried, so a later attempt can outlive the allow.
+module shop
+
+enum Phase { Idle, Charging, Done, Failed }
+
+machine Till {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+  action Charge()
+  action Charged()
+  action Refused()
+  on Charge {
+    require phase == Idle else reject "busy"
+    phase' = Charging
+    emit charge(1)
+  }
+  on Charged {
+    require phase == Charging else reject "not-charging"
+    phase' = Done
+  }
+  on Refused {
+    require phase == Charging else reject "not-charging"
+    phase' = Failed
+  }
+  effect charge(n: 0..1) {
+    kind "till.charge"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Charged()
+    failed -> Refused()
+    exhausted -> Refused()
+  }
+}
