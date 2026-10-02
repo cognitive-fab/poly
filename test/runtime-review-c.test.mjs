@@ -190,3 +190,21 @@ test('review C4, C8: a program machine with the id of a model the runtime needs 
     assert.equal((await rt.getState(o.id)).state.status, 'Proposed');
   } finally { await rt.close(); }
 });
+
+// Polywatch on review C6: the message loop of startWorkers isolates its passes as tick does.
+test('polywatch: a failing message recovery does not starve the message pass or the K10 audit', async () => {
+  const { rt } = await loaded(a);
+  const seen = { messages: 0, audits: 0 };
+  rt.recoverMessages = async () => { throw new Error('recovery down'); };
+  const tm = rt.kernel.workers.tickMessages.bind(rt.kernel.workers);
+  rt.kernel.workers.tickMessages = async (...x) => { seen.messages++; return tm(...x); };
+  const au = rt.auditRefusals.bind(rt);
+  rt.auditRefusals = async () => { seen.audits++; return au(); };
+  const err = console.error;
+  console.error = () => {};
+  try {
+    rt.startWorkers({ effectPollMs: 1000, timerPollMs: 1000, messagePollMs: 10 });
+    await new Promise((r) => setTimeout(r, 120));
+  } finally { rt.stopWorkers(); console.error = err; await rt.close(); }
+  assert.ok(seen.messages > 0 && seen.audits > 0, JSON.stringify(seen));
+});

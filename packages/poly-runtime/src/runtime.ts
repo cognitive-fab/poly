@@ -402,7 +402,13 @@ export class PolyRuntime {
     w.unref?.();
     this.timers.push(w);
     const t = setInterval(() => { this.kernel.workers.tickTimers().catch(report); }, timerPollMs);
-    const m = setInterval(() => { this.recoverMessages().then(() => this.kernel.workers.tickMessages()).then(() => this.auditRefusals()).catch(report); }, messagePollMs);
+    // Review C6, as in tick: each pass runs whatever the one before it threw, so a failing recovery starves neither
+    // the message pass nor the audit of its K10 refusals.
+    const m = setInterval(() => {
+      void (async () => {
+        for (const pass of [() => this.recoverMessages(), () => this.kernel.workers.tickMessages(), () => this.auditRefusals()]) await pass().catch(report);
+      })();
+    }, messagePollMs);
     t.unref?.(); m.unref?.();
     this.timers.push(t, m);
     if (this.ledger?.headMs) { const h = setInterval(() => { this.signHeads().catch(report); }, this.ledger.headMs); h.unref?.(); this.timers.push(h); }
