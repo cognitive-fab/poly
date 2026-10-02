@@ -158,6 +158,8 @@ The arms' folder gained `plugins/synced`, `skills/synced` and a new `.claude.jso
 4. Proposes a fix. A fix that changes the frozen runner or the arms' environment is a deviation, ruled before any further block and reported.
 5. Then removes the synced folders, and the folder check passes before block 3.
 
+**Hold lifted.** The sync came from a stray interactive session started at 21:25:51 UTC in the owner's login window, which still had `CLAUDE_CONFIG_DIR` set; it began after every block-2 run had finished and passed its check. No run is affected, and blocks 1 and 2 stand. The runner is not changed: its before-check refuses the folder, which is the protection. Before block 3 the stray session is closed, the variable cleared, the synced folders removed (their listing kept as evidence), and the folder check passes. The batch starts from a fresh window.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
