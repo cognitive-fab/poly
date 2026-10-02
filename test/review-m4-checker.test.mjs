@@ -1,7 +1,7 @@
 // The checker findings of M4's code review (part D), each a test that failed before its fix.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFile, render } from '@poly/check';
 import { ROOT } from './helpers.mjs';
@@ -39,4 +39,8 @@ test('review D6: a path property can name an adjudication\'s kind', async () => 
   const r = await checkFile(join(FIX, 'pathout.poly'), { root: OUT });
   assert.ok(!codes(r).includes('PL1001'), render(r));
   assert.ok(r.verdict === 'CLEAN' || r.verdict === 'INCONCLUSIVE', render(r));
+  // The property is checked, not merely accepted: a bound the adjudications break is a finding.
+  const f = join(OUT, 'pathout-broken.poly');
+  writeFileSync(f, readFileSync(join(FIX, 'pathout.poly'), 'utf8').replace('count("outcome.route") <= 1', 'count("outcome.route") < 1'));
+  assert.ok(codes(await checkFile(f, { root: OUT })).includes('PL4001'));
 });

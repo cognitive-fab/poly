@@ -556,8 +556,9 @@ class Checker {
       if (facts.decisions.has(it.name)) { this.err('PL1002', it, `decision ${it.name} is declared twice`); continue; }
       facts.decisions.set(it.name, it);
     }
-    // PD1.7: a decision is an effect of kind decision.<name>.
-    const kinds = new Set([...[...facts.effects.values()].map(effectKind), ...[...facts.decisions.keys()].map((d) => `decision.${d}`)]);
+    // PD1.7: a decision is an effect of kind decision.<name>. PD2.4: its adjudication is one of kind outcome.<name>,
+    // which a path property may name (review D6).
+    const kinds = new Set([...[...facts.effects.values()].map(effectKind), ...[...facts.decisions.keys()].flatMap((d) => [`decision.${d}`, `outcome.${d}`])]);
     // M4 review D1: decision.* and outcome.* are the toolchain's own kinds (PD1.7, PD2.4); an effect declaring one
     // would share a manifest entry, or pose as a decision or an adjudication.
     for (const e of facts.effects.values()) {
