@@ -34,7 +34,7 @@ function trustOf(args: string[]): Record<string, string> {
 
 export async function journalCommand(sub: string, args: string[], write: (s: string) => void): Promise<number> {
   // The runtime is loaded only here, so `poly check` and its tests run in a toolchain without it.
-  const { load, openJournal, verifyRun, ledgerProblems } = await import('@poly/runtime');
+  const { load, openJournal, verifyRun, ledgerProblems, verifyCountersignatures } = await import('@poly/runtime');
   const db = one(args, '--db');
   if (!db) throw new JournalUsageError('poly journal needs --db <store>');
   const only = one(args, '--run');
@@ -45,13 +45,25 @@ export async function journalCommand(sub: string, args: string[], write: (s: str
       const runs = (await store.runs()).filter((r) => !only || r.run === only);
       if (only && !runs.length) throw new JournalUsageError(`no run ${only} in ${db}`);
       const found: Diagnostic[] = [];
+      // PD5-A9, S108: a countersignature adapter, given as a module whose default export checks the host's scheme.
+      const cs = one(args, '--countersign');
+      const adapter = cs ? ((await import(pathToFileURL(resolve(cs)).href)) as { default: { scheme: string; verify: (h: string, s: string) => boolean | Promise<boolean> } }).default : null;
       for (const r of runs) {
         const heads = await store.heads(r.run);
-        const v = verifyRun(await store.chain(r.run), heads, trust, await store.journal(r.run));
+        const v = verifyRun(await store.chain(r.run), heads, trust, await store.journal(r.run), await store.lineage(r.run));
+        const counter = await store.countersignatures(r.run);
+        const notes: string[] = [];
+        if (counter.length) {
+          const c = await verifyCountersignatures(counter, heads, adapter);
+          v.problems.push(...c.problems);
+          if (c.verified) notes.push(`  countersignatures (${adapter!.scheme}): ${c.verified} verified\n`);
+          if (c.notVerified) notes.push(`  countersignatures: ${c.notVerified} not verified: ${adapter ? 'no adapter for their scheme' : 'no adapter given'} (not run)\n`);
+        }
         const all = await store.anchors();
         // Review B1: a run must be signed, and covered by the latest anchor at its latest signed head.
         v.problems.push(...ledgerProblems(r.run, heads, all.length ? all[all.length - 1] : null, trust));
         write(`${r.run} (${r.wf}): ${v.verdict}${v.signedThrough !== null ? `, signed through seq ${v.signedThrough}` : ''}${v.unsignedTail ? `, ${v.unsignedTail} event(s) not yet signed` : ''}\n`);
+        for (const n of notes) write(n);
         for (const p of v.problems) { const d = diag('PL9002', { module: r.ns, machine: r.wf.slice(r.wf.indexOf('.') + 1) }, `run ${r.run}: ${p}`); found.push(d); write(`  ${d.code} ${d.name}  ${d.message}\n`); }
       }
       write(`journal: ${runs.length} run(s), ${found.length ? 'FINDINGS' : 'verified'}\n`);

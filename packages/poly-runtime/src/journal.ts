@@ -10,7 +10,7 @@ import { headMessage, verifyHead, type SignedHead } from '@cognitive-fab/polyflo
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
 import type { JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import type { LedgerStore } from './ledger-store.js';
+import { lineageDigest, type LedgerStore } from './ledger-store.js';
 import { verifyRunChain, type ChainResult, type LedgerEvent, type Run } from './ledger.js';
 
 export type { SignedHead };
@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS poly_head (
   seq  INTEGER NOT NULL,
   head TEXT NOT NULL,
   PRIMARY KEY (run, seq)
+);
+CREATE TABLE IF NOT EXISTS poly_countersign (
+  run    TEXT NOT NULL,
+  seq    INTEGER NOT NULL,
+  hash   TEXT NOT NULL,
+  scheme TEXT NOT NULL,
+  sig    TEXT NOT NULL,
+  PRIMARY KEY (run, seq, scheme)
 );
 CREATE TABLE IF NOT EXISTS poly_anchor (
   anchor_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,6 +70,55 @@ export async function signHeads(store: LedgerStore, signer: LedgerSigner, only?:
     out.push(head);
   }
   return out;
+}
+
+/**
+ * PD5.4b, S108: a workload-identity countersignature. The host's adapter signs a signed head's hash with its own scheme
+ * (an SVID, say), and checks one; the record is kept apart from the ed25519 head, which stays as it is.
+ */
+export interface CountersignAdapter {
+  scheme: string;
+  sign?: (hash: string) => Promise<string> | string;
+  verify?: (hash: string, sig: string) => Promise<boolean> | boolean;
+}
+export interface Countersignature { run: string; seq: number; hash: string; scheme: string; sig: string }
+
+/** Countersigns the latest signed head of every run that has none from this adapter's scheme yet. */
+export async function countersignHeads(store: LedgerStore, adapter: CountersignAdapter): Promise<Countersignature[]> {
+  if (!adapter.sign) throw new Error(`the countersignature adapter ${adapter.scheme} cannot sign`);
+  const heads = await store.txn(() => store.db.prepare('SELECT head FROM poly_head h WHERE seq = (SELECT MAX(seq) FROM poly_head WHERE run = h.run) ORDER BY run').all().map((r) => JSON.parse(r.head) as SignedHead));
+  const out: Countersignature[] = [];
+  for (const h of heads) {
+    const done = await store.txn(() => store.db.prepare('SELECT 1 FROM poly_countersign WHERE run = ? AND seq = ? AND scheme = ?').get(h.run.run, h.seq, adapter.scheme));
+    if (done) continue;
+    const c: Countersignature = { run: h.run.run, seq: h.seq, hash: h.hash, scheme: adapter.scheme, sig: await adapter.sign(h.hash) };
+    await store.txn(() => store.db.prepare('INSERT INTO poly_countersign (run, seq, hash, scheme, sig) VALUES (?, ?, ?, ?, ?)').run(c.run, c.seq, c.hash, c.scheme, c.sig));
+    out.push(c);
+  }
+  return out;
+}
+
+export async function countersignaturesOf(store: LedgerStore, run: string): Promise<Countersignature[]> {
+  return store.txn(() => store.db.prepare('SELECT run, seq, hash, scheme, sig FROM poly_countersign WHERE run = ? ORDER BY seq').all(run) as Countersignature[]);
+}
+
+/**
+ * PD5-A9: each countersignature names a signed head of the run, by seq and hash, and verifies through the adapter.
+ * Without an adapter none is verified, and that is said (not run), never reported as ok.
+ */
+export async function verifyCountersignatures(rows: Countersignature[], heads: SignedHead[], adapter: CountersignAdapter | null): Promise<{ verified: number; notVerified: number; problems: string[] }> {
+  const problems: string[] = [];
+  let verified = 0;
+  let notVerified = 0;
+  for (const c of rows) {
+    const h = heads.find((x) => x.seq === c.seq);
+    if (!h || h.hash !== c.hash) { problems.push(`the countersignature at seq ${c.seq} names no signed head with its hash`); continue; }
+    if (!adapter || adapter.scheme !== c.scheme || !adapter.verify) { notVerified++; continue; }
+    let ok = false;
+    try { ok = await adapter.verify(c.hash, c.sig); } catch { ok = false; }
+    if (ok) verified++; else problems.push(`the ${c.scheme} countersignature at seq ${c.seq} does not verify`);
+  }
+  return { verified, notVerified, problems };
 }
 
 export async function headsOf(store: LedgerStore, instanceId: string): Promise<SignedHead[]> {
@@ -142,7 +199,7 @@ export interface RunVerification {
  * The chain, the signed heads, the closure, and the binding of every step event to the journal row it records
  * (while the journal exists; after an archive the step events and the content store are what remains).
  */
-export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Record<string, string>, journal: JournalRow[] | null): RunVerification {
+export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Record<string, string>, journal: JournalRow[] | null, lineage: Map<number, { origin: unknown; intent: string; prev: string | null; digest: string }> | null = null): RunVerification {
   const run = events[0]?.run.run ?? '';
   const chain = verifyRunChain(events);
   const problems: string[] = [];
@@ -174,6 +231,12 @@ export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Rec
       // Review B9: the action id (K4's dedupe key) and the machine version are bound with the rest of the row.
       if (b.action !== row.action || b.actionId !== row.action_id || b.machineVersion !== row.machine_version || b.stepKind !== row.step_kind || (b.rejectReason ?? null) !== (row.reject_reason ?? null) || b.data !== digest(row.data) || b.pre !== digest(row.pre) || b.post !== digest(row.post)) {
         problems.push(`journal row ${row.seq} differs from its step event`);
+      }
+      // PD5-A11: the claims that admitted the step, and its lineage record, which recomputes.
+      if (b.claims !== undefined && b.claims !== digest((row.data as { $claims?: unknown } | null)?.$claims ?? null)) problems.push(`journal row ${row.seq}: its claims differ from the step event's claims digest`);
+      if (b.lineage !== undefined && lineage) {
+        const l = lineage.get(row.seq);
+        if (!l || l.digest !== b.lineage || lineageDigest(run, row.seq, l.origin, l.intent, l.prev) !== l.digest) problems.push(`journal row ${row.seq}: its lineage record does not match the step event's lineage digest`);
       }
     }
   }
@@ -209,6 +272,10 @@ export interface JournalReader {
   body(digest: string): Promise<unknown>;
   /** The anchors published, oldest first. */
   anchors(): Promise<{ anchor: Anchor; heads: SignedHead[] }[]>;
+  /** PD5-A9: the run's countersignatures. */
+  countersignatures(instanceId: string): Promise<Countersignature[]>;
+  /** PD5-A11: the run's lineage records, by seq. */
+  lineage(instanceId: string): Promise<Map<number, { origin: unknown; intent: string; prev: string | null; digest: string }>>;
   close(): Promise<void>;
 }
 
@@ -220,6 +287,8 @@ export function readerOf(store: LedgerStore): JournalReader {
     journal: async (id) => ((await store.getInstance(id)) ? store.getJournal(id) : null),
     body: (d) => store.body(d),
     anchors: () => anchors(store),
+    countersignatures: (id) => countersignaturesOf(store, id),
+    lineage: async (id) => new Map((store.db.prepare('SELECT seq, origin, intent, prev, digest FROM poly_lineage WHERE run = ?').all(id) as { seq: number; origin: string; intent: string; prev: string | null; digest: string }[]).map((r) => [r.seq, { origin: JSON.parse(r.origin), intent: r.intent, prev: r.prev, digest: r.digest }])),
     close: () => store.close(),
   };
 }

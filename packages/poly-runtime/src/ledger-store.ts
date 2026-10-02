@@ -249,7 +249,8 @@ export class LedgerStore extends Store {
       pre: this.keep(row.pre),
       post: this.keep(row.post),
       ...(extra?.before?.length ? { decision: this.lastHash(row.instanceId, 'decision') } : {}),
-      // PD5-A11: the step's lineage digest.
+      // PD5-A11: the digest of the claims that admitted the step, and its lineage digest.
+      claims: digest((row.data as { $claims?: unknown } | null)?.$claims ?? null),
       lineage,
     }, row.now);
     for (const e of extra?.after ?? []) this.appendEvent(row.instanceId, e.kind, e.body, row.now);

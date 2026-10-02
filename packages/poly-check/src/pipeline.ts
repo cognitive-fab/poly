@@ -736,8 +736,9 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
     states: ref.states,
     transitions: ref.transitions,
     bounds,
-    // M0 checks one machine's relation: K7 (profile fidelity) is the kernel assumption its guarantee uses (PS10).
-    kernelAssumptions: ['K7'],
+    // M0 checks one machine's relation: K7 (profile fidelity) is the kernel assumption its guarantee uses (PS10); K11
+    // when the machine's actions take claims, which only the verifier vouches for (PD5.5, S110).
+    kernelAssumptions: ref.model.actions.some((a) => a.claims) ? ['K7', 'K11'] : ['K7'],
     engines,
     refOnly,
   };

@@ -153,7 +153,10 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
     }
     const module = modules.get(inst.machineId.slice(0, inst.machineId.indexOf('.')));
     if (!module) throw new Error(`${inst.id}: machine ${inst.machineId} is not in the certified sources`);
-    out.push(replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id) }));
+    const r = replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id) });
+    // PD5-A11: the claims and lineage digests each step event records are reproduced.
+    for (const p of await rt.verifyAttribution(inst.id)) r.diagnostics.push(diag('PL9001', { machine: inst.machineId }, `run ${inst.id}: ${p}`));
+    out.push(r);
   }
   return out;
 }

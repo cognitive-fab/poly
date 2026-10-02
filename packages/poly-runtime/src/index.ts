@@ -2,6 +2,7 @@ export { EffectWorker, ALLOW_ALL, RuntimeFault, WORKER_DRIFTS, type Gate, type G
 export { calibrate, mapDigest, answerProbability, decisionHandler, type Provider, type ProviderAnswer, type ProviderConfig, type CalibrationMap, type DecisionRecord } from './provider.js';
 export { load, PolyRuntime, RefusedDispatch, ApprovalRefused, OutcomeWithoutDecision, LoadError, type LoadOptions, type Handler } from './runtime.js';
 export { LedgerStore, openLedgerStore, type StepEvents } from './ledger-store.js';
+export { countersignHeads, countersignaturesOf, verifyCountersignatures, type CountersignAdapter, type Countersignature } from './journal.js';
 export { readerOf, ledgerProblems, type JournalReader, signHeads, headsOf, publishAnchor, verifyAnchor, verifyRun, merkleRoot, anchorMessage, type LedgerSigner, type SignedHead, type Anchor, type RunVerification, type RunVerdict } from './journal.js';
 export { KINDS, POLY_KINDS, runOf, nextEvent, verifyRunChain, verifyWithPolyflow, polyflowAcceptsPolyKinds, type LedgerEvent, type Run, type ChainResult } from './ledger.js';
 export { verifyBuild, projectRootOf, type VerifiedBuild } from './load.js';

@@ -7,8 +7,9 @@
 //   const r = await rt.dispatch(order.id, 'Place', {}, { actionId: 'req-7781' })
 //
 // What M4's runtime does not do is stated in the certificate's `limits` and printed with it (S118, S134, S135).
+import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, type Verifier } from './verifier.js';
-import type { Lineage } from './ledger-store.js';
+import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -25,7 +26,7 @@ import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionRecord, type ProviderConfig } from './provider.js';
-import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
+import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
 export { LoadError };
 
@@ -409,6 +410,29 @@ export class PolyRuntime {
    * PD2.2d: every accepted completion of a decision links a decision event of the run, and its data are the
    * recorded answer, confidence and margin, through the manifest's own map. Each problem is PL9003.
    */
+  /**
+   * PD5-A11: each step event's claims digest is its journal row's claims, and its lineage digest is the step's lineage
+   * record, which recomputes. Each problem is listed.
+   */
+  async verifyAttribution(run: string): Promise<string[]> {
+    const problems: string[] = [];
+    const journal = await this.store.getJournal(run);
+    for (const e of await this.chain(run)) {
+      if (e.kind !== 'step') continue;
+      const b = e.body as { seq: number; claims?: string; lineage?: string };
+      const row = journal.find((x) => x.seq === b.seq);
+      if (!row) continue;
+      if (b.claims !== undefined && b.claims !== digest((row.data as { $claims?: unknown } | null)?.$claims ?? null)) problems.push(`step ${b.seq}: the claims digest is not the journal row's claims`);
+      const l = this.store.lineage(run, b.seq);
+      if (b.lineage !== undefined) {
+        if (!l) problems.push(`step ${b.seq}: no lineage record for its lineage digest`);
+        else if (l.digest !== b.lineage) problems.push(`step ${b.seq}: the lineage record's digest is not the step event's`);
+        else if (lineageDigest(run, b.seq, l.origin, l.intent, l.prev) !== l.digest) problems.push(`step ${b.seq}: the lineage record does not recompute to its digest`);
+      }
+    }
+    return problems;
+  }
+
   async verifyProvenance(instanceId: string): Promise<string[]> {
     const inst = await this.store.getInstance(instanceId);
     const events = await this.chain(instanceId);
@@ -468,6 +492,11 @@ export class PolyRuntime {
   heads(instanceId: string): Promise<SignedHead[]> { return headsOf(this.store, instanceId); }
 
   /** S123: an anchor over the latest signed head of every run, for the period it names. */
+  /** PD5.4b, S108: countersigns the latest signed head of each run through the host's adapter. */
+  async countersignHeads(adapter: CountersignAdapter): Promise<Countersignature[]> {
+    return countersignHeads(this.store, adapter);
+  }
+
   async publishAnchor(period: { from: number; to: number }): Promise<{ anchor: Anchor; heads: SignedHead[] }> {
     if (!this.ledger) throw new Error('no ledger signer: an anchor is signed (S123)');
     return publishAnchor(this.store, this.ledger, period);
