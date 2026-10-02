@@ -137,6 +137,8 @@ The owner's budget is $100 a month, so the runs use the owner's Claude subscript
 
 These changes join the token-count and scorer fixes in the one regeneration of the freeze. The four P1 pilots are then rerun as one block, on the subscription, to confirm isolation and the counts. FROZEN waits for that report.
 
+**Runner fixes accepted (3110ae1, freeze f65bbef).** `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` are part of the arm's environment: the config folder alone let the owner's `CLAUDE.md` through, and the marker test proves the pair keeps it out. This holds only if no arm's own material is delivered through a `CLAUDE.md`; the report confirms that. The skill check rests on two facts, both asserted by the test: slash commands are off, and the `Skill` tool is in no arm's allowed tools. One call at a fraction of a cent settles whether the CLI enforces `--max-budget-usd` under a subscription.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
