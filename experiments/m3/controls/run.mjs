@@ -3,10 +3,10 @@
 //   1. the reference checks clean: `poly check` verdict CLEAN, every stage run;
 //   2. the reference replays its own O3 at 100% through the adapter over polyrun, with every O2 predicate true;
 //   3. the mutant fails O3 or O2 on at least one trace;
-//   4. once O1 exists (experiments/m3/o1/<task>/v<n>.test.mjs), it passes on the reference and fails on the mutant.
+//   4. O1 (experiments/m3/o1/<task>/v<n>.test.mjs) passes on the reference and fails on the mutant.
 //
-// A control that cannot run is reported as not run, never as passed. The exit code is 0 only when every
-// control that ran passed and none was skipped except O1 before it exists.
+// A control that cannot run is reported as not run, never as passed. The exit code is 0 only when every control
+// of every version ran and passed; since O1 is committed, a missing suite fails control 4 (M3-9).
 //
 // Usage: node experiments/m3/controls/run.mjs [T1 T2 ...]
 import { existsSync } from 'node:fs';
@@ -20,7 +20,7 @@ import { M3, adapterOf, mapOf, moduleOf, o3Path, readJson, readO3, taskIds, vers
 import { tmpdir } from 'node:os';
 
 /** Runs the controls of one version; returns { version, controls: [{ n, name, status, detail }] }. */
-export async function controlsOf(v) {
+export async function controlsOf(v, { o1Dir = join(M3, 'o1') } = {}) {
   const out = [];
   const add = (n, name, status, detail = '') => out.push({ n, name, status, detail });
   const spec = readJson(join(v.dir, 'explore.json'));
@@ -46,9 +46,9 @@ export async function controlsOf(v) {
     add(3, 'mutant fails O3 or O2', mut.failures.length > 0 ? 'pass' : 'fail', `${mut.failures.filter((f) => f.kind === 'o3').length} O3 failures; O2 violated: ${o2Names.join(', ') || 'none'}`);
   }
 
-  // 4. O1, once the owner's session has written it.
-  const o1 = join(M3, 'o1', v.task, `v${v.n}.test.mjs`);
-  if (!existsSync(o1)) add(4, 'O1 passes on the reference and fails on the mutant', 'not-run', 'O1 does not exist yet');
+  // 4. O1. It is committed (bb929b2) and frozen (M3-9), so a missing suite is a failure, not a control not run.
+  const o1 = join(o1Dir, v.task, `v${v.n}.test.mjs`);
+  if (!existsSync(o1)) add(4, 'O1 passes on the reference and fails on the mutant', 'fail', `no O1 suite: ${o1}`);
   else {
     const runO1 = async (which) => {
       const dir = await adapterDir(v, which);
@@ -60,6 +60,9 @@ export async function controlsOf(v) {
   }
   return { task: v.task, version: v.n, controls: out };
 }
+
+/** Whether a version's controls all passed: each of controls 1 to 4 is there, and a control that did not run is not a pass (M3-9). */
+export const controlsPassed = (controls) => [1, 2, 3, 4].every((n) => controls.some((c) => c.n === n)) && controls.every((c) => c.status === 'pass');
 
 /** The directory of a generated adapter, for O1, which imports it by path. */
 async function adapterDir(v, which) {
@@ -80,9 +83,9 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   for (const id of ids) {
     for (const v of versions(id)) {
       const r = await controlsOf(v);
+      if (!controlsPassed(r.controls)) ok = false;
       for (const c of r.controls) {
         console.log(`${id} v${v.n} control ${c.n} ${c.status.toUpperCase().padEnd(7)} ${c.name}: ${c.detail}`);
-        if (c.status === 'fail' || (c.status === 'not-run' && c.n !== 4)) ok = false;
       }
     }
   }

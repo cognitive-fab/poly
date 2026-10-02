@@ -66,7 +66,28 @@ test('S97: the tree replay finds the same failing traces as replaying each trace
   }
 });
 
-test('M3 controls on T1: every version\'s reference checks clean and replays its O3, and its mutant fails', async () => {
+test('M3-9: O1 is committed, so a missing O1 suite fails control 4, and no control may go unrun', async () => {
+  const { controlsPassed } = await import('../experiments/m3/controls/run.mjs');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const empty = mkdtempSync(join(tmpdir(), 'poly-m3-no-o1-'));
+  try {
+    const r = await controlsOf(versions('T1')[0], { o1Dir: empty });
+    const c4 = r.controls.find((c) => c.n === 4);
+    assert.equal(c4.status, 'fail', c4.detail);
+    assert.match(c4.detail, /no O1 suite/);
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
+  const all = (s4) => [1, 2, 3].map((n) => ({ n, status: 'pass' })).concat({ n: 4, status: s4 });
+  assert.equal(controlsPassed(all('not-run')), false);
+  assert.equal(controlsPassed(all('pass')), true);
+  // A control that is missing is not a pass either.
+  assert.equal(controlsPassed([{ n: 1, status: 'pass' }, { n: 4, status: 'pass' }]), false);
+  assert.equal(controlsPassed([]), false);
+});
+
+test('M3 controls on T1: every version\'s reference checks clean and replays its O3, its mutant fails, and O1 passes on the reference and fails on the mutant', async () => {
   for (const v of versions('T1')) {
     const r = await controlsOf(v);
     for (const c of r.controls) {
