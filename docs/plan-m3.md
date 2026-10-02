@@ -134,7 +134,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 **Step 8 is done.** `experiments/m3/analysis/analyse.mjs` computes PT13's measures per arm and task, the five escaped-defect comparisons by the exact Wilcoxon signed-rank test with Holm's correction (tokens as a second family), and the win (S96), surface and stop rules; a task with no delivered run for an arm is left out of that comparison and listed. `stats.mjs` is tested on known values, and `test/m3-analysis.test.mjs` on synthetic records whose answer is known: a clear win, a reduction that is not significant, a win denied by tokens, a null result, the surface decision each way, a stop, a left-out task, and the four token parts with their cost.
 
-**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 781 files of the experiment (365, and the 41 of O1 since M3-9; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`9c185f5`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
+**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 783 files of the experiment (365, the 41 of O1 since M3-9 and the 2 of O1-R since M3-10; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`0841ccb`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
 
 | Part | Digest |
 |---|---|
@@ -180,13 +180,14 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | T10 v3 | `95561d8f9cf16aa2` |
 | P1 v0 | `a32c6f4ee46bc974` |
 | P1 v1 | `0c2f87ea81498248` |
+| O1-R (M3-10) | `ad46c1ca41a5893c` |
 | O1 (M3-9) | `9cf4892024085325` |
 | O1 prompt | `7b3997f818de199b` |
 | template | `2d43b4899af7aa53` |
-| controls | `44b6d89fadd68f93` |
+| controls | `61e3ff5754bbdca3` |
 | adapter | `843a9d1994789861` |
-| runner and prompts | `d1c6bff0844fce12` |
-| analysis | `07eed61ee87a20d7` |
+| runner and prompts | `0bed7c461ae98fed` |
+| analysis | `2a3fd4c9c67d53bc` |
 | toolchain (S100) | `246ec34ee8e2dc7f` |
 | manual (S114) | `137da845784fe69b` |
 | examples (S114) | `facc8d422e048c60` |
@@ -214,7 +215,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 The modelled tasks are **T1, T2, T3, T4 and T6**, all from material only arms 3 and 4 receive. The polygraph README names its examples (the turnstile, the cart checkout, etcd raft), but the archive does not include them. The tasks left for the sensitivity analysis are **T5, T7, T8, T9 and T10**. Over five tasks the smallest two-sided exact p of the signed-rank test is 2/32 = 0.0625, so a second significance test on them could never reject at 0.05; with Holm over five comparisons a win needs at least eight tasks (5 × 2/256 = 0.039). S117 therefore makes the sensitivity analysis an effect check. Significance is decided once, by the primary comparison over all ten tasks (S96). A primary win of an arm stands only if, on T5, T7, T8, T9 and T10, its mean escaped defects per delivered task is also at least 30% below that of arm 1 and of arm 2 (`sensitivity.holds`); otherwise `reported` gives `win only with the modelled tasks`, never a win. The subset's comparisons and p-values are reported as descriptive, with the note that five tasks cannot reach 0.05. `test/m3-sensitivity.test.mjs` covers a win that holds on both, a win carried by the modelled tasks only, and a subset reduction of 29% (does not hold) beside one of exactly 30% (holds), and keeps the minimum p as documentation.
 
-*The environment (S116).* `freeze.json` records the environment every arm shares: Node `v24.12.0`, the claude CLI `2.1.287`, the model `claude-opus-5-5` (the exact id passed to the CLI, the one proposed below and still to be confirmed) and the operating system (`win32`, release `10.0.26300`, `x64`). The runner refuses a run, pilots included, when any of them differs from the record (since M3-10, any but the OS release) or the model is not an exact id, and `--check` reports any change of the environment. `freeze.mjs` now needs `--model <exact id>` to write the freeze. Between S116 and M3-9 the claude CLI updated itself from `2.1.286` and Windows from release `10.0.26200`, and the freeze written at M3-9 records the new values. An update after FROZEN would stop every run until the freeze is written again, so the CLI's version should be pinned before FROZEN.
+*The environment (S116).* `freeze.json` records the environment every arm shares: Node `v24.12.0`, the claude CLI `2.1.287`, the model `claude-opus-5-5` (the exact id passed to the CLI, the one proposed below and still to be confirmed) and the operating system (`win32`, release `10.0.26300`, `x64`). The runner refuses a run, pilots included, when any of them differs from the record (since M3-10, any but the OS release) or the model is not an exact id, and `--check` reports any change of the environment. `freeze.mjs` now needs `--model <exact id>` to write the freeze. Between S116 and M3-9 the claude CLI updated itself from `2.1.286` and Windows from release `10.0.26200`, and the freeze written at M3-9 records the new values. The owner then pinned the CLI at `2.1.287` (`DISABLE_AUTOUPDATER=1` in the user settings; `claude doctor` reports auto-updates disabled by it) and paused Windows updates, and the freeze was written once more, at `0841ccb`, recording the pinned versions (M3-10).
 
 *Out-of-range inputs and the audit of stated ranges (M3-6 to M3-8).* Control 4 first failed on T3 and T6: O1 sent values outside the ranges the briefs state (a capture of 0 units, a refund of 3, `maxTries` 4), and the references took them. The references declared those ranges only as parameter types, and a type range is a constraint at run time only when PT3.4a makes it `strict`, which it does only for a value that reaches an irreversible or compensable effect; elsewhere the domain is `disclosed` and the value is accepted. O3 explores only in-range values, so controls 1 to 3 could not see it. The audit lists every action parameter a caller sets through the host interface whose brief states a range or a set of values; parameters only another machine sets (`Reserve`, `Granted` and the like) are not caller inputs.
 
