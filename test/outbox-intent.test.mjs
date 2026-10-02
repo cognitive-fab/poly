@@ -11,7 +11,7 @@ import { checkFile, workerConformance, replayRuntime } from '@poly/check';
 import { checkMachine, flatten } from '@poly/ref';
 import { modelSource, BOUNDS, MODEL_BUILD, MODEL_SOURCE, verifiedModels } from '@poly/runtime/model';
 import { ROOT } from './helpers.mjs';
-import { admitted, loaded } from './runtime-helpers.mjs';
+import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
 import { lowerModels } from '../scripts/outbox-models.mjs';
 
 const WORKER_SOURCE = join(ROOT, 'packages', 'poly-runtime', 'src', 'worker.ts');
@@ -100,7 +100,7 @@ async function corpus(extra = {}) {
   const { rt, clock } = await loaded(a, { gate: { gate, escalationTimeoutMs: 10 * 60_000 }, worker: { leaseMs: 60_000 }, ...extra });
   const calls = new Map();
   const hung = [];
-  rt.handle('w.work', (_payload, caps, ctx) => {
+  handleWith(rt, 'w.work', (_payload, caps, ctx) => {
     const job = ctx.instanceId;
     const k = calls.get(job) ?? 0;
     calls.set(job, k + 1);
@@ -176,7 +176,7 @@ test('polywatch: an expired Running intent whose manifest is gone is parked, not
   const { rt, clock } = await loaded(a, { worker: { leaseMs: 60_000 } });
   try {
     let release;
-    rt.handle('w.work', () => new Promise((r) => { release = r; }));
+    handleWith(rt, 'w.work', () => new Promise((r) => { release = r; }));
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     const pending = rt.worker.tick();

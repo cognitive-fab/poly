@@ -10,6 +10,7 @@
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import { RESERVED_MODULE, type Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
@@ -62,7 +63,13 @@ export class PolyRuntime {
   private readonly intentSubscribers = new Map<string, Set<(intent: unknown) => void>>();
   private timers: NodeJS.Timeout[] = [];
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> = {}) {
+  /** S142: the exports of each certified handler file, as the runtime imported it from its verified copy. */
+  private readonly certified: Map<string, Readonly<Record<string, unknown>>>;
+  private readonly certifiedFunctions: Set<unknown>;
+
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> & { certified?: Map<string, Readonly<Record<string, unknown>>> } = {}) {
+    this.certified = opts.certified ?? new Map();
+    this.certifiedFunctions = new Set([...this.certified.values()].flatMap((ns) => Object.values(ns).filter((v) => typeof v === 'function')));
     this.gateGiven = opts.gate?.gate !== undefined;
     store.decisionCompletions = (machineId) => this.decisionCompletions(machineId);
     store.allowWitnessCompletions = verified.certificate.purpose === 'witness';
@@ -138,11 +145,24 @@ export class PolyRuntime {
     return { source: modelSource(bound), module: verifiedModels([bound])[0].module };
   }
 
+  /** S142: the exports of a certified handler file (a path poly.json names), as the runtime loaded it. */
+  handlerExports(path: string): Readonly<Record<string, unknown>> {
+    const ns = this.certified.get(path);
+    if (!ns) throw new Error(`no certified handler file ${path}; the certificate binds ${[...this.certified.keys()].join(', ') || 'none'} (S142)`);
+    return ns;
+  }
+
   /** PT15: a handler for an effect kind. It runs only from the outbox worker, after the gate allows (PT9.2). */
   handle(kind: string, handler: Handler): void {
     // Review B2: a decision's handler is the provider host's, which keeps the record its completion commits with.
     if (kind.startsWith('decision.')) throw new Error(`${kind} is a decision: register its provider with rt.provide, never rt.handle (PD2.2, K10)`);
     if (kind.startsWith('outcome.')) throw new Error(`${kind} is an adjudication's outcome, handled by the runtime itself (PD2.4)`);
+    // S142: only an export of a certified handler file, as this runtime loaded it, by identity. The same file imported
+    // by the host is another module instance, and a closure is no file at all: neither is what the lint read.
+    if (!this.certifiedFunctions.has(handler)) {
+      const files = [...this.certified.keys()];
+      throw new Error(`PL6404 HANDLER_NOT_CERTIFIED: the handler for ${kind} is not an export of a certified handler file as the runtime loaded it${files.length ? ` (take it from rt.handlerExports(${files.map((f) => JSON.stringify(f)).join(' | ')}))` : '; the certificate binds no handler file'} (S142)`);
+    }
     this.handlers.set(kind, handler);
   }
 
@@ -441,6 +461,7 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   }
   const models = verifiedModels([...bounds].filter((b) => BOUNDS.includes(b as 1)).sort((x, y) => x - y));
   let kernel: Runtime;
+  const certified = new Map<string, Readonly<Record<string, unknown>>>();
   try {
     kernel = await createRuntime({
       store,
@@ -451,6 +472,12 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
       ...(opts.now ? { now: opts.now } : {}),
     });
     recheckCopy(verified);
+    // S142: the handlers, imported from their verified copies, after the copies are checked again.
+    for (const [path, copy] of verified.handlers) {
+      let ns: Record<string, unknown>;
+      try { ns = await import(pathToFileURL(copy).href) as Record<string, unknown>; } catch (e) { throw new LoadError(`refused at load: the certified handler file ${path} does not import: ${(e as Error).message} (S142)`); }
+      certified.set(path, Object.freeze({ ...ns }));
+    }
     // S119: polyrun's own effect worker must never run beside the one that hosts OutboxIntent.
     (kernel as unknown as { startWorkers: () => never }).startWorkers = () => { throw new Error('polyrun\'s workers do not run under poly-runtime; use rt.startWorkers (S119)'); };
   } catch (e) {
@@ -458,5 +485,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (e instanceof LoadError) throw e;
     throw new LoadError(`refused at load: polyrun did not register the certified machines: ${(e as Error).message}`);
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker });
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified });
 }

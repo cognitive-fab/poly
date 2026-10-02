@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { load } from '@poly/runtime';
 import { ROOT } from './helpers.mjs';
-import { admitted, makeKey } from './runtime-helpers.mjs';
+import { admitted, makeKey, handleWith } from './runtime-helpers.mjs';
 
 const CLI = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
 const poly = (...args) => {
@@ -109,7 +109,7 @@ test('review B5: poly journal replay does not recompute a gate decision with a g
   rmSync(gdb, { force: true });
   const gate = { propose: () => ({ decision: 'deny', reason: 'policy-x' }), settle: () => 'ok' };
   const rt = await load(b.build, { certificate: b.certificate, trust: b.trust, store: { sqlite: gdb }, gate: { gate } });
-  rt.handle('w.work', () => 'ok');
+  handleWith(rt, 'w.work', () => 'ok');
   await rt.create('outbox.Job', { id: 'job' });
   await rt.dispatch('job', 'Go');
   await rt.worker.tick();

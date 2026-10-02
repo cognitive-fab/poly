@@ -15,13 +15,14 @@ import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { checkFile, checkProject, type ProjectReport } from './pipeline.js';
+import { LINT_VERSION, handlerClosure } from './handlers.js';
 
 export class AdmitError extends Error {
   constructor(message: string) { super(message); this.name = 'AdmitError'; }
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -32,6 +33,7 @@ export const M4_LIMITS = [
   'escalation approvals are recorded API calls without a person-key signature until PT12.5 (M5, S118)',
   'handlers receive no capabilities; capabilities are not bound until M5 (S134)',
   'the store is SQLite only; Postgres is not built (S135)',
+  'installed packages the handlers import are not hashed; the certificate records the lockfile\'s digest, and hashing them is M5\'s (S142)',
 ];
 
 export interface AdmitOptions {
@@ -240,6 +242,30 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
       if (!opts.fault && want !== have) throw new AdmitError(`not admitted: ${path} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
     }
   }
+  // S142: the handlers, as the lint read them. A file that differs on disk now is refused, never certified.
+  const lint = report.handlers;
+  const handlers: Certificate['poly']['handlers'] = lint?.status === 'ran'
+    ? { roots: lint.roots, files: lint.digests, lint: { version: LINT_VERSION, verdict: lint.diagnostics.length ? 'FINDINGS' : 'CLEAN' }, packages: lint.packages, lockfile: lint.lockfile }
+    : { roots: [], files: {}, lint: { version: LINT_VERSION, verdict: 'not-run', reason: lint?.status === 'not-run' ? lint.reason : 'the program has no effects and poly.json names no handlers' }, packages: [], lockfile: null };
+  const handlerProblems = (): string[] => {
+    const out: string[] = [];
+    for (const [p, want] of Object.entries(handlers.files)) {
+      const f = join(dir, p);
+      if (!existsSync(f) || sha256OfBytes(readFileSync(f)) !== want) out.push(`${p} on disk is not the handler the lint read`);
+    }
+    if (handlers.lockfile) {
+      const f = join(dir, handlers.lockfile.path);
+      if (!existsSync(f) || sha256OfBytes(readFileSync(f)) !== handlers.lockfile.digest) out.push(`${handlers.lockfile.path} changed during the check`);
+    }
+    return out;
+  };
+  const changed = handlerProblems();
+  if (changed.length) throw new AdmitError(`not admitted: ${changed.join('; ')} (S142)`);
+  // S142, the standing rule on artefacts: the broken variants a read-back must catch.
+  const certifiedHandlers: Certificate['poly']['handlers'] = { ...handlers, files: { ...handlers.files } };
+  const handlerPaths = Object.keys(certifiedHandlers.files);
+  if (opts.fault === 'stale-handler-digest' && handlerPaths.length) certifiedHandlers.files[handlerPaths[0]] = sha256OfBytes(handlerPaths[0]);
+  if (opts.fault === 'omit-handler-file' && handlerPaths.length) delete certifiedHandlers.files[handlerPaths[handlerPaths.length - 1]];
   const toolchain = { ...(report.files[0]?.engines ?? {}) };
   const body: Omit<Certificate, 'digest' | 'signatures'> = {
     v: 1,
@@ -252,8 +278,8 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     boundAccepted: null,
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
-    buildId: buildIdOf(artefacts, sources, toolchain),
-    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS] },
+    buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
+    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS], handlers: certifiedHandlers },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -267,6 +293,12 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const problems = certificateProblems(back, artefactsOnDisk(dir, machines), { [key.id]: publicKeyOf(key.privateKeyPem) });
   const sourcesNow = Object.fromEntries(files.map((f) => [rel(dir, f), sha256OfBytes(readFileSync(f))]));
   if (JSON.stringify(back.poly.sources) !== JSON.stringify(sourcesNow)) problems.push({ name: 'sources', problem: 'the sources changed while the program was admitted' });
+  for (const p of handlerProblems()) problems.push({ name: 'handlers', problem: p });
+  // S142: the handlers read back are the closure of the roots as it is on disk now, file for file.
+  if (lint?.status === 'ran') {
+    const now = handlerClosure(dir, lint.roots.map((p) => join(dir, p)));
+    if (JSON.stringify(back.poly.handlers.files) !== JSON.stringify(now.digests)) problems.push({ name: 'handlers', problem: 'the certified handler files are not the closure of the handlers on disk' });
+  } else if (Object.keys(back.poly.handlers.files).length) problems.push({ name: 'handlers', problem: 'handler files certified with no lint run' });
   if (problems.length) {
     rmSync(tmp, { force: true });
     throw new AdmitError(`certificate read-back failed (a toolchain fault): ${problems.map((p) => `${p.name}: ${p.problem}`).join('; ')}`);

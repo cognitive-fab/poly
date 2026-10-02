@@ -24,7 +24,7 @@ import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
-import { lintHandlers } from './lint.js';
+import { handlerClosure } from './handlers.js';
 import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, conjunction, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type Vacuous } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
@@ -792,8 +792,14 @@ export interface ProjectReport {
   project: string;
   name: string;
   files: CheckReport[];
-  /** S72: the handler lint (PT6.5): ran over the files poly.json names, or not run, and why. */
-  handlers: { status: 'ran'; files: number; diagnostics: Diagnostic[] } | { status: 'not-run'; reason: string } | null;
+  /**
+   * S72: the handler lint (PT6.5), or not run, and why. S142: it runs over the files poly.json names and every file
+   * they reach through relative imports, read once; admission certifies these digests.
+   */
+  handlers: {
+    status: 'ran'; files: number; diagnostics: Diagnostic[];
+    roots: string[]; digests: Record<string, string>; packages: string[]; lockfile: { path: string; digest: string } | null;
+  } | { status: 'not-run'; reason: string } | null;
   verdict: CheckReport['verdict'];
   exit: number;
 }
@@ -846,7 +852,10 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
   // field lists the lint as not run, never as clean.
   const hasEffects = reports.some((r) => (r.effectKinds ?? []).length > 0);
   let handlers: ProjectReport['handlers'] = null;
-  if (handlerFiles) handlers = { status: 'ran', files: handlerFiles.length, diagnostics: lintHandlers(handlerFiles) };
+  if (handlerFiles) {
+    const c = handlerClosure(dir, handlerFiles);
+    handlers = { status: 'ran', files: c.bytes.size, diagnostics: c.diagnostics, roots: c.roots, digests: c.digests, packages: c.packages, lockfile: c.lockfile };
+  }
   else if (hasEffects) handlers = { status: 'not-run', reason: 'the project has effects, and poly.json names no handlers (S72)' };
   const lintVerdict: Verdict[] = handlers?.status === 'ran' ? [verdictOf(handlers.diagnostics)] : [];
   const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');

@@ -112,6 +112,12 @@ export const CODES: Record<string, CodeInfo> = {
   PL5404: { name: 'SEND_TO_NONE', stage: 'configuration', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   PL6401: { name: 'AMBIENT_EFFECT_IN_HANDLER', stage: 'lint', severity: 'error' },
+  // S142: an import of a handler file that the certificate cannot name (no such file, outside the project, a URL).
+  PL6402: { name: 'HANDLER_NOT_CERTIFIABLE', stage: 'lint', severity: 'error' },
+  // S142: at load, a certified handler file (or the lockfile) whose bytes are not the certified bytes.
+  PL6403: { name: 'HANDLER_CHANGED', stage: 'runtime', severity: 'error' },
+  // S142: rt.handle given a function that is not an export of a certified handler file the runtime loaded.
+  PL6404: { name: 'HANDLER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },
   PL6201: { name: 'UNGATED_DECISION', stage: 'effects', severity: 'finding' },
   PL6202: { name: 'DECISION_WITHOUT_FAILURE', stage: 'types', severity: 'error' },
   // M4 review C5, K10: a send of an action that completes one of the receiver's decisions.

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { workerConformance, workerActions } from '@poly/check';
 import { WORKER_DRIFTS } from '@poly/runtime';
 import { ROOT } from './helpers.mjs';
-import { admitted, loaded } from './runtime-helpers.mjs';
+import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
 
 const WORKER_SOURCE = join(ROOT, 'packages', 'poly-runtime', 'src', 'worker.ts');
 const a = await admitted('drift', ['conformance/m4/outbox.poly']);
@@ -18,7 +18,7 @@ async function run(jobs, opts = {}) {
   const deny = { propose: (p) => (p.instance.includes('deny') ? { decision: 'deny', reason: 'no' } : { decision: 'allow' }), settle: () => 'ok' };
   const { rt, clock } = await loaded(a, { gate: { gate: deny }, ...opts });
   const tries = new Map();
-  rt.handle('w.work', (_p, _c, ctx) => {
+  handleWith(rt, 'w.work', (_p, _c, ctx) => {
     const k = (tries.get(ctx.instanceId) ?? 0) + 1;
     tries.set(ctx.instanceId, k);
     if (ctx.instanceId.includes('fail') && k === 1) throw new Error('first try fails');

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { genesis } from '@cognitive-fab/polyflow-kernel';
 import { RefusedError } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import { admitted, loaded } from './runtime-helpers.mjs';
+import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
 
 const a = await admitted('ledger', ['conformance/m1/children.poly']);
 
@@ -113,7 +113,7 @@ test('PT15 streams: every step of an instance, and every intent of a kind after 
     const intents = [];
     rt.inputs('job').subscribe((s) => steps.push(s.action));
     rt.intents('w.work').subscribe((i) => intents.push([i.instance, i.proposal.effectKind]));
-    rt.handle('w.work', () => 'ok');
+    handleWith(rt, 'w.work', () => 'ok');
     await rt.create('outbox.Job', { id: 'job' });
     await rt.dispatch('job', 'Go');
     await rt.worker.tick();

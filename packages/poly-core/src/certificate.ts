@@ -49,6 +49,19 @@ export interface Certificate {
     decisions: { machine: string; kind: string; provider: string; result: unknown; labels: string[]; modelBound: false; calibration: 'runtime configuration' }[];
     /** What this build's runtime does not do, printed with every verdict about it (S118, S134, S135). */
     limits: string[];
+    /**
+     * S142: the handlers the certificate binds. `files` holds each handler file poly.json names (`roots`) and every
+     * file reached from them through relative imports, by path relative to the project root and SHA-256; `load`
+     * refuses any difference, and `rt.handle` takes only exports of the roots as loaded. The lint ran over `files`.
+     * Installed packages are named, not hashed (an M4 limit): `lockfile` is the nearest lockfile and its digest.
+     */
+    handlers: {
+      roots: string[];
+      files: Record<string, string>;
+      lint: { version: string; verdict: 'CLEAN' | 'FINDINGS' | 'not-run'; reason?: string };
+      packages: string[];
+      lockfile: { path: string; digest: string } | null;
+    };
   };
   signatures: CertificateSignature[];
   digest: string;

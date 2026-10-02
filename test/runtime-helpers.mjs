@@ -17,13 +17,32 @@ export function makeKey(name = 'admission') {
   return { id: `test-${name}`, file, publicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
 }
 
+/**
+ * A test's handler module (S142): the certified export delegates to a script the test sets through another export,
+ * so each test scripts its handler while rt.handle still takes only the certified function.
+ */
+export const HANDLERS_TS = [
+  'type Script = (payload: unknown, caps: unknown, ctx: unknown) => unknown;',
+  'let script: Script = (payload) => ({ ok: true, payload });',
+  'export function setScript(s: Script) { script = s; }',
+  'export async function handle(payload: unknown, caps: unknown, ctx: unknown) { return script(payload, caps, ctx); }',
+  '',
+].join('\n');
+
+/** Registers a test's script for a kind through the certified handler (S142). */
+export function handleWith(rt, kind, script) {
+  const h = rt.handlerExports('src/handlers.ts');
+  h.setScript(script);
+  rt.handle(kind, h.handle);
+}
+
 /** A project directory under .poly with the given sources copied in, a clean handler module and an admission key. */
 export function project(name, sources, key, base = 'test-cert') {
   const dir = join(ROOT, '.poly', base, name);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'src'), { recursive: true });
   for (const s of sources) copyFileSync(join(ROOT, s), join(dir, 'src', s.split('/').pop()));
-  writeFileSync(join(dir, 'src', 'handlers.ts'), 'export async function handle(payload: unknown) { return { ok: true, payload } }\n');
+  writeFileSync(join(dir, 'src', 'handlers.ts'), HANDLERS_TS);
   writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` } } }, null, 2));
   return dir;
 }

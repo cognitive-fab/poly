@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { EXIT_CODES, ManifestError, loadProject, toJson } from '@poly/core';
-import { lintHandlers } from './lint.js';
+import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
 import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
@@ -125,12 +125,14 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (positional[0] === 'lint' && positional[1] === 'handlers' && positional.length <= 3) {
-      // S72: the lint alone, over the handlers poly.json names.
-      const { handlers } = loadProject(positional[2] ?? process.cwd());
+      // S72, S142: the lint alone, over the handlers poly.json names and the files they import.
+      const projectDir = positional[2] ?? process.cwd();
+      const { handlers } = loadProject(projectDir);
       if (!handlers) { process.stderr.write('poly: poly.json names no handlers (S72)\n'); return EXIT_CODES.USAGE; }
-      const ds = lintHandlers(handlers);
+      const closure = handlerClosure(projectDir, handlers);
+      const ds = closure.diagnostics;
       for (const d of ds) process.stdout.write(`${d.code} ${d.name}  ${d.message}\n`);
-      process.stdout.write(`handlers: lint ${ds.length ? 'REFUSED' : 'CLEAN'} over ${handlers.length} file${handlers.length === 1 ? '' : 's'} (PT6.5)\n`);
+      process.stdout.write(`handlers: lint ${ds.length ? 'REFUSED' : 'CLEAN'} over ${closure.bytes.size} file${closure.bytes.size === 1 ? '' : 's'} (PT6.5, S142)\n`);
       return ds.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN;
     }
     if (positional[0] === 'journal' && positional.length >= 2) {

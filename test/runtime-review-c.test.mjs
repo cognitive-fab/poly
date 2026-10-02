@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { workerConformance } from '@poly/check';
 import { RefusedDispatch } from '@poly/runtime';
 import { ROOT } from './helpers.mjs';
-import { admitted, loaded } from './runtime-helpers.mjs';
+import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
 
 const WORKER = join(ROOT, 'packages', 'poly-runtime', 'src', 'worker.ts');
 const a = await admitted('review-c', ['conformance/m4/outbox.poly']);
@@ -17,7 +17,7 @@ test('review C1: a crash while a permanent failure ends leaves the completion an
   const { rt, clock } = await loaded(a, { worker: { leaseMs: 60_000 } });
   try {
     let calls = 0;
-    rt.handle('w.work', () => { calls++; if (calls === 1) throw Object.assign(new Error('card declined'), { permanent: true }); return 'charged'; });
+    handleWith(rt, 'w.work', () => { calls++; if (calls === 1) throw Object.assign(new Error('card declined'), { permanent: true }); return 'charged'; });
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     // The process dies while HandlerFailedPermanent commits.
@@ -44,7 +44,7 @@ test('review C2: a worker whose claim was taken over delivers no completion', as
   try {
     let calls = 0;
     let fail;
-    rt.handle('w.work', () => { calls++; if (calls === 1) return new Promise((_, rej) => { fail = rej; }); return 'charged'; });
+    handleWith(rt, 'w.work', () => { calls++; if (calls === 1) return new Promise((_, rej) => { fail = rej; }); return 'charged'; });
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     const stale = rt.worker.tick();
@@ -66,7 +66,7 @@ const escalating = { propose: (p) => (p.approved ? { decision: 'allow' } : { dec
 test('review C3: an approval that loses the race to the timeout is a rejected step and an error, never drift or a park', async () => {
   const { rt, clock } = await loaded(a, { gate: { gate: escalating, escalationTimeoutMs: 60_000 } });
   try {
-    rt.handle('w.work', () => 'charged');
+    handleWith(rt, 'w.work', () => 'charged');
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     await rt.worker.tick(); // escalated
@@ -85,7 +85,7 @@ test('review C3: an approval that wins the race makes the timeout a rejected ste
   const { rt, clock } = await loaded(a, { gate: { gate: escalating, escalationTimeoutMs: 60_000 } });
   try {
     let calls = 0;
-    rt.handle('w.work', () => { calls++; return 'charged'; });
+    handleWith(rt, 'w.work', () => { calls++; return 'charged'; });
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     await rt.worker.tick(); // escalated
@@ -110,7 +110,7 @@ test('review C3: an approval that wins the race makes the timeout a rejected ste
 test('review C4: an outside dispatch to a hosted OutboxIntent instance is refused before any step, with an audit row', async () => {
   const { rt } = await loaded(a, { gate: { gate: escalating } });
   try {
-    rt.handle('w.work', () => 'charged');
+    handleWith(rt, 'w.work', () => 'charged');
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     await rt.worker.tick();
@@ -129,7 +129,7 @@ test('review C6: a gate that throws holds only its own intent, Proposed with a b
   const gate = { propose: (p) => { if (p.instance === 'bad') throw new Error('policy service unavailable'); return { decision: 'allow' }; }, settle: () => 'ok' };
   const { rt, clock } = await loaded(a, { gate: { gate } });
   try {
-    rt.handle('w.work', () => 'charged');
+    handleWith(rt, 'w.work', () => 'charged');
     for (const id of ['bad', 'g1', 'g2']) { await rt.create('outbox.Job', { id }); await rt.dispatch(id, 'Go'); }
     await rt.tick(); // never throws
     assert.equal(await phase(rt, 'g1'), 'Done');
@@ -147,7 +147,7 @@ test('review C8: an intent keeps the bound it started under when a redeploy chan
   const { rt, clock } = await loaded(a);
   try {
     let calls = 0;
-    rt.handle('w.work', () => { calls++; if (calls < 3) throw new Error('flaky'); return 'charged'; });
+    handleWith(rt, 'w.work', () => { calls++; if (calls < 3) throw new Error('flaky'); return 'charged'; });
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     await rt.worker.tick(); // attempt 1 fails under the bound 3
@@ -163,7 +163,7 @@ test('review C8: an intent keeps the bound it started under when a redeploy chan
 test('review C7: conformance relates each intent\'s end to the program\'s completions, and finds a story that does not hold', async () => {
   const { rt } = await loaded(a);
   try {
-    rt.handle('w.work', () => 'charged');
+    handleWith(rt, 'w.work', () => 'charged');
     await rt.create('outbox.Job', { id: 'j' });
     await rt.dispatch('j', 'Go');
     await rt.worker.tick();

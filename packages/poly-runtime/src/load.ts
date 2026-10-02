@@ -19,6 +19,8 @@ export interface VerifiedBuild {
   /** Where the verified copy lives: one directory per machine, as in the build. */
   runDir: string;
   machines: { id: string; module: string; contract?: string; effects?: { mapper: string; manifest: string }; manifest: { effects?: Record<string, any> } | null; types: Map<string, [string, TypeNode][]> }[];
+  /** S142: each certified handler file (poly.json's), by its certified path, at its verified copy. */
+  handlers: Map<string, string>;
 }
 
 /** `load('./.poly/build', …)` (PT15) names the build; the certificate's paths are relative to the project above it. */
@@ -52,7 +54,35 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     throw new LoadError(`refused at load: ${problems.map((p) => `${p.name}: ${p.problem}${p.want || p.have ? ` (certified ${p.want ?? 'nothing'}, found ${p.have ?? 'nothing'})` : ''}`).join('; ')}`, problems);
   }
 
+  // S142: the handlers, hash first. Each certified file is read once; a missing or changed file, or a changed
+  // lockfile, refuses the load. The verified bytes are copied beside the artefacts, and the runtime imports the copy.
+  const h = certificate.poly?.handlers;
+  if (!h || typeof h.files !== 'object' || !Array.isArray(h.roots)) throw new LoadError('refused at load: PL6403 HANDLER_CHANGED: the certificate binds no handlers; it predates S142, so admit the program again');
+  const handlerBytes = new Map<string, Buffer>();
+  const changed: string[] = [];
+  for (const [p, want] of Object.entries(h.files)) {
+    const f = join(root, p);
+    const b = existsSync(f) ? readFileSync(f) : null;
+    if (!b) { changed.push(`${p} is missing (certified ${want})`); continue; }
+    const have = sha256OfBytes(b);
+    if (have !== want) { changed.push(`${p} is not the certified handler (certified ${want}, found ${have})`); continue; }
+    handlerBytes.set(p, b);
+  }
+  if (h.lockfile) {
+    const f = join(root, h.lockfile.path);
+    const have = existsSync(f) ? sha256OfBytes(readFileSync(f)) : null;
+    if (have !== h.lockfile.digest) changed.push(`the lockfile ${h.lockfile.path} is not the certified one (certified ${h.lockfile.digest}, found ${have ?? 'nothing'})`);
+  }
+  if (changed.length) throw new LoadError(`refused at load: PL6403 HANDLER_CHANGED: ${changed.join('; ')} (S142)`);
+
   const runDir = join(root, '.poly', 'run', certificate.buildId);
+  const handlers = new Map<string, string>();
+  for (const [p, b] of handlerBytes) {
+    const copy = join(runDir, 'handlers', ...p.split('/'));
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, b);
+    if (h.roots.includes(p)) handlers.set(p, copy);
+  }
   const machines: VerifiedBuild['machines'] = [];
   for (const m of certificate.subject.machines) {
     const dir = join(runDir, m.id);
@@ -78,7 +108,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
       manifest,
     });
   }
-  return { certificate, root, runDir, machines };
+  return { certificate, root, runDir, machines, handlers };
 }
 
 /** After registration: the copy polyrun read is still the certified bytes (a check of the copy, not of the build). */
@@ -90,5 +120,10 @@ export function recheckCopy(v: VerifiedBuild): void {
       const have = sha256OfBytes(readFileSync(join(v.runDir, m.id, name)));
       if (have !== want) throw new LoadError(`refused at load: the verified copy of ${m.dir}/${name} changed before it was registered (certified ${want}, found ${have})`);
     }
+  }
+  // S142: the handler copies too, before the runtime imports them.
+  for (const [p, want] of Object.entries(v.certificate.poly.handlers.files)) {
+    const have = sha256OfBytes(readFileSync(join(v.runDir, 'handlers', ...p.split('/'))));
+    if (have !== want) throw new LoadError(`refused at load: PL6403 HANDLER_CHANGED: the verified copy of ${p} changed before it was imported (certified ${want}, found ${have})`);
   }
 }
