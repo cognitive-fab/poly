@@ -269,6 +269,9 @@ export class PolyRuntime {
       .map((r) => ({ id: r.instance_id as string, machineId: r.machine_id as string, status: r.status as string, state: JSON.parse(r.state) as Record<string, unknown> })));
   }
 
+  /** Every run with a chain, archived ones included (PT16). */
+  runs() { return this.store.runs(); }
+
   /** A run's chain (PT16). */
   chain(instanceId: string): Promise<LedgerEvent[]> { return this.store.chain(instanceId); }
   async verifyChain(instanceId: string): Promise<ChainResult> { return verifyRunChain(await this.chain(instanceId)); }

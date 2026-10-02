@@ -36,6 +36,8 @@ export interface RunReplay {
   /** Rows folded through poly-ref's δ, and windows replayed by polygraph. */
   folded: number;
   windows: number;
+  /** Review B7: why the run was not replayed (an archived run's journal is gone), when it was not. */
+  notRun?: string;
   /** Review B5: recorded gate decisions not replayed, for want of the gate they were made by (listed as not run). */
   gateNotRun: number;
   diagnostics: Diagnostic[];
@@ -126,6 +128,12 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
   const modules = certifiedModules(rt.root, rt.certificate.poly.sources);
   const instances = await rt.instances();
   const out: RunReplay[] = [];
+  // Review B7: an archived run has no journal to fold; it is listed as not replayed, never skipped.
+  const live = new Set(instances.map((i) => i.id));
+  for (const run of await rt.runs()) {
+    if (live.has(run.run) || (opts.runs && !opts.runs.includes(run.run))) continue;
+    out.push({ run: run.run, machine: run.wf, rows: 0, folded: 0, windows: 0, gateNotRun: 0, diagnostics: [], notRun: 'archived, its journal is gone; not replayed' });
+  }
   for (const inst of instances) {
     if (opts.runs && !opts.runs.includes(inst.id)) continue;
     const rows = (await rt.getJournal(inst.id)) as unknown as JournalRowLike[];

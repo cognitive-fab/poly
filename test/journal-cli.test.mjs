@@ -56,7 +56,8 @@ test('verify: every run, its verdict, and PL9002 for a changed event', async () 
 test('replay: every live run reproduced through the certified build; export: one run as JSON', async () => {
   await populate();
   const r = poly('journal', 'replay', '--db', db, '--build', a.build, '--certificate', a.certificate, '--trust', `${a.key.id}=${adm}`);
-  assert.equal(r.code, 0, r.out);
+  assert.equal(r.code, 2, r.out); // the archived p-1 is listed as not replayed (review B7)
+  assert.match(r.out, /p-1 \(rec\.Packer\): archived/);
   assert.match(r.out, /o-1 \(shop\.Order\): 2 rows folded by poly-ref, 1 windows replayed by polygraph, reproduced/);
   const x = poly('journal', 'export', '--db', db, '--run', 'p-1');
   assert.equal(x.code, 0, x.out);
@@ -117,4 +118,12 @@ test('review B5: poly journal replay does not recompute a gate decision with a g
   assert.doesNotMatch(r.out, /PL9001/);
   assert.match(r.out, /1 gate decision\(s\) recorded, not replayed: no gate was given \(not run\)/);
   assert.equal(r.code, 2, r.out);
+});
+
+test('review B7: an archived run is listed as not replayed, never as reproduced', async () => {
+  await populate();
+  const r = poly('journal', 'replay', '--db', db, '--build', a.build, '--certificate', a.certificate, '--trust', `${a.key.id}=${adm}`, '--run', 'p-1');
+  assert.match(r.out, /p-1 \(rec\.Packer\): archived, its journal is gone; not replayed \(not run\)/);
+  assert.equal(r.code, 2, r.out);
+  assert.equal(poly('journal', 'replay', '--db', db, '--build', a.build, '--certificate', a.certificate, '--trust', `${a.key.id}=${adm}`, '--run', 'nope').code, 64);
 });

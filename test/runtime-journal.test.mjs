@@ -95,3 +95,16 @@ test('polyflow\'s own verifier accepts poly\'s chains once E2 is vendored (S122)
       assert.equal(polyflowVerifyChain(await rt.chain(o.id)).ok, true);
     } finally { await rt.close(); }
   });
+
+test('review B6: an archived instance\'s id is not created again, so its closed chain is never extended', async () => {
+  const { rt } = await loaded(a, { ledger });
+  try {
+    const o = await rt.create('shop.Order', { id: 'j-reuse' });
+    await rt.dispatch(o.id, 'Cancel');
+    await rt.archive(o.id);
+    const before = (await rt.chain(o.id)).length;
+    await assert.rejects(rt.create('shop.Order', { id: 'j-reuse' }), /archived/);
+    assert.equal((await rt.chain(o.id)).length, before);
+    assert.equal((await rt.verifyRun(o.id, trust)).verdict, 'closed-and-signed');
+  } finally { await rt.close(); }
+});

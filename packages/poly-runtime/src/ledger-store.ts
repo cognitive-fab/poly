@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS poly_content (
  * with a SamSchemaError, which polyrun journals as a rejected step; here, before that row is written, the whole
  * dispatch is refused instead, so no step, no journal row and no ledger event exist for it.
  */
+/** Review B6: an id whose run was archived; creating it again would extend a closed chain under another machine. */
+export class ArchivedId extends Error {
+  constructor(message: string) { super(message); this.name = 'ArchivedId'; }
+}
+
 export class InputOutsideType extends Error {
   constructor(message: string, readonly instanceId: string, readonly action: string) { super(message); this.name = 'InputOutsideType'; }
 }
@@ -97,6 +102,9 @@ export class LedgerStore extends Store {
   override async insertJournal(row: InsertJournal): Promise<unknown> {
     if (row.stepKind === 'rejected' && typeof row.rejectReason === 'string' && row.rejectReason.startsWith(`${SCHEMA_REJECTION}${row.action}'`)) {
       throw new InputOutsideType(`${row.action} on ${row.instanceId}: the input is outside its type, so it is no step (PS3.2, S140): ${row.rejectReason}`, row.instanceId, row.action);
+    }
+    if (row.seq === 0 && this.db.prepare("SELECT 1 FROM poly_ledger WHERE run = ? AND kind = 'closure'").get(row.instanceId)) {
+      throw new ArchivedId(`instance '${row.instanceId}' was archived: its run is closed, and its id is not created again (K4)`);
     }
     const extra = this.pending.get(`${row.instanceId}\u0000${row.actionId}`);
     // Review B2: the worker's success completion of a decision commits only with its decision record (K10, PD2.2).
