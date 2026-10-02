@@ -132,7 +132,7 @@ export class PolyRuntime {
       if (typeof b?.session !== 'string' || !b.action) continue;
       const action = await this.store.body(b.action) as Record<string, unknown>;
       if (b.outcome === 'settled') out.push({ session: b.session, sseq: b.sseq, kind: 'settle', action, intent: b.intent, observed: b.observed, run: r.run, ledgerSeq: r.seq });
-      else out.push({ session: b.session, sseq: b.sseq, kind: 'propose', action, intent: b.intent, approvedBy: b.approvedBy, gateDecision: b.gateDecision, stateBefore: b.stateBefore, run: r.run, ledgerSeq: r.seq });
+      else out.push({ session: b.session, sseq: b.sseq, kind: 'propose', action, intent: b.intent, approvedBy: b.approvedBy, gateDecision: b.gateDecision, engineDecision: b.engineDecision, engineClass: b.engineClass ?? null, stateBefore: b.stateBefore, run: r.run, ledgerSeq: r.seq });
     }
     return out;
   }
@@ -190,7 +190,9 @@ export class PolyRuntime {
       await this.store.insertAudit({ at: this.now(), instanceId: found?.run ?? '', action: 'Approve', actionId: body?.intent ?? subject, rule: 'PT12.5', reason: problem });
       throw new ApprovalRefused(`approval refused: ${problem}`);
     };
-    const v = verifyRecord(record, this.verified.certificate.poly.keyrings, { kind: 'approval' });
+    // O9 of the outage test: a keyring or verifier that cannot be read refuses the approval; nothing is assumed.
+    let v: ReturnType<typeof verifyRecord>;
+    try { v = verifyRecord(record, this.verified.certificate.poly.keyrings, { kind: 'approval' }); } catch (e) { return refuse(`the keyring cannot be read: ${(e as Error).message}`); }
     if (!v.ok) {
       // An unverifiable record is audited against the escalation it names, when it names one.
       return refuse(v.problem);

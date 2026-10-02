@@ -40,8 +40,12 @@ export interface PolicyGateOptions {
   wrap?: (px: any) => any;
 }
 
+/**
+ * PT9.5: the engine could not decide, or answered in a way the host cannot act on. With `record`, the engine did
+ * answer, so the answer took a session sequence, and the worker records it as `held` (S146).
+ */
 export class GateUnavailable extends Error {
-  constructor(message: string) { super(message); this.name = 'GateUnavailable'; }
+  constructor(message: string, readonly record?: Record<string, unknown>) { super(message); this.name = 'GateUnavailable'; }
 }
 
 const approvedOf = (p: Proposal) => (p.approved ? { approvedBy: p.approved.by } : {});
@@ -55,8 +59,10 @@ export interface SessionEvent {
   intent: string;
   approvedBy?: string;
   observed?: Record<string, unknown>;
-  /** What the run recorded: the gate's decision and Σ before it, for a proposal. */
+  /** What the run recorded: the gate's decision (or `held`) and Σ before it, for a proposal. */
   gateDecision?: string;
+  engineDecision?: string;
+  engineClass?: string | null;
   stateBefore?: string | null;
   /** Where it was recorded, for the report. */
   run: string;
@@ -132,9 +138,6 @@ export class PolicyGate implements Gate {
   /** One decision of the engine on an action, with PS8.3's precedence (S158); shared by the gate and session replay. */
   async decideAction(session: string, scope: string, action: Record<string, unknown>, intent: string, approved?: { by: string }): Promise<{ v: any; decision: 'allow' | 'deny' | 'escalate'; reason: string | null }> {
     const v: any = await this.timed<any>(this.engine.merge({ run_id: session, scope, action, meta: { tool_use_id: intent, tool: (action.effect as { kind?: string } | undefined)?.kind ?? 'poly' }, ...(approved ? { approved: { by: approved.by, ref: intent } } : {}) }));
-    // PT9.5: an answer the engine could not stand behind is no answer.
-    if (v.class === 'unavailable') throw new GateUnavailable(`the gate engine is unavailable: ${v.reason}`);
-    if (v.record === 'degraded') throw new GateUnavailable('the gate engine could not journal its decision (degraded)');
     let decision = v.decision as 'allow' | 'deny' | 'escalate';
     let reason: string | null = v.reason ?? null;
     if (decision === 'escalate') {
@@ -149,8 +152,14 @@ export class PolicyGate implements Gate {
     const session = sessionOf(proposal.machine);
     return this.serial(session, async () => {
       const { action, reads } = this.action(proposal, snapshot);
-      const sseq = this.view.nextSseq(session);
+      // An engine that throws or does not answer took no decision, and so no sequence number (PT9.5).
       const { v, decision, reason } = await this.decideAction(session, moduleOf(proposal.machine), action, proposal.idempotencyKey, proposal.approved);
+      const sseq = this.view.nextSseq(session);
+      // PT9.5: an answer the engine could not stand behind is no answer: the intent is held, and the answer is recorded
+      // with its sequence number, so the session still replays (an `unavailable` answer moved nothing; a degraded
+      // allow moved Σ).
+      const held = v.class === 'unavailable' ? `the gate engine is unavailable: ${v.reason}` : v.record === 'degraded' ? 'the gate engine could not journal its decision (degraded)' : null;
+      if (held) throw new GateUnavailable(held, { session, sseq, action, engineDecision: v.decision, engineClass: v.class ?? null, engineRecord: v.record ?? null, stateBefore: v.state_before ?? null, ...approvedOf(proposal) });
       const record = { session, sseq, action, stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
       if (decision === 'allow') return { decision, reads, record };
       if (decision === 'deny') return { decision, reason: reason ?? 'denied', witnessDigest: v.witnesses?.length ? digest(v.witnesses) : undefined, reads, record };
@@ -178,9 +187,10 @@ export class PolicyGate implements Gate {
     const session = sessionOf(proposal.machine);
     return this.serial(session, async () => {
       const { action } = this.action(proposal, {});
-      const sseq = this.view.nextSseq(session);
       const seen = { ok: observed.ok, effects: proposal.labels, output: observed.output };
       await this.timed(this.engine.settle({ run_id: session, scope: moduleOf(proposal.machine), action, observed: seen }));
+      // A settle the engine did not take has no sequence number (PT9.5).
+      const sseq = this.view.nextSseq(session);
       return { result: 'ok' as const, record: { session, sseq, action, observed: seen } };
     });
   }
@@ -205,9 +215,13 @@ export class PolicyGate implements Gate {
         expected++;
         const scope = session.slice('scope:'.length);
         if (e.kind === 'settle') { await fresh.engine.settle({ run_id: session, scope, action: e.action, observed: e.observed ?? {} }); r.settles++; continue; }
+        // An `unavailable` answer moved nothing, so it is not re-applied (PT9.5).
+        if (e.engineClass === 'unavailable') { r.proposals++; continue; }
         const { v, decision } = await fresh.decideAction(session, scope, e.action, e.intent, e.approvedBy ? { by: e.approvedBy } : undefined);
         r.proposals++;
-        if (decision !== e.gateDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the gate decided ${e.gateDecision}, and the session's replay decides ${decision}` });
+        if (e.gateDecision === 'held') {
+          if (v.decision !== e.engineDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the engine answered ${e.engineDecision} when the intent was held, and the session's replay answers ${v.decision}` });
+        } else if (decision !== e.gateDecision) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): the gate decided ${e.gateDecision}, and the session's replay decides ${decision}` });
         if ((v.state_before ?? null) !== (e.stateBefore ?? null)) r.diagnostics.push({ code: 'PL9001', message: `${session} sseq ${e.sseq} (run ${e.run}, ledger seq ${e.ledgerSeq}): Σ before the decision was ${e.stateBefore}, and the session's replay has ${v.state_before}` });
       }
     }

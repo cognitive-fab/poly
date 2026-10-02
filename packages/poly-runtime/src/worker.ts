@@ -332,8 +332,11 @@ export class EffectWorker {
             g = await this.gate.propose(proposal, snapshot);
           } catch (e) {
             // Review C6: a gate that fails holds only this intent, Proposed with a backoff, and never allows it (PT9.5).
+            const held = (e as { record?: Record<string, unknown> })?.record;
             await this.store.txn(async () => {
               this.checkFence(row);
+              // S146: an answer the gate could not act on is recorded with its sequence number, as `held`.
+              if (held) { const { action: heldAction, ...rest } = held; this.verdict(row, { outcome: 'held', reason: String((e as Error).message), ...rest, gateDecision: 'held', ...(heldAction ? { action: this.store.keep(heldAction) } : {}) }); }
               this.store.db.prepare(`UPDATE pr_outbox SET status = 'pending', claimed_until = NULL, next_attempt_at = ?, last_error = ? WHERE intent_id = ?`).run(now + this.backoff(decl, 1), `gate unavailable: ${String((e as Error)?.message ?? e)}`, row.intent_id);
             });
             return;

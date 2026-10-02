@@ -1,0 +1,11 @@
+// The outage test's policy (plan-m5 section 6): rules only, so a decision is a function of its proposal, and the
+// decision taken after an outage can be compared with a fault-free run's.
+module orders_rules
+
+policy orders-rules {
+  scope "orders"
+  obligation orders-irreversible "No irreversible effect on a cancelled order." rule {
+    when effect.machine == "orders.Order" && effect.class == "irreversible" && machine("orders.Order").status == Cancelled
+    require false else deny
+  }
+}
