@@ -55,7 +55,7 @@ function polygraphFiles() {
 }
 
 /** The parts of the experiment and their files; `manualDir` reads the manual from another directory, as the test does with a copy. */
-export function parts({ toolchainRoot = ROOT, manualDir = MANUAL } = {}) {
+export function parts({ toolchainRoot = ROOT, manualDir = MANUAL, o1Dir = join(M3, 'o1') } = {}) {
   const out = {};
   // The ten tasks, and the practice tasks of the pilot runs.
   const practice = existsSync(PRACTICE) ? readdirSync(PRACTICE).filter((d) => /^P\d+$/.test(d)).sort() : [];
@@ -67,6 +67,8 @@ export function parts({ toolchainRoot = ROOT, manualDir = MANUAL } = {}) {
       out[`${id} v${v.n}`] = files.filter((f) => existsSync(f));
     }
   }
+  // M3-9: O1, the independent session's suites and LEAKS.md, named where they live whatever directory they are read from.
+  out['O1'] = walk(o1Dir).map((f) => ({ file: f, as: `experiments/m3/o1/${relative(o1Dir, f)}` }));
   out['O1 prompt'] = [join(ROOT, 'docs', 'm3', 'o1-prompt.md'), join(M3, 'o1-kit.mjs')];
   out['template'] = walk(join(M3, 'tasks', '_template'));
   out['controls'] = [join(M3, 'controls', 'run.mjs'), join(M3, 'controls', 'o1-check.mjs'), ...walk(join(M3, 'lib')), join(M3, 'o3', 'generate.mjs')];
@@ -83,10 +85,10 @@ export function parts({ toolchainRoot = ROOT, manualDir = MANUAL } = {}) {
 }
 
 /** The digests; `toolchainRoot` and `manualDir` read those parts from elsewhere, as the tests do with copies. */
-export function manifest({ toolchainRoot = ROOT, manualDir = MANUAL } = {}) {
+export function manifest({ toolchainRoot = ROOT, manualDir = MANUAL, o1Dir = join(M3, 'o1') } = {}) {
   const files = {};
   const digests = {};
-  for (const [part, list] of Object.entries(parts({ toolchainRoot, manualDir }))) {
+  for (const [part, list] of Object.entries(parts({ toolchainRoot, manualDir, o1Dir }))) {
     // A toolchain or manual file is named by its path under its root, so a copy of the tree digests alike.
     const entries = list.map((f) => (typeof f === 'string' ? [rel(f), sha(readFileSync(f))] : [f.as.split('\\').join('/'), sha(f.bytes ?? readFileSync(f.file))])).sort((a, b) => (a[0] < b[0] ? -1 : 1));
     for (const [p, d] of entries) files[p] = d;

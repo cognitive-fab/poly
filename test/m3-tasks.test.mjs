@@ -70,8 +70,8 @@ test('M3 controls on T1: every version\'s reference checks clean and replays its
   for (const v of versions('T1')) {
     const r = await controlsOf(v);
     for (const c of r.controls) {
-      if (c.n === 4) assert.equal(c.status, 'not-run');
-      else assert.equal(c.status, 'pass', `T1 v${v.n} control ${c.n}: ${c.detail}`);
+      // O1 exists since bb929b2, so control 4 runs and must pass like the others (M3-9).
+      assert.equal(c.status, 'pass', `T1 v${v.n} control ${c.n}: ${c.detail}`);
     }
   }
 });
