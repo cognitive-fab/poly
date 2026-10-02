@@ -97,3 +97,24 @@ test('review B1: deleted heads, a missing anchor, or a head the anchor does not 
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /the latest anchor covers o-1 at seq \d+, and its latest signed head is at seq \d+/);
 });
+
+// Review B5: replay never substitutes a gate. Without one it reports the gate decisions as not run.
+test('review B5: poly journal replay does not recompute a gate decision with a gate it was not given, and says so', async () => {
+  const { admitted: admit2 } = await import('./runtime-helpers.mjs');
+  const b = await admit2('journal-gate', ['conformance/m4/outbox.poly']);
+  const gdb = join(b.dir, 'gate.db');
+  const badm = join(b.dir, 'admission.pub');
+  writeFileSync(badm, b.key.publicKey);
+  rmSync(gdb, { force: true });
+  const gate = { propose: () => ({ decision: 'deny', reason: 'policy-x' }), settle: () => 'ok' };
+  const rt = await load(b.build, { certificate: b.certificate, trust: b.trust, store: { sqlite: gdb }, gate: { gate } });
+  rt.handle('w.work', () => 'ok');
+  await rt.create('outbox.Job', { id: 'job' });
+  await rt.dispatch('job', 'Go');
+  await rt.worker.tick();
+  await rt.close();
+  const r = poly('journal', 'replay', '--db', gdb, '--build', b.build, '--certificate', b.certificate, '--trust', `${b.key.id}=${badm}`, '--run', 'job');
+  assert.doesNotMatch(r.out, /PL9001/);
+  assert.match(r.out, /1 gate decision\(s\) recorded, not replayed: no gate was given \(not run\)/);
+  assert.equal(r.code, 2, r.out);
+});

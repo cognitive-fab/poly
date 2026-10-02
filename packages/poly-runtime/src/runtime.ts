@@ -54,6 +54,8 @@ export class RefusedDispatch extends Error {
 export class PolyRuntime {
   readonly handlers = new Map<string, Handler>();
   readonly worker: EffectWorker;
+  /** Review B5: whether a gate was given at load; only then are recorded gate decisions recomputed. */
+  readonly gateGiven: boolean;
   /** PD2.2: each decision's record, from the provider's return to its completion's commit, by intent id. */
   private readonly records = new Map<string, DecisionRecord>();
   private readonly inputSubscribers = new Map<string, Set<(step: unknown) => void>>();
@@ -61,6 +63,7 @@ export class PolyRuntime {
   private timers: NodeJS.Timeout[] = [];
 
   constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> = {}) {
+    this.gateGiven = opts.gate?.gate !== undefined;
     const builtins: Record<string, EffectHandler> = {};
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
     this.worker = new EffectWorker(kernel, store, this.handlers, {
@@ -97,11 +100,13 @@ export class PolyRuntime {
     return m.module;
   }
   /** S118: each recorded gate decision of a run, recomputed from its recorded proposal and snapshot (K6). */
-  async gateReplays(instanceId: string): Promise<{ seq: number; decision: string; recompute: () => string }[]> {
-    const out: { seq: number; decision: string; recompute: () => string }[] = [];
+  async gateReplays(instanceId: string): Promise<{ seq: number; decision: string; recompute: (() => string) | null }[]> {
+    const out: { seq: number; decision: string; recompute: (() => string) | null }[] = [];
     for (const e of await this.chain(instanceId)) {
       const b = e.body as Record<string, any>;
       if (e.kind !== 'verdict' || b?.stage !== 'gate' || !b.proposal) continue;
+      // Review B5: replay never substitutes a gate. Without the gate the runtime ran with, the decision is not replayed.
+      if (!this.gateGiven) { out.push({ seq: e.seq, decision: b.outcome, recompute: null }); continue; }
       const proposal = await this.store.body(b.proposal) as any;
       const snapshot = await this.store.body(b.snapshot) as Record<string, unknown>;
       let g = await this.worker.gate.propose(proposal, snapshot);

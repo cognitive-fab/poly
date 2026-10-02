@@ -27,7 +27,7 @@ export interface JournalRowLike {
   reject_reason: string | null;
 }
 
-export interface GateDecisionLike { seq: number; decision: string; recompute: () => string }
+export interface GateDecisionLike { seq: number; decision: string; recompute: (() => string) | null }
 
 export interface RunReplay {
   run: string;
@@ -36,6 +36,8 @@ export interface RunReplay {
   /** Rows folded through poly-ref's δ, and windows replayed by polygraph. */
   folded: number;
   windows: number;
+  /** Review B5: recorded gate decisions not replayed, for want of the gate they were made by (listed as not run). */
+  gateNotRun: number;
   diagnostics: Diagnostic[];
 }
 
@@ -95,11 +97,13 @@ export function replayRun(module: A.Module, machineId: string, instanceId: strin
   }
 
   // Gate decisions (S118): each recorded verdict, recomputed from its proposal and its snapshot.
+  let gateNotRun = 0;
   for (const g of opts.gate ?? []) {
+    if (!g.recompute) { gateNotRun++; continue; }
     const again = g.recompute();
     if (again !== g.decision) out.push(diag('PL9001', at, `run ${instanceId}: the gate decision at ledger seq ${g.seq} was ${g.decision}, and replay gives ${again}`));
   }
-  return { run: instanceId, machine: machineId, rows: rows.length, folded, windows: opts.modulePath ? windows.length : 0, diagnostics: out };
+  return { run: instanceId, machine: machineId, rows: rows.length, folded, windows: opts.modulePath ? windows.length : 0, gateNotRun, diagnostics: out };
 }
 
 /** The certified sources of a build, read and checked against the certificate's digests, parsed, by module name. */

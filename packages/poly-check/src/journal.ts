@@ -66,14 +66,16 @@ export async function journalCommand(sub: string, args: string[], write: (s: str
     try {
       const runs = await replayRuntime(rt, only ? { runs: [only] } : {});
       let n = 0;
+      let notRun = 0;
       for (const r of runs) {
         write(`${r.run} (${r.machine}): ${r.rows} rows folded by poly-ref, ${r.windows} windows replayed by polygraph${r.diagnostics.length ? '' : ', reproduced'}\n`);
         for (const d of r.diagnostics) { n++; write(`  ${d.code} ${d.name}  ${d.message}\n`); }
+        if (r.gateNotRun) { notRun++; write(`  ${r.gateNotRun} gate decision(s) recorded, not replayed: no gate was given (not run)\n`); }
         // PD2.2d, S131: every decision completion links its decision event, with the data it records.
         for (const p of await rt.verifyProvenance(r.run)) { n++; const d = diag('PL9003', { machine: r.machine }, `run ${r.run}: ${p}`); write(`  ${d.code} ${d.name}  ${d.message}\n`); }
       }
-      write(`replay: ${runs.length} run(s), ${n ? 'FINDINGS' : 'every post-state reproduced'}\n`);
-      return n ? EXIT_CODES.FINDINGS : EXIT_CODES.CLEAN;
+      write(`replay: ${runs.length} run(s), ${n ? 'FINDINGS' : notRun ? 'every post-state reproduced, and some gate decisions not run' : 'every post-state reproduced'}\n`);
+      return n ? EXIT_CODES.FINDINGS : notRun ? EXIT_CODES.INCONCLUSIVE : EXIT_CODES.CLEAN;
     } finally { await rt.close(); }
   }
   if (sub === 'export') {
