@@ -175,6 +175,23 @@ export function rules(table, defects) {
   return { escapedMean: { 1: esc(1), 2: esc(2), 3: s3, 4: s4 }, tokensMean: { 1: tok(1), 2: tok(2), 3: tok(3), 4: tok(4) }, win, surface, admittedRate: { 3: admitted(3), 4: admitted(4) }, stop, verdict };
 }
 
+/**
+ * Per arm, how many runs a cap stopped and which (4c630d2): `tokens` (the runner's token cap), `wall` (its wall time)
+ * and `usd` (the CLI's dollar cap). The caps are set not to bind; a run a cap stops is still counted, never rerun.
+ */
+export function capStops(records) {
+  const out = Object.fromEntries([1, 2, 3, 4].map((a) => [a, { runs: 0, stopped: 0, tokens: 0, wall: 0, usd: 0 }]));
+  const which = { budget: 'tokens', wall: 'wall', usd: 'usd' };
+  for (const r of records) {
+    const c = out[r.arm];
+    if (!c) continue;
+    c.runs++;
+    const cap = (r.versions ?? []).map((v) => which[v.stopped]).find(Boolean);
+    if (cap) { c.stopped++; c[cap]++; }
+  }
+  return out;
+}
+
 /** The comparisons and rules over a set of records. */
 function primary(records, prices) {
   const table = perTask(records, prices);
@@ -209,7 +226,7 @@ export function analyse(records, prices, { modelled = modelledTasks() } = {}) {
   const values = Object.values(win);
   const verdict = all.rules.verdict !== 'win' ? all.rules.verdict : values.includes('win') ? 'win' : 'win only with the modelled tasks';
   // M3-10: O1-R compared the same way, reported apart as a secondary measure, in no rule and no verdict.
-  return { ...all, sensitivity, reported: { verdict, win }, secondary: { o1r: compare(all.table, 'o1rPerDelivered') } };
+  return { ...all, sensitivity, reported: { verdict, win }, secondary: { o1r: compare(all.table, 'o1rPerDelivered') }, capStops: capStops(records) };
 }
 
 /** Every scored run record under a directory. */
@@ -233,5 +250,6 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   console.log(`  ${s.note}`);
   console.log(`  at least 30% below arms 1 and 2 (S117): arm 3 ${s.holds[3]}, arm 4 ${s.holds[4]}`);
   for (const c of a.secondary.o1r) console.log(`secondary (M3-10), O1-R failures, arm ${c.arms[0]} vs ${c.arms[1]}: ${c.meanA?.toFixed(2)} vs ${c.meanB?.toFixed(2)} over ${c.tasks} tasks, p ${c.p.toFixed(4)}`);
+  for (const [arm, c] of Object.entries(a.capStops)) console.log(`caps (4c630d2), arm ${arm}: ${c.stopped} of ${c.runs} runs stopped by a cap (tokens ${c.tokens}, wall ${c.wall}, dollars ${c.usd})`);
   console.log(`reported (S115, S117): ${a.reported.verdict}; arm 3 ${a.reported.win[3]}, arm 4 ${a.reported.win[4]}`);
 }
