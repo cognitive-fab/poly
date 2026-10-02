@@ -129,10 +129,12 @@ test('regressions: a test of an unchanged rule that fails on a snapshot and pass
   assert.deepEqual([...tapResults('# Subtest: s\n    ok 1 - a\n    not ok 2 - b\nok 1 - s\n')], [['s > a', true], ['s > b', false], ['s', true]]);
 });
 
-test('the CLI turn: headless, bare, the arm\'s tools only, and resumed for a change', () => {
+test('the CLI turn: headless, without --bare (4210fa6), the arm\'s tools only, and resumed for a change', () => {
   const a = claudeArgs({ arm: 3, model: 'm', prompt: 'p', sessionId: 's1' });
   assert.deepEqual(a.slice(0, 2), ['-p', 'p']);
-  for (const f of ['--bare', '--disable-slash-commands']) assert.ok(a.includes(f), f);
+  assert.ok(a.includes('--disable-slash-commands'));
+  // The subscription needs the login, which --bare never reads; isolation comes from the folder and the environment.
+  assert.ok(!a.includes('--bare'));
   assert.equal(a[a.indexOf('--permission-mode') + 1], 'dontAsk');
   assert.equal(a[a.indexOf('--allowedTools') + 1], ALLOWED_TOOLS[3].join(','));
   assert.equal(a[a.indexOf('--resume') + 1], 's1');
@@ -140,13 +142,23 @@ test('the CLI turn: headless, bare, the arm\'s tools only, and resumed for a cha
   assert.ok(!ALLOWED_TOOLS[1].some((t) => /poly/.test(t)), 'the TypeScript arms have no poly tool');
 });
 
-test('a real run is refused until the freeze is approved, and a pilot until the owner approves it', () => {
+test('a real run is refused until the freeze is approved, and a pilot until the owner approves it', async () => {
   // The model the freeze records, so the environment check passes and the gate is what refuses (S116).
   const model = JSON.parse(readFileSync(join(M3, 'freeze.json'), 'utf8')).environment.model;
   const r = spawnSync(process.execPath, [join(M3, 'runner', 'run.mjs'), '--arm', '1', '--task', 'T1', '--model', model, '--tokens', '1', '--wall', '1', '--out', join(tmpdir(), 'poly-m3-refused')], { encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /needs the freeze/);
-  const p = spawnSync(process.execPath, [join(M3, 'runner', 'run.mjs'), '--arm', '1', '--task', 'P1', '--model', model, '--tokens', '1', '--wall', '1', '--out', join(tmpdir(), 'poly-m3-refused')], { encoding: 'utf8' });
-  assert.equal(p.status, 2);
-  assert.match(p.stderr, /pilot run needs/);
+  // The pilot gate is open since ab9d2d0, so a spawned pilot would really run: the gate is checked on a stand-in directory.
+  const { gateProblem } = await import('../experiments/m3/runner/run.mjs');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const m3 = mkdtempSync(join(tmpdir(), 'poly-m3-gate-'));
+  try {
+    assert.match(gateProblem('P1', m3), /pilot run needs/);
+    assert.match(gateProblem('T1', m3), /needs the freeze/);
+    writeFileSync(join(m3, 'PILOT'), '');
+    assert.equal(gateProblem('P1', m3), null);
+    assert.match(gateProblem('T1', m3), /needs the freeze/);
+  } finally {
+    rmSync(m3, { recursive: true, force: true });
+  }
 });
