@@ -361,7 +361,7 @@ export function alphabetSize(M: RMachine): number {
 }
 
 /** S49: a quantifier in a machine ranges over a family's indices. */
-const familyMembers: Members = (env, group) => {
+export const familyMembers: Members = (env, group) => {
   const r = env.M.families.get(group);
   if (!r) return [];
   const out: number[] = [];

@@ -22,7 +22,8 @@ import { buildMachine, dataDomain, inCheckDomain, inType, type RMachine } from '
 import { transition, initialState, isTerminal } from './step.js';
 import { evaluate, type Verdict } from './eval.js';
 import { stateKey, statePlain, toPlain, type State, type Value } from './values.js';
-import { ENGINE } from './check.js';
+import { ENGINE, familyMembers } from './check.js';
+import { antecedents, judge, type Vacuous } from './vacuity.js';
 
 export const MAX_CASCADE_DEPTH = 8;
 
@@ -191,6 +192,8 @@ export interface JointReport {
   transitions: number;
   findings: Diagnostic[];
   capHit: boolean;
+  /** Review D4: the compose invariants whose antecedent no explored joint state satisfies (S128). */
+  vacuous: Vacuous[];
   /** The joint states, for confirming polyrun's check-product findings. */
   graph: { states: Joint[]; index: Map<string, number>; edges: JointEdge[]; parent: (number | null)[] };
 }
@@ -290,7 +293,18 @@ export function checkJoint(module: Module, parentName: string, opts: { maxStates
     }
   }
   if (capHit) findings.push(finding('PL3901', 'BOUND_HIT', 'inconclusive', `joint exploration stopped at ${states.length} states`, []));
-  return { machine: P.name, states: states.length, transitions: edges.length, findings, capHit, graph: { states, index, edges, parent } };
+  // Review D4, S128: a compose invariant is judged for vacuity over the joint states, as a machine's invariant is over
+  // its own; a quantifier ranges over the parent's family (S49).
+  const vacuous: Vacuous[] = [];
+  const envs = () => states.map((j) => ({ M: P, state: j.parent.state, data: {}, locals: new Map(), joint: { parent: j.parent.state, children: new Map(j.children.map(([k, c]) => [k, c.state])) } }));
+  for (const p of invariants) {
+    if (p.kind !== 'Property') continue;
+    for (const a of antecedents(p.expr)) {
+      const v = judge(a, envs, familyMembers);
+      if (v) { vacuous.push({ property: p.name, id: p.id, parts: a.parts, ...v }); break; }
+    }
+  }
+  return { machine: P.name, states: states.length, transitions: edges.length, findings, capHit, vacuous, graph: { states, index, edges, parent } };
 }
 
 /** `sha256:` of a joint state, for findings that name one. */

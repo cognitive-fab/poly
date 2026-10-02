@@ -398,6 +398,7 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const joint = checkJoint(module, machine);
   mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9'];
   mc.instance!.jointStates = joint.states;
+  mc.vacuous.push(...vacuousRecords(joint.vacuous));
   const out: Diagnostic[] = [];
   const facts = checked.machines.get(machine)!;
   const hasCompose = facts.machine.items.some((i) => i.kind === 'Property' && i.form === 'compose');
