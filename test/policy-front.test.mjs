@@ -162,3 +162,17 @@ test('PT8.4, PT8.5: a policy Polyaxion refuses at admission is PL6001 with the e
   assert.ok(s.diagnostics.some((d) => d.code === 'PL6501' && /reserve-before-charge cannot be discharged/.test(d.message)));
   assert.equal(s.verdict, 'REFUSED');
 });
+
+// Polywatch on S149: a never statement that reads a decision's answer from an open domain is runtime-only, as a
+// machine field from an open domain is; it is not proved, or called vacuous, over the rows where the answer is null.
+test('S149: a never statement over an open decision answer is runtime-only', () => {
+  const router = parse(read('conformance/m4/router.poly')).module;
+  const policy = parse(`module p\npolicy route-guard {\n  scope "support"\n  never no-refund-answer "The router never answers Refund.": allow when decision("route").answer == "Refund"\n}\n`).module;
+  const facts = policyFacts([router]);
+  facts.decisions.set('route', { answers: null });
+  const s = { scope: 'support', policies: policy.decls.filter((d) => d.kind === 'Policy') };
+  const r = checkNever(s, facts, () => ({}));
+  assert.deepEqual(r.runtimeOnly, ['route-guard.no-refund-answer']);
+  assert.deepEqual(r.vacuous, []);
+  assert.deepEqual(r.findings, []);
+});

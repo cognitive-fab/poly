@@ -337,7 +337,9 @@ export function checkNever(s: PolicyScope, facts: PolicyFacts, at: (node: string
   for (const p of s.policies) for (const it of p.items) {
     if (it.kind !== 'Never') continue;
     const reads = readsOf({ scope: s.scope, policies: [{ ...p, items: [it] }] });
-    const touchesOpen = [...reads.machines].some(([m, fs]) => [...fs].some((f) => table.open.includes(`${m}.${f}`)));
+    // S149: an open domain, a machine field's or a decision's answer, is checked at run time only.
+    const touchesOpen = [...reads.machines].some(([m, fs]) => [...fs].some((f) => table.open.includes(`${m}.${f}`)))
+      || [...reads.decisions].some(([d, fs]) => [...fs].some((f) => table.open.includes(`decision ${d}.${f}`)));
     if (touchesOpen) { runtimeOnly.push(`${p.name}.${it.name}`); continue; }
     let applies = false;
     let hit: { path: WitnessStep[]; row: Record<string, any>; sigma: Sigma } | null = null;
