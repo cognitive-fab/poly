@@ -227,4 +227,20 @@ test('O9: an approval while the keyring cannot be read is refused, and the escal
   } finally { await rt.close(); }
 });
 
-test('O10: the claims verifier is M5b\'s (PD5.1); its outage is tested there', { todo: 'M5b: claims-unverified before the module (PD5-A1)' }, () => {});
+// O10 (PD5.1.4, K11): the claims verifier is unavailable. The adapter throws; the dispatch gets no claims, so the step is
+// rejected(claims-unverified) before the module, journaled, and nothing downstream runs.
+test('O10: a verifier that throws gives no claims: claims-unverified before the module, and no effect', async () => {
+  const a = await admitted('outage-o10', ['conformance/m5/refund.poly']);
+  const { rt } = await loaded(a, { verifier: () => { throw new Error('injected: the verifier is down'); } });
+  try {
+    let calls = 0;
+    handleWith(rt, 'payments.refund', () => { calls++; return 'refunded'; });
+    await rt.create('refund.Refund', { id: 'r' });
+    const r = await rt.dispatch('r', 'Request', { a: 1 }, { actionId: 'q', credentials: 'token' });
+    assert.deepEqual([r.stepKind, r.rejectReason], ['rejected', 'claims-unverified']);
+    assert.equal((await rt.getState('r')).state.status, 'Idle');
+    assert.deepEqual(await rt.outbox('r'), []);
+    await rt.worker.tick();
+    assert.equal(calls, 0);
+  } finally { await rt.close(); }
+});
