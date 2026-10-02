@@ -145,6 +145,8 @@ Each issue gives a proposal. Nothing is built on an issue before it is ruled.
 
 - **S139. Exported witness tests over the runtime API meet PF8.1** (open, step 11 not built). S68 and S133 regenerate exported tests over the runtime API in M4. The runtime loads only an admitted program, and in M4 only a CLEAN program is admitted (S126), but a witness exists only for a program with a finding: the test cannot load the program it is about through `load`. *Proposal:* a test entry point, `loadForWitness(build, { moduleDigest })`, that loads an unadmitted build into an in-memory store only, pins the module digest as exported tests do today, writes `admitted: false` into every ledger event, and refuses a file store. Until it is ruled, exported tests keep driving the lowered artefacts (S68).
 
+- **S141. Two kinds of witness the runtime API cannot place** (open, walked through the certified artefacts). S139 walks exported witness tests through the runtime API, and two kinds cannot be: a configuration's, whose instances start from the configuration's own initial values (an address, a count), which no API call sets; and a machine that spawns children, whose children the witness drives as the environment while the runtime would run them itself. Both are admitted with a witness certificate and walked through the certified lowered artefacts of the runtime's verified copy, and the test says so in its output. *Proposal:* a runtime call that creates an instance at given initial values, allowed only under a witness certificate, so a configuration's witness can be walked through the runtime; a machine with children stays on its artefacts until children's completions can be scripted through the API.
+
 ## 7. Risks
 
 - **Subclassing polyrun's `Store`** (S121) depends on `commitStep` and `insertJournal` keeping their names and call pattern. `test/vendor.test.mjs` pins the bytes; a re-vendoring that changes either fails the ledger tests first.
@@ -198,6 +200,30 @@ Every step is built except step 11, which waits on S139. Commits, in order: the 
 
 `npm test` runs 881 tests: 875 pass, 3 are listed as waiting, and 3 fail, the same three M3 tests that fail at the merge base (the environment record, the run refusal that follows from it, and control 4). The boundary check passes with `poly-runtime` in it.
 
+### After the rulings S137 to S140
+
+`main` was merged at 4ec2fe2. Each ruling is built with a test that failed first.
+
+| Ruling | Built | Commit |
+|---|---|---|
+| S137 | The cap is 10: the oms example (attempts 6) is admitted, 11 is refused. OutboxIntent is checked at every bound from 1 to 10, with 3m + 8 states each, 11 at 1 and 38 at 10, and its builds are checked in. | 823eb9e |
+| S138 | PT9.7 first: `HandlerFailedPermanent`, Running to Dead with the failed completion. Re-checked at every bound, `settles` included: 17 states and 27 accepted transitions at 3, all covered by the corpus (15 jobs). Each handler outcome is an observation paired by CI with the transition taken; a worker that retries a permanent error is PL2401. | 56136fe |
+| S140 | An input outside its action's type, read from the certified contract, is refused before any step with an audit row; a provider's answer outside the type fails the settle; a schema rejection reaching the store is refused as a backstop. PS3.2 says so. | 1bcc3d3 |
+| S139, step 11 | `poly admit --witness` and witness certificates; `load` refuses them without allowWitness, and allowWitness in production; exported witness tests admit the source as it is now with a key made for the run and walk a machine's witness through the runtime API. PL6203 can be exported. S141 is raised for configurations and machines with children. | 9783948 |
+
+`npm test` after these: 1,065 tests, 1,062 pass, 0 fail, 3 waiting (E1, E2, FROZEN). The M3 tests that failed before pass since the merge of M3's fixes.
+
+### The code review of M4
+
+Four reviewers read `ee3aa66..9783948` in four parts (certificates and loading; the ledger, replay and decisions; the worker and the refusals; the checker), and each reproduced every finding it reports with a script under `.poly/review-a` to `review-d`. I re-ran a sample of each part's scripts and every one gave the reported output. Polywatch found three more defects in the last build, fixed with tests that failed first (2f81abd). The 30 review findings are open, for the owner's ruling before M4 closes.
+
+| Part | High | Medium | Low |
+|---|---|---|---|
+| A, certificates and loading | 1 (the certificate hashes the build after the check, so a file rewritten during the check is certified) | 1 (sources and guarantees read after the check) | 3 (a witness key in version control is accepted; a junction defeats the version-control test; handlers are not in the certificate) |
+| B, ledger, replay, decisions | 3 (verify passes a run whose heads were deleted, and never reads the anchor; a decision completion without a decision event when the handler is not a provider; the adapter gives the chosen answer another answer's confidence) | 4 (fit does not pool tied raw values; the CLI replays gate decisions with the allow-all gate; a reused id extends an archived chain; replay skips archived runs and reports clean) | 3 (events after a closure; the binding ignores action id and version; the map's digest and monotonicity are not checked) |
+| C, worker and refusals | 4 (a crash between a permanent failure's completion and its transition re-runs the effect; a stale worker still dispatches its completion; an approval racing the escalation timeout makes the real worker drift; outside dispatches to intent instances are accepted) | 4 (K10 bypassed by a message; one throwing intent starves the batch and the tick; conformance misses completion drift; a redeploy changing a bound strands intents) | 1 (Ref parameters accept any string; the non-record case of the same finding is fixed) |
+| D, checker | 1 (outcome.<d> is not a reserved kind: a valid program gets PL2501, or PL6203 with no adjudication) | 3 (two decisions sharing a completion hide PL6203; an adjudication in the completion step itself is a false PL6203; compose invariants are never judged for vacuity) | 2 (the antecedent text drops parentheses; a path property cannot name outcome.<d>) |
+
 ## Conclusion
 
-M4 was planned in thirteen steps and twelve are built., from the tree guard to the record. The runtime loads only certified bytes, writes its ledger inside each step's transaction, and hosts the checked outbox machine itself, so the worker's trace is the machine's own journal and covers all of its states and transitions. Replay reproduces every post-state and every recorded gate decision, and decisions are recorded, linked and refused from outside as PD2 and K10 require. Three items wait, each listed rather than skipped: the archive trace on E1, polyflow's verifier on E2, and M3's references on FROZEN. S137 and S138 are built as stated and wait for rulings; S139 holds step 11.
+M4 was planned in thirteen steps, and all thirteen are built., from the tree guard to the record. The runtime loads only certified bytes, writes its ledger inside each step's transaction, and hosts the checked outbox machine itself, so the worker's trace is the machine's own journal and covers all of its states and transitions. Replay reproduces every post-state and every recorded gate decision, and decisions are recorded, linked and refused from outside as PD2 and K10 require. Three items wait, each listed rather than skipped: the archive trace on E1, polyflow's verifier on E2, and M3's references on FROZEN. S137 to S140 are built as ruled, step 11 with them; S141 is open.
