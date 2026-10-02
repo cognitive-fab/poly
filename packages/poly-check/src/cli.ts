@@ -27,6 +27,8 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
        poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
        poly journal export --db <store> --run <id>
+       poly journal eval --db <store> --decision <d> --candidate <provider module>
+       poly journal fit --db <store> --decision <d> --model <id> [--version <n>] [--out <file>]
 
   check    Parses, types and lowers each module; runs strict validate(), translation
            validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
@@ -47,6 +49,8 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
   journal  verify: the chain, signed heads, closure and journal binding of every run (PL9002).
            replay: every run folded again through poly-ref and polygraph (PL9001).
            export: one run's chain, heads and bodies, as JSON.
+           eval: recorded questions replayed to a candidate provider; agreement and calibration.
+           fit: a calibration map by isotonic regression. Neither writes to any chain.
 
   lint     Reads the effect handler modules poly.json names and refuses any reach for
            ambient authority (PL6401): fs, net, http, child_process, fetch, process.env.

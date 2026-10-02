@@ -8,6 +8,7 @@
 //
 // What M4's runtime does not do is stated in the certificate's `limits` and printed with it (S118, S134, S135).
 import { mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import type { Certificate } from '@poly/core';
@@ -16,6 +17,7 @@ import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
 import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
 import { verifiedModels, modelSource } from './model.js';
+import { decisionHandler, type DecisionRecord, type ProviderConfig } from './provider.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification } from './journal.js';
 
 export { LoadError };
@@ -37,6 +39,11 @@ export interface LoadOptions {
 export type Handler = EffectHandler;
 
 /** An outside dispatch that the runtime refuses before any step, with an audit row (K9, K10). */
+/** PD2.4: an adjudication with no decision event to link; a checked program cannot reach it (PL6203). */
+export class OutcomeWithoutDecision extends Error {
+  constructor(message: string) { super(message); this.name = 'OutcomeWithoutDecision'; }
+}
+
 export class RefusedDispatch extends Error {
   constructor(message: string, readonly rule: string) { super(message); this.name = 'RefusedDispatch'; }
 }
@@ -44,11 +51,30 @@ export class RefusedDispatch extends Error {
 export class PolyRuntime {
   readonly handlers = new Map<string, Handler>();
   readonly worker: EffectWorker;
+  /** PD2.2: each decision's record, from the provider's return to its completion's commit, by intent id. */
+  private readonly records = new Map<string, DecisionRecord>();
   private readonly inputSubscribers = new Map<string, Set<(step: unknown) => void>>();
   private timers: NodeJS.Timeout[] = [];
 
   constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> = {}) {
-    this.worker = new EffectWorker(kernel, store, this.handlers, { gate: opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker });
+    const builtins: Record<string, EffectHandler> = {};
+    for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
+    this.worker = new EffectWorker(kernel, store, this.handlers, {
+      gate: opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
+      // PD2.2, K10: the decision event is written with the completion step, in its transaction.
+      beforeCompletion: (row, decl) => {
+        const record = decl?.decision ? this.records.get(row.intent_id) : undefined;
+        if (record) this.store.pending.set(`${row.instance_id}\u0000${row.intent_id}:done`, { before: [{ kind: 'decision', body: record }] });
+      },
+      afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
+    });
+    // PD2.4, S129: an adjudication's outcome event, linked to the run's most recent decision event for its decision.
+    store.onOutbox = (instanceId, rows) => rows.filter((r) => r.kind.startsWith('outcome.')).map((r) => {
+      const decision = r.kind.slice('outcome.'.length);
+      const link = store.lastDecision(instanceId, decision);
+      if (!link) throw new OutcomeWithoutDecision(`${instanceId} adjudicates ${decision}, and the run has no decision event for it (PD2.4, S129)`);
+      return { kind: 'outcome', body: { decision, outcome: (r.payload as { outcome: string }).outcome, intent: r.intentId, decisionEvent: link } };
+    });
     kernel.events.on('step', (step) => {
       for (const f of this.inputSubscribers.get(step.instanceId) ?? []) f(step);
     });
@@ -107,10 +133,77 @@ export class PolyRuntime {
     return { id: r.instanceId, state: r.state };
   }
 
-  /** PT15. polyrun refuses an outside dispatch of a live child's completion (K9). */
+  /**
+   * PT15. polyrun refuses an outside dispatch of a live child's completion (K9); this refuses one of a decision's
+   * completion (K10, S130), since only the worker delivers it with its decision event. Both come before any step,
+   * with an audit row and no journal row.
+   */
   async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string } = {}): Promise<DispatchResult> {
-    return this.kernel.dispatch(instanceId, action, data, opts.actionId);
+    const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
+    const inst = await this.store.getInstance(instanceId);
+    if (inst && this.decisionCompletions(inst.machine_id).has(action)) {
+      const reason = `K10: '${action}' completes a decision of '${instanceId}', and only the outbox worker delivers it, with its decision event`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'K10', reason });
+      throw new RefusedDispatch(reason, 'K10');
+    }
+    try {
+      return await this.kernel.dispatch(instanceId, action, data, actionId);
+    } catch (e) {
+      if (!(e instanceof OutcomeWithoutDecision)) throw e;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'PD2.4', reason: e.message });
+      throw new RefusedDispatch(e.message, 'PD2.4');
+    }
   }
+
+  /** The actions a machine's decisions complete with, which only the worker dispatches (K10). */
+  decisionCompletions(machineId: string): Set<string> {
+    const m = this.verified.machines.find((x) => x.id === machineId);
+    const out = new Set<string>();
+    for (const e of Object.values(m?.manifest?.effects ?? {})) {
+      if (!e.decision) continue;
+      for (const h of ['onSuccess', 'onFailure', 'onExhausted']) if (e[h]?.action) out.add(e[h].action);
+    }
+    return out;
+  }
+
+  /** PD1.7, PD3: the provider of a decision, its model and its calibration map: runtime configuration, never certified. */
+  provide(decision: string, config: ProviderConfig): void {
+    const kind = `decision.${decision}`;
+    const entry = this.verified.machines.map((m) => m.manifest?.effects?.[kind]).find(Boolean);
+    if (!entry) throw new Error(`no decision ${decision} in the certified build`);
+    if (config.calibration && config.calibration.decision !== decision) throw new Error(`the calibration map is for ${config.calibration.decision}, not ${decision}`);
+    this.handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records));
+  }
+
+  /**
+   * PD2.2d: every accepted completion of a decision links a decision event of the run, and its data are the
+   * recorded answer, confidence and margin, through the manifest's own map. Each problem is PL9003.
+   */
+  async verifyProvenance(instanceId: string): Promise<string[]> {
+    const inst = await this.store.getInstance(instanceId);
+    const events = await this.chain(instanceId);
+    const wf = events[0]?.run.wf ?? inst?.machine_id;
+    const m = this.verified.machines.find((x) => x.id === wf);
+    const problems: string[] = [];
+    const byHash = new Map(events.map((e) => [e.hash, e]));
+    for (const [, entry] of Object.entries(m?.manifest?.effects ?? {})) {
+      if (!entry.decision || !entry.onSuccess?.action) continue;
+      for (const e of events) {
+        const b = e.body as Record<string, any>;
+        if (e.kind !== 'step' || b.action !== entry.onSuccess.action || b.stepKind !== 'accepted') continue;
+        const d = b.decision ? byHash.get(b.decision) : undefined;
+        if (!d || d.kind !== 'decision') { problems.push(`step ${b.seq} (${b.action}) completes a decision and links no decision event`); continue; }
+        const data = await this.store.body(b.data) as Record<string, unknown> | undefined;
+        const result = d.body as Record<string, unknown>;
+        for (const [field, path] of Object.entries(entry.onSuccess.map ?? {})) {
+          const want = String(path).replace(/^\$\.result\.?/, '').split('.').filter(Boolean).reduce<any>((v, k) => (v == null ? v : v[k]), result);
+          if (JSON.stringify(data?.[field]) !== JSON.stringify(want)) problems.push(`step ${b.seq} (${b.action}): ${field} is ${JSON.stringify(data?.[field])}, and the decision event records ${JSON.stringify(want)}`);
+        }
+      }
+    }
+    return problems;
+  }
+
 
   getState(instanceId: string) { return this.kernel.getState(instanceId); }
   getStateAt(instanceId: string, seq: number) { return this.kernel.getStateAt(instanceId, seq); }

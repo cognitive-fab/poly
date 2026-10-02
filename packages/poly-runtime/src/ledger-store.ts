@@ -81,7 +81,11 @@ export class LedgerStore extends Store {
   override async insertJournal(row: InsertJournal): Promise<unknown> {
     const result = await super.insertJournal(row);
     const extra = this.pending.get(`${row.instanceId}\u0000${row.actionId}`);
-    for (const e of extra?.before ?? []) this.appendEvent(row.instanceId, e.kind, e.body, row.now);
+    // A decision event keeps its question in the content store and carries its digest as `request` (PD2.2a).
+    for (const e of extra?.before ?? []) {
+      const { question, ...rest } = (e.body ?? {}) as Record<string, unknown>;
+      this.appendEvent(row.instanceId, e.kind, question === undefined ? e.body : { ...rest, request: this.keep(question) }, row.now);
+    }
     this.appendEvent(row.instanceId, 'step', {
       seq: row.seq,
       action: row.action,
@@ -113,6 +117,14 @@ export class LedgerStore extends Store {
       await super.markPoisoned(instanceId, now);
       this.appendEvent(instanceId, 'observation', { poisoned: true }, now);
     });
+  }
+
+  /** PD2.4: the hash of the run's most recent `decision` event for a decision, or null. */
+  lastDecision(instanceId: string, decision: string): string | null {
+    for (const r of this.db.prepare("SELECT event, hash FROM poly_ledger WHERE run = ? AND kind = 'decision' ORDER BY seq DESC").all(instanceId)) {
+      if (JSON.parse(r.event).body?.decision === decision) return r.hash;
+    }
+    return null;
   }
 
   /** The hash of the run's most recent event of a kind, or null. */
