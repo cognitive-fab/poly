@@ -117,6 +117,16 @@ The build is accepted as reported: M4a to M4f pass, with three tests waiting on 
 
 **Closing M4.** After S142 and S143 are built (each with a test that fails first), the gate is rerun from a clean build and polywatch reviews the changes. Then M4 closes and M5 is planned.
 
+## M4 closed
+
+**M4 is closed** on `m4` at 4068ddc. S142 (00398d8) and S143 (b6d28fa) are built as ruled, each with a test that failed first. The gate passes from a clean build: 1126 tests, 1123 pass, 0 fail, 3 waiting. The three waiting tests are not M4's to clear: the archive trace waits on E1 (polyrun tombstones), polyflow's own verifier on E2 (ledger kinds), and M3's references on FROZEN. **K4 is met only when E1 lands**, and the M4 record says so. Polywatch's findings each have a recorded outcome; the two real ones are fixed (b9ff135, bfa11fc).
+
+Accepted as built: `PL1208` renamed `RESERVED_NAME`, reserving `runtime<m>` as well as `runtime`; the `module intents` renames with every evidence number unchanged; `PL6402` to `PL6404`; a certificate made before S142 refused at load.
+
+`m4` still never goes into `main` before M3's runs are recorded. M5 is planned next, on `m4`, from `docs/handoff-m5.md`.
+
+**PT18's M5 row is amended** to carry what M4 and PD5 placed there: PD5 (S112), session replay in `sseq` order (S118), PD3-A2 (S131), bound capabilities (S134), starting an instance from a configuration's initial values (S141), hashing the installed dependencies of handlers (S142), and the opt-in OpenShell sandbox (PT6.5).
+
 ## Conclusion
 
 Building M4 and M5 alongside M3 saves calendar time without touching the experiment. The worktree keeps the frozen toolchain where the runner reads it, the merge waits for M3's result, and the stop rule keeps its force over everything built in the meantime. The M4 plan is ruled: the runtime hosts the checked outbox machine itself, writes the ledger inside each step's transaction, and needs two engine changes, tombstones in polyrun and four ledger kinds in polyflow.
