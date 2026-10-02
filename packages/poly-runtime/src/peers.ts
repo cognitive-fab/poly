@@ -5,8 +5,8 @@
 // is reported with its reason, and each check that needs it is listed as not run (no silent clean). Nothing here is
 // on the step path: the pins are checked once per process.
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** The repository root: this file is packages/poly-runtime/dist/src/peers.js. */
@@ -47,12 +47,30 @@ export function peer(name: PeerName, opts: { dir?: string; fresh?: boolean } = {
       if (!existsSync(f)) { problems.push(`${file} is missing`); continue; }
       if (pinDigest(readFileSync(f)) !== sha) problems.push(`${file} differs`);
     }
+    if (name === 'polyaxion') { const shadow = packageShadow(dir); if (shadow) problems.push(shadow); }
     status = problems.length
       ? { ok: false, dir, reason: `the peer at ${dir} differs from its pin at ${commit}: ${problems.slice(0, 3).join('; ')}${problems.length > 3 ? `; and ${problems.length - 3} more` : ''} (not run, ${p.ruling})` }
       : { ok: true, dir, commit, files: rows.length };
   }
   if (!opts.dir) cached.set(name, status);
   return status;
+}
+
+/**
+ * Review A2: Polyaxion's runtime/deps.mjs loads polysec-core package first, so a package Node resolves from the
+ * engine's directory runs instead of the pinned sibling. The first node_modules/@cognitive-fab/polysec-core on Node's
+ * walk up from the engine must be the pinned directory itself (a workspace link to it), or there must be none.
+ */
+function packageShadow(dir: string): string | null {
+  const pinned = join(dir, 'packages', 'polysec-core');
+  for (let at = join(dir, 'packages', 'polyaxion', 'src', 'runtime'); ; at = dirname(at)) {
+    const candidate = join(at, 'node_modules', '@cognitive-fab', 'polysec-core');
+    if (existsSync(candidate)) {
+      const same = existsSync(pinned) && realpathSync(candidate) === realpathSync(pinned);
+      return same ? null : `the installed package ${candidate} is not the pinned packages/polysec-core, and Polyaxion would load it first`;
+    }
+    if (dirname(at) === at) return null;
+  }
 }
 
 export const polyaxionPeer = (opts: { dir?: string; fresh?: boolean } = {}): PeerStatus => peer('polyaxion', opts);

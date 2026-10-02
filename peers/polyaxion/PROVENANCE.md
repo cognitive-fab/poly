@@ -6,6 +6,7 @@ The gate engine poly-runtime hosts in process (PT9, S146), and the admission eng
 - Selection: the runtime files of the three packages: `src`, `package.json` and `LICENSE` of each, with polysec-core's `labels` and polyman's `vendor` (its copy of sam-pattern). polyman is loaded from its TypeScript source, as Polyaxion's own resolver prefers in a checkout.
 - Licence: BUSL-1.1, in each `LICENSE`. poly's own licence is the owner's open decision (S145).
 - Not pinned: polysec-core's `harden` imports `@cognitive-fab/polygraph` from the checkout's own install (8.3.0). It runs at policy admission only, never on the step path.
+- Polyaxion loads polysec-core package first (`runtime/deps.mjs`). The peer is refused unless the first `node_modules/@cognitive-fab/polysec-core` Node finds from the engine is the pinned `packages/polysec-core` itself, or there is none (review A2).
 - Where the checkout is absent, or a file differs from its pin, every check that needs the engine is listed as not run, and `load` refuses a build with policies (no gate is assumed).
 
 `test/vendor.test.mjs` re-hashes every file against this table, and compares each with the commit.
