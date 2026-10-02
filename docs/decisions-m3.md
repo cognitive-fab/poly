@@ -119,7 +119,7 @@ FROZEN waits on M3-6 to M3-9 and a clean control 4 on all 40 versions.
 3. **Diagnostics seen.** The scorer counts only codes in poly command output, never codes the agent read in the manual. A test that fails first uses arm 3's pilot journal (`PL5401` must disappear).
 4. **Denied heredocs.** As designed; recorded, no change.
 
-**Caps per run:** $15 (`--max-budget-usd`), 15,000,000 tokens (counted as in point 1) and 1 hour of wall time. The number of runs stays as the frozen plan states; the pilot report gives the expected cost for it.
+**Caps per run:** $6 (`--max-budget-usd`), 6,000,000 tokens (counted as in point 1) and 1 hour of wall time. A run stopped by a cap is recorded as stopped, never rerun with a higher cap. **The total is capped by the owner** with a spend limit on the M3 workspace in the Anthropic Console; the per-run caps are not a budget. The number of runs stays as the frozen plan states unless the owner's total requires fewer, which is decided before FROZEN.
 
 **Concurrency.** The full runs go in blocks of four: one run of each arm, same task and run number, started together, so load on the machine falls equally on every arm. A block starts only on a key created for it.
 
