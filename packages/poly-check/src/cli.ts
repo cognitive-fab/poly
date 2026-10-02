@@ -9,14 +9,14 @@
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { EXIT_CODES, ManifestError, loadProject, toJson } from '@poly/core';
 import { lintHandlers } from './lint.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
 import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
 import { applyFixById } from './fix.js';
-import { admit, AdmitError } from './admit.js';
+import { admit, admitWitness, AdmitError } from './admit.js';
 import { journalCommand, JournalUsageError } from './journal.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
@@ -24,6 +24,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
        poly admit <project dir>
+       poly admit --witness <file | project dir> --key <private key file> [--root <dir>] [--out <file>]
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
        poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
        poly journal export --db <store> --run <id>
@@ -86,7 +87,7 @@ export async function main(argv: string[]): Promise<number> {
   const json = args.includes('--json');
   const root = option(args, '--root');
   const out = option(args, '--out');
-  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (root === null || out === null) return usage();
@@ -134,6 +135,16 @@ export async function main(argv: string[]): Promise<number> {
     }
     if (positional[0] === 'journal' && positional.length >= 2) {
       return await journalCommand(positional[1], argv, (s) => process.stdout.write(s));
+    }
+    if (positional[0] === 'admit' && positional.length === 2 && args.includes('--witness')) {
+      // S139: a witness certificate, signed with the test key given by file (never one under version control).
+      const keyFile = option(args, '--key');
+      if (!keyFile) { process.stderr.write('poly: admit --witness needs --key <private key file>\n'); return EXIT_CODES.USAGE; }
+      const target = positional[1];
+      const base = root ?? (statSync(target).isDirectory() ? target : dirname(target));
+      const r = await admitWitness(target, { root: root ?? undefined, key: { id: 'witness', privateKeyPem: readFileSync(keyFile, 'utf8') }, out: out ?? join(base, '.poly', 'witness.certificate.json') });
+      process.stdout.write(`witness certificate for ${r.certificate.subject.project}: ${r.certificate.findings?.length ?? 0} finding(s), ${r.certificate.digest}\n  ${r.certificatePath}\n  the runtime loads it only with allowWitness, never in production (S139)\n`);
+      return EXIT_CODES.CLEAN;
     }
     if (positional[0] === 'admit' && positional.length === 2) {
       const r = await admit(positional[1]);

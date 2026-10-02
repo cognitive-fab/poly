@@ -27,12 +27,16 @@ export function projectRootOf(buildDir: string): string {
   return basename(abs) === 'build' && basename(dirname(abs)) === '.poly' ? dirname(dirname(abs)) : abs;
 }
 
-export function verifyBuild(buildDir: string, certificatePath: string, trust: Record<string, string>): VerifiedBuild {
+export function verifyBuild(buildDir: string, certificatePath: string, trust: Record<string, string>, opts: { allowWitness?: boolean } = {}): VerifiedBuild {
   const root = projectRootOf(buildDir);
   if (!existsSync(certificatePath)) throw new LoadError(`no certificate at ${certificatePath}: the runtime loads only admitted programs (PF8.1)`);
   let certificate: Certificate;
   try { certificate = JSON.parse(readFileSync(certificatePath, 'utf8')) as Certificate; } catch (e) { throw new LoadError(`the certificate at ${certificatePath} is not JSON: ${(e as Error).message}`); }
   if (!certificate?.subject?.machines || !Array.isArray(certificate.subject.machines)) throw new LoadError('the certificate names no machines');
+  // S139: a witness certificate admits a program with findings, for its exported tests only.
+  if (opts.allowWitness && process.env.NODE_ENV === 'production') throw new LoadError('allowWitness is refused in production: a witness certificate admits a program with findings (S139)');
+  if (certificate.purpose === 'witness' && !opts.allowWitness) throw new LoadError(`refused at load: ${certificatePath} is a witness certificate, for a program with ${certificate.findings?.length ?? 0} finding(s); only an exported witness test loads it, with allowWitness (S139)`);
+  if (certificate.purpose !== undefined && certificate.purpose !== 'witness') throw new LoadError(`refused at load: unknown certificate purpose ${JSON.stringify(certificate.purpose)}`);
 
   // Read once: these bytes are hashed, compared, and copied; nothing is read from the build again.
   const bytes = new Map<string, Buffer>();

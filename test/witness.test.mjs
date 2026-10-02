@@ -1,6 +1,7 @@
 // AC3 and PT12.4 (plan-m2 step 4): for every seeded defect, one per diagnostic kind with a witness, the
 // diagnostic has a witness, and the exported host test fails on the unfixed program and passes on the fixed
-// one. The test also refuses a stale build (S68), and the witness ids follow S69.
+// one. The witness ids follow S69. Since S139 the test admits the source as it is now with a witness certificate
+// and walks a machine's witness through the runtime API, so no stale build can make it pass.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -60,11 +61,9 @@ for (const [kind, code] of KINDS) {
     const failing = runTest(exported);
     assert.notEqual(failing.status, 0, `${kind}: the exported test passes on the unfixed program\n${failing.stdout}`);
     assert.match(failing.stdout, BECAUSE[code]);
+    // S139: a machine's witness through the runtime; a configuration through its certified artefacts (S141).
+    assert.match(failing.stdout, code === 'PL5401' || code === 'PL5402' ? /walked through the certified lowered artefacts of configuration/ : /walked through poly-runtime/);
     copyFileSync(join(SEEDED, kind, 'fixed.poly'), file);
-    // S68: before poly check rebuilds, the build is stale for the fixed source, and the test refuses it.
-    const stale = runTest(exported);
-    assert.notEqual(stale.status, 0);
-    assert.match(stale.stdout, /stale build/);
     const after = await checkFile(file, { root: dir });
     assert.deepEqual(all(after).filter((x) => x.code === code), [], render(after));
     const passing = runTest(exported);

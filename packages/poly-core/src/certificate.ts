@@ -24,6 +24,10 @@ export interface CertificateSignature { keyId: string; alg: 'ed25519'; sig: stri
 
 export interface Certificate {
   v: 1;
+  /** S139: a witness certificate, for an exported witness test only; the runtime refuses it unless allowWitness. */
+  purpose?: 'witness';
+  /** S139: the findings a witness certificate is issued for. */
+  findings?: { code: string; property: string | null; subject: string; witness: string }[];
   subject: { kind: 'poly.program'; project: string; machines: CertifiedMachine[] };
   /** Every certified file by its path relative to the project root, as `sha256:<hex>` of its bytes. */
   artefacts: Record<string, string>;

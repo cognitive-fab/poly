@@ -30,6 +30,8 @@ export interface LoadOptions {
   /** S135: SQLite only. ':memory:' when omitted. */
   store?: { sqlite: string };
   now?: () => number;
+  /** S139: load a witness certificate, for an exported witness test only; refused when NODE_ENV is production. */
+  allowWitness?: boolean;
   /** S118: the gate interface; allow-all when omitted. */
   gate?: { gate?: Gate; escalationTimeoutMs?: number };
   worker?: { leaseMs?: number; batch?: number; drift?: WorkerDrift };
@@ -174,6 +176,13 @@ export class PolyRuntime {
     const id = machineId ?? (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined);
     const m = this.verified.machines.find((x) => x.id === id);
     return m ? dataOutside(m.types, action, data) : null;
+  }
+
+  /** The decision whose ok completion an action is, on a machine, or null. */
+  decisionOf(machineId: string, action: string): string | null {
+    const m = this.verified.machines.find((x) => x.id === machineId);
+    for (const [kind, e] of Object.entries(m?.manifest?.effects ?? {})) if (e.decision && e.onSuccess?.action === action) return kind.slice('decision.'.length);
+    return null;
   }
 
   /** The actions a machine's decisions complete with, which only the worker dispatches (K10). */
@@ -355,7 +364,7 @@ export class PolyRuntime {
 }
 
 export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRuntime> {
-  const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust);
+  const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust, { allowWitness: opts.allowWitness });
   const dbPath = opts.store?.sqlite ?? ':memory:';
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true });
   const store = openLedgerStore(dbPath);
