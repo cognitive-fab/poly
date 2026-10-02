@@ -119,6 +119,9 @@ export const CODES: Record<string, CodeInfo> = {
   PL6403: { name: 'HANDLER_CHANGED', stage: 'runtime', severity: 'error' },
   // S142: rt.handle given a function that is not an export of a certified handler file the runtime loaded.
   PL6404: { name: 'HANDLER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },
+  // S134, S151: at run time, a capability call outside its declared bounds (a URL, a redirect hop, a secret name,
+  // a command or a table), refused before the host transport and audited.
+  PL6406: { name: 'CAPABILITY_REFUSED', stage: 'runtime', severity: 'error' },
   // PT8.4: Polyaxion refuses a policy at admission (not fully mediated, an example that fails, an unreachable discharge).
   PL6001: { name: 'NOT_FULLY_MEDIATED', stage: 'policy', severity: 'error' },
   // PT8.4, S161: polycheck reaches a forbidden region over the scope's effects with no gate crossed.
@@ -139,6 +142,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
   PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },
+  // PT6.5, S151: a target whose capability the effect's labels do not grant.
+  PL6303: { name: 'TARGET_NOT_GRANTED', stage: 'types', severity: 'error' },
   // S129: an accepted adjudication reachable without a preceding accepted ok completion of its decision.
   PL6203: { name: 'ADJUDICATION_WITHOUT_DECISION', stage: 'effects', severity: 'finding' },
   // S125: a fifo pair, which polyrun's parallel message worker cannot serve; refused at load.

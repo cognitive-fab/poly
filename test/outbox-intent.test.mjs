@@ -165,7 +165,7 @@ async function corpus(extra = {}) {
     const k = calls.get(job) ?? 0;
     calls.set(job, k + 1);
     const what = SCRIPT[job]?.handler?.[k] ?? 'ok';
-    assert.deepEqual(caps, {}, 'S134: no capabilities');
+    assert.deepEqual(Object.keys(caps), ['exec'], 'S134: the exec label grants exec, bound to no command since none is declared');
     if (what === 'fail') throw new Error('scripted failure');
     if (what === 'permanent') throw Object.assign(new Error('card declined'), { permanent: true });
     if (what === 'hang') return new Promise((resolve) => hung.push(() => resolve(`${job}|late`)));

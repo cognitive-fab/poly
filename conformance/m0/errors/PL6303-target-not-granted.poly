@@ -1,0 +1,13 @@
+// expect: PL6303 (a target the effect's labels do not grant: secrets need read:private, PT6.5)
+module errors
+
+machine M {
+  state { n : 0..1 = 0 }
+  action Go()
+  on Go { emit call(1) }
+  effect call(n: 0..1) {
+    labels { egress:external }
+    targets { egress: "https://api.example/v1/", secrets: ["KEY"] }
+    class none
+  }
+}

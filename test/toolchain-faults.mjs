@@ -29,6 +29,8 @@ export const FAULT_SOURCES = {
   'compose-invariant': ['conformance/m1/children.poly'],
   'liveness-goal': ['examples/evidence/outbox-union.poly'],
   'outcome-entry': ['conformance/m4/router.poly'],
+  // S151: the targets the runtime binds a handler's capabilities to.
+  'widen-target': ['conformance/m5/capabilities.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

@@ -13,7 +13,7 @@ export interface LowerOptions {
   fault?: Fault;
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target';
 
 export interface Lowered {
   machine: string;
@@ -258,6 +258,12 @@ function breakArtefact(fault: Fault, files: Lowered['files'], contract: Record<s
     const entry = Object.values(man.effects).find((e) => e.outcome);
     if (entry) { entry.outcome = { decision: `${entry.outcome!.decision}Broken` }; files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
   }
+  // S151: a capability bound wider than the source declares (the first egress prefix cut back to its origin).
+  if (fault === 'widen-target' && files['effects.manifest.json']) {
+    const man = JSON.parse(files['effects.manifest.json']) as { effects: Record<string, { targets?: Record<string, string[]> }> };
+    const entry = Object.values(man.effects).find((e) => e.targets?.egress?.length);
+    if (entry) { entry.targets!.egress[0] = new URL(entry.targets!.egress[0]).origin + '/'; files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
+  }
   if (fault === 'path-invariant') rewrite('effect-invariants.mjs', /<= (\d+)/, (m) => `<= ${Number(m.slice(3)) + 1}`);
   if (fault === 'compose-invariant') rewrite('invariants.compose.mjs', /pred: \(joint\) => /, () => 'pred: (joint) => !');
   if (fault === 'liveness-goal') rewrite('liveness.mjs', /goal: \(s\) => /, () => 'goal: (s) => !');
@@ -321,7 +327,7 @@ function emitsAny(body: A.Stmt[]): boolean {
 /** PT6.1, S137: the retry of an effect with no retry clause, polyrun's own default written out. */
 export const DEFAULT_RETRY = { maxAttempts: 5, baseMs: 500, timeoutMs: 30_000 } as const;
 
-/** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels and class. */
+/** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels, targets (S151) and class. */
 function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Record<string, unknown> } {
   // Kinds are the author's strings, so the manifest is built from entries: an assignment to a key such
   // as "__proto__" would set a prototype instead of adding the kind.
@@ -335,6 +341,8 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx): { effects: Recor
       if (it.kind === 'EffOutcome') entry[hooks[it.outcome]] = outcomeEntry(it, cx);
       if (it.kind === 'EffRetry') entry.retry = { maxAttempts: it.attempts, baseMs: durationMs(it.base), timeoutMs: durationMs(it.timeout) };
       if (it.kind === 'EffLabels') entry.labels = it.labels;
+      // PT6.5, S151: the runtime binds the handler's capabilities to these; polyrun ignores the field.
+      if (it.kind === 'EffTargets') entry.targets = Object.fromEntries(it.targets.map((t) => [t.key, t.values]));
     }
     // S137: an effect with no retry clause declares polyrun's default bound, so every manifest entry has its maxAttempts (S120).
     if (!entry.retry) entry.retry = { ...DEFAULT_RETRY };

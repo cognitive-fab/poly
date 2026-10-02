@@ -94,6 +94,9 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, retry ? { maxAttempts: retry.attempts, baseMs: durationMs(retry.base), timeoutMs: durationMs(retry.timeout) } : { maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }); // PT6.1, S137
         const labels = e.items.find((x): x is A.EffectItem & { kind: 'EffLabels' } => x.kind === 'EffLabels');
         differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, labels ? labels.labels : null);
+        // S151: the capability bounds, read back exactly: a wider prefix in the manifest is a wider capability at run time.
+        const targets = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
+        differ(`effects.manifest.json ${kind}.targets`, entry.targets ?? null, targets ? Object.fromEntries(targets.targets.map((t) => [t.key, t.values])) : null);
         differ(`effects.manifest.json ${kind}.class`, entry.class, M.effects.get(e.name)!.cls);
       }
       // PD1.7: a decision, tried once within its timeout, class none; a timeout is its failure.

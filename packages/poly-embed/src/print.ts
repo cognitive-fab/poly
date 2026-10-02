@@ -147,6 +147,8 @@ class Printer {
       case 'EffLabels': return `${this.use('labels')}([${x.labels.map(q).join(', ')}])`;
       case 'EffClass': return `${this.use('cls')}(${q(x.value)})`;
       case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
+      // PT6.5, S151: one entry per key, in source order.
+      case 'EffTargets': return `${this.use('targets')}([${x.targets.map((t) => `[${q(t.key)}, [${t.values.map(q).join(', ')}]]`).join(', ')}])`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
       case 'EffOutcome': {
         const args = x.args.some((a) => readsName(a.value)) ? `(${this.p}) => (${this.args(x.args)})` : this.args(x.args);

@@ -70,6 +70,8 @@ export declare function effect(name: string, params: { [param: string]: Type }, 
 export declare function kind(kind: string): EffItem;
 export declare function labels(labels: string[]): EffItem;
 export declare function cls(value: 'none' | 'reversible' | 'compensable' | 'irreversible'): EffItem;
+/** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target. */
+export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: string[]][]): EffItem;
 export declare function retry(attempts: number, base: string, timeout: string): EffItem;
 export declare function ok(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
 export declare function failed(action: string, args: Args | ((scope: Scope) => Args)): EffItem;

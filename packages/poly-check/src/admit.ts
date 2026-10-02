@@ -28,9 +28,9 @@ export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
 export const MAX_ATTEMPTS = 10;
 
-/** The limits every M4 build states with its verdicts (S118, S134, S135). */
+/** The limits every build states with its verdicts (S118, S134, S135, S142). */
 export const M4_LIMITS = [
-  'handlers receive no capabilities; capabilities are not bound until M5 (S134)',
+  'capabilities are bound in-process to the declared targets; what stops a handler reaching around them is the lint, a discipline, until the opt-in sandbox (PT6.5, S134, S152)',
   'the store is SQLite only; Postgres is not built (S135)',
   'installed packages the handlers import are not hashed; the certificate records the lockfile\'s digest, and hashing them is M5\'s (S142)',
 ];

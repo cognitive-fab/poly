@@ -7,6 +7,7 @@
 //   const r = await rt.dispatch(order.id, 'Place', {}, { actionId: 'req-7781' })
 //
 // What M4's runtime does not do is stated in the certificate's `limits` and printed with it (S118, S134, S135).
+import { capabilitiesFor, type Transports } from './capabilities.js';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
@@ -43,6 +44,11 @@ export interface LoadOptions {
   worker?: { leaseMs?: number; batch?: number; drift?: WorkerDrift };
   /** S123: the head signer, and how often heads are signed and anchors published, off the step path. */
   ledger?: LedgerSigner & { headMs?: number; anchorMs?: number };
+  /**
+   * S134, S151: the host functions handlers' capabilities are built over. poly-runtime imports no network module;
+   * each capability checks a call against its effect's declared targets before calling the transport.
+   */
+  transports?: Transports;
 }
 
 export type Handler = EffectHandler;
@@ -80,7 +86,7 @@ export class PolyRuntime {
   /** PT9: the policy gate, when the build has policies. */
   readonly policyGate: PolicyGate | null;
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
     this.certified = opts.certified ?? new Map();
     this.certifiedFunctions = new Set([...this.certified.values()].flatMap((ns) => Object.values(ns).filter((v) => typeof v === 'function')));
@@ -97,6 +103,9 @@ export class PolyRuntime {
         const record = decl?.decision ? this.records.get(row.intent_id) : undefined;
         if (record) this.store.pending.set(`${row.instance_id}\u0000${row.intent_id}:done`, { before: [{ kind: 'decision', body: record }] });
       },
+      capabilities: (row, decl) => capabilitiesFor(decl ?? {}, opts.transports ?? {}, async (reason) => {
+        await this.store.insertAudit({ at: this.now(), instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule: 'PL6406', reason });
+      }),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
     });
@@ -627,5 +636,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
       throw new LoadError(`refused at load: the policy gate did not open: ${(e as Error).message}`);
     }
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate });
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports });
 }

@@ -384,12 +384,13 @@ class Reader {
   }
 
   private effItem(node: ts.Expression): A.EffectItem {
-    const c = this.call(node, 'kind', 'labels', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'kind', 'labels', 'targets', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.EffectItem;
     switch (c.name) {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'labels': return mk({ kind: 'EffLabels', labels: this.arr(this.argsOf(c, 1, 1)[0]).map((l) => this.str(l)) });
       case 'cls': return mk({ kind: 'EffClass', value: this.str(this.argsOf(c, 1, 1)[0]) });
+      case 'targets': return mk({ kind: 'EffTargets', targets: this.arr(this.argsOf(c, 1, 1)[0]).map((p) => { const [k, v] = this.arr(p); return { key: this.str(k), values: this.arr(v).map((s) => this.str(s)) }; }) });
       case 'retry': {
         const [n, base, timeout] = this.argsOf(c, 3, 3);
         return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });

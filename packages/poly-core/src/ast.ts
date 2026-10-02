@@ -306,7 +306,11 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffLabels'; labels: string[] })
   | (NodeBase & { kind: 'EffClass'; value: string })
   | (NodeBase & { kind: 'EffRetry'; attempts: number; base: string; timeout: string })
+  | EffTargets
   | EffOutcomeItem;
+
+/** PT6.5, S151: `targets { egress: "<prefix>" | [ … ], secrets: [ … ], exec: [ … ], store: [ … ] }`, in source order. */
+export type EffTargets = NodeBase & { kind: 'EffTargets'; targets: { key: string; values: string[] }[] };
 
 /** `ok -> A(args)`, or `ok(r) -> A(p: r.x)`, which binds the handler's result (PD1.2b, PD1.2g, S79). */
 export type EffOutcomeItem = NodeBase & { kind: 'EffOutcome'; outcome: 'ok' | 'failed' | 'exhausted'; action: string; args: NamedArg[]; bind?: string };

@@ -49,9 +49,9 @@ export type SettleResult = 'ok' | 'failed' | { result: 'ok' | 'failed'; record?:
 /** S118: the default gate allows every proposal and every settle. */
 export const ALLOW_ALL: Gate = { propose: () => ({ decision: 'allow' }), settle: () => 'ok' };
 
-export type EffectHandler = (payload: any, caps: Readonly<Record<string, never>>, ctx: { idempotencyKey: string; instanceId: string; seq: number; attempt: number }) => unknown;
+export type EffectHandler = (payload: any, caps: Readonly<Record<string, any>>, ctx: { idempotencyKey: string; instanceId: string; seq: number; attempt: number }) => unknown;
 
-/** S134: handlers receive no capabilities until M5. */
+/** A worker given no capability builder passes this: no capability at all. */
 const NO_CAPABILITIES: Readonly<Record<string, never>> = Object.freeze({});
 
 /** Deliberately drifting workers, for the runtime CI's PL2401 test only (test/runtime-drift.test.mjs). */
@@ -79,6 +79,8 @@ export interface WorkerOptions {
    * `reads` of the allow are compared with each instance's current `seq`.
    */
   isStale?: (row: OutboxRow, reads: Record<string, number>) => boolean | Promise<boolean>;
+  /** S134, S151: the capabilities a handler receives for one call, from its manifest entry's labels and targets. */
+  capabilities?: (row: OutboxRow, decl: any) => Readonly<Record<string, unknown>>;
   /** PT15: called with each intent the gate allowed, after its transaction commits. Observation only. */
   onAllowed?: (row: OutboxRow, proposal: Proposal) => void;
 }
@@ -475,7 +477,7 @@ export class EffectWorker {
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`effect '${row.kind}' timed out after ${timeoutMs}ms`)), timeoutMs); timer.unref?.(); });
     try {
-      return await Promise.race([Promise.resolve(handler(row.payload, NO_CAPABILITIES, { idempotencyKey: row.intent_id, instanceId: row.instance_id, seq: row.seq, attempt })), timeout]);
+      return await Promise.race([Promise.resolve(handler(row.payload, this.opts.capabilities?.(row, decl) ?? NO_CAPABILITIES, { idempotencyKey: row.intent_id, instanceId: row.instance_id, seq: row.seq, attempt })), timeout]);
     } finally { clearTimeout(timer); }
   }
 

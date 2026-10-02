@@ -756,9 +756,27 @@ class Parser {
         const timeout = this.duration();
         this.expect('}');
         items.push(this.effItem(is, { kind: 'EffRetry', attempts, base, timeout }));
+      } else if (w === 'targets') {
+        // PT6.5, S151: each key names a capability; its value is one string or a list of strings.
+        this.expect('{');
+        const targets: { key: string; values: string[] }[] = [];
+        while (!this.atPunct('}')) {
+          const key = this.ident('a target kind');
+          this.expect(':');
+          const values: string[] = [];
+          if (this.atPunct('[')) {
+            this.next();
+            while (!this.atPunct(']')) { values.push(this.str('a target')); if (!this.atPunct(']')) this.expect(','); }
+            this.next();
+          } else values.push(this.str('a target'));
+          targets.push({ key, values });
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+        items.push(this.effItem(is, { kind: 'EffTargets', targets }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
         items.push(this.outcome(is, w));
-      } else this.fail('expected kind, labels, class, retry, ok, failed or exhausted', is);
+      } else this.fail('expected kind, labels, targets, class, retry, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);

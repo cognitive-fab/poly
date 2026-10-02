@@ -1,0 +1,58 @@
+// S134, S151, PT6.5: an order whose effects declare targets next to their labels. The charge may reach the PSP's
+// charges path and read one secret; the note may write one table; the ping is labelled read:store and has no
+// egress label, so its handler gets no egress capability.
+module caps
+
+enum Status { Open, Charging, Done }
+
+machine Order {
+  state {
+    status : Status = Open
+    noted  : bool   = false
+    pinged : bool   = false
+  }
+  terminal status == Done
+
+  action Charge()
+  action Note()
+  action Ping()
+  action Finish()
+
+  on Charge {
+    require status == Open else reject "not-open"
+    status' = Charging
+    emit charge(1)
+  }
+  on Note {
+    require !noted else reject "noted"
+    noted' = true
+    emit note(1)
+  }
+  on Ping {
+    require !pinged else reject "pinged"
+    pinged' = true
+    emit ping(1)
+  }
+  on Finish {
+    require status == Charging else reject "not-charging"
+    status' = Done
+  }
+
+  effect charge(n: 0..1) {
+    kind "payment.charge"
+    labels { egress:external, read:private }
+    targets { egress: "https://api.psp.example/v1/charges", secrets: ["PSP_KEY"] }
+    class irreversible
+  }
+  effect note(n: 0..1) {
+    kind "orders.note"
+    labels { write:store }
+    targets { store: ["notes"] }
+    class reversible
+  }
+  effect ping(n: 0..1) {
+    kind "orders.ping"
+    labels { read:store }
+    class none
+  }
+}

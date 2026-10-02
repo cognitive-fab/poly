@@ -704,6 +704,7 @@ class Checker {
     }
     const seen = new Set<string>();
     let labelled = false;
+    const targets: (A.EffectItem & { kind: 'EffTargets' })[] = [];
     for (const it of e.items) {
       const key = it.kind === 'EffOutcome' ? it.outcome : it.kind.slice(3).toLowerCase();
       if (seen.has(key)) this.err('PL1002', it, `effect ${e.name} states ${key} twice`);
@@ -715,6 +716,9 @@ class Checker {
           break;
         case 'EffClass':
           if (!CLASSES.has(it.value)) this.err('PL1001', it, `${it.value} is not an effect class: none, reversible, compensable or irreversible`);
+          break;
+        case 'EffTargets':
+          targets.push(it);
           break;
         case 'EffRetry':
           if (it.attempts < 1) this.err('PL1201', it, 'retry needs at least one attempt');
@@ -728,6 +732,8 @@ class Checker {
       }
     }
     if (!labelled) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
+    const labels = new Set(e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])));
+    for (const t of targets) this.targets(e, t, labels);
     // polyrun reads timer, cancelTimer, spawnChild and signalChild before its manifest, and PT7a adds sendTo (review finding L3).
     const kind = effectKind(e);
     if (KERNEL_KINDS.has(kind)) this.err('PL1201', e, `effect ${e.name} has kind "${kind}", which is the kernel's own intent kind; choose another (PT6.1)`);
@@ -758,6 +764,29 @@ class Checker {
   }
 
   /** `ok -> A(p: v)`: a completion is an ordinary action (PS4.4) whose data the manifest carries as constants (PT6.1). */
+  /**
+   * PT6.5, S151: each target names a capability one of the effect's labels grants (PL6303). An egress target is an
+   * absolute http or https prefix with no user, query or fragment, since the runtime matches the normalised URL's
+   * origin and path against it; a secret name, a command and a table are non-empty strings.
+   */
+  private targets(e: A.EffectDecl, t: A.EffTargets, labels: Set<string>): void {
+    const keys = new Set<string>();
+    for (const { key, values } of t.targets) {
+      if (keys.has(key)) { this.err('PL1002', t, `effect ${e.name} states the ${key} targets twice`); continue; }
+      keys.add(key);
+      const grants = GRANTS[key];
+      if (!grants) { this.err('PL1001', t, `${key} is not a kind of target: egress, secrets, exec or store (PT6.5)`); continue; }
+      if (!grants.some((l) => labels.has(l))) this.err('PL6303', t, `effect ${e.name} declares ${key} targets, and none of its labels grants them: ${grants.join(' or ')} (PT6.5)`);
+      for (const v of values) {
+        if (!v.length) { this.err('PL1201', t, `an empty ${key} target`); continue; }
+        if (key !== 'egress') continue;
+        let u: URL | null = null;
+        try { u = new URL(v); } catch { u = null; }
+        if (!u || !/^https?:$/.test(u.protocol) || u.username || u.password || u.search || u.hash || v.includes('?') || v.includes('#')) this.err('PL1201', t, `${JSON.stringify(v)} is not an egress prefix: an absolute http or https URL with no user, query or fragment (S151)`);
+      }
+    }
+  }
+
   private completion(it: A.EffOutcomeItem, handlers: Set<string>, bound: ((path: string[]) => Ty | null) | null = null): void {
     const act = this.actions.get(it.action);
     if (!act) { this.err('PL1001', it, `${it.outcome} -> ${it.action}: no action ${it.action}`); return; }
@@ -2333,6 +2362,9 @@ function spawnedKeys(e: A.Expr): string[] {
 const KERNEL_KINDS = new Set(['timer', 'cancelTimer', 'spawnChild', 'signalChild', 'sendTo', 'createInstance']);
 
 // PT6.2: the closed Polyaxion vocabulary.
+/** PT6.5: the labels that grant each kind of target's capability. */
+const GRANTS: Record<string, string[]> = { egress: ['egress:external', 'egress:public'], secrets: ['read:private'], exec: ['exec'], store: ['read:store', 'write:store'] };
+
 const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
 const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
 
