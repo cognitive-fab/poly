@@ -8,7 +8,7 @@ Each command returns `{ ok: true }` when it takes effect, and `{ ok: false, reas
 
 - `electionTimeout()`: a follower or a candidate hears nothing for too long and starts an election: it becomes a candidate in the next term (the term goes up by 1). Refused for the leader, and refused in term 3.
 - `electionWon()`: a candidate won its election and becomes the leader, in the same term. Refused otherwise.
-- `newerTermSeen(term)`: the node sees a message from a term strictly newer than its own (1 to 3): whatever its role, it becomes a follower in that term. Refused when the term is not newer.
+- `newerTermSeen(term)`: the node sees a message from a term strictly newer than its own (1 to 3): whatever its role, it becomes a follower in that term. Refused when the term is outside 1 to 3 or not newer.
 - `quorumLost()`: the leader lost contact with the majority and steps down: it becomes a follower in the same term. Refused otherwise.
 - `shutdown()`: the node is **shut down**. Its term does not change.
 

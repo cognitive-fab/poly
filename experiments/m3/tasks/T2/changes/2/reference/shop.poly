@@ -54,7 +54,7 @@ machine Order {
   }
   terminal status is rejected | cancelled | expired
 
-  action Place(qty: 1..2)
+  action Place(qty: int check { 1, 2 } strict)
   action Cancel()
   action Expire()
   action Reserved()

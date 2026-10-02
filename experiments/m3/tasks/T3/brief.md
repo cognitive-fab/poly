@@ -6,7 +6,7 @@ A payment service authorises card payments, captures them, and refunds them. Pay
 
 Each command returns `{ ok: true }` when it takes effect, and `{ ok: false, reason }` when it is refused. A refused command changes nothing. Any command on a payment id that was never authorised is refused.
 
-- `authorize(payment, amount)`: creates the payment for `amount` (1 or 2 units) as **authorizing**, and sends the provider one authorisation request: the effect `card.authorize` with data `{ amount }`. Refused if a payment with that id exists.
+- `authorize(payment, amount)`: creates the payment for `amount` (1 or 2 units) as **authorizing**, and sends the provider one authorisation request: the effect `card.authorize` with data `{ amount }`. Refused if `amount` is not 1 or 2, or if a payment with that id exists.
 - `timedOut(payment)`: the provider did not answer in time. An authorizing payment sends the provider a new authorisation request, another `card.authorize` effect, unless 3 requests were already sent: then it becomes **failed**. Refused for a payment that is not authorizing. The earlier requests stay pending: the provider may still answer them.
 - `capture(payment, amount)`: takes `amount` (1 or 2 units) of an authorized payment, at most the amount authorised. The payment becomes **captured**. Refused otherwise.
 - `void(payment)`: an authorized payment that was not captured becomes **voided**, and the hold on the card is released. Refused otherwise.

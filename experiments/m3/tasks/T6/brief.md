@@ -6,7 +6,7 @@ A job queue runs jobs on workers. Jobs are named by the caller with a string id.
 
 Each command returns `{ ok: true }` when it takes effect, and `{ ok: false, reason }` when it is refused. A refused command changes nothing. A command on a job id that was never submitted is refused.
 
-- `submit(job, maxTries)`: creates the job, **queued**, allowed `maxTries` tries (1 to 3). Refused if a job with that id exists.
+- `submit(job, maxTries)`: creates the job, **queued**, allowed `maxTries` tries (1 to 3). Refused if `maxTries` is outside 1 to 3, or if a job with that id exists.
 - `claim(job)`: a worker takes a queued job: it becomes **running**, and this counts as one try. Refused otherwise.
 - `succeed(job)`: the worker finished a running job: it becomes **succeeded**. If the job was **cancelling**, the work was done before the worker could stop, and the job becomes **succeeded** too.
 - `fail(job)`: the worker's try failed. A running job with tries left becomes **queued** again; a running job with no tries left becomes **failed**. A cancelling job becomes **cancelled**.
