@@ -8,6 +8,7 @@
 // does not have is a spec issue, raised before it is used (M1-6), so an
 // unknown field is refused here rather than silently ignored.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { createPublicKey } from 'node:crypto';
 import { join, relative, sep } from 'node:path';
 
 export interface Manifest {
@@ -87,12 +88,25 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
 
 /** PT12.5, S150: the keyrings a manifest names, each public key read (PEM, or `file:PATH` relative to the project). */
 export function keyringsOf(dir: string, manifest: Manifest): { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] } {
+  // Review A3: the text must hold a public key and nothing private. It is parsed, and the SPKI export is what is
+  // certified, so no other text in the file reaches the certificate.
   const read = (h: { name: string; keyId: string; publicKey: string }) => {
     const pem = h.publicKey.startsWith('file:') ? readFileSync(join(dir, h.publicKey.slice(5)), 'utf8') : h.publicKey;
+    if (/PRIVATE KEY/.test(pem)) throw new ManifestError(`poly.json: the key of ${h.keyId} holds a private key; a keyring holds public keys only (PT12.5, S126)`);
     if (!/-----BEGIN PUBLIC KEY-----/.test(pem)) throw new ManifestError(`poly.json: the public key of ${h.keyId} is not a PEM public key (PT12.5)`);
-    return { name: h.name, keyId: h.keyId, publicKey: pem.trim() };
+    let spki: string;
+    try { spki = createPublicKey(pem).export({ type: 'spki', format: 'pem' }).toString().trim(); } catch (e) { throw new ManifestError(`poly.json: the public key of ${h.keyId} does not parse: ${(e as Error).message} (PT12.5)`); }
+    return { name: h.name, keyId: h.keyId, publicKey: spki };
   };
-  return { people: (manifest.people ?? []).map(read), agents: (manifest.agents ?? []).map(read) };
+  const rings = { people: (manifest.people ?? []).map(read), agents: (manifest.agents ?? []).map(read) };
+  // Review A4: one key is one holder. An agent's key listed again as a person's would sign as that person.
+  const seen = new Map<string, string>();
+  for (const h of [...rings.people, ...rings.agents]) {
+    const other = seen.get(h.publicKey);
+    if (other) throw new ManifestError(`poly.json: ${other} and ${h.keyId} are the same key; a key belongs to one holder in one ring (PT12.5)`);
+    seen.set(h.publicKey, h.keyId);
+  }
+  return rings;
 }
 
 /** A module pattern to a regular expression: `*` within one path segment, `**` across segments. */

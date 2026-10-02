@@ -177,3 +177,20 @@ test('PT9.2: an approval that arrives after the escalation timeout is refused, a
     assert.equal((await rt.worker.intentState(row)).intent, 'Denied');
   } finally { await rt.close(); }
 });
+
+// Review A3, A4: a keyring holds public keys only, and one key is one holder. A key pair, private key first, passed
+// the PEM test and was certified whole; an agent's key listed again under a person's id signed as that person.
+test('PT12.5: a private key in a keyring is refused, and one key listed in both rings is refused', async () => {
+  const { keyringsOf, ManifestError } = await import('@poly/core');
+  const { generateKeyPairSync } = await import('node:crypto');
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const priv = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  const pub = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const ring = (people, agents = []) => keyringsOf('.', { poly: '1', name: 'x', modules: [], people, agents });
+  assert.throws(() => ring([{ name: 'ops', keyId: 'k1', publicKey: priv + pub }]), (e) => e instanceof ManifestError && /private key/.test(e.message));
+  assert.throws(() => ring([{ name: 'ops', keyId: 'k1', publicKey: `${priv}\n# -----BEGIN PUBLIC KEY-----` }]), (e) => e instanceof ManifestError);
+  const ok = ring([{ name: 'ops', keyId: 'k1', publicKey: pub }]);
+  assert.match(ok.people[0].publicKey, /^-----BEGIN PUBLIC KEY-----/);
+  assert.ok(!/PRIVATE/.test(ok.people[0].publicKey));
+  assert.throws(() => ring([{ name: 'ops', keyId: 'k1', publicKey: pub }], [{ name: 'ci', keyId: 'k2', publicKey: pub }]), (e) => e instanceof ManifestError && /same key/.test(e.message));
+});
