@@ -1,0 +1,45 @@
+// S161's control: a program that can read untrusted content, read a secret and send data out.
+module tri
+
+enum Step { Idle, Fetching, Reading, Posting, Done }
+
+machine Agent {
+  state { step : Step = Idle }
+  terminal step in { Done }
+  action Fetch()
+  action Read()
+  action Post()
+  action Finish()
+  on Fetch {
+    require step == Idle else reject "busy"
+    step' = Fetching
+    emit fetch(1)
+  }
+  on Read {
+    require step == Fetching else reject "not-fetching"
+    step' = Reading
+    emit secret(1)
+  }
+  on Post {
+    require step == Reading else reject "not-reading"
+    step' = Posting
+    emit post(1)
+  }
+  on Finish {
+    require step == Posting else reject "not-posting"
+    step' = Done
+  }
+  effect fetch(n: 0..1) {
+    kind "web.fetch"
+    labels { read:web }
+  }
+  effect secret(n: 0..1) {
+    kind "vault.read"
+    labels { read:private }
+  }
+  effect post(n: 0..1) {
+    kind "http.post"
+    labels { egress:external }
+    class irreversible
+  }
+}

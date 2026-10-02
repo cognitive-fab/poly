@@ -61,7 +61,7 @@ test('PT8: the AC4 project checks CLEAN through every policy stage, and lowers o
     return;
   }
   assert.equal(s.verdict, 'CLEAN', JSON.stringify(s.stages));
-  assert.deepEqual(s.stages.map((x) => [x.stage, x.verdict]), [['policy-types', 'CLEAN'], ['policy-lower', 'CLEAN'], ['consistency', 'CLEAN'], ['policy-admission', 'CLEAN'], ['policy-tv', 'CLEAN'], ['never', 'CLEAN']]);
+  assert.deepEqual(s.stages.map((x) => [x.stage, x.verdict]), [['policy-types', 'CLEAN'], ['policy-lower', 'CLEAN'], ['consistency', 'CLEAN'], ['policy-admission', 'CLEAN'], ['policy-tv', 'CLEAN'], ['regions', 'CLEAN'], ['never', 'CLEAN']]);
 });
 
 test('PT8, S147: unknown names, wrong types and a machine read that can never be known are reported', async () => {

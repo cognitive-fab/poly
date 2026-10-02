@@ -121,6 +121,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6404: { name: 'HANDLER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },
   // PT8.4: Polyaxion refuses a policy at admission (not fully mediated, an example that fails, an unreachable discharge).
   PL6001: { name: 'NOT_FULLY_MEDIATED', stage: 'policy', severity: 'error' },
+  // PT8.4, S161: polycheck reaches a forbidden region over the scope's effects with no gate crossed.
+  PL7001: { name: 'REGION_WITNESS', stage: 'policy', severity: 'finding' },
   // PT8.5, PS8.6: a mandate no path discharges under the obligations together (the minimal subset is named).
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.

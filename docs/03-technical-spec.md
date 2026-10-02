@@ -697,6 +697,16 @@ Closed history predicates are lifted into counters and model-checked by Polyaxio
 
 Policy admission runs Polyaxion `compile` and `harden`. Machines with regions or gates must be `fullyMediated`. The coverage grade (`checked` or `runtime-only`) is copied into the certificate. polycheck then runs the regions against the effect labels of every admitted machine and the tool labels of the declared scope. Its result, `PROOF`, `WITNESS` or `INCONCLUSIVE`, maps to `CLEAN`, `FINDINGS` or `INCONCLUSIVE`.
 
+**Stage 5a as built (M5a, S161).** polycheck is a second optional peer, pinned like Polyaxion (`peers/polycheck/PROVENANCE.md`) and listed as not run where it is absent. For each trust scope it models the effects of the modules the scope governs: each effect kind is an action whose flags are its labels' by the table below, gated when a policy of the scope names that kind (`effect.kind == "k"` or `effect.kind in { … }`). polycheck's default regions (`lethal-trifecta`, `credential-egress`, `source-egress`) are checked over it. A region reached with no gate crossed is `PL7001 REGION_WITNESS`, a finding with the path. A region no effect of the program can provide is noted as unreachable, not left inconclusive: a program's effects are its whole capability surface, since its handlers are certified (PT6.5). The state-dependent cases stay with `never` statements (S149).
+
+| Effect label | polycheck flag |
+|---|---|
+| `read:web`, `read:store` | `untrusted` |
+| `read:private` | `sensitive` |
+| `read:repo` | `proprietary` |
+| `egress:external`, `egress:public` | `egress` |
+| any other | none |
+
 ### PT8.5 Obligation consistency
 
 After compilation, stage 5b checks that each mandate in scope is **dischargeable** under all obligations together: declared, promoted, recalled and native (PS8.6). This is Polyaxion's m2 condition, surfaced as a named stage with its own diagnostic.

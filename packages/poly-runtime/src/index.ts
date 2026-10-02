@@ -10,6 +10,6 @@ import { openLedgerStore } from './ledger-store.js';
 import { readerOf } from './journal.js';
 /** Opens a store for its ledger and journal (poly journal verify, export). */
 export const openJournal = (dbPath: string) => readerOf(openLedgerStore(dbPath));
-export { polyaxionPeer, loadPolyaxion, loadPolyaxionModule, pinDigest, PeerUnavailable, REPO_ROOT, type PeerStatus } from './peers.js';
+export { peer, polyaxionPeer, polycheckPeer, loadPolyaxion, loadPolyaxionModule, loadPolycheck, pinDigest, PeerUnavailable, REPO_ROOT, type PeerStatus } from './peers.js';
 export { PolicyGate, GateUnavailable, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 export { policyEngine, actionOf, decisionOfReject, type EngineDecision } from './policy-engine.js';

@@ -85,3 +85,18 @@ test('peers/polyaxion: the checkout matches every pin, and each pin is the file 
     assert.equal(pinDigest(execFileSync('git', ['-C', peer.dir, 'show', `${PEER.commit}:${file}`], { maxBuffer: 1 << 26 })), sha, file);
   }
 });
+
+// S161: polycheck, a second optional peer, pinned the same way.
+test('peers/polycheck: the checkout matches every pin, and each pin is the file at the commit', async () => {
+  const { polycheckPeer, pinDigest } = await import('@poly/runtime');
+  const text = readFileSync(join(ROOT, 'peers', 'polycheck', 'PROVENANCE.md'), 'utf8');
+  assert.match(text, /commit `678b120`/);
+  const rows = [...text.matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \|$/gm)].map((m) => ({ file: m[1], sha: m[2] }));
+  assert.deepEqual(rows.map((r) => r.file), ['src/check.mjs', 'data/regions.json', 'package.json', 'LICENSE']);
+  const p = polycheckPeer();
+  if (!p.ok) { assert.match(p.reason, /not run/); return; }
+  for (const { file, sha } of rows) {
+    assert.equal(pinDigest(readFileSync(join(p.dir, file))), sha, file);
+    assert.equal(pinDigest(execFileSync('git', ['-C', p.dir, 'show', `678b120:${file}`])), sha, file);
+  }
+});

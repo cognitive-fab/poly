@@ -16,7 +16,7 @@ import { checkPolicies, policyProgram, diag, type Diagnostic, type Module, type 
 import { lowerPolicyScope, type PolicyDoc } from '@poly/lower';
 import { policyFacts, checkNever, validatePolicy, proposalTable, evalPolicyExpr, initialSigma, type PolicyFacts } from '@poly/ref';
 
-export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'consistency' | 'policy-tv' | 'never';
+export type PolicyStage = 'policy-types' | 'policy-lower' | 'policy-admission' | 'consistency' | 'regions' | 'policy-tv' | 'never';
 
 export interface PolicyReport {
   scope: string;
@@ -33,6 +33,67 @@ export interface PolicyReport {
 }
 
 export const policySlug = (scope: string) => scope.replace(/[^A-Za-z0-9._-]/g, '_');
+
+/** PT8.4, S161: the fixed map from a program's effect labels to polycheck's flags (PT8.4's table). */
+export const REGION_FLAGS: Record<string, string> = {
+  'read:web': 'untrusted', 'read:store': 'untrusted', 'read:private': 'sensitive', 'read:repo': 'proprietary',
+  'egress:external': 'egress', 'egress:public': 'egress',
+};
+
+const scopeGoverns = (scope: string, module: string) => {
+  if (!scope.includes('*')) return scope === module;
+  const re = new RegExp('^' + scope.split('**').map((s) => s.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')).join('.*') + '$');
+  return re.test(module);
+};
+
+/** The effect kinds a scope's policies name, which polycheck counts as gated (S161). */
+function mentionedKinds(ps: Policy[]): Set<string> {
+  const out = new Set<string>();
+  const isKind = (e: any) => e?.kind === 'Member' && e.prop === 'kind' && e.object?.kind === 'Name' && e.object.name === 'effect';
+  const walk = (e: any): void => {
+    if (!e || typeof e !== 'object') return;
+    if (e.kind === 'Binary' && (e.op === '==' || e.op === '!=')) for (const [a, b] of [[e.left, e.right], [e.right, e.left]]) if (isKind(a) && b?.kind === 'String') out.add(b.value);
+    if (e.kind === 'In' && isKind(e.expr)) for (const x of e.set) if (x.kind === 'String') out.add(x.value);
+    for (const v of Object.values(e)) { if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') walk(v); }
+  };
+  for (const p of ps) for (const it of p.items) walk(it);
+  return out;
+}
+
+/**
+ * PT8.4, S161: polycheck over the scope: each effect of a governed module is an action with the flags its labels map
+ * to, gated when a policy of the scope names its kind. A region reached with no gate crossed is PL7001 with the
+ * path. A region no effect of the program can provide is unreachable: the program's effects are its whole
+ * capability surface (its handlers are certified, PT6.5), so that is noted, not left inconclusive.
+ */
+export function regionCheck(scope: string, ps: Policy[], program: Module[], modelCheck: (m: any) => any, regions: { name: string; kind: string; requires: string[] }[]): { findings: { region: string; message: string; trace: WitnessStep[] }[]; notes: string[] } {
+  const gated = mentionedKinds(ps);
+  const actions: any[] = [];
+  for (const m of program) {
+    if (!scopeGoverns(scope, m.name)) continue;
+    for (const d of m.decls) {
+      if (d.kind !== 'Machine') continue;
+      for (const it of d.items) {
+        if (it.kind !== 'EffectDecl') continue;
+        const kind = (it.items.find((x) => x.kind === 'EffKind') as { value: string } | undefined)?.value ?? it.name;
+        const flags = [...new Set(it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])).map((l) => REGION_FLAGS[l]).filter(Boolean))];
+        actions.push({ tool: kind, specifier: null, effects: flags, gateKind: gated.has(kind) ? 'ask' : null, source: `${m.name}.${d.name}`, tag: null });
+      }
+    }
+  }
+  const res = modelCheck({ actions, regions });
+  const findings: { region: string; message: string; trace: WitnessStep[] }[] = [];
+  const notes: string[] = [];
+  for (const x of res.results) {
+    const name = x.region.name;
+    if (x.status === 'BYPASS' || x.status === 'SHELL-EQUIVALENT' || x.status === 'INCONCLUSIVE') {
+      const trace: WitnessStep[] = (x.witness ?? []).map((s: any) => ({ pre: null, action: s.action.tool, data: { adds: s.added }, post: { held: s.held } }));
+      findings.push({ region: name, trace, message: `region ${name} (${x.region.requires.join(' + ')}) is reached with no gate crossed: ${trace.map((s) => s.action).join(' → ')}; a policy of scope ${scope} that names ${x.fix?.actions?.join(' or ') ?? 'one of these effects'} would gate it (PT8.4, S161)` });
+    } else if (x.status === 'VACUOUS') notes.push(`${name}: unreachable, no effect provides ${x.missingEffects.join(', ')}`);
+    else notes.push(`${name}: ${x.mediated ? 'every path crosses a gate' : 'unreachable'}`);
+  }
+  return { findings, notes };
+}
 
 /**
  * PT8.4: Polyaxion's exploration (its checks, harden, and the m2 discharge check) draws its actions from a policy's
@@ -109,7 +170,7 @@ export async function policyReports(module: Module, program: Module[], root: str
   const typed = checkPolicies(module, facts);
   const scopes = new Map<string, Policy[]>();
   for (const p of policies) { if (!scopes.has(p.scope)) scopes.set(p.scope, []); scopes.get(p.scope)!.push(p); }
-  const { polyaxionPeer, loadPolyaxion, loadPolyaxionModule, policyEngine } = await import('@poly/runtime');
+  const { polyaxionPeer, polycheckPeer, loadPolyaxion, loadPolyaxionModule, loadPolycheck, policyEngine } = await import('@poly/runtime');
   const refFacts = policyFacts(program);
   const out: PolicyReport[] = [];
   for (const [scope, ps] of scopes) {
@@ -124,7 +185,7 @@ export async function policyReports(module: Module, program: Module[], root: str
     const refused = mine.some((d) => d.severity === 'error');
     r.stages.push({ stage: 'policy-types', status: 'ran', engine: '@poly/core', verdict: refused ? 'REFUSED' : mine.length ? 'FINDINGS' : 'CLEAN' });
     if (refused) {
-      for (const s of ['policy-lower', 'policy-admission', 'consistency', 'policy-tv', 'never'] as PolicyStage[]) r.stages.push({ stage: s, status: 'not-run', engine: '', reason: 'the policies were refused at policy-types' });
+      for (const s of ['policy-lower', 'policy-admission', 'consistency', 'regions', 'policy-tv', 'never'] as PolicyStage[]) r.stages.push({ stage: s, status: 'not-run', engine: '', reason: 'the policies were refused at policy-types' });
       continue;
     }
     // policy-lower: one document per scope, written where admission certifies it.
@@ -163,6 +224,16 @@ export async function policyReports(module: Module, program: Module[], root: str
       }
       if (tv.capHit) r.diagnostics.push(diag('PL3901', { module: module.name, node: ps[0].id }, `translation validation of scope ${scope} stopped at its bound (${tv.pairs} state pairs)`));
       r.stages.push({ stage: 'policy-tv', status: 'ran', engine: `poly-ref, polyaxion@${peer.commit}`, verdict: tv.mismatch ? 'REFUSED' : tv.capHit ? 'INCONCLUSIVE' : 'CLEAN', note: `${tv.rows} proposals over ${tv.pairs} state pairs agree` });
+    }
+
+    // Stage 5a (PT8.4, S161): polycheck's default regions over the effects of the modules the scope governs.
+    const pc = polycheckPeer();
+    if (!pc.ok) r.stages.push({ stage: 'regions', status: 'not-run', engine: '', reason: pc.reason });
+    else {
+      const { modelCheck, regions } = await loadPolycheck();
+      const reg = regionCheck(scope, ps, program, modelCheck, regions);
+      for (const f of reg.findings) r.diagnostics.push({ ...diag('PL7001', { module: module.name, node: ps[0].id, line: ps[0].span?.line }, f.message), property: f.region, witness: { id: '', length: f.trace.length, trace: f.trace } });
+      r.stages.push({ stage: 'regions', status: 'ran', engine: `polycheck@${pc.commit}`, verdict: reg.findings.length ? 'FINDINGS' : 'CLEAN', note: reg.notes.join('; ') });
     }
 
     // never: poly-ref alone, over the decision table.
