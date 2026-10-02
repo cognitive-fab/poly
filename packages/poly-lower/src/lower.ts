@@ -126,7 +126,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const body = stmts(h.body, hcx, '      ', emitOpts);
     // PD5.1.2: the claims binder reads the label's claims, carried under $claims (S155).
     // Review A-F2: sam-pattern runs this acceptor even after the first one rejects, so the body is guarded by the row too.
-    if (h.by) body.unshift(`      if (!${claimsOkText}(proposal.$claims, ${JSON.stringify(claimed.get(a.name))})) return reject('claims-unverified');`, `      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims };`);
+    // The fault skip-claims drops the row here too: with the row in either place the step is still rejected.
+    if (h.by) body.unshift(...(opts.fault === 'skip-claims' ? [] : [`      if (!${claimsOkText}(proposal.$claims, ${JSON.stringify(claimed.get(a.name))})) return reject('claims-unverified');`]), `      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims };`);
     // S55: each map the handler writes entry by entry gathers its entries in an accumulator.
     for (const f of mapUpdated(h.body)) body.unshift(`      let __m_${f} = model[${JSON.stringify(f)}];`);
     const written = mayWrite(h.body, layout);
