@@ -57,7 +57,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   // S142: the handlers, hash first. Each certified file is read once; a missing or changed file, or a changed
   // lockfile, refuses the load. The verified bytes are copied beside the artefacts, and the runtime imports the copy.
   const h = certificate.poly?.handlers;
-  if (!h || typeof h.files !== 'object' || !Array.isArray(h.roots)) throw new LoadError('refused at load: PL6403 HANDLER_CHANGED: the certificate binds no handlers; it predates S142, so admit the program again');
+  if (!h || h.files === null || typeof h.files !== 'object' || Array.isArray(h.files) || !Array.isArray(h.roots)) throw new LoadError('refused at load: PL6403 HANDLER_CHANGED: the certificate binds no handlers; it predates S142, so admit the program again');
   const handlerBytes = new Map<string, Buffer>();
   const changed: string[] = [];
   for (const [p, want] of Object.entries(h.files)) {

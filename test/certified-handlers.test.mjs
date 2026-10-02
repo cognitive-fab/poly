@@ -102,3 +102,17 @@ test('S142: an installed package is not hashed in M4; the certificate records it
   assert.equal(h.lockfile.digest, sha256OfBytes(readFileSync(join(dir, h.lockfile.path))));
   assert.ok(r.certificate.poly.limits.some((l) => /installed packages/.test(l)));
 });
+
+// Polywatch on S142: a signed certificate whose handlers block is malformed is refused as PL6403, never a TypeError.
+test('polywatch: a certificate whose handler files are null is refused at load with PL6403', async () => {
+  const { certificateDigest, signDigest } = await import('@poly/core');
+  const dir = withClosure('null-files');
+  const r = await admit(dir);
+  const body = JSON.parse(readFileSync(r.certificatePath, 'utf8'));
+  body.poly.handlers.files = null;
+  delete body.digest; delete body.signatures;
+  const digest = certificateDigest(body);
+  const forged = { ...body, signatures: [signDigest(digest, key.id, readFileSync(key.file, 'utf8'))], digest };
+  writeFileSync(r.certificatePath, JSON.stringify(forged));
+  await assert.rejects(load(join(dir, '.poly', 'build'), opts(dir, r)), (e) => e instanceof LoadError && /PL6403/.test(e.message));
+});
