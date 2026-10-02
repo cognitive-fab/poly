@@ -54,9 +54,14 @@ export async function controlsOf(v, { o1Dir = join(M3, 'o1') } = {}) {
       const dir = await adapterDir(v, which);
       return spawnSync(process.execPath, ['--no-warnings', '--test', o1], { encoding: 'utf8', env: cleanEnv({ M3_IMPL: join(dir, 'host.gen.ts') }) }).status;
     };
-    const onRef = await runO1('reference');
-    const onMut = await runO1('mutant');
-    add(4, 'O1 passes on the reference and fails on the mutant', onRef === 0 && onMut !== 0 ? 'pass' : 'fail', `reference exit ${onRef}, mutant exit ${onMut}`);
+    // An adapter that does not build is a control not run, reported with its errors, never an uncaught exception.
+    try {
+      const onRef = await runO1('reference');
+      const onMut = await runO1('mutant');
+      add(4, 'O1 passes on the reference and fails on the mutant', onRef === 0 && onMut !== 0 ? 'pass' : 'fail', `reference exit ${onRef}, mutant exit ${onMut}`);
+    } catch (e) {
+      add(4, 'O1 passes on the reference and fails on the mutant', 'not-run', `the adapter did not build: ${e.message}`);
+    }
   }
   return { task: v.task, version: v.n, controls: out };
 }
