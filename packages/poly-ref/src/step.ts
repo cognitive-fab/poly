@@ -1,7 +1,7 @@
 // Handlers denote functions (PS2) and the transition relation (PS3).
 import type * as A from '@poly/core';
 import type { RMachine, RType } from './model.js';
-import { detachedAlone, inCheckDomain } from './model.js';
+import { detachedAlone, inCheckDomain, inType } from './model.js';
 import { evaluate, evaluateAt, EvalError, type Env, type Verdict } from './eval.js';
 
 const int = (v: Value): number => {
@@ -51,8 +51,9 @@ export function runHandler(M: RMachine, h: A.Handler, s: State, d: Record<string
   for (const g of M.guards) {
     if (evaluate(g.cond, guardEnv) === true) return { kind: 'reject', reason: g.reason };
   }
-  // In the handler a bare name is local, then parameter, then field; pre.f names the field (S19).
-  const env: Env = { M, state: s, data: d, locals: new Map(), pre: s, action: h.action, params: true, self };
+  // In the handler a bare name is local, then parameter, then field; pre.f names the field (S19). PD5.1.2: the claims
+  // binder of `by c: C` reads the label's claims.
+  const env: Env = { M, state: s, data: h.by ? { ...d, [h.by.name]: d.$claims ?? null } : d, locals: new Map(), pre: s, action: h.action, params: true, self };
   const w = new Map<string, Value>();
   const E: Intent[] = [];
   const r = block(h.body, env, w, E, M, s);
@@ -229,6 +230,7 @@ function staticType(e: A.Expr, env: Env): RType | undefined {
       const a = env.action ? M.actions.find((x) => x.name === env.action) : undefined;
       const p = env.params ? a?.params.find((x) => x.name === e.name) : undefined;
       if (p) return p.type;
+      if (env.params && a?.claims?.binder === e.name) return a.claims.type;
       return M.fields.find((f) => f.name === e.name)?.type;
     }
     case 'Member': {
@@ -281,6 +283,8 @@ export function transition(M: RMachine, s: State, action: string, d: Record<stri
   for (const p of a.params) {
     if (p.strict && !inCheckDomain(d[p.name], p, M)) return { verdict: { kind: 'rejected', reason: 'outside-check-domain' }, next: s, effects: [] };
   }
+  // PD5.1.2c, S101: claims missing, malformed or outside their domains, applied before the module like row 2.
+  if (a.claims && !inType(d.$claims ?? null, a.claims.type, M)) return { verdict: { kind: 'rejected', reason: 'claims-unverified' }, next: s, effects: [] };
   const h = M.handlers.get(action);
   if (!h) return { verdict: { kind: 'unhandled' }, next: s, effects: [] };
   const r = runHandler(M, h, s, d, self);

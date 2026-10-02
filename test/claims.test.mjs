@@ -74,3 +74,31 @@ test('PD5.1.2: the embedded surface carries claims and `by`, and prints back to 
   assert.deepEqual(back.diagnostics ?? [], []);
   assert.equal(strip(back.module), strip(m));
 });
+
+// PD5-A3 (S102, S113): poly-ref reproduces principal_symmetry.py. The reachable states of the refund example for
+// 2, 3 and 4 representatives are 7, 13 and 21; the default is the Principal positions plus one, 3, printed in the
+// instance line; a mutant without the self-approval require is a finding whose witness requests and approves with
+// one principal; one representative leaves no approval reachable, so the invariant is vacuous and nothing is clean.
+test('PD5-A3: principal representatives reproduce the evidence', async () => {
+  const { checkMachine } = await import('@poly/ref');
+  const m = parse(SRC).module;
+  assert.deepEqual([2, 3, 4].map((n) => checkMachine(m, 'Refund', { principals: n }).states), [7, 13, 21]);
+  const def = checkMachine(m, 'Refund');
+  assert.equal(def.instance.principals, 3);
+  assert.deepEqual(def.findings.map((f) => f.code), []);
+  const one = checkMachine(m, 'Refund', { principals: 1 });
+  assert.deepEqual(one.findings, []);
+  assert.deepEqual(one.vacuous.map((v) => v.property), ['not-self-approved']);
+  const mutant = parse(SRC.replace('    require caller.principal != requester else reject "self-approval"\n', '')).module;
+  const f = checkMachine(mutant, 'Refund').findings.find((x) => x.code === 'PL3001');
+  assert.ok(f);
+  const steps = f.witness.trace.map((s) => [s.action, s.data.$claims?.principal]);
+  assert.equal(steps.length, 2);
+  assert.deepEqual(steps.map(([a]) => a), ['Request', 'Approve']);
+  assert.equal(steps[0][1], steps[1][1]);
+  const { checkFile } = await import('@poly/check');
+  const { render } = await import('../packages/poly-check/dist/src/render.js');
+  const r = await checkFile(join(ROOT, 'conformance/m5/refund.poly'), { root: join(ROOT, '.poly', 'test-claims') });
+  assert.equal(r.verdict, 'CLEAN', render(r));
+  assert.match(render(r), /3 principal representatives/);
+});

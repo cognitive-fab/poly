@@ -15,11 +15,11 @@ import { checkMachine, ENGINE, type MachineReport } from './check.js';
 import { loadLoweredModule } from './load.js';
 import { pathTo, type Edge } from './explore.js';
 import { evaluate, type Verdict } from './eval.js';
-import { alpha, flatten, flattenData } from './alpha.js';
+import { alpha, alphaData, flatten, flattenData } from './alpha.js';
 import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
 import type { Intent } from './step.js';
-import { detachedAlone, type RMachine } from './model.js';
-import { isTerminal } from './step.js';
+import { dataDomain, detachedAlone, type RMachine } from './model.js';
+import { isTerminal, transition } from './step.js';
 import { readBack } from './artefacts.js';
 
 interface SamModule {
@@ -86,7 +86,7 @@ function stepModule(mod: SamModule, rt: RuntimeFacts, pre: Record<string, unknow
 
 const verdictText = (v: Verdict) => (v.kind === 'rejected' ? `rejected(${v.reason})` : v.kind);
 
-export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number } = {}): Promise<TvResult> {
+export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number; principals?: number } = {}): Promise<TvResult> {
   const report = checkMachine(module, machineName, opts);
   const { graph: g, model: M } = report;
   // Finding 5: sam-pattern resolves from poly's own install, wherever the build directory is.
@@ -161,6 +161,33 @@ export async function translationValidate(module: Module, machineName: string, b
       continue;
     }
     if (stable(gotE) !== stable(wantE)) mismatch(`${what}: the lowered effects are ${stable(gotE)}, R_M emits ${stable(wantE)}`, where);
+  }
+
+  // PS3.2's claims row (PD5.1.2c, S101): the exploration offers only claims in their domains, so the row is compared
+  // here, in every reachable state and for every action with claims, on claims that are missing, malformed, or have a
+  // value outside a field's domain. R_M rejects each with claims-unverified, unless row 1 rejects it first.
+  for (const a of M.actions.filter((x) => x.claims)) {
+    const sample = dataDomain(a, M)[0];
+    const good = flattenData(sample, a.name, M);
+    const fields = a.claims!.type.k === 'record' ? M.records.get(a.claims!.type.name)!.fields : [];
+    const bad: [string, Record<string, unknown>][] = [
+      ['missing', Object.fromEntries(Object.entries(good).filter(([k]) => k !== '$claims'))],
+      ['malformed', { ...good, $claims: 'not-claims' }],
+      ...fields.map((f): [string, Record<string, unknown>] => [`${f.name} outside its domain`, { ...good, $claims: { ...(good.$claims as object), [f.name]: f.type.k === 'principal' ? '' : '__outside__' } }]),
+      ['with an extra field', { ...good, $claims: { ...(good.$claims as object), extra: 1 } }],
+    ];
+    for (const [i, s] of g.states.entries()) {
+      const flatPre = flatten(s, M);
+      for (const [why, d] of bad) {
+        // Each of these is not a value of the claims type, so R_M sees no claims: $claims is null after rows 1 and 2.
+        const want = transition(M, s, a.name, { ...alphaData(good, a.name, M), $claims: null }).verdict;
+        const got = stepModule(mod, rt, flatPre, a.name, d);
+        const text = `${a.name} with claims ${why} from ${stateKey(s, M.fieldNames)}`;
+        if ('error' in got) { mismatch(`the lowered module threw on ${text}: ${got.error}; R_M gives ${verdictText(want)}`, pathTo(g, i)); continue; }
+        if (got.verdict.kind !== want.kind || (want.kind === 'rejected' && got.verdict.reason !== want.reason)) mismatch(`${text}: the lowered module gives ${verdictText(got.verdict)}, R_M gives ${verdictText(want)}`, pathTo(g, i));
+        transitions++;
+      }
+    }
   }
 
   // The runtime applies row 1 from contract.json (PS9.1a), and the module keeps its own guard for polygraph (S6),

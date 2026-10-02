@@ -41,10 +41,12 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
   const handled = M.actions.filter((a) => M.handlers.has(a.name));
   differ('contract.json actions', Object.keys(contract.actions), handled.map((a) => a.name));
   for (const a of handled) {
-    differ(`contract.json actions.${a.name}.dataFields`, Object.keys(contract.actions[a.name]?.dataFields ?? {}), a.params.map((p) => p.name));
-    if (!a.params.length) continue;
-    // D(a) per parameter (PS1.1): its check domain, or every value of its type, encoded as the runtime sees it.
-    const want = Object.fromEntries(a.params.map((p) => [p.name, (p.check ?? valuesOf(p.type, M)).map((v) => flatValue(v, p.type, M))]));
+    differ(`contract.json actions.${a.name}.dataFields`, Object.keys(contract.actions[a.name]?.dataFields ?? {}), [...a.params.map((p) => p.name), ...(a.claims ? ['$claims'] : [])]);
+    if (!a.params.length && !a.claims) continue;
+    // D(a) per parameter (PS1.1): its check domain, or every value of its type, encoded as the runtime sees it; and
+    // the claims over the principal representatives (PD5.1.3c, S155).
+    const want: Record<string, unknown[]> = Object.fromEntries(a.params.map((p) => [p.name, (p.check ?? valuesOf(p.type, M)).map((v) => flatValue(v, p.type, M))]));
+    if (a.claims) want.$claims = valuesOf(a.claims.type, M).map((v) => flatValue(v, a.claims!.type, M));
     differ(`contract.json dataDomain.${a.name}`, contract.dataDomain?.[a.name], want);
   }
 

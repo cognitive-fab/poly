@@ -34,6 +34,8 @@ export const ENGINE = 'poly-ref@0.0.0';
 export interface InstanceLine {
   fields: { name: string; domain: string }[];
   params: { name: string; domain: string }[];
+  /** PD5.1.3c: the principal representatives, when the machine has claims or Principal fields. */
+  principals?: number;
 }
 
 export interface MachineReport {
@@ -58,10 +60,12 @@ export interface MachineReport {
 
 export interface CheckOptions {
   maxStates?: number;
+  /** PD5.1.3c: the number of principal representatives, forced (a control); by default the rule's count. */
+  principals?: number;
 }
 
 export function checkMachine(module: Module, machineName: string, opts: CheckOptions = {}): MachineReport {
-  const M = buildMachine(module, machineName);
+  const M = buildMachine(module, machineName, { principals: opts.principals });
   const g = explore(machineSystem(M), opts.maxStates);
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, machine: M.name, ...(node ? { node } : {}) });
@@ -324,11 +328,17 @@ function domainText(check: unknown[] | null, t: RType, M: RMachine): string {
   return `{${check.map((v) => (typeof v === 'string' ? JSON.stringify(v) : String(v))).join(', ')}}`;
 }
 
+/** Whether the machine's labels or state hold a principal (PD5.1.3c), so its instance names the representatives. */
+function usesPrincipals(M: RMachine): boolean {
+  return M.actions.some((a) => a.claims) || JSON.stringify([...M.fields.map((f) => f.type), ...[...M.records.values()], ...[...M.unions.values()]]).includes('"principal"');
+}
+
 /** The checked instance a verdict holds for (PS4.3, PT12.3a). */
 export function instanceOf(M: RMachine): InstanceLine {
   return {
     fields: M.fields.filter((f) => f.check || f.type.k === 'int').map((f) => ({ name: f.name, domain: domainText(f.check, f.type, M) })),
     params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'record' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) }))),
+    ...(usesPrincipals(M) ? { principals: M.principals } : {}),
   };
 }
 

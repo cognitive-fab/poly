@@ -31,6 +31,8 @@ export const FAULT_SOURCES = {
   'outcome-entry': ['conformance/m4/router.poly'],
   // S151: the targets the runtime binds a handler's capabilities to.
   'widen-target': ['conformance/m5/capabilities.poly'],
+  // PD5.1.2c: PS3.2's claims row, which the runtime applies before the module.
+  'skip-claims': ['conformance/m5/refund.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

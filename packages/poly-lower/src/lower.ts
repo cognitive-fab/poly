@@ -13,7 +13,7 @@ export interface LowerOptions {
   fault?: Fault;
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims';
 
 export interface Lowered {
   machine: string;
@@ -83,8 +83,17 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const lowerable = actions.filter((a) => handlers.has(a.name));
   // PT3.4a: strict as declared, or by the flow of a parameter into an irreversible or compensable payload.
   const strict = lowerable.flatMap((a) => a.params.filter((p) => facts.strictParams.has(`${a.name}.${p.name}`)).map((p) => ({ a: a.name, p: p.name, values: paramValues(p, env, facts, a.name) })));
+  // PD5.1.2c, S101: each action with `by c: C`, and the domain of each claims field (a principal is a non-empty string).
+  const claimed = new Map<string, Record<string, unknown[] | 'principal'>>();
+  for (const a of lowerable) {
+    const by = handlers.get(a.name)?.by;
+    if (!by) continue;
+    const rec = env.records.get(by.type)!;
+    claimed.set(a.name, Object.fromEntries(rec.fields.map((f) => { const ty = tyOfTypeExpr(f.type, env); return [f.name, ty.k === 'principal' ? 'principal' : ty.k === 'int' ? Array.from({ length: ty.hi - ty.lo + 1 }, (_, k) => ty.lo + k) : ty.k === 'bool' ? [false, true] : env.unions.get((ty as { name: string }).name)!.ctors.map((c) => c.name)]; })));
+  }
+  const claimsOf = (action: string): Ty | null => { const by = handlers.get(action)?.by; return by ? { k: 'record', name: by.type } : null; };
   const acceptors: string[] = [];
-  if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length) {
+  if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length || claimed.size) {
     const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2. It runs for handled actions only: no other is an intent (S35).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
     if (terminal && opts.fault !== 'skip-terminal') lines.push(`      if (TERMINAL(model)) return reject('terminal');`);
     for (const s of strict) {
@@ -96,6 +105,11 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
           : `!${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])`;
       lines.push(`      if (action === ${JSON.stringify(s.a)} && ${test}) return reject('outside-check-domain');`);
     }
+    // PS3.2's claims row (S101): claims missing, malformed or outside their domains, after row 2 and before the guards.
+    for (const [name, spec] of claimed) {
+      if (opts.fault === 'skip-claims') continue;
+      lines.push(`      if (action === ${JSON.stringify(name)} && !((c, spec) => !!c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length === Object.keys(spec).length && Object.entries(spec).every(([f, d]) => d === 'principal' ? typeof c[f] === 'string' && c[f].length > 0 : d.includes(c[f])))(proposal.$claims, ${JSON.stringify(spec)})) return reject('claims-unverified');`);
+    }
     if (guards.length) {
       for (const g of guards) lines.push(`      if (${expr(g.cond, stateCx)}) return reject(${JSON.stringify(g.reason)});`);
     }
@@ -106,6 +120,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const h = handlers.get(a.name)!;
     const hcx: Cx = { ...base, mode: 'handler', stateVar: 'model', dataVar: 'proposal' };
     const body = stmts(h.body, hcx, '      ', emitOpts);
+    // PD5.1.2: the claims binder reads the label's claims, carried under $claims (S155).
+    if (h.by) body.unshift(`      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims ?? {} };`);
     // S55: each map the handler writes entry by entry gathers its entries in an accumulator.
     for (const f of mapUpdated(h.body)) body.unshift(`      let __m_${f} = model[${JSON.stringify(f)}];`);
     const written = mayWrite(h.body, layout);
@@ -119,8 +135,13 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
   const intentDecls = lowerable.map((a) => {
     // S58: an address is a string, and none is null.
-    const schema = Object.fromEntries(a.params.map((p) => [p.name, { type: jsType(tyOfTypeExpr(p.type, env), env), required: true, ...(p.type.kind === 'TRef' ? { nullable: true } : {}) }]));
-    return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(dataDomainOf(a, env, facts))} },`;
+    const schema: Record<string, unknown> = Object.fromEntries(a.params.map((p) => { const ty = tyOfTypeExpr(p.type, env); return [p.name, { type: jsType(ty, env), required: true, ...(p.type.kind === 'TRef' || ty.k === 'principal' ? { nullable: true } : {}) }]; }));
+    // PD5.1.2c, S155: the claims travel under the reserved key $claims; their absence is refused by the acceptor, not
+    // the schema, so it is the reserved rejection claims-unverified (PS3.2).
+    if (claimed.has(a.name)) schema.$claims = { type: ['object', 'string', 'number', 'boolean', 'array'], required: false, nullable: true };
+    const claimsTy = claimsOf(a.name);
+    const domain = claimsTy ? dataDomainOf(a, env, facts).flatMap((d) => valuesOfTy(claimsTy, env, facts.machine).map((c) => ({ ...d, $claims: c }))) : dataDomainOf(a, env, facts);
+    return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(domain)} },`;
   });
   const version = digest(module);
   const next = [
@@ -173,9 +194,10 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     machineVersion: version,
     stateKeys: layout.fields.flatMap((l) => l.flat.map((k) => ({ name: k, type: keyTypeText(l, k, env) }))),
     initState,
-    actions: Object.fromEntries(lowerable.map((a) => [a.name, { dataFields: Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type, env), env)])) }])),
+    // PD5.1.2c, S155: an action with claims has the field $claims, explored over the principal representatives.
+    actions: Object.fromEntries(lowerable.map((a) => [a.name, { dataFields: { ...Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type, env), env)])), ...(claimsOf(a.name) ? { $claims: typeText(claimsOf(a.name)!, env) } : {}) } }])),
     terminalStates,
-    dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length).map((a) => [a.name, Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env, facts, a.name)]))])),
+    dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length || claimsOf(a.name)).map((a) => [a.name, { ...Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env, facts, a.name)])), ...(claimsOf(a.name) ? { $claims: valuesOfTy(claimsOf(a.name)!, env, facts.machine) } : {}) }])),
     invariants: 'invariants.mjs',
   };
 
@@ -281,6 +303,8 @@ function effectsModule(m: A.Machine, lowerable: A.Action[], handlers: Map<string
     const h = handlers.get(a.name)!;
     if (!emitsAny(h.body)) continue;
     const body = stmts(h.body, cx, '    ', { effects: true, dropEffect });
+    // PD5.1.2: the claims binder, as in the acceptor (S155).
+    if (h.by) body.unshift(`    data = { ...data, ${JSON.stringify(h.by.name)}: data.$claims ?? {} };`);
     // Test-only fault reorder-effects: the step's intents come back in reverse order.
     const ret = fault === 'reorder-effects' ? '__E.reverse()' : '__E';
     entries.push(`  ${JSON.stringify(a.name)}: (pre, data) => {\n    const __E = [];\n${body.join('\n')}\n    return ${ret};\n  },`);
@@ -555,6 +579,12 @@ function holdsMap(t: A.TypeExpr, env: TypeEnv, seen: Set<string>): boolean {
 }
 
 function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
+  // PD5.1.3c: the principal representatives p1..pn, n the Principal positions of the state plus one, at least 2.
+  if (t.k === 'principal') {
+    if (!m) throw new Error('poly-lower: a principal domain needs its machine (PD5.1.3c)');
+    const n = Math.max(2, m.fields.reduce((k, f) => k + principalPositions(tyOfTypeExpr(f.type, env), env, new Set()), 0) + 1);
+    return Array.from({ length: n }, (_, i) => `p${i + 1}`);
+  }
   if (t.k === 'ref') {
     if (!m || t.machine === null) throw new Error('poly-lower: an address domain needs its machine (S57)');
     return refDomain(m, t.machine);
@@ -581,7 +611,7 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
     // S25: every combination of field values, as plain objects.
     let recs: Record<string, unknown>[] = [{}];
     for (const f of env.records.get(t.name)!.fields) {
-      const vs = valuesOfTy(tyOfTypeExpr(f.type, env), env);
+      const vs = valuesOfTy(tyOfTypeExpr(f.type, env), env, m);
       recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [f.name]: v })));
     }
     return recs;
@@ -607,6 +637,14 @@ function dataDomainOf(a: A.Action, env: TypeEnv, facts?: MachineFacts): Record<s
   return recs;
 }
 
+function principalPositions(t: Ty, env: TypeEnv, seen: Set<string>): number {
+  if (t.k === 'principal') return 1;
+  if (t.k === 'record' && !seen.has(t.name)) return env.records.get(t.name)!.fields.reduce((n, f) => n + principalPositions(tyOfTypeExpr(f.type, env), env, new Set([...seen, t.name])), 0);
+  if (t.k === 'union' && !seen.has(t.name)) return env.unions.get(t.name)!.ctors.reduce((n, c) => n + c.fields.reduce((k, f) => k + principalPositions(tyOfTypeExpr(f.type, env), env, new Set([...seen, t.name])), 0), 0);
+  if (t.k === 'map') return principalPositions(t.value, env, seen);
+  return 0;
+}
+
 function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[] {
   const t = facts.fieldTypes.get(f.name)!;
   // A union with payloads is flattened at the top of a field (PS9.1b): its flat value is the tag (review finding L2).
@@ -616,6 +654,7 @@ function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[]
 
 function jsType(t: Ty, env: TypeEnv): string {
   return t.k === 'bool' ? 'boolean' : t.k === 'int' || t.k === 'conf' ? 'number' : t.k === 'record' || isPayloadUnion(env, t) ? 'object' : 'string';
+  // A principal (PD5.1.2b) is a string, like an address.
 }
 
 function typeText(t: Ty, env: TypeEnv): string {
@@ -627,6 +666,7 @@ function typeText(t: Ty, env: TypeEnv): string {
     case 'record': return `{ ${env.records.get(t.name)!.fields.map((f) => `${f.name}: ${typeText(tyOfTypeExpr(f.type, env), env)}`).join(', ')} }`;
     case 'map': return t.array ? `array of ${typeText(t.value, env)}, indexed ${typeText(t.key, env)}` : `object of ${typeText(t.value, env)}, keyed ${typeText(t.key, env)}`;
     case 'ref': return `address of ${t.machine} | null`;
+    case 'principal': return 'principal | null';
     default: return t.k;
   }
 }

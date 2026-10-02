@@ -18,7 +18,9 @@ export type RType =
   /** An address of an instance of machine `machine` (PS1.6); `none` is null. */
   | { k: 'ref'; machine: string }
   /** `Conf` (PD1.3): a confidence in thousandths, 0..1000. */
-  | { k: 'conf' };
+  | { k: 'conf' }
+  /** `Principal` (PD5.1.2b): an opaque identity, a string at run time, or null for `none`. */
+  | { k: 'principal' };
 
 export interface RUnion {
   name: string;
@@ -53,6 +55,8 @@ export interface RDecision {
 export interface RAction {
   name: string;
   params: RParam[];
+  /** PD5.1.2: the claims the action requires (its handler's `by`): the binder and the claims type. */
+  claims: { binder: string; type: RType } | null;
 }
 
 /** An effect declaration (PT6.1): the kind its intents carry, its class, and its payload's parameters. */
@@ -166,9 +170,11 @@ export interface RMachine {
   rejectProperties: A.Property[];
   /** Liveness properties (PS5.5), checked under their fairness (PS6). */
   liveness: A.Liveness[];
+  /** PD5.1.3c: how many principal representatives the check offers. */
+  principals: number;
 }
 
-export function buildMachine(module: A.Module, machineName: string): RMachine {
+export function buildMachine(module: A.Module, machineName: string, opts: { principals?: number } = {}): RMachine {
   const unions = new Map<string, RUnion>();
   const ctors = new Map<string, string>();
   const decls = module.decls;
@@ -181,7 +187,11 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
       case 'TInt': return { k: 'int', lo: -Infinity, hi: Infinity };
       case 'TString': return { k: 'string' };
       case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
-      case 'TName': return recordNames.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
+      case 'TName':
+        if (recordNames.has(t.name)) return { k: 'record', name: t.name };
+        // PD5.1.2b: Principal is built in, unless the module declares a type of that name.
+        if (t.name === 'Principal' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Principal')) return { k: 'principal' };
+        return { k: 'union', name: t.name };
       case 'TMap': return { k: 'map', key: typeOf(t.key), value: typeOf(t.value) };
       case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
       case 'TConf': return { k: 'conf' };
@@ -294,8 +304,10 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
   for (const it of m.items) if (it.kind === 'Handler') spawns(it.body, it.action, []);
   for (const it of m.items) {
     if (it.kind === 'Action') {
+      const by = m.items.find((h): h is A.Handler => h.kind === 'Handler' && h.action === it.name)?.by;
       actions.push({
         name: it.name,
+        claims: by ? { binder: by.name, type: typeOf({ kind: 'TName', name: by.type } as A.TName) } : null,
         // PT3.4a: a check domain is strict when declared so, or when the parameter can flow into the payload of
         // an irreversible or compensable effect; `disclosed` written out keeps it disclosed.
         params: it.params.map((p) => ({
@@ -335,7 +347,17 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
     const keys = [...children.values()].filter((c) => c.onComplete === a.name).map((c) => c.key);
     for (const p of a.params) if (p.name === 'childKey' && p.type.k === 'string' && p.check === null && keys.length) p.check = keys;
   }
+  // PD5.1.3c, S102: the Principal positions of the state, plus one, and never fewer than 2.
+  const positions = (t: RType, seen: Set<string>): number => {
+    if (t.k === 'principal') return 1;
+    if (t.k === 'record' && !seen.has(t.name)) return (records.get(t.name)?.fields ?? []).reduce((n, f) => n + positions(f.type, new Set([...seen, t.name])), 0);
+    if (t.k === 'union' && !seen.has(t.name)) return (unions.get(t.name)?.ctors ?? []).reduce((n, c) => n + c.fields.reduce((k, f) => k + positions(f.type, new Set([...seen, t.name])), 0), 0);
+    if (t.k === 'map') return positions(t.value, seen);
+    return 0;
+  };
+  const principals = opts.principals ?? Math.max(2, fields.reduce((n, f) => n + positions(f.type, new Set()), 0) + 1);
   return {
+    principals,
     name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties, liveness,
   };
@@ -416,6 +438,8 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
       if (!Number.isFinite(t.lo) || !Number.isFinite(t.hi)) throw new Error('poly-ref: an unbounded int has no enumeration; it needs a check domain (PT3.2)');
       return Array.from({ length: t.hi - t.lo + 1 }, (_, k) => t.lo + k);
     case 'string': throw new Error('poly-ref: a string has no enumeration; it needs a check domain (PT3.2)');
+    // PD5.1.3: a principal ranges over the representatives p1..pn; none is never asserted, only stored.
+    case 'principal': return Array.from({ length: M.principals }, (_, i) => `p${i + 1}`);
     case 'ref': {
       // S57, PS1.6: alone, none and one address per Ref<M> field plus the most Ref<M> parameters of one action, and
       // self when M is the machine's own type. Addresses are only compared and passed on, so these realise every
@@ -488,6 +512,11 @@ export function dataDomain(a: RAction, M: RMachine): Record<string, Value>[] {
     const vs = p.check ?? valuesOf(p.type, M);
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
+  // PD5.1.2c, S155: the claims are part of the label, carried under the reserved key $claims; every value is offered.
+  if (a.claims) {
+    const cs = valuesOf(a.claims.type, M);
+    recs = recs.flatMap((r) => cs.map((c) => ({ ...r, $claims: c })));
+  }
   return recs;
 }
 
@@ -510,6 +539,7 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     case 'int': return typeof v === 'number' && Number.isInteger(v) && v >= t.lo && v <= t.hi;
     case 'string': return typeof v === 'string';
     case 'ref': return v === null || typeof v === 'string';
+    case 'principal': return v === null || (typeof v === 'string' && v.length > 0);
     case 'conf': return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1000;
     case 'record': {
       if (!isRecord(v)) return false;

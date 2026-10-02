@@ -42,7 +42,11 @@ export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
     case 'TInt': return { k: 'int', lo: -Infinity, hi: Infinity };
     case 'TString': return { k: 'string' };
     case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
-    case 'TName': return env?.records.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
+    case 'TName':
+      if (env?.records.has(t.name)) return { k: 'record', name: t.name };
+      // PD5.1.2b: Principal is built in, unless the module declares a type of that name.
+      if (t.name === 'Principal' && !env?.unions.has(t.name)) return { k: 'principal' };
+      return { k: 'union', name: t.name };
     case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
     case 'TMap': return { k: 'map', key: tyOfTypeExpr(t.key, env), value: tyOfTypeExpr(t.value, env), array: t.key.kind === 'TRange' };
     case 'TConf': return { k: 'conf' };
@@ -71,6 +75,8 @@ function scalarShape(t: Ty, env: TypeEnv): ShapeSpec | null {
     case 'record': return { type: 'object' };
     // S58: an address is the target instance's id; none is null.
     case 'ref': return { type: 'string', nullable: true };
+    // PD5.1.2b: a principal is its identity's string; none is null.
+    case 'principal': return { type: 'string', nullable: true };
     default: return null;
   }
 }

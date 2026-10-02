@@ -731,7 +731,8 @@ export function refOnlyProperties(module: Module, machine: string): { property: 
 function instanceRecord(ref: MachineReport, engines: Record<string, string>, refOnly: { property: string; actions: string[] }[] = []): InstanceRecord {
   const bounds = [...new Set(ref.findings.filter((f) => f.code === 'PL3901').map((f) => f.field ?? 'exploration cap'))];
   return {
-    domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`)],
+    // PD5.1.3c: the principal representatives the verdict holds for, when the machine has any.
+    domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`), ...(ref.instance.principals ? [`${ref.instance.principals} principal representatives (PD5.1.3c)`] : [])],
     states: ref.states,
     transitions: ref.transitions,
     bounds,
