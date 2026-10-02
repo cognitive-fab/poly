@@ -71,6 +71,8 @@ The definitions are mathematical and short. They are written so that a reference
 
   `(s ⊕ w)(f) = w(f)` if `f ∈ dom(w)`, and `s(f)` otherwise. This is the **frame**: every field not written is unchanged.
 
+  **Data outside the type (S140).** The relation has steps only for `d ∈ T(a)`. An input outside its action's type is no label of `R_M`: the runtime refuses it before any step, with an error and an audit row and no journal row, as it refuses an outside completion (K9, K10). Replay never meets such a row.
+
   **Reserved reasons (S101, S127).** The reasons the runtime uses are reserved: `terminal` and `outside-check-domain` (the two rows above), `poisoned` (an instance the kernel has poisoned), `archived` (K4) and `claims-unverified` (PD5, reserved now). A handler's `reject` may not use them (`PL1207 RESERVED_REJECT_REASON`), so a rejection's reason always says whether the runtime or the module refused the step.
 - **PS3.3** **Rejected and unhandled steps are steps.** They are transitions whose next state equals their current state, and they carry their verdict in the label, not in the state. They are journaled, they appear in traces, and properties over labels see them (PS5). Properties over states cannot distinguish them from not taking a step at all. This is the answer to the question "is a rejected step a step?": it is a labelled stuttering step.
 - **PS3.4** An accepted step may leave the state unchanged (for example `Pay` in PT4.5, which only emits). It is still accepted, and its label carries its effects.

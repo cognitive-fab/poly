@@ -10,7 +10,7 @@
 // A row whose machine or manifest is unavailable is parked and takes no transition. Dead is terminal.
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import type { OutboxRow, Runtime } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import type { LedgerStore } from './ledger-store.js';
+import { InputOutsideType, type LedgerStore } from './ledger-store.js';
 import { machineOfBound } from './model.js';
 
 export interface Proposal {
@@ -54,6 +54,8 @@ export interface WorkerOptions {
   escalationTimeoutMs?: number;
   leaseMs?: number;
   batch?: number;
+  /** S140: why a completion's data is outside its action's type, or null. */
+  outsideType?: (instanceId: string, action: string, data: unknown) => string | null;
   /** Built-in handlers by kind, which run without a host handler (the outcome of an adjudication, PD2.4). */
   builtins?: Record<string, EffectHandler>;
   /** Called with a completion's action id and the handler's result just before the completion is dispatched. */
@@ -143,6 +145,8 @@ export class EffectWorker {
 
   private async dispatchCompletion(row: OutboxRow, hook: any, suffix: string, data: Record<string, unknown>): Promise<void> {
     if (!hook || !hook.action) return;
+    const why = this.opts.outsideType?.(row.instance_id, hook.action, data);
+    if (why) throw new InputOutsideType(`${hook.action} on ${row.instance_id}: ${why} (PS3.2, S140)`, row.instance_id, hook.action);
     await this.kernel.dispatch(row.instance_id, hook.action, data, `${row.intent_id}${suffix}`);
   }
 
@@ -309,6 +313,12 @@ export class EffectWorker {
           this.opts.beforeCompletion?.(row, decl, result);
           try {
             await this.dispatchCompletion(row, decl.onSuccess, ':done', mapCompletion(decl.onSuccess ?? {}, { result }, result && typeof result === 'object' ? result as Record<string, unknown> : {}));
+          } catch (e) {
+            if (!(e instanceof InputOutsideType)) throw e;
+            // S140: a result whose completion is outside its type takes no step; the settle failed, and the intent retries or dies.
+            await this.store.insertAudit({ at: now, instanceId: row.instance_id, action: decl.onSuccess.action, actionId: `${row.intent_id}:done`, rule: 'S140', reason: e.message });
+            await this.settleFailed(row, decl, n, 'the completion is outside its type (S140)', now);
+            return;
           } finally { this.opts.afterCompletion?.(row); }
           await this.settled(row);
           return;

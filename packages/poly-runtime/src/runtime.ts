@@ -12,7 +12,8 @@ import { randomUUID } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import type { Certificate } from '@poly/core';
-import { LedgerStore, openLedgerStore } from './ledger-store.js';
+import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
+import { dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
 import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
@@ -62,6 +63,7 @@ export class PolyRuntime {
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
     this.worker = new EffectWorker(kernel, store, this.handlers, {
       gate: opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
+      outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
       // PD2.2, K10: the decision event is written with the completion step, in its transaction.
       beforeCompletion: (row, decl) => {
         const record = decl?.decision ? this.records.get(row.intent_id) : undefined;
@@ -137,12 +139,18 @@ export class PolyRuntime {
 
   /**
    * PT15. polyrun refuses an outside dispatch of a live child's completion (K9); this refuses one of a decision's
-   * completion (K10, S130), since only the worker delivers it with its decision event. Both come before any step,
-   * with an audit row and no journal row.
+   * completion (K10, S130), since only the worker delivers it with its decision event, and an input outside its
+   * action's type (S140). Each comes before any step, with an audit row and no journal row.
    */
   async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string } = {}): Promise<DispatchResult> {
     const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
     const inst = await this.store.getInstance(instanceId);
+    const why = this.outsideType(instanceId, action, data, inst?.machine_id);
+    if (why) {
+      const reason = `${action} on ${instanceId}: ${why}, so it is no step (PS3.2, S140)`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S140', reason });
+      throw new RefusedDispatch(`${reason}: the input is outside its type`, 'S140');
+    }
     if (inst && this.decisionCompletions(inst.machine_id).has(action)) {
       const reason = `K10: '${action}' completes a decision of '${instanceId}', and only the outbox worker delivers it, with its decision event`;
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'K10', reason });
@@ -151,10 +159,21 @@ export class PolyRuntime {
     try {
       return await this.kernel.dispatch(instanceId, action, data, actionId);
     } catch (e) {
+      if (e instanceof InputOutsideType) {
+        await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S140', reason: e.message });
+        throw new RefusedDispatch(e.message, 'S140');
+      }
       if (!(e instanceof OutcomeWithoutDecision)) throw e;
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'PD2.4', reason: e.message });
       throw new RefusedDispatch(e.message, 'PD2.4');
     }
+  }
+
+  /** S140: why data is outside an action's type on an instance's machine, or null (a runtime model's actions take none). */
+  outsideType(instanceId: string, action: string, data: unknown, machineId?: string): string | null {
+    const id = machineId ?? (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined);
+    const m = this.verified.machines.find((x) => x.id === id);
+    return m ? dataOutside(m.types, action, data) : null;
   }
 
   /** The actions a machine's decisions complete with, which only the worker dispatches (K10). */

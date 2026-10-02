@@ -5,6 +5,7 @@
 // digests. A manifest entry without its retry bound is refused too (S120).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { actionTypes, type TypeNode } from './types.js';
 import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, type Certificate, type CertificateProblem } from '@poly/core';
 
 export class LoadError extends Error {
@@ -17,7 +18,7 @@ export interface VerifiedBuild {
   root: string;
   /** Where the verified copy lives: one directory per machine, as in the build. */
   runDir: string;
-  machines: { id: string; module: string; contract?: string; effects?: { mapper: string; manifest: string }; manifest: { effects?: Record<string, any> } | null }[];
+  machines: { id: string; module: string; contract?: string; effects?: { mapper: string; manifest: string }; manifest: { effects?: Record<string, any> } | null; types: Map<string, [string, TypeNode][]> }[];
 }
 
 /** `load('./.poly/build', …)` (PT15) names the build; the certificate's paths are relative to the project above it. */
@@ -61,8 +62,12 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     for (const [kind, entry] of Object.entries(manifest?.effects ?? {})) {
       if (!Number.isInteger(entry?.retry?.maxAttempts)) throw new LoadError(`${m.id} ${kind}: the manifest declares no retry.maxAttempts; the outbox machine is checked at a declared bound (S120)`);
     }
+    // S140: each action's type, as the certified contract states it; a type the runtime cannot read refuses the load.
+    let types: Map<string, [string, TypeNode][]>;
+    try { types = actionTypes(JSON.parse((bytes.get(`${m.dir}/contract.json`) ?? Buffer.from('{}')).toString('utf8'))); } catch (e) { throw new LoadError(`${m.id}: the contract states a type the runtime cannot read: ${(e as Error).message}`); }
     machines.push({
       id: m.id,
+      types,
       module: join(dir, 'next.cjs'),
       ...(bytes.has(`${m.dir}/contract.json`) ? { contract: join(dir, 'contract.json') } : {}),
       ...(bytes.has(`${m.dir}/effects.cjs`) && manifestBytes ? { effects: { mapper: join(dir, 'effects.cjs'), manifest: join(dir, 'effects.manifest.json') } } : {}),

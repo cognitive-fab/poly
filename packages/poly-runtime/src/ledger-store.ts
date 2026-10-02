@@ -31,6 +31,17 @@ CREATE TABLE IF NOT EXISTS poly_content (
 );
 `;
 
+/**
+ * S140: PS3.2 defines steps only for data in the action's type. The SAM strict profile refuses data outside it
+ * with a SamSchemaError, which polyrun journals as a rejected step; here, before that row is written, the whole
+ * dispatch is refused instead, so no step, no journal row and no ledger event exist for it.
+ */
+export class InputOutsideType extends Error {
+  constructor(message: string, readonly instanceId: string, readonly action: string) { super(message); this.name = 'InputOutsideType'; }
+}
+
+const SCHEMA_REJECTION = "Invalid proposal for intent '";
+
 /** Events the runtime adds around a step, keyed by the step's action id (the decision record, PD2.2). */
 export interface StepEvents {
   before?: { kind: string; body: unknown }[];
@@ -79,6 +90,9 @@ export class LedgerStore extends Store {
 
   /** Every journal row, with its `step` event (and the events the worker set for it) in the same transaction. */
   override async insertJournal(row: InsertJournal): Promise<unknown> {
+    if (row.stepKind === 'rejected' && typeof row.rejectReason === 'string' && row.rejectReason.startsWith(`${SCHEMA_REJECTION}${row.action}'`)) {
+      throw new InputOutsideType(`${row.action} on ${row.instanceId}: the input is outside its type, so it is no step (PS3.2, S140): ${row.rejectReason}`, row.instanceId, row.action);
+    }
     const result = await super.insertJournal(row);
     const extra = this.pending.get(`${row.instanceId}\u0000${row.actionId}`);
     // A decision event keeps its question in the content store and carries its digest as `request` (PD2.2a).
