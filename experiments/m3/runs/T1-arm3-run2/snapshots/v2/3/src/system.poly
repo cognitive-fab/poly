@@ -1,0 +1,115 @@
+module shop
+
+// `fresh` is an order whose id is reserved by the host but not yet created.
+enum Status { fresh, draft, placed, paid, shipped, cancelling, cancelled, declined, failed }
+
+machine Order {
+  state {
+    status  : Status = fresh
+    items   : 0..3   = 0
+    charges : 0..2   = 0
+    refunds : 0..1   = 0
+  }
+  terminal status in { shipped, cancelled, failed }
+
+  action Create()
+  action AddItem()
+  action RemoveItem()
+  action Place()
+  action Ship()
+  action Cancel()
+  action RetryPayment()
+  action ChargeOk()
+  action ChargeFailed()
+
+  on Create {
+    require status == fresh else reject "exists"
+    status' = draft
+  }
+  on AddItem {
+    require status == draft else reject "not-draft"
+    require items < 3 else reject "full"
+    items' = items + 1
+  }
+  on RemoveItem {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    items' = items - 1
+  }
+  on Place {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    require charges == 0 else reject "charged"
+    status' = placed
+    charges' = charges + 1
+    emit charge(items)
+  }
+  on Ship {
+    require status == paid else reject "not-paid"
+    status' = shipped
+  }
+  on Cancel {
+    match status {
+      draft => status' = cancelled
+      paid  => {
+        require refunds == 0 else reject "refunded"
+        status' = cancelled
+        refunds' = refunds + 1
+        emit refund(items)
+      }
+      placed   => status' = cancelling
+      cancelling => reject "cancelling"
+      declined => reject "payment-declined"
+      _        => reject "closed"
+    }
+  }
+  on RetryPayment {
+    require status == declined else reject "not-declined"
+    require charges == 1 else reject "retried"
+    status' = placed
+    charges' = charges + 1
+    emit charge(items)
+  }
+  // The provider's answer to a charge. For a cancelling order it decides whether money must be returned.
+  on ChargeOk {
+    match status {
+      placed     => status' = paid
+      cancelling => {
+        status' = cancelled
+        refunds' = refunds + 1
+        emit refund(items)
+      }
+      _          => reject "not-charging"
+    }
+  }
+  on ChargeFailed {
+    match status {
+      placed     => if charges == 1 { status' = declined }
+                    else            { status' = failed }
+      cancelling => status' = cancelled
+      _          => reject "not-charging"
+    }
+  }
+
+  effect charge(amount: int) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+    ok -> ChargeOk()
+    failed -> ChargeFailed()
+  }
+  effect refund(amount: int) {
+    kind "payment.refund"
+    labels { egress:external }
+    class irreversible
+  }
+
+  invariant charged-when-placed: status != fresh && status != draft implies charges >= 1 || status == cancelled
+  invariant declined-once: status == declined implies charges == 1
+  invariant failed-after-retry: status == failed implies charges == 2
+  invariant shipped-was-paid: status == shipped implies charges >= 1 && refunds == 0
+  invariant refund-after-pay: refunds == 1 implies status == cancelled && charges >= 1
+  path property charge-at-most-twice: count("payment.charge") <= 2
+  path property refund-at-most-once: count("payment.refund") <= 1
+  path property refund-after-charge: before("payment.charge", "payment.refund")
+}

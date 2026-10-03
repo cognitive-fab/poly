@@ -1,0 +1,19 @@
+{
+  "$schema": "./host.map.schema.json",
+  "module": "lease",
+  "instances": {
+    "lease": { "machine": "Lease" },
+    "c0": { "machine": "Client", "init": { "lease": "lease" } },
+    "c1": { "machine": "Client", "init": { "lease": "lease" } }
+  },
+  "methods": {
+    "acquire": { "instance": "$arg:client", "machine": "Client", "action": "Acquire" },
+    "release": { "instance": "$arg:client", "machine": "Client", "action": "Release" },
+    "write": { "instance": "$arg:client", "machine": "Client", "action": "Write" },
+    "expire": { "instance": "lease", "action": "Expire" }
+  },
+  "queries": {
+    "lease": { "instance": "lease", "fields": { "holder": "holder", "token": "token", "writes": "writes" } },
+    "client": { "instance": "$arg:client", "machine": "Client", "fields": { "status": "status", "token": "token", "writing": "writing" } }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "module": "election",
+  "instances": {
+    "n0": { "machine": "Node", "init": { "me": "n0", "peerA": "n1", "peerB": "n2" } },
+    "n1": { "machine": "Node", "init": { "me": "n1", "peerA": "n0", "peerB": "n2" } },
+    "n2": { "machine": "Node", "init": { "me": "n2", "peerA": "n0", "peerB": "n1" } }
+  },
+  "methods": {
+    "timeout": { "instance": "$arg:node", "machine": "Node", "action": "Timeout" },
+    "giveUp": { "instance": "$arg:node", "machine": "Node", "action": "GiveUp" },
+    "crash": { "instance": "$arg:node", "machine": "Node", "action": "Crash" },
+    "recover": { "instance": "$arg:node", "machine": "Node", "action": "Recover" }
+  },
+  "queries": {
+    "node": {
+      "instance": "$arg:node",
+      "machine": "Node",
+      "fields": { "role": "role", "term": "term", "votedFor": "votedFor", "leader": "knownLeader" }
+    }
+  }
+}

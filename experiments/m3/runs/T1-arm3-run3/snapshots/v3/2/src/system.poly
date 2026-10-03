@@ -1,0 +1,132 @@
+module shop
+
+// Status members are lowercase because the host's query returns them verbatim.
+// `unborn` is the instant before Create; the host never shows it.
+enum Status { unborn, draft, placed, paid, shipped, cancelling, cancelled, declined, failed }
+
+machine Order {
+  state {
+    status  : Status = unborn
+    items   : 0..3   = 0
+    charges : 0..2   = 0
+    refunds : 0..1   = 0
+    held    : bool   = false
+  }
+  terminal status in { shipped, cancelled, failed }
+
+  action Create()
+  action AddItem()
+  action RemoveItem()
+  action Place()
+  action Ship()
+  action Cancel()
+  action RetryPayment()
+  action Hold()
+  action Release()
+  action ChargeOk()
+  action ChargeFailed()
+  action RefundAnswered()
+
+  on Create {
+    require status == unborn else reject "exists"
+    status' = draft
+  }
+  on AddItem {
+    require status == draft else reject "not-draft"
+    require items < 3       else reject "order-full"
+    items' = items + 1
+  }
+  on RemoveItem {
+    require status == draft else reject "not-draft"
+    require items > 0       else reject "empty-order"
+    items' = items - 1
+  }
+  on Place {
+    require status == draft else reject "not-draft"
+    require items > 0       else reject "empty-order"
+    require charges == 0    else reject "already-charged"
+    status' = placed
+    charges' = charges + 1
+    emit charge(amount: items)
+  }
+  on Ship {
+    require status == paid else reject "not-paid"
+    status' = shipped
+  }
+  on Cancel {
+    require status in { draft, placed, paid } else reject "not-cancellable"
+    if status == paid {
+      require refunds == 0 else reject "already-refunded"
+      status' = cancelled
+      refunds' = refunds + 1
+      emit refund(amount: items)
+    } else {
+      // A placed order waits for the charge's answer to know whether to refund.
+      if status == placed {
+        status' = cancelling
+      } else {
+        status' = cancelled
+      }
+    }
+  }
+  on RetryPayment {
+    require status == declined else reject "not-declined"
+    require charges < 2        else reject "retry-used"
+    status' = placed
+    charges' = charges + 1
+    emit charge(amount: items)
+  }
+  // A charge that goes through after the order was cancelled is refunded.
+  on ChargeOk {
+    require status in { placed, cancelling } else reject "not-placed"
+    require refunds == 0                     else reject "already-refunded"
+    if status == cancelling {
+      status' = cancelled
+      refunds' = refunds + 1
+      emit refund(amount: items)
+    } else {
+      status' = paid
+    }
+  }
+  // The first failed charge may be retried once; the second is final.
+  on ChargeFailed {
+    require status in { placed, cancelling } else reject "not-placed"
+    if status == cancelling {
+      status' = cancelled
+    } else {
+      if charges < 2 {
+        status' = declined
+      } else {
+        status' = failed
+      }
+    }
+  }
+  // A refund needs no answer: whatever the provider says, the order is unchanged.
+  on RefundAnswered {
+    reject "refund-needs-no-answer"
+  }
+
+  effect charge(amount: int) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+    ok -> ChargeOk()
+    failed -> ChargeFailed()
+  }
+  effect refund(amount: int) {
+    kind "payment.refund"
+    labels { egress:external }
+    class irreversible
+    ok -> RefundAnswered()
+    failed -> RefundAnswered()
+  }
+
+  invariant charged-at-most-twice: charges <= 2
+  invariant refund-after-charge: refunds <= charges
+  invariant declined-after-first-charge: status == declined implies charges == 1
+  invariant shipped-was-charged: status == shipped implies charges >= 1
+  invariant refunded-only-when-cancelled: refunds == 1 implies status == cancelled
+  path property charge-at-most-twice: count("payment.charge") <= 2
+  path property refund-at-most-once: count("payment.refund") <= 1
+  path property refund-after-charge-path: before("payment.charge", "payment.refund")
+}

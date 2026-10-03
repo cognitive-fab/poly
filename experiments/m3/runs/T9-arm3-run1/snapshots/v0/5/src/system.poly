@@ -1,0 +1,69 @@
+// Electing a leader among three nodes: one election round, term 1.
+module election
+
+type Role = follower | candidate | leader
+
+// A service: a node answers RequestVote for the life of the round, and the round may end with no leader.
+service machine Node {
+  state {
+    role     : Role      = follower
+    term     : 0..1      = 0
+    votedFor : Ref<Node> = none
+    votes    : 0..3      = 0
+    me       : Ref<Node> = none     // this node's own address, set by the host
+    p1       : Ref<Node> = none     // the other two nodes
+    p2       : Ref<Node> = none
+  }
+  action Timeout()
+  action RequestVote(from: Ref<Node>, term: 1..1)
+  action VoteReply(term: 1..1, granted: bool)
+
+  on Timeout {
+    require role is follower && pre.term == 0 else reject "not-a-follower-in-term-0"
+    role'     = candidate
+    term'     = 1
+    votedFor' = me
+    votes'    = 1
+    send p1 <- RequestVote(from: self, term: 1)
+    send p2 <- RequestVote(from: self, term: 1)
+  }
+
+  on RequestVote(from, term) {
+    if pre.term == 0 {
+      term'     = 1
+      votedFor' = from
+      send from <- VoteReply(term: 1, granted: true)
+    } else {
+      if role is follower && (votedFor == none || votedFor == from) {
+        votedFor' = from
+        send from <- VoteReply(term: 1, granted: true)
+      } else {
+        send from <- VoteReply(term: 1, granted: false)
+      }
+    }
+  }
+
+  on VoteReply(term, granted) {
+    require role is candidate && term == pre.term && granted else reject "ignored"
+    votes' = votes + 1
+    if votes + 1 >= 2 { role' = leader }
+  }
+
+  invariant leader-has-majority: role is leader implies votes >= 2
+  invariant term-1-once-moved: role != follower implies term == 1
+  step property votes-once: pre.votedFor != none implies post.votedFor == pre.votedFor
+}
+
+configuration three-nodes {
+  a : Node { me: a, p1: b, p2: c }
+  b : Node { me: b, p1: a, p2: c }
+  c : Node { me: c, p1: a, p2: b }
+  inputs { a.Timeout, b.Timeout, c.Timeout }
+  bounds { transit 6 }
+  invariant one-leader:
+    !(a.role is leader && b.role is leader) && !(a.role is leader && c.role is leader) && !(b.role is leader && c.role is leader)
+  invariant leader-holds-majority:
+    (a.role is leader implies (b.votedFor == a || c.votedFor == a))
+    && (b.role is leader implies (a.votedFor == b || c.votedFor == b))
+    && (c.role is leader implies (a.votedFor == c || b.votedFor == c))
+}

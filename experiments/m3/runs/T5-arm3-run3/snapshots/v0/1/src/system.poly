@@ -1,0 +1,164 @@
+// T5, workflow run status: one Run per run id, with three tasks and a status derived from them.
+module workflow
+
+// fresh: the instance exists but the run is not started yet (never visible: a refused start leaves no run).
+enum Status { fresh, queued, running, evicted, completed, failed, cancelled }
+
+machine Run {
+  state {
+    status : Status = fresh
+    t0     : Status = queued
+    t1     : Status = queued
+    t2     : Status = queued
+  }
+  terminal status in { completed, failed, cancelled }
+
+  action Start()
+  action TaskStarted(task: int check 0..2 strict)
+  action TaskCompleted(task: int check 0..2 strict)
+  action TaskFailed(task: int check 0..2 strict)
+  action TaskEvicted(task: int check 0..2 strict)
+  action TaskRequeued(task: int check 0..2 strict)
+  action Cancel()
+
+  on Start {
+    require status == fresh else reject "run-exists"
+    status' = queued
+  }
+
+  // queued -> running; the run is running unless every task is running (then running too) or one failed.
+  on TaskStarted(task) {
+    require status != fresh else reject "unknown-run"
+    if task == 0 {
+      require t0 == queued else reject "task-not-queued"
+      t0' = running
+      if t1 == failed || t2 == failed { status' = failed } else { status' = running }
+    } else {
+      if task == 1 {
+        require t1 == queued else reject "task-not-queued"
+        t1' = running
+        if t0 == failed || t2 == failed { status' = failed } else { status' = running }
+      } else {
+        require t2 == queued else reject "task-not-queued"
+        t2' = running
+        if t0 == failed || t1 == failed { status' = failed } else { status' = running }
+      }
+    }
+  }
+
+  // evicted -> queued; the run is queued when all three are queued.
+  on TaskRequeued(task) {
+    require status != fresh else reject "unknown-run"
+    if task == 0 {
+      require t0 == evicted else reject "task-not-evicted"
+      t0' = queued
+      if t1 == queued && t2 == queued { status' = queued } else {
+        if t1 == failed || t2 == failed { status' = failed } else { status' = running }
+      }
+    } else {
+      if task == 1 {
+        require t1 == evicted else reject "task-not-evicted"
+        t1' = queued
+        if t0 == queued && t2 == queued { status' = queued } else {
+          if t0 == failed || t2 == failed { status' = failed } else { status' = running }
+        }
+      } else {
+        require t2 == evicted else reject "task-not-evicted"
+        t2' = queued
+        if t0 == queued && t1 == queued { status' = queued } else {
+          if t0 == failed || t1 == failed { status' = failed } else { status' = running }
+        }
+      }
+    }
+  }
+
+  // running -> evicted; the run is evicted when all three are evicted.
+  on TaskEvicted(task) {
+    require status != fresh else reject "unknown-run"
+    if task == 0 {
+      require t0 == running else reject "task-not-running"
+      t0' = evicted
+      if t1 == evicted && t2 == evicted { status' = evicted } else {
+        if t1 == failed || t2 == failed { status' = failed } else { status' = running }
+      }
+    } else {
+      if task == 1 {
+        require t1 == running else reject "task-not-running"
+        t1' = evicted
+        if t0 == evicted && t2 == evicted { status' = evicted } else {
+          if t0 == failed || t2 == failed { status' = failed } else { status' = running }
+        }
+      } else {
+        require t2 == running else reject "task-not-running"
+        t2' = evicted
+        if t0 == evicted && t1 == evicted { status' = evicted } else {
+          if t0 == failed || t1 == failed { status' = failed } else { status' = running }
+        }
+      }
+    }
+  }
+
+  // running -> completed.
+  on TaskCompleted(task) {
+    require status != fresh else reject "unknown-run"
+    if task == 0 {
+      require t0 == running else reject "task-not-running"
+      t0' = completed
+      if t1 == completed && t2 == completed { status' = completed } else {
+        if t1 == failed || t2 == failed { status' = failed } else {
+          if t1 in { queued, running, evicted } || t2 in { queued, running, evicted } { status' = running } else { status' = cancelled }
+        }
+      }
+    } else {
+      if task == 1 {
+        require t1 == running else reject "task-not-running"
+        t1' = completed
+        if t0 == completed && t2 == completed { status' = completed } else {
+          if t0 == failed || t2 == failed { status' = failed } else {
+            if t0 in { queued, running, evicted } || t2 in { queued, running, evicted } { status' = running } else { status' = cancelled }
+          }
+        }
+      } else {
+        require t2 == running else reject "task-not-running"
+        t2' = completed
+        if t0 == completed && t1 == completed { status' = completed } else {
+          if t0 == failed || t1 == failed { status' = failed } else {
+            if t0 in { queued, running, evicted } || t1 in { queued, running, evicted } { status' = running } else { status' = cancelled }
+          }
+        }
+      }
+    }
+  }
+
+  // running -> failed; a failed task always fails the run.
+  on TaskFailed(task) {
+    require status != fresh else reject "unknown-run"
+    if task == 0 {
+      require t0 == running else reject "task-not-running"
+      t0' = failed
+    } else {
+      if task == 1 {
+        require t1 == running else reject "task-not-running"
+        t1' = failed
+      } else {
+        require t2 == running else reject "task-not-running"
+        t2' = failed
+      }
+    }
+    status' = failed
+  }
+
+  // every task in flight -> cancelled; none is left in flight, so the run is cancelled unless a task failed.
+  on Cancel {
+    require status != fresh else reject "unknown-run"
+    require t0 in { queued, running, evicted } || t1 in { queued, running, evicted } || t2 in { queued, running, evicted } else reject "nothing-in-flight"
+    if t0 in { queued, running, evicted } { t0' = cancelled }
+    if t1 in { queued, running, evicted } { t1' = cancelled }
+    if t2 in { queued, running, evicted } { t2' = cancelled }
+    if t0 == failed || t1 == failed || t2 == failed { status' = failed } else { status' = cancelled }
+  }
+
+  invariant completed-only-when-all-completed: status == completed implies (t0 == completed && t1 == completed && t2 == completed)
+  invariant failed-whenever-a-task-failed: (t0 == failed || t1 == failed || t2 == failed) implies status == failed
+  invariant final-only-when-none-in-flight: status in { completed, cancelled } implies !(t0 in { queued, running, evicted } || t1 in { queued, running, evicted } || t2 in { queued, running, evicted })
+}

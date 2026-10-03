@@ -1,0 +1,85 @@
+module consensus
+
+enum Role { follower, candidate, leader, shutdown }
+enum Vote { nobody, itself, n1, n2 }
+
+machine Node {
+  state {
+    role     : Role = follower
+    term     : 0..3 = 0
+    votedFor : Vote = nobody
+    paused   : bool = false
+  }
+  terminal role == shutdown
+
+  action Pause()
+  action Resume()
+  action ElectionTimeout()
+  action ElectionWon()
+  action ElectionLost()
+  action NewerTermSeen(t: int check 1..3 strict)
+  action QuorumLost()
+  action Shutdown()
+  action VoteRequested(c: string check { "n1", "n2" } strict, t: int check 1..3 strict)
+
+  on ElectionTimeout {
+    require role != shutdown else reject "shut-down"
+    require role != leader else reject "is-leader"
+    require term < 3 else reject "last-term"
+    role' = candidate
+    term' = term + 1
+    votedFor' = itself
+  }
+  on ElectionWon {
+    require role != shutdown else reject "shut-down"
+    require role == candidate else reject "not-candidate"
+    role' = leader
+  }
+  on ElectionLost {
+    require role != shutdown else reject "shut-down"
+    require role == candidate else reject "not-candidate"
+    role' = follower
+  }
+  on NewerTermSeen(t) {
+    require role != shutdown else reject "shut-down"
+    require t > term else reject "not-newer"
+    role' = follower
+    term' = t
+    votedFor' = nobody
+  }
+  on QuorumLost {
+    require role != shutdown else reject "shut-down"
+    require role == leader else reject "not-leader"
+    role' = follower
+  }
+  on Shutdown {
+    require role != shutdown else reject "shut-down"
+    role' = shutdown
+  }
+  on VoteRequested(c, t) {
+    require role != shutdown else reject "shut-down"
+    require t >= term else reject "older-term"
+    if t > term {
+      role' = follower
+      term' = t
+    } else {
+      require role == follower else reject "not-follower"
+      require votedFor == nobody || (c == "n1" && votedFor == n1) || (c == "n2" && votedFor == n2)
+        else reject "already-voted"
+    }
+    if c == "n1" { votedFor' = n1 } else { votedFor' = n2 }
+  }
+
+  invariant candidate-or-leader-voted-for-itself:
+    (role == candidate || role == leader) implies votedFor == itself
+  invariant no-vote-in-term-zero: term == 0 implies votedFor == nobody
+
+  step property term-never-decreases: post.term >= pre.term
+  step property term-changes-by-election-or-newer-term:
+    post.term != pre.term implies (action == ElectionTimeout || action == NewerTermSeen || action == VoteRequested)
+  step property leader-was-candidate:
+    (post.role == leader && pre.role != leader) implies (pre.role == candidate && pre.term == post.term)
+  step property shutdown-is-final: pre.role == shutdown implies post.role == shutdown
+  step property one-vote-per-term:
+    (pre.term == post.term && pre.votedFor != nobody) implies post.votedFor == pre.votedFor
+}

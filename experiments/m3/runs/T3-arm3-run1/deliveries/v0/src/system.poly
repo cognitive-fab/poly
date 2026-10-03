@@ -1,0 +1,78 @@
+// Card payments: one Payment instance per payment id, created by authorize.
+module payments
+
+type Status = fresh | authorizing | authorized | declined | failed | captured | voided | refunded
+
+machine Payment {
+  state {
+    status     : Status = fresh
+    amountAuth : 0..2   = 0     // the amount asked for
+    amountCapt : 0..2   = 0     // the amount captured
+    amountRef  : 0..2   = 0     // the amount refunded so far
+    requests   : 0..3   = 0     // authorisation requests sent to the provider
+  }
+  terminal status in { declined, failed, voided, refunded }
+
+  action Authorize(amount: int check { 1, 2 } strict)
+  action TimedOut()
+  action Approved()
+  action Declined()
+  action Capture(amount: int check { 1, 2 } strict)
+  action Void()
+  action Refund(amount: int check { 1, 2 } strict)
+
+  on Authorize(amount) {
+    require status is fresh else reject "exists"
+    status' = authorizing
+    amountAuth' = amount
+    requests' = 1
+    emit cardAuthorize(amount)
+  }
+  on TimedOut {
+    require status is authorizing else reject "not-authorizing"
+    if requests < 3 {
+      requests' = requests + 1
+      emit cardAuthorize(amountAuth)
+    } else {
+      status' = failed
+    }
+  }
+  on Approved {
+    require status is authorizing else reject "not-authorizing"
+    status' = authorized
+  }
+  on Declined {
+    require status is authorizing else reject "not-authorizing"
+    status' = declined
+  }
+  on Capture(amount) {
+    require status is authorized else reject "not-authorized"
+    require amount <= amountAuth else reject "exceeds-authorized"
+    status' = captured
+    amountCapt' = amount
+  }
+  on Void {
+    require status is authorized else reject "not-authorized"
+    status' = voided
+  }
+  on Refund(amount) {
+    require status is captured else reject "not-captured"
+    require amountRef + amount <= amountCapt else reject "exceeds-captured"
+    amountRef' = amountRef + amount
+    if amountRef + amount == amountCapt { status' = refunded }
+  }
+
+  invariant captured-within-authorized: amountCapt <= amountAuth
+  invariant refunded-within-captured: amountRef <= amountCapt
+  invariant voided-captured-nothing: status is voided implies amountCapt == 0
+  invariant at-most-three-requests: requests <= 3
+  path property three-requests: count("card.authorize") <= 3
+
+  effect cardAuthorize(amount: int) {
+    kind "card.authorize"
+    labels { egress:external }
+    class reversible
+    ok -> Approved()
+    failed -> Declined()
+  }
+}

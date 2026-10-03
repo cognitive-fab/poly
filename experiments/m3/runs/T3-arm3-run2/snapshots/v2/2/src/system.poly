@@ -1,0 +1,85 @@
+// Card payments: one Payment machine per payment id, authorised, captured and refunded.
+// Status constructors are lowercase because the host interface reports them by name.
+module payments
+
+type Status = created | authorizing | authorized | declined | failed | captured | voided | refunded | expired
+
+machine Payment {
+  state {
+    status     : Status = created
+    authorized : 0..3 = 0
+    captured   : 0..3 = 0
+    refunded   : 0..3 = 0
+    requests   : 0..3 = 0
+  }
+  terminal status in { Status.declined, Status.failed, Status.voided, Status.refunded, Status.expired }
+
+  action Authorize(amount: int check { 1, 2 })
+  action TimedOut()
+  action Approved()
+  action Declined()
+  action Capture(amount: int check { 1, 2, 3 })
+  action Void()
+  action Increase()
+  action Refund(amount: int check { 1, 2 })
+
+  on Authorize(amount) {
+    require status is created else reject "exists"
+    status' = authorizing
+    authorized' = amount
+    requests' = 1
+    emit cardAuthorize(amount)
+  }
+  on TimedOut {
+    require status is authorizing else reject "not-authorizing"
+    if requests < 3 {
+      requests' = requests + 1
+      emit cardAuthorize(authorized)
+    } else {
+      status' = failed
+    }
+  }
+  on Approved {
+    require status is authorizing else reject "not-authorizing"
+    status' = Status.authorized
+  }
+  on Declined {
+    require status is authorizing else reject "not-authorizing"
+    status' = declined
+  }
+  on Capture(amount) {
+    require status == Status.authorized else reject "not-authorized"
+    require amount <= pre.authorized else reject "over-authorized"
+    status' = Status.captured
+    captured' = amount
+  }
+  on Void {
+    require status == Status.authorized else reject "not-authorized"
+    status' = voided
+  }
+  on Increase {
+    require status == Status.authorized else reject "not-authorized"
+    require pre.authorized < 3 else reject "at-most-three"
+    authorized' = pre.authorized + 1
+  }
+  on Refund(amount) {
+    require status == Status.captured else reject "not-captured"
+    require pre.refunded + amount <= pre.captured else reject "over-captured"
+    refunded' = pre.refunded + amount
+    if pre.refunded + amount == pre.captured { status' = Status.refunded }
+  }
+
+  effect cardAuthorize(amount: int) {
+    kind "card.authorize"
+    labels { egress:external }
+    class compensable
+    ok -> Approved()
+    failed -> Declined()
+  }
+
+  invariant captured-within-authorized: captured <= authorized
+  invariant refunded-within-captured: refunded <= captured
+  invariant voided-captured-nothing: status is voided implies captured == 0
+  invariant requests-bounded: requests <= 3
+  path property at-most-three-requests: count("card.authorize") <= 3
+}

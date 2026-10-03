@@ -91,6 +91,8 @@ export function overlapping(processes, selfPid, seen = new Set(), { detail = fal
   const byPid = new Map(processes.map((p) => [p.ProcessId, p]));
   const ours = (pid) => { for (let p = pid, i = 0; p && i < 64; p = byPid.get(p)?.ParentProcessId, i++) if (p === selfPid || seen.has(p)) return true; return false; };
   for (const p of processes) if (ours(p.ProcessId)) seen.add(p.ProcessId);
+  // A PID gone from the table is forgotten: Windows reuses PIDs, and a later process given it is not the batch's.
+  for (const pid of [...seen]) if (!byPid.has(pid)) seen.delete(pid);
   // Tests and reviews only: an editor's TypeScript server in the M5b worktree is no load worth flagging.
   const looks = /node(\.exe)?"?\s.*--test\b|npm(-cli\.js|\.cmd)?"?\s.*\btest\b|polywatch/i;
   const flagged = processes.filter((p) => p.CommandLine && looks.test(p.CommandLine) && !seen.has(p.ProcessId));
@@ -107,13 +109,15 @@ const createdAt = (d) => { const m = /\/Date\((\d+)\)\//.exec(String(d ?? '')); 
 
 /**
  * The windows in which an arm's shell commands ran, from its record and journal: [{ arm, from, to, command }] in ms.
- * A turn starts after the turns before it (their wall times from the record); a command the CLI moved to the
- * background has no end the journal knows of, so its window stays open.
+ * A turn starts after the turns before it (their wall times from the record). A command the CLI moved to the
+ * background, or still running when a cap stopped the turn, has no end in the journal; from block 40 the runner ends
+ * every process under the arm when the run ends (37beede), so its window closes with the run.
  */
 export function armCommandWindows(record, journalText) {
   const starts = [];
   let t = Date.parse(record.started);
   for (const v of record.versions ?? []) { starts[v.n] = t; t += v.wallMs ?? 0; }
+  const end = Date.parse(record.finished ?? record.started);
   const open = new Map();
   const out = [];
   for (const line of journalText.split('\n')) {
@@ -126,12 +130,12 @@ export function armCommandWindows(record, journalText) {
         const w = open.get(c.tool_use_id);
         open.delete(c.tool_use_id);
         const text = typeof c.content === 'string' ? c.content : (c.content ?? []).map((x) => x.text ?? '').join(' ');
-        out.push({ ...w, to: /moved to the background/.test(text) ? Infinity : at });
+        out.push({ ...w, to: /moved to the background/.test(text) ? end : at });
       }
     }
   }
   // A command still running when the turn was stopped has no result either.
-  for (const w of open.values()) out.push({ ...w, to: Infinity });
+  for (const w of open.values()) out.push({ ...w, to: end });
   return out.sort((a, b) => a.from - b.from);
 }
 
@@ -179,18 +183,17 @@ async function runBlock(b) {
   })));
   clearInterval(timer);
   sample();
-  // Each flagged process is matched against the arms' shell commands, this block's and the open ones of earlier
-  // blocks (a backgrounded command may outlive its run); only what no arm started is an overlap.
+  // Each flagged process is matched against the arms' shell commands in this block; only what no arm started is an
+  // overlap. Nothing of an earlier block's arms outlives its run from block 40 (37beede).
+  const ownWindows = [];
   for (const arm of ARMS) {
     const d = join(RUNS, id(b.task, arm, b.run));
     try { ownWindows.push(...armCommandWindows(JSON.parse(readFileSync(join(d, 'run.json'), 'utf8')), readFileSync(join(d, 'journal.jsonl'), 'utf8'))); } catch { /* a refused run has no journal */ }
   }
   const processes_ = attribute([...seen.values()], ownWindows);
   const outside = processes_.filter((p) => p.arm === undefined);
-  for (let i = ownWindows.length - 1; i >= 0; i--) if (ownWindows[i].to !== Infinity) ownWindows.splice(i, 1);
   return { started, finished: new Date().toISOString(), exits, overlap: { flagged: outside.length > 0, outside: outside.length, processes: processes_, samples: sampled } };
 }
-const ownWindows = [];
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   mkdirSync(RUNS, { recursive: true });

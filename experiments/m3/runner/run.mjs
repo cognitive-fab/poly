@@ -15,6 +15,7 @@ import { currentEnvironment, environmentDiff, isExactModelId, refusalDiff } from
 import { ARM_CONFIG_DIR, apiKeyProblems, configProblems, loginOf, loginProblems } from './isolation.mjs';
 import { changeSources, deliveryFiles, listFiles, makeWorkspace, takeDelivery } from './workspace.mjs';
 import { runTurn } from './agent.mjs';
+import { openJob } from './jobs.mjs';
 
 const sha = (t) => createHash('sha256').update(t).digest('hex');
 
@@ -49,7 +50,7 @@ export function promptOf(arm, version) {
   return fill(readFileSync(join(M3, 'prompts', 'change.md'), 'utf8'), { CHANGE: readFileSync(version.briefs[version.n], 'utf8').trim(), HOST: host });
 }
 
-export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, agent, maxBudgetUsd, environment, isolation }) {
+export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, agent, maxBudgetUsd, environment, isolation, remove = (d) => rmSync(d, { recursive: true, force: true }), retryMs = 10_000, jobs = openJob }) {
   const id = `${task}-arm${arm}-run${run}`;
   const dir = join(out, id);
   const ws = join(tmpdir(), 'poly-m3-ws', id);
@@ -64,6 +65,8 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
   if (environment) record.environment = environment;
   // 4210fa6: the arms' configuration folder and the kind of login, never a credential.
   if (isolation) record.isolation = isolation;
+  // 37beede: the run's processes are held in one job, from block 40; the stub agent starts none.
+  const job = agent.kind === 'claude' ? await jobs() : null;
   let sessionId = null;
   let spent = { tokens: 0, wallMs: 0 };
   let stopped = null;
@@ -72,7 +75,7 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
       for (const s of changeSources(v)) copyFileSync(s.from, join(ws, s.to));
     }
     const prompt = promptOf(arm, v);
-    if (stopped) { record.versions.push({ n: v.n, attempted: false, reason: stopped === 'limited' || stopped === 'auth' ? `the run stopped: ${stopped}` : `the run's ${stopped} was spent` }); continue; }
+    if (stopped) { record.versions.push({ n: v.n, attempted: false, reason: ['limited', 'auth', 'job'].includes(stopped) ? `the run stopped: ${stopped}` : `the run's ${stopped} was spent` }); continue; }
     let last = deliveryDigest(ws, arm);
     let k = 0;
     const onToolResult = () => {
@@ -81,7 +84,7 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
       last = now;
       takeDelivery(ws, arm, join(dir, 'snapshots', `v${v.n}`, String(++k)));
     };
-    const t = await runTurn({ agent, ws, journal, arm, model, prompt, sessionId, turn: v.n, maxBudgetUsd, onToolResult, configDir: isolation?.configDir, limits: { tokens: tokens - spent.tokens, wallMs: wallMs - spent.wallMs } });
+    const t = await runTurn({ agent, ws, journal, arm, model, prompt, sessionId, turn: v.n, maxBudgetUsd, onToolResult, configDir: isolation?.configDir, job, limits: { tokens: tokens - spent.tokens, wallMs: wallMs - spent.wallMs } });
     sessionId = t.sessionId;
     spent = { tokens: spent.tokens + t.tokens, wallMs: spent.wallMs + t.wallMs, costUsd: t.costUsd === null || spent.costUsd === null ? null : (spent.costUsd ?? 0) + t.costUsd };
     stopped = t.stopped;
@@ -90,7 +93,7 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
     record.versions.push({ n: v.n, attempted: true, promptSha256: sha(prompt), usage: t.usage, tokens: t.tokens, costUsd: t.costUsd, cliCostUsd: t.cliCostUsd, usageSource: t.usageSource, running: t.running, differs: t.differs, wallMs: t.wallMs, stopped: t.stopped, exitCode: t.exitCode, delivered: taken, snapshots: k });
   }
   // A usage limit or a failed login: recorded as such, never scored, rerun from the start (4210fa6, aad9a23).
-  if (stopped === 'limited' || stopped === 'auth') record.unscored = stopped === 'limited' ? 'limited' : 'authentication failure';
+  if (stopped === 'limited' || stopped === 'auth' || stopped === 'job') record.unscored = { limited: 'limited', auth: 'authentication failure', job: "the run's job could not hold its CLI" }[stopped];
   // 4c630d2: the folder is checked after the run as before it. Anything synced into it during the run (the account's
   // plugins or skills, a memory, an MCP server) may have reached the arm, so the run is unscored and rerun.
   if (isolation) {
@@ -99,9 +102,27 @@ export async function runOne({ arm, task, run = 1, model, tokens, wallMs, out, a
   }
   record.spent = spent;
   record.finished = new Date().toISOString();
+  // 37beede: the run has ended, so what it left running ends now, with its trees, listed as leftovers. Never between turns.
+  record.leftovers = job ? (await job.end()).map((x) => ({ pid: x.pid, command: String(x.command ?? '').slice(0, 300) })) : [];
+  job?.close();
+  record.cleanup = await cleanUp(ws, remove, retryMs);
   writeFileSync(join(dir, 'run.json'), JSON.stringify(record, null, 2) + '\n');
-  rmSync(ws, { recursive: true, force: true });
   return { dir, record };
+}
+
+/**
+ * Deletes a run's workspace, retrying for `retryMs` (37beede): a process that has just been ended may hold it for a
+ * moment. A deletion that still fails is returned as { ok: false, error } and recorded; the runner does not crash, as
+ * it did in blocks 19 and 39 (EPERM).
+ */
+async function cleanUp(ws, remove, retryMs) {
+  const until = Date.now() + retryMs;
+  for (;;) {
+    try { remove(ws); return { ok: true }; } catch (e) {
+      if (Date.now() >= until) return { ok: false, error: String(e?.message ?? e) };
+      await new Promise((r) => setTimeout(r, Math.min(500, Math.max(10, retryMs / 10))));
+    }
+  }
 }
 
 /**

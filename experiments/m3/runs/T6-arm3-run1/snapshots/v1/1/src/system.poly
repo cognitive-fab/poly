@@ -1,0 +1,67 @@
+module jobs
+
+// The status names are the host interface's own, so a query returns them as they are.
+enum Status { unsubmitted, queued, running, cancelling, succeeded, failed, cancelled }
+
+machine Job {
+  state {
+    status   : Status = unsubmitted
+    tries    : 0..3   = 0
+    maxTries : 0..3   = 0
+  }
+  terminal status in { succeeded, failed, cancelled }
+
+  action Submit(n: int check { 0, 1, 2, 3, 4 } disclosed)
+  action Claim()
+  action Succeed()
+  action Fail()
+  action Lost()
+  action Cancel()
+
+  on Submit(n) {
+    require status == unsubmitted else reject "job-exists"
+    require n >= 1 && n <= 3 else reject "bad-max-tries"
+    status' = queued
+    maxTries' = n
+  }
+  on Claim {
+    require status == queued else reject "not-queued"
+    require tries < maxTries else reject "no-tries-left"
+    status' = running
+    tries' = tries + 1
+  }
+  // A cancelling job whose worker finished anyway keeps the outcome of the work.
+  on Succeed {
+    require status in { running, cancelling } else reject "not-running"
+    status' = succeeded
+  }
+  on Fail {
+    require status in { running, cancelling } else reject "not-running"
+    if status == cancelling { status' = cancelled }
+    else { if tries < maxTries { status' = queued } else { status' = failed } }
+  }
+  // A lost worker is treated exactly as a failed try.
+  on Lost {
+    require status in { running, cancelling } else reject "not-running"
+    if status == cancelling { status' = cancelled }
+    else { if tries < maxTries { status' = queued } else { status' = failed } }
+  }
+  on Cancel {
+    require status in { queued, held, running } else reject "not-cancellable"
+    if status == running { status' = cancelling } else { status' = cancelled }
+  }
+  // An operator holds a queued job back from the workers, and releases it.
+  on Hold {
+    require status == queued else reject "not-queued"
+    status' = held
+  }
+  on Release {
+    require status == held else reject "not-held"
+    status' = queued
+  }
+
+  invariant tries-within-limit: tries <= maxTries
+  invariant failed-only-when-exhausted: status == failed implies tries == maxTries
+  invariant submitted-has-limit: status != unsubmitted implies maxTries >= 1
+  invariant queued-has-tries-left: status == queued implies tries < maxTries
+}

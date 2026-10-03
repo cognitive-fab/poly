@@ -135,7 +135,7 @@ test('overlap: a test process born while an arm\'s shell command was running is 
     line(1, 5_000, use('b', 'npm test')), line(1, 125_000, res('b', 'Command did not complete within its 120s timeout and was moved to the background (ID: x).')),
   ].join('\n');
   const w = armCommandWindows(record, journal);
-  assert.deepEqual(w.map((x) => [x.arm, x.from - t0, x.to === Infinity ? 'open' : x.to - t0]), [[2, 10_000, 40_000], [2, 605_000, 'open']]);
+  assert.deepEqual(w.map((x) => [x.arm, x.from - t0, x.to === Infinity ? 'open' : x.to - t0]), [[2, 10_000, 40_000], [2, 605_000, 900_000]]);
   const flagged = [
     { pid: 1, command: 'node  --test', created: t0 + 20_000 },
     { pid: 2, command: 'node  --test', created: t0 + 300_000 },
@@ -143,5 +143,14 @@ test('overlap: a test process born while an arm\'s shell command was running is 
     { pid: 4, command: 'node polywatch.mjs worker x.json', created: t0 + 20_000 },
     { pid: 5, command: 'node --test "packages/*/dist/test/*.test.js"', created: t0 + 20_000 },
   ];
-  assert.deepEqual(attribute(flagged, w).map((p) => p.arm ?? null), [2, null, 2, null, null]);
+  assert.deepEqual(attribute(flagged, w).map((p) => p.arm ?? null), [2, null, null, null, null]);
+});
+
+test('overlap: a PID once the batch\'s own and gone since is forgotten, so a later process that reuses it is judged afresh', () => {
+  const seen = new Set();
+  const block = [{ ProcessId: 10, ParentProcessId: 1, CommandLine: 'node blocks.mjs' }, { ProcessId: 11, ParentProcessId: 10, CommandLine: 'node run.mjs' }, { ProcessId: 50, ParentProcessId: 11, CommandLine: 'node --test' }];
+  assert.deepEqual(overlapping(block, 10, seen), []);
+  // PID 50 ends; later Windows gives it to an unrelated test.
+  assert.deepEqual(overlapping(block.slice(0, 2), 10, seen), []);
+  assert.deepEqual(overlapping([...block.slice(0, 2), { ProcessId: 50, ParentProcessId: 99, CommandLine: 'node --test other.test.mjs' }], 10, seen), ['node --test other.test.mjs']);
 });

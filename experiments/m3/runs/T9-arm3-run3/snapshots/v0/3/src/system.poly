@@ -1,0 +1,66 @@
+// Electing a leader among three nodes: one election round, term 1.
+module election
+
+type Role = follower | candidate | leader
+
+// A node runs for as long as the cluster does, so a settled election is not a stuck one.
+service machine Node {
+  state {
+    role     : Role      = follower
+    term     : 0..1      = 0
+    votedFor : Ref<Node> = none
+    votes    : 0..3      = 0
+    me       : Ref<Node> = none
+    p1       : Ref<Node> = none
+    p2       : Ref<Node> = none
+  }
+  action Timeout()
+  action RequestVote(from: Ref<Node>, term: 1..1)
+  action VoteReply(term: 1..1, granted: bool)
+
+  // A follower in term 0 starts the one election it may start.
+  on Timeout {
+    require role is follower && pre.term == 0 else reject "not-a-follower-in-term-0"
+    role' = candidate
+    term' = 1
+    votedFor' = me
+    votes' = 1
+    send p1 <- RequestVote(from: self, term: 1)
+    send p2 <- RequestVote(from: self, term: 1)
+  }
+
+  on RequestVote(from, term) {
+    if pre.term == 0 {
+      term' = 1
+      votedFor' = from
+      send from <- VoteReply(term: 1, granted: true)
+    } else {
+      if (role is follower && votedFor == none) || votedFor == from {
+        votedFor' = from
+        send from <- VoteReply(term: 1, granted: true)
+      } else {
+        send from <- VoteReply(term: 1, granted: false)
+      }
+    }
+  }
+
+  // Only a candidate counts a granted vote for its term; any other reply is ignored.
+  on VoteReply(term, granted) {
+    require role is candidate && pre.term == term && granted else reject "ignored"
+    votes' = votes + 1
+    if votes + 1 >= 2 { role' = leader }
+  }
+
+  invariant leader-has-majority: role is leader implies votes >= 2
+  invariant votes-only-as-candidate: votes > 0 implies votedFor == me
+}
+
+configuration three-nodes {
+  n0 : Node { me: n0, p1: n1, p2: n2 }
+  n1 : Node { me: n1, p1: n0, p2: n2 }
+  n2 : Node { me: n2, p1: n0, p2: n1 }
+  inputs { n0.Timeout, n1.Timeout, n2.Timeout }
+  bounds { transit 6 }
+  invariant one-leader: !(n0.role is leader && n1.role is leader) && !(n0.role is leader && n2.role is leader)
+                        && !(n1.role is leader && n2.role is leader)
+}

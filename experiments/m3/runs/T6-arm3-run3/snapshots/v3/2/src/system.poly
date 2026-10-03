@@ -1,0 +1,92 @@
+module jobs
+
+// Status names are the host interface's own, so the query returns them as they are.
+// `unsubmitted` is the state of an instance before its submit takes effect; a refused submit leaves no instance.
+enum Status { unsubmitted, queued, running, cancelling, succeeded, failed, cancelled, held }
+
+machine Job {
+  state {
+    status   : Status = unsubmitted
+    tries    : 0..3   = 0
+    maxTries : 0..3   = 0
+  }
+  // A failed job is not terminal: an operator may resubmit it.
+  terminal status in { succeeded, cancelled }
+
+  action Submit(max: int check 0..4 strict)
+  action Claim()
+  action Succeed()
+  action Fail()
+  action FailPermanently()
+  action Cancel()
+  action Hold()
+  action Release()
+
+  on Submit(max) {
+    require status is unsubmitted else reject "job-exists"
+    require max >= 1 && max <= 3 else reject "max-tries-out-of-range"
+    status' = queued
+    maxTries' = max
+  }
+  on Claim {
+    require status is queued else reject "not-queued"
+    require tries < maxTries else reject "no-tries-left"
+    status' = running
+    tries' = tries + 1
+  }
+  // The worker finished: a cancelling job's work was done before it could stop, so it succeeds too.
+  on Succeed {
+    require status in { running, cancelling } else reject "not-running"
+    status' = succeeded
+  }
+  // Also the worker lost: a failed try is retried while tries are left; a cancelling job is cancelled.
+  on Fail {
+    require status in { running, cancelling } else reject "not-running"
+    if status is cancelling {
+      status' = cancelled
+    } else {
+      if tries < maxTries {
+        status' = queued
+      } else {
+        status' = failed
+      }
+    }
+  }
+  // A failure no retry will fix: the job fails with whatever tries it has left.
+  on FailPermanently {
+    require status in { running, cancelling } else reject "not-running"
+    if status is cancelling {
+      status' = cancelled
+    } else {
+      status' = failed
+    }
+  }
+  // An operator gives a failed job a fresh start, with the same limit.
+  on Resubmit {
+    require status is failed else reject "not-failed"
+    status' = queued
+    tries' = 0
+  }
+  // An operator holds a queued job back from workers, and releases it.
+  on Hold {
+    require status is queued else reject "not-queued"
+    status' = held
+  }
+  on Release {
+    require status is held else reject "not-held"
+    status' = queued
+  }
+  on Cancel {
+    require status in { queued, held, running } else reject "not-cancellable"
+    if status in { queued, held } {
+      status' = cancelled
+    } else {
+      status' = cancelling
+    }
+  }
+
+  invariant tries-within-limit: tries <= maxTries
+  invariant submitted-has-limit: status is unsubmitted || maxTries >= 1
+  invariant started-has-tries: status in { running, cancelling, succeeded, failed } implies tries >= 1
+  invariant queued-has-tries-left: status in { queued, held } implies tries < maxTries
+}

@@ -1,0 +1,81 @@
+// Electing a leader among three nodes: one election round, term 1.
+module election
+
+// Lowercase, so the host interface reads the roles as they are lowered.
+type Role = follower | candidate | leader
+
+service machine Node {
+  state {
+    role     : Role      = follower
+    term     : 0..1      = 0
+    votedFor : Ref<Node> = none
+    votes    : 0..3      = 0          // votes counted as a candidate, its own included
+    me       : Ref<Node> = none       // this node's own address
+    peerA    : Ref<Node> = none
+    peerB    : Ref<Node> = none
+  }
+  action Timeout()
+  action RequestVote(from: Ref<Node>, term: 1..1)
+  action VoteReply(term: 1..1, granted: bool)
+
+  on Timeout {
+    require role is follower && pre.term == 0 else reject "not-a-follower-in-term-0"
+    role' = candidate
+    term' = 1
+    votedFor' = me
+    votes' = 1
+    send peerA <- RequestVote(from: me, term: 1)
+    send peerB <- RequestVote(from: me, term: 1)
+  }
+
+  on RequestVote(from, term) {
+    if pre.term == 0 {
+      term' = 1
+      votedFor' = from
+      send from <- VoteReply(term: 1, granted: true)
+    } else {
+      if role is follower && (votedFor == none || votedFor == from) {
+        votedFor' = from
+        send from <- VoteReply(term: 1, granted: true)
+      } else {
+        send from <- VoteReply(term: 1, granted: false)
+      }
+    }
+  }
+
+  on VoteReply(term, granted) {
+    require role is candidate && pre.term == term else reject "not-a-candidate-in-term"
+    require granted else reject "vote-not-granted"
+    votes' = votes + 1
+    if votes + 1 >= 2 {
+      role' = leader
+      knownLeader' = me
+      send peerA <- Leader(from: me, term: 1)
+      send peerB <- Leader(from: me, term: 1)
+    }
+  }
+
+  on Leader(from, term) {
+    require !(role is leader) else reject "already-leader"
+    term' = 1
+    role' = follower
+    knownLeader' = from
+  }
+}
+
+configuration three-nodes {
+  n0 : Node { me: n0, peerA: n1, peerB: n2 }
+  n1 : Node { me: n1, peerA: n0, peerB: n2 }
+  n2 : Node { me: n2, peerA: n0, peerB: n1 }
+  inputs { n0.Timeout, n1.Timeout, n2.Timeout }
+  bounds { transit 6 }
+  invariant one-leader:
+    !(n0.role is leader && n1.role is leader) && !(n0.role is leader && n2.role is leader)
+      && !(n1.role is leader && n2.role is leader)
+  invariant leader-has-majority:
+    (n0.role is leader implies n0.votes >= 2) && (n1.role is leader implies n1.votes >= 2)
+      && (n2.role is leader implies n2.votes >= 2)
+  invariant leader-voted-for-itself:
+    (n0.role is leader implies n0.votedFor == n0.me) && (n1.role is leader implies n1.votedFor == n1.me)
+      && (n2.role is leader implies n2.votedFor == n2.me)
+}

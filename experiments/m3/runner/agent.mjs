@@ -12,7 +12,10 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { armEnv } from './isolation.mjs';
+
+const LAUNCH = fileURLToPath(new URL('launch.mjs', import.meta.url));
 
 /** The allowed tools of each arm: the file tools and a shell for the arm's commands, nothing else (plan-m3 §6). */
 export const ALLOWED_TOOLS = {
@@ -109,7 +112,7 @@ export function turnAccount() {
  * cliCostUsd, usageSource, running, differs, wallMs, stopped: null | 'budget' | 'wall' | 'usd' | 'limited' | 'auth', exitCode }.
  * `configDir` is the arms' configuration folder (isolation.mjs).
  */
-export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionId, limits, turn, maxBudgetUsd, onToolResult, configDir }) {
+export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionId, limits, turn, maxBudgetUsd, onToolResult, configDir, job }) {
   mkdirSync(dirname(journal), { recursive: true });
   const t0 = Date.now();
   const log = (event) => appendFileSync(journal, JSON.stringify({ at: Date.now() - t0, turn, ...event }) + '\n');
@@ -130,8 +133,25 @@ export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionI
   if (agent.kind === 'stub') {
     exitCode = await stubTurn(agent.turns[turn] ?? { events: [] }, ws, onEvent, () => (state.stopped = over()));
   } else {
-    exitCode = await new Promise((resolve) => {
-      const child = spawn(agent.bin ?? 'claude', claudeArgs({ arm, model, prompt, sessionId, maxBudgetUsd }), { cwd: ws, stdio: ['ignore', 'pipe', 'pipe'], env: armEnv(process.env, configDir) });
+    exitCode = await new Promise(async (resolve) => {
+      const args = [...(agent.prefix ?? []), ...claudeArgs({ arm, model, prompt, sessionId, maxBudgetUsd })];
+      // 37beede: in a run's job, the CLI starts only once the launcher is held by the job, so all it starts is too.
+      const held = job?.windows === true;
+      const child = held
+        ? spawn(process.execPath, [LAUNCH, agent.bin ?? 'claude', ...args], { cwd: ws, stdio: ['pipe', 'pipe', 'pipe'], env: armEnv(process.env, configDir) })
+        : spawn(agent.bin ?? 'claude', args, { cwd: ws, stdio: ['ignore', 'pipe', 'pipe'], env: armEnv(process.env, configDir) });
+      if (held) {
+        // A CLI outside the job could leave processes no one ends, so it is never started: the run stops as `job`,
+        // is recorded unscored and is rerun.
+        const ok = await job.assign(child.pid).catch(() => false);
+        if (!ok) {
+          log({ type: 'runner.job', text: `the job could not hold the launcher ${child.pid}; the CLI was not started` });
+          state.stopped = 'job';
+          child.kill();
+        } else child.stdin.end('go\n');
+      }
+      // A cap ends the run, so it ends the run's processes with it: the whole job, or the CLI alone without one.
+      const stop = () => { if (held) job.end(); else child.kill(); };
       let buf = '';
       child.stdout.on('data', (d) => {
         buf += d;
@@ -141,11 +161,11 @@ export async function runTurn({ agent, ws, journal, arm, model, prompt, sessionI
           buf = buf.slice(i + 1);
           if (!line) continue;
           try { onEvent(JSON.parse(line)); } catch { log({ type: 'runner.unparsed', line }); }
-          if (!state.stopped && (state.stopped = over())) child.kill();
+          if (!state.stopped && (state.stopped = over())) stop();
         }
       });
       child.stderr.on('data', (d) => log({ type: 'runner.stderr', text: String(d) }));
-      const timer = setInterval(() => { if (!state.stopped && (state.stopped = over())) child.kill(); }, 1000);
+      const timer = setInterval(() => { if (!state.stopped && (state.stopped = over())) stop(); }, 1000);
       child.on('close', (code) => { clearInterval(timer); resolve(code); });
     });
   }

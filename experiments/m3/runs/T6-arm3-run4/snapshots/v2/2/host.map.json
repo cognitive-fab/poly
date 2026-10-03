@@ -1,0 +1,19 @@
+{
+  "module": "jobs",
+  "instances": {
+    "jobs": { "machine": "Job", "createdBy": "submit", "keyArgument": "job" }
+  },
+  "methods": {
+    "submit": { "instance": "jobs", "key": "$arg:job", "action": "Submit", "params": { "max": "$arg:maxTries" } },
+    "claim": { "instance": "jobs", "key": "$arg:job", "action": "Claim" },
+    "succeed": { "instance": "jobs", "key": "$arg:job", "action": "Succeed" },
+    "fail": { "instance": "jobs", "key": "$arg:job", "action": "Fail" },
+    "lost": { "instance": "jobs", "key": "$arg:job", "action": "Lost" },
+    "cancel": { "instance": "jobs", "key": "$arg:job", "action": "Cancel" },
+    "hold": { "instance": "jobs", "key": "$arg:job", "action": "Hold" },
+    "release": { "instance": "jobs", "key": "$arg:job", "action": "Release" }
+  },
+  "queries": {
+    "job": { "instance": "jobs", "key": "$arg:job", "fields": { "status": "status", "tries": "tries", "maxTries": "maxTries" } }
+  }
+}

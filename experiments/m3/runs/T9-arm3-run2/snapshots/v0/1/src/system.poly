@@ -1,0 +1,60 @@
+// Electing a leader among three nodes: one election round, term 1.
+module election
+
+type Role = Follower | Candidate | Leader
+
+service machine Node {
+  state {
+    role     : Role      = Follower
+    term     : 0..1      = 0
+    votedFor : Ref<Node> = none
+    votes    : 0..3      = 0          // votes counted as a candidate, its own included
+    me       : Ref<Node> = none       // this node's own address
+    peerA    : Ref<Node> = none
+    peerB    : Ref<Node> = none
+  }
+  action Timeout()
+  action RequestVote(from: Ref<Node>, term: 1..1)
+  action VoteReply(term: 1..1, granted: bool)
+
+  on Timeout {
+    require role is Follower && pre.term == 0 else reject "not-a-follower-in-term-0"
+    role' = Candidate
+    term' = 1
+    votedFor' = me
+    votes' = 1
+    send peerA <- RequestVote(from: me, term: 1)
+    send peerB <- RequestVote(from: me, term: 1)
+  }
+
+  on RequestVote(from, term) {
+    if pre.term == 0 {
+      term' = 1
+      votedFor' = from
+      send from <- VoteReply(term: 1, granted: true)
+    } else {
+      if role is Follower && (votedFor == none || votedFor == from) {
+        votedFor' = from
+        send from <- VoteReply(term: 1, granted: true)
+      } else {
+        send from <- VoteReply(term: 1, granted: false)
+      }
+    }
+  }
+
+  on VoteReply(term, granted) {
+    require role is Candidate && pre.term == term else reject "not-a-candidate-in-term"
+    require granted else reject "vote-not-granted"
+    votes' = votes + 1
+    if votes + 1 >= 2 { role' = Leader }
+  }
+}
+
+configuration three-nodes {
+  n0 : Node { me: n0, peerA: n1, peerB: n2 }
+  n1 : Node { me: n1, peerA: n0, peerB: n2 }
+  n2 : Node { me: n2, peerA: n0, peerB: n1 }
+  inputs { n0.Timeout, n1.Timeout, n2.Timeout }
+  bounds { transit 6 }
+  invariant one-leader: count(n0.role is Leader, n1.role is Leader, n2.role is Leader) <= 1
+}

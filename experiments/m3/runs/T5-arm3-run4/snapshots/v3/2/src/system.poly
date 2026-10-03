@@ -1,0 +1,156 @@
+// T5, workflow run status: one Run instance per run id, created by start.
+module workflow
+
+enum Status { queued, running, evicted, completed, failed, cancelled }
+
+machine Run {
+  state {
+    status  : Status = queued
+    task0   : Status = queued
+    task1   : Status = queued
+    task2   : Status = queued
+    started : bool = false
+    paused  : bool = false
+  }
+  terminal status in { completed, cancelled }
+
+  action Start()
+  action TaskStarted(task: int check { 0, 1, 2 } strict)
+  action TaskCompleted(task: int check { 0, 1, 2 } strict)
+  action TaskFailed(task: int check { 0, 1, 2 } strict)
+  action TaskEvicted(task: int check { 0, 1, 2 } strict)
+  action TaskRequeued(task: int check { 0, 1, 2 } strict)
+  action TaskRetried(task: int check { 0, 1, 2 } strict)
+  action Cancel()
+  action CancelTask(task: int check { 0, 1, 2 } strict)
+  action Pause()
+  action Resume()
+
+  // Pausing stops queued tasks from starting; it leaves the status alone.
+  on Pause {
+    require started else reject "no-run"
+    require !paused else reject "paused"
+    paused' = true
+  }
+  on Resume {
+    require started else reject "no-run"
+    require paused else reject "not-paused"
+    paused' = false
+  }
+
+  on Start {
+    require !started else reject "run-exists"
+    started' = true
+    status' = queued
+  }
+
+  // queued -> running. The new task is in flight, so the run is running unless all three agree.
+  on TaskStarted(task) {
+    require started else reject "no-run"
+    require (task == 0 && task0 == queued) || (task == 1 && task1 == queued) || (task == 2 && task2 == queued)
+      else reject "task-not-queued"
+    let same = (task == 0 || task0 == running) && (task == 1 || task1 == running) && (task == 2 || task2 == running)
+    let failedAny = (task != 0 && task0 == failed) || (task != 1 && task1 == failed) || (task != 2 && task2 == failed)
+    if task == 0 { task0' = running } else { if task == 1 { task1' = running } else { task2' = running } }
+    if same { status' = running } else { if failedAny { status' = failed } else { status' = running } }
+  }
+
+  // running -> completed.
+  on TaskCompleted(task) {
+    require started else reject "no-run"
+    require (task == 0 && task0 == running) || (task == 1 && task1 == running) || (task == 2 && task2 == running)
+      else reject "task-not-running"
+    let same = (task == 0 || task0 == completed) && (task == 1 || task1 == completed) && (task == 2 || task2 == completed)
+    let failedAny = (task != 0 && task0 == failed) || (task != 1 && task1 == failed) || (task != 2 && task2 == failed)
+    let flightAny = (task != 0 && task0 in { queued, running, evicted })
+                 || (task != 1 && task1 in { queued, running, evicted })
+                 || (task != 2 && task2 in { queued, running, evicted })
+    if task == 0 { task0' = completed } else { if task == 1 { task1' = completed } else { task2' = completed } }
+    if same { status' = completed } else {
+      if failedAny { status' = failed } else {
+        if flightAny { status' = running } else { status' = cancelled } } }
+  }
+
+  // running -> failed. A failed task makes the run failed.
+  on TaskFailed(task) {
+    require started else reject "no-run"
+    require (task == 0 && task0 == running) || (task == 1 && task1 == running) || (task == 2 && task2 == running)
+      else reject "task-not-running"
+    if task == 0 { task0' = failed } else { if task == 1 { task1' = failed } else { task2' = failed } }
+    status' = failed
+  }
+
+  // running -> evicted. The evicted task is still in flight.
+  on TaskEvicted(task) {
+    require started else reject "no-run"
+    require (task == 0 && task0 == running) || (task == 1 && task1 == running) || (task == 2 && task2 == running)
+      else reject "task-not-running"
+    let same = (task == 0 || task0 == evicted) && (task == 1 || task1 == evicted) && (task == 2 || task2 == evicted)
+    let failedAny = (task != 0 && task0 == failed) || (task != 1 && task1 == failed) || (task != 2 && task2 == failed)
+    if task == 0 { task0' = evicted } else { if task == 1 { task1' = evicted } else { task2' = evicted } }
+    if same { status' = evicted } else { if failedAny { status' = failed } else { status' = running } }
+  }
+
+  // evicted -> queued. The queued task is in flight.
+  on TaskRequeued(task) {
+    require started else reject "no-run"
+    require (task == 0 && task0 == evicted) || (task == 1 && task1 == evicted) || (task == 2 && task2 == evicted)
+      else reject "task-not-evicted"
+    let same = (task == 0 || task0 == queued) && (task == 1 || task1 == queued) && (task == 2 || task2 == queued)
+    let failedAny = (task != 0 && task0 == failed) || (task != 1 && task1 == failed) || (task != 2 && task2 == failed)
+    if task == 0 { task0' = queued } else { if task == 1 { task1' = queued } else { task2' = queued } }
+    if same { status' = queued } else { if failedAny { status' = failed } else { status' = running } }
+  }
+
+  // failed -> queued. The queued task is in flight.
+  on TaskRetried(task) {
+    require started else reject "no-run"
+    require (task == 0 && task0 == failed) || (task == 1 && task1 == failed) || (task == 2 && task2 == failed)
+      else reject "task-not-failed"
+    let same = (task == 0 || task0 == queued) && (task == 1 || task1 == queued) && (task == 2 || task2 == queued)
+    let failedAny = (task != 0 && task0 == failed) || (task != 1 && task1 == failed) || (task != 2 && task2 == failed)
+    if task == 0 { task0' = queued } else { if task == 1 { task1' = queued } else { task2' = queued } }
+    if same { status' = queued } else { if failedAny { status' = failed } else { status' = running } }
+  }
+
+  // One task in flight -> cancelled.
+  on CancelTask(task) {
+    require started else reject "no-run"
+    require (task == 0 && task0 in { queued, running, evicted })
+         || (task == 1 && task1 in { queued, running, evicted })
+         || (task == 2 && task2 in { queued, running, evicted })
+      else reject "task-not-in-flight"
+    let same = (task == 0 || task0 == cancelled) && (task == 1 || task1 == cancelled) && (task == 2 || task2 == cancelled)
+    let failedAny = (task != 0 && task0 == failed) || (task != 1 && task1 == failed) || (task != 2 && task2 == failed)
+    let flightAny = (task != 0 && task0 in { queued, running, evicted })
+                 || (task != 1 && task1 in { queued, running, evicted })
+                 || (task != 2 && task2 in { queued, running, evicted })
+    if task == 0 { task0' = cancelled } else { if task == 1 { task1' = cancelled } else { task2' = cancelled } }
+    if same { status' = cancelled } else {
+      if failedAny { status' = failed } else {
+        if flightAny { status' = running } else { status' = cancelled } } }
+  }
+
+  // Every task in flight becomes cancelled; none is in flight afterwards.
+  on Cancel {
+    require started else reject "no-run"
+    require task0 in { queued, running, evicted } || task1 in { queued, running, evicted } || task2 in { queued, running, evicted }
+      else reject "nothing-in-flight"
+    let same = task0 in { queued, running, evicted, cancelled }
+            && task1 in { queued, running, evicted, cancelled }
+            && task2 in { queued, running, evicted, cancelled }
+    let failedAny = task0 == failed || task1 == failed || task2 == failed
+    if task0 in { queued, running, evicted } { task0' = cancelled }
+    if task1 in { queued, running, evicted } { task1' = cancelled }
+    if task2 in { queued, running, evicted } { task2' = cancelled }
+    if same { status' = cancelled } else { if failedAny { status' = failed } else { status' = cancelled } }
+  }
+
+  invariant completed-only-when-all-completed:
+    status == completed implies (task0 == completed && task1 == completed && task2 == completed)
+  invariant failed-when-any-failed:
+    (task0 == failed || task1 == failed || task2 == failed) implies status == failed
+  invariant final-only-when-none-in-flight:
+    (status == completed || status == cancelled)
+      implies !(task0 in { queued, running, evicted } || task1 in { queued, running, evicted } || task2 in { queued, running, evicted })
+}
