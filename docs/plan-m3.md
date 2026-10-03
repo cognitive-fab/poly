@@ -134,7 +134,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 
 **Step 8 is done.** `experiments/m3/analysis/analyse.mjs` computes PT13's measures per arm and task, the five escaped-defect comparisons by the exact Wilcoxon signed-rank test with Holm's correction (tokens as a second family), and the win (S96), surface and stop rules; a task with no delivered run for an arm is left out of that comparison and listed. `stats.mjs` is tested on known values, and `test/m3-analysis.test.mjs` on synthetic records whose answer is known: a clear win, a reduction that is not significant, a win denied by tokens, a null result, the surface decision each way, a stop, a left-out task, and the four token parts with their cost.
 
-**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 784 files of the experiment (366, the 41 of O1 since M3-9 and the 2 of O1-R since M3-10; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`afcace1`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
+**Step 9, the freeze.** `experiments/m3/freeze.mjs` writes the SHA-256 of all 787 files of the experiment (366, the 3 of the runner's job since the ruling after block 39, the 41 of O1 since M3-9 and the 2 of O1-R since M3-10; since S100 the 86 of the toolchain: poly's package sources without build output, everything under `vendor/` and `package-lock.json`; and since S114 the 289 of the manual, the examples, the toolchain build and arm 2's polygraph), with the git commit it was taken from (`afcace1`), to `experiments/m3/freeze.json`, and one digest per part over its files' paths and digests; `--check` lists any file changed since. The parts, by the first 16 hex digits of their digest:
 
 | Part | Digest |
 |---|---|
@@ -186,7 +186,7 @@ Neither bug was in a mutant: both were in the reference designs. A third referen
 | template | `2d43b4899af7aa53` |
 | controls | `61e3ff5754bbdca3` |
 | adapter | `843a9d1994789861` |
-| runner and prompts | `0ec35362d235515c` |
+| runner and prompts | `c2165e1ca5ddfbfe` |
 | analysis | `8b1eafcbca88b0da` |
 | toolchain (S100) | `246ec34ee8e2dc7f` |
 | manual (S114) | `137da845784fe69b` |
