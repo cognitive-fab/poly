@@ -160,6 +160,18 @@ The arms' folder gained `plugins/synced`, `skills/synced` and a new `.claude.jso
 
 **Hold lifted.** The sync came from a stray interactive session started at 21:25:51 UTC in the owner's login window, which still had `CLAUDE_CONFIG_DIR` set; it began after every block-2 run had finished and passed its check. No run is affected, and blocks 1 and 2 stand. The runner is not changed: its before-check refuses the folder, which is the protection. Before block 3 the stray session is closed, the variable cleared, the synced folders removed (their listing kept as evidence), and the folder check passes. The batch starts from a fresh window.
 
+## After block 39: leftover processes and the overlap flags (2541bad)
+
+**The runner fix is accepted as a reported deviation.** Arm 2's commands moved to the background by the CLI, and processes under `claude.exe` at a cap, outlive the run. They load the machine into later blocks and crashed the cleanup twice. From block 40, the runner tracks every process started under the arm's `claude.exe`, kills any still running with its whole tree when the run ends (never between turns, so what an arm sees within a run is unchanged), deletes the workspace with retries, records a failed cleanup instead of crashing, and lists the killed processes as `leftovers` in run.json. Built with a test that fails first; the freeze is regenerated once; the report states that blocks 1 to 39 ran without it and blocks 40 to 50 with it.
+
+**For blocks 1 to 39**, the report reconstructs from the journals which backgrounded commands outlived their run and which later blocks they overlapped, and says whether those blocks' wall times differ.
+
+**Arm 2's backgrounded commands** (21, against none in the other arms) are a behavioural result and go in the report.
+
+**Overlap flags are reclassified, not cleared.** Each flag of blocks 4 to 39 keeps its raw record and gains a classification: `arm-own (command line)` when the command is a workspace's own test script, with the evidence; `unclassified` for anything not identified, including the `node --use-largepages=off` processes until they are identified. Blocks 1, 2 and 22 stay `genuine`. Wall-time results are reported with and without the blocks that carry a genuine or unclassified flag.
+
+**Order before block 40:** finish scoring the 148 runs (so scoring does not overlap a block), build the runner fix, regenerate the freeze, then the batch resumes at block 40.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
