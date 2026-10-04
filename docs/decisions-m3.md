@@ -172,6 +172,12 @@ The arms' folder gained `plugins/synced`, `skills/synced` and a new `.claude.jso
 
 **Order before block 40:** finish scoring the 148 runs (so scoring does not overlap a block), build the runner fix, regenerate the freeze, then the batch resumes at block 40.
 
+**M3 closed (2026-10-04).** The final report is `docs/m3/report.md` at `2ccb75c`. Verdict under PT13: between. Escaped defects per task were 0, 0, 1.04 and 1.08 for arms 1 to 4, and no comparison was significant. Arms 1 and 2 were at the floor. Poly arms used about 3.5 times arm 1's tokens and fewer than arm 2's. The stop rule was not triggered: 50 of 50 poly runs were admitted. Section 4 is post hoc and outside the freeze. Follow-ups:
+
+- a proposal to make strict the default, starting from the T3 disclosed-range trap;
+- checking the refund amount against PT3.4a;
+- a possible second pre-registered experiment with harder tasks.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
