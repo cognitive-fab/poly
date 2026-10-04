@@ -106,6 +106,14 @@ The decision-table check proves statements a policy states. In M5a, PT8.1 gains 
 - **Checker time.** Over the 712 distinct programs the M3 arms wrote, measured one after another: mean 1.4 s, median 0.19 s, 31 over 10 s; the slowest, `experiments/m3/runs/T9-arm3-run4/deliveries/v3/src/system.poly` (5,645 bytes), took 53 s.
 - **Memory.** One process grew to 2.9 GB while checking 1,438 files in a row. It may be a leak per file checked. It is unexplained, and M6 measures it.
 
+## m4 merged into main
+
+**Ruled and done.** `m4` is merged into `main` without squashing, by the merge commit 34305c8 ("Merge m4 into main: M4 and M5"), whose parents are `main` at d7d2144 and `m4` at 58b0649. a7a7c76 was already an ancestor of f56ca18, so the gate at f56ca18 covered every code change; after it only records changed.
+
+- **The gate at 34305c8, from a clean build:** 1,378 tests, 1,373 pass, 0 fail, 1 skipped, 4 waiting, in 11 min 50 s; the boundary check passes. The two tests more than at f56ca18 come from `main`: the check that a document's title and byline appear once, over the two new proposal documents.
+- **The freeze:** `freeze.mjs --check` at 34305c8 lists `examples`, `toolchain` and `toolchain build` as changed, and no evidence part, as the standing rule of `decisions-m3.md` requires.
+- **Moving `main`:** the main tree at `C:\Users\jjdub\code\poly` was clean and no session was working in it; `git merge --ff-only` moved `main` to 34305c8. The merge was built in a temporary worktree, now removed.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
