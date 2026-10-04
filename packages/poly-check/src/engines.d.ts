@@ -87,3 +87,13 @@ declare module '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs' {
 declare module '@cognitive-fab/polygraph/scripts/replay.mjs' {
   export function replaySpecResults(specPath: string, windows: { action: string; data: unknown; pre: unknown; post: unknown }[]): { ok: boolean; error?: string; results: { status: string; rejectionReason?: string }[] };
 }
+
+// polyflow's library, vendored unchanged (vendor/polyflow, M6): the admission the workflow stage runs (PT10, S165).
+declare module '@cognitive-fab/polyflow-server/library' {
+  export class Library {
+    constructor(dir: string);
+    load(): Library;
+    get(name: string): unknown;
+    certify(wf: unknown, opts?: { maxDepth?: number; maxPaths?: number }): Promise<{ ok: boolean; bounded: boolean; violations: { name?: string; invariant?: string }[]; pathsExplored: number; report: string }>;
+  }
+}

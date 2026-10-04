@@ -18,7 +18,8 @@
     "vendor/sam-pattern",
     "vendor/polygraph",
     "vendor/polyflow/platform/packages/kernel",
-    "vendor/polyflow/platform/packages/verify"
+    "vendor/polyflow/platform/packages/verify",
+    "vendor/polyflow"
   ],
   "scripts": {
     "build": "tsc -b",

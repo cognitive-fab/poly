@@ -1,0 +1,44 @@
+// S165 (M6 step 3): a workflow whose emission paths are longer than polyflow's admission bound (depth 12). Each step
+// emits the next tick, so a run takes fourteen work orders; polyflow's certify would stop at its bound and refuse the
+// workflow, so poly's workflow stage reports it INCONCLUSIVE, never CLEAN.
+module long
+
+machine Counter {
+  state {
+    n : 0..14 = 0
+    started : bool = false
+  }
+
+  terminal n == 14
+
+  action Start()
+  action Ticked()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+    emit tick(1)
+  }
+
+  on Ticked {
+    require started && n < 14 else reject "not-counting"
+    n' = n + 1
+    if n < 13 {
+      emit tick(1)
+    }
+  }
+
+  path property bounded: count("long.tick") <= 14
+
+  effect tick(k: 0..1) {
+    kind "long.tick"
+    labels { read:store }
+    class none
+    ok -> Ticked()
+  }
+}
+
+workflow long-count runs Counter {
+  input Start
+  tool "long.tick" -> ask why "count one more"
+}

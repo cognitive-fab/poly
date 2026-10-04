@@ -177,6 +177,22 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     }
   }
 
+  // ── polyflow.workflow.json (PT10, S165): each workflow that runs this machine, read back against its source ──
+  for (const w of module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === decl.name)) {
+    const file = join(dir, '..', 'workflows', w.name, 'polyflow.workflow.json');
+    if (!existsSync(file)) { out.push(`the descriptor of workflow ${w.name} is missing`); continue; }
+    let got: Record<string, unknown>;
+    try { got = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { out.push(`the descriptor of workflow ${w.name} is not JSON`); continue; }
+    const rel = (f: string) => `../../${module.name}.${decl.name}/${f}`;
+    differ(`polyflow.workflow.json of ${w.name}`, got, {
+      name: w.name,
+      inputAction: w.input,
+      tools: Object.fromEntries(w.tools.map((t) => [t.effect, { tool: t.tool, ...(t.target === null ? {} : { target: t.target }), why: t.why }])),
+      ...(w.key ? { key: { template: w.key.template, fields: Object.fromEntries(w.key.fields.map((f) => [f.name, { pattern: f.pattern }])) } } : {}),
+      contract: rel('contract.json'), machine: rel('next.cjs'), effects: rel('effects.cjs'), manifest: rel('effects.manifest.json'), effectInvariants: rel('effect-invariants.mjs'), invariants: rel('invariants.mjs'),
+    });
+  }
+
   // ── invariants.compose.mjs (PS7.3) ──
   const compose = decl.items.filter((i): i is A.Property => i.kind === 'Property' && i.form === 'compose');
   const composeFile = join(dir, 'invariants.compose.mjs');

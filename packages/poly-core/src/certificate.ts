@@ -67,6 +67,11 @@ export interface Certificate {
     };
     /** PT8, S146: each trust scope's lowered policy document (its digest is under `artefacts`), and the machines it reads. */
     policies: { scope: string; policies: string[]; path: string; reads: string[] }[];
+    /**
+     * PT10, S164: each workflow, run by polyflow outside the gate, so it never reads as covered by it (PA0.4). Its
+     * descriptor's digest is under `artefacts`. Absent in a certificate with no workflow.
+     */
+    workflows?: { name: string; machine: string; runtime: 'polyflow'; gated: false; descriptor: string }[];
     /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */
     keyrings: { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] };
   };

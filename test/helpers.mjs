@@ -1,7 +1,7 @@
 // Shared by the gate tests: parse, check and lower a poly source, and write
 // its artefacts where Node can resolve @cognitive-fab/sam-pattern.
 import { readFileSync, readdirSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { parse } from '@poly/lang';
@@ -40,7 +40,7 @@ export function build(file, name, opts = {}) {
     // One directory per source file: several sources declare intents.OutboxIntent.
     const dir = join(BUILD, name, basename(file, '.poly'), `${module.name}.${machine}`);
     mkdirSync(dir, { recursive: true });
-    for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);
+    for (const [f, text] of Object.entries(lowered.files)) { mkdirSync(dirname(join(dir, f)), { recursive: true }); writeFileSync(join(dir, f), text); }
     out.push({ machine, dir, lowered, module, check });
   }
   return out;

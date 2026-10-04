@@ -32,7 +32,7 @@ import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration' | 'workflow';
 
 export interface StageRecord {
   stage: StageName;
@@ -267,6 +267,32 @@ function byContent(dir: string, file: string): string {
   return copy;
 }
 
+/**
+ * PT10, S165: polyflow admits a workflow only if check-effects over its contract finds no violation and is not bounded
+ * (depth 12, 50,000 paths). The stage runs that admission itself, with the vendored library's certify, so a workflow
+ * poly reports CLEAN is one polyflow admits; a bounded run is INCONCLUSIVE (PL3901), never CLEAN. A violation polyflow
+ * reports is one of the machine's path properties, which the effects stage decides over every path; it is listed here
+ * as polyflow's refusal.
+ */
+async function workflowStage(moduleName: string, w: A.Workflow, mc: MachineCheck, dir: string): Promise<void> {
+  const t0 = performance.now();
+  const engine = '@cognitive-fab/polyflow-server@0.4.2 (certify)';
+  const at = { module: moduleName, machine: mc.machine, node: w.id, line: w.span?.line, col: w.span?.col };
+  const { Library } = await import('@cognitive-fab/polyflow-server/library');
+  const wf = new Library(join(dir, '..', 'workflows')).load().get(w.name);
+  if (!wf) {
+    mc.diagnostics.push(diag('PL2501', at, `polyflow does not load the workflow ${w.name} from its lowered descriptor (addressed to the toolchain, not the author)`, { engine }));
+    mc.stages.push({ stage: 'workflow', status: 'ran', engine, verdict: 'REFUSED', ms: performance.now() - t0 });
+    return;
+  }
+  const c = await new Library(join(dir, '..', 'workflows')).certify(wf);
+  const out: Diagnostic[] = [];
+  if (c.bounded) out.push(diag('PL3901', at, `workflow ${w.name}: polyflow's admission explores at most depth 12 and 50,000 paths, and this machine's emission paths go beyond them, so polyflow would refuse it (S165)`, { engine }));
+  for (const v of c.violations) out.push(diag('PL4001', at, `workflow ${w.name}: polyflow's admission finds a path that violates ${v.invariant ?? v.name ?? 'an effect invariant'}, so it would refuse the workflow (S165)`, { engine }));
+  mc.diagnostics.push(...out);
+  mc.stages.push({ stage: 'workflow', status: 'ran', engine, verdict: verdictOf(out), ms: performance.now() - t0, note: `polyflow ${c.ok ? 'admits' : 'refuses'} ${w.name} (${c.pathsExplored} paths); it runs on polyflow, outside the gate (S164)` });
+}
+
 /** Stages 2c, 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
 function laterStages(checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
   const f = checked.machines.get(machine)!;
@@ -293,7 +319,11 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   // A file left by an earlier build (effects.cjs, effect-invariants.mjs) would be read as this program's (review finding P2).
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);
+  for (const [f, text] of Object.entries(lowered.files)) {
+    // PT10: a workflow's descriptor sits in its own directory under .poly/build/workflows/, written afresh.
+    if (f.startsWith('../workflows/')) { rmSync(dirname(join(dir, f)), { recursive: true, force: true }); mkdirSync(dirname(join(dir, f)), { recursive: true }); }
+    writeFileSync(join(dir, f), text);
+  }
   mc.buildDir = dir;
   mc.artefactDigests = Object.fromEntries(Object.entries(lowered.files).map(([f, text]) => [f, 'sha256:' + createHash('sha256').update(text, 'utf8').digest('hex')]));
   mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'CLEAN', ms: performance.now() - t0 });
@@ -392,6 +422,8 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 3: effects (PS5.4, S33) ─────────────────────────────────────
   if (lowered.files['effects.cjs']) await effectsStage(module, machine, mc, dir, contract, ref, engines);
+  // PT10, S165: each workflow that runs this machine, admitted by polyflow's own gate at its own bounds.
+  for (const w of module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === machine)) await workflowStage(module.name, w, mc, dir);
 
   // ── stage 3b: decisions (PD1.4d, S75) ─────────────────────────────────
   if (ref.model.decisions.size) {
@@ -452,7 +484,7 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
     const cdir = join(root, id);
     rmSync(cdir, { recursive: true, force: true });
     mkdirSync(cdir, { recursive: true });
-    for (const [f, text] of Object.entries(lowered!.files)) writeFileSync(join(cdir, f), text);
+    for (const [f, text] of Object.entries(lowered!.files)) { mkdirSync(dirname(join(cdir, f)), { recursive: true }); writeFileSync(join(cdir, f), text); }
     return { machineId: id, module: join(cdir, 'next.cjs'), contract: join(cdir, 'contract.json') };
   });
   const r = await checkProduct({

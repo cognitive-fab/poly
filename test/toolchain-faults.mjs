@@ -35,6 +35,9 @@ export const FAULT_SOURCES = {
   'skip-claims': ['conformance/m5/refund.poly'],
   // S162: the actions timers start, which the runtime refuses from outside in a scope that requires attribution.
   'drop-timer-target': ['conformance/m5/lineage-timer.poly'],
+  // PT10, S165: the workflow descriptor polyflow reads: a tool mapped to another kind, and a key field's pattern dropped.
+  'workflow-tool': ['conformance/m6/brief.poly'],
+  'workflow-key': ['conformance/m6/brief.poly'],
   // S152: the generated sandbox policy, an artefact the sandbox reads.
   'widen-sandbox': ['conformance/m5/capabilities.poly'],
 };

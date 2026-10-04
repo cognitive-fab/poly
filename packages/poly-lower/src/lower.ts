@@ -15,11 +15,11 @@ export interface LowerOptions {
   isolation?: 'openshell';
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target';
+export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -223,6 +223,10 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   }
   const pathProps = mutated.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'path');
   if (pathProps.length) files['effect-invariants.mjs'] = effectInvariantsModule(m.name, pathProps);
+  // PT10, S165: each workflow that runs this machine gets its descriptor. polyflow's admission needs at least one effect
+  // invariant, so a workflow machine with no path property is refused by polyflow (S172, proposed).
+  const workflows = module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === m.name);
+  for (const w of workflows) files[`../workflows/${w.name}/polyflow.workflow.json`] = JSON.stringify(workflowDescriptor(module.name, m.name, w, opts.fault), null, 2) + '\n';
   // S74: each liveness property's goal (and, for leads to, its start) as a state predicate, for exported witness
   // tests. Its own module, so no engine can take it for an invariant; it is read back like every artefact.
   const live = mutated.items.filter((p): p is A.Liveness => p.kind === 'Liveness' && !p.quant);
@@ -478,6 +482,31 @@ function constValue(e: A.Expr, cx: Cx): unknown {
  * effect-invariants.mjs (PT5): each path property as a predicate over polyrun's Path. `count` is
  * `p.count(kind)`; `before` reads `p.emitted`, the path's intents in order (S37).
  */
+/**
+ * polyflow.workflow.json (PT10, S165), written to .poly/build/workflows/<name>/: polyflow names a workflow by its
+ * directory, and the descriptor names the machine's lowered files beside it, so nothing is copied.
+ */
+export function workflowDescriptor(module: string, machine: string, w: A.Workflow, fault?: Fault): Record<string, unknown> {
+  const rel = (f: string) => `../../${module}.${machine}/${f}`;
+  const tools = w.tools.map((t) => [t.effect, { tool: t.tool, ...(t.target === null ? {} : { target: t.target }), why: t.why }] as [string, Record<string, string>]);
+  // The broken variants the read-back must catch (standing rule on artefacts).
+  if (fault === 'workflow-tool' && tools.length > 1) { const first = tools[0][1].tool; tools[0][1].tool = tools[1][1].tool; tools[1][1].tool = first; }
+  const fields = (w.key?.fields ?? []).map((f) => [f.name, { pattern: f.pattern }] as [string, { pattern: string }]);
+  if (fault === 'workflow-key' && fields.length) fields.shift();
+  return {
+    name: w.name,
+    inputAction: w.input,
+    tools: Object.fromEntries(tools),
+    ...(w.key ? { key: { template: w.key.template, fields: Object.fromEntries(fields) } } : {}),
+    contract: rel('contract.json'),
+    machine: rel('next.cjs'),
+    effects: rel('effects.cjs'),
+    manifest: rel('effects.manifest.json'),
+    effectInvariants: rel('effect-invariants.mjs'),
+    invariants: rel('invariants.mjs'),
+  };
+}
+
 function effectInvariantsModule(machine: string, props: A.Property[]): string {
   const lines = props.map((p) => {
     const conj: string[] = [];

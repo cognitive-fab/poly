@@ -243,10 +243,17 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const kernel = new Set<string>();
   const decisions: Certificate['poly']['decisions'] = [];
   const moduleDigests: Record<string, string> = {};
+  // PT10, S164: the workflows, each run by polyflow outside the gate.
+  const workflows: NonNullable<Certificate['poly']['workflows']> = [];
   for (const r of report.files) {
     if (!r.module || !r.moduleDigest) throw new AdmitError(`${r.file}: no module digest`);
     moduleDigests[r.module] = r.moduleDigest;
     const ast = moduleOf(r.file);
+    for (const w of ast?.decls.filter((d): d is A.Workflow => d.kind === 'Workflow') ?? []) {
+      const m = r.machines.find((x) => x.machine === w.machine);
+      if (!m?.buildDir) throw new AdmitError(`${r.module}: workflow ${w.name} runs ${w.machine}, which was checked without a build`);
+      workflows.push({ name: w.name, machine: `${r.module}.${w.machine}`, runtime: 'polyflow', gated: false, descriptor: rel(dir, join(m.buildDir, '..', 'workflows', w.name, 'polyflow.workflow.json')) });
+    }
     for (const m of r.machines) {
       if (!m.buildDir || !m.instance) throw new AdmitError(`${r.module}.${m.machine}: checked without a build`);
       const id = `${r.module}.${m.machine}`;
@@ -293,7 +300,8 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // PT8: the policies of every scope, as the check lowered them.
   const policyReports = report.files.flatMap((r) => r.policies ?? []);
   for (const p of policyReports) if (!p.artefact) throw new AdmitError(`not admitted: the policies of scope ${p.scope} were not lowered`);
-  const policyPaths = policyReports.map((p) => p.artefact!.path);
+  // The workflow descriptors are artefacts polyflow reads, certified with the policies (PT10, S164).
+  const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor)];
   const artefacts = artefactsOf(dir, machines, opts.fault, policyPaths);
   for (const p of policyReports) {
     if (!opts.fault && artefacts[p.artefact!.path] !== p.artefact!.digest) throw new AdmitError(`not admitted: ${p.artefact!.path} on disk is not the policy the check checked (certified bytes must be the checked bytes)`);
@@ -356,7 +364,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })) },
+    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : []), ...workflows.map((w) => `ungated: polyflow runtime: workflow ${w.name} runs ${w.machine} on polyflow, outside the gate, so its effects are not governed by it (PT10, S164, PA0.4)`)], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
