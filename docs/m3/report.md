@@ -133,7 +133,7 @@ These were recorded in `docs/plan-m3.md` as the runs were scored. They are repor
 
 ### 4.1 T3: range refusals
 
-Three poly runs fail 26 O1 tests and 16 O1-R tests each, the same tests in all three: arm 3 in runs 2 and 4, and arm 4 in runs 2 and 5. A capture or a refund of 0 or of a negative amount is accepted, a refund of 3 units is accepted when 3 were captured, and some random command sequences break the brief's money limits. These are T3's escaped defects in section 2.1. The one escaped defect elsewhere is T7-arm4-run1: `taskTimeout` is not refused for a task other than 0 or 1 (versions 2 and 3, 2 O1 and 4 O1-R tests).
+Four poly runs fail 26 O1 tests and 16 O1-R tests each, the same tests in all four: arm 3 in runs 2 and 4, and arm 4 in runs 2 and 5. A capture or a refund of 0 or of a negative amount is accepted, a refund of 3 units is accepted when 3 were captured, and some random command sequences break the brief's money limits. These are T3's escaped defects in section 2.1. The one escaped defect elsewhere is T7-arm4-run1: `taskTimeout` is not refused for a task other than 0 or 1 (versions 2 and 3, 2 O1 and 4 O1-R tests).
 
 ### 4.2 T1: the refund that needs no answer
 
