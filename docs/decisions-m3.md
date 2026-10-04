@@ -178,6 +178,17 @@ The arms' folder gained `plugins/synced`, `skills/synced` and a new `.claude.jso
 - checking the refund amount against PT3.4a;
 - a possible second pre-registered experiment with harder tasks.
 
+## Freeze after close (2026-10-04)
+
+M3 is closed. Its results are reproduced from the freeze commit b8a8cfb and the analysis commands in the report, not from `main`.
+
+- **Expected to change:** `examples`, `toolchain` and `toolchain build`. Later milestones change them.
+- **Evidence, which must not change:** every other part: the runs, the scored data, the analysis script and `freeze.json`.
+
+**Standing rule.** From now on, a merge into `main` requires `freeze.mjs --check` to report no change for every evidence part. Changes to the three expected parts are listed, not treated as failures. `freeze.mjs` and `freeze.json` are not changed to encode this. The first merge under it, `m4` into `main` at 34305c8, listed `examples`, `toolchain` and `toolchain build` and no evidence part.
+
+**Line endings.** In the M3 tree (`C:\Users\jjdub\code\poly`), two files of the `toolchain` part, `packages/poly-core/package.json` and `packages/poly-check/tsconfig.json`, were checked out with CRLF, and `freeze.json` hashed those bytes; the committed bytes are LF, so a fresh checkout reports the `toolchain` part changed even at `main` before the merge. Both are in an expected part, not evidence. A checkout on Windows already gives the committed bytes: `.gitattributes` has pinned every text file to `eol=lf` since 2d91ba1, before the freeze, and no file's content was changed. `test/m3-freeze-eol.test.mjs` checks the rule in a fresh checkout with `core.autocrlf=true`: every evidence part reports no change. It could not fail first, since the pin was already there, so it is a confirmation test with a seeded control: with `eol=lf` removed from the checkout's `.gitattributes` and the experiment checked out again, the evidence parts change.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.
