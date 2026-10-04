@@ -1,0 +1,32 @@
+// Review of M5b, A-F3: a label that carries two principals (a Principal parameter and the claims principal).
+module t
+
+enum Kind { Person, Agent }
+
+claims Caller {
+  kind: Kind
+  principal: Principal
+}
+
+machine M {
+  state {
+    owner : Principal = none
+    bad   : bool = false
+  }
+  action Claim()
+  action Delegate(to: Principal)
+  action Release()
+  on Release { owner' = none }
+  on Claim() by caller: Caller {
+    require owner == none else reject "taken"
+    owner' = caller.principal
+  }
+  on Delegate(to) by caller: Caller {
+    require owner != none else reject "free"
+    require caller.principal != owner else reject "owner"
+    require to != owner else reject "owner"
+    require to != caller.principal else reject "self"
+    bad' = true
+  }
+  invariant never-bad: bad == false
+}

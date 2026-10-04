@@ -1,0 +1,58 @@
+// Review of M5b (B1, B3): a parent whose action takes claims spawns a child; the child's Start takes claims too, so a
+// creation that runs Start must get its claims from the verifier, never from the caller's data.
+module kids
+
+enum Kind { Person, Agent, Service }
+enum Attest { Verified, Failed, Absent }
+enum ShipStatus { Pending, Sent, Delivered }
+enum OrderStatus { Open, Shipping, Done }
+
+claims Caller {
+  kind: Kind
+  attest: Attest
+  assurance: 0..3
+  principal: Principal
+}
+
+machine Shipment {
+  state {
+    ship  : ShipStatus = Pending
+    owner : Principal  = none
+  }
+  terminal ship == Delivered
+
+  action Start()
+  action Deliver()
+
+  on Start() by c: Caller {
+    require ship == Pending else reject "started"
+    require c.kind == Person else reject "person-required"
+    owner' = c.principal
+  }
+  on Deliver {
+    require ship == Pending else reject "not-pending"
+    ship' = Delivered
+  }
+}
+
+machine Order {
+  state {
+    status : OrderStatus = Open
+    who    : Principal   = none
+  }
+  terminal status == Done
+
+  action Checkout()
+  action Shipped()
+
+  on Checkout() by c: Caller {
+    require status == Open else reject "not-open"
+    who' = c.principal
+    status' = Shipping
+    spawn Shipment as box -> Deliver() on complete -> Shipped
+  }
+  on Shipped {
+    require status == Shipping else reject "not-shipping"
+    status' = Done
+  }
+}

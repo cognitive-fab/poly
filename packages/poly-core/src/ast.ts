@@ -27,7 +27,63 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy;
+
+// ── Policies (PT8, PS8) ────────────────────────────────────────────────────
+
+/**
+ * `policy p { scope "s" … }` (PT8.1): obligations the gate enforces on the proposals of a trust scope. Its
+ * expressions are PX: their inputs are optional, so they have type `Tri` (PT2.3, PS8.0).
+ */
+export interface Policy extends NodeBase {
+  kind: 'Policy';
+  name: string;
+  scope: string;
+  /** S156: `scope "s" requires attribution`: a compensable or irreversible effect needs an origin with claims (PD5.2.3). */
+  requiresAttribution?: true;
+  vars: PolicyVar[];
+  items: PolicyItem[];
+}
+
+/** `var n: T = e`: policy state with a finite domain (PT8.1). */
+export interface PolicyVar extends NodeBase { kind: 'PolicyVar'; name: string; type: TypeExpr; init: Expr }
+
+export type PolicyItem = RuleObligation | MachineObligation | InvariantObligation | Recalled | Never;
+
+/** `obligation o "text" rule { when W require Q else s on unknown u }` (PS8.2). */
+export interface RuleObligation extends NodeBase {
+  kind: 'RuleObligation';
+  name: string;
+  text: string;
+  when: Expr | null;
+  require: Expr;
+  severity: 'deny' | 'warn' | 'escalate';
+  /** null when not written: the default of PS8.2. */
+  onUnknown: 'escalate' | 'deny' | 'skip' | null;
+}
+
+/** `obligation o "text" machine { states … initial … from … deny in … end … }` (PT8.1, PT8.2). */
+export interface MachineObligation extends NodeBase {
+  kind: 'MachineObligation';
+  name: string;
+  text: string;
+  states: string[];
+  initial: string;
+  /** `from s1, s2 when e -> t`; `from *` is every state. */
+  transitions: { from: string[] | '*'; when: Expr; to: string }[];
+  /** `deny in s1, s2 when e reason "r"`. */
+  guards: { in: string[]; when: Expr; reason: string }[];
+  end: string[];
+}
+
+/** `obligation o "text" invariant { e }` over the policy's vars. */
+export interface InvariantObligation extends NodeBase { kind: 'InvariantObligation'; name: string; text: string; expr: Expr }
+
+/** `recalled o "text"`: durable text, not enforced. */
+export interface Recalled extends NodeBase { kind: 'Recalled'; name: string; text: string }
+
+/** `never n "text": allow when e` (S149): the gate never allows a proposal for which e holds; proved, never lowered. */
+export interface Never extends NodeBase { kind: 'Never'; name: string; text: string; when: Expr }
 
 /**
  * `configuration c { … }` (PS13, PT7a): named instances of machines of this module, the inputs the
@@ -51,6 +107,8 @@ export interface ConfigInstance extends NodeBase {
   machine: string[];
   /** Initial values that replace the machine's own, addresses included (PS13.1). */
   init: { field: string; value: Expr }[];
+  /** PS8.7, S160: the trust scope the configuration assigns; absent, the scope is the machine's module. */
+  scope?: string;
 }
 
 /** `x.A`, `g[i].A` or `g[*].A` (S31): an action the environment may inject at those instances. */
@@ -73,6 +131,11 @@ export interface RecordDecl extends NodeBase {
   kind: 'RecordDecl';
   name: string;
   fields: PayloadField[];
+  /**
+   * PD5.1.2: `claims C { f: T … }`, a record of finite fields (enums, integer ranges, `Principal`) that a verifier
+   * outside poly asserts for an action's caller. Absent on a plain record.
+   */
+  claims?: true;
 }
 
 /** `type U = C1 { p: T } | C2` (PT2, PS1.4). */
@@ -200,6 +263,8 @@ export interface Handler extends NodeBase {
   action: string;
   /** The written parameter list, or null when omitted (PT2.4a). */
   params: string[] | null;
+  /** PD5.1.2: `on A(…) by c: C`, the claims the action requires, bound to `c`. */
+  by?: { name: string; type: string };
   body: Stmt[];
 }
 
@@ -250,7 +315,11 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffLabels'; labels: string[] })
   | (NodeBase & { kind: 'EffClass'; value: string })
   | (NodeBase & { kind: 'EffRetry'; attempts: number; base: string; timeout: string })
+  | EffTargets
   | EffOutcomeItem;
+
+/** PT6.5, S151: `targets { egress: "<prefix>" | [ … ], secrets: [ … ], exec: [ … ], store: [ … ] }`, in source order. */
+export type EffTargets = NodeBase & { kind: 'EffTargets'; targets: { key: string; values: string[] }[] };
 
 /** `ok -> A(args)`, or `ok(r) -> A(p: r.x)`, which binds the handler's result (PD1.2b, PD1.2g, S79). */
 export type EffOutcomeItem = NodeBase & { kind: 'EffOutcome'; outcome: 'ok' | 'failed' | 'exhausted'; action: string; args: NamedArg[]; bind?: string };
@@ -304,13 +373,13 @@ export interface PCtor extends NodeBase {
 /** emit, after, cancel, spawn, send, signal (PS2.2, PT6). Parsed in M0, lowered from M1 (PL0901). */
 export interface IntentStmt extends NodeBase {
   kind: 'Intent';
-  op: 'emit' | 'after' | 'cancel' | 'spawn' | 'send' | 'signal' | 'decide';
-  /** emit/after/send/signal: the action or effect name; spawn: the machine; cancel: the timer key; decide: the decision. */
+  op: 'emit' | 'after' | 'cancel' | 'spawn' | 'send' | 'signal' | 'decide' | 'adjudicate';
+  /** emit/after/send/signal: the action or effect name; spawn: the machine; cancel: the timer key; decide, adjudicate: the decision. */
   target: string;
   args: NamedArg[];
   /** send: the address expression. */
   to: Expr | null;
-  /** after: the duration literal; spawn: 'detached' or null. */
+  /** after: the duration literal; spawn: 'detached' or null; adjudicate: 'Correct' or 'Wrong' (PD2.4, S129). */
   modifier: string | null;
   /** after/spawn/send: the `as` name. */
   as: string | null;
@@ -387,4 +456,4 @@ export interface MapLit extends NodeBase { kind: 'MapLit'; entries: { key: Expr;
 /** `[v0, …, vn]` for maps keyed by 0..n (PT2.2, S4). */
 export interface ArrayLit extends NodeBase { kind: 'ArrayLit'; items: Expr[] }
 
-export type AnyNode = Module | Decl | Ctor | PayloadField | TypeExpr | CheckClause | Domain | Field | MachineItem | EffectItem | Param | Stmt | Arm | Pattern | Expr | FairGroup | ConfigInstance | InputRef | ConfigBounds;
+export type AnyNode = Module | Decl | Ctor | PayloadField | TypeExpr | CheckClause | Domain | Field | MachineItem | EffectItem | Param | Stmt | Arm | Pattern | Expr | FairGroup | ConfigInstance | InputRef | ConfigBounds | PolicyVar | PolicyItem;

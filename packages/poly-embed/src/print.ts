@@ -37,10 +37,12 @@ class Printer {
     switch (d.kind) {
       case 'EnumDecl': return `${this.use('enumType')}(${q(d.name)}, [${d.members.map(q).join(', ')}])`;
       case 'TypeDecl': return `${this.use('union')}(${q(d.name)}, { ${d.ctors.map((c) => `${this.key(c.name)}: ${this.fields(c.fields)}`).join(', ')} })`;
-      case 'RecordDecl': return `${this.use('record')}(${q(d.name)}, ${this.fields(d.fields)})`;
+      case 'RecordDecl': return `${this.use(d.claims ? 'claims' : 'record')}(${q(d.name)}, ${this.fields(d.fields)})`;
       case 'Use': return `${this.use('use')}(${q(d.path.join('.'))})`;
       case 'Machine': return this.machine(d, ind);
       case 'Configuration': return this.configuration(d, ind);
+      // PT1.1a: a policy lives in a .policy.poly file; the embedded surface has none (PT2.5).
+      case 'Policy': throw new Error('policy ' + d.name + ' has no embedded form: policies are written in .policy.poly files (PT1.1a)');
     }
   }
 
@@ -117,7 +119,8 @@ class Printer {
     switch (i.kind) {
       case 'Terminal': return `${this.use('terminal')}(${this.arrow(i.expr)})`;
       case 'Action': return `${this.use('action')}(${q(i.name)}, ${this.params(i.params)})`;
-      case 'Handler': return `${this.use('on')}(${q(i.action)}, (${this.p}) => ${this.stmts(i.body, ind)}${i.params ? `, [${i.params.map(q).join(', ')}]` : ''})`;
+      // PD5.1.2: `by c: C` as an options argument; the parameter list is then written, or null.
+      case 'Handler': return `${this.use('on')}(${q(i.action)}, (${this.p}) => ${this.stmts(i.body, ind)}${i.params || i.by ? `, ${i.params ? `[${i.params.map(q).join(', ')}]` : 'null'}` : ''}${i.by ? `, { by: [${q(i.by.name)}, ${q(i.by.type)}] }` : ''})`;
       case 'Guard': return `${this.use('guard')}(${this.arrow(i.cond)}, ${q(i.reason)})`;
       case 'Property': return this.property(i);
       case 'Liveness': return this.liveness(i);
@@ -145,6 +148,8 @@ class Printer {
       case 'EffLabels': return `${this.use('labels')}([${x.labels.map(q).join(', ')}])`;
       case 'EffClass': return `${this.use('cls')}(${q(x.value)})`;
       case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
+      // PT6.5, S151: one entry per key, in source order.
+      case 'EffTargets': return `${this.use('targets')}([${x.targets.map((t) => `[${q(t.key)}, [${t.values.map(q).join(', ')}]]`).join(', ')}])`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
       case 'EffOutcome': {
         const args = x.args.some((a) => readsName(a.value)) ? `(${this.p}) => (${this.args(x.args)})` : this.args(x.args);
@@ -177,6 +182,7 @@ class Printer {
     const opts: string[] = [];
     if (i.count !== null) opts.push(`count: ${i.count}`);
     if (i.init.length) opts.push(`init: (${this.p}) => ({ ${i.init.map((x) => `${this.key(x.field)}: ${this.expr(x.value, 0)}`).join(', ')} })`);
+    if (i.scope !== undefined) opts.push(`scope: ${q(i.scope)}`);
     return `${this.use('instance')}(${q(i.name)}, ${q(i.machine.join('.'))}${opts.length ? `, { ${opts.join(', ')} }` : ''})`;
   }
 
@@ -218,6 +224,7 @@ class Printer {
     switch (s.op) {
       case 'emit': return `${this.use('emit')}(${q(s.target)}, ${this.args(s.args)})`;
       case 'decide': return `${this.use('decide')}(${q(s.target)}, ${this.args(s.args)})`;
+      case 'adjudicate': return `${this.use('adjudicate')}(${q(s.target)}, ${q(s.modifier!)})`;
       case 'after': return `${this.use('after')}(${q(s.modifier!)}, ${q(s.target)}, ${this.args(s.args)}, ${q(s.as!)}${idx})`;
       case 'cancel': return `${this.use('cancel')}(${q(s.target)}${idx})`;
       case 'send': return `${this.use('send')}(${this.expr(s.to!, 0)}, ${q(s.target)}, ${this.args(s.args)}${s.as ? `, ${q(s.as)}` : ''})`;

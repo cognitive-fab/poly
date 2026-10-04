@@ -8,6 +8,7 @@
 // does not have is a spec issue, raised before it is used (M1-6), so an
 // unknown field is refused here rather than silently ignored.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { createPublicKey } from 'node:crypto';
 import { join, relative, sep } from 'node:path';
 
 export interface Manifest {
@@ -19,18 +20,31 @@ export interface Manifest {
   engines?: Record<string, string>;
   /** S72: the effect handler modules `poly lint handlers` reads (PT6.5). */
   handlers?: string[];
+  /** PT6.5, S152: `"openshell"` generates an OpenShell sandbox policy per effect kind. */
+  isolation?: 'openshell';
+  /**
+   * S126: the admission key, named by id and location, never by value. A location is `env:NAME` (a variable
+   * holding the private key, PEM) or `file:PATH` (a file outside version control). No private key is committed.
+   */
+  keys?: { admission: { id: string; location: string } };
+  /**
+   * PT12.5, S150: the people whose keys sign approvals and acceptances, and the agents whose keys never may. A public
+   * key is PEM, or `file:PATH` relative to the project. Admission certifies both keyrings.
+   */
+  people?: { name: string; keyId: string; publicKey: string }[];
+  agents?: { name: string; keyId: string; publicKey: string }[];
 }
 
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation']);
 
 export function parseManifest(text: string, where = 'poly.json'): Manifest {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch (e) { throw new ManifestError(`${where}: not JSON (${(e as Error).message})`); }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ManifestError(`${where}: expected an object`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation)`);
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
   if (!Array.isArray(m.modules) || m.modules.length === 0 || !m.modules.every((x) => typeof x === 'string' && x)) {
@@ -52,7 +66,50 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
       throw new ManifestError(`${where}: "engines" must map engine names to version ranges`);
     }
   }
+  if (m.isolation !== undefined && m.isolation !== 'openshell') throw new ManifestError(`${where}: "isolation" is "openshell" or absent (PT6.5, S152)`);
+  if (m.keys !== undefined) {
+    const k = m.keys as Record<string, unknown>;
+    const a = (k && typeof k === 'object' && !Array.isArray(k) ? k.admission : undefined) as Record<string, unknown> | undefined;
+    const ok = a && typeof a === 'object' && Object.keys(k).length === 1 && Object.keys(a).sort().join(',') === 'id,location'
+      && typeof a.id === 'string' && a.id !== '' && typeof a.location === 'string' && /^(env|file):./.test(a.location);
+    if (!ok) throw new ManifestError(`${where}: "keys" must be { "admission": { "id": "...", "location": "env:NAME" or "file:PATH" } } (S126)`);
+  }
+  const ids = new Set<string>();
+  for (const ring of ['people', 'agents'] as const) {
+    if (m[ring] === undefined) continue;
+    const list = m[ring];
+    const ok = Array.isArray(list) && list.every((h) => h && typeof h === 'object' && !Array.isArray(h) && Object.keys(h).sort().join(',') === 'keyId,name,publicKey'
+      && typeof h.name === 'string' && h.name !== '' && typeof h.keyId === 'string' && h.keyId !== '' && typeof h.publicKey === 'string' && h.publicKey !== '');
+    if (!ok) throw new ManifestError(`${where}: "${ring}" must be a list of { "name", "keyId", "publicKey" } (PT12.5)`);
+    for (const h of list as { keyId: string }[]) {
+      if (ids.has(h.keyId)) throw new ManifestError(`${where}: key ${h.keyId} is named twice across "people" and "agents" (PT12.5)`);
+      ids.add(h.keyId);
+    }
+  }
   return m as unknown as Manifest;
+}
+
+/** PT12.5, S150: the keyrings a manifest names, each public key read (PEM, or `file:PATH` relative to the project). */
+export function keyringsOf(dir: string, manifest: Manifest): { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] } {
+  // Review A3: the text must hold a public key and nothing private. It is parsed, and the SPKI export is what is
+  // certified, so no other text in the file reaches the certificate.
+  const read = (h: { name: string; keyId: string; publicKey: string }) => {
+    const pem = h.publicKey.startsWith('file:') ? readFileSync(join(dir, h.publicKey.slice(5)), 'utf8') : h.publicKey;
+    if (/PRIVATE KEY/.test(pem)) throw new ManifestError(`poly.json: the key of ${h.keyId} holds a private key; a keyring holds public keys only (PT12.5, S126)`);
+    if (!/-----BEGIN PUBLIC KEY-----/.test(pem)) throw new ManifestError(`poly.json: the public key of ${h.keyId} is not a PEM public key (PT12.5)`);
+    let spki: string;
+    try { spki = createPublicKey(pem).export({ type: 'spki', format: 'pem' }).toString().trim(); } catch (e) { throw new ManifestError(`poly.json: the public key of ${h.keyId} does not parse: ${(e as Error).message} (PT12.5)`); }
+    return { name: h.name, keyId: h.keyId, publicKey: spki };
+  };
+  const rings = { people: (manifest.people ?? []).map(read), agents: (manifest.agents ?? []).map(read) };
+  // Review A4: one key is one holder. An agent's key listed again as a person's would sign as that person.
+  const seen = new Map<string, string>();
+  for (const h of [...rings.people, ...rings.agents]) {
+    const other = seen.get(h.publicKey);
+    if (other) throw new ManifestError(`poly.json: ${other} and ${h.keyId} are the same key; a key belongs to one holder in one ring (PT12.5)`);
+    seen.set(h.publicKey, h.keyId);
+  }
+  return rings;
 }
 
 /** A module pattern to a regular expression: `*` within one path segment, `**` across segments. */

@@ -1,0 +1,35 @@
+// Review of M5b, A-F3: a map of principals holds one principal per key, so it counts that many positions.
+module t
+
+enum Kind { Person, Agent }
+
+claims Caller {
+  kind: Kind
+  principal: Principal
+}
+
+machine M {
+  state {
+    slots : map<0..1, Principal> = [none, none]
+    bad   : bool = false
+  }
+  action Put(i: 0..1)
+  action Third()
+  action Reset()
+  on Reset { slots' = [none, none] }
+  on Put(i) by caller: Caller {
+    require slots[0] != caller.principal else reject "dup"
+    require slots[1] != caller.principal else reject "dup"
+    slots' = slots with [i] = caller.principal
+  }
+  // A third distinct caller, while both slots hold distinct principals.
+  on Third() by caller: Caller {
+    require slots[0] != none else reject "empty"
+    require slots[1] != none else reject "empty"
+    require slots[0] != slots[1] else reject "same"
+    require caller.principal != slots[0] else reject "dup"
+    require caller.principal != slots[1] else reject "dup"
+    bad' = true
+  }
+  invariant never-bad: bad == false
+}

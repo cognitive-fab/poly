@@ -1,0 +1,57 @@
+// expect: PL6204 (a send of a decision's completion action; only the outbox worker delivers it, K10)
+module kmsg
+
+enum Branch { Refund, Other }
+enum TicketStatus { New, Routing, Routed, NeedsHuman }
+
+machine Ticket {
+  state { status : TicketStatus = New }
+  terminal status in { Routed, NeedsHuman }
+
+  action Received(text: string check { "hi" })
+  action Routed(branch: Branch, conf: Conf, margin: Conf)
+  action RouteFailed()
+
+  on Received(text) {
+    require status == New else reject "not-new"
+    status' = Routing
+    decide route(text)
+  }
+  on Routed(branch, conf, margin) {
+    require status == Routing else reject "not-routing"
+    status' = Routed
+  }
+  on RouteFailed {
+    require status == Routing else reject "not-routing"
+    status' = NeedsHuman
+  }
+
+  decision route(text: string) -> Branch {
+    provider "jev"
+    labels { egress:external }
+    timeout 800ms
+    ok(r) -> Routed(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> RouteFailed()
+  }
+}
+
+machine Poker {
+  state {
+    done : bool = false
+    peer : Ref<Ticket> = none
+  }
+  terminal done
+
+  action Wire(to: Ref<Ticket>)
+  action Poke()
+
+  on Wire(to) {
+    require peer == none else reject "wired"
+    peer' = to
+  }
+  on Poke {
+    require peer != none && !done else reject "no"
+    done' = true
+    send peer <- RouteFailed()
+  }
+}

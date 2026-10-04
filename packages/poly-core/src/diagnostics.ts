@@ -13,7 +13,10 @@ export type Stage =
   | 'configuration'
   | 'deadlock'
   | 'liveness'
-  | 'lint';
+  | 'lint'
+  | 'policy'
+  | 'runtime'
+  | 'replay';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
 export type DiagSeverity = 'error' | 'finding' | 'inconclusive' | 'warning';
@@ -42,6 +45,12 @@ export const CODES: Record<string, CodeInfo> = {
   PL1203: { name: 'TRI_WHERE_BOOL_EXPECTED', stage: 'types', severity: 'error' },
   PL1204: { name: 'DIVISION_BY_ZERO', stage: 'types', severity: 'error' },
   PL1205: { name: 'CONFIDENCE_NOT_COMPARED', stage: 'types', severity: 'error' },
+  // S101, S127: a reason the runtime uses (PS3.2), so a rejection always says who refused the step.
+  // PD5.1.2b, S109: a Principal used other than by equality, storage or passing.
+  PL1206: { name: 'PRINCIPAL_NOT_OPAQUE', stage: 'types', severity: 'error' },
+  PL1207: { name: 'RESERVED_REJECT_REASON', stage: 'types', severity: 'error' },
+  // M4 review D1: an effect kind with a prefix the toolchain generates (decision.*, outcome.*).
+  PL1208: { name: 'RESERVED_NAME', stage: 'types', severity: 'error' },
   // PT3.4a: a finding a person must accept (PT12.5), not a refusal.
   PL1301: { name: 'DISCLOSED_IRREVERSIBLE_INPUT', stage: 'types', severity: 'finding' },
   // S53: an explicit strict on a parameter of an action with no handler; the runtime never runs the check.
@@ -106,12 +115,53 @@ export const CODES: Record<string, CodeInfo> = {
   PL5404: { name: 'SEND_TO_NONE', stage: 'configuration', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   PL6401: { name: 'AMBIENT_EFFECT_IN_HANDLER', stage: 'lint', severity: 'error' },
+  // S142: an import of a handler file that the certificate cannot name (no such file, outside the project, a URL).
+  PL6402: { name: 'HANDLER_NOT_CERTIFIABLE', stage: 'lint', severity: 'error' },
+  // S142: at load, a certified handler file (or the lockfile) whose bytes are not the certified bytes.
+  PL6403: { name: 'HANDLER_CHANGED', stage: 'runtime', severity: 'error' },
+  // S142: rt.handle given a function that is not an export of a certified handler file the runtime loaded.
+  PL6404: { name: 'HANDLER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },
+  // S134, S151: at run time, a capability call outside its declared bounds (a URL, a redirect hop, a secret name,
+  // a command or a table), refused before the host transport and audited.
+  PL6406: { name: 'CAPABILITY_REFUSED', stage: 'runtime', severity: 'error' },
+  // PT8.4: Polyaxion refuses a policy at admission (not fully mediated, an example that fails, an unreachable discharge).
+  PL6001: { name: 'NOT_FULLY_MEDIATED', stage: 'policy', severity: 'error' },
+  // PT8.4, S161: polycheck reaches a forbidden region over the scope's effects with no gate crossed.
+  PL7001: { name: 'REGION_WITNESS', stage: 'policy', severity: 'finding' },
+  // PT8.5, PS8.6: a mandate no path discharges under the obligations together (the minimal subset is named).
+  // PD5.2.3, S156: in a scope that requires attribution, a compensable or irreversible effect from an origin with no claims.
+  PL6701: { name: 'UNATTRIBUTED_EFFECT', stage: 'policy', severity: 'finding' },
+  PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
+  // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
+  PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },
+  // S149: a policy allows a proposal its own `never` statement forbids.
+  PL6503: { name: 'NEVER_VIOLATED', stage: 'policy', severity: 'finding' },
+  // S150: at load, a people or agents keyring that differs from the one the certificate binds.
+  PL6405: { name: 'KEYRING_CHANGED', stage: 'runtime', severity: 'error' },
   PL6201: { name: 'UNGATED_DECISION', stage: 'effects', severity: 'finding' },
   PL6202: { name: 'DECISION_WITHOUT_FAILURE', stage: 'types', severity: 'error' },
+  // M4 review C5, K10: a send of an action that completes one of the receiver's decisions.
+  PL6204: { name: 'DECISION_COMPLETION_SENT', stage: 'types', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.
   PL6102: { name: 'SHARED_COMPLETION_ACTION', stage: 'types', severity: 'error' },
   // PT6.2: outside a labelled scope an unlabelled effect is a finding.
   PL6301: { name: 'UNLABELLED_EFFECT', stage: 'types', severity: 'finding' },
+  // PS8.4: in a scope whose obligations read labels or class, an effect with no labels (refused at admission).
+  PL6302: { name: 'UNLABELLED_IN_LABELLED_SCOPE', stage: 'policy', severity: 'error' },
+  // PT6.5, S151: a target whose capability the effect's labels do not grant.
+  PL6303: { name: 'TARGET_NOT_GRANTED', stage: 'types', severity: 'error' },
+  // S129: an accepted adjudication reachable without a preceding accepted ok completion of its decision.
+  PL6203: { name: 'ADJUDICATION_WITHOUT_DECISION', stage: 'effects', severity: 'finding' },
+  // S125: a fifo pair, which polyrun's parallel message worker cannot serve; refused at load.
+  PL5405: { name: 'FIFO_WITHOUT_IN_ORDER_WORKER', stage: 'runtime', severity: 'error' },
+  // PT9.7, S119: a worker state or transition that the OutboxIntent machine does not have, in the runtime's CI.
+  PL2401: { name: 'RUNTIME_MODEL_DRIFT', stage: 'runtime', severity: 'finding' },
+  // PS11.4, S131: a post-state that differs from the fold of the journal through the step.
+  PL9001: { name: 'SPEC_DIVERGENCE', stage: 'replay', severity: 'finding' },
+  // S131: a chain, a signed head or an anchor that does not verify.
+  PL9002: { name: 'LEDGER_BROKEN', stage: 'replay', severity: 'finding' },
+  // PD2.2d, S131: a decision completion with no decision event, or with data that differs from it.
+  PL9003: { name: 'DECISION_PROVENANCE', stage: 'replay', severity: 'finding' },
 };
 
 export interface NodeAt {
@@ -131,7 +181,7 @@ export interface WitnessStep {
   /** The kinds of the step's intents, in order, when it emits (PS2.1). */
   effects?: string[];
   /** A global step of a configuration (PS13.3): an input or a delivery, at its instance. */
-  global?: { kind: 'input' | 'deliver'; instance: string; text: string };
+  global?: { kind: 'input' | 'deliver' | 'gate'; instance: string; text: string };
 }
 
 export interface Witness {

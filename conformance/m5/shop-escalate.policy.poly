@@ -1,0 +1,10 @@
+// PT9.2, PT12.5: every till charge needs a person's approval.
+module shop_escalate
+
+policy till-person {
+  scope "shop"
+  obligation charge-needs-person "A person approves every charge." rule {
+    when effect.kind == "till.charge"
+    require false else escalate
+  }
+}

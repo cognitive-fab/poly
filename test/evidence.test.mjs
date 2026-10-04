@@ -108,3 +108,16 @@ test('outbox_check.py v0.3 and v0.2 still print those numbers', (t) => {
   const v2 = script(t, 'outbox_check.py', 'v0.2');
   assert.match(v2, /v0\.2 states 35 accepted steps 40 deadlocks \[\('Allowed', 3, 1, True, False\), \('Allowed', 3, 2, True, True\)\]/);
 });
+
+// PD5-A3 (S102): principal_symmetry.py and poly-ref over conformance/m5/refund.poly agree on the reference's state
+// counts for 2, 3 and 4 representatives; the mutant's witness is checked in claims.test.mjs.
+test('principal_symmetry.py: the reference has 7, 13 and 21 states at 2, 3 and 4 representatives, as poly-ref finds', (t) => {
+  const m = parse(readFileSync(join(ROOT, 'conformance/m5/refund.poly'), 'utf8')).module;
+  assert.deepEqual([2, 3, 4].map((n) => checkMachine(m, 'Refund', { principals: n }).states), [7, 13, 21]);
+  const out = script(t, 'principal_symmetry.py');
+  if (out === null) return;
+  const ref = out.split('== ')[1];
+  for (const [n, s] of [[2, 7], [3, 13], [4, 21]]) assert.match(ref, new RegExp(`n=${n}: states +${s},`));
+  assert.match(out, /mutant: no self-approval require[\s\S]*?witness \['Request\(2\) by p0', 'Approve by Person\/2\/p0'\]/);
+  assert.match(out, /PL1206/);
+});

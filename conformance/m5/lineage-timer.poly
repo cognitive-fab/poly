@@ -1,0 +1,40 @@
+// S162: in a scope that requires attribution, a timer's target is started only by its timer. The hold is started by a
+// step with claims; its timer pays. An outside dispatch of Due would be a step with no origin, so the runtime
+// refuses it before any step, as it refuses a completion's.
+module lt
+
+enum Kind { Person, Agent, Service }
+enum Attest { Verified, Failed, Absent }
+enum Phase { Open, Waiting, Paid }
+
+claims Caller {
+  kind: Kind
+  attest: Attest
+  assurance: 0..3
+  principal: Principal
+}
+
+machine Hold {
+  state { phase : Phase = Open }
+  terminal phase == Paid
+
+  action Start()
+  action Due()
+
+  on Start() by c: Caller {
+    require phase == Open else reject "not-open"
+    phase' = Waiting
+    after 1m -> Due() as due
+  }
+  on Due {
+    require phase == Waiting else reject "not-waiting"
+    phase' = Paid
+    emit pay(1)
+  }
+
+  effect pay(n: 0..1) {
+    kind "lt.pay"
+    labels { egress:external }
+    class irreversible
+  }
+}

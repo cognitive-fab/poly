@@ -1,0 +1,21 @@
+// PT8.5, S148: a mandate two obligations trap together. The order must be reserved before it ends; a rule denies
+// every reserve; an unrelated rule plays no part, so the minimal conflicting subset leaves it out.
+module consistency_policy
+
+policy orders-mandate {
+  scope "orders"
+  obligation fee-free "No fee is charged." rule {
+    when effect.kind == "payment.fee"
+    require false else deny
+  }
+  obligation reserved-by-end "Every session reserves stock before it ends." machine {
+    states waiting, reserved
+    initial waiting
+    from waiting when effect.kind == "stock.reserve" -> reserved
+    end reserved
+  }
+  obligation no-reserve "No stock is reserved." rule {
+    when effect.kind == "stock.reserve"
+    require false else deny
+  }
+}

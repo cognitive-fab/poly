@@ -1,0 +1,25 @@
+{
+  "name": "@poly/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "poly's runtime: the polyrun host with the certificate check at load, the ledger, and the outbox intent worker (PT15, PT16, PT9.7)",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./model": {
+      "types": "./dist/src/model.d.ts",
+      "default": "./dist/src/model.js"
+    }
+  },
+  "dependencies": {
+    "@poly/core": "0.0.0",
+    "@cognitive-fab/polygraph": "8.3.2",
+    "@cognitive-fab/polyflow-kernel": "0.1.0",
+    "@cognitive-fab/polyflow-verify": "0.1.0",
+    "@cognitive-fab/sam-pattern": "2.3.0"
+  }
+}

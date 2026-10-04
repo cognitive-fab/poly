@@ -1,0 +1,16 @@
+{
+  "name": "@cognitive-fab/polyflow-verify",
+  "version": "0.1.0",
+  "description": "The bundle verifier and head signer of the polyflow platform that poly uses, vendored unchanged; see vendor/polyflow/PROVENANCE.md",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "main": "src/verify.mjs",
+  "exports": {
+    ".": "./src/verify.mjs",
+    "./sink": "./src/sink.mjs"
+  },
+  "dependencies": {
+    "@cognitive-fab/polyflow-kernel": "0.1.0"
+  }
+}

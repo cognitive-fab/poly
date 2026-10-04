@@ -37,7 +37,7 @@ export function build(file, name, opts = {}) {
   for (const machine of check.machines.keys()) {
     const { lowered, diagnostics } = lowerMachine(module, check, machine, opts);
     if (!lowered) throw new Error(`${file}: ${diagnostics.map((d) => `${d.code} ${d.message}`).join('; ')}`);
-    // One directory per source file: several sources declare runtime.OutboxIntent.
+    // One directory per source file: several sources declare intents.OutboxIntent.
     const dir = join(BUILD, name, basename(file, '.poly'), `${module.name}.${machine}`);
     mkdirSync(dir, { recursive: true });
     for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);

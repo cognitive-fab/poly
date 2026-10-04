@@ -2,6 +2,8 @@
 // The workspace holds nothing an arm must not see, the budget cut-off stops a run and says so, the journal
 // records every turn, and the scoring reads each delivery. The poly arms' toolchain runs from inside a
 // workspace. No model is called.
+// First: the home is a stand-in, before the runner reads it (m3-home.mjs).
+import './m3-home.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -158,4 +160,14 @@ test('a real run is refused until the freeze is approved, and a pilot until the 
   } finally {
     rmSync(m3, { recursive: true, force: true });
   }
+});
+
+// The m4 gate gives the same answer whatever state the owner's M3 account is in: this file reads the arms' folder
+// from a stand-in home it creates (./m3-home.mjs), never from ~/.poly-m3/claude.
+test('the runner this file loads reads its arms\' folder from a stand-in home, never the owner\'s', async () => {
+  const { userInfo } = await import('node:os');
+  const { ARM_CONFIG_DIR } = await import('../experiments/m3/runner/isolation.mjs');
+  const { STAND_IN_HOME } = await import('./m3-home.mjs');
+  assert.notEqual(ARM_CONFIG_DIR.toLowerCase(), join(userInfo().homedir, '.poly-m3', 'claude').toLowerCase());
+  assert.equal(ARM_CONFIG_DIR, join(STAND_IN_HOME, '.poly-m3', 'claude'));
 });

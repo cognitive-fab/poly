@@ -1,0 +1,8 @@
+// S147: a singleton the policy reads. Switch is a service machine, so the gate reads its latest snapshot.
+module ops
+
+service machine Switch {
+  state { on : bool = true }
+  action Flip()
+  on Flip { on' = !on }
+}

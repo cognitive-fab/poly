@@ -1,0 +1,79 @@
+// The router of PD1.5 with PD2.4's outcomes: a refund is completed, then closed as Correct or reversed as Wrong,
+// and the adjudication is linked by the runtime to the decision event it judges (PD2-A4, S129).
+module support
+
+enum Branch { Refund, Reschedule, Status, Complaint, Other }
+enum TicketStatus { New, Routing, Refunding, Refunded, Reversed, Closed, NeedsHuman, Handled }
+
+machine Ticket {
+  state {
+    status : TicketStatus = New
+    order  : 1..2         = 1
+  }
+  terminal status in { Reversed, Closed, NeedsHuman, Handled }
+
+  action Received(text: string check { "where is my refund" })
+  action Routed(branch: Branch, conf: Conf, margin: Conf)
+  action RouteFailed()
+  action RefundDone()
+  action RefundReversed()
+  action Close()
+
+  on Received(text) {
+    require status == New else reject "not-new"
+    status' = Routing
+    decide route(text)
+  }
+  on Routed(branch, conf, margin) {
+    require status == Routing else reject "not-routing"
+    match branch {
+      Refund => {
+        if conf >= 0.8 && margin >= 0.3 { status' = Refunding   emit refund(order) }
+        else { status' = NeedsHuman }
+      }
+      Other => { status' = NeedsHuman   adjudicate route as Wrong }
+      _ => { status' = Handled   emit reply(branch) }
+    }
+  }
+  on RouteFailed {
+    require status == Routing else reject "not-routing"
+    status' = NeedsHuman
+  }
+
+  on RefundDone {
+    require status == Refunding else reject "not-refunding"
+    status' = Refunded
+  }
+  on RefundReversed {
+    require status == Refunded else reject "not-refunded"
+    status' = Reversed
+    adjudicate route as Wrong
+  }
+  on Close {
+    require status == Refunded else reject "not-refunded"
+    status' = Closed
+    adjudicate route as Correct
+  }
+
+  decision route(text: string) -> Branch {
+    provider "jev"
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Routed(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> RouteFailed()
+  }
+
+  effect refund(order: int) {
+    kind "payments.refund"
+    labels { egress:external }
+    class irreversible
+  }
+  effect reply(branch: Branch) {
+    kind "support.reply"
+    labels { egress:external }
+  }
+
+  path property one-routing: count("decision.route") <= 1
+  path property refund-once: count("payments.refund") <= 1
+  step property refund-needs-margin: (action == Routed && post.status == Refunding) implies (conf >= 0.8 && margin >= 0.3)
+}

@@ -1,6 +1,18 @@
-// The walker behind every exported witness test (PT12.4, S68, S74).
+// The walker behind every exported witness test (PT12.4, S68, S74, S139).
 //
-// Until PT15's runtime API exists (M4), a witness is walked through the lowered artefacts the engines run:
+// The test admits the source as it is now with a witness certificate (S139): the same check and the same
+// certificate format, purpose "witness", the findings listed, signed with a key generated in memory for the run
+// and never stored. It loads the build through the runtime with allowWitness, so every byte it walks is a
+// certified byte, and no build older than the source can make it pass (what S68's stale-build refusal was for).
+// A machine's witness is walked through the runtime API: each step a dispatch, its verdict and post-state the
+// runtime's. A decision's completion is delivered as the worker delivers it, with a decision event, since the
+// runtime refuses it from outside (K10).
+//
+// Two kinds are still walked through the certified lowered artefacts, from the runtime's verified copy, because
+// the runtime API cannot place them (S141): a configuration, whose instances start from the configuration's own
+// initial values, and a machine with attached or detached children, whose children the witness drives as the
+// environment while the runtime would run them. Before the runtime API existed, every witness was walked this
+// way:
 // the SAM module (next.cjs), the effects mapper, and the property modules the engines read (invariants.mjs,
 // effect-invariants.mjs, liveness.mjs). A configuration's instances are walked by a small harness that
 // delivers the witness's messages between the lowered modules, without a store: polyrun has had sendTo since
@@ -14,6 +26,8 @@
 //     longer takes that path;
 //   - after each step, the violated predicate is asserted; the test fails while the defect is there.
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
+import type { PolyRuntime } from '@poly/runtime';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -26,7 +40,7 @@ export interface WitnessStepSpec {
   action: string;
   data: Record<string, unknown>;
   verdict: string;
-  global?: { kind: 'input' | 'deliver'; instance: string; text: string };
+  global?: { kind: 'input' | 'deliver' | 'gate'; instance: string; text: string };
 }
 
 export interface WitnessSpec {
@@ -62,10 +76,10 @@ const stable = (v: unknown): string => (v === null || typeof v !== 'object' ? JS
 const clone = <T>(x: T): T => structuredClone(x);
 
 /** Loads one machine's build and refuses it unless it is the build of the source as it is now (S68). */
-function load(root: string, module: string, machine: string, moduleDigest: string): Lowered {
-  const dir = join(root, '.poly', 'build', `${module}.${machine}`);
+function load(runDir: string, module: string, machine: string, moduleDigest: string): Lowered {
+  const dir = join(runDir, `${module}.${machine}`);
   const contractPath = join(dir, 'contract.json');
-  if (!existsSync(contractPath)) throw new Error(`no build of ${module}.${machine} under ${root}: run poly check first`);
+  if (!existsSync(contractPath)) throw new Error(`no build of ${module}.${machine} under ${runDir}: it is not in the certified build`);
   const contract = JSON.parse(readFileSync(contractPath, 'utf8'));
   if (contract.machineVersion !== moduleDigest) throw new Error(`stale build of ${module}.${machine}: it was built from ${contract.machineVersion}, and the source is now ${moduleDigest}; run poly check first`);
   const mapperPath = join(dir, 'effects.cjs');
@@ -109,19 +123,84 @@ function offers(l: Lowered): { action: string; data: Flat }[] {
   return out;
 }
 
+/** S139: the source as it is now, admitted with a witness certificate under a key that lives only for this run. */
+async function witnessRuntime(spec: WitnessSpec): Promise<PolyRuntime> {
+  const { admitWitness } = await import('./admit.js');
+  const { load: loadRuntime } = await import('@poly/runtime');
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const key = { id: 'witness-run', privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() };
+  const out = join(spec.buildRoot, '.poly', 'witness', `${spec.id.slice('sha256:'.length, 'sha256:'.length + 12)}.certificate.json`);
+  await admitWitness(spec.source, { root: spec.buildRoot, key, out });
+  // The walk's verifier asserts the claims the witness carries (PD5.1.4): the witness was found over them.
+  const verifier = (c: unknown) => (c && typeof c === 'object' && '$witness' in (c as object) ? ((c as { $witness: Record<string, unknown> | null }).$witness ?? null) : null);
+  return loadRuntime(join(spec.buildRoot, '.poly', 'build'), { certificate: out, trust: { [key.id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() }, allowWitness: true, verifier });
+}
+
+/** Whether a machine's handlers spawn children, which a witness drives itself and the runtime would run (S141). */
+function spawnsChildren(decl: Machine): boolean {
+  return JSON.stringify(decl.items.filter((x) => x.kind === 'Handler')).includes('"op":"spawn"');
+}
+
+/**
+ * S139, S141: how an exported test walks its witness: through the runtime API, or, for a configuration or a machine
+ * that spawns children, through the certified lowered artefacts (ruled an M4 limit).
+ */
+export function walkRoute(spec: WitnessSpec): 'runtime' | 'configuration' | 'spawns' {
+  if (spec.configuration) return 'configuration';
+  const text = readFileSync(spec.source, 'utf8');
+  const parsed = spec.source.endsWith('.ts') ? readEmbedded(text, spec.source) : parse(text);
+  const decl = parsed.module?.decls.find((d): d is Machine => d.kind === 'Machine' && d.name === spec.machine);
+  return decl && spawnsChildren(decl) ? 'spawns' : 'runtime';
+}
+
 export async function runWitness(spec: WitnessSpec): Promise<void> {
   const text = readFileSync(spec.source, 'utf8');
   const parsed = spec.source.endsWith('.ts') ? readEmbedded(text, spec.source) : parse(text);
   if (!parsed.module) throw new Error(`${spec.source} does not parse: ${parsed.diagnostics.map((d) => d.message).join('; ')}`);
   const moduleDigest = digest(parsed.module);
-  if (spec.configuration) return walkConfiguration(spec, parsed.module, moduleDigest);
-  return walkMachine(spec, parsed.module, moduleDigest);
+  const rt = await witnessRuntime(spec);
+  try {
+    if (spec.configuration) return await walkConfiguration(spec, parsed.module, moduleDigest, rt);
+    return await walkMachine(spec, parsed.module, moduleDigest, rt);
+  } finally { await rt.close(); }
 }
 
-async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: string): Promise<void> {
+/** S139: one step of a machine's witness through the runtime API, as a host or the worker would take it. */
+async function runtimeStep(rt: PolyRuntime, machineId: string, i: number, s: WitnessStepSpec): Promise<{ verdict: string; post: Flat; refusal?: { rule: string; message: string } }> {
+  const id = 'witness';
+  const actionId = `witness:${i}`;
+  try {
+    const decision = rt.decisionOf(machineId, s.action);
+    let r;
+    if (decision !== null || rt.decisionCompletions(machineId).has(s.action)) {
+      // K10: only the worker delivers a decision's completion, with its decision event; the walk does what it does.
+      if (decision !== null) rt.store.pending.set(`${id}\u0000${actionId}`, { before: [{ kind: 'decision', body: { decision, witness: true, data: s.data } }] });
+      try { r = await rt.kernel.dispatch(id, s.action, s.data, actionId); } finally { rt.store.pending.delete(`${id}\u0000${actionId}`); }
+    } else {
+      // PD5.1.4, review B2: a witness's claims go to the walk's verifier, as a host's credentials would, never as data (S155).
+      const { $claims, ...data } = (s.data ?? {}) as Record<string, unknown>;
+      r = await rt.dispatch(id, s.action, data, { actionId, ...($claims !== undefined ? { credentials: { $witness: $claims } } : {}) });
+    }
+    const verdict = r.stepKind === 'rejected' ? `rejected(${r.rejectReason})` : r.stepKind;
+    return { verdict, post: r.state as Flat };
+  } catch (e) {
+    const rule = (e as { rule?: string }).rule;
+    if (!rule) throw e;
+    return { verdict: `refused(${rule})`, post: (await rt.getState(id)).state as Flat, refusal: { rule, message: (e as Error).message } };
+  }
+}
+
+async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: string, rt: PolyRuntime): Promise<void> {
   const decl = module.decls.find((d): d is Machine => d.kind === 'Machine' && d.name === spec.machine);
   if (!decl) return; // the machine is gone, and its defect with it
-  const l = load(spec.buildRoot, spec.module, spec.machine!, moduleDigest);
+  const l = load(rt.verified.runDir, spec.module, spec.machine!, moduleDigest);
+  const machineId = `${spec.module}.${spec.machine}`;
+  // S139, S141: through the runtime API unless the machine spawns children, which the witness drives itself.
+  const spawns = spawnsChildren(decl);
+  if (!spawns) {
+    await rt.create(machineId, { id: 'witness' });
+    console.log(`# walked through poly-runtime: ${spec.steps.length} step(s) of ${machineId}, under a witness certificate (S139)`);
+  } else console.log(`# walked through the certified lowered artefacts of ${machineId}: it spawns children, which the runtime would run (S141)`);
   const props = await esm(l.dir, 'invariants.mjs');
   const paths = await esm(l.dir, 'effect-invariants.mjs');
   const live = await esm(l.dir, 'liveness.mjs');
@@ -156,7 +235,11 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
     if (cycleStart) visited.push(clone(state));
     const pre = state;
     lastPre = pre;
-    const r = step(l, pre, s.action, s.data);
+    const r: { verdict: string; post: Flat; refusal?: { rule: string; message: string } } = spawns ? step(l, pre, s.action, s.data) : await runtimeStep(rt, machineId, i, s);
+    if (r.refusal?.rule === 'PD2.4') {
+      // PL6203 through the runtime: the adjudication has no decision event to link, and the runtime refuses it.
+      assert.fail(`step ${i + 1}, ${s.action}, adjudicates ${/adjudicates (\w+)/.exec(r.refusal.message)?.[1] ?? 'a decision'} with no decision event (PL6203, PD2.4)`);
+    }
     if (r.verdict !== s.verdict) return; // the program no longer takes this path
     const v = r.verdict.startsWith('rejected') ? { rejected: true, reason: r.verdict.slice(9, -1) } : { rejected: false, reason: null };
     if (spec.code === 'PL3003') {
@@ -234,12 +317,13 @@ async function walkMachine(spec: WitnessSpec, module: Module, moduleDigest: stri
 }
 
 /** A configuration: one lowered module per machine, one flat state per instance, messages as a multiset (PS13.2a). */
-async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest: string): Promise<void> {
+async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest: string, rt: PolyRuntime): Promise<void> {
   const decl = module.decls.find((d): d is Configuration => d.kind === 'Configuration' && d.name === spec.configuration);
   if (!decl) return;
+  console.log(`# walked through the certified lowered artefacts of configuration ${decl.name}: the runtime cannot start instances from a configuration's initial values (S141)`);
   const { instances, groups } = buildConfiguration(module, decl.name);
   const lowered = new Map<string, Lowered>();
-  for (const i of instances) if (!lowered.has(i.machine.name)) lowered.set(i.machine.name, load(spec.buildRoot, spec.module, i.machine.name, moduleDigest));
+  for (const i of instances) if (!lowered.has(i.machine.name)) lowered.set(i.machine.name, load(rt.verified.runDir, spec.module, i.machine.name, moduleDigest));
   const byName = new Map(instances.map((x) => [x.name, x]));
   // S60: an instance a detached spawn creates has no state until then.
   let sigma = new Map(instances.filter((x) => !x.spawned).map((x) => [x.name, flatten(x.init, x.machine)]));
@@ -270,6 +354,8 @@ async function walkConfiguration(spec: WitnessSpec, module: Module, moduleDigest
       if (holds(prop.expr, sigma)) return;
       visited.push({ sigma: new Map(sigma), mu: [...mu] });
     }
+    // PS8.7: a gate's decision on a cross-scope send is not walked by an exported test in M5a; say so, never pass.
+    if (g.kind === 'gate') throw new Error(`the witness takes the gate's ${s.action} on a cross-scope send (PS8.7), which an exported test does not walk in M5a`);
     const inst = byName.get(g.instance)!;
     const l = lowered.get(inst.machine.name)!;
     if (!sigma.has(g.instance)) return; // that instance is no longer created

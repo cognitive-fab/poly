@@ -1,0 +1,59 @@
+// PD5.2 (S105, S155): lineage. A job started by a person's step emits an effect and sets a timer, and on completion
+// sends a message to a peer. The completion's step, the timer's step and the delivered message's step each inherit the
+// starting step's origin and append one hop.
+module lin
+
+enum Kind { Person, Agent, Service }
+enum Attest { Verified, Failed, Absent }
+enum Phase { Idle, Working, Done }
+
+claims Caller {
+  kind: Kind
+  attest: Attest
+  assurance: 0..3
+  principal: Principal
+}
+
+machine Peer {
+  state { pings : 0..1 = 0 }
+  terminal pings == 1
+  action Ping()
+  on Ping { pings' = 1 }
+}
+
+machine Job {
+  state {
+    phase : Phase      = Idle
+    peer  : Ref<Peer>  = none
+    ticks : 0..1       = 0
+  }
+  terminal phase == Done
+
+  action Start(to: Ref<Peer>)
+  action Worked()
+  action Tick()
+
+  on Start(to) by c: Caller {
+    require phase == Idle else reject "started"
+    phase' = Working
+    peer' = to
+    emit work(1)
+    after 1s -> Tick() as tick
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+    send peer <- Ping()
+  }
+  on Tick {
+    require ticks == 0 else reject "ticked"
+    ticks' = 1
+  }
+
+  effect work(n: 0..1) {
+    kind "lin.work"
+    labels { write:store }
+    class reversible
+    ok -> Worked()
+  }
+}

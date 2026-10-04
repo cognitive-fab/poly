@@ -1,0 +1,86 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:147d001a6a2df29d2fe1962b1ab248427ac7609b2024ec7b41053df3eaff69f3",
+  "stateKeys": [
+    {
+      "name": "intent",
+      "type": "{ $: 'Pending' } | { $: 'Proposed', decision: 1..2, attempts: 0..9, rechecks: 0..2 } | { $: 'Escalated', approved: boolean, attempts: 0..9, rechecks: 0..2 } | { $: 'Allowed', attempts: 0..9, rechecks: 0..2 } | { $: 'Running', attempt: 1..10, rechecks: 0..2 } | { $: 'Settled', attempt: 1..10, rechecks: 0..2 } | { $: 'Done' } | { $: 'Denied' } | { $: 'Dead' }"
+    },
+    {
+      "name": "intent_decision",
+      "type": "1..2 | null (payload of Proposed)"
+    },
+    {
+      "name": "intent_attempts",
+      "type": "0..9 | null (payload of Proposed, Escalated, Allowed)"
+    },
+    {
+      "name": "intent_rechecks",
+      "type": "0..2 | null (payload of Proposed, Escalated, Allowed, Running, Settled)"
+    },
+    {
+      "name": "intent_approved",
+      "type": "boolean | null (payload of Escalated)"
+    },
+    {
+      "name": "intent_attempt",
+      "type": "1..10 | null (payload of Running, Settled)"
+    }
+  ],
+  "initState": {
+    "intent": "Pending",
+    "intent_decision": null,
+    "intent_attempts": null,
+    "intent_rechecks": null,
+    "intent_approved": null,
+    "intent_attempt": null
+  },
+  "actions": {
+    "Propose": {
+      "dataFields": {}
+    },
+    "GateAllow": {
+      "dataFields": {}
+    },
+    "GateDeny": {
+      "dataFields": {}
+    },
+    "GateEscalate": {
+      "dataFields": {}
+    },
+    "Approve": {
+      "dataFields": {}
+    },
+    "EscalationTimeout": {
+      "dataFields": {}
+    },
+    "Recheck": {
+      "dataFields": {}
+    },
+    "Start": {
+      "dataFields": {}
+    },
+    "HandlerOk": {
+      "dataFields": {}
+    },
+    "HandlerFailed": {
+      "dataFields": {}
+    },
+    "HandlerFailedPermanent": {
+      "dataFields": {}
+    },
+    "SettleOk": {
+      "dataFields": {}
+    },
+    "SettleFailed": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [
+    "Done",
+    "Denied",
+    "Dead"
+  ],
+  "dataDomain": {},
+  "invariants": "invariants.mjs"
+}

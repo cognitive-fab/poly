@@ -48,6 +48,8 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
   '>': { prec: 5, assoc: 'none' },
   '>=': { prec: 5, assoc: 'none' },
   in: { prec: 5, assoc: 'none' },
+  // PT8.1: `effect.labels has "egress:external"`, a policy's set membership, written as a call `has(s, x)` in the AST.
+  has: { prec: 5, assoc: 'none' },
   is: { prec: 5, assoc: 'none' },
   '==': { prec: 6, assoc: 'none' },
   '!=': { prec: 6, assoc: 'none' },
@@ -56,8 +58,8 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
   implies: { prec: 9, assoc: 'right' },
 };
 
-const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for', 'decide']);
-const LATER_TOP_LEVEL = new Set(['policy', 'workflow', 'world']);
+const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for', 'decide', 'adjudicate']);
+const LATER_TOP_LEVEL = new Set(['workflow', 'world']);
 
 export function parse(src: string): ParseResult {
   const trivia: Trivia = { leading: new Map(), trailing: new Map(), end: [] };
@@ -78,6 +80,7 @@ export function parse(src: string): ParseResult {
     return { module: null, trivia, diagnostics: [diag('PL0001', { line: e.tok.line, col: e.tok.col }, e.message)] };
   }
   assignIds(module as unknown as Record<string, unknown>);
+  for (const a of p.lineAnchors) a.node.id = `${a.owner.id}:${a.slot}`;
   attachComments(module, p.attachable, comments, trivia);
   for (const d of p.laterDiagnostics) d.at.module = module.name;
   return { module, trivia, diagnostics: p.laterDiagnostics };
@@ -88,6 +91,8 @@ class Parser {
   /** Nodes comments may attach to, in document order. */
   readonly attachable: A.NodeBase[] = [];
   readonly laterDiagnostics: Diagnostic[] = [];
+  /** Review D-F6: obligation body lines with no expression (on unknown, states, initial, end), as comment anchors outside the AST. */
+  readonly lineAnchors: { owner: A.NodeBase; slot: string; node: A.NodeBase }[] = [];
 
   constructor(private readonly t: Token[]) {}
 
@@ -129,6 +134,12 @@ class Parser {
   private spanFrom(start: Token): Span {
     const last = this.t[Math.max(0, this.i - 1)];
     return { line: start.line, col: start.col, endLine: last.endLine, endCol: last.endCol };
+  }
+  /** An anchor for the line from `start` to the last token read; its id is set from its owner's after assignIds. */
+  private lineAnchor(start: Token, slot: string, pending: { slot: string; node: A.NodeBase }[]): void {
+    const node: A.NodeBase = { id: '', span: this.spanFrom(start) };
+    this.attachable.push(node);
+    pending.push({ slot, node });
   }
   private node<T extends A.NodeBase>(start: Token, fields: Mk<T>, attach = false): T {
     const n = { id: '', ...fields, span: this.spanFrom(start) } as unknown as T;
@@ -186,9 +197,11 @@ class Parser {
     const start = this.peek();
     if (this.at('type')) return this.typeDecl();
     if (this.at('enum')) return this.enumDecl();
+    if (this.at('claims') && this.peek(1).kind === 'ident') return this.claimsDecl();
     if (this.at('machine')) return this.machine(false);
     if (this.at('service') && this.at('machine', 1)) { this.next(); return this.machine(true, start); }
     if (this.at('configuration') && this.peek(1).kind === 'ident') return this.configuration();
+    if (this.at('policy') && this.peek(1).kind === 'ident') return this.policy();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -198,7 +211,132 @@ class Parser {
       this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
       return null;
     }
-    this.fail('expected a declaration (type, enum, machine, use)');
+    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, use)');
+  }
+
+  /** `policy p { scope "s" var … obligation … recalled … never … }` (PT8.1, S149). */
+  private policy(): A.Policy {
+    const start = this.next();
+    const name = this.dashedName();
+    this.expect('{');
+    this.expect('scope');
+    const scope = this.str('the policy\'s scope');
+    // S156: `requires attribution`.
+    let requiresAttribution = false;
+    if (this.at('requires')) { this.next(); this.expect('attribution'); requiresAttribution = true; }
+    const vars: A.PolicyVar[] = [];
+    const items: A.PolicyItem[] = [];
+    while (!this.atPunct('}')) {
+      const s = this.peek();
+      if (this.at('var')) {
+        this.next();
+        const v = this.ident('a variable');
+        this.expect(':');
+        const type = this.type();
+        this.expect('=');
+        vars.push(this.node<A.PolicyVar>(s, { kind: 'PolicyVar', name: v, type, init: this.expr() }, true));
+      } else if (this.at('obligation')) {
+        this.next();
+        const oname = this.dashedName();
+        const text = this.str('the obligation\'s text');
+        if (this.at('rule')) {
+          this.next();
+          this.expect('{');
+          let when: A.Expr | null = null;
+          if (this.at('when')) { this.next(); when = this.expr(); this.attachable.push(when); }
+          this.expect('require');
+          const require = this.expr();
+          this.attachable.push(require);
+          this.expect('else');
+          const sev = this.ident('deny, warn or escalate');
+          if (sev !== 'deny' && sev !== 'warn' && sev !== 'escalate') this.fail('expected deny, warn or escalate', this.t[this.i - 1]);
+          let onUnknown: A.RuleObligation['onUnknown'] = null;
+          const anchors: { slot: string; node: A.NodeBase }[] = [];
+          if (this.at('on')) {
+            const at = this.peek();
+            this.next();
+            this.expect('unknown');
+            const u = this.ident('escalate, deny or skip');
+            if (u !== 'escalate' && u !== 'deny' && u !== 'skip') this.fail('expected escalate, deny or skip', this.t[this.i - 1]);
+            onUnknown = u;
+            this.lineAnchor(at, 'onUnknown', anchors);
+          }
+          this.expect('}');
+          const rule = this.node<A.RuleObligation>(s, { kind: 'RuleObligation', name: oname, text, when, require, severity: sev, onUnknown }, true);
+          for (const a of anchors) this.lineAnchors.push({ owner: rule, ...a });
+          items.push(rule);
+        } else if (this.at('machine')) {
+          this.next();
+          this.expect('{');
+          const anchors: { slot: string; node: A.NodeBase }[] = [];
+          const atStates = this.peek();
+          this.expect('states');
+          const states = this.identList('a state');
+          this.lineAnchor(atStates, 'states', anchors);
+          const atInitial = this.peek();
+          this.expect('initial');
+          const initial = this.ident('the initial state');
+          this.lineAnchor(atInitial, 'initial', anchors);
+          const transitions: A.MachineObligation['transitions'] = [];
+          const guards: A.MachineObligation['guards'] = [];
+          while (this.at('from') || this.at('deny')) {
+            if (this.at('from')) {
+              this.next();
+              let from: string[] | '*';
+              if (this.atPunct('*')) { this.next(); from = '*'; } else from = this.identList('a state');
+              this.expect('when');
+              const when = this.expr();
+              this.attachable.push(when);
+              this.expect('->');
+              transitions.push({ from, when, to: this.ident('a state') });
+            } else {
+              this.next();
+              this.expect('in');
+              const inStates = this.identList('a state');
+              this.expect('when');
+              const when = this.expr();
+              this.attachable.push(when);
+              this.expect('reason');
+              guards.push({ in: inStates, when, reason: this.str('a reason') });
+            }
+          }
+          const atEnd = this.peek();
+          this.expect('end');
+          const end = this.identList('a state');
+          this.lineAnchor(atEnd, 'end', anchors);
+          this.expect('}');
+          const machine = this.node<A.MachineObligation>(s, { kind: 'MachineObligation', name: oname, text, states, initial, transitions, guards, end }, true);
+          for (const a of anchors) this.lineAnchors.push({ owner: machine, ...a });
+          items.push(machine);
+        } else if (this.at('invariant')) {
+          this.next();
+          this.expect('{');
+          const expr = this.expr();
+          this.expect('}');
+          items.push(this.node<A.InvariantObligation>(s, { kind: 'InvariantObligation', name: oname, text, expr }, true));
+        } else this.fail('expected rule, machine or invariant');
+      } else if (this.at('recalled')) {
+        this.next();
+        const rname = this.dashedName();
+        items.push(this.node<A.Recalled>(s, { kind: 'Recalled', name: rname, text: this.str('the recalled text') }, true));
+      } else if (this.at('never')) {
+        this.next();
+        const nname = this.dashedName();
+        const text = this.str('the statement\'s text');
+        this.expect(':');
+        this.expect('allow');
+        this.expect('when');
+        items.push(this.node<A.Never>(s, { kind: 'Never', name: nname, text, when: this.expr() }, true));
+      } else this.fail('expected var, obligation, recalled or never');
+    }
+    this.next();
+    return this.node<A.Policy>(start, { kind: 'Policy', name, scope, ...(requiresAttribution ? { requiresAttribution: true as const } : {}), vars, items }, true);
+  }
+
+  private identList(what: string): string[] {
+    const out = [this.ident(what)];
+    while (this.atPunct(',')) { this.next(); out.push(this.ident(what)); }
+    return out;
   }
 
   /** `configuration c { instances, inputs, bounds, properties }` (PT2, PT7a, S31). */
@@ -265,11 +403,33 @@ class Parser {
           }
           this.next();
         }
-        instances.push(this.node<A.ConfigInstance>(is, { kind: 'ConfigInstance', name: iname, count, machine, init }, true));
+        // PS8.7, S160: `scope "x"` assigns the instance a trust scope; absent, it is its machine's module.
+        let scope: string | undefined;
+        if (this.at('scope') && this.peek(1).kind === 'string') { this.next(); scope = this.str(); }
+        instances.push(this.node<A.ConfigInstance>(is, { kind: 'ConfigInstance', name: iname, count, machine, init, ...(scope !== undefined ? { scope } : {}) }, true));
       }
     }
     this.next();
     return this.node<A.Configuration>(start, { kind: 'Configuration', name, instances, inputs, bounds, properties }, true);
+  }
+
+  /** `claims C { f: T … }` (PD5.1.2): fields one per line, or separated by commas. */
+  private claimsDecl(): A.RecordDecl {
+    const start = this.next();
+    const name = this.ident('a claims type name');
+    this.expect('{');
+    const fields: A.PayloadField[] = [];
+    while (!this.atPunct('}')) {
+      const fs = this.peek();
+      const fname = this.ident('a claims field');
+      this.expect(':');
+      const type = this.type();
+      // Polywatch: each field is a comment anchor, as a machine's fields are.
+      fields.push(this.node<A.PayloadField>(fs, { kind: 'PayloadField', name: fname, type }, true));
+      if (this.atPunct(',')) this.next();
+    }
+    this.next();
+    return this.node<A.RecordDecl>(start, { kind: 'RecordDecl', name, fields, claims: true }, true);
   }
 
   private typeDecl(): A.TypeDecl | A.RecordDecl {
@@ -484,8 +644,16 @@ class Parser {
           }
           this.next();
         }
+        // PD5.1.2: `by c: C`, the claims the action requires.
+        let by: A.Handler['by'];
+        if (this.at('by')) {
+          this.next();
+          const bname = this.ident('the name of the claims');
+          this.expect(':');
+          by = { name: bname, type: this.ident('a claims type') };
+        }
         const body = this.block();
-        return this.node<A.Handler>(start, { kind: 'Handler', action, params, body }, true);
+        return this.node<A.Handler>(start, { kind: 'Handler', action, params, ...(by ? { by } : {}), body }, true);
       }
       case 'guard': {
         this.next();
@@ -645,9 +813,27 @@ class Parser {
         const timeout = this.duration();
         this.expect('}');
         items.push(this.effItem(is, { kind: 'EffRetry', attempts, base, timeout }));
+      } else if (w === 'targets') {
+        // PT6.5, S151: each key names a capability; its value is one string or a list of strings.
+        this.expect('{');
+        const targets: { key: string; values: string[] }[] = [];
+        while (!this.atPunct('}')) {
+          const key = this.ident('a target kind');
+          this.expect(':');
+          const values: string[] = [];
+          if (this.atPunct('[')) {
+            this.next();
+            while (!this.atPunct(']')) { values.push(this.str('a target')); if (!this.atPunct(']')) this.expect(','); }
+            this.next();
+          } else values.push(this.str('a target'));
+          targets.push({ key, values });
+          if (!this.atPunct('}')) this.expect(',');
+        }
+        this.next();
+        items.push(this.effItem(is, { kind: 'EffTargets', targets }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
         items.push(this.outcome(is, w));
-      } else this.fail('expected kind, labels, class, retry, ok, failed or exhausted', is);
+      } else this.fail('expected kind, labels, targets, class, retry, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);
@@ -896,6 +1082,13 @@ class Parser {
         base.target = this.ident('a decision name');
         base.args = this.args();
         break;
+      case 'adjudicate':
+        // PD2.4, S129: `adjudicate d as Correct | Wrong`.
+        base.target = this.ident('a decision name');
+        this.expect('as');
+        if (!this.at('Correct') && !this.at('Wrong')) this.fail('expected Correct or Wrong');
+        base.modifier = this.ident();
+        break;
       case 'signal':
         base.extra.push(this.ident('a child key'));
         base.index = index();
@@ -940,7 +1133,7 @@ class Parser {
       }
       return tok.text in BINARY ? tok.text : null;
     }
-    if (tok.kind === 'ident' && (tok.text === 'implies' || tok.text === 'in' || tok.text === 'is')) return tok.text;
+    if (tok.kind === 'ident' && (tok.text === 'implies' || tok.text === 'in' || tok.text === 'is' || tok.text === 'has')) return tok.text;
     return null;
   }
 
@@ -959,6 +1152,9 @@ class Parser {
         const ctors = [this.ident('a constructor')];
         while (this.atPunct('|')) { this.next(); ctors.push(this.ident('a constructor')); }
         left = this.node<A.Is>(start, { kind: 'Is', expr: left, ctors });
+      } else if (op === 'has') {
+        const right = this.binary(info.prec - 1, noStruct, arrow);
+        left = this.node<A.Call>(start, { kind: 'Call', callee: 'has', args: [left, right] });
       } else if (op === 'in') {
         this.expect('{');
         const set: A.Expr[] = [];

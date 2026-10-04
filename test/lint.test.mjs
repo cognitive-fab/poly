@@ -61,7 +61,7 @@ test('S72: a violating handler refuses the project; a clean one leaves its verdi
   assert.deepEqual(bad.handlers.diagnostics.map((d) => d.code), ['PL6401']);
   assert.equal(bad.verdict, 'REFUSED');
   const good = await checkProject(project('good', ['handlers/*.ts'], { 'charge.ts': 'export const charge = (p, caps) => caps.egress.post("/c", p);\n' }));
-  assert.deepEqual(good.handlers, { status: 'ran', files: 1, diagnostics: [] });
+  assert.deepEqual([good.handlers.status, good.handlers.files, good.handlers.diagnostics, good.handlers.roots], ['ran', 1, [], ['handlers/charge.ts']]);
   assert.equal(good.verdict, good.files[0].verdict);
 });
 

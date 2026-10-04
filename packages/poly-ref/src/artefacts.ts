@@ -41,10 +41,12 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
   const handled = M.actions.filter((a) => M.handlers.has(a.name));
   differ('contract.json actions', Object.keys(contract.actions), handled.map((a) => a.name));
   for (const a of handled) {
-    differ(`contract.json actions.${a.name}.dataFields`, Object.keys(contract.actions[a.name]?.dataFields ?? {}), a.params.map((p) => p.name));
-    if (!a.params.length) continue;
-    // D(a) per parameter (PS1.1): its check domain, or every value of its type, encoded as the runtime sees it.
-    const want = Object.fromEntries(a.params.map((p) => [p.name, (p.check ?? valuesOf(p.type, M)).map((v) => flatValue(v, p.type, M))]));
+    differ(`contract.json actions.${a.name}.dataFields`, Object.keys(contract.actions[a.name]?.dataFields ?? {}), [...a.params.map((p) => p.name), ...(a.claims ? ['$claims'] : [])]);
+    if (!a.params.length && !a.claims) continue;
+    // D(a) per parameter (PS1.1): its check domain, or every value of its type, encoded as the runtime sees it; and
+    // the claims over the principal representatives (PD5.1.3c, S155).
+    const want: Record<string, unknown[]> = Object.fromEntries(a.params.map((p) => [p.name, (p.check ?? valuesOf(p.type, M)).map((v) => flatValue(v, p.type, M))]));
+    if (a.claims) want.$claims = valuesOf(a.claims.type, M).map((v) => flatValue(v, a.claims!.type, M));
     differ(`contract.json dataDomain.${a.name}`, contract.dataDomain?.[a.name], want);
   }
 
@@ -72,7 +74,19 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     else {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { effects: Record<string, Record<string, unknown>> };
       const byKind = new Map(effects.map((e) => [M.effects.get(e.name)!.kind, e]));
-      differ('effects.manifest.json kinds', Object.keys(manifest.effects).sort(), [...byKind.keys(), ...decisions.map((d) => M.decisions.get(d.name)!.kind)].sort());
+      // PD2.4, S129: an adjudicated decision's outcome kind, read from the handlers here, not from the lowering.
+      const judged = new Set<string>();
+      const walk = (body: A.Stmt[]): void => { for (const s of body) { if (s.kind === 'Intent' && s.op === 'adjudicate') judged.add(s.target); if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); } if (s.kind === 'Match') for (const a of s.arms) walk(a.body); if (s.kind === 'For') walk(s.body); } };
+      for (const h of M.handlers.values()) walk(h.body);
+      // S162: the actions timers start, read from the handlers here, not from the lowering.
+      const timed = new Set<string>();
+      const walkTimers = (body: A.Stmt[]): void => { for (const s of body) { if (s.kind === 'Intent' && s.op === 'after') timed.add(s.target); if (s.kind === 'If') { walkTimers(s.then); walkTimers(s.else ?? []); } if (s.kind === 'Match') for (const a of s.arms) walkTimers(a.body); if (s.kind === 'For') walkTimers(s.body); } };
+      for (const h of M.handlers.values()) walkTimers(h.body);
+      differ('effects.manifest.json timerTargets', (manifest as { timerTargets?: string[] }).timerTargets ?? [], [...timed].sort());
+      differ('effects.manifest.json kinds', Object.keys(manifest.effects).sort(), [...byKind.keys(), ...decisions.map((d) => M.decisions.get(d.name)!.kind), ...[...judged].map((d) => `outcome.${d}`)].sort());
+      for (const d of judged) {
+        differ(`effects.manifest.json outcome.${d}`, manifest.effects[`outcome.${d}`] ?? null, { payloadSchema: { outcome: { type: 'string', required: true } }, retry: { maxAttempts: 1, baseMs: 500, timeoutMs: 30000 }, class: 'none', outcome: { decision: d } });
+      }
       for (const [kind, e] of byKind) {
         const entry = manifest.effects[kind];
         if (!entry) continue;
@@ -84,9 +98,12 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
           differ(`effects.manifest.json ${kind}.${hook}`, entry[hook], outcome(it));
         }
         const retry = e.items.find((x): x is A.EffectItem & { kind: 'EffRetry' } => x.kind === 'EffRetry');
-        differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, retry ? { maxAttempts: retry.attempts, baseMs: durationMs(retry.base), timeoutMs: durationMs(retry.timeout) } : null);
+        differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, retry ? { maxAttempts: retry.attempts, baseMs: durationMs(retry.base), timeoutMs: durationMs(retry.timeout) } : { maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }); // PT6.1, S137
         const labels = e.items.find((x): x is A.EffectItem & { kind: 'EffLabels' } => x.kind === 'EffLabels');
         differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, labels ? labels.labels : null);
+        // S151: the capability bounds, read back exactly: a wider prefix in the manifest is a wider capability at run time.
+        const targets = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
+        differ(`effects.manifest.json ${kind}.targets`, entry.targets ?? null, targets ? Object.fromEntries(targets.targets.map((t) => [t.key, t.values])) : null);
         differ(`effects.manifest.json ${kind}.class`, entry.class, M.effects.get(e.name)!.cls);
       }
       // PD1.7: a decision, tried once within its timeout, class none; a timeout is its failure.
@@ -111,6 +128,37 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}) });
       }
     }
+  }
+
+  // ── openshell.policies.yaml (PT6.5, S152): present only when isolation is asked for; then exactly the source's ──
+  const sandboxFile = join(dir, 'openshell.policies.yaml');
+  if (existsSync(sandboxFile)) {
+    let got: unknown = null;
+    try { got = JSON.parse(readFileSync(sandboxFile, 'utf8')); } catch { out.push('openshell.policies.yaml is not readable'); }
+    const want: Record<string, unknown> = {};
+    const m = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === M.name)!;
+    for (const e of [...m.items.filter((x): x is A.EffectDecl => x.kind === 'EffectDecl')].sort((x, y) => (M.effects.get(x.name)!.kind < M.effects.get(y.name)!.kind ? -1 : 1))) {
+      const labels = new Set(e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])));
+      const t = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
+      const of = (k: string) => t?.targets.find((x) => x.key === k)?.values ?? [];
+      const prefixes = labels.has('egress:external') || labels.has('egress:public') ? of('egress') : [];
+      const secrets = labels.has('read:private') ? of('secrets') : [];
+      const endpoints: unknown[] = [];
+      for (const p of prefixes) {
+        const u = new URL(p);
+        const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
+        const globs = u.pathname.endsWith('/') ? [u.pathname + '**'] : [u.pathname, u.pathname + '/**'];
+        for (const g of globs) for (const s of secrets.length ? secrets : [null]) endpoints.push({ host: u.hostname, port, path: g, protocol: 'rest', access: 'full', ...(s ? { credential_binding: { provider: s } } : {}) });
+      }
+      want[M.effects.get(e.name)!.kind] = {
+        version: 1,
+        filesystem_policy: { include_workdir: false, read_only: ['/usr', '/lib', '/etc/ssl'], read_write: ['/sandbox/scratch'] },
+        landlock: { compatibility: 'hard_requirement' },
+        process: { run_as_user: 'sandbox', run_as_group: 'sandbox' },
+        network_policies: endpoints.length ? { egress: { endpoints, binaries: [{ path: '**/node' }] } } : {},
+      };
+    }
+    if (got !== null) differ('openshell.policies.yaml', got, want);
   }
 
   // ── effect-invariants.mjs (PS5.4) ──

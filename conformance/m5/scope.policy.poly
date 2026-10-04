@@ -1,0 +1,10 @@
+// PT9.9: scope sa may ping scope sb, and may not shout at it.
+module scope_policy
+
+policy sa-sends {
+  scope "sa"
+  obligation no-shouting "No message to scope sb but a ping." rule {
+    when proposal.kind == "send" && send.scope == "sb"
+    require send.action == "Ping" else deny
+  }
+}

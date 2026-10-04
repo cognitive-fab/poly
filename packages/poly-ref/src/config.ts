@@ -30,6 +30,7 @@ import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
 import { createHash } from 'node:crypto';
 import { buildMachine, inCheckDomain, inType, valuesOf, type RMachine } from './model.js';
 import { fairCycles, type FairGroup } from './liveness.js';
+import { antecedents, judge, type Members, type Vacuous } from './vacuity.js';
 import { transition, initialState, isTerminal } from './step.js';
 import { AbsentInstance, evaluate, evaluateAt, type GlobalView } from './eval.js';
 import { explore, pathTo, type Edge, type Graph, type Label, type Outcome, type System } from './explore.js';
@@ -43,6 +44,18 @@ export interface Message {
   data: Record<string, Value>;
   /** S60: the creation action of a detached child, delivered before any other message to it. */
   creation?: boolean;
+  /**
+   * PS8.7: a message between instances of different trust scopes waits for the gate: `pending`, then delivered
+   * (allow), turned into SendDenied (deny) or `held` (escalate), and a held one is delivered (approved) or denied.
+   * `from` is its sender. Absent on a message within one scope.
+   */
+  gate?: 'pending' | 'held';
+  from?: number;
+  /**
+   * PD5.2.3, S105: the message's origin class, the claims that started its chain and that step's intent. Absent when
+   * the chain started with no claims. No hop is kept: nothing a property or policy reads depends on one.
+   */
+  origin?: { claims: Value; intent: string };
 }
 
 export interface GlobalState {
@@ -62,11 +75,13 @@ export interface ConfigInstance {
   spawned: { parent: number; key: string } | null;
   /** S60: its name as a member of its group, `Worker[0]`, when it is spawned. */
   member: string | null;
+  /** PS8.7, S160: its trust scope: the configuration's assignment, or its machine's module. */
+  scope: string;
 }
 
 /** A global step's label: the step at its instance, and what kind of global step it was (PS13.3). */
 export interface GlobalLabel extends Label {
-  via: 'input' | 'deliver';
+  via: 'input' | 'deliver' | 'gate';
   instance: number;
   /** A send of this step to none (S29). */
   toNone: boolean;
@@ -99,9 +114,11 @@ export interface ConfigReport {
   liveness: string[];
   capHit: boolean;
   graph: Graph<GlobalState>;
+  /** PT12.3, S128: properties whose antecedent is never true in any explored global state. */
+  vacuous: Vacuous[];
 }
 
-const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
+const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
 export function buildConfiguration(module: Module, name: string): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
@@ -117,7 +134,7 @@ export function buildConfiguration(module: Module, name: string): { decl: A.Conf
   for (const i of decl.instances) {
     const M = machineOf(i.machine);
     const names = i.count === null ? [i.name] : Array.from({ length: i.count }, (_, k) => `${i.name}[${k}]`);
-    for (const n of names) instances.push({ name: n, group: i.count === null ? null : i.name, machine: M, init: {}, spawned: null, member: null });
+    for (const n of names) instances.push({ name: n, group: i.count === null ? null : i.name, machine: M, init: {}, spawned: null, member: null, scope: i.scope ?? module.name });
   }
   // S60: the instances detached spawns can create within N, breadth first; those of machine T are the group T.
   const declared = instances.length;
@@ -130,7 +147,7 @@ export function buildConfiguration(module: Module, name: string): { decl: A.Conf
       for (const d of instances[p].machine.detached) {
         const k = members.get(d.machine) ?? 0;
         members.set(d.machine, k + 1);
-        instances.push({ name: `${instances[p].name}/${d.key}`, group: d.machine, machine: machineOf([d.machine]), init: {}, spawned: { parent: p, key: d.key }, member: `${d.machine}[${k}]` });
+        instances.push({ name: `${instances[p].name}/${d.key}`, group: d.machine, machine: machineOf([d.machine]), init: {}, spawned: { parent: p, key: d.key }, member: `${d.machine}[${k}]`, scope: module.name });
         next.push(instances.length - 1);
       }
     }
@@ -205,8 +222,12 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       inputs.push({ instance: k, action: r.action, data: dataOf(instances[k].machine, r.action) });
     }
   }
-  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
+  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin']): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
     const inst = instances[k];
+    // PD5.2.2a: an input with claims starts a chain whose origin class is its claims and its intent; a delivered message's
+    // step inherits the message's origin class.
+    const claimed = inst.machine.actions.find((x) => x.name === action)?.claims;
+    const origin: Message['origin'] = via === 'input' ? (claimed && data.$claims !== undefined && data.$claims !== null ? { claims: data.$claims, intent: `${inst.machine.id}.${action}` } : undefined) : from;
     const st = transition(inst.machine, s.sigma[k]!, action, data, inst.name);
     const sigma = [...s.sigma];
     sigma[k] = st.next;
@@ -225,14 +246,15 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
         if (sigma.filter((y) => y !== null).length + 1 > N) { over = true; break; }
         if (t === undefined) throw new Error(`poly-ref: ${inst.name} creates ${x.address}, which is outside the instances the bound admits`);
         sigma[t] = instances[t].init;
-        if (x.create) next.push({ target: t, action: x.create.action, data: x.create.data, creation: true });
+        if (x.create) next.push({ target: t, action: x.create.action, data: x.create.data, creation: true, ...(origin ? { origin } : {}) });
         continue;
       }
       if (x.type !== 'send') continue; // S61: other intents are completed only through declared inputs
       if (x.target === null) { toNone = true; continue; } // S29: nothing joins μ
       const t = index.get(x.target as string);
       if (t === undefined || sigma[t] === null) throw new Error(`poly-ref: ${inst.name} sends to ${keyOf(x.target)}, which is no instance of the configuration`);
-      next.push({ target: t, action: x.action, data: x.data });
+      // PS8.7: a send between two trust scopes waits for the gate.
+      next.push({ ...(inst.scope !== instances[t].scope ? { target: t, action: x.action, data: x.data, gate: 'pending' as const, from: k } : { target: t, action: x.action, data: x.data }), ...(origin ? { origin } : {}) });
     }
     const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone, ...(creation ? { creation } : {}) };
     const g: GlobalState = { sigma, mu: sortMu(next) };
@@ -268,7 +290,17 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
         const key = msgKey(m);
         if (seen.has(key) || (!m.creation && waiting.has(m.target))) return;
         seen.add(key);
-        out.push(step(s, m.target, m.action, m.data, [...s.mu.slice(0, j), ...s.mu.slice(j + 1)], 'deliver', m.creation === true));
+        const rest = [...s.mu.slice(0, j), ...s.mu.slice(j + 1)];
+        out.push(step(s, m.target, m.action, m.data, rest, 'deliver', m.creation === true, m.origin));
+        if (m.gate) {
+          // PS8.7, PS4.4: the gate's decision is an environment choice: deny delivers SendDenied to the sender, as an
+          // ordinary message; escalate holds the message, which is then approved (delivered) or timed out (denied).
+          const reason = m.gate === 'held' ? 'escalation-timeout' : 'denied';
+          const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason }, ...(m.origin ? { origin: m.origin } : {}) };
+          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu) } }) as Outcome<GlobalState> });
+          out.push(gateStep('deny', [...rest, denied]));
+          if (m.gate === 'pending') out.push(gateStep('escalate', [...rest, { ...m, gate: 'held' }]));
+        }
       });
       return out;
     },
@@ -384,7 +416,23 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     else findings.push(finding('PL3901', undefined, `${o.field} can leave its check domain (value ${keyOf(o.value)}); the state is not explored`, path, { field: o.field, state: o.state }));
   }
   if (g.capHit) findings.push(finding('PL3901', undefined, `exploration stopped at ${g.states.length} global states`, []));
+
+  // PT12.3, S128: a configuration property is judged over the global states, and under a quantifier for every
+  // member of its group that exists (S60).
+  const groupMembers: Members = (env, group) => env.global?.groups.get(group) ?? [];
+  const states = () => g.states.map(envOf);
+  const vacuous: Vacuous[] = [];
+  for (const p of decl.properties) {
+    const list = p.kind === 'Liveness'
+      ? (p.from ? [{ parts: [p.from], quant: p.quant }] : [])
+      : antecedents(p.expr);
+    for (const a of list) {
+      const v = judge(a, states, groupMembers);
+      if (v) { vacuous.push({ property: p.name, id: p.id, parts: a.parts, ...v }); break; }
+    }
+  }
   return {
+    vacuous,
     configuration: decl.name,
     states: g.states.length,
     transitions: g.edges.length,
@@ -437,6 +485,8 @@ export function inputData(instances: ConfigInstance[], M: RMachine, action: stri
     const vs = p.check ?? (p.type.k === 'ref' ? [null, ...instances.filter((x) => x.machine.name === (p.type as { machine: string }).machine).map((x) => x.name)] : valuesOf(p.type, M));
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
+  // PD5.1.2c: an input with claims offers every claims value, as a machine's check does.
+  if (a.claims) { const cs = valuesOf(a.claims.type, M); recs = recs.flatMap((r) => cs.map((c) => ({ ...r, $claims: c }))); }
   return recs;
 }
 

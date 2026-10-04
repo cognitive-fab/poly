@@ -12,6 +12,7 @@ import { isTerminal } from './step.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
+import { antecedents, judge, type Members, type Vacuous } from './vacuity.js';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
 const CODE = {
@@ -25,6 +26,7 @@ const CODE = {
   PL4001: ['PATH_PROPERTY', 'finding', 'effects'],
   PL4002: ['EMIT_WITHOUT_STATE_CHANGE', 'finding', 'effects'],
   PL6201: ['UNGATED_DECISION', 'finding', 'effects'],
+  PL6203: ['ADJUDICATION_WITHOUT_DECISION', 'finding', 'effects'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -32,6 +34,8 @@ export const ENGINE = 'poly-ref@0.0.0';
 export interface InstanceLine {
   fields: { name: string; domain: string }[];
   params: { name: string; domain: string }[];
+  /** PD5.1.3c: the principal representatives, when the machine has claims or Principal fields. */
+  principals?: number;
 }
 
 export interface MachineReport {
@@ -50,14 +54,18 @@ export interface MachineReport {
   model: RMachine;
   /** S33: every accepted edge that emits and leaves the state unchanged, the steps PL4002 is about. */
   identityEmits: Edge<State>[];
+  /** PT12.3, S128: properties whose antecedent is never true where they are judged. */
+  vacuous: Vacuous[];
 }
 
 export interface CheckOptions {
   maxStates?: number;
+  /** PD5.1.3c: the number of principal representatives, forced (a control); by default the rule's count. */
+  principals?: number;
 }
 
 export function checkMachine(module: Module, machineName: string, opts: CheckOptions = {}): MachineReport {
-  const M = buildMachine(module, machineName);
+  const M = buildMachine(module, machineName, { principals: opts.principals });
   const g = explore(machineSystem(M), opts.maxStates);
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, machine: M.name, ...(node ? { node } : {}) });
@@ -172,6 +180,15 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     }
   }
 
+  // PD2.4, S129: an accepted adjudication of d is reachable only after an accepted ok completion of d on the same
+  // path, or the runtime would have no decision event to link the outcome to. Decided on the product of the graph
+  // with one bit per decision, "taken"; BFS gives a shortest witness.
+  const ds = [...M.decisions.values()].map((x) => ({ name: x.name, kind: x.kind, ok: x.ok?.action ?? null }));
+  for (const d of M.decisions.values()) {
+    const hit = adjudicationWithoutDecision(g, d.name, ds);
+    if (hit) findings.push(finding('PL6203', d.id, `${hit[hit.length - 1].label.action} adjudicates ${d.name} on a path where no ${d.ok?.action ?? 'ok completion'} answering ${d.name} was accepted, so there is no decision to link the outcome to (PD2.4)`, trace(hit), { property: d.name, state: g.states[hit[hit.length - 1].from] }));
+  }
+
   // Liveness (PS6.4): each fair component that never reaches the goal, with its lasso.
   for (const p of M.liveness) {
     if (p.quant || !p.fair) continue; // refused by the checker in a machine (S56)
@@ -204,7 +221,10 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     });
   }
 
+  const vacuous = machineVacuity(M, g);
+
   return {
+    vacuous,
     machine: M.name,
     states: g.states.length,
     transitions: g.edges.length,
@@ -217,6 +237,44 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
     model: M,
     identityEmits,
   };
+}
+
+/**
+ * PL6203: the shortest path to an accepted step that adjudicates `decision` before the runtime has a decision event
+ * for it. Decided on the product of the graph with two bits per decision: asked (a `decide` is outstanding) and
+ * taken (its ok completion was accepted). An ok completion takes the decision it answers: the one asked, of the
+ * decisions sharing that action (review D2); when two are asked it cannot tell which, and takes neither, so the check
+ * stays sound. The completion's own step counts before its adjudication, since the runtime writes the decision event
+ * before the step (review D3).
+ */
+export function adjudicationWithoutDecision(g: Graph<State>, decision: string, decisions: { name: string; kind: string; ok: string | null }[]): Edge<State>[] | null {
+  const outcome = `outcome.${decision}`;
+  const at = new Map(decisions.map((d, i) => [d.name, i]));
+  const me = at.get(decision)!;
+  const start = { node: 0, asked: 0, taken: 0, path: [] as Edge<State>[] };
+  const seen = new Set<string>(['0:0:0']);
+  const queue = [start];
+  while (queue.length) {
+    const { node, asked, taken, path } = queue.shift()!;
+    for (const k of g.out[node]) {
+      const e = g.edges[k];
+      const accepted = e.label.verdict.kind === 'accepted';
+      let a = asked;
+      let t = taken;
+      if (accepted) {
+        const answering = decisions.map((d, i) => (d.ok !== null && d.ok === e.label.action && (a & (1 << i)) ? i : -1)).filter((i) => i >= 0);
+        if (answering.length === 1) { t |= 1 << answering[0]; a &= ~(1 << answering[0]); }
+        for (const x of e.label.effects) { const i = decisions.findIndex((d) => d.kind === x.kind); if (i >= 0) a |= 1 << i; }
+        if (e.label.effects.some((x) => x.kind === outcome) && !(t & (1 << me))) return [...path, e];
+      }
+      if (e.to === null) continue;
+      const key = `${e.to}:${a}:${t}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push({ node: e.to, asked: a, taken: t, path: [...path, e] });
+    }
+  }
+  return null;
 }
 
 /**
@@ -270,11 +328,20 @@ function domainText(check: unknown[] | null, t: RType, M: RMachine): string {
   return `{${check.map((v) => (typeof v === 'string' ? JSON.stringify(v) : String(v))).join(', ')}}`;
 }
 
+/** Whether the machine's labels or state hold a principal (PD5.1.3c), so its instance names the representatives. */
+function usesPrincipals(M: RMachine): boolean {
+  const deep = (x: RType, seen: Set<string>): boolean => x.k === 'principal' || (x.k === 'map' && deep(x.value, seen))
+    || (x.k === 'record' && !seen.has(x.name) && (M.records.get(x.name)?.fields ?? []).some((f) => deep(f.type, new Set([...seen, x.name]))))
+    || (x.k === 'union' && !seen.has(x.name) && (M.unions.get(x.name)?.ctors ?? []).some((c) => c.fields.some((f) => deep(f.type, new Set([...seen, x.name])))));
+  return M.actions.some((a) => a.claims && deep(a.claims.type, new Set())) || M.fields.some((f) => deep(f.type, new Set()));
+}
+
 /** The checked instance a verdict holds for (PS4.3, PT12.3a). */
 export function instanceOf(M: RMachine): InstanceLine {
   return {
     fields: M.fields.filter((f) => f.check || f.type.k === 'int').map((f) => ({ name: f.name, domain: domainText(f.check, f.type, M) })),
     params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'record' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) }))),
+    ...(usesPrincipals(M) ? { principals: M.principals } : {}),
   };
 }
 
@@ -304,4 +371,46 @@ export function machineGroups(M: RMachine, fair: AstFairGroup[]): FairGroup[] {
 /** How many data records each action is offered in every state: |D(a)|. */
 export function alphabetSize(M: RMachine): number {
   return M.actions.reduce((n, a) => n + dataDomain(a, M).length, 0);
+}
+
+/** S49: a quantifier in a machine ranges over a family's indices. */
+export const familyMembers: Members = (env, group) => {
+  const r = env.M.families.get(group);
+  if (!r) return [];
+  const out: number[] = [];
+  for (let k = r.lo; k <= r.hi; k++) out.push(k);
+  return out;
+};
+
+/** PT12.3, S128: each property of the machine whose antecedent is never true where the property is judged. */
+export function machineVacuity(M: RMachine, g: Graph<State>): Vacuous[] {
+  const out: Vacuous[] = [];
+  const states = () => g.states.map((s) => ({ M, state: s, data: {}, locals: new Map() }));
+  const accepted = () => g.edges.filter((x) => x.label.verdict.kind === 'accepted').map((x) => ({
+    M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action,
+  }));
+  const every = () => g.edges.map((x) => ({
+    M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], action: x.label.action, verdict: x.label.verdict,
+  }));
+  const judgeAll = (name: string, id: string, e: Expr, envs: () => Iterable<import('./eval.js').Env>) => {
+    for (const a of antecedents(e)) {
+      const v = judge(a, envs, familyMembers);
+      if (v) { out.push({ property: name, id, parts: a.parts, ...v }); return; }
+    }
+  };
+  for (const p of M.invariants) judgeAll(p.name, p.id, p.expr, states);
+  for (const p of M.stepProperties) judgeAll(p.name, p.id, p.expr, accepted);
+  for (const p of M.rejectProperties) judgeAll(p.name, p.id, p.expr, every);
+  for (const p of M.liveness) {
+    if (!p.from || p.quant) continue; // a quantified liveness is refused in a machine (S56)
+    const v = judge({ parts: [p.from], quant: null }, states, familyMembers);
+    if (v) out.push({ property: p.name, id: p.id, parts: [p.from], ...v });
+  }
+  // before(k1, k2) is about every k2 emitted: none on any explored step is vacuous (S128).
+  const emitted = new Set(g.edges.filter((x) => x.label.verdict.kind === 'accepted').flatMap((x) => x.label.effects.map((f) => f.kind)));
+  for (const p of M.pathProperties) {
+    const c = p.clauses.find((x): x is Extract<PathClause, { k: 'before' }> => x.k === 'before' && !emitted.has(x.then));
+    if (c) out.push({ property: p.name, id: p.id, parts: [], text: `before("${c.first}", "${c.then}"): no ${c.then} is emitted` });
+  }
+  return out;
 }

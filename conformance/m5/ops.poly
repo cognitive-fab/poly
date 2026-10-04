@@ -1,0 +1,28 @@
+// PD4.2: the operating mode, a singleton the policies read. PD4-A3 (S107): Declare is dispatched only with a person's
+// signature, which the person-key adapter turns into claims; the module requires a verified person and records who.
+module ops
+
+enum Mode { Normal, Complex, Crisis }
+enum Kind { Person, Agent, Service }
+enum Attest { Verified, Failed, Absent }
+
+claims Caller {
+  kind: Kind
+  attest: Attest
+  assurance: 0..3
+  principal: Principal
+}
+
+service machine OpsMode {
+  state {
+    mode       : Mode      = Normal
+    declaredBy : Principal = none
+  }
+  action Declare(mode: Mode)
+  on Declare(mode) by op: Caller {
+    require op.kind == Person else reject "person-required"
+    require op.attest == Verified else reject "not-attested"
+    mode' = mode
+    declaredBy' = op.principal
+  }
+}

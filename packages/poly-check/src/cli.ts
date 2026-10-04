@@ -4,21 +4,38 @@
 //   poly check <file.poly | project dir> [--json] [--root <dir>]
 //   poly witness <id> --trace | --test [--root <dir>] [--out <file>]
 //   poly fix <id> [--root <dir>]
+//   poly admit <project dir>
+//   poly journal verify | replay | export --db <store> …
+//   poly bench gate [--sizes 1,8,64] [--out <file>]
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { EXIT_CODES, ManifestError, loadProject, toJson } from '@poly/core';
-import { lintHandlers } from './lint.js';
+import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
 import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
 import { applyFixById } from './fix.js';
+import { admit, admitWitness, witnessKey, AdmitError } from './admit.js';
+import { approvalRecord, acceptanceRecord, writeAcceptance, RecordUsageError } from './records.js';
+import { journalCommand, JournalUsageError } from './journal.js';
+import { benchGate } from './bench.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
+       poly admit <project dir>
+       poly admit --witness <file | project dir> --key <private key file> [--root <dir>] [--out <file>]
+       poly approve <intent> --by <keyId> --key <private key file> --db <store> [--out <file>]
+       poly accept <witness id> --by <keyId> --key <private key file> [--root <dir>]
+       poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
+       poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
+       poly journal export --db <store> --run <id>
+       poly bench gate [--sizes 1,8,64] [--out <file>]
+       poly journal eval --db <store> --decision <d> --candidate <provider module>
+       poly journal fit --db <store> --decision <d> --model <id> [--version <n>] [--out <file>]
 
   check    Parses, types and lowers each module; runs strict validate(), translation
            validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
@@ -32,6 +49,15 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
   --json        print the report as JSON (diagnostics in poly.diagnostic/1 form)
   --root <dir>  where .poly/ lives (default: the project directory, or the working directory)
   --out <file>  where \`poly witness\` writes (default: .poly/witness/<id prefix>.<ext>)
+
+  admit    Checks the project and, when it is CLEAN, writes .poly/certificate.json, signed
+           with the admission key poly.json names by location (keys.admission, S126).
+
+  journal  verify: the chain, signed heads, closure and journal binding of every run (PL9002).
+           replay: every run folded again through poly-ref and polygraph (PL9001).
+           export: one run's chain, heads and bodies, as JSON.
+           eval: recorded questions replayed to a candidate provider; agreement and calibration.
+           fit: a calibration map by isotonic regression. Neither writes to any chain.
 
   lint     Reads the effect handler modules poly.json names and refuses any reach for
            ambient authority (PL6401): fs, net, http, child_process, fetch, process.env.
@@ -67,7 +93,7 @@ export async function main(argv: string[]): Promise<number> {
   const json = args.includes('--json');
   const root = option(args, '--root');
   const out = option(args, '--out');
-  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (root === null || out === null) return usage();
@@ -105,13 +131,79 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (positional[0] === 'lint' && positional[1] === 'handlers' && positional.length <= 3) {
-      // S72: the lint alone, over the handlers poly.json names.
-      const { handlers } = loadProject(positional[2] ?? process.cwd());
+      // S72, S142: the lint alone, over the handlers poly.json names and the files they import.
+      const projectDir = positional[2] ?? process.cwd();
+      const { handlers } = loadProject(projectDir);
       if (!handlers) { process.stderr.write('poly: poly.json names no handlers (S72)\n'); return EXIT_CODES.USAGE; }
-      const ds = lintHandlers(handlers);
+      const closure = handlerClosure(projectDir, handlers);
+      const ds = closure.diagnostics;
       for (const d of ds) process.stdout.write(`${d.code} ${d.name}  ${d.message}\n`);
-      process.stdout.write(`handlers: lint ${ds.length ? 'REFUSED' : 'CLEAN'} over ${handlers.length} file${handlers.length === 1 ? '' : 's'} (PT6.5)\n`);
+      process.stdout.write(`handlers: lint ${ds.length ? 'REFUSED' : 'CLEAN'} over ${closure.bytes.size} file${closure.bytes.size === 1 ? '' : 's'} (PT6.5, S142)\n`);
       return ds.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN;
+    }
+    if (positional[0] === 'journal' && positional.length >= 2) {
+      return await journalCommand(positional[1], argv, (s) => process.stdout.write(s));
+    }
+    if ((positional[0] === 'approve' || positional[0] === 'accept') && positional.length === 2) {
+      // PT12.5, S150: a person's signed record, with a key given by file, never one under version control.
+      const by = option(args, '--by');
+      const keyFile = option(args, '--key');
+      if (!by || !keyFile) { process.stderr.write(`poly: ${positional[0]} needs --by <keyId> and --key <private key file>\n`); return EXIT_CODES.USAGE; }
+      try {
+        if (positional[0] === 'approve') {
+          const db = option(args, '--db');
+          if (!db) { process.stderr.write('poly: approve needs --db <store>\n'); return EXIT_CODES.USAGE; }
+          const record = await approvalRecord(db, positional[1], by, keyFile);
+          const text = JSON.stringify(record, null, 2) + '\n';
+          if (out) writeFileSync(out, text); else process.stdout.write(text);
+          return EXIT_CODES.CLEAN;
+        }
+        const base = root ?? process.cwd();
+        const path = writeAcceptance(base, acceptanceRecord(readReport(base), positional[1], by, keyFile));
+        process.stdout.write(`${path}\n  admission reads it from accepted/ (PT12.5)\n`);
+        return EXIT_CODES.CLEAN;
+      } catch (e) {
+        if (e instanceof RecordUsageError) { process.stderr.write(`poly: ${e.message}\n`); return EXIT_CODES.USAGE; }
+        throw e;
+      }
+    }
+    if (positional[0] === 'admit' && positional.length === 2 && args.includes('--witness')) {
+      // S139: a witness certificate, signed with the test key given by file (never one under version control).
+      const keyFile = option(args, '--key');
+      if (!keyFile) { process.stderr.write('poly: admit --witness needs --key <private key file>\n'); return EXIT_CODES.USAGE; }
+      const target = positional[1];
+      const base = root ?? (statSync(target).isDirectory() ? target : dirname(target));
+      const r = await admitWitness(target, { root: root ?? undefined, key: witnessKey(keyFile), out: out ?? join(base, '.poly', 'witness.certificate.json') });
+      process.stdout.write(`witness certificate for ${r.certificate.subject.project}: ${r.certificate.findings?.length ?? 0} finding(s), ${r.certificate.digest}\n  ${r.certificatePath}\n  the runtime loads it only with allowWitness, never in production (S139)\n`);
+      return EXIT_CODES.CLEAN;
+    }
+    if (positional[0] === 'admit' && positional.length === 2) {
+      const r = await admit(positional[1]);
+      process.stdout.write(`admitted ${r.certificate.subject.project}: ${r.certificate.buildId}, ${r.certificate.digest}\n  ${r.certificatePath}\n`);
+      for (const l of r.certificate.poly.limits) process.stdout.write(`  limit: ${l}\n`);
+      return EXIT_CODES.CLEAN;
+    }
+    if (positional[0] === 'bench' && positional[1] === 'gate' && positional.length === 2) {
+      // PT9.6, AC4: a measurement with no pass threshold, over AC4's program in this checkout.
+      const sizes = (option(args, '--sizes') ?? '1,8,64').split(',').map(Number);
+      if (sizes.some((n) => !Number.isInteger(n) || n < 1)) return usage();
+      const { REPO_ROOT } = await import('@poly/runtime');
+      const r = await benchGate({ repo: REPO_ROOT, sizes, out: out ?? undefined });
+      const line = (t: { instances: number; perSecond: number; allowed: number; effects: number }) => `${t.instances}: ${t.perSecond}/s (${t.allowed}/${t.effects} allowed)`;
+      process.stdout.write(`gate bench on ${r.machine.cpu}, Node ${r.node}
+`);
+      if ('notRun' in r.latencyMs) process.stdout.write(`  latency: not run (${r.latencyMs.notRun})
+`);
+      else for (const [k, p] of Object.entries(r.latencyMs)) process.stdout.write(`  latency ${k}: p50 ${p.p50} ms, p99 ${p.p99} ms over ${p.n}
+`);
+      process.stdout.write(`  throughput runtime (no policy): ${r.throughput.runtime.map(line).join(', ')}
+`);
+      const s = r.throughput.session;
+      process.stdout.write(`  throughput session ${r.program.session}: ${'notRun' in s ? `not run (${s.notRun})` : s.map(line).join(', ')}
+`);
+      if (out) process.stdout.write(`  ${out}
+`);
+      return EXIT_CODES.CLEAN;
     }
     if (positional[0] === 'fix' && positional.length === 2) {
       const base = root ?? process.cwd();
@@ -125,6 +217,8 @@ export async function main(argv: string[]): Promise<number> {
     const err = e as Error & { nondeterministic?: boolean };
     process.stderr.write(`poly: ${err.message}\n`);
     if (err instanceof ManifestError || err instanceof UsageError || err instanceof WitnessExportError) return EXIT_CODES.USAGE;
+    if (err instanceof AdmitError) return EXIT_CODES.REFUSED;
+    if (err instanceof JournalUsageError) return EXIT_CODES.USAGE;
     return err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;
   }
 }

@@ -1,0 +1,12 @@
+// PD5.3.3a (S106, S149): while Halted, no compensable or irreversible effect is allowed. The never statement is proved
+// over the decision table; without the halt rule it is a finding with a witness.
+module halt_policy
+
+policy halt {
+  scope "refund"
+  obligation halt-stops "No compensable or irreversible effect while halted." rule {
+    when effect.class in { "compensable", "irreversible" } && machine("security.Trust").level == Halted
+    require false else deny
+  }
+  never halted-is-stopped "No compensable or irreversible effect is allowed while halted.": allow when machine("security.Trust").level == Halted && effect.class in { "compensable", "irreversible" }
+}

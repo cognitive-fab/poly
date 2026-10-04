@@ -102,6 +102,8 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
     case 'TName': {
       // A type that refers to itself has no finite domain; the checker reports the recursion (S25).
       if (visiting.has(t.name)) return null;
+      // PD5.1.3: a Principal is explored by representatives, so it is finite in the checked instance.
+      if (t.name === 'Principal' && !env.unions.has(t.name) && !env.records.has(t.name)) return 2;
       visiting = new Set([...visiting, t.name]);
       const r = env.records.get(t.name);
       if (r) {

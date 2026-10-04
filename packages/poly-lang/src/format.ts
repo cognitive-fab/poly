@@ -22,6 +22,9 @@ export function printType(t: A.TypeExpr): string { return new Printer().type(t);
 export function printStmt(s: A.Stmt): string { return (new Printer() as unknown as { stmt(s: A.Stmt): string[] }).stmt(s).join('\n'); }
 export function printPattern(p: A.Pattern): string { return (new Printer() as unknown as { pattern(p: A.Pattern): string }).pattern(p); }
 
+/** Review D-F6: the comment anchor of an obligation body line with no expression, as the parser names it. */
+const lineOf = (n: A.NodeBase, slot: string): A.NodeBase => ({ id: `${n.id}:${slot}` });
+
 export function format(module: A.Module, trivia?: Trivia): string {
   return new Printer(trivia).module(module);
 }
@@ -59,6 +62,15 @@ class Printer {
       case 'EnumDecl':
         return this.emit(d, '', [`enum ${d.name} { ${d.members.join(', ')} }`]);
       case 'RecordDecl':
+        // PD5.1.2: a claims type, one field per line.
+        if (d.claims) {
+          // Polywatch: each field line carries its own comments, as a machine's fields do.
+          this.lead(d, '');
+          this.out.push(`claims ${d.name} {`);
+          for (const f of d.fields) this.emit(f, INDENT, [`${f.name}: ${this.type(f.type)}`]);
+          this.out.push(`}${this.trail(d)}`);
+          return;
+        }
         return this.emit(d, '', [`type ${d.name} = { ${d.fields.map((f) => `${f.name}: ${this.type(f.type)}`).join(', ')} }`]);
       case 'TypeDecl': {
         const ctors = d.ctors.map((c) => this.ctor(c));
@@ -75,7 +87,52 @@ class Printer {
         return this.machine(d);
       case 'Configuration':
         return this.configuration(d);
+      case 'Policy':
+        return this.policy(d);
     }
+  }
+
+  /** PT8.1: one canonical text per policy. */
+  private policy(p: A.Policy): void {
+    const q = (s: string) => JSON.stringify(s);
+    this.emit(p, '', [`policy ${p.name} {`]);
+    this.out.push(`${INDENT}scope ${q(p.scope)}${p.requiresAttribution ? ' requires attribution' : ''}`);
+    for (const v of p.vars) this.emit(v, INDENT, [`var ${v.name}: ${this.type(v.type)} = ${this.expr(v.init, 0)}`]);
+    for (const it of p.items) {
+      switch (it.kind) {
+        // B13: each line of a body carries the comments of the expression on it, before it and at its end.
+        case 'RuleObligation': {
+          this.lead(it, INDENT);
+          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} rule {`);
+          if (it.when) this.emit(it.when, INDENT + INDENT, [`when ${this.expr(it.when, 0)}`]);
+          this.emit(it.require, INDENT + INDENT, [`require ${this.expr(it.require, 0)} else ${it.severity}`]);
+          if (it.onUnknown) this.emit(lineOf(it, 'onUnknown'), INDENT + INDENT, [`on unknown ${it.onUnknown}`]);
+          this.out.push(`${INDENT}}${this.trail(it)}`);
+          break;
+        }
+        case 'MachineObligation': {
+          this.lead(it, INDENT);
+          this.out.push(`${INDENT}obligation ${it.name} ${q(it.text)} machine {`);
+          this.emit(lineOf(it, 'states'), INDENT + INDENT, [`states ${it.states.join(', ')}`]);
+          this.emit(lineOf(it, 'initial'), INDENT + INDENT, [`initial ${it.initial}`]);
+          for (const t of it.transitions) this.emit(t.when, INDENT + INDENT, [`from ${t.from === '*' ? '*' : t.from.join(', ')} when ${this.expr(t.when, 0)} -> ${t.to}`]);
+          for (const g of it.guards) this.emit(g.when, INDENT + INDENT, [`deny in ${g.in.join(', ')} when ${this.expr(g.when, 0)} reason ${q(g.reason)}`]);
+          this.emit(lineOf(it, 'end'), INDENT + INDENT, [`end ${it.end.join(', ')}`]);
+          this.out.push(`${INDENT}}${this.trail(it)}`);
+          break;
+        }
+        case 'InvariantObligation':
+          this.emit(it, INDENT, [`obligation ${it.name} ${q(it.text)} invariant { ${this.expr(it.expr, 0)} }`]);
+          break;
+        case 'Recalled':
+          this.emit(it, INDENT, [`recalled ${it.name} ${q(it.text)}`]);
+          break;
+        case 'Never':
+          this.emit(it, INDENT, [`never ${it.name} ${q(it.text)}: allow when ${this.expr(it.when, 0)}`]);
+          break;
+      }
+    }
+    this.out.push('}');
   }
 
   private ctor(c: A.Ctor): string {
@@ -139,7 +196,7 @@ class Printer {
       }
       case 'Liveness': return this.liveness(it);
       case 'Handler': {
-        const head = `on ${it.action}${it.params ? `(${it.params.join(', ')})` : ''}`;
+        const head = `on ${it.action}${it.params ? `(${it.params.join(', ')})` : ''}${it.by ? ` by ${it.by.name}: ${it.by.type}` : ''}`;
         return this.blockLines(head, it.body);
       }
       case 'EffectDecl': {
@@ -173,7 +230,7 @@ class Printer {
     const width = Math.max(0, ...heads.map((h) => h.length));
     c.instances.forEach((i, k) => {
       const init = i.init.length ? ` { ${i.init.map((x) => `${x.field}: ${this.expr(x.value, 0)}`).join(', ')} }` : '';
-      this.emit(i, INDENT, [`${heads[k].padEnd(width)} : ${i.machine.join('.')}${init}`]);
+      this.emit(i, INDENT, [`${heads[k].padEnd(width)} : ${i.machine.join('.')}${init}${i.scope !== undefined ? ` scope ${JSON.stringify(i.scope)}` : ''}`]);
     });
     if (c.inputs.length) {
       const refs = c.inputs.map((r) => `${r.instance}${r.index === null ? '' : `[${r.index}]`}.${r.action}`);
@@ -190,6 +247,7 @@ class Printer {
       case 'EffClass': return `class ${e.value}`;
       case 'EffLabels': return `labels { ${e.labels.join(', ')} }`;
       case 'EffRetry': return `retry { attempts ${e.attempts}, base ${e.base}, timeout ${e.timeout} }`;
+      case 'EffTargets': return `targets { ${e.targets.map((t) => `${t.key}: ${t.key === 'egress' && t.values.length === 1 ? JSON.stringify(t.values[0]) : `[${t.values.map((v) => JSON.stringify(v)).join(', ')}]`}`).join(', ')} }`;
       case 'EffOutcome': return `${e.outcome}${e.bind !== undefined ? `(${e.bind})` : ''} -> ${e.action}(${this.args(e.args)})`;
     }
   }
@@ -277,6 +335,7 @@ class Printer {
       case 'send': return `send ${this.expr(s.to!, 0)} <- ${call}${s.as ? ` as ${s.as}` : ''}`;
       case 'signal': return `signal ${s.extra[0]}${idx} -> ${call}`;
       case 'decide': return `decide ${call}`;
+      case 'adjudicate': return `adjudicate ${s.target} as ${s.modifier}`;
       case 'spawn': {
         let w = `spawn ${s.modifier ? s.modifier + ' ' : ''}${s.target} as ${s.as}${idx}`;
         for (let k = 0; k < s.extra.length; k += 2) {
@@ -318,7 +377,8 @@ class Printer {
       case 'Primed': return `${e.name}'`;
       case 'Member': return `${this.expr(e.object, 1, noStruct)}.${e.prop}`;
       case 'Index': return `${this.expr(e.object, 1, noStruct)}[${this.expr(e.index, 0)}]`;
-      case 'Call': return `${e.callee}(${e.args.map((a) => this.expr(a, 0)).join(', ')})`;
+      // PT8.1: `s has x`, which the parser reads as the call has(s, x).
+      case 'Call': return e.callee === 'has' && e.args.length === 2 ? wrap(`${this.expr(e.args[0], 4, noStruct)} has ${this.expr(e.args[1], 4, noStruct)}`, 5) : `${e.callee}(${e.args.map((a) => this.expr(a, 0)).join(', ')})`;
       case 'Unary': return wrap(`${e.op}${this.expr(e.arg, 2, noStruct)}`, 2);
       case 'Spawned': return `${e.key}${e.index ? `[${this.expr(e.index, 0)}]` : ''} spawned`;
       case 'Star': return '*';

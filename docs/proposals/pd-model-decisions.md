@@ -52,7 +52,7 @@ on Received(text) {
 ```
 
 - **PD1.2a** **Result types.** The result type after `->` is finite: an enum (a choice), an integer range (a score), `Tri` (a truth value, PD1.2d), or a record of these (S25), which asks several questions about the same state in one call. An unbounded result type is `PL1101 UNBOUNDED_DOMAIN`.
-- **PD1.2b** **The reply.** `ok(r)` binds the reply. `r.answer` has the result type. `r.conf` and `r.margin` have type `Conf` (PD1.3). For a record result, each field has its own: `r.answer.branch`, `r.conf.branch`, `r.margin.branch`. The margin is the difference between the probabilities of the first and second answers.
+- **PD1.2b** **The reply.** `ok(r)` binds the reply. `r.answer` has the result type. `r.conf` and `r.margin` have type `Conf` (PD1.3). For a record result, each field has its own: `r.answer.branch`, `r.conf.branch`, `r.margin.branch`. *Ruled (review B3):* `r.conf` is the calibrated probability of the answer returned, not of the most probable one, and `r.margin` is that probability minus the highest calibrated probability of any other answer, floored at 0.
 - **PD1.2c** **Failure.** `timeout` is required, and a timeout is a `failed`. A decision with no `timeout` or no `failed` completion is `PL6202 DECISION_WITHOUT_FAILURE`, because a machine waiting on a dead provider can wait forever. The recommended fallback is a person or a default branch. A second decision as fallback is legal, and it costs a second calibration map to maintain (PD1.6).
 - **PD1.2d** **Truth values.** A truth question returns `Tri`. The decision declares its band, `band 0.3..0.7`: a calibrated probability below the band is `False`, above it is `True`, inside it is `Unknown`. PS8.0's three-valued logic already covers what follows.
 - **PD1.2e** **Provider.** `provider` names the engine kind, never a model version. The version is recorded at runtime (PD2) and is outside the certificate (PD3).
@@ -172,7 +172,7 @@ on RefundReversed(reason) {
 }
 ```
 
-- **PD2.4a** `adjudicate d as Correct | Wrong` lowers to an `outcome` intent. The runtime writes an `outcome` event linked to the hash of the most recent `decision` event for `d` on the run. With no such event, the step is rejected `no-decision-to-adjudicate`, and the checker reports a handler that can adjudicate a decision not taken on every path to it (`PL1201`, with the path).
+- **PD2.4a** `adjudicate d as Correct | Wrong` lowers to an `outcome` intent. The runtime writes an `outcome` event linked to the hash of the most recent `decision` event for `d` on the run. *Ruled (S129):* the checker reports an accepted adjudication reachable without a preceding accepted `ok` completion of `d` as `PL6203 ADJUDICATION_WITHOUT_DECISION`, with the path, and the runtime reason `no-decision-to-adjudicate` is dropped (PT6.1).
 - **PD2.4b** Evaluation, calibration fitting and drift monitoring read `decision` events joined with their `outcome` links. None of them writes to a run's chain.
 
 ### PD2.5 Acceptance (M4)
@@ -202,7 +202,7 @@ The certificate says what the system may do with any answer. It does not say how
 ### PD3.4 Acceptance (M4)
 
 - **PD3-A1** Swapping the router's provider configuration from one model to another changes no file under `.poly/build` and leaves the certificate's digest unchanged.
-- **PD3-A2** With the policy of PD4.3, the new model cannot take a gated refund decision until a map fitted for it is installed; after that it can, and its `decision` events record the new map.
+- **PD3-A2** *(Moved to M5 with PD4, S131.)* With the policy of PD4.3, the new model cannot take a gated refund decision until a map fitted for it is installed; after that it can, and its `decision` events record the new map.
 - **PD3-A3** An evaluation over 100 recorded router questions with outcomes reports agreement and calibration for the candidate model, and writes nothing to any run's chain.
 
 ## PD4. Operating modes

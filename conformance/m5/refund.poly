@@ -1,0 +1,64 @@
+// PD5.1 (S101 to S103, S107, S109): the refund example. A refund above the limit needs an approval, and the approval
+// must come from a verified person other than the requester. The caller's claims are part of the label: a verifier
+// outside poly asserts them, and the checker explores every value they can take, with principals by representatives.
+module refund
+
+enum Kind { Person, Agent, Service }
+enum Attest { Verified, Failed, Absent }
+enum Status { Idle, Awaiting, Refunded }
+
+claims Caller {
+  kind: Kind
+  attest: Attest
+  assurance: 0..3
+  principal: Principal
+}
+
+machine Refund {
+  state {
+    status    : Status    = Idle
+    requester : Principal = none
+    approver  : Principal = none
+    amount    : 0..2      = 0
+  }
+  terminal status == Refunded
+
+  action Request(a: 1..2)
+  action Approve()
+  action Withdraw()
+
+  on Request(a) by caller: Caller {
+    require status == Idle else reject "busy"
+    requester' = caller.principal
+    amount' = a
+    if a > 1 { status' = Awaiting } else { status' = Refunded  emit refund(a) }
+  }
+
+  on Approve() by caller: Caller {
+    require status == Awaiting else reject "not-awaiting"
+    require caller.kind == Person else reject "person-required"
+    require caller.attest == Verified else reject "not-attested"
+    require caller.assurance >= 2 else reject "low-assurance"
+    require caller.principal != requester else reject "self-approval"
+    approver' = caller.principal
+    status' = Refunded
+    emit refund(amount)
+  }
+
+  // A request awaiting approval can be withdrawn, which returns the machine to its start.
+  on Withdraw {
+    require status == Awaiting else reject "not-awaiting"
+    status' = Idle
+    requester' = none
+    amount' = 0
+  }
+
+  // PD5.1.3d: no refund is approved by its requester.
+  invariant not-self-approved: approver != none implies approver != requester
+
+  effect refund(n: 0..2) {
+    kind "payments.refund"
+    labels { egress:external }
+    class irreversible
+  }
+}

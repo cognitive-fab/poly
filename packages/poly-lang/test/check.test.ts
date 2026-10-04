@@ -43,7 +43,13 @@ test('each error source raises exactly the code it names', () => {
   // PL0201 is raised by poly fix on a stale fix, never by a source (S70), tested by fixes.test.mjs.
   // PL0301 is raised by poly-embed on a .ts source (PT2.5, S71), tested by embed.test.mjs.
   // PL6401 is raised by the handler lint over handler modules, not a source (PT6.5, S72), tested by lint.test.mjs.
-  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401').map(([c]) => c);
+  // PL5405 is raised by the runtime at load, and fifo has no syntax yet (S125).
+  // PL6402 is raised by the handler closure at admission, PL6403 at load and PL6404 by rt.handle (S142), tested by certified-handlers.test.mjs.
+  // PL6405 is raised at load by a changed keyring (S150), tested by person-keys.test.mjs.
+  // PL6302 is raised by the policy stage over a scope and the modules it governs (PS8.4), tested by policy-front.test.mjs.
+  // PL6406 is raised at run time by a capability call outside its targets (S151), tested by capabilities.test.mjs.
+  // PL6001 is Polyaxion's refusal of a policy at admission (PT8.4), which needs the engine; tested by policy-front.test.mjs.
+  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404' && c !== 'PL6302' && c !== 'PL6405' && c !== 'PL6406' && c !== 'PL6001').map(([c]) => c);
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 

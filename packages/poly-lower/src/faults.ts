@@ -5,11 +5,11 @@
 import type * as A from '@poly/core';
 import type { Fault } from './lower.js';
 
-export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal'];
+export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal', 'outcome-entry', 'widen-target', 'skip-claims', 'widen-sandbox', 'drop-timer-target'];
 
 /** The machine as the broken lowering sees it. drop-frame, skip-terminal, the property faults and the effect faults act in the emitter instead. */
 export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {
-  if (!fault || fault === 'drop-frame' || fault === 'skip-terminal' || fault === 'drop-property' || fault === 'drop-auto-invariant' || fault === 'drop-effect' || fault === 'reorder-effects' || fault === 'unnamed-reject' || fault === 'poison-step' || fault === 'manifest-data' || fault === 'drop-terminal-state' || fault === 'contract-domain' || fault === 'contract-init' || fault === 'path-invariant' || fault === 'compose-invariant' || fault === 'liveness-goal') return m;
+  if (!fault || fault === 'drop-frame' || fault === 'skip-terminal' || fault === 'drop-property' || fault === 'drop-auto-invariant' || fault === 'drop-effect' || fault === 'reorder-effects' || fault === 'unnamed-reject' || fault === 'poison-step' || fault === 'manifest-data' || fault === 'drop-terminal-state' || fault === 'contract-domain' || fault === 'contract-init' || fault === 'path-invariant' || fault === 'compose-invariant' || fault === 'liveness-goal' || fault === 'outcome-entry' || fault === 'widen-target' || fault === 'skip-claims' || fault === 'widen-sandbox' || fault === 'drop-timer-target') return m;
   const copy = structuredClone(m);
   let done = false;
   const visitStmts = (body: A.Stmt[]): void => {

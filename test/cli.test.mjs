@@ -62,7 +62,7 @@ test('CLEAN, exit 0: a liveness property is checked, with the safety results (PS
   const r = poly('check', src('examples/evidence/outbox-union.poly'));
   assert.equal(r.code, 0);
   assert.match(r.out, /liveness CLEAN \(1 property under weak fairness \(PS6\.4\)\)/);
-  assert.match(r.out, /verdict: CLEAN \(exit 0\)  runtime\.OutboxIntent  over 17 states/);
+  assert.match(r.out, /verdict: CLEAN \(exit 0\)  intents\.OutboxIntent  over 17 states/);
   assert.doesNotMatch(r.out, /PL0901/);
 });
 

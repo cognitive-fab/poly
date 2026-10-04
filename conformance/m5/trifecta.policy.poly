@@ -1,0 +1,10 @@
+// S161's control: a policy of scope tri that names no effect kind, so nothing is gated.
+module tri_policy
+
+policy tri-ungated {
+  scope "tri"
+  obligation irreversible-seen "Irreversible effects are seen by the gate." rule {
+    when effect.class == "irreversible"
+    require true else deny
+  }
+}

@@ -1,0 +1,18 @@
+// A Ref parameter (review C9): at dispatch it names an existing instance of its machine, or none.
+module refs
+
+machine Peer {
+  state { n : 0..1 = 0 }
+  terminal n in { 1 }
+  action Hi()
+  on Hi {
+    require n == 0 else reject "said"
+    n' = 1
+  }
+}
+
+machine Keeper {
+  state { p : Ref<Peer> = none }
+  action Link(r: Ref<Peer>)
+  on Link(r) { p' = r }
+}

@@ -1,0 +1,22 @@
+// Review of M5b, A-F2: a handler that matches on a claims field; bad claims are rejected before its body runs.
+module t
+
+enum Kind { Person, Agent }
+enum St { A, B }
+
+claims Caller {
+  kind: Kind
+}
+
+machine M {
+  state { st : St = A }
+  action Go()
+  action Back()
+  on Back { st' = A }
+  on Go() by caller: Caller {
+    match caller.kind {
+      Person => { st' = B }
+      Agent => { reject "agent" }
+    }
+  }
+}

@@ -48,16 +48,18 @@ export declare function module(name: string, decls: Decl[]): Decl;
 export declare function enumType(name: string, members: string[]): Decl;
 export declare function union(name: string, ctors: { [ctor: string]: { [payload: string]: Type } }): Decl;
 export declare function record(name: string, fields: { [field: string]: Type }): Decl;
+/** PD5.1.2: `claims C { f: T … }`, the claims a verifier asserts for an action's caller. */
+export declare function claims(name: string, fields: { [field: string]: Type }): Decl;
 export declare function use(path: string): Decl;
 export declare function machine(name: string, body: { service?: true; version?: number; state?: { [field: string]: Field }; items?: Item[] }): Decl;
 export declare function field(type: Type, init: Arrow, opts?: { check?: Literal[] | { lo: number; hi: number }; mode?: Mode; flag?: 'internal' | 'derived' }): Field;
 export declare function name(ctor: string): NameLiteral;
 export declare function configuration(name: string, body: { instances: Instance[]; inputs?: string[]; bounds?: { transit: number; instances?: number }; properties?: Item[] }): Decl;
-export declare function instance(name: string, machine: string, opts?: { count?: number; init?: (scope: Scope) => { [field: string]: Expr } }): Instance;
+export declare function instance(name: string, machine: string, opts?: { count?: number; init?: (scope: Scope) => { [field: string]: Expr }; scope?: string }): Instance;
 
 // ── machine items ──────────────────────────────────────────────────────────
 export declare function action(name: string, params: { [param: string]: Type }): Item;
-export declare function on(action: string, body: (scope: Scope) => Stmt[], params?: string[]): Item;
+export declare function on(action: string, body: (scope: Scope) => Stmt[], params?: string[] | null, opts?: { by: [name: string, claims: string] }): Item;
 export declare function guard(cond: Arrow, reason: string): Item;
 export declare function terminal(cond: Arrow): Item;
 export declare function invariant(name: string, e: Arrow): Item;
@@ -70,6 +72,8 @@ export declare function effect(name: string, params: { [param: string]: Type }, 
 export declare function kind(kind: string): EffItem;
 export declare function labels(labels: string[]): EffItem;
 export declare function cls(value: 'none' | 'reversible' | 'compensable' | 'irreversible'): EffItem;
+/** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target. */
+export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: string[]][]): EffItem;
 export declare function retry(attempts: number, base: string, timeout: string): EffItem;
 export declare function ok(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
 export declare function failed(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
@@ -84,6 +88,8 @@ export declare function provider(kind: string): DecisionItem;
 export declare function timeout(duration: string): DecisionItem;
 export declare function band(lo: number, hi: number): DecisionItem;
 export declare function decide(decision: string, args: Args): Stmt;
+/** `adjudicate d as Correct | Wrong` (PD2.4, S129). */
+export declare function adjudicate(decision: string, outcome: 'Correct' | 'Wrong'): Stmt;
 
 // ── statements ─────────────────────────────────────────────────────────────
 export declare function require(cond: Expr, reason: string): Stmt;

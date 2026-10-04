@@ -1,0 +1,8 @@
+// PT9.9: the sender's trust scope. A cross-scope message is injected below the language in M5a (S160).
+module sa
+
+service machine Pinger {
+  state { denied : 0..1 = 0 }
+  action SendDenied(to: string check { "pong" }, action: string check { "Ping", "Shout" }, reason: string check { "denied" } disclosed)
+  on SendDenied(to, action, reason) { denied' = 1 }
+}

@@ -1,0 +1,33 @@
+// A program machine in module runtime, whose id is the runtime's own OutboxIntent at bound 3: refused by the
+// checker under PL1208 whatever the build declares or the store holds (S143).
+module runtime
+
+enum S { Idle, Busy, Over }
+
+machine OutboxIntent {
+  state { s : S = Idle }
+  terminal s in { Over }
+
+  action Go()
+  action Done()
+
+  on Go {
+    require s == Idle else reject "started"
+    s' = Busy
+    emit work(1)
+  }
+  on Done {
+    require s == Busy else reject "not-busy"
+    s' = Over
+  }
+
+  effect work(n: 0..1) {
+    kind "w.work"
+    labels { exec }
+    class compensable
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Done()
+    failed -> Done()
+    exhausted -> Done()
+  }
+}

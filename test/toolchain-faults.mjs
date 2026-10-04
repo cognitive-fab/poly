@@ -28,11 +28,36 @@ export const FAULT_SOURCES = {
   'path-invariant': ['conformance/m1/effects.poly'],
   'compose-invariant': ['conformance/m1/children.poly'],
   'liveness-goal': ['examples/evidence/outbox-union.poly'],
+  'outcome-entry': ['conformance/m4/router.poly'],
+  // S151: the targets the runtime binds a handler's capabilities to.
+  'widen-target': ['conformance/m5/capabilities.poly'],
+  // PD5.1.2c: PS3.2's claims row, which the runtime applies before the module.
+  'skip-claims': ['conformance/m5/refund.poly'],
+  // S162: the actions timers start, which the runtime refuses from outside in a scope that requires attribution.
+  'drop-timer-target': ['conformance/m5/lineage-timer.poly'],
+  // S152: the generated sandbox policy, an artefact the sandbox reads.
+  'widen-sandbox': ['conformance/m5/capabilities.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);
+
+// PT8.2 and the standing rule: the lowered policy is an artefact the runtime's gate reads, so each broken policy
+// lowering is listed here with the source that exercises it, and translation validation must catch it with PL2501.
+export const POLICY_FAULT_SOURCES = {
+  'drop-unknown-rule': ['conformance/m5/policy-faults.poly'],
+  'deny-as-warn': ['conformance/m5/policy-faults.poly'],
+  'drop-guard': ['conformance/m5/policy-faults.poly'],
+};
 
 /** The toolchain-fault diagnostics among a list (S20: addressed to the toolchain, never to the author). */
 export function toolchainFaults(diagnostics) {
   return diagnostics.filter((d) => d.code === 'PL2501' || d.code === 'PL2001');
 }
+
+// S126 and the standing rule: the certificate is an artefact the runtime reads, so each broken certificate writer
+// is listed here and must be caught by poly admit's read-back (test/certificate.test.mjs).
+export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file'];
+// The faults that need a project with policies to act on (PT8).
+export const POLICY_CERTIFICATE_FAULTS = ['stale-policy-digest', 'omit-policy'];
+// Review of M5b, D: the faults that need a handler importing an installed package (S154).
+export const PACKAGE_CERTIFICATE_FAULTS = ['omit-package-file'];

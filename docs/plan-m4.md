@@ -1,0 +1,275 @@
+# poly · Plan for milestone M4, the runtime
+
+*Cognitive Fab · October 2026 · plan, written before any M4 code · on branch `m4` in the worktree `poly-m4` (M4-0) · ruled in `decisions-m4.md` (c80ce85)*
+
+This plan covers milestone M4 of PT18: `poly-runtime`, the per-run ledger, journal verify and replay, the outbox intent machine and its worker, delivery conformance, the K9 refusal through the runtime API, decision provenance and model independence (PD2, PD3, K10), and the two checker rules frozen out of M3 (`PL1207`, `vacuous`). It fixes the packages touched, the order of work, how each gate item is tested with the test that fails first, the engine changes for the owner's list, and the spec issues found while reading, from S118. Nothing is built before the rulings. PD4 and the rest of PD5 are M5 and nothing here builds toward them.
+
+## 1. What was read, and what was found before planning
+
+The documents were read in the order of the handoff: `CLAUDE.md`; `decisions-m4.md` (M4-0); `decisions-m3.md` from S100 on, including M3-6 to M3-9, which are on `main` (9d8d7ba) and not yet merged into `m4`; `decisions-pd5.md` (S101, S113); PD2 and PD3 of `proposals/pd-model-decisions.md`; PS3.2, PS9, PS9.1a, PS10, PS11 and PS14; PT9.1 to PT9.8, PT12.2 to PT12.5, PT14 to PT16 and PT18; PF8 and AC6; the closing sections of `plan-m2.md` and `plan-m3.md`; `02-architecture.md` §2a, §7.2 and AD-3. The engines were read where M4 touches them: polyrun's `index.mjs`, `kernel.mjs`, `store.mjs` and `workers.mjs` as vendored (4949de4), and the polyflow platform's `kernel/src/ledger.mjs`, `certificate.mjs` and `verify/src/verify.mjs` (polyflow 5170add, Apache-2.0).
+
+What the reading found, each item checked against the source:
+
+| Finding | Where | Consequence |
+|---|---|---|
+| polyrun's archive deletes the dedupe keys. `purgeInstance` deletes the instance's `pr_journal` rows, and `UNIQUE(instance_id, action_id)` lives on those rows. No tombstone table exists, in the vendored copy or on polygraph's `main`. | `store.mjs` `purgeInstance` | K4 as written ("archiving keeps the dedupe record") is not met. A duplicate message to an archived receiver is dead-lettered and journaled on the sender as `$undeliverable`, never acknowledged. M4c across an archive fails today (S124, engine E1). |
+| polyrun's effect worker has no gate, and three of its transitions are not in `OutboxIntent`: lease recovery returns an inflight row to `pending` without counting an attempt; a row whose machine or manifest is unavailable is parked without an attempt; the DLQ can move a `dead` row back to `pending` (`retryDead`) or to `done` (`discardDead`). | `workers.mjs`, `store.mjs` | The worker cannot conform to PT9.7 as it stands (S119). |
+| The effect's result is not kept with the outbox row. The worker maps it into the completion's data and drops it. | `workers.mjs` `_runEffect` | PD2.2e's integration point: poly-runtime must keep the decision record itself (S121). |
+| Every journal row goes through `Store.insertJournal`, inside the step's transaction, and `commitStep` sees the step's outbox rows. `Store.txn` joins an open transaction. | `store.mjs` | A `Store` subclass can write ledger events in the step's own transaction, with no engine change (S121). Wrapping `rt.dispatch` in an outer transaction cannot: the K9 audit row and the poison mark would roll back with it. |
+| The polyflow ledger's kinds are frozen to six: `admission`, `proposal`, `verdict`, `effect`, `observation`, `closure`. `verifyChain` refuses any other kind. `at` is a number, not the ISO string of PT16's example. | `kernel/src/ledger.mjs` | `step`, `advice`, `decision` and `outcome` events cannot be verified by the polyflow verifier without a change to it (S122, engine E2). |
+| The polyflow certificate builder accepts a fixed list of artefact names, without `invariants.compose.mjs` or `liveness.mjs`. Signing lives in a BUSL package. | `kernel/src/certificate.mjs`, `temporal/src/certificates.mjs` | poly writes its own certificate in the same shape and signs with `node:crypto` (S126). Nothing BUSL is vendored. |
+| No certificate exists in poly yet: no `poly admit`, no certificate format. | `packages/poly-check` | M4a's "tampered artefact refused at load" needs `poly admit` first (S126). |
+| `adjudicate` is in PD2 only: not in PT2's grammar, not in PS, not parsed. Calibration maps are not built either (M2's acceptance did not need them). | `packages/*`, `test/providers/recorded.mjs` | PD2-A4 needs compiler work in every front-end package; PD3 needs the map (S129, S132). |
+| The runtime's own rejection reasons are more than the two PS3.2 reserves: polyrun rejects a poisoned instance with reason `poisoned`; S101 reserves `claims-unverified` too; K4 answers `archived`. | `kernel.mjs`, `decisions-pd5.md` | The reserved set of `PL1207` needs a ruling (S127). |
+| PT12.3 names "the trigger of an 'after' property", and no property kind called "after" exists in PS5. | PT12.3, PS5 | The vacuity rule needs a definition per property kind (S128). |
+
+Nothing was measured: M4 has no evidence script of its own, and every number the gate cites (17 states for `OutboxIntent`, the four `Delivery` variants) is already reproduced by M2's tests.
+
+## 2. Engine changes, for the owner's list
+
+| Id | Engine | Change | Needed for | Without it |
+|---|---|---|---|---|
+| **E1** | polyrun | **K4 tombstones.** `purgeInstance` copies the instance's `(instance_id, action_id)` keys, with each step's recorded result, into a `pr_tombstone` table in the same transaction. A dispatch to a purged instance answers from the tombstone (`deduped: true`) for a known key and `archived` for an unknown one, and takes no step. The message worker acknowledges a message answered this way (`done`), instead of dead-lettering it. | K4 as written; M4c across an archive | M4c fails on its archive traces. A host-side fallback exists (poly-runtime keeps the tombstones and delivers messages itself), but it moves the kernel's dedupe into poly and is not recommended. |
+| **E2** | polyflow kernel and verify | The ledger accepts the kinds `step`, `advice`, `decision` and `outcome` (the kind set as an option of `openLedger` and `verifyChain`, or the four added to `KINDS`). | AD-3's "one verification tool"; `poly journal verify` through the polyflow verifier | poly verifies its own chains with its own code, in the same format, and the polyflow verifier cannot read a poly ledger. |
+| E3 | polyrun | A gate hook in the outbox worker, as `02` §2a lists it. | Only if S119 is ruled against the recommendation | Not needed if poly-runtime hosts its own effect worker (S119). |
+| E4 | polyrun | An in-transaction journal hook ("the ledger writer as a store option", `02` §2a). | Only if S121 is ruled against the recommendation | Not needed with the `Store` subclass (S121). |
+
+E1 and E2 are needed. E3 and E4 are listed because the architecture names them; this plan recommends doing without them. Each is made in its engine's repository, then re-vendored on `m4` only, with its provenance and a test that fails on the old copy (M4-0 rule 4). The polyflow kernel and verify files are a new vendored engine, `vendor/polyflow`, with `PROVENANCE.md` and hashes checked by `test/vendor.test.mjs`.
+
+## 3. Packages and what changes in each
+
+| Package | M4 changes |
+|---|---|
+| `poly-core` | Codes: `PL1207` enforced; `PL2401`; the replay and verification codes of S131; vacuity in the report model (S128). AST for `adjudicate` (S129). |
+| `poly-lang` | Grammar and formatter for `adjudicate d as Correct \| Wrong`. |
+| `poly-embed` | The `adjudicate` combinator, its printer and reader, and its declaration; the surface-equality test covers it. |
+| `poly-ref` | Vacuity per property kind, over the explored graph, in machines and in configurations (S128). `PL1207` (poly-ref reads reasons from the AST and does not enforce codes; it needs no change for it). `adjudicate` in the semantics: the `outcome.<d>` intent and the path check that an accepted adjudication is preceded by an accepted `ok` completion of `d` (S129). A fold of a journal through `δ` (PS11.4), for replay. |
+| `poly-lower` | `adjudicate` as an `outcome.<d>` effect intent with class `none` and a built-in handler (S129). The `decisions` section the certificate needs (PD3.2b) comes from the check report, not the lowering. |
+| `poly-check` | `PL1207` at stage 1; the vacuity fold to `INCONCLUSIVE`; `poly admit` (S126); `poly journal verify`, `replay`, `export` (PT14) and `eval` (S132); exported witness tests regenerated over the runtime API (S68, S133). |
+| **`poly-runtime`** (new) | `load(buildDir, options)` with the certificate check (PT15, PF8.1); the `LedgerStore` subclass of polyrun's `Store` (S121); the effect worker hosting the lowered `OutboxIntent` with a gate interface (S118, S119); the provider adapter host with calibration maps and the decision record (PD1.6, PD2.2); signed heads and the anchor, off the step path (S123); archive with closure; `rt.inputs()` and `rt.intents()`; the model `model/outbox-intent.poly` and its lowered build checked in. |
+| `vendor/polyflow` (new) | The polyflow kernel's `canonical`, `digest`, `sha256`, `ed25519` and `ledger`, and `verify`'s `verify` and `sink`, copied unchanged (after E2). |
+| `scripts/check-boundaries.mjs` | `poly-runtime` joins the rules: no model SDK, no network module. Provider adapters are host code, passed in, never imported. |
+| `test/` | One file per gate item (section 5); the fault lists gain the certificate's broken variants (S126) and a runtime drift list for `PL2401`. |
+
+`poly-runtime` imports polyrun and `vendor/polyflow`, and the lowered `OutboxIntent` build. It does not import poly-ref: replay and the conformance checks run in `poly-check` and in tests.
+
+## 4. Order of work
+
+Each step ends with a commit; every defect gets a regression test that fails first.
+
+0. **The tree guard (M4-0).** A module `scripts/tree-guard.mjs` that throws when the repository's top level is `C:\Users\jjdub\code\poly` or its branch is `main`, and a test of each condition: the path through a pure `treeProblem({ topLevel, branch })` given the experiment's path in several spellings (and a path that only starts like it), and the branch through a real clone checked out on `main` in a temporary directory. Every M4 script that writes files calls it first. This is the first commit on `m4`.
+1. **Spec text from the rulings.** K10 into PS10; PT2 and PS for `adjudicate`; PT16's kinds and formats; PT9.7 and PT9.8 as ruled; the reserved reasons; the vacuity definition. One commit, before any code that depends on it.
+2. **M4f, the checker rules.** `PL1207` with an error source on both surfaces. Vacuity in poly-ref and the fold, with one seed per property kind and a non-vacuous control. Then the re-check: every conformance and example source, and M3's references at the FROZEN commit, read through `git show` from the shared object store, never from the experiment's tree (S136). Every verdict that changes is listed with its cause in the record this plan gains at step 12.
+3. **The certificate.** `poly admit` writes and signs `.poly/certificate.json`; the read-back check and the broken variants enter the fault list (CLAUDE.md standing rule).
+4. **`poly-runtime` core.** `load` with the certificate check and the verified copy (S126); the `LedgerStore` with `step` events in the step's transaction and the content store; `create`, `dispatch`, `getState`, `getStateAt`, `list`; timers and messages through polyrun's `Workers.tickTimers` and `tickMessages`; the K9 refusal through the API (M4d).
+5. **The ledger.** Chains per run in the polyflow format; heads signed off the step path; the anchor; closure at archive; `advice` events by API; `poly journal verify` and `export`. This step uses E2 if it has landed, and poly's own verifier otherwise (S122).
+6. **Replay (M4a).** `poly journal replay` folds each run through poly-ref's `δ` and through polygraph's `replay.mjs` over the certified module, and compares every post-state, and every recorded gate decision with the M4 gate's (S118).
+7. **The outbox intent (M4b).** `model/outbox-intent.poly` checked in the runtime's CI; the worker hosting its lowered module; the gate interface with the allow-all gate and scripted test gates; approvals by API; worker traces replayed through poly-ref; `PL2401` with its seeded drifts.
+8. **Delivery (M4c).** After E1 is re-vendored: the delivery harness with fault injection, its abstraction function, and replay against the `Delivery` variant S125 rules.
+9. **PD2.** The provider adapter host, calibration maps, the `decision` event in the completion's transaction, the refusal of an outside dispatch of a decision's completion (S130), `adjudicate` end to end, `outcome` events, and the provenance checks of `poly journal verify`. PD2-A1 to PD2-A4.
+10. **PD3.** The certificate's `decisions` section with `modelBound: false`; the provider swap; `poly journal eval`; PD3-A1 to PD3-A3 as S131 and S132 rule.
+11. **Witness tests over the runtime API** (S68, S133).
+12. **Record**: measurements in this document, then stop for the code review.
+
+Steps 2 and 3 do not depend on each other or on the engines, and can start as soon as the rulings are in. Steps 8 and 5 (fully) wait on E1 and E2.
+
+## 5. How each gate item is tested
+
+Every test listed is written first and fails before the code it tests exists or before the fix it guards; the column says what makes it fail first.
+
+| Gate item | Test | Pass condition | Fails first because |
+|---|---|---|---|
+| **M4a** replay | `test/runtime-replay.test.mjs`: runs the orders example, the oms order, the router and the checkout configuration through `poly-runtime`, with timers, effects, children and messages; then `poly journal replay` on every run | every post-state equals the fold through poly-ref's `δ` and through the certified module; every recorded gate decision is reproduced (S118); a snapshot edited in `pr_instance` is reported as a kernel fault (PS11.4) with a `PL9xxx` code (S131) | no runtime and no replay exist |
+| **M4a** load | `test/runtime-load.test.mjs`: one admitted build, then one tampering per class: a byte of each certified artefact, an artefact added, one removed, the certificate's body, its signature, an unknown signing key | `load` refuses each, naming the artefact and both digests; the untouched build loads | `load` is first written as a stub that registers without checking |
+| **M4b** model | `test/outbox-intent.test.mjs`: `poly check packages/poly-runtime/model/outbox-intent.poly` | `CLEAN` with its instance: 17 states, deadlock-free, `no-reproposal-after-allow` holds, `settles` holds under its fairness; the M0 evidence numbers unchanged | the file does not exist in the runtime package |
+| **M4b** conformance | the same file: the worker runs every path (allow; deny; escalate, approve, allow; escalate, approve, deny; escalate, timeout; handler failing to `Dead`; settle failing; a crash while running) under scripted gates and handlers, and its intent traces replay through poly-ref | every recorded step is accepted with the recorded post-state; the corpus visits all 17 states and every accepted transition of the machine (measured, and the count printed) | the worker does not exist |
+| **M4b** `PL2401` | `test/runtime-drift.test.mjs` over the runtime drift list: a worker variant that re-proposes after a failed attempt, one with an extra persisted status, one that takes the DLQ retry | the runtime CI reports `PL2401 RUNTIME_MODEL_DRIFT` for each, naming the transition or status; the real worker reports nothing | the drift check does not exist |
+| **M4c** | `test/runtime-delivery.test.mjs`: two messages from a sender to a receiver under polyrun, with a crash injected at each point (after the claim, after the receiver's commit, before the acknowledgement), the receiver archived after both steps, then a duplicate redelivered | every captured trace replays through poly-ref against the `Delivery` variant S125 names, every action accepted; `at-most-once` true on every trace | on today's polyrun the archive trace dead-letters the duplicate, which maps to no `Delivery` action (E1) |
+| **M4d** | `test/runtime-k9.test.mjs` through the runtime API: an outside dispatch of an action wired as a live child's completion | refused with an error naming K9; one audit row; no journal row and no ledger event; the cascade still delivers the completion when the child ends | no runtime API exists; then, a seeded `poly-runtime` that bypasses polyrun's check |
+| **M4e** PD2 | `test/runtime-decisions.test.mjs`: PD2-A1 (a fault between the provider's result and the completion's commit, through `store.fault`, leaves neither event nor step; the run recovers and completes), PD2-A2 (verify refuses a removed link and an altered answer), PD2-A3 (replay with a provider that throws if called and `fetch` replaced by one that throws), PD2-A4 (a reversed refund writes an `outcome` linked to the right `decision`) | as stated in PD2.5 | each mechanism is absent |
+| **M4e** PD3 | the same file: PD3-A1 (a provider swap changes no byte under `.poly/build` and not the certificate's digest), PD3-A2 as S131 rules, PD3-A3 (`poly journal eval` over 100 recorded router questions with outcomes reports agreement and calibration and leaves every chain's head unchanged) | as stated in PD3.4 and S131 | each mechanism is absent |
+| **M4f** `PL1207` | `test/reserved-reasons.test.mjs` over `conformance/m4/errors/PL1207-*.poly` and their embedded twins | each reserved reason is `PL1207` at its `reject`; a reason that only contains one (`"not-terminal"`) is accepted | the code is listed but not enforced |
+| **M4f** vacuity | `test/vacuous.test.mjs`: one seed per kind of S128 (invariant, step, reject and liveness properties, `before`, a configuration invariant), each with a non-vacuous twin | each seed is `INCONCLUSIVE` with reason `vacuous` naming the antecedent; each twin is `CLEAN` | the rule is not implemented |
+| **M4f** re-check | `test/m4f-recheck.test.mjs` over every conformance and example source, and M3's references from the FROZEN commit | the verdicts equal a recorded table, in which every change from M2's verdicts is explained in the record of step 12 | the table is written before the rules are |
+| Standing rules | `test/tv.test.mjs`, `test/vendor.test.mjs`, `scripts/check-boundaries.mjs` | the certificate has its read-back and broken variants; `vendor/polyflow` is hashed; `poly-runtime` imports no model SDK and no network module | the new artefact and the new engine are unlisted |
+| No regressions | every M0 to M2 test, unchanged | every gate number unchanged | |
+| One command | `npm test` | exit 0 | |
+
+## 6. Spec issues
+
+Each issue gives a proposal. Nothing is built on an issue before it is ruled.
+
+- **S118. The gate in M4, with no Polyaxion until M5.** M4a asks replay to reproduce every gate decision, and `OutboxIntent` has gate states, but the gate is M5. *Proposal:* M4 builds the gate *interface* in the worker (`propose(proposal, snapshot) → allow | deny | escalate`, `settle(observed) → ok | failed`), with an allow-all gate as the default and scripted, deterministic test gates. Each decision is a `verdict` event in the run's chain. M4a's gate half is shown with those gates: replay reproduces each recorded decision from the proposal and the snapshot at its `seq` (PT9.3). AC6's second half, session replay in `sseq` order with Σ digests (PS11.1, PS11.2), moves to M5 with the real gate, and PT18's M4a row says so. Approvals in M4 are an API call that records who approved, without the person-key signature, which is PT12.5 and M5; M4 states this limit.
+
+- **S119. Who hosts the outbox intent.** polyrun's worker has no gate and three transitions outside the machine (section 1). *Proposal:* `poly-runtime` runs its own effect worker, built on the store's outbox primitives (`claimEffects`, `markEffectDone`, `markEffectRetry`, `markEffectDead`) and `rt.dispatch`, and does not start polyrun's `tickEffects` or call `recoverExpiredLeases`; polyrun's `tickTimers` and `tickMessages` are used unchanged. Each intent's state is an `OutboxIntent` value in a `poly-runtime` table, and every worker transition is an action on the lowered `OutboxIntent` module: an action the module rejects stops the worker on that intent and is reported as a runtime fault, never taken. Every worker transition writes the intent's new `OutboxIntent` value and the matching `pr_outbox` change in one `store.txn` (these are plain store writes, with no K9 or poison path that a joined transaction would roll back), so the two tables never disagree after a crash. A completion dispatch is never inside that transaction: it is dispatched first and the transition is written second, fenced on the completion's journal row, as polyrun's worker does. A crash or lease expiry while `Running` is `HandlerFailed` (it counts an attempt, where polyrun's does not): the worker finds expired `inflight` rows itself and, per row, writes `HandlerFailed` and the row's `markEffectRetry` or `markEffectDead` in one transaction. The parked path takes no transition. The DLQ retry and discard are not offered: `Dead` is terminal. `02` §2a and E3 are amended accordingly. *Alternative:* E3, the gate hook in polyrun's worker, with polyrun's lease recovery and DLQ added to the machine.
+
+- **S120. The attempt bound.** `OutboxIntent` bounds attempts at 3; a manifest's `retry.maxAttempts` is per kind (polyrun's default is 5; a decision's is 1). *Proposal:* the runtime's CI checks the machine once per distinct `maxAttempts` in the build, generated from the PT9.7 source with that bound (PT9.7 shows the instance 3), and the worker conformance runs at each. `load` refuses a manifest with no `maxAttempts`, so the bound is always the declared one.
+
+- **S121. The ledger in the step's transaction, and where the decision record lives.** *Proposal:* `poly-runtime` passes polyrun a `LedgerStore`, a subclass of polyrun's `Store` that overrides `insertJournal` and `commitStep`. Each journal row then gets its `step` event in the same transaction, chained on its run (K1 extends to the ledger), and the step's `outcome.<d>` outbox rows get their `outcome` events (S129). The worker holds a decision's record in memory from the provider's return to the completion's commit; `LedgerStore` writes the `decision` event before the completion's `step` event, in the same transaction, keyed by the completion's action id `<intent>:done`. A crash before the commit loses both and re-runs the provider, as PD2-A1 and K10 allow. M4 builds this for SQLite only; the Postgres store is listed as not built. E4 is not needed.
+
+- **S122. The ledger format.** *Proposal:* the polyflow event `{ v: 1, run: { ns, wf, run }, seq, kind, at, body, prev, hash }`, with `at` a number of milliseconds as polyflow writes it (PT16's example is corrected), `ns` the module, `wf` the machine, `run` the instance id. The ledger's `seq` is the event's position in its chain; a `step` event's body carries the journal's `seq`, `action`, digests of `data`, `pre` and `post`, `stepKind` and `rejectReason`. Bodies are kept in a content store table by digest, under a retention setting. `closure` is written when an instance is archived, not when it becomes terminal, since a terminal instance still takes rejected steps (PS3.2 row 1). A poisoning is an `observation` event. A K9 refusal writes no event (S88).
+
+- **S123. Signed heads and the anchor.** A KMS signer (PT15) cannot sign inside a transaction. *Proposal:* a signer loop, off the step path, signs the latest head of each run that moved since its last signature, `{ run, seq, hash, keyId, alg: "ed25519", sig }`, every `ledger.headMs` and at closure. The anchor is a Merkle tree (RFC 6962 hashing) over the latest signed heads of all runs, ordered by run, published every `ledger.anchorMs` as `{ v: 1, period, root, runs, keyId, alg, sig }` in its own table. `poly journal verify` reports a live run as `open-and-signed` with the seq it is signed through, as the polyflow verifier does.
+
+- **S124. K4 is not met by polyrun's archive.** *Proposal:* E1. Until it lands, PS10's evidence column for K4 says that archiving drops the dedupe keys in polyrun 8.3.2, and M4c's archive traces are the failing test that waits on it.
+
+- **S125. Which `Delivery` machine the runtime's traces replay against.** polyrun delivers messages in no promised order (S89); the in-order worker of PT9.8 rule 2 does not exist. *Proposal:* M4c replays against `delivery-parallel.poly` (2,368 states). A `fifo` declaration is refused at `load` until an in-order worker exists, so no deployed program relies on an order it does not get. The abstraction function from polyrun's store to `Delivery` actions is part of the test and is written down: `Emit` is the sender's commit, `Send` a claim, `Resend` a claim after a lease recovery, `LoseReq` a crash before the receiver commits, `DeliverReq` the receiver's commit or dedupe hit, `LoseAck` a crash between that and the mark, `DeliverAck` the mark `done`, `Archive` the purge.
+
+- **S126. The certificate.** *Proposal:* `poly admit` writes `.poly/certificate.json` in the polyflow shape (`v`, `subject`, `artefacts`, `guarantees`, `checks`, `domains`, `boundAccepted`, `toolchain`, `issuedAt`, `buildId`, `signatures`, `digest`), with poly's fields: the source and module digests, every artefact of every machine by path and SHA-256 (including `invariants.compose.mjs` and `liveness.mjs`), the instance of PT12.3a, the kernel assumptions, and `decisions` (PD3.2b). It is signed with an admission key named in `poly.json` (`keys.admission`), ed25519 through `node:crypto`. In M4 only a `CLEAN` program is admitted, since accepting a finding needs a person's signature (PT12.5, M5). At load, `poly-runtime` reads each artefact once, checks its digest, writes the verified bytes to a directory named by the build id, and registers polyrun's machines from that copy, so the bytes polyrun loads are the bytes checked. The certificate is a new artefact the runtime reads: its read-back check and broken variants enter the fault list.
+
+- **S127. The reserved reasons.** *Proposal:* `PL1207` reserves every reason the runtime gives: `terminal`, `outside-check-domain`, `poisoned` (polyrun), `archived` (K4, E1) and `claims-unverified` (S101, reserved now although PD5 is M5). PS3.2 lists them. polyrun's internal reasons (an action outside the surface, a strict-profile rejection) cannot be written in poly and are toolchain faults.
+
+- **S128. What is vacuous, per property kind.** *Proposal:* the antecedent of an implication is the conjunction of the left sides along its right spine (`a implies b implies c` has antecedent `a && b`). A property whose body is a conjunction is judged conjunct by conjunct, and one vacuous conjunct makes the property vacuous. Per kind: an invariant over the reachable states; a step property over the accepted transitions; a reject property over all transitions; `P leads to Q` over the reachable states (`P` never true); `before(k1, k2)` over the explored paths (no `k2` ever emitted); a quantified configuration property over the instances and the global states. An implication nested inside another operator is not judged. Automatic properties (`domain:`, `shape:`) are not judged. "After" properties are removed from PT12.3, since PS5 has none. The verdict names the property and its antecedent's source text. A new code is not needed: the report lists the property under a `vacuous` entry beside `notRun`, and the fold makes it `INCONCLUSIVE`.
+
+- **S129. `adjudicate`.** PD2.4a has the runtime reject the step `no-decision-to-adjudicate`. polyrun cannot turn an accepted step into a rejected one after the module has run, and a reason that depends on the ledger breaks PS4.1b. *Proposal:* the check makes it impossible instead. `adjudicate d as Correct | Wrong` lowers to an effect intent of kind `outcome.<d>`, class `none`, labels none, with a built-in handler that does nothing; the `outcome` event is written by `LedgerStore` in the adjudicating step's transaction, linked to the hash of the run's most recent `decision` event for `d`. poly-ref reports a finding with the path (ruled: `PL6203 ADJUDICATION_WITHOUT_DECISION`) for any reachable accepted adjudication not preceded on its path by an accepted `ok` completion of `d`. With S130, a checked program cannot reach the runtime case; if it is reached, the dispatch is refused like K9 (no step, an error, an audit row), never journaled. PT2, PT6 and PS3 gain the construct; the reason `no-decision-to-adjudicate` is dropped.
+
+- **S130. An outside dispatch of a decision's completion.** A host can dispatch `Routed(...)` itself. The step is accepted with no `decision` event, and PD2.2d's verify refuses the run afterwards. *Proposal:* `poly-runtime`'s `dispatch` refuses, before any step, an action wired as a decision's completion, with an error, an audit row and no journal row, as K9 does for children. Only the worker delivers them. K10's row in PS10 says so.
+
+- **S131. PD3-A2 needs PD4.3's policy, which is M5.** *Proposal:* PD3-A2 moves to M5 with PD4. M4 tests the half that needs no policy: each `decision` event records `model.reported` and the map's `fittedFor`; after a swap with no map fitted for the new model, the events show the mismatch and `uncalibrated` where no map is installed; after a map is installed, they record it. *Also for verify:* the codes in the replay range, `PL9001 SPEC_DIVERGENCE` for a post-state that differs from the fold, and new `PL9002 LEDGER_BROKEN` (chain, signature or anchor) and `PL9003 DECISION_PROVENANCE` (PD2.2d), so that a refusal names its kind.
+
+- **S132. Evaluation and fitting have no command.** *Proposal:* `poly journal eval --decision d --candidate <recorded provider>` reads `decision` events with their `outcome` links from an export, replays the recorded questions to the candidate, and reports agreement and calibration (Brier score and ten reliability bins). `poly journal fit` fits a monotone map by isotonic regression and writes `{ decision, version, fittedFor, digest, points }`. Neither writes to any chain (PD2.4b). The map is a piecewise-constant function on thousandths, applied by the adapter host.
+
+- **S133. Regenerations promised for M4.** S68 regenerates exported witness tests over the runtime API when it lands; M3-4 regenerates M3's adapter over it. *Proposal:* witness tests are regenerated in M4 (step 11). The M3 adapter is not touched on `m4`: `experiments/m3` is frozen on `main`, and a change on `m4` would conflict at the merge. It is regenerated after the merge, as a separate change.
+
+- **S134. Capabilities in the handler signature.** PT15 shows `(payload, { egress }, ctx)` and PT6.5 binds capabilities to labels and targets, but the M4 row does not list them. *Proposal:* M4 keeps the PT15 signature and passes an empty, frozen capability object, and the instance line says capabilities are not bound. Capability binding comes with the sandbox in M5.
+
+- **S135. The store.** *Proposal:* M4 supports SQLite (`node:sqlite`) only. The Postgres store needs the same subclass over `PgStore` and is listed as not built.
+
+- **S136. Which M3 references M4f re-checks.** The references on `m4` predate M3-6 to M3-8. *Proposal:* the references at the commit that FROZEN records, read with `git show <commit>:<path>` into a temporary directory. Nothing in `C:\Users\jjdub\code\poly` is read through its working tree or written. A change of verdict is a finding for the M3 report, not a change to the frozen set.
+
+### Raised during the build
+
+- **S137. The retry bound of an effect with no `retry` clause** (open, built as proposed). S120 has `load` refuse a manifest entry without `maxAttempts`, and most effects declare no `retry`, so the lowering wrote none and polyrun applied its hidden default (5). *Proposal:* the lowering writes that default out, `{ maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }`, and poly-ref's read-back expects it from PT6.1. The runtime behaves as before, and every bound is declared. One consequence of S120 is not changed: the oms example declares `attempts 6` on `chargeCard` (copied from the hand-written polyrun-oms manifest, AC1), so it is refused at admission; the runtime tests use other sources.
+
+- **S138. OutboxIntent has no permanent failure** (open, built without it). polyrun lets a handler throw `{ permanent: true }` to stop retrying (a declined card is a result, not an infrastructure failure), and dispatches the `failed` completion at once. PT9.7 has no such transition: from `Running`, `HandlerFailed` returns to `Allowed` below the bound. The worker hosts the machine, so it cannot add the path without the machine first (PL2401). *As built:* a permanent failure is an ordinary failure, retried up to the bound, and then `exhausted`. *Proposal:* PT9.7 gains `action HandlerRefused()`, `Running { attempt: n } => intent' = Dead`, with the `failed` completion; the model, its checks and the worker change together.
+
+- **S139. Exported witness tests over the runtime API meet PF8.1** (open, step 11 not built). S68 and S133 regenerate exported tests over the runtime API in M4. The runtime loads only an admitted program, and in M4 only a CLEAN program is admitted (S126), but a witness exists only for a program with a finding: the test cannot load the program it is about through `load`. *Proposal:* a test entry point, `loadForWitness(build, { moduleDigest })`, that loads an unadmitted build into an in-memory store only, pins the module digest as exported tests do today, writes `admitted: false` into every ledger event, and refuses a file store. Until it is ruled, exported tests keep driving the lowered artefacts (S68).
+
+- **S141. Two kinds of witness the runtime API cannot place** (ruled: an M4 limit; the exported test says so in its header, a455041). S139 walks exported witness tests through the runtime API, and two kinds cannot be: a configuration's, whose instances start from the configuration's own initial values (an address, a count), which no API call sets; and a machine that spawns children, whose children the witness drives as the environment while the runtime would run them itself. Both are admitted with a witness certificate and walked through the certified lowered artefacts of the runtime's verified copy, and the test says so in its output. *Proposal:* a runtime call that creates an instance at given initial values, allowed only under a witness certificate, so a configuration's witness can be walked through the runtime; a machine with children stays on its artefacts until children's completions can be scripted through the API.
+
+- **S142. The handlers are not bound by the certificate** (ruled: the proposal, extended to imports; built in 00398d8). `poly admit` runs the handler lint of PT6.5 over the files `poly.json` names, and the certificate records neither the lint nor those files. A handler rewritten after admission to reach for ambient authority (`node:fs`, `process.env`) loads under the same certificate. Fixing it changes PT15's certificate fields and what `load` checks, so it waits for a ruling. Two facts bound the choice: the runtime receives handlers as functions through `rt.handle`, not as files, so a digest at load proves which file was read, not which function was registered; and the lint is a static check of source, so it binds only the source it read. *Proposal:* the certificate records the lint as a check, with the path and SHA-256 of every handler file it read, among `artefacts`; `load` takes the handler files' directory and refuses one whose digest differs, as for any artefact, and `rt.handle` accepts only a handler exported by a certified file. *Alternative:* record the lint and the digests in the certificate only, so a changed handler is found by `poly journal verify` and an audit, not refused at load; the runtime's limit says so.
+
+## 7. Risks
+
+- **Subclassing polyrun's `Store`** (S121) depends on `commitStep` and `insertJournal` keeping their names and call pattern. `test/vendor.test.mjs` pins the bytes; a re-vendoring that changes either fails the ledger tests first.
+- **Two workers.** If a host also calls polyrun's `startWorkers`, two effect workers run. `poly-runtime`'s `startWorkers` starts only its own effect loop and polyrun's timer and message loops, and `load` hides polyrun's `startWorkers`.
+- **Signing off the step path** leaves the tail of a live run unsigned for up to `ledger.headMs`. The verifier reports it; it is never reported as signed.
+- **E1 and E2 are in other repositories.** Steps 2 to 4, 6, 7 and 9 to 11 do not wait on them; steps 5 (fully) and 8 do.
+
+## 8. Record
+
+Every step is built except step 11, which waits on S139. Commits, in order: the tree guard 74fa212; the plan 40fe2fd; the spec text eee9d22; then the build, below. `main` was merged into `m4` twice (c80ce85 at the start, 0da9607 with M3-10), never the reverse.
+
+| Step | What was built | Commits |
+|---|---|---|
+| 2, M4f | `PL1207` over require, reject and guard on both surfaces; vacuity per property kind in poly-ref, listed under `vacuous` and folded to `INCONCLUSIVE` | f263af7, 5c7ceb2 |
+| 3 | `poly admit` and the certificate; S137 (every manifest entry declares its retry bound) | 5201691, 6f79eb5 |
+| | `vendor/polyflow`: the polyflow ledger and verifier at 5170add | 48225d7 |
+| 4 | `poly-runtime`: `load` with the certificate check and the verified copy; `LedgerStore` writing each step's event in its transaction; K9 through the API | 0d8ba84 |
+| 5 | Signed heads off the step path, the anchor, closure at archive, `advice` | 8046494 |
+| 6 | Replay through poly-ref and polygraph; `poly journal verify / replay / export` | 202df7c, 9cff2f9 |
+| 7, M4b | The effect worker hosting OutboxIntent, the gate interface, approvals, PL2401 in CI; polyrun's own workers refused | c51ee07, de101d5 |
+| 8, M4c | Delivery traces against the parallel Delivery machine; message lease recovery | d84a5ac |
+| 9, 10, M4e | `adjudicate` and PL6203; decision events, outcome links, the K10 refusal, providers and calibration maps, `poly journal eval / fit`; the intent stream | 8e824de, deebd41, ab94e52 |
+
+**The gate, item by item.**
+
+| Item | Status | Measured |
+|---|---|---|
+| M4a replay | **passes** | A program with a cascade, effects, a strict domain, a terminal state, a fired timer, unions and records: every row of every run folded by poly-ref and every accepted window replayed by polygraph, with no divergence; an edited snapshot and an edited post-state are each found (PL9001). Every recorded gate decision of the M4 gates is recomputed from its proposal and snapshot. Session replay in `sseq` order is M5's (S118). |
+| M4a load | **passes** | Six tamperings refused, each naming the artefact and both digests: a changed byte in five artefact kinds, a removed artefact, an added one, an edited certificate, a bad signature, an untrusted key. With the check disabled, three of the tamper tests fail. |
+| M4b model | **passes** | PT9.7 word for word; CLEAN at every bound 1 to 5, with 3m + 8 states (17 at 3), deadlock-free, `settles` under its fairness, nothing vacuous. The checked-in builds equal their lowering byte for byte. |
+| M4b conformance | **passes** | Twelve scripted jobs drive the bound-3 intents through **17 of 17 states and 24 of 24 accepted transitions**, and every trace replays through poly-ref. Three drifting workers and polyrun's DLQ discard are each PL2401; the real worker reports nothing. |
+| M4c | **passes, except the archive trace, which waits on E1** | Four traces replay against the parallel Delivery, every action accepted, at-most-once on every state, Delivery's step count equal to the receiver's journal. The archive trace runs and fails: the late duplicate is dead-lettered, since polyrun 8.3.2 drops the dedupe keys at purge (S124). It is listed as waiting on E1. |
+| M4d | **passes** | Through the API: refused with an error naming K9, one audit row, no journal row and no ledger event; the cascade still delivers the completion. |
+| M4e | **passes** for PD2-A1 to PD2-A4, PD3-A1, PD3-A3 and the half of PD3-A2 without a policy (S131) | The crash between answer and commit leaves neither event nor step, and the run completes by `RouteFailed` with the model asked once (a decision is tried once, PD1.7). A removed link and an altered answer are found with the chain rebuilt around them (PL9003). Evaluation over 100 recorded questions: 100 scored, ten reliability bins, no chain changed. |
+| M4f | **passes, except the M3 half, which waits on FROZEN** | The re-check of every conformance and example source finds three vacuous properties and no PL1207. FROZEN does not exist on `main`, so the M3 half is listed as not run (S136). |
+
+**What the re-check found (M4f).** Three step properties restate terminality: `cancel-is-final` in the orders example and its embedded twin, and `shutdown-is-a-true-terminal-state` in raft. No step is accepted from a terminal state (PS3.2 row 1), so each antecedent is never true on an accepted step, and the rule reports them as vacuous. Raft's verdict goes from CLEAN to INCONCLUSIVE; no gate number of M0 to M2 changes. As a preview, not the gate: M3's 40 references on `main` at 0da9607 check CLEAN, with no vacuous property and no PL1207.
+
+**Waiting, never skipped.** Three tests run as `todo` with their reason: the M4c archive trace (E1); polyflow's own verifier over poly's chains (E2); the M3 references at FROZEN (S136). Until E2, poly verifies its chains with its own verifier, rule for rule polyflow's, over the ten kinds.
+
+**Found during the build, and fixed with a test that failed first.**
+- poly-runtime does not run polyrun's effect tick (S119), which is where polyrun returns an expired message lease to pending; a crash after claiming a message stranded it. The runtime now recovers message leases itself (d84a5ac).
+- A worker whose lease was taken over could take a transition on an intent it no longer held. The claim is now a fence on every transition (c51ee07).
+- `poly check` failed in a toolchain without the runtime, through poly-check's static import of it; the M3 runner's test caught it (9cff2f9).
+
+**Not built, by ruling or for lack of syntax.** Postgres (S135); capabilities, with an empty, frozen object passed (S134); person-key signatures on approvals (S118); the M3 adapter over the runtime API, after the merge (S133); exported witness tests over the runtime API (S139); replay of an archived run from its step events and the content store. `PL5405` is in the catalogue, and the grammar has no `fifo` yet, so there is nothing for `load` to refuse.
+
+**Observations for the owner.**
+- The experiment's own tests on this branch fail as they did before any M4 commit (3 of 789 at the merge base): `freeze.json` records claude CLI 2.1.286 and Windows 10.0.26200, and this machine has 2.1.287 and 10.0.26300, so the S116 rule would refuse a run here; and control 4's test still expects O1 not to exist. Both belong to M3 and are untouched on `m4`.
+- An input outside an action's type (a union constructor with payloads written as a bare name) is refused by the SAM strict schema with the reason "Invalid proposal ...", which is not reserved. PS3.2 gives no label to data outside T(a); replay flags such a row as a divergence.
+
+`npm test` runs 881 tests: 875 pass, 3 are listed as waiting, and 3 fail, the same three M3 tests that fail at the merge base (the environment record, the run refusal that follows from it, and control 4). The boundary check passes with `poly-runtime` in it.
+
+### After the rulings S137 to S140
+
+`main` was merged at 4ec2fe2. Each ruling is built with a test that failed first.
+
+| Ruling | Built | Commit |
+|---|---|---|
+| S137 | The cap is 10: the oms example (attempts 6) is admitted, 11 is refused. OutboxIntent is checked at every bound from 1 to 10, with 3m + 8 states each, 11 at 1 and 38 at 10, and its builds are checked in. | 823eb9e |
+| S138 | PT9.7 first: `HandlerFailedPermanent`, Running to Dead with the failed completion. Re-checked at every bound, `settles` included: 17 states and 27 accepted transitions at 3, all covered by the corpus (15 jobs). Each handler outcome is an observation paired by CI with the transition taken; a worker that retries a permanent error is PL2401. | 56136fe |
+| S140 | An input outside its action's type, read from the certified contract, is refused before any step with an audit row; a provider's answer outside the type fails the settle; a schema rejection reaching the store is refused as a backstop. PS3.2 says so. | 1bcc3d3 |
+| S139, step 11 | `poly admit --witness` and witness certificates; `load` refuses them without allowWitness, and allowWitness in production; exported witness tests admit the source as it is now with a key made for the run and walk a machine's witness through the runtime API. PL6203 can be exported. S141 is raised for configurations and machines with children. | 9783948 |
+
+`npm test` after these: 1,065 tests, 1,062 pass, 0 fail, 3 waiting (E1, E2, FROZEN). The M3 tests that failed before pass since the merge of M3's fixes.
+
+### The code review of M4
+
+Four reviewers read `ee3aa66..9783948` in four parts (certificates and loading; the ledger, replay and decisions; the worker and the refusals; the checker), and each reproduced every finding it reports with a script under `.poly/review-a` to `review-d`. I re-ran a sample of each part's scripts and every one gave the reported output. Polywatch found three more defects in the last build, fixed with tests that failed first (2f81abd). The 30 findings were ruled in `decisions-m4.md`, and are fixed below.
+
+| Part | High | Medium | Low |
+|---|---|---|---|
+| A, certificates and loading | 1 (the certificate hashes the build after the check, so a file rewritten during the check is certified) | 1 (sources and guarantees read after the check) | 3 (a witness key in version control is accepted; a junction defeats the version-control test; handlers are not in the certificate) |
+| B, ledger, replay, decisions | 3 (verify passes a run whose heads were deleted, and never reads the anchor; a decision completion without a decision event when the handler is not a provider; the adapter gives the chosen answer another answer's confidence) | 4 (fit does not pool tied raw values; the CLI replays gate decisions with the allow-all gate; a reused id extends an archived chain; replay skips archived runs and reports clean) | 3 (events after a closure; the binding ignores action id and version; the map's digest and monotonicity are not checked) |
+| C, worker and refusals | 4 (a crash between a permanent failure's completion and its transition re-runs the effect; a stale worker still dispatches its completion; an approval racing the escalation timeout makes the real worker drift; outside dispatches to intent instances are accepted) | 4 (K10 bypassed by a message; one throwing intent starves the batch and the tick; conformance misses completion drift; a redeploy changing a bound strands intents) | 1 (Ref parameters accept any string; the non-record case of the same finding is fixed) |
+| D, checker | 1 (outcome.<d> is not a reserved kind: a valid program gets PL2501, or PL6203 with no adjudication) | 3 (two decisions sharing a completion hide PL6203; an adjudication in the completion step itself is a false PL6203; compose invariants are never judged for vacuity) | 2 (the antecedent text drops parentheses; a path property cannot name outcome.<d>) |
+
+### The review's findings, fixed
+
+`main` was merged into `m4` a third time (8b1b5c7) for the rulings. Each finding has a test that failed before its fix; one finding is raised instead of fixed, since its fix changes PT15 (S142).
+
+| Findings | Fix | Commit |
+|---|---|---|
+| A1, A2 | admission certifies the artefact and source digests the check recorded, and refuses bytes that differ | a745491 |
+| A3, A4 | `admit --witness` applies the version-control rule to its key; the rule walks the real path | bf3d29d |
+| A5 | raised as S142 and built as ruled: the certificate binds the handler files and their relative imports; `load` refuses a change (PL6403); `rt.handle` takes only certified exports (PL6404) | 00398d8 |
+| B1 | `poly journal verify` requires a signed head and an anchor covering it; PL9002, exit 1 | e72246e |
+| B2 | a decision completion without its record is refused; decision and outcome kinds take no `rt.handle` | ed8d9eb |
+| B3 | `conf` is the returned answer's calibrated probability; `margin` against the best other, floored at 0 | 3b15778 |
+| B4 | `fit` pools tied raw values before PAV | cf98b35 |
+| B5 | replay never substitutes a gate; unreplayed gate decisions are listed as not run, exit 2 | 487bc3b |
+| B6, B7 | an archived id is not created again; replay lists archived runs as not replayed | ac45bcd |
+| B8, B9 | no event after a closure, and verify finds one; the binding compares action id and version | 88e7447 |
+| B10 | `provide` refuses a map whose digest is not its own, or that is not monotone | 4bfb12b |
+| C1 to C4, C6 to C8 | one transaction for a terminal transition and its completion, behind the fence; the approval race is a rejected step; outside dispatches to intents refused; a throwing gate holds only its intent; completion drift found; an intent keeps its bound | 68b5f60 |
+| C4, C8 (follow-up) | a program machine named `runtime.OutboxIntent` is refused at load where the runtime needs that model, and is the program's otherwise; replaced by S143 | 5580cd8 |
+| S143 | the checker reserves modules `runtime` and `runtime<m>` under PL1208, except PT9.7's model pinned by digest; `load` refuses them too | b6d28fa |
+| C5 | K10 at both ends: `PL6204` for a send, a runtime refusal for a delivered message | d666282 |
+| C9 | a `Ref<M>` parameter must name a live instance of M, or none (S140) | e2ae8a1 |
+| D1 | `decision.*` and `outcome.*` are reserved: `PL1208` | 3401b9c |
+| D2, D3 | PL6203 tracks which decision a shared completion answers, and counts the completion before its own adjudication | d55e87c |
+| D4 | compose invariants are judged for vacuity over the joint states | 7cc2130 |
+| D5 | a vacuous antecedent prints as one conjunction, with its parentheses | b786557 |
+| D6 | a path property may name `outcome.<d>` | e777a07 |
+| S141 | the exported test's header names its route; one through the artefacts is not a runtime-API test | a455041 |
+
+The C4 and C8 follow-up was found by the gate, not by a reviewer: C8 registered the runtime's model at every bound, so AC3's liveness seed, a program machine `runtime.OutboxIntent`, was walked through the runtime's model and its exported test passed on the unfixed program.
+
+**The gate, from a clean build.** Every `dist` directory and build-info file was removed, with the test build directories under `.poly`; then `npm test` built, ran the boundary check (passed) and ran 1113 tests: 1110 pass, 0 fail, and 3 are listed as waiting (the archive trace on E1, polyflow's verifier on E2, M3's references on FROZEN). The three M3 tests that failed at the merge base before pass now.
+
+
+### S142, S143 and the gate that closes M4
+
+`main` was merged into `m4` a fourth time (8d7df77) for the rulings on S142 and S143. Each was built with a test that failed first.
+
+- **S143** (b6d28fa). The checker refuses a program machine in a module named `runtime` under PL1208 (renamed `RESERVED_NAME`), whatever bounds a build declares or intents a store holds. Two points go beyond the ruling's text. The runtime's ids at other bounds are `runtime<m>.OutboxIntent`, so modules `runtime<m>` are reserved too. PT9.7's own model is written in module `runtime`, so poly-core pins its module digests at bounds 1 to 10; these are the only modules the checker accepts under those names, and a test recomputes them from the model's text. The AC3 liveness seed, the four OutboxIntent evidence examples and the CLI escape fixture moved to module `intents`, and every evidence number is unchanged.
+- **S142** (00398d8). Admission reads the handler files and their relative-import closure once, lints those bytes, and certifies each file's digest, the lint's version and verdict, the installed packages and the lockfile's digest. An import it cannot name is PL6402. `load` hashes the certified files and the lockfile first and refuses a difference (PL6403), then imports the roots from the verified copy. `rt.handle` takes only an export of a root as loaded (`rt.handlerExports`), by identity; anything else is PL6404. Witness certificates follow the same rule. Two broken certificate writers joined the fault list.
+- **Polywatch.** On the earlier fixes it confirmed two findings: one held (a failing message recovery starved the message pass and the K10 audit, fixed in b9ff135) and one did not. On S142 and S143 it confirmed two findings and raised one more: a checked artefact deleted before the certificate was written was left out of it, fixed in bfa11fc; a dynamic import of a computed name, which the lint already refuses (PL6401), and a synchronous throw from passes that are all async, did not hold. Each outcome is recorded.
+
+**The gate, from a clean build.** Every `dist` directory, build-info file and test build directory was removed; `npm test` built, ran the boundary check (passed) and ran 1126 tests: 1123 pass, 0 fail, 3 waiting (the archive trace on E1, polyflow's verifier on E2, M3's references on FROZEN).
+
+## Conclusion
+
+M4 is closed at 4068ddc (ruled in `decisions-m4.md`, "M4 closed"). It was planned in thirteen steps, and all thirteen are built, from the tree guard to the record. The runtime loads only certified bytes, writes its ledger inside each step's transaction, and hosts the checked outbox machine itself, so the worker's trace is the machine's own journal and covers all of its states and transitions. Replay reproduces every post-state and every recorded gate decision, and decisions are recorded, linked and refused from outside as PD2 and K10 require. Three items wait, each listed rather than skipped: the archive trace on E1, polyflow's verifier on E2, and M3's references on FROZEN. **K4 counts as met only once E1 lands:** until polyrun's tombstones are vendored, a duplicate delivered after an archive is dead-lettered rather than answered from a dedupe record, and the M4c archive trace stays waiting. S137 to S140 are built as ruled, step 11 with them. S141 is an M4 limit that the exported tests state. The review's 30 findings are fixed; A5 was raised as S142 and built as ruled, with S143.

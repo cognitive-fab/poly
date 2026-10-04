@@ -1,0 +1,16 @@
+// PD4-A2: a policy that denies the refund flow in a crisis with no escalation, under a mandate that needs a refund.
+module crisis_policy
+
+policy crisis-stop {
+  scope "support"
+  obligation refund-before-end "A session ends only after a refund." machine {
+    states waiting, refunded
+    initial waiting
+    from waiting when effect.kind == "payments.refund" -> refunded
+    end refunded
+  }
+  obligation crisis-deny "In a crisis, refunds are denied." rule {
+    when effect.kind == "payments.refund" && machine("ops.OpsMode").mode == Crisis
+    require false else deny
+  }
+}

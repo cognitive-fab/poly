@@ -1,0 +1,45 @@
+// PD5.2.2c, S156: a payment made by a completion step. The order is checked by a step with claims; the check's
+// completion pays. The payment's step has no claims of its own: it inherits the starting step's origin.
+module lp
+
+enum Kind { Person, Agent, Service }
+enum Attest { Verified, Failed, Absent }
+enum Phase { Open, Checking, Paid }
+
+claims Caller {
+  kind: Kind
+  attest: Attest
+  assurance: 0..3
+  principal: Principal
+}
+
+machine Order {
+  state { phase : Phase = Open }
+  terminal phase == Paid
+
+  action Check() 
+  action Checked()
+
+  on Check() by c: Caller {
+    require phase == Open else reject "not-open"
+    phase' = Checking
+    emit check(1)
+  }
+  on Checked {
+    require phase == Checking else reject "not-checking"
+    phase' = Paid
+    emit pay(1)
+  }
+
+  effect check(n: 0..1) {
+    kind "lp.check"
+    labels { read:store }
+    class none
+    ok -> Checked()
+  }
+  effect pay(n: 0..1) {
+    kind "lp.pay"
+    labels { egress:external }
+    class irreversible
+  }
+}

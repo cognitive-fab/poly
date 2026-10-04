@@ -1,0 +1,10 @@
+// S162: the scope requires attribution, so an outside dispatch of a timer's target is refused at run time.
+module lt_policy
+
+policy timed-origin {
+  scope "lt" requires attribution
+  obligation person-pays "An irreversible effect has a person at its origin." rule {
+    when effect.class == "irreversible"
+    require lineage.origin.kind == Person else deny
+  }
+}

@@ -89,6 +89,7 @@ export function render(r: CheckReport): string {
   for (const d of r.diagnostics) out.push(...renderDiagnostic(d, r.file));
   for (const m of r.machines) for (const d of m.diagnostics) out.push(...renderDiagnostic(d, r.file));
   for (const c of r.configurations ?? []) for (const d of c.diagnostics) out.push(...renderDiagnostic(d, r.file));
+  for (const p of r.policies ?? []) for (const d of p.diagnostics) out.push(...renderDiagnostic(d, r.file));
   if (r.error) out.push(`error: ${r.error}`);
   for (const m of r.machines) {
     const ran = m.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
@@ -96,6 +97,7 @@ export function render(r: CheckReport): string {
     out.push(`${m.machine}: ${ran.join(' · ')}`);
     if (notRun.length) out.push(`  not run: ${notRun.map((s) => s.stage).join(', ')} (${notRun[0].reason})`);
     for (const p of m.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
+    for (const p of m.vacuous) out.push(`  vacuous: ${p.property}, its antecedent ${p.antecedent} is never true${p.member !== undefined ? ` for member ${p.member}` : ''} (PT12.3)`);
     for (const s of m.stages) for (const n of s.notes ?? []) out.push(`  note: ${n}`);
   }
   for (const c of r.configurations ?? []) {
@@ -104,7 +106,17 @@ export function render(r: CheckReport): string {
     out.push(`configuration ${c.configuration}: ${ran.join(' · ')}`);
     if (notRun.length) out.push(`  not run: ${notRun.map((s) => s.stage).join(', ')} (${notRun[0].reason})`);
     for (const p of c.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
+    for (const p of c.vacuous) out.push(`  vacuous: ${p.property}, its antecedent ${p.antecedent} is never true${p.member !== undefined ? ` for member ${p.member}` : ''} (PT12.3)`);
     for (const s of c.stages) for (const n of s.notes ?? []) out.push(`  note: ${n}`);
+  }
+  // PT8: each trust scope's policies, with their stages.
+  for (const p of r.policies ?? []) {
+    const ran = p.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
+    const notRun = p.stages.filter((s) => s.status === 'not-run');
+    out.push(`scope "${p.scope}" (${p.policies.join(', ')}): ${ran.join(' · ')}`);
+    for (const s of notRun) out.push(`  not run: ${s.stage} (${s.reason})`);
+    for (const x of p.notRun) out.push(`  not run: ${x.property}, ${x.reason}`);
+    for (const x of p.vacuous) out.push(`  vacuous: ${x.property}, ${x.antecedent} (S113, S149)`);
   }
   const instances = [...r.machines.map((m) => instanceLine(m, r.module)), ...(r.configurations ?? []).map((c) => configLine(c, r.module))];
   out.push(`verdict: ${r.verdict} (exit ${r.exit})${instances.length ? `  ${instances[0]}` : ''}`);

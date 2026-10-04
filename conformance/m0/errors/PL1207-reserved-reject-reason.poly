@@ -1,0 +1,19 @@
+// expect: PL1207 (a handler rejects with a reason the runtime reserves, PS3.2, S101, S127)
+module errors
+enum S { Open, Shut }
+
+machine M {
+  state { s : S = Open }
+  terminal s == Shut
+  action Close()
+  action Poke()
+  guard all when s == Shut reject "archived"
+  on Close {
+    require s == Open else reject "terminal"
+    s' = Shut
+  }
+  on Poke {
+    require s == Open else reject "outside-check-domain"
+    if s == Open { reject "poisoned" } else { reject "claims-unverified" }
+  }
+}

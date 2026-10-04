@@ -1,0 +1,10 @@
+// PT9.9: the receiver's trust scope.
+module sb
+
+service machine Ponger {
+  state { pings : 0..1 = 0 }
+  action Ping()
+  action Shout()
+  on Ping { pings' = 1 }
+  on Shout { pings' = 1 }
+}

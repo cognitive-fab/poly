@@ -1,0 +1,19 @@
+// AC4's policy (PT8.1): a machine obligation over effect labels, a rule over the emitting order's state, and a
+// statement the decision table proves (S149).
+module orders_policy
+
+policy orders-governance {
+  scope "orders"
+  obligation reserve-before-charge "Charge only after stock has been reserved." machine {
+    states open, reserved
+    initial open
+    from open when effect.kind == "stock.reserve" -> reserved
+    deny in open when effect.class == "irreversible" && effect.labels has "egress:external" && effect.kind == "payment.charge" reason "charge-before-reserve"
+    end open, reserved
+  }
+  obligation orders-irreversible "No irreversible effect on a cancelled order." rule {
+    when effect.machine == "orders.Order" && effect.class == "irreversible" && machine("orders.Order").status == Cancelled
+    require false else deny
+  }
+  never no-fee-when-cancelled "No irreversible effect is ever allowed for a cancelled order.": allow when effect.machine == "orders.Order" && effect.class == "irreversible" && machine("orders.Order").status == Cancelled
+}

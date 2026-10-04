@@ -17,15 +17,16 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
-import { parse } from '@poly/lang';
+import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
-import { lintHandlers } from './lint.js';
-import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport } from '@poly/ref';
+import { handlerClosure } from './handlers.js';
+import { policyReports, type PolicyReport } from './policies.js';
+import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, conjunction, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type Vacuous } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
@@ -49,10 +50,32 @@ export interface MachineCheck {
   stages: StageRecord[];
   /** Properties that were not checked, with the reason and the milestone that checks them (M1-2). */
   notRun: { property: string; reason: string }[];
+  /** PT12.3, S128: properties whose antecedent is never true where they are judged; each makes the verdict INCONCLUSIVE. */
+  vacuous: VacuousRecord[];
   diagnostics: Diagnostic[];
   verdict: Verdict;
   instance?: InstanceRecord;
   buildDir?: string;
+  /** Review A1: the SHA-256 of each artefact as the lowering wrote it, the bytes every later stage checked. */
+  artefactDigests?: Record<string, string>;
+}
+
+/** A vacuous property (PT12.3, S128): its name, its antecedent's source text, and the member it never held for. */
+export interface VacuousRecord {
+  property: string;
+  reason: 'vacuous';
+  antecedent: string;
+  member?: number;
+}
+
+function vacuousRecords(list: Vacuous[]): VacuousRecord[] {
+  return list.map((v) => ({
+    property: v.property,
+    reason: 'vacuous',
+    // Review D5: printed as one conjunction, so a part that needs parentheses keeps them.
+    antecedent: v.text ?? printExpr(conjunction(v.parts)),
+    ...(v.member !== undefined ? { member: v.member } : {}),
+  }));
 }
 
 export interface InstanceRecord {
@@ -78,6 +101,8 @@ export interface ConfigCheck {
   stages: StageRecord[];
   /** Liveness properties, listed as not run (M1-2). */
   notRun: { property: string; reason: string }[];
+  /** PT12.3, S128: as for a machine. */
+  vacuous: VacuousRecord[];
   diagnostics: Diagnostic[];
   verdict: Verdict;
   /** The checked instance (PT12.3a): the instances, the bounds, and what the verdict assumes. */
@@ -95,6 +120,8 @@ export interface CheckReport {
   module: string | null;
   /** The module digest (PT1.4) the witnesses and fixes of this report were computed on (S69). */
   moduleDigest?: string;
+  /** Review A2: the SHA-256 of the source text the check read. */
+  sourceDigest?: string;
   verdict: Verdict | 'NONDETERMINISM' | 'ERROR';
   exit: number;
   diagnostics: Diagnostic[];
@@ -103,6 +130,8 @@ export interface CheckReport {
   configurations: ConfigCheck[];
   error?: string;
   engines: Record<string, string>;
+  /** Stage 5 (PT8): the module's policies, one report per trust scope. */
+  policies: PolicyReport[];
   /** S41: each effect kind the module declares, with what must agree across the project's modules. */
   effectKinds?: { kind: string; signature: string; effect: string; line?: number; col?: number }[];
 }
@@ -110,6 +139,10 @@ export interface CheckReport {
 export interface CheckOptions {
   /** Where `.poly/build` goes; the working directory by default (PT1.5). */
   root?: string;
+  /** PT8: the modules the policies of this file govern; the file's own module when it is checked alone. */
+  program?: Module[];
+  /** PT6.5, S152: generate the OpenShell sandbox policies (poly.json's `isolation`). */
+  isolation?: 'openshell';
 }
 
 const HERE_REQUIRE = createRequire(import.meta.url);
@@ -145,7 +178,7 @@ export function engineVersions(): Record<string, string> {
 export async function checkFile(file: string, opts: CheckOptions = {}): Promise<CheckReport> {
   const src = readFileSync(file, 'utf8');
   // The source's absolute path, so a later `poly witness` or `poly fix` finds it from any directory (review D4).
-  const report: CheckReport = { file: resolve(file), module: null, verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], engines: engineVersions() };
+  const report: CheckReport = { file: resolve(file), module: null, sourceDigest: 'sha256:' + createHash('sha256').update(src, 'utf8').digest('hex'), verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], policies: [], engines: engineVersions() };
 
   // ── stage 0: parse, type, domains ─────────────────────────────────────
   // S71: a .ts module is read by poly-embed into the same AST; everything after this line is shared.
@@ -161,7 +194,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const engines = report.engines;
 
   for (const machine of checked.machines.keys()) {
-    const mc: MachineCheck = { machine, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+    const mc: MachineCheck = { machine, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
     report.machines.push(mc);
     mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
     if (refused) {
@@ -179,12 +212,12 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       notRun(mc, (['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)] as StageName[]).filter((st) => !done.has(st)), reason);
       const cut = [mc];
       for (const rest of [...checked.machines.keys()].slice([...checked.machines.keys()].indexOf(machine) + 1)) {
-        const other: MachineCheck = { machine: rest, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+        const other: MachineCheck = { machine: rest, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
         notRun(other, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, rest)], reason);
         report.machines.push(other);
         cut.push(other);
       }
-      for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
+      for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
       finish(report, module);
       for (const m of cut) m.verdict = fold([m.verdict, 'INCONCLUSIVE']);
       report.error = `${machine}: ${err.message}`;
@@ -196,6 +229,20 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // ── stage 4b: configurations (PS13) ─────────────────────────────────────
   const configs = configurationReports(module, refused);
   report.configurations.push(...configs.configurations);
+  // ── stage 5: policies (PT8) ─────────────────────────────────────────────
+  if (module.decls.some((d) => d.kind === 'Policy')) {
+    if (refused) {
+      for (const d of module.decls) if (d.kind === 'Policy') report.policies.push({ scope: d.scope, policies: [d.name], stages: [{ stage: 'policy-types', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE', reads: [] });
+    } else {
+      try { report.policies.push(...await policyReports(module, opts.program ?? [module], resolve(opts.root ?? process.cwd()))); } catch (e) {
+        finish(report, module);
+        report.error = `policies: ${(e as Error).message}`;
+        report.verdict = 'ERROR';
+        report.exit = EXIT_CODES.ERROR;
+        return report;
+      }
+    }
+  }
   if (configs.error) {
     // As for a machine's stages: a throw is an ERROR report, never a rejected check (review finding).
     finish(report, module);
@@ -234,7 +281,7 @@ function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
 async function checkMachineStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, opts: CheckOptions, engines: Record<string, string>): Promise<void> {
   // ── lower ─────────────────────────────────────────────────────────────
   let t0 = performance.now();
-  const { lowered, diagnostics } = lowerMachine(module, checked, machine);
+  const { lowered, diagnostics } = lowerMachine(module, checked, machine, opts.isolation ? { isolation: opts.isolation } : {});
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
@@ -247,6 +294,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   mkdirSync(dir, { recursive: true });
   for (const [f, text] of Object.entries(lowered.files)) writeFileSync(join(dir, f), text);
   mc.buildDir = dir;
+  mc.artefactDigests = Object.fromEntries(Object.entries(lowered.files).map(([f, text]) => [f, 'sha256:' + createHash('sha256').update(text, 'utf8').digest('hex')]));
   mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'CLEAN', ms: performance.now() - t0 });
 
   // ── stage 1: strict validate() ────────────────────────────────────────
@@ -271,7 +319,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 1b: translation validation (PS9.3) ──────────────────────────
   t0 = performance.now();
-  const tv = await translationValidate(module, machine, dir);
+  const tv = await translationValidate(module, machine, dir, opts.isolation ? { isolation: opts.isolation } : {});
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {
@@ -281,6 +329,8 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     return;
   }
   mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'CLEAN', ms: performance.now() - t0, note: `${tv.transitions} transitions and ${tv.propertyChecks} property evaluations agree` });
+
+  mc.vacuous = vacuousRecords(ref.vacuous);
 
   // ── stage 2: polygraph model check ────────────────────────────────────
   t0 = performance.now();
@@ -345,7 +395,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   // ── stage 3b: decisions (PD1.4d, S75) ─────────────────────────────────
   if (ref.model.decisions.size) {
     t0 = performance.now();
-    const ungated = ref.findings.filter((f) => f.code === 'PL6201');
+    const ungated = ref.findings.filter((f) => f.code === 'PL6201' || f.code === 'PL6203');
     mc.diagnostics.push(...ungated);
     mc.stages.push({ stage: 'decisions', status: 'ran', engine: 'poly-ref', verdict: verdictOf(ungated), ms: performance.now() - t0, note: `${ref.model.decisions.size} decision${ref.model.decisions.size === 1 ? '' : 's'}, each answer at each interval of its confidence and margin (PD1.4b); the completion step alone (S75)` });
   }
@@ -367,8 +417,10 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const at = { module: module.name, machine };
   const engine = `polyrun@${engines.polygraph}`;
   const joint = checkJoint(module, machine);
-  mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9'];
+  // Review B3: K11 stays when the machine's actions take claims (PD5.5).
+  mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9', ...(mc.instance!.kernelAssumptions.includes('K11') ? ['K11'] : [])];
   mc.instance!.jointStates = joint.states;
+  mc.vacuous.push(...vacuousRecords(joint.vacuous));
   const out: Diagnostic[] = [];
   const facts = checked.machines.get(machine)!;
   const hasCompose = facts.machine.items.some((i) => i.kind === 'Property' && i.form === 'compose');
@@ -394,7 +446,8 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   }
   const children = ids.map((id) => {
     const name = id.split('.').pop()!;
-    const { lowered } = lowerMachine(module, checked, name);
+    // Review D-F1: a child is lowered as its own stages lowered it, sandbox policy included.
+    const { lowered } = lowerMachine(module, checked, name, opts.isolation ? { isolation: opts.isolation } : {});
     const cdir = join(root, id);
     rmSync(cdir, { recursive: true, force: true });
     mkdirSync(cdir, { recursive: true });
@@ -545,7 +598,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
  */
 function configurationStage(module: Module, decl: A.Configuration, refused: boolean): ConfigCheck {
-  const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], diagnostics: [], verdict: 'CLEAN' };
+  const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
     return cc;
@@ -553,6 +606,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   const t0 = performance.now();
   const r = checkConfiguration(module, decl.name);
   cc.diagnostics.push(...r.findings);
+  cc.vacuous = vacuousRecords(r.vacuous);
   const groups = new Map<string, { machine: string; n: number }>();
   for (const i of r.instances) {
     const key = i.group ?? i.name;
@@ -636,7 +690,7 @@ export function mergeFindings(fromPolygraph: Diagnostic[], fromRef: Diagnostic[]
   const out = [...fromPolygraph];
   const have = new Set(out.map(mergeKey));
   for (const f of fromRef) {
-    if (f.code === 'PL3201' || f.code === 'PL3301' || f.code === 'PL4001' || f.code === 'PL4002' || f.code === 'PL6201') continue; // stages 2b and 2c report deadlocks and liveness, stage 3 path properties
+    if (f.code === 'PL3201' || f.code === 'PL3301' || f.code === 'PL4001' || f.code === 'PL4002' || f.code === 'PL6201' || f.code === 'PL6203') continue; // stages 2b and 2c report deadlocks and liveness, stage 3 path properties
     if (have.has(mergeKey(f))) continue;
     // Finding 6: an escape or bound is kept per field, and poly-ref's exploration cap (no field) on its own.
     if (f.code === 'PL3003' && f.property && refOnly.has(f.property)) {
@@ -681,12 +735,14 @@ export function refOnlyProperties(module: Module, machine: string): { property: 
 function instanceRecord(ref: MachineReport, engines: Record<string, string>, refOnly: { property: string; actions: string[] }[] = []): InstanceRecord {
   const bounds = [...new Set(ref.findings.filter((f) => f.code === 'PL3901').map((f) => f.field ?? 'exploration cap'))];
   return {
-    domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`)],
+    // PD5.1.3c: the principal representatives the verdict holds for, when the machine has any.
+    domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`), ...(ref.instance.principals ? [`${ref.instance.principals} principal representatives (PD5.1.3c)`] : [])],
     states: ref.states,
     transitions: ref.transitions,
     bounds,
-    // M0 checks one machine's relation: K7 (profile fidelity) is the kernel assumption its guarantee uses (PS10).
-    kernelAssumptions: ['K7'],
+    // M0 checks one machine's relation: K7 (profile fidelity) is the kernel assumption its guarantee uses (PS10); K11
+    // when the machine's actions take claims, which only the verifier vouches for (PD5.5, S110).
+    kernelAssumptions: ref.model.actions.some((a) => a.claims) ? ['K7', 'K11'] : ['K7'],
     engines,
     refOnly,
   };
@@ -702,6 +758,7 @@ function finish(report: CheckReport, module?: Module): CheckReport {
       ...report.diagnostics.map((d) => ({ d, subject: d.at.machine ?? null })),
       ...report.machines.flatMap((m) => m.diagnostics.map((d) => ({ d, subject: m.machine }))),
       ...report.configurations.flatMap((c) => c.diagnostics.map((d) => ({ d, subject: c.configuration }))),
+      ...report.policies.flatMap((p) => p.diagnostics.map((d) => ({ d, subject: `policy:${p.scope}` }))),
     ];
     for (const { d, subject } of scoped) {
       // Ruling after the M2 review: a witness no exported test can judge yet is marked, and its export refused.
@@ -747,8 +804,13 @@ function finish(report: CheckReport, module?: Module): CheckReport {
     }
   }
   // A property not run keeps the verdict from CLEAN: INCONCLUSIVE at best, FINDINGS if a safety check failed (M1-2).
-  for (const m of [...report.machines, ...report.configurations]) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length ? ['INCONCLUSIVE' as Verdict] : [])]);
-  const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict), ...report.configurations.map((c) => c.verdict)]);
+  for (const m of [...report.machines, ...report.configurations]) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length || m.vacuous.length ? ['INCONCLUSIVE' as Verdict] : [])]);
+  // PT8: a policy scope folds like a machine: its diagnostics, its stages, and anything not run or vacuous.
+  for (const p of report.policies) {
+    if (p.verdict === 'INCONCLUSIVE' && p.stages.every((s) => s.status === 'not-run')) continue;
+    p.verdict = fold([verdictOf(p.diagnostics), ...p.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(p.notRun.length || p.vacuous.length || p.stages.some((s) => s.status === 'not-run') ? ['INCONCLUSIVE' as Verdict] : [])]);
+  }
+  const v = fold([verdictOf(report.diagnostics), ...report.machines.map((m) => m.verdict), ...report.configurations.map((c) => c.verdict), ...report.policies.map((p) => p.verdict)]);
   report.verdict = v;
   report.exit = EXIT_CODES[v];
   return report;
@@ -761,8 +823,14 @@ export interface ProjectReport {
   project: string;
   name: string;
   files: CheckReport[];
-  /** S72: the handler lint (PT6.5): ran over the files poly.json names, or not run, and why. */
-  handlers: { status: 'ran'; files: number; diagnostics: Diagnostic[] } | { status: 'not-run'; reason: string } | null;
+  /**
+   * S72: the handler lint (PT6.5), or not run, and why. S142: it runs over the files poly.json names and every file
+   * they reach through relative imports, read once; admission certifies these digests.
+   */
+  handlers: {
+    status: 'ran'; files: number; diagnostics: Diagnostic[];
+    roots: string[]; digests: Record<string, string>; packages: string[]; packageFiles: Record<string, string>; packageUnresolved: string[]; lockfile: { path: string; digest: string } | null;
+  } | { status: 'not-run'; reason: string } | null;
   verdict: CheckReport['verdict'];
   exit: number;
 }
@@ -799,7 +867,23 @@ function refold(report: CheckReport): void {
 export async function checkProject(dir: string, opts: CheckOptions = {}): Promise<ProjectReport> {
   const { manifest, files, handlers: handlerFiles } = loadProject(dir);
   const reports: CheckReport[] = [];
-  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir }));
+  // PT8: policies govern the whole project, so every module is read first and given to each file's policy stage.
+  const program: Module[] = [];
+  for (const f of files) {
+    const text = readFileSync(f, 'utf8');
+    const m = (f.endsWith('.ts') ? readEmbedded(text, f) : parse(text)).module;
+    if (m) program.push(m);
+  }
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, ...(manifest.isolation ? { isolation: manifest.isolation } : {}) }));
+  // PT8.2: a scope's policies lower to one document, so they live in one module.
+  const scopes = new Map<string, CheckReport>();
+  for (const report of reports) {
+    for (const p of report.policies) {
+      const prev = scopes.get(p.scope);
+      if (prev && prev !== report) { report.diagnostics.push(diag('PL1002', { module: report.module ?? undefined, line: 1, col: 1 }, `scope "${p.scope}" also has policies in ${prev.file}; a scope's policies lower to one document, so they are declared in one module (PT8.2)`)); refold(report); }
+      else scopes.set(p.scope, report);
+    }
+  }
   projectKindConflicts(reports);
   // PT1.3, PT1.5: a module is named once in a project; two modules of one name would share their build
   // directory and their machine ids (review finding P3).
@@ -815,7 +899,10 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
   // field lists the lint as not run, never as clean.
   const hasEffects = reports.some((r) => (r.effectKinds ?? []).length > 0);
   let handlers: ProjectReport['handlers'] = null;
-  if (handlerFiles) handlers = { status: 'ran', files: handlerFiles.length, diagnostics: lintHandlers(handlerFiles) };
+  if (handlerFiles) {
+    const c = handlerClosure(dir, handlerFiles);
+    handlers = { status: 'ran', files: c.bytes.size, diagnostics: c.diagnostics, roots: c.roots, digests: c.digests, packages: c.packages, packageFiles: c.packageFiles, packageUnresolved: c.packageUnresolved, lockfile: c.lockfile };
+  }
   else if (hasEffects) handlers = { status: 'not-run', reason: 'the project has effects, and poly.json names no handlers (S72)' };
   const lintVerdict: Verdict[] = handlers?.status === 'ran' ? [verdictOf(handlers.diagnostics)] : [];
   const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');

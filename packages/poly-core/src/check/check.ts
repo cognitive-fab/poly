@@ -8,6 +8,8 @@
 import type * as A from '../ast.js';
 import { diag, type Diagnostic, type NodeAt } from '../diagnostics.js';
 import { buildTypeEnv, cardinality, type TypeEnv, type UnionInfo } from '../types.js';
+import { digest } from '../digest.js';
+import { RESERVED_MODULE, RUNTIME_MODEL_DIGESTS } from '../reserved.js';
 
 // ── semantic types ─────────────────────────────────────────────────────────
 
@@ -24,11 +26,15 @@ export type Ty =
   | { k: 'action' }
   /** `Conf` (PD1.3): a confidence, and the type of a decimal literal (S76). */
   | { k: 'conf' }
+  /** `Principal` (PD5.1.2b): an opaque identity, or `none`. */
+  | { k: 'principal' }
   | { k: 'error' };
 
 const BOOL: Ty = { k: 'bool' };
 const INT: Ty = { k: 'int', lo: -Infinity, hi: Infinity };
 const ERR: Ty = { k: 'error' };
+/** The reasons the runtime gives (PS3.2, S101, S127), which a module may not use (PL1207). */
+export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified'];
 
 export function tyToString(t: Ty): string {
   switch (t.k) {
@@ -45,6 +51,8 @@ function same(a: Ty, b: Ty): boolean {
   if (a.k === 'error' || b.k === 'error') return true;
   // PD1.3b: a Conf where it does not belong is PL1205, reported once by confUses, not also a type mismatch.
   if (a.k === 'conf' || b.k === 'conf') return true;
+  // PD5.1.2b: `none` is also the absent principal.
+  if ((a.k === 'principal' && b.k === 'ref' && b.machine === null) || (b.k === 'principal' && a.k === 'ref' && a.machine === null)) return true;
   if (a.k !== b.k) return false;
   if (a.k === 'union' || a.k === 'record') return a.name === (b as { name: string }).name;
   // `none` is an address of every machine (PS1.6).
@@ -182,7 +190,10 @@ class Checker {
   run(): CheckResult {
     const machines = new Map<string, MachineFacts>();
     this.declarations();
+    // S143: runtime.* and runtime<m>.* are the runtime's own machine ids; only PT9.7's model takes them.
+    const reserved = RESERVED_MODULE.test(this.module.name) && !RUNTIME_MODEL_DIGESTS.has(digest(this.module));
     for (const d of this.module.decls) {
+      if (reserved && d.kind === 'Machine') this.err('PL1208', d, `machine ${this.module.name}.${d.name}: the module name ${this.module.name} is reserved for the runtime's own OutboxIntent model (PT9.7), and only that model takes it; rename the module (S143)`);
       if (d.kind === 'Use') this.err('PL0901', d, '`use` (imports between modules) is not lowered in milestone M0');
       if (d.kind !== 'Machine') continue;
       if (machines.has(d.name)) { this.err('PL1002', d, `machine ${d.name} is declared twice`); continue; }
@@ -398,6 +409,8 @@ class Checker {
       if (Array.isArray(x)) { x.forEach(proto); return; }
       const n = x as { kind?: string; name?: string; members?: string[]; id?: string };
       if (n.kind && n.kind !== 'Name' && (n.name === '__proto__' || n.members?.includes('__proto__'))) this.err('PL1201', n as A.NodeBase, '__proto__ cannot be a name: it is not a safe JSON key');
+      // S155: $claims and $lineage are the runtime's reserved data keys; no program declares them.
+      if (n.kind && n.kind !== 'Name' && (n.name === '$claims' || n.name === '$lineage')) this.err('PL1208', n as A.NodeBase, `${n.name} is reserved: the runtime writes it, and no program declares it (S155)`);
       for (const [k, v] of Object.entries(x)) if (k !== 'span') proto(v);
     };
     proto(this.module.decls);
@@ -417,6 +430,10 @@ class Checker {
           continue;
         }
         for (const f of d.fields) {
+          // PD5.1.2a, S103: a claims field is an enum, an integer range or a Principal; Tri is refused as everywhere.
+          if (d.claims && f.type.kind === 'TName' && f.type.name === 'Tri') { this.err('PL1203', f, `claims field ${d.name}.${f.name} is Tri; a claim is verified, so it is an enum such as Attest { Verified, Failed, Absent } (S103)`); continue; }
+          // Review A-F4, PD5.1.2a: an enum without payloads, an integer range or a Principal; int and string are PL1101 below.
+          if (d.claims && f.type.kind !== 'TInt' && f.type.kind !== 'TString' && f.type.kind !== 'TRange' && !(f.type.kind === 'TName' && (f.type.name === 'Principal' || this.env.unions.get(f.type.name)?.isEnum))) { this.err('PL1201', f, `claims field ${d.name}.${f.name} is ${f.type.kind === 'TName' ? f.type.name : f.type.kind.slice(1).toLowerCase()}; a claims field is an enum, an integer range or a Principal (PD5.1.2a, S103)`); continue; }
           if (this.tyOf(f.type).k === 'ref') this.err('PL0901', f, `an address inside a record is lowered after milestone M1: ${d.name}.${f.name}`);
           if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `field ${d.name}.${f.name} has no finite domain; give it a range or an enum type`);
         }
@@ -484,6 +501,8 @@ class Checker {
         // A recursive record was reported at its declaration; its uses say nothing more (one mistake, one diagnostic).
         if (this.recursive.has(t.name)) return ERR;
         if (this.env.records.has(t.name)) return { k: 'record', name: t.name };
+        // PD5.1.2b: Principal is built in, unless the module declares a type of that name.
+        if (t.name === 'Principal' && !this.env.unions.has(t.name)) return { k: 'principal' };
         if (!this.env.unions.has(t.name)) { this.errOnce('PL1001', t, `unknown type ${t.name}`); return ERR; }
         return { k: 'union', name: t.name };
       case 'TMap': {
@@ -493,6 +512,7 @@ class Checker {
           return { k: 'map', key: { k: 'int', lo: t.key.lo, hi: t.key.hi }, value, array: true };
         }
         const key = this.tyOf(t.key);
+        if (key.k === 'principal') this.errOnce('PL1206', t.key, 'a Principal is opaque, so it cannot key a map: it is compared by equality, stored or passed (PD5.1.2b)');
         if (key.k === 'union' && !this.env.unions.get(key.name)!.isEnum) this.errOnce('PL1201', t.key, `map key ${key.name} must be an enum (constructors without payload)`);
         // PT3.1: an enum or an integer range 0..n; a record has no key form in JSON.
         if (key.k === 'record') this.errOnce('PL1201', t.key, `map key ${key.name} is a record; a map is keyed by an enum or a range 0..n (PT3.1)`);
@@ -554,10 +574,15 @@ class Checker {
       if (facts.decisions.has(it.name)) { this.err('PL1002', it, `decision ${it.name} is declared twice`); continue; }
       facts.decisions.set(it.name, it);
     }
-    // PD1.7: a decision is an effect of kind decision.<name>.
-    const kinds = new Set([...[...facts.effects.values()].map(effectKind), ...[...facts.decisions.keys()].map((d) => `decision.${d}`)]);
-    // PD1.7, S41: a decision's kind decision.<d> is its own; an effect declaring it would share a manifest entry (review A6).
-    for (const e of facts.effects.values()) if (facts.decisions.has(effectKind(e).replace(/^decision\./, '')) && effectKind(e).startsWith('decision.')) this.err('PL1002', e, `effect ${e.name} has kind "${effectKind(e)}", which is the kind of decision ${effectKind(e).slice(9)} (PD1.7, S41)`);
+    // PD1.7: a decision is an effect of kind decision.<name>. PD2.4: its adjudication is one of kind outcome.<name>,
+    // which a path property may name (review D6).
+    const kinds = new Set([...[...facts.effects.values()].map(effectKind), ...[...facts.decisions.keys()].flatMap((d) => [`decision.${d}`, `outcome.${d}`])]);
+    // M4 review D1: decision.* and outcome.* are the toolchain's own kinds (PD1.7, PD2.4); an effect declaring one
+    // would share a manifest entry, or pose as a decision or an adjudication.
+    for (const e of facts.effects.values()) {
+      const k = effectKind(e);
+      if (k.startsWith('decision.') || k.startsWith('outcome.')) this.err('PL1208', e, `effect ${e.name} has kind "${k}": the prefixes decision. and outcome. are reserved for the kinds the toolchain generates (PD1.7, PD2.4)`);
+    }
     // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
     // Keys are declared by their use (PT6.3, PT6.4); an indexed key k[i] declares the family k (S49).
     const loops: Loop[] = [];
@@ -620,6 +645,7 @@ class Checker {
         }
         case 'Guard':
           this.expectBool(it.cond, this.scope('guard'));
+          this.reason(it);
           break;
         case 'Terminal': {
           if (terminal) { this.err('PL1002', it, 'a machine has one terminal predicate'); break; }
@@ -691,6 +717,7 @@ class Checker {
     }
     const seen = new Set<string>();
     let labelled = false;
+    const targets: (A.EffectItem & { kind: 'EffTargets' })[] = [];
     for (const it of e.items) {
       const key = it.kind === 'EffOutcome' ? it.outcome : it.kind.slice(3).toLowerCase();
       if (seen.has(key)) this.err('PL1002', it, `effect ${e.name} states ${key} twice`);
@@ -702,6 +729,9 @@ class Checker {
           break;
         case 'EffClass':
           if (!CLASSES.has(it.value)) this.err('PL1001', it, `${it.value} is not an effect class: none, reversible, compensable or irreversible`);
+          break;
+        case 'EffTargets':
+          targets.push(it);
           break;
         case 'EffRetry':
           if (it.attempts < 1) this.err('PL1201', it, 'retry needs at least one attempt');
@@ -715,6 +745,8 @@ class Checker {
       }
     }
     if (!labelled) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
+    const labels = new Set(e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])));
+    for (const t of targets) this.targets(e, t, labels);
     // polyrun reads timer, cancelTimer, spawnChild and signalChild before its manifest, and PT7a adds sendTo (review finding L3).
     const kind = effectKind(e);
     if (KERNEL_KINDS.has(kind)) this.err('PL1201', e, `effect ${e.name} has kind "${kind}", which is the kernel's own intent kind; choose another (PT6.1)`);
@@ -745,6 +777,34 @@ class Checker {
   }
 
   /** `ok -> A(p: v)`: a completion is an ordinary action (PS4.4) whose data the manifest carries as constants (PT6.1). */
+  /**
+   * PT6.5, S151: each target names a capability one of the effect's labels grants (PL6303). An egress target is an
+   * absolute http or https prefix with no user, query or fragment, since the runtime matches the normalised URL's
+   * origin and path against it; a secret name, a command and a table are non-empty strings.
+   */
+  private targets(e: A.EffectDecl, t: A.EffTargets, labels: Set<string>): void {
+    const keys = new Set<string>();
+    for (const { key, values } of t.targets) {
+      if (keys.has(key)) { this.err('PL1002', t, `effect ${e.name} states the ${key} targets twice`); continue; }
+      keys.add(key);
+      const grants = GRANTS[key];
+      if (!grants) { this.err('PL1001', t, `${key} is not a kind of target: egress, secrets, exec or store (PT6.5)`); continue; }
+      if (!grants.some((l) => labels.has(l))) this.err('PL6303', t, `effect ${e.name} declares ${key} targets, and none of its labels grants them: ${grants.join(' or ')} (PT6.5)`);
+      for (const v of values) {
+        if (!v.length) { this.err('PL1201', t, `an empty ${key} target`); continue; }
+        if (key !== 'egress') continue;
+        let u: URL | null = null;
+        try { u = new URL(v); } catch { u = null; }
+        if (!u || !/^https?:$/.test(u.protocol) || u.username || u.password || u.search || u.hash || v.includes('?') || v.includes('#')) this.err('PL1201', t, `${JSON.stringify(v)} is not an egress prefix: an absolute http or https URL with no user, query or fragment (S151)`);
+        // Review D3: the prefix the runtime binds is the parsed URL, so the text must be that form already: no dot
+        // segments, backslashes, encoded separators, upper-case host or default port that parsing would rewrite.
+        // Review D-F2: a glob character would widen the sandbox, which reads host and path as patterns.
+        else if (/[*?[\]{}]/.test(u.hostname + u.pathname)) this.err('PL1201', t, `${JSON.stringify(v)} holds a glob character (* ? [ ] { }), which the sandbox would read as a pattern (S152)`);
+        else if (u.href !== v || /%2e|%2f|%5c/i.test(u.pathname)) this.err('PL1201', t, `${JSON.stringify(v)} is not written in its normalised form${u.href !== v ? ` (${JSON.stringify(u.href)})` : ''}; an egress prefix is bound as parsed, so it is written as parsed, with no encoded dot or separator (S151)`);
+      }
+    }
+  }
+
   private completion(it: A.EffOutcomeItem, handlers: Set<string>, bound: ((path: string[]) => Ty | null) | null = null): void {
     const act = this.actions.get(it.action);
     if (!act) { this.err('PL1001', it, `${it.outcome} -> ${it.action}: no action ${it.action}`); return; }
@@ -1247,6 +1307,9 @@ class Checker {
     const receiver = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === tt.machine);
     const act = receiver?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
     if (!act) { this.err('PL1001', s, `send … <- ${s.target}: ${tt.machine} has no action ${s.target}`); rest(); return; }
+    // M4 review C5, K10: a decision's completion is delivered by the outbox worker only, with its decision event.
+    const decision = receiver!.items.find((i): i is A.Decision => i.kind === 'Decision' && i.items.some((x) => x.kind === 'EffOutcome' && (x as A.EffOutcomeItem).action === s.target));
+    if (decision) { this.err('PL6204', s, `send … <- ${s.target}: ${s.target} completes decision ${decision.name} of ${tt.machine}, and only the outbox worker delivers it, with its decision event (K10)`); rest(); return; }
     this.intentArgs(s, act.params, `${tt.machine}.${s.target}`, scope);
   }
 
@@ -1439,6 +1502,19 @@ class Checker {
     }
     const scope = this.scope('handler');
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
+    // PD5.1.2: `by c: C` binds the claims, a claims type's value, in the handler.
+    if (h.by) {
+      // Polywatch: the binder is not a node, so the reserved-name walk misses it; the embedded surface can spell it.
+      if (h.by.name === '$claims' || h.by.name === '$lineage') this.err('PL1208', h, `on ${h.action} by ${h.by.name}: ${h.by.name} is reserved: the runtime writes it, and no program declares it (S155)`);
+      const rec =this.module.decls.find((d): d is A.RecordDecl => d.kind === 'RecordDecl' && d.name === h.by!.type);
+      // A binder whose type is wrong is still bound, as an error, so its uses are not reported again.
+      if (!rec && !this.env.unions.has(h.by.type)) { this.err('PL1001', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: no claims type ${h.by.type}`); scope.params.set(h.by.name, ERR); }
+      else if (!rec?.claims) { this.err('PL1201', h, `on ${h.action} by ${h.by.name}: ${h.by.type}: ${h.by.type} is not a claims type (PD5.1.2)`); scope.params.set(h.by.name, ERR); }
+      else if (scope.params.has(h.by.name)) this.err('PL1002', h, `on ${h.action}: ${h.by.name} names a parameter and the claims`);
+      // Review A-F7: a name the language gives a meaning is not a binder.
+      else if (['pre', 'post', 'action', 'self', 'none'].includes(h.by.name)) { this.err('PL1201', h, `on ${h.action} by ${h.by.name}: ${h.by.name} is a name of the language, not a binder`); scope.params.set(h.by.name, ERR); }
+      else scope.params.set(h.by.name, { k: 'record', name: rec.name });
+    }
     this.handlerAction = act;
     this.stmts(h.body, scope);
     this.childAddressUses(h.body);
@@ -1453,6 +1529,11 @@ class Checker {
     }
   }
 
+  /** PL1207 (PS3.2, S101, S127): the reasons the runtime gives are not the module's to give. */
+  private reason(n: A.Require | A.Reject | A.Guard): void {
+    if (RESERVED_REASONS.includes(n.reason)) this.err('PL1207', n, `reject "${n.reason}" uses a reason the runtime reserves (${RESERVED_REASONS.join(', ')})`);
+  }
+
   private stmts(body: A.Stmt[], scope: Scope): void {
     const local: Scope = { ...scope, locals: new Map(scope.locals) };
     for (const s of body) this.stmt(s, local);
@@ -1463,8 +1544,10 @@ class Checker {
     switch (s.kind) {
       case 'Require':
         this.expectBool(s.cond, scope);
+        this.reason(s);
         break;
       case 'Reject':
+        this.reason(s);
         break;
       case 'Let': {
         if (scope.locals.has(s.name) || scope.params.has(s.name) || fields.has(s.name)) this.err('PL1002', s, `${s.name} is already a name here`);
@@ -1518,6 +1601,10 @@ class Checker {
         else if (s.op === 'signal') this.signal(s, scope);
         else if (s.op === 'send') this.send(s, scope);
         else if (s.op === 'decide') this.decide(s, scope);
+        else if (s.op === 'adjudicate') {
+          // PD2.4, S129: the decision is the machine's own.
+          if (!this.facts!.decisions.has(s.target)) this.err('PL1001', s, `adjudicate ${s.target}: ${s.target} is not a declared decision`);
+        }
         else if (s.op === 'cancel') {
           const armedKey = s.index ? [...this.facts!.timerKeys].some((k) => k.startsWith(s.target) && /^\d+$/.test(k.slice(s.target.length))) : this.facts!.timerKeys.has(s.target);
           if (!armedKey) this.err('PL1001', s, `cancel ${s.target}${s.index ? '[…]' : ''}: no \`after\` of ${this.machine!.name} arms a timer ${s.target} (PT6.3)`);
@@ -1936,6 +2023,7 @@ class Checker {
       case 'Unary': {
         if (e.op === '!') { this.expectBool(e.arg, scope); return BOOL; }
         const t = this.typeOf(e.arg, scope);
+        if (t.k === 'principal') { this.err('PL1206', e, 'a Principal is opaque: unary - is not defined on it (PD5.1.2b)'); return ERR; }
         if (t.k !== 'int') { if (t.k !== 'error' && t.k !== 'conf') this.err('PL1201', e, `unary - needs an int, not ${tyToString(t)}`); return ERR; }
         return { k: 'int', lo: -t.hi, hi: -t.lo };
       }
@@ -2126,6 +2214,8 @@ class Checker {
           r = this.typeOf(e.right, scope, l);
         }
         if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
+        // PD5.1.2b: a Principal is compared only with a Principal (or none).
+        if ((l.k === 'principal' || r.k === 'principal') && !same(l, r)) { this.err('PL1206', e, `a Principal is opaque: it is compared only with another Principal, not with ${tyToString(l.k === 'principal' ? r : l)} (PD5.1.2b)`); return BOOL; }
         if (!same(l, r)) this.err('PL1201', e, `cannot compare ${tyToString(l)} with ${tyToString(r)}`);
         return BOOL;
       }
@@ -2136,6 +2226,7 @@ class Checker {
         const l = this.typeOf(e.left, scope);
         const r = this.typeOf(e.right, scope);
         if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
+        if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque and has no order: ${e.op} is not defined on it (PD5.1.2b)`); return BOOL; }
         if ((l.k !== 'int' && l.k !== 'error') || (r.k !== 'int' && r.k !== 'error')) this.err('PL1201', e, `${e.op} compares ints, not ${tyToString(l)} and ${tyToString(r)}`);
         return BOOL;
       }
@@ -2144,6 +2235,7 @@ class Checker {
         const r = this.typeOf(e.right, scope);
         // PD1.3b: arithmetic on a Conf is PL1205, reported once at the Conf by confUses.
         if (l.k === 'conf' || r.k === 'conf') return ERR;
+        if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque: ${e.op} is not defined on it (PD5.1.2b)`); return ERR; }
         if (l.k !== 'int' || r.k !== 'int') {
           if (l.k !== 'error' && r.k !== 'error') this.err('PL1201', e, `${e.op} needs ints, not ${tyToString(l)} and ${tyToString(r)}`);
           return ERR;
@@ -2306,7 +2398,10 @@ function spawnedKeys(e: A.Expr): string[] {
 const KERNEL_KINDS = new Set(['timer', 'cancelTimer', 'spawnChild', 'signalChild', 'sendTo', 'createInstance']);
 
 // PT6.2: the closed Polyaxion vocabulary.
-const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
+/** PT6.5: the labels that grant each kind of target's capability. */
+const GRANTS: Record<string, string[]> = { egress: ['egress:external', 'egress:public'], secrets: ['read:private'], exec: ['exec'], store: ['read:store', 'write:store'] };
+
+export const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
 const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
 
 /** S41: an effect with no `kind` has its name as its kind. */

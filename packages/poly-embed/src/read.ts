@@ -171,7 +171,7 @@ class Reader {
 
   // ── declarations ─────────────────────────────────────────────────────────
   private decl(node: ts.Expression): A.Decl {
-    const c = this.call(node, 'enumType', 'union', 'record', 'use', 'machine', 'configuration');
+    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration');
     switch (c.name) {
       case 'enumType': {
         const [name, members] = this.argsOf(c, 2, 2);
@@ -181,9 +181,10 @@ class Reader {
         const [name, ctors] = this.argsOf(c, 2, 2);
         return this.mk<A.TypeDecl>(c.node, { kind: 'TypeDecl', name: this.str(name), ctors: this.obj(ctors).map(([k, v, kn]) => this.mk<A.Ctor>(kn, { kind: 'Ctor', name: k, fields: this.payload(v) })) });
       }
-      case 'record': {
+      case 'record':
+      case 'claims': {
         const [name, fields] = this.argsOf(c, 2, 2);
-        return this.mk<A.RecordDecl>(c.node, { kind: 'RecordDecl', name: this.str(name), fields: this.payload(fields) });
+        return this.mk<A.RecordDecl>(c.node, { kind: 'RecordDecl', name: this.str(name), fields: this.payload(fields), ...(c.name === 'claims' ? { claims: true as const } : {}) });
       }
       case 'use': {
         const [path] = this.argsOf(c, 1, 1);
@@ -308,8 +309,16 @@ class Reader {
         return this.mk<A.Action>(c.node, { kind: 'Action', name: this.str(name), params: this.paramList(params) });
       }
       case 'on': {
-        const [action, body, params] = this.argsOf(c, 2, 3);
-        return this.mk<A.Handler>(c.node, { kind: 'Handler', action: this.str(action), params: params ? this.arr(params).map((p) => this.str(p)) : null, body: this.arrow(body, (b) => this.stmts(b)) });
+        const [action, body, params, opts] = this.argsOf(c, 2, 4);
+        const none = !params || this.unparen(params).kind === ts.SyntaxKind.NullKeyword;
+        // PD5.1.2: `{ by: ['c', 'C'] }` is `by c: C`.
+        let by: A.Handler['by'];
+        for (const [k, v] of opts ? this.obj(opts) : []) {
+          if (k !== 'by') throw new Outside(v, `on(…) takes the option by, not ${k}`);
+          const [bn, bt] = this.arr(v);
+          by = { name: this.str(bn), type: this.str(bt) };
+        }
+        return this.mk<A.Handler>(c.node, { kind: 'Handler', action: this.str(action), params: none ? null : this.arr(params).map((p) => this.str(p)), ...(by ? { by } : {}), body: this.arrow(body, (b) => this.stmts(b)) });
       }
       case 'guard': {
         const [cond, reason] = this.argsOf(c, 2, 2);
@@ -384,12 +393,13 @@ class Reader {
   }
 
   private effItem(node: ts.Expression): A.EffectItem {
-    const c = this.call(node, 'kind', 'labels', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'kind', 'labels', 'targets', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.EffectItem;
     switch (c.name) {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'labels': return mk({ kind: 'EffLabels', labels: this.arr(this.argsOf(c, 1, 1)[0]).map((l) => this.str(l)) });
       case 'cls': return mk({ kind: 'EffClass', value: this.str(this.argsOf(c, 1, 1)[0]) });
+      case 'targets': return mk({ kind: 'EffTargets', targets: this.arr(this.argsOf(c, 1, 1)[0]).map((p) => { const [k, v] = this.arr(p); return { key: this.str(k), values: this.arr(v).map((s) => this.str(s)) }; }) });
       case 'retry': {
         const [n, base, timeout] = this.argsOf(c, 3, 3);
         return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });
@@ -432,9 +442,9 @@ class Reader {
   private instance(node: ts.Expression): A.ConfigInstance {
     const c = this.call(node, 'instance');
     const [name, machine, opts] = this.argsOf(c, 2, 3);
-    const o = this.opts(opts, ['count', 'init']);
+    const o = this.opts(opts, ['count', 'init', 'scope']);
     const init: A.ConfigInstance['init'] = o.has('init') ? this.arrow(o.get('init')!, (b) => this.obj(b).map(([k, v]) => ({ field: k, value: this.expr(v) }))) : [];
-    return this.mk<A.ConfigInstance>(c.node, { kind: 'ConfigInstance', name: this.str(name), count: o.has('count') ? this.int(o.get('count')!) : null, machine: this.str(machine).split('.'), init });
+    return this.mk<A.ConfigInstance>(c.node, { kind: 'ConfigInstance', name: this.str(name), count: o.has('count') ? this.int(o.get('count')!) : null, machine: this.str(machine).split('.'), init, ...(o.has('scope') ? { scope: this.str(o.get('scope')!) } : {}) });
   }
 
   // ── statements ───────────────────────────────────────────────────────────
@@ -443,7 +453,7 @@ class Reader {
   }
 
   private stmt(node: ts.Expression): A.Stmt {
-    const c = this.call(node, 'require', 'reject', 'let_', 'set', 'setEntry', 'when', 'match', 'forEach', 'emit', 'decide', 'after', 'cancel', 'spawn', 'send', 'signal');
+    const c = this.call(node, 'require', 'reject', 'let_', 'set', 'setEntry', 'when', 'match', 'forEach', 'emit', 'decide', 'adjudicate', 'after', 'cancel', 'spawn', 'send', 'signal');
     const n = c.node;
     switch (c.name) {
       case 'require': {
@@ -517,6 +527,14 @@ class Reader {
         const [k, args] = this.argsOf(c, 2, 2);
         base.target = this.str(k);
         base.args = this.args(args);
+        break;
+      }
+      case 'adjudicate': {
+        // PD2.4, S129: adjudicate('d', 'Correct' | 'Wrong').
+        const [d, o] = this.argsOf(c, 2, 2);
+        base.target = this.str(d);
+        base.modifier = this.str(o);
+        if (base.modifier !== 'Correct' && base.modifier !== 'Wrong') this.fail(o, 'an adjudication is Correct or Wrong');
         break;
       }
       case 'after': {
