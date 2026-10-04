@@ -19,6 +19,7 @@ import { commandNamed, CommandUsageError } from './commands.js';
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
        poly fmt <file.poly> [--write] [--json]
        poly mcp      (an MCP server over stdio: the registry's commands as tools)
+       poly lsp      (the language server over stdio, on both surfaces)
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
@@ -124,6 +125,12 @@ export async function main(argv: string[]): Promise<number> {
       const agent = '@poly/agent';
       const { serveMcp } = (await import(agent)) as { serveMcp: () => Promise<void> };
       await serveMcp();
+      return EXIT_CODES.CLEAN;
+    }
+    if (positional[0] === 'lsp' && positional.length === 1) {
+      const agent = '@poly/agent';
+      const { serveLsp } = (await import(agent)) as { serveLsp: () => Promise<void> };
+      await serveLsp();
       return EXIT_CODES.CLEAN;
     }
     const call = inputOf(positional, args);

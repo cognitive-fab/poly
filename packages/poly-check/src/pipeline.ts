@@ -144,6 +144,13 @@ export interface CheckOptions {
   program?: Module[];
   /** PT6.5, S152: generate the OpenShell sandbox policies (poly.json's `isolation`). */
   isolation?: 'openshell';
+  /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
+  text?: string;
+  /**
+   * PT14, S168: the language server checks stages 0 to 2 on every edit and the rest on save. With 2, the later stages,
+   * the configurations and the policies are listed as not run, and a report that would be CLEAN is INCONCLUSIVE.
+   */
+  through?: 2;
 }
 
 const HERE_REQUIRE = createRequire(import.meta.url);
@@ -177,7 +184,7 @@ export function engineVersions(): Record<string, string> {
 }
 
 export async function checkFile(file: string, opts: CheckOptions = {}): Promise<CheckReport> {
-  const src = readFileSync(file, 'utf8');
+  const src = opts.text ?? readFileSync(file, 'utf8');
   // The source's absolute path, so a later `poly witness` or `poly fix` finds it from any directory (review D4).
   const report: CheckReport = { file: resolve(file), module: null, sourceDigest: 'sha256:' + createHash('sha256').update(src, 'utf8').digest('hex'), verdict: 'CLEAN', exit: 0, diagnostics: [], machines: [], configurations: [], policies: [], engines: engineVersions() };
 
@@ -228,6 +235,13 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     }
   }
   // ── stage 4b: configurations (PS13) ─────────────────────────────────────
+  // PT14, S168: stages 0 to 2 only, as the language server asks on an edit: no configuration and no policy is checked,
+  // and a report that would read CLEAN is INCONCLUSIVE, so it never reads as the whole check (PA0.4).
+  if (opts.through === 2) {
+    finish(report, module);
+    if (report.verdict === 'CLEAN') { report.verdict = 'INCONCLUSIVE'; report.exit = EXIT_CODES.INCONCLUSIVE; }
+    return report;
+  }
   const configs = configurationReports(module, refused);
   report.configurations.push(...configs.configurations);
   // ── stage 5: policies (PT8) ─────────────────────────────────────────────
@@ -420,6 +434,12 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     const live = ref.findings.filter((f) => f.code === 'PL3301');
     mc.diagnostics.push(...live);
     mc.stages.push({ stage: 'liveness', status: 'ran', engine: 'poly-ref', verdict: verdictOf(live), ms: performance.now() - t0, note: `${ref.model.liveness.length} propert${ref.model.liveness.length === 1 ? 'y' : 'ies'} under weak fairness (PS6.4)` });
+  }
+
+  // PT14, S168: on an edit the language server stops here; the later stages run on save.
+  if (opts.through === 2) {
+    notRun(mc, laterStages(module, checked, machine).filter((st) => !mc.stages.some((s) => s.stage === st)), 'stages 3 and later run on save or on request (PT14)');
+    return;
   }
 
   // ── stage 3: effects (PS5.4, S33) ─────────────────────────────────────

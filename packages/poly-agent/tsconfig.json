@@ -13,6 +13,9 @@
     },
     {
       "path": "../poly-check"
+    },
+    {
+      "path": "../poly-lang"
     }
   ]
 }
