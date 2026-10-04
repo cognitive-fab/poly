@@ -31,6 +31,7 @@ import type { PolyRuntime } from '@poly/runtime';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { importArtefact } from './import-artefact.js';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { digest, type Configuration, type Machine, type Module } from '@poly/core';
@@ -87,7 +88,7 @@ function load(runDir: string, module: string, machine: string, moduleDigest: str
   return { mod: loadLoweredModule<SamModule>(join(dir, 'next.cjs')), contract, mapper, dir };
 }
 
-const esm = async (dir: string, file: string) => (existsSync(join(dir, file)) ? await import(pathToFileURL(join(dir, file)).href + `?v=${Date.now()}-${Math.random()}`) : {});
+const esm = async (dir: string, file: string) => (existsSync(join(dir, file)) ? await importArtefact<any>(join(dir, file)) : {});
 
 /** One step of R_L (PS9.1a): the runtime's terminal row, an action outside the module, then the module. */
 /** S78: the kernel's commit: every detached child's marker becomes that child's address. */

@@ -15,6 +15,7 @@ import { readFileSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { importArtefact } from './import-artefact.js';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
@@ -338,7 +339,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   // S5: polygraph cannot stop at a state outside the instance. Its cap is poly-ref's count, plus the
   // out-of-instance states, plus one; the cap hit that follows is expected and already reported (PL3901, PL3102).
   const maxStates = outside.size ? ref.states + outside.size + 1 : Math.max(ref.states + 1, 2);
-  const inv = await import(pathToFileURL(join(dir, 'invariants.mjs')).href + `?v=${Date.now()}`);
+  const inv = await importArtefact(join(dir, 'invariants.mjs'));
   const contract = JSON.parse(readFileSync(join(dir, 'contract.json'), 'utf8'));
   const pg = polygraphCheck({ specModule: mod, contract, invariants: inv, maxStates });
   const stage2: Diagnostic[] = [];

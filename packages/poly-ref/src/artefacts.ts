@@ -13,6 +13,7 @@ import type * as A from '@poly/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { importArtefact } from './import-artefact.js';
 import { valuesOf, monitorStart, monitorStep, replyPath, type RMachine, type RPathProperty, type RType } from './model.js';
 import { initialState, durationMs } from './step.js';
 import { evaluate, evaluateAt } from './eval.js';
@@ -166,7 +167,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
   if (M.pathProperties.length) {
     if (!existsSync(pathFile)) out.push('effect-invariants.mjs is missing, and the machine has path properties');
     else {
-      const lowered = ((await import(pathToFileURL(pathFile).href + `?v=${Date.now()}-${Math.random()}`)) as { effectInvariants?: { name: string; pred: (p: unknown) => boolean }[] }).effectInvariants ?? [];
+      const lowered = ((await importArtefact(pathFile)) as { effectInvariants?: { name: string; pred: (p: unknown) => boolean }[] }).effectInvariants ?? [];
       for (const p of M.pathProperties) {
         const l = lowered.find((x) => x.name === p.name);
         if (!l) { out.push(`effect-invariants.mjs has no predicate ${p.name}`); continue; }
@@ -182,7 +183,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
   if (compose.length) {
     if (!existsSync(composeFile)) out.push('invariants.compose.mjs is missing, and the machine has compose invariants');
     else {
-      const lowered = ((await import(pathToFileURL(composeFile).href + `?v=${Date.now()}-${Math.random()}`)) as { stateInvariants?: { name: string; pred: (j: unknown) => boolean }[] }).stateInvariants ?? [];
+      const lowered = ((await importArtefact(composeFile)) as { stateInvariants?: { name: string; pred: (j: unknown) => boolean }[] }).stateInvariants ?? [];
       const joint = checkJoint(module, M.name);
       for (const p of compose) {
         const l = lowered.find((x) => x.name === p.name);
@@ -205,7 +206,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
   if (live.length) {
     if (!existsSync(liveFile)) out.push('liveness.mjs is missing, and the machine has liveness properties');
     else {
-      const lowered = ((await import(pathToFileURL(liveFile).href + `?v=${Date.now()}-${Math.random()}`)) as { liveness?: { name: string; goal: (s: unknown) => boolean; from: ((s: unknown) => boolean) | null; fair: unknown }[] }).liveness ?? [];
+      const lowered = ((await importArtefact(liveFile)) as { liveness?: { name: string; goal: (s: unknown) => boolean; from: ((s: unknown) => boolean) | null; fair: unknown }[] }).liveness ?? [];
       for (const p of live) {
         const l = lowered.find((x) => x.name === p.name);
         if (!l) { out.push(`liveness.mjs has no predicate ${p.name}`); continue; }

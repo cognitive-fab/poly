@@ -11,6 +11,7 @@ import type { Diagnostic, Module, WitnessStep } from '@poly/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { importArtefact } from './import-artefact.js';
 import { checkMachine, ENGINE, type MachineReport } from './check.js';
 import { loadLoweredModule } from './load.js';
 import { pathTo, type Edge } from './explore.js';
@@ -96,7 +97,7 @@ export async function translationValidate(module: Module, machineName: string, b
   // A machine with no effect declarations has no mapper; its R_M emits nothing, which the comparison checks.
   const mapperPath = join(buildDir, 'effects.cjs');
   const mapper = existsSync(mapperPath) ? loadLoweredModule<{ effects: (pre: object, a: string, d: object, post: object, k: string) => unknown }>(mapperPath).effects : null;
-  const props = (await import(pathToFileURL(join(buildDir, 'invariants.mjs')).href + `?v=${Date.now()}-${Math.random()}`)) as PropertyModule;
+  const props = (await importArtefact(join(buildDir, 'invariants.mjs'))) as PropertyModule;
 
   const mismatches: Diagnostic[] = [];
   const trace = (edges: Edge<State>[]): WitnessStep[] => edges.map((e) => ({
