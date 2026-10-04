@@ -62,3 +62,12 @@ test('S166: two workflows with one name are PL1002', () => {
   const w = SRC.slice(SRC.indexOf('workflow daily-brief'));
   assert.ok(codes(SRC + '\n' + w).includes('PL1002'));
 });
+
+// Polywatch on step 2: a key field over an integer range has its declared values tested against the pattern too.
+test('S166: a key field over an integer range is tested against its pattern (PL6802)', () => {
+  const src = SRC.replace('action Start(date: string check { "2026-10-04", "2026-10-05" })', 'action Start(date: 0..3)');
+  const pattern = '"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"';
+  assert.ok(src.includes(pattern) && src !== SRC);
+  assert.ok(codes(src.replace(pattern, '"^[a-z]+$"')).includes('PL6802'), 'a range the pattern refuses');
+  assert.ok(!codes(src.replace(pattern, '"^[0-9]$"')).includes('PL6802'), 'a range the pattern accepts');
+});

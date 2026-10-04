@@ -12,7 +12,6 @@
 import type * as A from '@poly/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { importArtefact } from './import-artefact.js';
 import { valuesOf, monitorStart, monitorStep, replyPath, type RMachine, type RPathProperty, type RType } from './model.js';
 import { initialState, durationMs } from './step.js';

@@ -30,7 +30,6 @@ import { generateKeyPairSync } from 'node:crypto';
 import type { PolyRuntime } from '@poly/runtime';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { importArtefact } from './import-artefact.js';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';

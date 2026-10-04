@@ -255,12 +255,13 @@ class Checker {
         let re: RegExp;
         try { re = new RegExp(f.pattern); } catch (e) { this.err('PL6802', f, `workflow ${w.name}: the pattern of ${f.name} does not compile: ${(e as Error).message} (S166)`); continue; }
         const p = act?.params.find((x) => x.name === f.name);
-        if (p?.check?.domain.kind === 'DomainSet') {
-          for (const v of p.check.domain.values) {
-            const text = String((v as { value?: unknown }).value);
-            if (!re.test(text)) this.err('PL6802', f, `workflow ${w.name}: ${w.input}'s ${f.name} may be ${JSON.stringify(text)}, which the key's pattern refuses, so such a run could not start (S166)`);
-          }
-        }
+        // Every declared value of the field: a set's members, or each integer of a range, whether the range is the
+        // check domain or the type (polywatch on step 2). A value the pattern refuses is a run that could not start.
+        const d = p?.check?.domain;
+        const range = d?.kind === 'DomainRange' ? d : p?.type.kind === 'TRange' ? p.type : null;
+        const values = d?.kind === 'DomainSet' ? d.values.map((v) => String((v as { value?: unknown }).value)) : range ? Array.from({ length: Math.min(range.hi - range.lo + 1, 10_000) }, (_, k) => String(range.lo + k)) : [];
+        const refused = values.filter((v) => !re.test(v));
+        if (refused.length) this.err('PL6802', f, `workflow ${w.name}: ${w.input}'s ${f.name} may be ${refused.slice(0, 3).map((v) => JSON.stringify(v)).join(', ')}${refused.length > 3 ? ` and ${refused.length - 3} more` : ''}, which the key's pattern refuses, so such a run could not start (S166)`);
       }
     }
     // PL6803: each effect kind of the machine has exactly one tool, and each tool's kind is an effect of the machine.

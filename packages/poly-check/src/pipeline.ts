@@ -199,7 +199,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     report.machines.push(mc);
     mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
     if (refused) {
-      notRun(mc, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)], 'the program was refused at stage 0');
+      notRun(mc, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(module, checked, machine)], 'the program was refused at stage 0');
       continue;
     }
     try {
@@ -210,11 +210,11 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       // after it list what did not run, and none of them folds to CLEAN (polywatch, rated at M2's start).
       const reason = `the check stopped with an error in ${machine}`;
       const done = new Set(mc.stages.map((st) => st.stage));
-      notRun(mc, (['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)] as StageName[]).filter((st) => !done.has(st)), reason);
+      notRun(mc, (['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(module, checked, machine)] as StageName[]).filter((st) => !done.has(st)), reason);
       const cut = [mc];
       for (const rest of [...checked.machines.keys()].slice([...checked.machines.keys()].indexOf(machine) + 1)) {
         const other: MachineCheck = { machine: rest, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
-        notRun(other, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, rest)], reason);
+        notRun(other, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(module, checked, rest)], reason);
         report.machines.push(other);
         cut.push(other);
       }
@@ -294,11 +294,13 @@ async function workflowStage(moduleName: string, w: A.Workflow, mc: MachineCheck
 }
 
 /** Stages 2c, 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
-function laterStages(checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
+function laterStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
   const f = checked.machines.get(machine)!;
   const mapper = f.effects.size > 0 || f.decisions.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || kernelIntents(f.machine).length > 0;
   const live = f.machine.items.some((i) => i.kind === 'Liveness');
-  return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.decisions.size ? ['decisions' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
+  // PT10, S165: a machine a workflow runs has the workflow stage too (polywatch on step 3).
+  const workflow = module.decls.some((d) => d.kind === 'Workflow' && d.machine === machine);
+  return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.decisions.size ? ['decisions' as const] : []), ...(f.children.size ? ['composition' as const] : []), ...(workflow ? ['workflow' as const] : [])];
 }
 
 function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
@@ -312,7 +314,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
-    notRun(mc, ['validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)], 'the lowering refused the machine');
+    notRun(mc, ['validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(module, checked, machine)], 'the lowering refused the machine');
     return;
   }
   const dir = join(resolve(opts.root ?? process.cwd()), '.poly', 'build', `${module.name}.${machine}`);
@@ -343,7 +345,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     // S20: a lowered module that fails strict validation is a toolchain fault, PL2001, never the author's.
     mc.diagnostics.push(diag('PL2001', { module: module.name, machine }, `the lowered module fails strict validate(): ${problems.join('; ')} (addressed to the toolchain, not the author)`, { engine: `sam-pattern@${engines['sam-pattern']}` }));
     mc.stages.push({ stage: 'validate', status: 'ran', engine: `sam-pattern@${engines['sam-pattern']}`, verdict: 'REFUSED', ms: performance.now() - t0 });
-    notRun(mc, ['translation-validation', 'model-check', 'deadlock', ...laterStages(checked, machine)], 'strict validate() refused the lowered module (PL2001)');
+    notRun(mc, ['translation-validation', 'model-check', 'deadlock', ...laterStages(module, checked, machine)], 'strict validate() refused the lowered module (PL2001)');
     return;
   }
   mc.stages.push({ stage: 'validate', status: 'ran', engine: `sam-pattern@${engines['sam-pattern']}`, verdict: 'CLEAN', ms: performance.now() - t0 });
@@ -356,7 +358,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   if (tv.mismatches.length) {
     mc.diagnostics.push(...tv.mismatches.slice(0, 20));
     mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'REFUSED', ms: performance.now() - t0, note: `${tv.mismatches.length} mismatches over ${tv.transitions} transitions` });
-    notRun(mc, ['model-check', 'deadlock', ...laterStages(checked, machine)], 'translation validation refused the lowering (PL2501)');
+    notRun(mc, ['model-check', 'deadlock', ...laterStages(module, checked, machine)], 'translation validation refused the lowering (PL2501)');
     return;
   }
   mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'CLEAN', ms: performance.now() - t0, note: `${tv.transitions} transitions and ${tv.propertyChecks} property evaluations agree` });

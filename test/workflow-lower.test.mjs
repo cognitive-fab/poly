@@ -48,3 +48,27 @@ test('S164: the certificate lists every workflow as ungated: polyflow runtime, a
   assert.ok(a.certificate.artefacts['.poly/build/workflows/daily-brief/polyflow.workflow.json']);
   assert.ok(a.certificate.poly.limits.some((l) => /ungated: polyflow runtime/.test(l) && /daily-brief/.test(l)), JSON.stringify(a.certificate.poly.limits));
 });
+
+// Polywatch on step 3: a workflow stage an earlier stage stopped is listed as not run, never left out (review P7).
+test('S165: when an earlier stage stops, the workflow stage is listed as not run', async () => {
+  const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
+  const dir = join(ROOT, '.poly', 'test-workflow-notrun');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'brief.poly'), readFileSync(BRIEF, 'utf8').replace("    phase' = Posted\n", "    phase' = Posted\n    nothing' = 1\n"));
+  const r = await checkFile(join(dir, 'brief.poly'), { root: dir });
+  assert.equal(r.verdict, 'REFUSED');
+  const stage = r.machines[0].stages.find((s) => s.stage === 'workflow');
+  assert.equal(stage?.status, 'not-run', JSON.stringify(r.machines[0].stages));
+});
+
+// Polywatch on step 3: a workflow descriptor rewritten after the check ran is refused at admission, as a machine's
+// artefact is (review A1): certified bytes must be the checked bytes.
+test('S164: a descriptor rewritten after the check is refused at admission, not certified', async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { AdmitError } = await import('@poly/check');
+  const key = makeKey('workflow-race');
+  const dir = project('workflow-race', ['conformance/m6/brief.poly'], key);
+  const f = join(dir, '.poly', 'build', 'workflows', 'daily-brief', 'polyflow.workflow.json');
+  const tamper = () => writeFileSync(f, readFileSync(f, 'utf8').replace('"slack_send"', '"shell_exec"'));
+  await assert.rejects(admit(dir, { afterCheck: tamper }), (e) => e instanceof AdmitError && /polyflow\.workflow\.json.*not the bytes the check checked/.test(e.message));
+});

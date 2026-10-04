@@ -10,7 +10,6 @@
 import type { Diagnostic, Module, WitnessStep } from '@poly/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { importArtefact } from './import-artefact.js';
 import { checkMachine, ENGINE, type MachineReport } from './check.js';
 import { loadLoweredModule } from './load.js';

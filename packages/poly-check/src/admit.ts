@@ -306,6 +306,13 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   for (const p of policyReports) {
     if (!opts.fault && artefacts[p.artefact!.path] !== p.artefact!.digest) throw new AdmitError(`not admitted: ${p.artefact!.path} on disk is not the policy the check checked (certified bytes must be the checked bytes)`);
   }
+  // Polywatch on step 3: a workflow's descriptor is outside its machine's directory, so it is compared by its own name.
+  for (const w of workflows) {
+    const id = w.machine.slice(w.machine.indexOf('.') + 1);
+    const m = report.files.flatMap((r) => r.machines.map((x) => ({ r, x }))).find(({ r, x }) => `${r.module}.${x.machine}` === w.machine && x.machine === id)?.x;
+    const want = m?.artefactDigests?.[`../workflows/${w.name}/polyflow.workflow.json`];
+    if (!opts.fault && (want === undefined || artefacts[w.descriptor] !== want)) throw new AdmitError(`not admitted: ${w.descriptor} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
+  }
   for (const r of report.files) for (const m of r.machines) {
     if (!m.buildDir) continue;
     const prefix = rel(dir, m.buildDir);
