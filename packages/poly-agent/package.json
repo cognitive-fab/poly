@@ -1,0 +1,18 @@
+{
+  "name": "@poly/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "poly's agent interface, host-neutral: the MCP server and the language server over the command registry (PF9.1, S167)",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "dependencies": {
+    "@poly/check": "0.0.0",
+    "@poly/core": "0.0.0"
+  }
+}

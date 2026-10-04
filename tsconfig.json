@@ -21,6 +21,9 @@
     },
     {
       "path": "packages/poly-runtime"
+    },
+    {
+      "path": "packages/poly-agent"
     }
   ]
 }

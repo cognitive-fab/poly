@@ -18,6 +18,7 @@ import { commandNamed, CommandUsageError } from './commands.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
        poly fmt <file.poly> [--write] [--json]
+       poly mcp      (an MCP server over stdio: the registry's commands as tools)
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
@@ -118,6 +119,13 @@ export async function main(argv: string[]): Promise<number> {
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();
   try {
+    // S167: the MCP server is poly-agent's; it is loaded by name, so poly-check does not depend on it.
+    if (positional[0] === 'mcp' && positional.length === 1) {
+      const agent = '@poly/agent';
+      const { serveMcp } = (await import(agent)) as { serveMcp: () => Promise<void> };
+      await serveMcp();
+      return EXIT_CODES.CLEAN;
+    }
     const call = inputOf(positional, args);
     if (!call) return usage();
     // The journal reads its own options from argv, as before.
