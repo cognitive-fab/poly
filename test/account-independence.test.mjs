@@ -55,7 +55,7 @@ function runAt(home, files) {
   });
 }
 
-test('the tests that load the M3 runner pass whatever the M3 account holds, or with no account at all', { timeout: 3_900_000 }, async () => {
+test('the tests that load the M3 runner pass whatever the M3 account holds, or with no account at all', { timeout: 3_900_000 }, async (t) => {
   const files = runnerTests();
   assert.ok(files.includes(join('test', 'm3-runner.test.mjs')), files.join(', '));
   const base = mkdtempSync(join(tmpdir(), 'poly-account-'));
@@ -69,7 +69,13 @@ test('the tests that load the M3 runner pass whatever the M3 account holds, or w
     const none = join(base, 'none');
     mkdirSync(none, { recursive: true });
     // Each run has its own temporary directory, so the two run side by side.
-    const results = await Promise.all([refused, none].map((home) => runAt(home, files)));
+    const results = await Promise.all([refused, none].map(async (home) => {
+      const t0 = Date.now();
+      const r = await runAt(home, files);
+      return { ...r, seconds: Math.round((Date.now() - t0) / 1000) };
+    }));
+    // decisions-m6.md: each run's time is reported, so a growing gap between the gate and a run alone is seen.
+    t.diagnostic(`child runs: refused account ${results[0].seconds} s, no account ${results[1].seconds} s`);
     for (const [home, r] of [[refused, results[0]], [none, results[1]]]) {
       assert.ok(r.tests > 0, `${home}: no test ran\n${r.out.slice(-2000)}`);
       assert.equal(r.fail, 0, `${home}: ${r.fail} failed\n${r.out.split('\n').filter((l) => /^✖|AssertionError|needs the freeze|isolation:/.test(l)).slice(0, 20).join('\n')}`);

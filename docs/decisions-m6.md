@@ -23,6 +23,12 @@
 
 **E12 (polyflow, for the owner's engine list).** polyflow's example workflow `customer-brief` breaks its own contract on the deny path: its contract declares `DENIED`'s `reason` as only `"not-ready"`, and a denied approval reported with free text writes that text into `reason`. The defect is in polyflow's example, not in poly. The vendored copy is not changed.
 
+## Steps 5 and 6, and S167 amended
+
+**Steps 5 and 6 accepted**, with the gate fixes in 1445bef: the new scripts call the tree guard (the standing rule doing its job), and an account-independence run has 30 minutes. With the next gate counts, the measured time of each of that test's two child runs is reported, inside the gate and alone; if the gap keeps growing, the test runs after the rest of the suite instead of the limit being raised again.
+
+**S167 amended.** The registry stays in `packages/poly-check/src/commands.ts`, next to the command line, and `poly-agent` re-exports it: the `poly` binary, its tests and the frozen M3 runner all point there, so moving it would touch frozen paths. The boundary rules apply to the registry unchanged: it imports no host name and no host SDK.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.
