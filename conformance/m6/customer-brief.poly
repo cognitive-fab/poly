@@ -1,0 +1,133 @@
+// AC5 (M6 step 4): polyflow's own customer-brief workflow (vendor/polyflow/workflows/customer-brief), written in
+// poly. Pull the day's support tickets, draft a brief, ask a person, post it. The same states, actions, rejections,
+// emissions, tools and run key as the hand-written workflow, so a run of either through polyflow's unchanged tools
+// gives the same work orders, step for step.
+module customer_brief
+
+enum BriefState { idle, gathering, drafting, review, posting, posted, denied, failed }
+
+machine Brief {
+  state {
+    briefState : BriefState = idle
+    ticketCount : 0..3 = 0
+    reason : string check { "", "no-empty-brief", "api-error", "not-ready", "channel-unavailable" } = ""
+  }
+
+  terminal briefState == posted || briefState == denied || briefState == failed
+
+  action START(date: string check { "2026-10-04", "2026-10-05" })
+  action TICKETS_READY(count: 0..3)
+  action TICKETS_FAILED(reason: string check { "api-error" })
+  action DRAFT_READY()
+  action APPROVED()
+  action DENIED(reason: string check { "not-ready" })
+  action POST_DONE()
+  action POST_FAILED(reason: string check { "channel-unavailable" })
+
+  on START(date) {
+    require briefState == idle else reject "already-started"
+    briefState' = gathering
+    emit fetch_tickets(window: "yesterday")
+  }
+
+  on TICKETS_READY(count) {
+    require briefState == gathering else reject "stale-completion"
+    if count == 0 {
+      briefState' = denied
+      ticketCount' = 0
+      reason' = "no-empty-brief"
+    } else {
+      briefState' = drafting
+      ticketCount' = count
+      emit draft_brief(ticketCount: count)
+    }
+  }
+
+  on TICKETS_FAILED(reason) {
+    require briefState == gathering else reject "stale-completion"
+    briefState' = failed
+    reason' = reason
+  }
+
+  on DRAFT_READY {
+    require briefState == drafting else reject "stale-completion"
+    briefState' = review
+    emit request_approval(ticketCount: ticketCount)
+    after 8h -> DENIED(reason: "not-ready") as approvalWindow
+  }
+
+  on APPROVED {
+    require briefState == review else reject "nothing-awaiting-approval"
+    briefState' = posting
+    emit post_brief(ticketCount: ticketCount)
+  }
+
+  on DENIED(reason) {
+    require briefState == review else reject "nothing-awaiting-approval"
+    briefState' = denied
+    reason' = reason
+  }
+
+  on POST_DONE {
+    require briefState == posting else reject "stale-completion"
+    briefState' = posted
+  }
+
+  on POST_FAILED(reason) {
+    require briefState == posting else reject "stale-completion"
+    briefState' = failed
+    reason' = reason
+  }
+
+  path property at-most-one-post-per-path: count("post_brief") <= 1
+  path property no-post-without-prior-approval: before("request_approval", "post_brief")
+  path property draft-implies-prior-fetch: before("fetch_tickets", "draft_brief")
+
+  effect fetch_tickets(window: string) {
+    kind "fetch_tickets"
+    labels { read:web }
+    class none
+    retry { attempts 3, base 1s, timeout 2m }
+    ok(r) -> TICKETS_READY(count: r.count)
+    failed -> TICKETS_FAILED(reason: "api-error")
+    exhausted -> TICKETS_FAILED(reason: "api-error")
+  }
+
+  effect draft_brief(ticketCount: 0..3) {
+    kind "draft_brief"
+    labels { read:private }
+    class none
+    retry { attempts 3, base 1s, timeout 2m }
+    ok -> DRAFT_READY()
+    failed -> TICKETS_FAILED(reason: "api-error")
+  }
+
+  effect request_approval(ticketCount: 0..3) {
+    kind "request_approval"
+    labels { read:private }
+    class none
+    retry { attempts 3, base 5s, timeout 2m }
+    ok -> APPROVED()
+    failed -> DENIED(reason: "not-ready")
+    exhausted -> DENIED(reason: "not-ready")
+  }
+
+  effect post_brief(ticketCount: 0..3) {
+    kind "post_brief"
+    labels { egress:public }
+    class irreversible
+    retry { attempts 5, base 2s, timeout 2m }
+    ok -> POST_DONE()
+    failed -> POST_FAILED(reason: "channel-unavailable")
+    exhausted -> POST_FAILED(reason: "channel-unavailable")
+  }
+}
+
+workflow customer-brief runs Brief {
+  input START
+  key "{date}" where date matches "^\\d{4}-\\d{2}-\\d{2}$"
+  tool "fetch_tickets" -> github_search_issues why "gather yesterday's support tickets"
+  tool "draft_brief" -> ask why "draft the brief from the gathered tickets"
+  tool "request_approval" -> ask_user why "the next step posts publicly - get a human decision"
+  tool "post_brief" -> slack_send target "#cs" why "publish the approved brief"
+}
