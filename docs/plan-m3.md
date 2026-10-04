@@ -294,6 +294,16 @@ Blocks 40 and 42 are flagged `genuine` and keep their flags (ruled). In block 40
 
 Block 43 is flagged `genuine`, as polywatch's processes have been: a review worker of the owner's polysim session, started at 01:25:20 UTC, ran into the block, which started at 01:28:10. Block 44 is not flagged.
 
+*Blocks 45 to 50: every block is recorded.* The batch resumed at block 45 and ran to block 50 without a stop. Every run ended its four turns on its own, within the caps, left no process and was cleaned up at the first attempt; none was refused or unscored, and no runner failed. Wall times and tokens, arms 1 to 4:
+- block 45 (T5 run 5): 186, 527, 325 and 304 s; 0.46, 3.80, 1.54 and 1.38 million tokens;
+- block 46 (T6 run 5): 138, 536, 228 and 239 s; 0.31, 1.93, 0.84 and 0.93 million;
+- block 47 (T7 run 5): 186, 963, 284 and 389 s; 0.62, 5.66, 1.88 and 2.09 million;
+- block 48 (T8 run 5): 159, 329, 229 and 241 s; 0.33, 1.47, 1.46 and 1.06 million;
+- block 49 (T9 run 5): 213, 1,647, 337 and 387 s; 0.66, 4.37, 2.47 and 2.28 million;
+- block 50 (T10 run 5): 158, 1,210, 290 and 371 s; 0.33, 4.30, 1.55 and 2.42 million.
+
+Blocks 45, 46 and 47 are flagged `genuine`, for polywatch review workers. In block 45, the worker reviewed this session's commit recording blocks 43 and 44 (9aa5725): it started at 08:42:23 UTC and the owner resumed the batch at 08:44:09, so the commit that records a stop also loads the next block when the batch resumes at once. In blocks 46 and 47, one worker of the owner's fibchannels-com session, started at 08:57:55, ran across both. Blocks 48 to 50 are not flagged. Over the 50 blocks, three runs were stopped by the wall cap, all in arm 2 (T9-arm2-run4, T2-arm2-run5 and T4-arm2-run5), and none by the token or dollar caps.
+
 *The proposed budget.* Each run (base brief and three changes, one session) gets **30,000,000 tokens**, counted as all tokens processed (S99), and **3 hours** of wall time, with `--max-budget-usd 60` as the CLI's own cap. The dry run's tokens are scripted, so they say nothing about real use, and the budget cannot be computed from them as section 8 first planned. The figures above are a ceiling for a session that reads its toolchain's manual, writes and tests a small system, and takes three changes; the pilots are there to replace them with measured ones.
 
 *The estimated cost.* Cost = runs × (input × p_in + output × p_out + cache read × p_read + cache write × p_write) / 10^6. Two assumptions must be confirmed before approval: the model, which I propose to be the same for every arm (`claude-opus-5-5`); and its list prices, which I do not have for that model. As an illustration only, at the rates of an Opus-class model at $5 input, $25 output, $0.50 cache read and $6.25 cache write per million tokens, and a token mix typical of agent sessions (90% cache read, 5% cache write, 3% input, 2% output), a run that uses its whole budget costs $13.50 + $9.38 + $4.50 + $15.00 = $42.38, and 200 runs cost **$8,475** at the ceiling, or about $4,240 if runs use half their budget. The O1 session (one session, forty suites) and the pilots add little beside it.

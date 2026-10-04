@@ -1,0 +1,118 @@
+module lease
+
+// Lowercase, because the host interface reports a client's status by constructor name.
+type ClientStatus = idle | requesting | holding
+
+// The lease service: at most 2 grants (tokens 1 and 2), at most 2 writes taken.
+service machine Lease {
+  state {
+    holder  : Ref<Client> = none
+    current : 0..2 = 0
+    writes  : 0..2 = 0
+    wrote   : bool = false      // a write was taken since the current grant
+  }
+  action Acquire(from: Ref<Client>)
+  action Release(from: Ref<Client>, token: 0..2)
+  action Write(from: Ref<Client>, token: 0..2)
+  action Expire()
+
+  on Acquire(from) {
+    if holder == none && current < 2 {
+      holder' = from
+      current' = current + 1
+      wrote' = false
+      send from <- Granted(token: current + 1)
+    } else {
+      send from <- Denied()
+    }
+  }
+  // A release from anyone but the holder with the current token is ignored; either way it is acknowledged.
+  on Release(from, token) {
+    if holder == from && token == current { holder' = none }
+    send from <- Released()
+  }
+  on Write(from, token) {
+    if holder == from && token == current && !wrote && writes < 2 {
+      writes' = writes + 1
+      wrote' = true
+      send from <- WriteDone()
+    } else {
+      send from <- WriteRefused()
+    }
+  }
+  on Expire {
+    require holder != none else reject "no-holder"
+    holder' = none
+    send holder <- Revoked(token: current)
+  }
+}
+
+machine Client {
+  state {
+    status  : ClientStatus = idle
+    held    : 0..2 = 0          // the last token granted
+    writing : bool = false
+    revoked : 0..2 = 0          // the newest token revoked while not holding
+    svc     : Ref<Lease> = none
+  }
+  action Acquire()
+  action Release()
+  action Write()
+  action Granted(token: 0..2)
+  action Denied()
+  action Revoked(token: 0..2)
+  action WriteDone()
+  action WriteRefused()
+
+  on Acquire {
+    require status is idle else reject "not-idle"
+    status' = requesting
+    send svc <- Acquire(from: self)
+  }
+  on Release {
+    require status is holding else reject "not-holding"
+    status' = idle
+    send svc <- Release(from: self, token: held)
+  }
+  on Write {
+    require status is holding else reject "not-holding"
+    require !writing else reject "write-pending"
+    writing' = true
+    send svc <- Write(from: self, token: held)
+  }
+  // A grant already revoked leaves the client idle.
+  on Granted(token) {
+    require status is requesting else reject "not-requesting"
+    held' = token
+    if token <= revoked { status' = idle } else { status' = holding }
+  }
+  on Denied {
+    require status is requesting else reject "not-requesting"
+    status' = idle
+  }
+  on Revoked(token) {
+    if status is holding {
+      require token == held else reject "stale-revoke"
+      status' = idle
+    } else {
+      require token > revoked else reject "stale-revoke"
+      revoked' = token
+    }
+  }
+  on WriteDone {
+    require writing else reject "no-write"
+    writing' = false
+  }
+  on WriteRefused {
+    require writing else reject "no-write"
+    writing' = false
+  }
+}
+
+configuration two-clients {
+  lease : Lease
+  c[2]  : Client { svc: lease }
+  inputs { c[*].Acquire, c[*].Release, c[*].Write, lease.Expire }
+  bounds { transit 8 }
+  invariant one-current-holder: count(c[*].status is holding && c[*].held == lease.current) <= 1
+}
