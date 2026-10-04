@@ -46,6 +46,17 @@ class Printer {
     lines.forEach((l, k) => this.out.push(indent + l + (k === lines.length - 1 ? this.trail(n) : '')));
   }
 
+  /** PT10: one line per clause; a tool name that is not an identifier is quoted. */
+  private workflow(w: A.Workflow): void {
+    const q = (s: string) => JSON.stringify(s);
+    this.lead(w, '');
+    this.out.push(`workflow ${w.name} runs ${w.machine} {`);
+    this.out.push(`${INDENT}input ${w.input}`);
+    if (w.key) this.emit(w.key, INDENT, [`key ${q(w.key.template)}${w.key.fields.length ? ` where ${w.key.fields.map((f) => `${f.name} matches ${q(f.pattern)}`).join(', ')}` : ''}`]);
+    for (const t of w.tools) this.emit(t, INDENT, [`tool ${q(t.effect)} -> ${/^[A-Za-z_][A-Za-z0-9_]*$/.test(t.tool) ? t.tool : q(t.tool)}${t.target === null ? '' : ` target ${q(t.target)}`} why ${q(t.why)}`]);
+    this.out.push(`}${this.trail(w)}`);
+  }
+
   module(m: A.Module): string {
     this.lead(m, '');
     this.out.push(`module ${m.name}`);
@@ -89,6 +100,8 @@ class Printer {
         return this.configuration(d);
       case 'Policy':
         return this.policy(d);
+      case 'Workflow':
+        return this.workflow(d);
     }
   }
 

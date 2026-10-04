@@ -212,6 +212,14 @@ class Checker {
       configs.add(d.name);
       this.checkConfiguration(d, machines);
     }
+    // PT10, S166: workflows, each over a machine of this module.
+    const workflows = new Set<string>();
+    for (const d of this.module.decls) {
+      if (d.kind !== 'Workflow') continue;
+      if (workflows.has(d.name)) { this.err('PL1002', d, `workflow ${d.name} is declared twice`); continue; }
+      workflows.add(d.name);
+      this.checkWorkflow(d, machines);
+    }
     // S41: polyrun keys handlers by kind, so effects that share a kind must declare the same payload,
     // completions and class. Identical declarations may share it. Across modules, poly-check compares
     // the signatures of a project's files.
@@ -225,6 +233,45 @@ class Checker {
       }
     }
     return { diagnostics: this.diags, env: this.env, machines };
+  }
+
+  // ── workflows (PT10, S166) ─────────────────────────────────────────────
+  private checkWorkflow(w: A.Workflow, machines: Map<string, MachineFacts>): void {
+    const m = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === w.machine);
+    const facts = machines.get(w.machine);
+    if (!m || !facts) { this.err('PL1001', w, `workflow ${w.name} runs ${w.machine}, which is no machine of module ${this.module.name}`); return; }
+    // PL6801: polyflow starts a run by dispatching the input action with the caller's input, so it is a handled action.
+    const act = m.items.find((i): i is A.Action => i.kind === 'Action' && i.name === w.input);
+    if (!act || !m.items.some((i) => i.kind === 'Handler' && i.action === w.input)) {
+      this.err('PL6801', w, `workflow ${w.name}: its input ${w.input} is ${act ? 'an action of' : 'no action of'} ${w.machine}${act ? ' with no handler' : ''}, so polyflow could not start a run with it (S166)`);
+    }
+    // PL6802: the key names parameters of the input action, its patterns compile, and every declared value matches.
+    if (w.key) {
+      const named = [...w.key.template.matchAll(/\{(\w+)\}/g)].map((x) => x[1]);
+      if (!named.length) this.err('PL6802', w.key, `workflow ${w.name}: the key template ${JSON.stringify(w.key.template)} names no field, so every run would have one name (S166)`);
+      for (const f of named) if (act && !act.params.some((p) => p.name === f)) this.err('PL6802', w.key, `workflow ${w.name}: the key field ${f} is no parameter of ${w.input} (S166)`);
+      for (const f of w.key.fields) {
+        if (!named.includes(f.name)) { this.err('PL6802', f, `workflow ${w.name}: ${f.name} has a pattern, and the key template does not name it (S166)`); continue; }
+        let re: RegExp;
+        try { re = new RegExp(f.pattern); } catch (e) { this.err('PL6802', f, `workflow ${w.name}: the pattern of ${f.name} does not compile: ${(e as Error).message} (S166)`); continue; }
+        const p = act?.params.find((x) => x.name === f.name);
+        if (p?.check?.domain.kind === 'DomainSet') {
+          for (const v of p.check.domain.values) {
+            const text = String((v as { value?: unknown }).value);
+            if (!re.test(text)) this.err('PL6802', f, `workflow ${w.name}: ${w.input}'s ${f.name} may be ${JSON.stringify(text)}, which the key's pattern refuses, so such a run could not start (S166)`);
+          }
+        }
+      }
+    }
+    // PL6803: each effect kind of the machine has exactly one tool, and each tool's kind is an effect of the machine.
+    const kinds = new Set([...facts.effects.values()].map((e) => effectKind(e)));
+    const seen = new Set<string>();
+    for (const t of w.tools) {
+      if (!kinds.has(t.effect)) this.err('PL6803', t, `workflow ${w.name}: "${t.effect}" is no effect kind of ${w.machine} (${[...kinds].sort().join(', ') || 'it has none'}) (S166)`);
+      else if (seen.has(t.effect)) this.err('PL6803', t, `workflow ${w.name}: "${t.effect}" is mapped to a tool twice (S166)`);
+      seen.add(t.effect);
+    }
+    for (const k of [...kinds].sort()) if (!seen.has(k)) this.err('PL6803', w, `workflow ${w.name}: the effect kind "${k}" has no tool, so polyflow would hand out a work order no tool fulfils (S166)`);
   }
 
   // ── configurations (PS13, PT7a) ─────────────────────────────────────────

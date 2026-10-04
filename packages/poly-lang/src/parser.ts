@@ -59,7 +59,7 @@ const BINARY: Record<string, { prec: number; assoc: 'left' | 'right' | 'none' }>
 };
 
 const STMT_KEYWORDS = new Set(['require', 'reject', 'let', 'if', 'match', 'emit', 'after', 'cancel', 'spawn', 'send', 'signal', 'for', 'decide', 'adjudicate']);
-const LATER_TOP_LEVEL = new Set(['workflow', 'world']);
+const LATER_TOP_LEVEL = new Set(['world']);
 
 export function parse(src: string): ParseResult {
   const trivia: Trivia = { leading: new Map(), trailing: new Map(), end: [] };
@@ -202,6 +202,7 @@ class Parser {
     if (this.at('service') && this.at('machine', 1)) { this.next(); return this.machine(true, start); }
     if (this.at('configuration') && this.peek(1).kind === 'ident') return this.configuration();
     if (this.at('policy') && this.peek(1).kind === 'ident') return this.policy();
+    if (this.at('workflow') && this.peek(1).kind === 'ident') return this.workflow();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -211,7 +212,47 @@ class Parser {
       this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
       return null;
     }
-    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, use)');
+    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, use)');
+  }
+
+  /** `workflow w runs M { input A  key "…" where f matches "…", …  tool "kind" -> t target "…" why "…" … }` (PT10, S166). */
+  private workflow(): A.Workflow {
+    const start = this.next();
+    const name = this.dashedName();
+    this.expect('runs');
+    const machine = this.ident('a machine');
+    this.expect('{');
+    this.expect('input');
+    const input = this.ident('the input action');
+    let key: A.Workflow['key'] = null;
+    if (this.at('key')) {
+      const ks = this.next();
+      const template = this.str('the key template');
+      const fields: A.WorkflowKeyField[] = [];
+      if (this.at('where')) {
+        this.next();
+        do {
+          const fs = this.peek();
+          const fname = this.ident('a key field');
+          this.expect('matches');
+          fields.push(this.node<A.WorkflowKeyField>(fs, { kind: 'WorkflowKeyField', name: fname, pattern: this.str('a pattern') }, true));
+        } while (this.atPunct(',') && this.next());
+      }
+      key = this.node<A.WorkflowKey>(ks, { kind: 'WorkflowKey', template, fields }, true);
+    }
+    const tools: A.WorkflowTool[] = [];
+    while (this.at('tool')) {
+      const ts = this.next();
+      const effect = this.str('an effect kind');
+      this.expect('->');
+      const tool = this.peek().kind === 'string' ? this.str() : this.ident('a tool');
+      let target: string | null = null;
+      if (this.at('target')) { this.next(); target = this.str('a target'); }
+      this.expect('why');
+      tools.push(this.node<A.WorkflowTool>(ts, { kind: 'WorkflowTool', effect, tool, target, why: this.str('why the step exists') }, true));
+    }
+    this.expect('}');
+    return this.node<A.Workflow>(start, { kind: 'Workflow', name, machine, input, key, tools }, true);
   }
 
   /** `policy p { scope "s" var … obligation … recalled … never … }` (PT8.1, S149). */

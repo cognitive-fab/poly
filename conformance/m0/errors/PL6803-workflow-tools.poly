@@ -1,0 +1,53 @@
+// expect: PL6803 (every effect kind of a workflow's machine has one tool, PT10, S166)
+module errors
+
+enum Phase { Idle, Gathering, Posting, Posted }
+
+machine Brief {
+  state {
+    phase : Phase = Idle
+  }
+
+  terminal phase == Posted
+
+  action Start(date: string check { "2026-10-04", "2026-10-05" })
+  action Gathered()
+  action Done()
+
+  on Start(date) {
+    require phase == Idle else reject "busy"
+    phase' = Gathering
+    emit fetch(1)
+  }
+
+  on Gathered {
+    require phase == Gathering else reject "not-gathering"
+    phase' = Posting
+    emit post(1)
+  }
+
+  on Done {
+    require phase == Posting else reject "not-posting"
+    phase' = Posted
+  }
+
+  effect fetch(n: 0..1) {
+    kind "brief.fetch"
+    labels { read:store }
+    class none
+    ok -> Gathered()
+  }
+
+  effect post(n: 0..1) {
+    kind "brief.post"
+    labels { egress:external }
+    class irreversible
+    ok -> Done()
+  }
+}
+
+workflow daily-brief runs Brief {
+  input Start
+  key "{date}" where date matches "^\\d{4}-\\d{2}-\\d{2}$"
+  tool "brief.fetch" -> github_search_issues why "gather the day's tickets"
+}

@@ -32,6 +32,7 @@ const NAMED: Record<string, string> = {
   InvariantObligation: 'obligation',
   Recalled: 'recalled',
   Never: 'never',
+  Workflow: 'workflow',
 };
 
 function segmentOf(node: Obj, key: string, index: number): string {

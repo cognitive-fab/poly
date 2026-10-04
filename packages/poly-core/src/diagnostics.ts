@@ -131,6 +131,12 @@ export const CODES: Record<string, CodeInfo> = {
   // PT8.5, PS8.6: a mandate no path discharges under the obligations together (the minimal subset is named).
   // PD5.2.3, S156: in a scope that requires attribution, a compensable or irreversible effect from an origin with no claims.
   PL6701: { name: 'UNATTRIBUTED_EFFECT', stage: 'policy', severity: 'finding' },
+  // PT10, S166: a workflow whose input is not a handled action of its machine.
+  PL6801: { name: 'WORKFLOW_INPUT', stage: 'types', severity: 'error' },
+  // PT10, S166: a workflow key whose fields are not the input's parameters, whose pattern does not compile, or that refuses a declared value.
+  PL6802: { name: 'WORKFLOW_KEY', stage: 'types', severity: 'error' },
+  // PT10, S166: an effect kind with no tool or two, or a tool for a kind that is no effect of the machine.
+  PL6803: { name: 'WORKFLOW_TOOLS', stage: 'types', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
   PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },

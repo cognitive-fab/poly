@@ -54,6 +54,8 @@ export declare function use(path: string): Decl;
 export declare function machine(name: string, body: { service?: true; version?: number; state?: { [field: string]: Field }; items?: Item[] }): Decl;
 export declare function field(type: Type, init: Arrow, opts?: { check?: Literal[] | { lo: number; hi: number }; mode?: Mode; flag?: 'internal' | 'derived' }): Field;
 export declare function name(ctor: string): NameLiteral;
+/** PT10: a workflow over a machine of the module, run by polyflow; its tools are keyed by effect kind. */
+export declare function workflow(name: string, body: { runs: string; input: string; key?: { template: string; where?: { [field: string]: string } }; tools: { [kind: string]: { tool: string; target?: string; why: string } } }): Decl;
 export declare function configuration(name: string, body: { instances: Instance[]; inputs?: string[]; bounds?: { transit: number; instances?: number }; properties?: Item[] }): Decl;
 export declare function instance(name: string, machine: string, opts?: { count?: number; init?: (scope: Scope) => { [field: string]: Expr }; scope?: string }): Instance;
 

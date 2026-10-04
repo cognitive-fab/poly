@@ -43,6 +43,12 @@ class Printer {
       case 'Configuration': return this.configuration(d, ind);
       // PT1.1a: a policy lives in a .policy.poly file; the embedded surface has none (PT2.5).
       case 'Policy': throw new Error('policy ' + d.name + ' has no embedded form: policies are written in .policy.poly files (PT1.1a)');
+      // PT10, PT2.5: a workflow, with its tools keyed by effect kind.
+      case 'Workflow': {
+        const key = d.key ? `, key: { template: ${q(d.key.template)}${d.key.fields.length ? `, where: { ${d.key.fields.map((f) => `${this.key(f.name)}: ${q(f.pattern)}`).join(', ')} }` : ''} }` : '';
+        const tools = d.tools.map((t) => `${ind}  ${q(t.effect)}: { tool: ${q(t.tool)}${t.target === null ? '' : `, target: ${q(t.target)}`}, why: ${q(t.why)} },\n`).join('');
+        return `${this.use('workflow')}(${q(d.name)}, { runs: ${q(d.machine)}, input: ${q(d.input)}${key}, tools: {\n${tools}${ind}} })`;
+      }
     }
   }
 

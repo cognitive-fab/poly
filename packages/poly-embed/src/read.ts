@@ -171,7 +171,7 @@ class Reader {
 
   // ── declarations ─────────────────────────────────────────────────────────
   private decl(node: ts.Expression): A.Decl {
-    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration');
+    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow');
     switch (c.name) {
       case 'enumType': {
         const [name, members] = this.argsOf(c, 2, 2);
@@ -191,8 +191,29 @@ class Reader {
         return this.mk<A.UseDecl>(c.node, { kind: 'Use', path: this.str(path).split('.') });
       }
       case 'machine': return this.machine(c);
+      case 'workflow': return this.workflow(c);
       default: return this.configuration(c);
     }
+  }
+
+  /** PT10: `workflow(name, { runs, input, key?: { template, where? }, tools: { kind: { tool, target?, why } } })`. */
+  private workflow(c: { name: string; node: ts.CallExpression }): A.Workflow {
+    const [name, body] = this.argsOf(c, 2, 2);
+    const o = this.opts(body, ['runs', 'input', 'key', 'tools']);
+    if (!o.has('runs') || !o.has('input') || !o.has('tools')) this.fail(body, 'a workflow names runs, input and tools (PT10)');
+    let key: A.Workflow['key'] = null;
+    if (o.has('key')) {
+      const k = this.opts(o.get('key')!, ['template', 'where']);
+      if (!k.has('template')) this.fail(o.get('key')!, 'a key names its template (PT10)');
+      const fields = k.has('where') ? this.obj(k.get('where')!).map(([f, v, kn]) => this.mk<A.WorkflowKeyField>(kn, { kind: 'WorkflowKeyField', name: f, pattern: this.str(v) })) : [];
+      key = this.mk<A.WorkflowKey>(o.get('key')!, { kind: 'WorkflowKey', template: this.str(k.get('template')!), fields });
+    }
+    const tools = this.obj(o.get('tools')!).map(([effect, v, kn]) => {
+      const t = this.opts(v, ['tool', 'target', 'why']);
+      if (!t.has('tool') || !t.has('why')) this.fail(v, 'a tool names tool and why (PT10)');
+      return this.mk<A.WorkflowTool>(kn, { kind: 'WorkflowTool', effect, tool: this.str(t.get('tool')!), target: t.has('target') ? this.str(t.get('target')!) : null, why: this.str(t.get('why')!) });
+    });
+    return this.mk<A.Workflow>(c.node, { kind: 'Workflow', name: this.str(name), machine: this.str(o.get('runs')!), input: this.str(o.get('input')!), key, tools });
   }
 
   private payload(node: ts.Expression): A.PayloadField[] {

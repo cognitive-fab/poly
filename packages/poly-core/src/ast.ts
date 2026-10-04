@@ -27,7 +27,33 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow;
+
+// ── Workflows (PT10, S166) ─────────────────────────────────────────────────
+
+/**
+ * `workflow w runs M { input A  key "…" where f matches "…"  tool "kind" -> t target "…" why "…" }` (PT10): a machine
+ * run by polyflow, whose effects become work orders for an agent's tools. Checked and lowered by poly, run by polyflow,
+ * outside the gate (S164).
+ */
+export interface Workflow extends NodeBase {
+  kind: 'Workflow';
+  name: string;
+  /** The machine of this module the workflow runs. */
+  machine: string;
+  /** The action a run starts with, given the caller's input as data. */
+  input: string;
+  /** How a run is named from its input; null when the caller names it. */
+  key: WorkflowKey | null;
+  tools: WorkflowTool[];
+}
+
+/** `key "{f}…" where f matches "re", …`: the template's fields are parameters of the input action. */
+export interface WorkflowKey extends NodeBase { kind: 'WorkflowKey'; template: string; fields: WorkflowKeyField[] }
+export interface WorkflowKeyField extends NodeBase { kind: 'WorkflowKeyField'; name: string; pattern: string }
+
+/** `tool "kind" -> t target "x" why "y"`: the agent tool that fulfils an effect kind's work order. */
+export interface WorkflowTool extends NodeBase { kind: 'WorkflowTool'; effect: string; tool: string; target: string | null; why: string }
 
 // ── Policies (PT8, PS8) ────────────────────────────────────────────────────
 
