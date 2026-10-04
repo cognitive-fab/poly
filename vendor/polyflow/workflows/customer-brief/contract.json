@@ -1,0 +1,46 @@
+{
+  "lang": "javascript",
+  "stateKeys": [
+    { "name": "briefState", "type": "enum: 'idle' | 'gathering' | 'drafting' | 'review' | 'posting' | 'posted' | 'denied' | 'failed'" },
+    { "name": "ticketCount", "type": "integer >= 0, tickets gathered for the brief" },
+    { "name": "reason", "type": "string, why the run ended without posting ('' otherwise)" }
+  ],
+  "initState": { "briefState": "idle", "ticketCount": 0, "reason": "" },
+  "actions": {
+    "START": { "dataFields": {} },
+    "TICKETS_READY": { "dataFields": { "count": "integer >= 0, tickets gathered" } },
+    "TICKETS_FAILED": { "dataFields": { "reason": "string" } },
+    "DRAFT_READY": { "dataFields": {} },
+    "APPROVED": { "dataFields": {} },
+    "DENIED": { "dataFields": { "reason": "string" } },
+    "POST_DONE": { "dataFields": {} },
+    "POST_FAILED": { "dataFields": { "reason": "string" } }
+  },
+  "dataDomain": {
+    "START": {},
+    "TICKETS_READY": { "count": [0, 3] },
+    "TICKETS_FAILED": { "reason": ["api-error"] },
+    "DRAFT_READY": {},
+    "APPROVED": {},
+    "DENIED": { "reason": ["not-ready"] },
+    "POST_DONE": {},
+    "POST_FAILED": { "reason": ["channel-unavailable"] }
+  },
+  "terminalKey": "briefState",
+  "terminalStates": ["posted", "denied", "failed"],
+  "specialRules": [
+    {
+      "name": "stale-completions-reject",
+      "note": "A tool result arriving in any state other than the one that awaits it is an observable rejection (post == pre), never a fault. This is what makes the agent's at-least-once reporting safe.",
+      "whenState": "any non-awaiting state",
+      "whenAction": "TICKETS_READY | TICKETS_FAILED | DRAFT_READY | APPROVED | DENIED | POST_DONE | POST_FAILED"
+    },
+    {
+      "name": "no-empty-brief",
+      "note": "TICKETS_READY with count == 0 ends the run in 'denied' rather than drafting and posting an empty brief.",
+      "whenState": "briefState == 'gathering'",
+      "whenAction": "TICKETS_READY"
+    }
+  ],
+  "noOpRule": "An action that does not apply in the current state is reject(reason) - an observable no-op with post == pre."
+}

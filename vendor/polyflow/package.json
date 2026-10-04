@@ -1,0 +1,8 @@
+{
+  "name": "@cognitive-fab/polyflow-server",
+  "version": "0.4.2",
+  "description": "polyflow's MCP server and library, vendored unchanged for M6 (AC5); see vendor/polyflow/PROVENANCE.md. Its server reads the version from this file.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true
+}

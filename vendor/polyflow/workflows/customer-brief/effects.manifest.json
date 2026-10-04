@@ -1,0 +1,31 @@
+{
+  "effects": {
+    "fetch_tickets": {
+      "payloadSchema": { "window": "string" },
+      "onSuccess": { "action": "TICKETS_READY" },
+      "onFailure": { "action": "TICKETS_FAILED" },
+      "onExhausted": { "action": "TICKETS_FAILED", "data": { "reason": "api-error" } },
+      "retry": { "maxAttempts": 3, "baseMs": 1000, "timeoutMs": 120000 }
+    },
+    "draft_brief": {
+      "payloadSchema": { "ticketCount": "number" },
+      "onSuccess": { "action": "DRAFT_READY" },
+      "onFailure": { "action": "TICKETS_FAILED" },
+      "retry": { "maxAttempts": 3, "baseMs": 1000, "timeoutMs": 120000 }
+    },
+    "request_approval": {
+      "payloadSchema": { "ticketCount": "number" },
+      "onSuccess": { "action": "APPROVED" },
+      "onFailure": { "action": "DENIED" },
+      "onExhausted": { "action": "DENIED", "data": { "reason": "not-ready" } },
+      "retry": { "maxAttempts": 3, "baseMs": 5000, "timeoutMs": 120000 }
+    },
+    "post_brief": {
+      "payloadSchema": { "ticketCount": "number" },
+      "onSuccess": { "action": "POST_DONE" },
+      "onFailure": { "action": "POST_FAILED" },
+      "onExhausted": { "action": "POST_FAILED", "data": { "reason": "channel-unavailable" } },
+      "retry": { "maxAttempts": 5, "baseMs": 2000, "timeoutMs": 120000 }
+    }
+  }
+}
