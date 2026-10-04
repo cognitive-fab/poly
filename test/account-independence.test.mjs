@@ -38,7 +38,10 @@ function runAt(home, files) {
     let out = '';
     p.stdout.on('data', (b) => { out += b; });
     p.stderr.on('data', (b) => { out += b; });
+    // Polywatch: a child that hangs is killed, and its run fails, before the test's own timeout.
+    const timer = setTimeout(() => { out += '\nkilled: the run did not finish in 10 minutes\n'; p.kill(); }, 600_000);
     p.on('close', (status) => {
+      clearTimeout(timer);
       const count = (k) => Number((out.match(new RegExp(`^ℹ ${k} (\\d+)`, 'm')) ?? [])[1] ?? NaN);
       done({ status, tests: count('tests'), fail: count('fail'), out });
     });
@@ -63,6 +66,8 @@ test('the tests that load the M3 runner pass whatever the M3 account holds, or w
     for (const [home, r] of [[refused, results[0]], [none, results[1]]]) {
       assert.ok(r.tests > 0, `${home}: no test ran\n${r.out.slice(-2000)}`);
       assert.equal(r.fail, 0, `${home}: ${r.fail} failed\n${r.out.split('\n').filter((l) => /^✖|AssertionError|needs the freeze|isolation:/.test(l)).slice(0, 20).join('\n')}`);
+      // Polywatch: a cancelled test or a killed run exits non-zero with no failure counted.
+      assert.equal(r.status, 0, `${home}: the run exited ${r.status}\n${r.out.slice(-2000)}`);
     }
     assert.equal(results[0].tests, results[1].tests);
   } finally {
