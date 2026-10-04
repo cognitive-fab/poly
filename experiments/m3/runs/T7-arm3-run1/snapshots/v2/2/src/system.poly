@@ -1,0 +1,148 @@
+// A workflow run with two tasks, each done by its own worker; the run and the workers talk by messages.
+module system
+
+type RunStatus = idle | running | cancelling | completed | failed | cancelled
+type TaskStatus = idle | assigned | completed | failed | cancelled
+type WorkerStatus = idle | busy
+
+machine Run {
+  state {
+    status : RunStatus   = RunStatus.idle
+    task0  : TaskStatus  = TaskStatus.idle
+    task1  : TaskStatus  = TaskStatus.idle
+    retried0 : bool      = false
+    retried1 : bool      = false
+    w0     : Ref<Worker> = none
+    w1     : Ref<Worker> = none
+  }
+  terminal status is completed | failed | cancelled
+
+  action Start()
+  action Cancel()
+  action Report(task: 0..1, outcome: TaskStatus)
+  action TaskTimeout(task: 0..1 check 0..1 strict)
+
+  on Start {
+    require status is idle else reject "already-started"
+    status' = running
+    task0' = assigned
+    task1' = assigned
+    send w0 <- Assign()
+    send w1 <- Assign()
+  }
+
+  on Cancel {
+    require status is running else reject "not-running"
+    status' = cancelling
+    if task0 is assigned { send w0 <- Abort() }
+    if task1 is assigned { send w1 <- Abort() }
+  }
+
+  // A task that takes too long fails for good, without a retry, and its worker is aborted. Since the task
+  // failed, the run fails once the other task has reported too.
+  on TaskTimeout(task) {
+    require status is running | cancelling else reject "run-ended"
+    if task == 0 {
+      require task0 is assigned else reject "not-assigned"
+      task0' = failed
+      send w0 <- Abort()
+      if !(task1 is assigned) { status' = failed }
+    } else {
+      require task1 is assigned else reject "not-assigned"
+      task1' = failed
+      send w1 <- Abort()
+      if !(task0 is assigned) { status' = failed }
+    }
+  }
+
+  // A report for a task that is no longer assigned is ignored. A task's first failure while running is retried: its worker is assigned it again. Otherwise the report
+  // is recorded, and the run's status becomes completed when both completed, else failed or cancelled once
+  // both tasks have reported, else stays unchanged.
+  on Report(task, outcome) {
+    require status is running | cancelling else reject "run-ended"
+    require outcome is completed | failed | cancelled else reject "not-an-outcome"
+    if task == 0 {
+      require task0 is assigned else reject "already-reported"
+      if outcome is failed && status is running && !retried0 {
+        retried0' = true
+        send w0 <- Assign()
+      } else {
+        task0' = outcome
+        if !(task1 is assigned) {
+          if outcome is completed && task1 is completed { status' = completed }
+          else {
+            if outcome is failed || task1 is failed { status' = failed } else { status' = cancelled }
+          }
+        }
+      }
+    } else {
+      require task1 is assigned else reject "already-reported"
+      if outcome is failed && status is running && !retried1 {
+        retried1' = true
+        send w1 <- Assign()
+      } else {
+        task1' = outcome
+        if !(task0 is assigned) {
+          if outcome is completed && task0 is completed { status' = completed }
+          else {
+            if outcome is failed || task0 is failed { status' = failed } else { status' = cancelled }
+          }
+        }
+      }
+    }
+  }
+
+  invariant completed-when-both-completed:
+    status is completed implies (task0 is completed && task1 is completed)
+  invariant ended-when-both-reported:
+    status is completed | failed | cancelled implies (!(task0 is idle | assigned) && !(task1 is idle | assigned))
+  invariant failed-when-a-task-failed:
+    status is failed implies (task0 is failed || task1 is failed)
+}
+
+// A worker is long-lived: idle is where it rests, not where it ends.
+service machine Worker {
+  state {
+    status : WorkerStatus = WorkerStatus.idle
+    run    : Ref<Run>     = none
+    task   : 0..1         = 0
+  }
+
+  action Assign()
+  action Abort()
+  action WorkDone()
+  action WorkFailed()
+
+  on Assign {
+    require status is idle else reject "busy"
+    status' = busy
+  }
+
+  on Abort {
+    require status is busy else reject "not-busy"
+    status' = idle
+    send run <- Report(task: task, outcome: TaskStatus.cancelled)
+  }
+
+  on WorkDone {
+    require status is busy else reject "not-busy"
+    status' = idle
+    send run <- Report(task: task, outcome: TaskStatus.completed)
+  }
+
+  on WorkFailed {
+    require status is busy else reject "not-busy"
+    status' = idle
+    send run <- Report(task: task, outcome: TaskStatus.failed)
+  }
+}
+
+configuration system {
+  run    : Run { w0: worker0, w1: worker1 }
+  worker0 : Worker { run: run, task: 0 }
+  worker1 : Worker { run: run, task: 1 }
+  inputs  { run.Start, run.Cancel, worker0.WorkDone, worker0.WorkFailed, worker1.WorkDone, worker1.WorkFailed }
+  bounds  { transit 4 }
+  invariant completed-only-when-both-completed:
+    run.status is completed implies (run.task0 is completed && run.task1 is completed)
+}

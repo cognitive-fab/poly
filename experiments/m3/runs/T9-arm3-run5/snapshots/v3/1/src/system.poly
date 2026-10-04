@@ -1,0 +1,99 @@
+module election
+
+type Role = follower | candidate | leader | down
+
+// A node keeps running after the election, so it is a service: a quiescent node is not stuck.
+service machine Node {
+  state {
+    role     : Role      = follower
+    term     : 0..1      = 0
+    votedFor : Ref<Node> = none
+    votes    : 0..3      = 0
+    leader   : Ref<Node> = none     // the leader this node knows in its term
+    peerA    : Ref<Node> = none
+    peerB    : Ref<Node> = none
+    me       : Ref<Node> = none     // this node's own address, set when the system is created
+  }
+
+  action Timeout()
+  action RequestVote(from: Ref<Node>, term: 0..1)
+  action VoteReply(term: 0..1, granted: bool)
+  action Leader(from: Ref<Node>, term: 0..1)
+  action GiveUp()
+
+  // A candidate gives up: it follows in the same term and keeps its vote for itself, so later replies are ignored.
+  on GiveUp {
+    require role is candidate else reject "not-a-candidate"
+    role' = follower
+  }
+
+  // A follower in term 0 starts the one election: it becomes a candidate in term 1 and votes for itself.
+  on Timeout {
+    require role is follower && pre.term == 0 else reject "not-a-follower-in-term-0"
+    role' = candidate
+    term' = 1
+    votedFor' = me
+    votes' = 1
+    send peerA <- RequestVote(from: self, term: 1)
+    send peerB <- RequestVote(from: self, term: 1)
+  }
+
+  on RequestVote(from, term) {
+    require term == 1 else reject "wrong-term"
+    if pre.term == 0 {
+      term' = 1
+      votedFor' = from
+      send from <- VoteReply(term: 1, granted: true)
+    } else {
+      if role is follower && (votedFor == none || votedFor == from) {
+        votedFor' = from
+        send from <- VoteReply(term: 1, granted: true)
+      } else {
+        send from <- VoteReply(term: 1, granted: false)
+      }
+    }
+  }
+
+  on VoteReply(term, granted) {
+    require role is candidate else reject "not-a-candidate"
+    require term == pre.term else reject "wrong-term"
+    require granted else reject "not-granted"
+    require votes < 3 else reject "all-votes-counted"
+    votes' = votes + 1
+    if votes + 1 >= 2 {
+      role' = Role.leader
+      leader' = me
+      send peerA <- Leader(from: me, term: 1)
+      send peerB <- Leader(from: me, term: 1)
+    }
+  }
+
+  // The leader's announcement: record it; a node in term 0 joins term 1 without voting, a candidate steps down.
+  on Leader(from, term) {
+    require term == 1 else reject "wrong-term"
+    require !(role == Role.leader) else reject "already-leader"
+    leader' = from
+    if pre.term == 0 { term' = 1 }
+    if role is candidate { role' = follower }
+  }
+
+  invariant leader-has-majority: role == Role.leader implies votes >= 2
+  invariant leader-voted-self: role == Role.leader implies term == 1
+  invariant leader-knows-itself: role == Role.leader implies leader == me
+}
+
+configuration three-nodes {
+  n0 : Node { me: n0, peerA: n1, peerB: n2 }
+  n1 : Node { me: n1, peerA: n0, peerB: n2 }
+  n2 : Node { me: n2, peerA: n0, peerB: n1 }
+  inputs { n0.Timeout, n1.Timeout, n2.Timeout, n0.GiveUp, n1.GiveUp, n2.GiveUp }
+  bounds { transit 6 }
+  invariant one-leader:
+    !(n0.role == Role.leader && n1.role == Role.leader) && !(n0.role == Role.leader && n2.role == Role.leader)
+    && !(n1.role == Role.leader && n2.role == Role.leader)
+  // a node that knows a leader knows the one that leads
+  invariant known-leader-leads:
+    (n0.leader == n1.me implies n1.role == Role.leader) && (n0.leader == n2.me implies n2.role == Role.leader)
+    && (n1.leader == n0.me implies n0.role == Role.leader) && (n1.leader == n2.me implies n2.role == Role.leader)
+    && (n2.leader == n0.me implies n0.role == Role.leader) && (n2.leader == n1.me implies n1.role == Role.leader)
+}

@@ -1,0 +1,57 @@
+// Jobs with retries and cancellation: one Job instance per job id, created by submit.
+module jobs
+
+type Status = unsubmitted | queued | running | cancelling | succeeded | failed | cancelled
+
+machine Job {
+  state {
+    status   : Status = unsubmitted
+    tries    : 0..3   = 0
+    maxTries : 0..3   = 0
+  }
+  terminal status in { succeeded, failed, cancelled }
+
+  action Submit(max: int check 1..3 strict)
+  action Claim()
+  action Succeed()
+  action Fail()
+  action Lost()
+  action Cancel()
+
+  on Submit(max) {
+    require status == unsubmitted else reject "job-exists"
+    status' = queued
+    maxTries' = max
+  }
+  on Claim {
+    require status == queued else reject "not-queued"
+    require tries < maxTries else reject "no-tries-left"
+    status' = running
+    tries' = tries + 1
+  }
+  on Succeed {
+    require status in { running, cancelling } else reject "not-running"
+    status' = succeeded
+  }
+  on Fail {
+    require status in { running, cancelling } else reject "not-running"
+    if status == cancelling { status' = cancelled }
+    else { if tries < maxTries { status' = queued } else { status' = failed } }
+  }
+  on Lost {
+    require status in { running, cancelling } else reject "not-running"
+    if status == cancelling { status' = cancelled }
+    else if tries < maxTries { status' = queued }
+    else { status' = failed }
+  }
+  on Cancel {
+    require status in { queued, running } else reject "not-cancellable"
+    if status == queued { status' = cancelled }
+    else { status' = cancelling }
+  }
+
+  invariant tries-within-limit: tries <= maxTries
+  invariant failed-on-last-try: status == failed implies tries == maxTries
+  invariant tried-when-worked: status in { running, cancelling, succeeded, failed } implies tries >= 1
+  step property cancel-keeps-success: (pre.status == cancelling && action == Succeed) implies post.status == succeeded
+}

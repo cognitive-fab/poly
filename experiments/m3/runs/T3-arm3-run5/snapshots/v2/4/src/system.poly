@@ -1,0 +1,87 @@
+module payments
+
+enum Status { New, authorizing, authorized, declined, failed, captured, voided, refunded, expired }
+
+machine Payment {
+  state {
+    status   : Status = New
+    amount   : 0..3   = 0   // the amount authorised so far
+    captured : 0..3   = 0
+    refunded : 0..3   = 0
+    requests : 0..3   = 0   // authorisation requests sent to the provider
+  }
+  terminal status in { Status.declined, Status.failed, Status.voided, Status.refunded, Status.expired }
+
+  action Authorize(amt: int check { 1, 2 } strict)
+  action TimedOut()
+  action Approved()
+  action Declined()
+  action Capture(amt: int check { 1, 2, 3 } strict)
+  action Void()
+  action Increase()
+  action Expire()
+  action Refund(amt: int check { 1, 2 } strict)
+
+  on Authorize(amt) {
+    require status == Status.New else reject "exists"
+    status' = Status.authorizing
+    amount' = amt
+    requests' = 1
+    emit authorizeCard(amt)
+  }
+  on TimedOut {
+    require status == Status.authorizing else reject "not-authorizing"
+    if requests < 3 {
+      requests' = requests + 1
+      emit authorizeCard(amount)
+    } else {
+      status' = Status.failed
+    }
+  }
+  on Approved {
+    require status == Status.authorizing else reject "not-authorizing"
+    status' = Status.authorized
+  }
+  on Declined {
+    require status == Status.authorizing else reject "not-authorizing"
+    status' = Status.declined
+  }
+  on Capture(amt) {
+    require status == Status.authorized else reject "not-authorized"
+    require amt <= amount else reject "exceeds-authorized"
+    status' = Status.captured
+    captured' = amt
+  }
+  on Void {
+    require status == Status.authorized else reject "not-authorized"
+    status' = Status.voided
+  }
+  on Expire {
+    require status == Status.authorized else reject "not-authorized"
+    status' = Status.expired
+  }
+  on Increase {
+    require status == Status.authorized else reject "not-authorized"
+    require amount < 3 else reject "at-most-3"
+    amount' = amount + 1
+  }
+  on Refund(amt) {
+    require status == Status.captured else reject "not-captured"
+    require refunded + amt <= captured else reject "exceeds-captured"
+    refunded' = refunded + amt
+    if refunded + amt == captured { status' = Status.refunded }
+  }
+
+  effect authorizeCard(amount: int) {
+    kind "card.authorize"
+    labels { egress:external }
+    class reversible
+    ok -> Approved()
+    failed -> Declined()
+  }
+
+  invariant captured-within-authorized: captured <= amount
+  invariant refunded-within-captured: refunded <= captured
+  invariant voided-captured-nothing: status == Status.voided implies captured == 0
+  path property at-most-three-requests: count("card.authorize") <= 3
+}

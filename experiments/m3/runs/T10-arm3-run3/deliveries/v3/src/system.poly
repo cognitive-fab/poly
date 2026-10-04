@@ -1,0 +1,135 @@
+// T10: a lease with fencing tokens. One lease service, two clients, talking by messages.
+module lease
+
+type Status = idle | requesting | holding | releasing | abandoning
+
+service machine Lease {
+  state {
+    holder : Ref<Client> = none
+    token  : 0..2 = 0          // the last token granted
+    writes : 0..2 = 0          // the writes taken
+    wrote  : bool = false      // a write was taken since the last grant
+  }
+  action Acquire(from: Ref<Client>)
+  action Release(from: Ref<Client>, token: 0..2)
+  action Write(from: Ref<Client>, token: 0..2)
+  action Expire()
+
+  on Acquire(from) {
+    if holder == none && pre.token < 2 {
+      holder' = from
+      token' = pre.token + 1
+      wrote' = false
+      send from <- Granted(token: pre.token + 1)
+    } else {
+      send from <- Denied()
+    }
+  }
+  on Release(from, token) {
+    if holder != none && holder == from && token == pre.token {
+      holder' = none
+    }
+    send from <- Released()
+  }
+  on Write(from, token) {
+    if holder != none && holder == from && token == pre.token && !wrote && writes < 2 {
+      writes' = writes + 1
+      wrote' = true
+      send from <- WriteDone()
+    } else {
+      send from <- WriteRefused()
+    }
+  }
+  on Expire {
+    require holder != none else reject "no-holder"
+    holder' = none
+    send holder <- Revoked(token: token)
+  }
+}
+
+service machine Client {
+  state {
+    status  : Status = idle
+    token   : 0..2 = 0          // the last token granted to this client
+    writing : bool = false      // a write waits for an answer
+    revoked : 0..2 = 0          // the newest token revoked while not holding
+    lease   : Ref<Lease> = none
+  }
+  action Request()
+  action Give()
+  action Put()
+  action Abandon()
+  action Granted(token: 0..2)
+  action Denied()
+  action Released()
+  action Revoked(token: 0..2)
+  action WriteDone()
+  action WriteRefused()
+
+  on Request {
+    require status is idle else reject "not-idle"
+    status' = requesting
+    send lease <- Acquire(from: self)
+  }
+  on Give {
+    require status is holding else reject "not-holding"
+    status' = releasing
+    send lease <- Release(from: self, token: pre.token)
+  }
+  on Put {
+    require status is holding else reject "not-holding"
+    require !writing else reject "write-pending"
+    writing' = true
+    send lease <- Write(from: self, token: pre.token)
+  }
+  on Abandon {
+    require status is requesting else reject "not-requesting"
+    status' = abandoning
+  }
+  on Granted(token) {
+    require status is requesting | abandoning else reject "not-requesting"
+    token' = token
+    if status is abandoning {
+      status' = releasing
+      send lease <- Release(from: self, token: token)
+    } else {
+      if token <= revoked {
+        status' = idle
+      } else {
+        status' = holding
+      }
+    }
+  }
+  on Released {
+    require status is releasing else reject "not-releasing"
+    status' = idle
+  }
+  on Denied {
+    require status is requesting | abandoning else reject "not-requesting"
+    status' = idle
+  }
+  on Revoked(token) {
+    require (status is holding && token == pre.token) || (status is idle | requesting | abandoning && token > revoked) else reject "stale-revoke"
+    if status is holding {
+      status' = idle
+    } else {
+      revoked' = token
+    }
+  }
+  on WriteDone {
+    require writing else reject "no-write"
+    writing' = false
+  }
+  on WriteRefused {
+    require writing else reject "no-write"
+    writing' = false
+  }
+}
+
+configuration pair {
+  lease : Lease
+  c[2]  : Client { lease: lease }
+  inputs { c[*].Request, c[*].Give, c[*].Put, c[*].Abandon,lease.Expire }
+  bounds { transit 10 }
+  invariant one-current-holder: count(c[*].status == holding && c[*].token == lease.token) <= 1
+}

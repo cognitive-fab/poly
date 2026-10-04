@@ -147,6 +147,31 @@ These changes join the token-count and scorer fixes in the one regeneration of t
 
 **Before FROZEN:** the folder check runs after every run as well as before, and a run during which anything was synced is unscored and rerun (test fails first). The caps above go into the plan. The freeze is regenerated once with both. No further pilots are needed: when `freeze.mjs --check` reports no change after that regeneration, FROZEN may be written, and the runs start in blocks of four as ruled.
 
+## Hold after block 2: a sync into the arms' folder
+
+The arms' folder gained `plugins/synced`, `skills/synced` and a new `.claude.json` at 21:25:52 UTC, two seconds after T2 arm 2 finished (21:25:50). No T2 run is marked unscored, so the after-run check either ran before the sync or did not see it.
+
+**The runs stop until this is explained.** Block 3 does not start. The M3 session:
+1. Keeps the synced folders as evidence (a listing with hashes in the run record), and leaves them in place until step 3 is done.
+2. Finds which process wrote them, and when, from the journals and file times.
+3. Checks, for every turn of every T1 and T2 run, the CLI's init event: whether any synced plugin, skill or MCP server appeared in what the model saw. A run whose model saw any is unscored and rerun.
+4. Proposes a fix. A fix that changes the frozen runner or the arms' environment is a deviation, ruled before any further block and reported.
+5. Then removes the synced folders, and the folder check passes before block 3.
+
+**Hold lifted.** The sync came from a stray interactive session started at 21:25:51 UTC in the owner's login window, which still had `CLAUDE_CONFIG_DIR` set; it began after every block-2 run had finished and passed its check. No run is affected, and blocks 1 and 2 stand. The runner is not changed: its before-check refuses the folder, which is the protection. Before block 3 the stray session is closed, the variable cleared, the synced folders removed (their listing kept as evidence), and the folder check passes. The batch starts from a fresh window.
+
+## After block 39: leftover processes and the overlap flags (2541bad)
+
+**The runner fix is accepted as a reported deviation.** Arm 2's commands moved to the background by the CLI, and processes under `claude.exe` at a cap, outlive the run. They load the machine into later blocks and crashed the cleanup twice. From block 40, the runner tracks every process started under the arm's `claude.exe`, kills any still running with its whole tree when the run ends (never between turns, so what an arm sees within a run is unchanged), deletes the workspace with retries, records a failed cleanup instead of crashing, and lists the killed processes as `leftovers` in run.json. Built with a test that fails first; the freeze is regenerated once; the report states that blocks 1 to 39 ran without it and blocks 40 to 50 with it.
+
+**For blocks 1 to 39**, the report reconstructs from the journals which backgrounded commands outlived their run and which later blocks they overlapped, and says whether those blocks' wall times differ.
+
+**Arm 2's backgrounded commands** (21, against none in the other arms) are a behavioural result and go in the report.
+
+**Overlap flags are reclassified, not cleared.** Each flag of blocks 4 to 39 keeps its raw record and gains a classification: `arm-own (command line)` when the command is a workspace's own test script, with the evidence; `unclassified` for anything not identified, including the `node --use-largepages=off` processes until they are identified. Blocks 1, 2 and 22 stay `genuine`. Wall-time results are reported with and without the blocks that carry a genuine or unclassified flag.
+
+**Order before block 40:** finish scoring the 148 runs (so scoring does not overlap a block), build the runner fix, regenerate the freeze, then the batch resumes at block 40.
+
 ## Conclusion
 
 The experiment runs on equal terms: both poly arms have the same tooling, the multi-machine tasks really run on polyrun, and the primary oracle is written without seeing any answer. Everything is frozen by digest before the first run, and the runs start only after the frozen set and the budget are approved.

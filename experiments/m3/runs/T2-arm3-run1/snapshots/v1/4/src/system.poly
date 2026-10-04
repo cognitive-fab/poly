@@ -1,0 +1,94 @@
+module shop
+
+service machine Inventory {
+  state {
+    available : 0..3 = 1
+    reserved  : 0..3 = 0
+  }
+  action Restock()
+  action Reserve(from: Ref<Order>, qty: 1..2)
+  action Release(qty: 1..2)
+
+  on Restock {
+    require available + reserved < 3 else reject "inventory-full"
+    available' = available + 1
+  }
+  on Reserve(from, qty) {
+    if available >= qty {
+      available' = available - qty
+      reserved' = reserved + qty
+      send from <- Reserved()
+    } else {
+      send from <- OutOfStock()
+    }
+  }
+  on Release(qty) {
+    require reserved >= qty else reject "not-reserved"
+    reserved' = reserved - qty
+    available' = available + qty
+  }
+
+  invariant within-capacity: available + reserved <= 3
+}
+
+type Status = new | pending | confirmed | rejected | cancelling | cancelled | expired
+
+machine Order {
+  state {
+    status : Status = new
+    qty    : 0..2 = 0
+    inv    : Ref<Inventory> = none
+  }
+  terminal status is rejected | cancelled | expired
+
+  action Place(qty: int check { 1, 2 } strict)
+  action Reserved()
+  action OutOfStock()
+  action Cancel()
+  action Expire()
+
+  on Place(qty) {
+    require status is new else reject "order-exists"
+    status' = pending
+    qty' = qty
+    send inv <- Reserve(from: self, qty: qty)
+  }
+  on Reserved {
+    require status is pending | cancelling else reject "not-waiting"
+    if status is pending {
+      status' = confirmed
+    } else {
+      status' = cancelled
+      send inv <- Release(qty: qty)
+    }
+  }
+  on OutOfStock {
+    require status is pending | cancelling else reject "not-waiting"
+    if status is pending { status' = rejected } else { status' = cancelled }
+  }
+  on Expire {
+    require status is confirmed else reject "not-confirmed"
+    status' = expired
+    send inv <- Release(qty: qty)
+  }
+  on Cancel {
+    require status is pending | confirmed else reject "not-cancellable"
+    if status is confirmed {
+      status' = cancelled
+      send inv <- Release(qty: qty)
+    } else {
+      status' = cancelling
+    }
+  }
+}
+
+configuration two-orders {
+  inv      : Inventory
+  order[2] : Order { inv: inv }
+  inputs   { order[*].Place, order[*].Cancel, inv.Restock }
+  bounds   { transit 4 }
+  invariant capacity: inv.available + inv.reserved <= 3
+  invariant confirmed-is-reserved: forall i in order: order[i] is confirmed implies inv.reserved >= order[i].qty
+  invariant both-confirmed-reserved: (order[0] is confirmed && order[1] is confirmed) implies inv.reserved >= order[0].qty + order[1].qty
+  liveness settle: forall i in order: order[i] is pending | cancelling leads to order[i] is confirmed | rejected | cancelled
+}

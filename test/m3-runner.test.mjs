@@ -143,12 +143,9 @@ test('the CLI turn: headless, without --bare (4210fa6), the arm\'s tools only, a
 });
 
 test('a real run is refused until the freeze is approved, and a pilot until the owner approves it', async () => {
-  // The model the freeze records, so the environment check passes and the gate is what refuses (S116).
-  const model = JSON.parse(readFileSync(join(M3, 'freeze.json'), 'utf8')).environment.model;
-  const r = spawnSync(process.execPath, [join(M3, 'runner', 'run.mjs'), '--arm', '1', '--task', 'T1', '--model', model, '--tokens', '1', '--wall', '1', '--out', join(tmpdir(), 'poly-m3-refused')], { encoding: 'utf8' });
-  assert.equal(r.status, 2);
-  assert.match(r.stderr, /needs the freeze/);
-  // The pilot gate is open since ab9d2d0, so a spawned pilot would really run: the gate is checked on a stand-in directory.
+  // Both gates are open (PILOT since ab9d2d0, FROZEN since 1c8d155), so a spawned run would really run: the gates are
+  // checked on a stand-in directory only. Until block 39's ruling this test spawned a T1 run, which then started the
+  // real CLI on the arms' login and was stopped by its 1-second wall cap with no token spent (measured on 3 October).
   const { gateProblem } = await import('../experiments/m3/runner/run.mjs');
   const { mkdtempSync, rmSync } = await import('node:fs');
   const m3 = mkdtempSync(join(tmpdir(), 'poly-m3-gate-'));

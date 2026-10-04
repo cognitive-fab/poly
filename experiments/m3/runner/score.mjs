@@ -58,6 +58,8 @@ export function runO1R(task, n, impl, timeoutMs) {
 function runSuite(suite, env, timeoutMs) {
   const r = spawnSync(process.execPath, ['--no-warnings', '--test', '--test-reporter=tap', suite], { encoding: 'utf8', timeout: timeoutMs, env: cleanEnv(env) });
   const num = (k) => Number((new RegExp(`^# ${k} (\\d+)$`, 'm').exec(r.stdout ?? '') ?? [])[1] ?? NaN);
+  // A suite the timeout stopped measured nothing: it is a scoring failure, never a failed test (ruling after block 39).
+  if (r.error?.code === 'ETIMEDOUT') return { ran: false, timeout: true, reason: String(r.error.message) };
   if (r.error) return { ran: false, reason: String(r.error.message) };
   const results = tapResults(r.stdout);
   return { ran: true, tests: num('tests'), failed: num('fail') + (num('cancelled') || 0), skipped: num('skipped') || 0, passed: [...results].filter(([, ok]) => ok).map(([n]) => n).sort(), failing: [...results].filter(([, ok]) => !ok).map(([n]) => n).sort() };
@@ -120,6 +122,8 @@ export async function scoreRun(dir, { timeoutMs = 30 * 60 * 1000, o1Dir } = {}) 
   if (record.unscored) return record;
   const vs = versions(record.task);
   const scores = [];
+  // Every suite or scorer the timeout stopped; any one of them makes the whole run not scored (timeout), to be scored again.
+  const timeouts = [];
   for (const rv of record.versions) {
     const v = vs[rv.n];
     const s = { n: rv.n, delivered: false, admitted: null, withinBudget: rv.attempted === true && !rv.stopped };
@@ -137,10 +141,13 @@ export async function scoreRun(dir, { timeoutMs = 30 * 60 * 1000, o1Dir } = {}) 
     s.delivered = true;
     if (record.arm >= 3) s.admitted = s.check?.verdict === 'CLEAN';
     const one = spawnSync(process.execPath, ['--no-warnings', join(HERE, 'score-one.mjs'), record.task, String(rv.n), built.impl], { encoding: 'utf8', timeout: timeoutMs });
+    if (one.error?.code === 'ETIMEDOUT') timeouts.push(`v${rv.n} O3 and O2`);
     try { Object.assign(s, JSON.parse(one.stdout.trim().split('\n').at(-1))); } catch { s.o3 = null; s.o2 = null; s.error = one.error ? String(one.error.message) : `scorer exited ${one.status}: ${one.stderr.slice(0, 500)}`; }
     s.o1 = runO1(record.task, rv.n, built.impl, timeoutMs, o1Dir);
+    if (s.o1.timeout) timeouts.push(`v${rv.n} O1`);
     // M3-10: the range refusals of the amended briefs, scored beside O1 and never into it.
     s.o1r = runO1R(record.task, rv.n, built.impl, timeoutMs);
+    if (s.o1r.timeout) timeouts.push(`v${rv.n} O1-R`);
     scores.push(s);
   }
   // Regressions (PT13): a test of version n that passed at version n-1 and fails at delivery n was introduced;
@@ -158,6 +165,7 @@ export async function scoreRun(dir, { timeoutMs = 30 * 60 * 1000, o1Dir } = {}) 
         const built = buildImpl(record.arm, vs[s.n], join(snaps, k), join(dir, 'scoring', `v${s.n}`, 'snap', k));
         if (!built.impl) continue;
         const o = runO1(record.task, s.n, built.impl, timeoutMs, o1Dir);
+        if (o.timeout) timeouts.push(`v${s.n} O1 on snapshot ${k}`);
         if (o.ran) for (const t of o.failing) seenFailing.add(t);
       }
     }
@@ -166,6 +174,13 @@ export async function scoreRun(dir, { timeoutMs = 30 * 60 * 1000, o1Dir } = {}) 
       caught: [...seenFailing].filter((t) => inBoth(t) && !failingAtDelivery.has(t)).length,
     };
   }
+  if (timeouts.length) {
+    delete record.scores;
+    record.notScored = { reason: 'timeout', where: timeouts, timeoutMs };
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(record, null, 2) + '\n');
+    return record;
+  }
+  delete record.notScored;
   record.scores = scores;
   if (record.arm >= 3 && existsSync(join(dir, 'journal.jsonl'))) record.toolchain = toolchainUse(readFileSync(join(dir, 'journal.jsonl'), 'utf8'));
   writeFileSync(join(dir, 'run.json'), JSON.stringify(record, null, 2) + '\n');
@@ -177,5 +192,6 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const i = process.argv.indexOf('--timeout');
   const r = await scoreRun(dir, i > 0 ? { timeoutMs: Number(process.argv[i + 1]) * 1000 } : {});
   if (r.unscored) console.log(`not scored: ${r.unscored}; rerun from the start (4210fa6)`);
+  if (r.notScored) console.log(`not scored: ${r.notScored.reason} (${r.notScored.where.join(', ')}); score it again`);
   for (const s of r.scores ?? []) console.log(`v${s.n}: delivered ${s.delivered}${s.admitted !== null ? `, admitted ${s.admitted}` : ''}, O3 ${s.o3 ? `${s.o3.failed}/${s.o3.traces} failed` : 'not run'}, O2 ${s.o2 ? `${s.o2.violated.length} violated` : 'not run'}, O1 ${s.o1?.ran ? `${s.o1.failed}/${s.o1.tests} failed` : `not run (${s.o1?.reason ?? s.reason})`}`);
 }

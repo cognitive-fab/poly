@@ -1,0 +1,91 @@
+module shop
+
+// `none` is an order whose id is reserved by the host but not yet created.
+enum Status { none, draft, placed, paid, shipped, cancelled, failed }
+
+machine Order {
+  state {
+    status  : Status = none
+    items   : 0..3   = 0
+    charges : 0..1   = 0
+    refunds : 0..1   = 0
+  }
+  terminal status in { shipped, cancelled, failed }
+
+  action Create()
+  action AddItem()
+  action RemoveItem()
+  action Place()
+  action Ship()
+  action Cancel()
+  action ChargeOk()
+  action ChargeFailed()
+
+  on Create {
+    require status == none else reject "exists"
+    status' = draft
+  }
+  on AddItem {
+    require status == draft else reject "not-draft"
+    require items < 3 else reject "full"
+    items' = items + 1
+  }
+  on RemoveItem {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    items' = items - 1
+  }
+  on Place {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    require charges == 0 else reject "charged"
+    status' = placed
+    charges' = charges + 1
+    emit charge(items)
+  }
+  on Ship {
+    require status == paid else reject "not-paid"
+    status' = shipped
+  }
+  on Cancel {
+    match status {
+      draft => status' = cancelled
+      paid  => {
+        require refunds == 0 else reject "refunded"
+        status' = cancelled
+        refunds' = refunds + 1
+        emit refund(items)
+      }
+      placed => reject "payment-in-progress"
+      _      => reject "closed"
+    }
+  }
+  on ChargeOk {
+    require status == placed else reject "not-placed"
+    status' = paid
+  }
+  on ChargeFailed {
+    require status == placed else reject "not-placed"
+    status' = failed
+  }
+
+  effect charge(amount: int) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+    ok -> ChargeOk()
+    failed -> ChargeFailed()
+  }
+  effect refund(amount: int) {
+    kind "payment.refund"
+    labels { egress:external }
+    class irreversible
+  }
+
+  invariant charged-once: status != none && status != draft implies charges == 1 || status == cancelled
+  invariant shipped-was-paid: status == shipped implies charges == 1 && refunds == 0
+  invariant refund-after-pay: refunds == 1 implies status == cancelled && charges == 1
+  path property charge-at-most-once: count("payment.charge") <= 1
+  path property refund-at-most-once: count("payment.refund") <= 1
+  path property refund-after-charge: before("payment.charge", "payment.refund")
+}

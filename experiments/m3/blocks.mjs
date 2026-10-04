@@ -31,32 +31,47 @@ export function blockOrder(tasks = taskIds(), runs = 5) {
 const id = (task, arm, run) => `${task}-arm${arm}-run${run}`;
 const readRecord = (dir, task, arm, run) => {
   const f = join(dir, id(task, arm, run), 'run.json');
-  return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null;
+  if (!existsSync(f)) return null;
+  // A truncated record stops the batch with its reason, rather than by a crash.
+  try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { return { unreadable: String(e.message) }; }
 };
 
-/** Why a finished block stops the batch, or null: a refused run, an unscored run, or a run a cap stopped. */
-export function blockProblems(block, records, exits = {}) {
+/**
+ * Why a finished block stops the batch: a refused run, a runner that exited with an error, a record that is not a
+ * finished run of its own task, arm and run, an unscored run, or a run a cap stopped. Block 19 went on although
+ * T9-arm2-run2's runner had crashed after writing its record (EPERM cleaning its workspace): an error exit stops it now.
+ */
+export function blockProblems(block, records, exits = {}, { caps = true } = {}) {
   const out = [];
   for (const arm of ARMS) {
     const r = records[arm];
     const name = id(block.task, arm, block.run);
+    if (exits[arm] !== undefined && exits[arm] !== 0) out.push(`${name}: the runner exited with code ${exits[arm]}`);
     if (!r) out.push(`${name}: refused (no run.json${exits[arm] !== undefined ? `, exit ${exits[arm]}` : ''})`);
+    else if (r.unreadable) out.push(`${name}: run.json is unreadable (${r.unreadable})`);
+    else if (r.task !== block.task || r.arm !== arm || r.run !== block.run) out.push(`${name}: run.json is the record of another run (${r.task} arm ${r.arm} run ${r.run})`);
+    else if (!r.finished) out.push(`${name}: run.json is not finished`);
+    else if (!Array.isArray(r.versions) || !r.versions.length) out.push(`${name}: run.json has no versions`);
     else if (r.unscored) out.push(`${name}: unscored (${r.unscored})`);
     else {
       const cap = (r.versions ?? []).find((v) => ['budget', 'wall', 'usd'].includes(v.stopped));
-      if (cap) out.push(`${name}: stopped by a cap (${cap.stopped}, version ${cap.n})`);
+      if (cap && caps) out.push(`${name}: stopped by a cap (${cap.stopped}, version ${cap.n})`);
     }
   }
   return out;
 }
 
-/** Where the batch starts: the first block whose four runs are not all recorded. A block with some runs only is a problem. */
+/**
+ * Where the batch starts: the first block whose four runs are not all recorded. A block with some runs only is a
+ * problem, and so is a recorded run that is invalid or unscored. A run a cap stopped is a recorded outcome, never
+ * rerun (74eff31): the batch stops when it happens, and resumes past it once the owner has ruled.
+ */
 export function firstToRun(order, dir = RUNS) {
   for (const b of order) {
     const recs = Object.fromEntries(ARMS.map((a) => [a, readRecord(dir, b.task, a, b.run)]));
     const have = ARMS.filter((a) => recs[a]);
     if (have.length === 4) {
-      const p = blockProblems(b, recs);
+      const p = blockProblems(b, recs, {}, { caps: false });
       if (p.length) return { block: b, problems: p };
       continue;
     }
@@ -66,18 +81,82 @@ export function firstToRun(order, dir = RUNS) {
   return { block: null, problems: [] };
 }
 
-/** Processes on this PC that look like tests or a review and are not this batch's own. */
-export function overlapping(processes, selfPid) {
-  const parent = new Map(processes.map((p) => [p.ProcessId, p.ParentProcessId]));
-  const ours = (pid) => { for (let p = pid, i = 0; p && i < 64; p = parent.get(p), i++) if (p === selfPid) return true; return false; };
+/**
+ * Processes on this PC that look like tests or a review and are not this batch's own. `seen` holds every PID found to
+ * be the batch's in an earlier sample: an arm's backgrounded test outlives the shell that started it, its parent
+ * PID then names no process, and without `seen` it was flagged as an overlap (blocks 4 to 39 of the first batch).
+ * With `detail`, each flagged process comes with its PID, its parent's, and its chain of ancestors still running.
+ */
+export function overlapping(processes, selfPid, seen = new Set(), { detail = false } = {}) {
+  const byPid = new Map(processes.map((p) => [p.ProcessId, p]));
+  const ours = (pid) => { for (let p = pid, i = 0; p && i < 64; p = byPid.get(p)?.ParentProcessId, i++) if (p === selfPid || seen.has(p)) return true; return false; };
+  for (const p of processes) if (ours(p.ProcessId)) seen.add(p.ProcessId);
+  // A PID gone from the table is forgotten: Windows reuses PIDs, and a later process given it is not the batch's.
+  for (const pid of [...seen]) if (!byPid.has(pid)) seen.delete(pid);
   // Tests and reviews only: an editor's TypeScript server in the M5b worktree is no load worth flagging.
   const looks = /node(\.exe)?"?\s.*--test\b|npm(-cli\.js|\.cmd)?"?\s.*\btest\b|polywatch/i;
-  return processes.filter((p) => p.CommandLine && looks.test(p.CommandLine) && !ours(p.ProcessId)).map((p) => p.CommandLine.slice(0, 200));
+  const flagged = processes.filter((p) => p.CommandLine && looks.test(p.CommandLine) && !seen.has(p.ProcessId));
+  if (!detail) return flagged.map((p) => p.CommandLine.slice(0, 200));
+  return flagged.map((p) => {
+    const chain = [];
+    for (let q = byPid.get(p.ParentProcessId), i = 0; q && i < 16; q = byPid.get(q.ParentProcessId), i++) chain.push(`${q.ProcessId} ${(q.CommandLine ?? '').slice(0, 80)}`);
+    return { pid: p.ProcessId, ppid: p.ParentProcessId, command: p.CommandLine.slice(0, 200), created: createdAt(p.CreationDate), chain };
+  });
+}
+
+/** CreationDate as ConvertTo-Json writes it ("/Date(ms)/") or as an ISO string, in milliseconds. */
+const createdAt = (d) => { const m = /\/Date\((\d+)\)\//.exec(String(d ?? '')); return m ? Number(m[1]) : d ? Date.parse(d) : null; };
+
+/**
+ * The windows in which an arm's shell commands ran, from its record and journal: [{ arm, from, to, command }] in ms.
+ * A turn starts after the turns before it (their wall times from the record). A command the CLI moved to the
+ * background, or still running when a cap stopped the turn, has no end in the journal; from block 40 the runner ends
+ * every process under the arm when the run ends (37beede), so its window closes with the run.
+ */
+export function armCommandWindows(record, journalText) {
+  const starts = [];
+  let t = Date.parse(record.started);
+  for (const v of record.versions ?? []) { starts[v.n] = t; t += v.wallMs ?? 0; }
+  const end = Date.parse(record.finished ?? record.started);
+  const open = new Map();
+  const out = [];
+  for (const line of journalText.split('\n')) {
+    if (!line) continue;
+    const e = JSON.parse(line);
+    const at = (starts[e.turn] ?? Date.parse(record.started)) + (e.at ?? 0);
+    for (const c of e.event?.message?.content ?? []) {
+      if (e.event.type === 'assistant' && c.type === 'tool_use' && c.name === 'Bash') open.set(c.id, { arm: record.arm, from: at, command: String(c.input?.command ?? '').slice(0, 120) });
+      if (e.event.type === 'user' && c.type === 'tool_result' && open.has(c.tool_use_id)) {
+        const w = open.get(c.tool_use_id);
+        open.delete(c.tool_use_id);
+        const text = typeof c.content === 'string' ? c.content : (c.content ?? []).map((x) => x.text ?? '').join(' ');
+        out.push({ ...w, to: /moved to the background/.test(text) ? end : at });
+      }
+    }
+  }
+  // A command still running when the turn was stopped has no result either.
+  for (const w of open.values()) out.push({ ...w, to: end });
+  return out.sort((a, b) => a.from - b.from);
+}
+
+/** Never an arm's: a review, or the tests of poly or of the M5b worktree, which name their packages. */
+const OUTSIDE = /polywatch|packages[\\/]|poly-m4/i;
+
+/**
+ * Each flagged process with the arm whose shell command was running when it was created (2 s either side), or
+ * without one: only those are outside the block (`arm` absent).
+ */
+export function attribute(flagged, windows, slackMs = 2000) {
+  return flagged.map((p) => {
+    if (OUTSIDE.test(p.command) || p.created == null) return p;
+    const w = windows.find((x) => p.created >= x.from - slackMs && p.created <= x.to + slackMs);
+    return w ? { ...p, arm: w.arm, by: w.command } : p;
+  });
 }
 
 function processes() {
   try {
-    const raw = execFileSync('powershell.exe', ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress'], { encoding: 'utf8', maxBuffer: 1 << 26 });
+    const raw = execFileSync('powershell.exe', ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,CreationDate | ConvertTo-Json -Compress'], { encoding: 'utf8', maxBuffer: 1 << 26 });
     return JSON.parse(raw);
   } catch {
     return null;
@@ -85,11 +164,13 @@ function processes() {
 }
 
 /** Runs one block: the four arms started together, and the processes sampled while they run. */
+const ownPids = new Set();
 async function runBlock(b) {
   const started = new Date().toISOString();
-  const seen = new Set();
+  const seen = new Map();
   let sampled = 0;
-  const sample = () => { const ps = processes(); if (ps) { sampled++; for (const c of overlapping(ps, process.pid)) seen.add(c); } };
+  // ownPids lasts across blocks: a leftover of an earlier block's arm is the batch's own, not an outside overlap.
+  const sample = () => { const ps = processes(); if (ps) { sampled++; for (const c of overlapping(ps, process.pid, ownPids, { detail: true })) seen.set(c.pid, c); } };
   sample();
   const timer = setInterval(sample, 30_000);
   const exits = {};
@@ -102,7 +183,16 @@ async function runBlock(b) {
   })));
   clearInterval(timer);
   sample();
-  return { started, finished: new Date().toISOString(), exits, overlap: { flagged: seen.size > 0, processes: [...seen], samples: sampled } };
+  // Each flagged process is matched against the arms' shell commands in this block; only what no arm started is an
+  // overlap. Nothing of an earlier block's arms outlives its run from block 40 (37beede).
+  const ownWindows = [];
+  for (const arm of ARMS) {
+    const d = join(RUNS, id(b.task, arm, b.run));
+    try { ownWindows.push(...armCommandWindows(JSON.parse(readFileSync(join(d, 'run.json'), 'utf8')), readFileSync(join(d, 'journal.jsonl'), 'utf8'))); } catch { /* a refused run has no journal */ }
+  }
+  const processes_ = attribute([...seen.values()], ownWindows);
+  const outside = processes_.filter((p) => p.arm === undefined);
+  return { started, finished: new Date().toISOString(), exits, overlap: { flagged: outside.length > 0, outside: outside.length, processes: processes_, samples: sampled } };
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
@@ -119,7 +209,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     const records = Object.fromEntries(ARMS.map((a) => [a, readRecord(RUNS, b.task, a, b.run)]));
     const problems = blockProblems(b, records, res.exits);
     appendFileSync(join(RUNS, 'blocks.jsonl'), JSON.stringify({ block: b.n, task: b.task, run: b.run, ...res, problems }) + '\n');
-    if (res.overlap.flagged) console.log(`block ${b.n}: overlap flagged, ${res.overlap.processes.length} process(es) outside the block`);
+    if (res.overlap.flagged) console.log(`block ${b.n}: overlap flagged, ${res.overlap.outside} process(es) no arm started`);
     if (problems.length) { for (const p of problems) console.error(`stopped after block ${b.n}: ${p}`); process.exit(1); }
     console.log(`block ${b.n}: done`);
   }

@@ -1,0 +1,114 @@
+// Order lifecycle: one Order instance per order id, created by Create.
+module shop
+
+enum Status { fresh, draft, placed, paid, shipped, cancelling, cancelled, declined, failed }
+
+machine Order {
+  state {
+    status  : Status = fresh
+    items   : 0..3   = 0
+    charges : 0..2   = 0
+    refunds : 0..1   = 0
+    held    : bool   = false
+  }
+  terminal status in { shipped, cancelled, failed }
+
+  action Create()
+  action AddItem()
+  action RemoveItem()
+  action Place()
+  action Ship()
+  action Cancel()
+  action RetryPayment()
+  action ChargeOk()
+  action ChargeFailed()
+
+  on Create {
+    require status == fresh else reject "exists"
+    status' = draft
+  }
+  on AddItem {
+    require status == draft else reject "not-draft"
+    require items < 3 else reject "full"
+    items' = items + 1
+  }
+  on RemoveItem {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    items' = items - 1
+  }
+  on Place {
+    require status == draft else reject "not-draft"
+    require items > 0 else reject "empty"
+    require charges == 0 else reject "charged"
+    status' = placed
+    charges' = charges + 1
+    emit charge(items)
+  }
+  on Ship {
+    require status == paid else reject "not-paid"
+    status' = shipped
+  }
+  on Cancel {
+    require status == draft || status == paid || status == placed else reject "not-cancellable"
+    if status == placed {
+      status' = cancelling
+    } else {
+      if status == paid {
+        require refunds == 0 else reject "refunded"
+        refunds' = refunds + 1
+        emit refund(items)
+      }
+      status' = cancelled
+    }
+  }
+  on ChargeOk {
+    require status == placed || status == cancelling else reject "not-placed"
+    if status == cancelling {
+      require refunds == 0 else reject "refunded"
+      status' = cancelled
+      refunds' = refunds + 1
+      emit refund(items)
+    } else {
+      status' = paid
+    }
+  }
+  on RetryPayment {
+    require status == declined else reject "not-declined"
+    require charges == 1 else reject "retried"
+    status' = placed
+    charges' = charges + 1
+    emit charge(items)
+  }
+  on ChargeFailed {
+    require status == placed || status == cancelling else reject "not-placed"
+    if status == cancelling {
+      status' = cancelled
+    } else {
+      if charges == 1 { status' = declined } else { status' = failed }
+    }
+  }
+
+  invariant charged-at-most-twice: charges <= 2
+  invariant declined-after-first-charge: status == declined implies charges == 1
+  invariant refund-only-if-charged: refunds <= charges
+  invariant cancelling-was-charged: status == cancelling implies charges >= 1
+  invariant paid-was-charged: (status == paid || status == shipped) implies charges >= 1
+  invariant refunded-when-cancelled-after-pay: refunds == 1 implies status == cancelled
+  path property charge-at-most-twice: count("payment.charge") <= 2
+  path property refund-at-most-once: count("payment.refund") <= 1
+  path property refund-after-charge: before("payment.charge", "payment.refund")
+
+  effect charge(amount: int) {
+    kind "payment.charge"
+    labels { egress:external }
+    class irreversible
+    ok -> ChargeOk()
+    failed -> ChargeFailed()
+  }
+  effect refund(amount: int) {
+    kind "payment.refund"
+    labels { egress:external }
+    class irreversible
+  }
+}

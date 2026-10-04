@@ -1,0 +1,135 @@
+// Checkout across cart, inventory and payments: carts reserve units at one inventory, then charge them at
+// one payment service, all by messages that may arrive in any order.
+module checkout
+
+service machine Inventory {
+  state {
+    available : 0..2 = 2
+    reserved  : 0..2 = 0
+  }
+  action Reserve(from: Ref<Cart>, qty: 1..2)
+  action Release(qty: 1..2)
+
+  on Reserve(from, qty) {
+    if qty <= available {
+      available' = available - qty
+      reserved' = reserved + qty
+      send from <- Reserved()
+    } else {
+      send from <- OutOfStock()
+    }
+  }
+  on Release(qty) {
+    require qty <= reserved else reject "not-reserved"
+    reserved' = reserved - qty
+    available' = available + qty
+  }
+}
+
+service machine Payments {
+  state {
+    charged   : 0..4 = 0
+    declining : bool = false
+  }
+  action Charge(from: Ref<Cart>, amount: 1..2)
+  action DeclineCards()
+  action AcceptCards()
+  action Refund(amount: 1..2)
+
+  on Refund(amount) {
+    require amount <= charged else reject "not-charged"
+    charged' = charged - amount
+  }
+  on Charge(from, amount) {
+    if !declining && charged + amount <= 4 {
+      charged' = charged + amount
+      send from <- Charged()
+    } else {
+      send from <- Declined()
+    }
+  }
+  on DeclineCards {
+    require !declining else reject "already-declining"
+    declining' = true
+  }
+  on AcceptCards {
+    require declining else reject "already-accepting"
+    declining' = false
+  }
+}
+
+// unopened is the state of a cart before Open takes effect; the host never shows it.
+type CartStatus = unopened | open | reserving | paying | paid | failed | cancelling | cancelled | returned
+
+machine Cart {
+  state {
+    status : CartStatus = unopened
+    items  : 0..2 = 0
+    inv    : Ref<Inventory> = none
+    pay    : Ref<Payments> = none
+  }
+  terminal status in { failed, cancelled, returned }
+
+  action Open()
+  action Add()
+  action Checkout()
+  action Cancel()
+  action Return()
+  action Reserved()
+  action OutOfStock()
+  action Charged()
+  action Declined()
+
+  on Open {
+    require status is unopened else reject "cart-exists"
+    status' = open
+  }
+  on Add {
+    require status is open else reject "not-open"
+    require items < 2 else reject "cart-full"
+    items' = items + 1
+  }
+  on Checkout {
+    require status is open else reject "not-open"
+    require items > 0 else reject "empty-cart"
+    status' = reserving
+    send inv <- Reserve(from: self, qty: items)
+  }
+  on Cancel {
+    require status in { open, reserving } else reject "cannot-cancel"
+    if status is open { status' = cancelled } else { status' = cancelling }
+  }
+  on Reserved {
+    require status in { reserving, cancelling } else reject "not-reserving"
+    if status is reserving {
+      status' = paying
+      send pay <- Charge(from: self, amount: items)
+    } else {
+      status' = cancelled
+      send inv <- Release(qty: items)
+    }
+  }
+  on OutOfStock {
+    require status in { reserving, cancelling } else reject "not-reserving"
+    if status is reserving { status' = failed } else { status' = cancelled }
+  }
+  on Charged {
+    require status is paying else reject "not-paying"
+    status' = paid
+  }
+  on Declined {
+    require status is paying else reject "not-paying"
+    status' = failed
+    send inv <- Release(qty: items)
+  }
+}
+
+configuration shop {
+  inventory : Inventory
+  payments  : Payments
+  cart[2]   : Cart { inv: inventory, pay: payments }
+  inputs    { cart[*].Open, cart[*].Add, cart[*].Checkout, cart[*].Cancel, payments.DeclineCards, payments.AcceptCards }
+  bounds    { transit 4 }
+  invariant units-conserved: inventory.available + inventory.reserved == init(inventory.available) + init(inventory.reserved)
+  invariant charged-within-reserved: payments.charged <= inventory.reserved
+}

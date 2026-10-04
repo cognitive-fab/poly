@@ -1,0 +1,21 @@
+{
+  "module": "shop",
+  "instances": {
+    "orders": { "machine": "Order", "createdBy": "create", "keyArgument": "order" }
+  },
+  "methods": {
+    "create": { "instance": "orders", "key": "$arg:order", "action": "Create" },
+    "addItem": { "instance": "orders", "key": "$arg:order", "action": "AddItem" },
+    "removeItem": { "instance": "orders", "key": "$arg:order", "action": "RemoveItem" },
+    "place": { "instance": "orders", "key": "$arg:order", "action": "Place" },
+    "ship": { "instance": "orders", "key": "$arg:order", "action": "Ship" },
+    "cancel": { "instance": "orders", "key": "$arg:order", "action": "Cancel" }
+  },
+  "queries": {
+    "order": {
+      "instance": "orders",
+      "key": "$arg:order",
+      "fields": { "status": "status", "items": "items", "charges": "charges", "refunds": "refunds" }
+    }
+  }
+}

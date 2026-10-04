@@ -1,0 +1,62 @@
+// T8: a consensus node's role and term.
+module consensus
+
+type Role = follower | candidate | leader | shutdown
+
+machine Node {
+  state {
+    role : Role = follower
+    term : 0..3 = 0
+    votedFor : Vote = nobody
+  }
+  terminal role is shutdown
+
+  action ElectionTimeout()
+  action ElectionWon()
+  action NewerTermSeen(t: int check { 1, 2, 3 } strict)
+  action QuorumLost()
+  action Shutdown()
+  action VoteRequested(c: string check { "n1", "n2" } strict, t: int check { 1, 2, 3 } strict)
+
+  on ElectionTimeout {
+    require role is follower || role is candidate else reject "not-follower-or-candidate"
+    require term < 3 else reject "last-term"
+    role' = candidate
+    term' = term + 1
+    votedFor' = itself
+  }
+  on VoteRequested(c, t) {
+    require t >= term else reject "term-older"
+    require t > term || role is follower else reject "not-follower"
+    require t > term || votedFor is nobody || (c == "n1" && votedFor is n1) || (c == "n2" && votedFor is n2)
+      else reject "already-voted"
+    role' = follower
+    term' = t
+    if c == "n1" { votedFor' = n1 } else { votedFor' = n2 }
+  }
+  on ElectionWon {
+    require role is candidate else reject "not-candidate"
+    role' = leader
+  }
+  on NewerTermSeen(t) {
+    require t >= 1 && t <= 3 else reject "term-out-of-range"
+    require t > term else reject "term-not-newer"
+    role' = follower
+    term' = t
+    votedFor' = nobody
+  }
+  on QuorumLost {
+    require role is leader else reject "not-leader"
+    role' = follower
+  }
+  on Shutdown {
+    role' = shutdown
+  }
+
+  step property term-never-decreases: post.term >= pre.term
+  step property term-changes-only-by-election-or-newer-term:
+    post.term != pre.term implies (action == ElectionTimeout || action == NewerTermSeen)
+  step property leader-was-candidate:
+    (post.role == leader && pre.role != leader) implies (pre.role == candidate && pre.term == post.term)
+  step property shutdown-is-final: pre.role == shutdown implies post.role == shutdown
+}

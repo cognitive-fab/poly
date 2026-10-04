@@ -1,0 +1,22 @@
+{
+  "module": "workflow",
+  "instances": {
+    "runs": { "machine": "Run", "createdBy": "start", "keyArgument": "run" }
+  },
+  "methods": {
+    "start": { "instance": "runs", "key": "$arg:run", "action": "start" },
+    "taskStarted": { "instance": "runs", "key": "$arg:run", "action": "taskStarted", "params": { "task": "$arg:task" } },
+    "taskCompleted": { "instance": "runs", "key": "$arg:run", "action": "taskCompleted", "params": { "task": "$arg:task" } },
+    "taskFailed": { "instance": "runs", "key": "$arg:run", "action": "taskFailed", "params": { "task": "$arg:task" } },
+    "taskEvicted": { "instance": "runs", "key": "$arg:run", "action": "taskEvicted", "params": { "task": "$arg:task" } },
+    "taskRequeued": { "instance": "runs", "key": "$arg:run", "action": "taskRequeued", "params": { "task": "$arg:task" } },
+    "taskRetried": { "instance": "runs", "key": "$arg:run", "action": "taskRetried", "params": { "task": "$arg:task" } },
+    "cancelTask": { "instance": "runs", "key": "$arg:run", "action": "cancelTask", "params": { "task": "$arg:task" } },
+    "pause": { "instance": "runs", "key": "$arg:run", "action": "pause" },
+    "resume": { "instance": "runs", "key": "$arg:run", "action": "resume" },
+    "cancel": { "instance": "runs", "key": "$arg:run", "action": "cancel" }
+  },
+  "queries": {
+    "run": { "instance": "runs", "key": "$arg:run", "fields": { "status": "status", "task0": "t0", "task1": "t1", "task2": "t2" } }
+  }
+}

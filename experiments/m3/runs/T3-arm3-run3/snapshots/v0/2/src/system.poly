@@ -1,0 +1,79 @@
+// Card payments: one Payment instance per payment id, created by authorize.
+module payments
+
+type Status = fresh | authorizing | authorized | declined | failed | captured | voided | refunded
+
+machine Payment {
+  state {
+    status     : Status = fresh
+    authorized : 0..2   = 0
+    captured   : 0..2   = 0
+    refunded   : 0..2   = 0
+    requests   : 0..3   = 0
+  }
+  terminal status in { declined, failed, voided, refunded }
+
+  action Authorize(amount: int check { 1, 2 } strict)
+  action TimedOut()
+  action Approved()
+  action Declined()
+  action Capture(amount: int check { 1, 2 } strict)
+  action Void()
+  action Refund(amount: int check { 1, 2 } strict)
+
+  on Authorize(amount) {
+    require status is fresh else reject "exists"
+    status' = authorizing
+    authorized' = amount
+    requests' = 1
+    emit authorize(amount)
+  }
+  on TimedOut {
+    require status is authorizing else reject "not-authorizing"
+    if requests < 3 {
+      requests' = requests + 1
+      emit authorize(authorized)
+    } else {
+      status' = failed
+    }
+  }
+  // The first answer decides; a late answer finds the payment no longer authorizing.
+  on Approved {
+    require status is authorizing else reject "not-authorizing"
+    status' = authorized
+  }
+  on Declined {
+    require status is authorizing else reject "not-authorizing"
+    status' = declined
+  }
+  on Capture(amount) {
+    require status is authorized else reject "not-authorized"
+    require amount <= authorized else reject "exceeds-authorized"
+    status' = captured
+    captured' = amount
+  }
+  on Void {
+    require status is authorized else reject "not-authorized"
+    status' = voided
+  }
+  on Refund(amount) {
+    require status is captured else reject "not-captured"
+    require refunded + amount <= captured else reject "exceeds-captured"
+    refunded' = refunded + amount
+    if refunded + amount == captured { status' = refunded }
+  }
+
+  effect authorize(amount: int) {
+    kind "card.authorize"
+    labels { egress:external }
+    class compensable
+    ok -> Approved()
+    failed -> Declined()
+  }
+
+  invariant captured-within-authorized: captured <= authorized
+  invariant refunded-within-captured: refunded <= captured
+  invariant voided-captured-nothing: status is voided implies captured == 0
+  invariant requests-bounded: requests <= 3
+  path property at-most-three-requests: count("card.authorize") <= 3
+}

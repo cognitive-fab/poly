@@ -1,0 +1,111 @@
+module lease
+
+type ClientStatus = Idle | Requesting | Holding
+
+// The lease service: at most 2 grants (tokens 1 and 2), at most 2 writes taken.
+service machine Lease {
+  state {
+    holder  : Ref<Client> = none
+    current : 0..2 = 0
+    writes  : 0..2 = 0
+  }
+  action Acquire(from: Ref<Client>)
+  action Release(from: Ref<Client>, token: 0..2)
+  action Write(from: Ref<Client>, token: 0..2)
+  action Expire()
+
+  on Acquire(from) {
+    if holder == none && current < 2 {
+      holder' = from
+      current' = current + 1
+      send from <- Granted(token: current + 1)
+    } else {
+      send from <- Denied()
+    }
+  }
+  on Release(from, token) {
+    require holder == from && token == current else reject "not-current-holder"
+    holder' = none
+  }
+  on Write(from, token) {
+    if holder == from && token == current && writes < 2 {
+      writes' = writes + 1
+      send from <- WriteDone()
+    } else {
+      send from <- WriteRefused()
+    }
+  }
+  on Expire {
+    require holder != none else reject "no-holder"
+    holder' = none
+    send holder <- Revoked(token: current)
+  }
+}
+
+machine Client {
+  state {
+    status  : ClientStatus = Idle
+    held    : 0..2 = 0
+    writing : bool = false
+    revoked : 0..2 = 0
+    svc     : Ref<Lease> = none
+  }
+  action Acquire()
+  action Release()
+  action Write()
+  action Granted(token: 0..2)
+  action Denied()
+  action Revoked(token: 0..2)
+  action WriteDone()
+  action WriteRefused()
+
+  on Acquire {
+    require status is Idle else reject "not-idle"
+    status' = Requesting
+    send svc <- Acquire(from: self)
+  }
+  on Release {
+    require status is Holding else reject "not-holding"
+    status' = Idle
+    send svc <- Release(from: self, token: held)
+  }
+  on Write {
+    require status is Holding else reject "not-holding"
+    require !writing else reject "write-pending"
+    writing' = true
+    send svc <- Write(from: self, token: held)
+  }
+  on Granted(token) {
+    require status is Requesting else reject "not-requesting"
+    held' = token
+    if token <= revoked { status' = Idle } else { status' = Holding }
+  }
+  on Denied {
+    require status is Requesting else reject "not-requesting"
+    status' = Idle
+  }
+  on Revoked(token) {
+    if status is Holding {
+      require token == held else reject "stale-revoke"
+      status' = Idle
+    } else {
+      require token > revoked else reject "stale-revoke"
+      revoked' = token
+    }
+  }
+  on WriteDone {
+    require writing else reject "no-write"
+    writing' = false
+  }
+  on WriteRefused {
+    require writing else reject "no-write"
+    writing' = false
+  }
+}
+
+configuration two-clients {
+  lease : Lease
+  c[2]  : Client { svc: lease }
+  inputs { c[*].Acquire, c[*].Release, c[*].Write, lease.Expire }
+  bounds { transit 6 }
+}

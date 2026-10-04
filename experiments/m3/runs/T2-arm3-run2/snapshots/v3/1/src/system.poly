@@ -1,0 +1,111 @@
+// Orders and inventory: one inventory, and orders that reserve units from it by messages.
+module shop
+
+service machine Inventory {
+  state {
+    available : 0..3 = 1
+    reserved  : 0..3 = 0
+    open      : bool = true
+  }
+  action Restock()
+  action Close()
+  action Open()
+  action Reserve(from: Ref<Order>, qty: 1..2)
+  action Release(qty: 1..2)
+
+  on Restock {
+    require open else reject "inventory-closed"
+    require available + reserved < 3 else reject "inventory-full"
+    available' = available + 1
+  }
+  on Close {
+    require open else reject "inventory-closed"
+    open' = false
+  }
+  on Open {
+    require !open else reject "inventory-open"
+    open' = true
+  }
+  on Reserve(from, qty) {
+    if open && available >= qty {
+      available' = available - qty
+      reserved' = reserved + qty
+      send from <- Reserved()
+    } else {
+      send from <- OutOfStock()
+    }
+  }
+  on Release(qty) {
+    require reserved >= qty else reject "not-reserved"
+    reserved' = reserved - qty
+    available' = available + qty
+  }
+
+  invariant within-capacity: available + reserved <= 3
+}
+
+enum OrderStatus { idle, pending, confirmed, rejected, cancelling, cancelled, expired }
+
+machine Order {
+  state {
+    status : OrderStatus = idle
+    qty    : 0..2 = 0
+    inv    : Ref<Inventory> = none
+  }
+  terminal status in { rejected, cancelled, expired }
+
+  action Place(n: int check { 1, 2 } strict)
+  action Cancel()
+  action Expire()
+  action Reserved()
+  action OutOfStock()
+
+  on Place(n) {
+    require status == idle else reject "order-exists"
+    require n == 1 || n == 2 else reject "bad-quantity"
+    status' = pending
+    qty' = n
+    send inv <- Reserve(from: self, qty: n)
+  }
+  on Cancel {
+    require status == pending || status == confirmed else reject "not-cancellable"
+    if status == confirmed {
+      status' = cancelled
+      send inv <- Release(qty: qty)
+    } else {
+      status' = cancelling
+    }
+  }
+  on Expire {
+    require status == confirmed else reject "not-confirmed"
+    status' = expired
+    send inv <- Release(qty: qty)
+  }
+  on Reduce {
+    require status == confirmed && qty == 2 else reject "not-reducible"
+    qty' = 1
+    send inv <- Release(qty: 1)
+  }
+  on Reserved {
+    require status == pending || status == cancelling else reject "not-waiting"
+    if status == pending {
+      status' = confirmed
+    } else {
+      status' = cancelled
+      send inv <- Release(qty: qty)
+    }
+  }
+  on OutOfStock {
+    require status == pending || status == cancelling else reject "not-waiting"
+    if status == pending { status' = rejected } else { status' = cancelled }
+  }
+}
+
+configuration two-orders {
+  inv      : Inventory
+  order[2] : Order { inv: inv }
+  inputs   { order[*].Place, order[*].Cancel, order[*].Expire, inv.Restock, inv.Close, inv.Open }
+  bounds   { transit 4 }
+  invariant conserved: inv.available + inv.reserved <= 3
+  invariant confirmed-are-reserved: count(order[*] is confirmed) <= inv.reserved
+}
