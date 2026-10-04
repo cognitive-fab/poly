@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { ROOT } from './helpers.mjs';
 
 /** The test files that load the M3 runner, found by what they import, so a new one is covered too. */
@@ -34,12 +34,17 @@ function runAt(home, files) {
   const env = { ...process.env, HOME: home, USERPROFILE: home, TEMP: temp, TMP: temp, TMPDIR: temp };
   delete env.NODE_TEST_CONTEXT;
   return new Promise((done) => {
-    const p = spawn(process.execPath, ['--test', ...files.map((f) => join(ROOT, f))], { cwd: home, env });
+    const p = spawn(process.execPath, ['--test', ...files.map((f) => join(ROOT, f))], { cwd: home, env, detached: process.platform !== 'win32' });
     let out = '';
     p.stdout.on('data', (b) => { out += b; });
     p.stderr.on('data', (b) => { out += b; });
-    // Polywatch: a child that hangs is killed, and its run fails, before the test's own timeout.
-    const timer = setTimeout(() => { out += '\nkilled: the run did not finish in 10 minutes\n'; p.kill(); }, 600_000);
+    // Polywatch: a run that hangs is killed with every process it started (node --test runs each file in its own
+    // process), and fails, before the test's own timeout. On Windows only taskkill /T ends the tree.
+    const killTree = () => {
+      if (process.platform === 'win32') spawnSync('taskkill', ['/F', '/T', '/PID', String(p.pid)]);
+      else try { process.kill(-p.pid, 'SIGKILL'); } catch { p.kill('SIGKILL'); }
+    };
+    const timer = setTimeout(() => { out += '\nkilled: the run did not finish in 10 minutes\n'; killTree(); }, 600_000);
     p.on('close', (status) => {
       clearTimeout(timer);
       const count = (k) => Number((out.match(new RegExp(`^ℹ ${k} (\\d+)`, 'm')) ?? [])[1] ?? NaN);
