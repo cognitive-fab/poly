@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "refused"
+      ]
+    },
+    "file": {
+      "type": "string",
+      "description": "the module changed"
+    },
+    "code": {
+      "type": "string",
+      "description": "PL0201 for a stale fix"
+    },
+    "message": {
+      "type": "string",
+      "description": "why it was refused"
+    }
+  },
+  "required": [
+    "status"
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "type": "object",
+  "properties": {
+    "report": {
+      "type": "object",
+      "description": "a module's report, or a project's with its files"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "the source file"
+          },
+          "module": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the module name, or null when it did not parse"
+          },
+          "moduleDigest": {
+            "type": "string",
+            "description": "the module digest the witnesses and fixes were computed on (PT1.4, S69)"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "CLEAN",
+              "FINDINGS",
+              "REFUSED",
+              "UNDERPOWERED",
+              "INCONCLUSIVE",
+              "NONDETERMINISM",
+              "ERROR"
+            ]
+          },
+          "exit": {
+            "type": "integer"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "schema": {
+                  "type": "string",
+                  "description": "poly.diagnostic/1"
+                },
+                "code": {
+                  "type": "string",
+                  "description": "PLxxxx"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "the code's name"
+                },
+                "severity": {
+                  "type": "string",
+                  "description": "error, finding, warning or note"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "the diagnostic in words"
+                },
+                "at": {
+                  "type": "object",
+                  "description": "where: module, machine, node, line, col"
+                }
+              },
+              "required": [
+                "code",
+                "severity",
+                "message"
+              ]
+            }
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "machine": {
+                  "type": "string",
+                  "description": "the machine"
+                },
+                "stages": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "stage": {
+                        "type": "string",
+                        "description": "the stage"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "ran",
+                          "not-run"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "stage",
+                      "status"
+                    ]
+                  }
+                },
+                "diagnostics": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "schema": {
+                        "type": "string",
+                        "description": "poly.diagnostic/1"
+                      },
+                      "code": {
+                        "type": "string",
+                        "description": "PLxxxx"
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "the code's name"
+                      },
+                      "severity": {
+                        "type": "string",
+                        "description": "error, finding, warning or note"
+                      },
+                      "message": {
+                        "type": "string",
+                        "description": "the diagnostic in words"
+                      },
+                      "at": {
+                        "type": "object",
+                        "description": "where: module, machine, node, line, col"
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "severity",
+                      "message"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "machine",
+                "stages",
+                "diagnostics"
+              ]
+            }
+          }
+        },
+        "required": [
+          "file",
+          "module",
+          "verdict",
+          "exit",
+          "diagnostics",
+          "machines"
+        ],
+        "description": "one module's check report (PT12.3)"
+      },
+      "description": "each module's report"
+    },
+    "verdict": {
+      "type": "string"
+    },
+    "exit": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "report",
+    "files",
+    "verdict",
+    "exit"
+  ]
+}

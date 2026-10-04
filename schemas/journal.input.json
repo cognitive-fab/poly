@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "sub": {
+      "type": "string",
+      "enum": [
+        "verify",
+        "replay",
+        "export",
+        "eval",
+        "fit"
+      ]
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "the options, as on the command line (--db, --run, --trust …)"
+    }
+  },
+  "required": [
+    "sub"
+  ]
+}

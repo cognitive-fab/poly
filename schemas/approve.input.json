@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "properties": {
+    "intent": {
+      "type": "string",
+      "description": "the escalated intent"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "db": {
+      "type": "string",
+      "description": "the store"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the record"
+    }
+  },
+  "required": [
+    "intent",
+    "by",
+    "key",
+    "db"
+  ]
+}

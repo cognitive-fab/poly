@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "sizes": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the measurement"
+    }
+  },
+  "required": []
+}

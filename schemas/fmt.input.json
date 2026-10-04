@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "a .poly or .policy.poly module"
+    },
+    "write": {
+      "type": "boolean",
+      "description": "rewrite the file in place"
+    }
+  },
+  "required": [
+    "file"
+  ]
+}

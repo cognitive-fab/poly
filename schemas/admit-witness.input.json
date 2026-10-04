@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "string",
+      "description": "a module file or a project directory"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "root": {
+      "type": "string",
+      "description": "where .poly/ lives"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the certificate"
+    }
+  },
+  "required": [
+    "target",
+    "key"
+  ]
+}

@@ -1164,6 +1164,8 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
 | `poly mine` | `poly_mine` | Passes journals to Polyx. Returns proposed obligations. |
 | `poly propose` | `poly_propose` | Passes agent journals to polyness. Returns proposed workflows. |
 
+**The command registry as built (M6, S167).** Each command poly has is defined once in `packages/poly-check/src/commands.ts`, with an input schema, an output schema and a function from input to a JSON result; the command line is a projection of it, printing the result's text or, with `--json`, its JSON. The schemas are published under `schemas/<command>.input.json` and `schemas/<command>.output.json` (`node scripts/publish-schemas.mjs`), and every command's output fits its own (PF9.2). The registry has `check`, `fmt`, `witness`, `fix`, `lint`, `admit`, `admit-witness`, `approve`, `accept`, `journal` and `bench`; `approve`, `accept` and `admit-witness` take a person's or a test key and are the command line's only. The rows of this table poly does not have yet (`new`, `explain`, `grade`, `deploy`, `dispatch`, `export`, `mine`, `propose`) are listed in the registry as not built, each with the milestone that builds it, so a command is served or said to be missing. `poly fmt <file> [--write]` prints the canonical text, or rewrites the file and prints the module digest; it formats the standalone surface, and an embedded module is TypeScript's to format.
+
 The language server publishes the same diagnostics as `poly check` stages 0 to 2 on every edit. Stages 3 and later run on save or on request, because they explore state spaces.
 
 ## PT15. Host runtime API (TypeScript)

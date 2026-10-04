@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "certificatePath": {
+      "type": "string",
+      "description": "the certificate"
+    },
+    "digest": {
+      "type": "string",
+      "description": "its digest"
+    },
+    "findings": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "certificatePath",
+    "digest",
+    "findings"
+  ]
+}

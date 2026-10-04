@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "exit": {
+      "type": "integer"
+    },
+    "output": {
+      "type": "string",
+      "description": "what the subcommand printed"
+    }
+  },
+  "required": [
+    "exit",
+    "output"
+  ]
+}

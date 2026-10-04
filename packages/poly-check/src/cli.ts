@@ -9,20 +9,15 @@
 //   poly bench gate [--sizes 1,8,64] [--out <file>]
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { EXIT_CODES, ManifestError, loadProject, toJson } from '@poly/core';
-import { handlerClosure } from './handlers.js';
-import { checkFile, checkProject, type CheckReport } from './pipeline.js';
-import { render } from './render.js';
-import { exportWitness, lookupWitness, WitnessExportError } from './witness.js';
-import { applyFixById } from './fix.js';
-import { admit, admitWitness, witnessKey, AdmitError } from './admit.js';
-import { approvalRecord, acceptanceRecord, writeAcceptance, RecordUsageError } from './records.js';
+import { EXIT_CODES, ManifestError } from '@poly/core';
+import { WitnessExportError } from './witness.js';
+import { AdmitError } from './admit.js';
+import { RecordUsageError } from './records.js';
 import { journalCommand, JournalUsageError } from './journal.js';
-import { benchGate } from './bench.js';
+import { commandNamed, CommandUsageError } from './commands.js';
 
 const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
+       poly fmt <file.poly> [--write] [--json]
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
@@ -64,21 +59,6 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
 
 exit codes: 0 CLEAN, 1 FINDINGS, 2 REFUSED / INCONCLUSIVE / stale fix, 3 nondeterminism, 4 error, 64 usage`;
 
-// Every diagnostic in the JSON form carries its schema, poly.diagnostic/1 (PT12.1).
-const asJson = (r: CheckReport) => ({ ...r, diagnostics: r.diagnostics.map(toJson), machines: r.machines.map((m) => ({ ...m, diagnostics: m.diagnostics.map(toJson) })), configurations: (r.configurations ?? []).map((c) => ({ ...c, diagnostics: c.diagnostics.map(toJson) })) });
-
-/** S69: the last report: .poly/report.json under the root. */
-function writeReport(root: string, report: unknown): void {
-  mkdirSync(join(root, '.poly'), { recursive: true });
-  writeFileSync(join(root, '.poly', 'report.json'), JSON.stringify(report, null, 2) + '\n');
-}
-
-function readReport(root: string): unknown {
-  const path = join(root, '.poly', 'report.json');
-  if (!existsSync(path)) throw new UsageError(`no report at ${path}: run poly check first`);
-  return JSON.parse(readFileSync(path, 'utf8'));
-}
-
 class UsageError extends Error {}
 
 function option(args: string[], name: string): string | undefined | null {
@@ -88,135 +68,69 @@ function option(args: string[], name: string): string | undefined | null {
   return v !== undefined && !v.startsWith('--') ? v : null;
 }
 
+/**
+ * The command line is a projection of the registry (commands.ts, S167): it turns argv into a command's input, runs
+ * it, and prints its text, or its JSON with --json. `poly check --json` prints the report itself, as before.
+ */
+function inputOf(positional: string[], args: string[]): { name: string; input: Record<string, unknown> } | null {
+  const root = option(args, '--root') ?? undefined;
+  const out = option(args, '--out') ?? undefined;
+  const [cmd, a, b] = positional;
+  if (cmd === 'check' && positional.length === 2) return { name: 'check', input: { target: a, root } };
+  if (cmd === 'fmt' && positional.length === 2) return { name: 'fmt', input: { file: a, write: args.includes('--write') } };
+  if (cmd === 'witness' && positional.length === 2) {
+    const trace = args.includes('--trace');
+    if (trace === args.includes('--test')) return null;
+    return { name: 'witness', input: { id: a, kind: trace ? 'trace' : 'test', root, out } };
+  }
+  if (cmd === 'lint' && a === 'handlers' && positional.length <= 3) return { name: 'lint', input: { project: b } };
+  if (cmd === 'journal' && positional.length >= 2) return { name: 'journal', input: { sub: a, args: args.slice(args.indexOf(a) + 1) } };
+  if ((cmd === 'approve' || cmd === 'accept') && positional.length === 2) {
+    const by = option(args, '--by');
+    const key = option(args, '--key');
+    if (!by || !key) throw new UsageError(`${cmd} needs --by <keyId> and --key <private key file>`);
+    if (cmd === 'approve') {
+      const db = option(args, '--db');
+      if (!db) throw new UsageError('approve needs --db <store>');
+      return { name: 'approve', input: { intent: a, by, key, db, out } };
+    }
+    return { name: 'accept', input: { id: a, by, key, root } };
+  }
+  if (cmd === 'admit' && positional.length === 2 && args.includes('--witness')) {
+    const key = option(args, '--key');
+    if (!key) throw new UsageError('admit --witness needs --key <private key file>');
+    return { name: 'admit-witness', input: { target: a, key, root, out } };
+  }
+  if (cmd === 'admit' && positional.length === 2) return { name: 'admit', input: { project: a } };
+  if (cmd === 'bench' && a === 'gate' && positional.length === 2) {
+    const sizes = (option(args, '--sizes') ?? '1,8,64').split(',').map(Number);
+    return { name: 'bench', input: { sizes, out } };
+  }
+  if (cmd === 'fix' && positional.length === 2) return { name: 'fix', input: { id: a, root } };
+  return null;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const root = option(args, '--root');
-  const out = option(args, '--out');
   const valued = new Set([args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
-  if (root === null || out === null) return usage();
+  if (option(args, '--root') === null || option(args, '--out') === null) return usage();
   try {
-    if (positional[0] === 'check' && positional.length === 2) {
-      const target = positional[1];
-      if (!existsSync(target)) { process.stderr.write(`poly: no such file or directory ${target}\n`); return EXIT_CODES.USAGE; }
-      if (statSync(target).isDirectory()) {
-        const p = await checkProject(target, { root });
-        writeReport(root ?? target, { ...p, files: p.files.map(asJson) });
-        if (json) process.stdout.write(JSON.stringify({ ...p, files: p.files.map(asJson) }, null, 2) + '\n');
-        else {
-          for (const r of p.files) process.stdout.write(`── ${r.file}\n${render(r)}`);
-          if (p.handlers?.status === 'ran') {
-            for (const d of p.handlers.diagnostics) process.stdout.write(`${d.code} ${d.name}  ${d.message}\n`);
-            process.stdout.write(`handlers: lint ${p.handlers.diagnostics.length ? 'REFUSED' : 'CLEAN'} over ${p.handlers.files} file${p.handlers.files === 1 ? '' : 's'} (PT6.5)\n`);
-          } else if (p.handlers) process.stdout.write(`handlers: lint not run (${p.handlers.reason})\n`);
-          process.stdout.write(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
-        }
-        return p.exit;
-      }
-      const report = await checkFile(target, { root });
-      writeReport(root ?? process.cwd(), asJson(report));
-      process.stdout.write(json ? JSON.stringify(asJson(report), null, 2) + '\n' : render(report));
-      return report.exit;
-    }
-    if (positional[0] === 'witness' && positional.length === 2) {
-      const trace = args.includes('--trace');
-      if (trace === args.includes('--test')) return usage();
-      const base = root ?? process.cwd();
-      const looked = lookupWitness(readReport(base), positional[1]);
-      if (!('found' in looked)) { process.stderr.write(`poly: ${looked.reason}\n`); return EXIT_CODES.USAGE; }
-      const written = exportWitness(looked.found, { root: base, kind: trace ? 'trace' : 'test', out: out ?? undefined });
-      process.stdout.write(`${written}\n`);
-      return 0;
-    }
-    if (positional[0] === 'lint' && positional[1] === 'handlers' && positional.length <= 3) {
-      // S72, S142: the lint alone, over the handlers poly.json names and the files they import.
-      const projectDir = positional[2] ?? process.cwd();
-      const { handlers } = loadProject(projectDir);
-      if (!handlers) { process.stderr.write('poly: poly.json names no handlers (S72)\n'); return EXIT_CODES.USAGE; }
-      const closure = handlerClosure(projectDir, handlers);
-      const ds = closure.diagnostics;
-      for (const d of ds) process.stdout.write(`${d.code} ${d.name}  ${d.message}\n`);
-      process.stdout.write(`handlers: lint ${ds.length ? 'REFUSED' : 'CLEAN'} over ${closure.bytes.size} file${closure.bytes.size === 1 ? '' : 's'} (PT6.5, S142)\n`);
-      return ds.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN;
-    }
-    if (positional[0] === 'journal' && positional.length >= 2) {
-      return await journalCommand(positional[1], argv, (s) => process.stdout.write(s));
-    }
-    if ((positional[0] === 'approve' || positional[0] === 'accept') && positional.length === 2) {
-      // PT12.5, S150: a person's signed record, with a key given by file, never one under version control.
-      const by = option(args, '--by');
-      const keyFile = option(args, '--key');
-      if (!by || !keyFile) { process.stderr.write(`poly: ${positional[0]} needs --by <keyId> and --key <private key file>\n`); return EXIT_CODES.USAGE; }
-      try {
-        if (positional[0] === 'approve') {
-          const db = option(args, '--db');
-          if (!db) { process.stderr.write('poly: approve needs --db <store>\n'); return EXIT_CODES.USAGE; }
-          const record = await approvalRecord(db, positional[1], by, keyFile);
-          const text = JSON.stringify(record, null, 2) + '\n';
-          if (out) writeFileSync(out, text); else process.stdout.write(text);
-          return EXIT_CODES.CLEAN;
-        }
-        const base = root ?? process.cwd();
-        const path = writeAcceptance(base, acceptanceRecord(readReport(base), positional[1], by, keyFile));
-        process.stdout.write(`${path}\n  admission reads it from accepted/ (PT12.5)\n`);
-        return EXIT_CODES.CLEAN;
-      } catch (e) {
-        if (e instanceof RecordUsageError) { process.stderr.write(`poly: ${e.message}\n`); return EXIT_CODES.USAGE; }
-        throw e;
-      }
-    }
-    if (positional[0] === 'admit' && positional.length === 2 && args.includes('--witness')) {
-      // S139: a witness certificate, signed with the test key given by file (never one under version control).
-      const keyFile = option(args, '--key');
-      if (!keyFile) { process.stderr.write('poly: admit --witness needs --key <private key file>\n'); return EXIT_CODES.USAGE; }
-      const target = positional[1];
-      const base = root ?? (statSync(target).isDirectory() ? target : dirname(target));
-      const r = await admitWitness(target, { root: root ?? undefined, key: witnessKey(keyFile), out: out ?? join(base, '.poly', 'witness.certificate.json') });
-      process.stdout.write(`witness certificate for ${r.certificate.subject.project}: ${r.certificate.findings?.length ?? 0} finding(s), ${r.certificate.digest}\n  ${r.certificatePath}\n  the runtime loads it only with allowWitness, never in production (S139)\n`);
-      return EXIT_CODES.CLEAN;
-    }
-    if (positional[0] === 'admit' && positional.length === 2) {
-      const r = await admit(positional[1]);
-      process.stdout.write(`admitted ${r.certificate.subject.project}: ${r.certificate.buildId}, ${r.certificate.digest}\n  ${r.certificatePath}\n`);
-      for (const l of r.certificate.poly.limits) process.stdout.write(`  limit: ${l}\n`);
-      return EXIT_CODES.CLEAN;
-    }
-    if (positional[0] === 'bench' && positional[1] === 'gate' && positional.length === 2) {
-      // PT9.6, AC4: a measurement with no pass threshold, over AC4's program in this checkout.
-      const sizes = (option(args, '--sizes') ?? '1,8,64').split(',').map(Number);
-      if (sizes.some((n) => !Number.isInteger(n) || n < 1)) return usage();
-      const { REPO_ROOT } = await import('@poly/runtime');
-      const r = await benchGate({ repo: REPO_ROOT, sizes, out: out ?? undefined });
-      const line = (t: { instances: number; perSecond: number; allowed: number; effects: number }) => `${t.instances}: ${t.perSecond}/s (${t.allowed}/${t.effects} allowed)`;
-      process.stdout.write(`gate bench on ${r.machine.cpu}, Node ${r.node}
-`);
-      if ('notRun' in r.latencyMs) process.stdout.write(`  latency: not run (${r.latencyMs.notRun})
-`);
-      else for (const [k, p] of Object.entries(r.latencyMs)) process.stdout.write(`  latency ${k}: p50 ${p.p50} ms, p99 ${p.p99} ms over ${p.n}
-`);
-      process.stdout.write(`  throughput runtime (no policy): ${r.throughput.runtime.map(line).join(', ')}
-`);
-      const s = r.throughput.session;
-      process.stdout.write(`  throughput session ${r.program.session}: ${'notRun' in s ? `not run (${s.notRun})` : s.map(line).join(', ')}
-`);
-      if (out) process.stdout.write(`  ${out}
-`);
-      return EXIT_CODES.CLEAN;
-    }
-    if (positional[0] === 'fix' && positional.length === 2) {
-      const base = root ?? process.cwd();
-      const r = applyFixById(readReport(base), positional[1]);
-      if (r.status === 'applied') { process.stdout.write(`applied ${positional[1]} to ${r.file}; run poly check again (PT12.1)\n`); return 0; }
-      process.stderr.write(`${r.code ?? 'poly'}: ${r.message}\n`);
-      return r.code === 'PL0201' ? EXIT_CODES.REFUSED : EXIT_CODES.USAGE;
-    }
-    return usage();
+    const call = inputOf(positional, args);
+    if (!call) return usage();
+    // The journal reads its own options from argv, as before.
+    if (call.name === 'journal') return await journalCommand(positional[1], argv, (s) => process.stdout.write(s));
+    const o = await commandNamed(call.name)!.run(call.input);
+    if (json) process.stdout.write(JSON.stringify(call.name === 'check' ? o.result.report : o.result, null, 2) + '\n');
+    else if (o.exit !== EXIT_CODES.CLEAN && o.exit !== EXIT_CODES.FINDINGS && call.name === 'fix') process.stderr.write(o.text);
+    else process.stdout.write(o.text);
+    return o.exit;
   } catch (e) {
     const err = e as Error & { nondeterministic?: boolean };
     process.stderr.write(`poly: ${err.message}\n`);
-    if (err instanceof ManifestError || err instanceof UsageError || err instanceof WitnessExportError) return EXIT_CODES.USAGE;
+    if (err instanceof ManifestError || err instanceof UsageError || err instanceof CommandUsageError || err instanceof WitnessExportError || err instanceof RecordUsageError) return EXIT_CODES.USAGE;
     if (err instanceof AdmitError) return EXIT_CODES.REFUSED;
     if (err instanceof JournalUsageError) return EXIT_CODES.USAGE;
     return err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;

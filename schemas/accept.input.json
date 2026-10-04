@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "the witness id"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "root": {
+      "type": "string",
+      "description": "where .poly/report.json lives"
+    }
+  },
+  "required": [
+    "id",
+    "by",
+    "key"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "the project directory (default: the working directory)"
+    }
+  },
+  "required": []
+}

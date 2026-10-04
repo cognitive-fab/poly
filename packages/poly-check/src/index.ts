@@ -11,3 +11,4 @@ export { replayRun, replayRuntime, replaySessions, certifiedModules, type RunRep
 export { workerConformance, workerActions, type Conformance } from './conformance.js';
 export { evaluate, fit, samples, type Evaluation, type Sample } from './evaluate.js';
 export { policyReports, policySlug, type PolicyReport, type PolicyStage } from './policies.js';
+export { COMMANDS, NOT_BUILT, commandNamed, CommandUsageError, type Command, type Outcome, type Schema } from './commands.js';

@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "bench": {
+      "type": "object",
+      "description": "the measurement, as docs/m5/gate-bench.json holds it"
+    }
+  },
+  "required": [
+    "bench"
+  ]
+}

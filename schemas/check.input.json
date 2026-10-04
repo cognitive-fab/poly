@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "target": {
+      "type": "string",
+      "description": "a .poly, .policy.poly or .ts module, or a project directory"
+    },
+    "root": {
+      "type": "string",
+      "description": "where .poly/ lives (default: the project directory, or the working directory)"
+    }
+  },
+  "required": [
+    "target"
+  ]
+}

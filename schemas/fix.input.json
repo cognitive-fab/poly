@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "the fix id"
+    },
+    "root": {
+      "type": "string",
+      "description": "where .poly/report.json lives"
+    }
+  },
+  "required": [
+    "id"
+  ]
+}

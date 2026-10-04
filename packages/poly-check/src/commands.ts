@@ -1,0 +1,274 @@
+// The command registry (PT14, PF9.1, PF9.2, S167, M6 step 5): each command poly has is defined once, with its input
+// schema, its output schema and a function from input to a JSON result. The command line, the MCP server and the
+// language server are projections of this table: the CLI renders a result as text (or prints its JSON with --json),
+// the MCP server returns it as structured content, and the language server returns it from workspace/executeCommand.
+// The registry knows no host. Its schemas are published under schemas/ (test/agent-registry.test.mjs keeps them in
+// step and validates every command's output against its own).
+//
+// It lives beside the CLI, in poly-check, and poly-agent re-exports it: the `poly` binary, its tests and the frozen
+// M3 runner name the CLI here.
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { EXIT_CODES, digest, loadProject, toJson } from '@poly/core';
+import { format, parse } from '@poly/lang';
+import { handlerClosure } from './handlers.js';
+import { checkFile, checkProject, type CheckReport } from './pipeline.js';
+import { render } from './render.js';
+import { exportWitness, lookupWitness } from './witness.js';
+import { applyFixById } from './fix.js';
+import { admit, admitWitness, witnessKey } from './admit.js';
+import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
+import { journalCommand } from './journal.js';
+import { benchGate } from './bench.js';
+
+/** A JSON Schema, in the subset the published schemas use: type, properties, required, items, enum, description. */
+export type Schema = { type?: string | string[]; description?: string; properties?: Record<string, Schema>; required?: string[]; items?: Schema; enum?: unknown[]; additionalProperties?: boolean | Schema };
+
+/** What a command gives: its exit code (PT12.3), its JSON result, and the text the command line prints. */
+export interface Outcome { exit: number; result: Record<string, unknown>; text: string }
+
+export interface Command {
+  /** The command as typed, `check` or `journal`. */
+  name: string;
+  summary: string;
+  /** The MCP tool's name, or null when the command is the command line's only (a person's key, PT14). */
+  mcp: string | null;
+  /** Whether the language server serves it through workspace/executeCommand (S171). */
+  lsp: boolean;
+  input: Schema;
+  output: Schema;
+  run(input: Record<string, unknown>): Promise<Outcome>;
+}
+
+/** A usage error: the input does not name what the command needs. */
+export class CommandUsageError extends Error {}
+
+const str = (description: string): Schema => ({ type: 'string', description });
+const obj = (properties: Record<string, Schema>, required: string[] = [], description?: string): Schema => ({ type: 'object', properties, required, ...(description ? { description } : {}) });
+const DIAGNOSTIC: Schema = obj({ schema: str('poly.diagnostic/1'), code: str('PLxxxx'), name: str('the code\'s name'), severity: str('error, finding, warning or note'), message: str('the diagnostic in words'), at: { type: 'object', description: 'where: module, machine, node, line, col' } }, ['code', 'severity', 'message']);
+const FILE_REPORT: Schema = obj({
+  file: str('the source file'),
+  module: { type: ['string', 'null'], description: 'the module name, or null when it did not parse' },
+  moduleDigest: str('the module digest the witnesses and fixes were computed on (PT1.4, S69)'),
+  verdict: { type: 'string', enum: ['CLEAN', 'FINDINGS', 'REFUSED', 'UNDERPOWERED', 'INCONCLUSIVE', 'NONDETERMINISM', 'ERROR'] },
+  exit: { type: 'integer' },
+  diagnostics: { type: 'array', items: DIAGNOSTIC },
+  machines: { type: 'array', items: obj({ machine: str('the machine'), stages: { type: 'array', items: obj({ stage: str('the stage'), status: { type: 'string', enum: ['ran', 'not-run'] } }, ['stage', 'status']) }, diagnostics: { type: 'array', items: DIAGNOSTIC } }, ['machine', 'stages', 'diagnostics']) },
+}, ['file', 'module', 'verdict', 'exit', 'diagnostics', 'machines'], 'one module\'s check report (PT12.3)');
+
+// Every diagnostic in the JSON form carries its schema, poly.diagnostic/1 (PT12.1).
+const asJson = (r: CheckReport) => ({ ...r, diagnostics: r.diagnostics.map(toJson), machines: r.machines.map((m) => ({ ...m, diagnostics: m.diagnostics.map(toJson) })), configurations: (r.configurations ?? []).map((c) => ({ ...c, diagnostics: c.diagnostics.map(toJson) })) });
+
+/** S69: the last report: .poly/report.json under the root. */
+function writeReport(root: string, report: unknown): void {
+  mkdirSync(join(root, '.poly'), { recursive: true });
+  writeFileSync(join(root, '.poly', 'report.json'), JSON.stringify(report, null, 2) + '\n');
+}
+function readReport(root: string): unknown {
+  const path = join(root, '.poly', 'report.json');
+  if (!existsSync(path)) throw new CommandUsageError(`no report at ${path}: run poly check first`);
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+const need = (input: Record<string, unknown>, k: string): string => {
+  const v = input[k];
+  if (typeof v !== 'string' || !v) throw new CommandUsageError(`${k} is required`);
+  return v;
+};
+const opt = (input: Record<string, unknown>, k: string): string | undefined => (typeof input[k] === 'string' ? (input[k] as string) : undefined);
+
+export const COMMANDS: Command[] = [
+  {
+    name: 'check', mcp: 'poly_check', lsp: true,
+    summary: 'Runs the check pipeline over a module or a project and writes the report to <root>/.poly/report.json.',
+    input: obj({ target: str('a .poly, .policy.poly or .ts module, or a project directory'), root: str('where .poly/ lives (default: the project directory, or the working directory)') }, ['target']),
+    output: obj({ report: { type: 'object', description: 'a module\'s report, or a project\'s with its files' }, files: { type: 'array', items: FILE_REPORT, description: 'each module\'s report' }, verdict: { type: 'string' }, exit: { type: 'integer' } }, ['report', 'files', 'verdict', 'exit']),
+    async run(input) {
+      const target = need(input, 'target');
+      const root = opt(input, 'root');
+      if (!existsSync(target)) throw new CommandUsageError(`no such file or directory ${target}`);
+      if (statSync(target).isDirectory()) {
+        const p = await checkProject(target, { root });
+        const report = { ...p, files: p.files.map(asJson) };
+        writeReport(root ?? target, report);
+        const lines: string[] = [];
+        for (const r of p.files) lines.push(`── ${r.file}\n${render(r)}`);
+        if (p.handlers?.status === 'ran') {
+          for (const d of p.handlers.diagnostics) lines.push(`${d.code} ${d.name}  ${d.message}\n`);
+          lines.push(`handlers: lint ${p.handlers.diagnostics.length ? 'REFUSED' : 'CLEAN'} over ${p.handlers.files} file${p.handlers.files === 1 ? '' : 's'} (PT6.5)\n`);
+        } else if (p.handlers) lines.push(`handlers: lint not run (${p.handlers.reason})\n`);
+        lines.push(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
+        return { exit: p.exit, result: { report, files: report.files, verdict: p.verdict, exit: p.exit }, text: lines.join('') };
+      }
+      const r = await checkFile(target, { root });
+      const report = asJson(r);
+      writeReport(root ?? process.cwd(), report);
+      return { exit: r.exit, result: { report, files: [report], verdict: r.verdict, exit: r.exit }, text: render(r) };
+    },
+  },
+  {
+    name: 'fmt', mcp: 'poly_fmt', lsp: true,
+    summary: 'Formats a standalone module canonically and prints its module digest (PF9.5); with write, rewrites the file.',
+    input: obj({ file: str('a .poly or .policy.poly module'), write: { type: 'boolean', description: 'rewrite the file in place' } }, ['file']),
+    output: obj({ file: str('the module'), formatted: str('the canonical text'), changed: { type: 'boolean' }, moduleDigest: str('the AST digest, which comments do not change (PT1.4)') }, ['file', 'formatted', 'changed', 'moduleDigest']),
+    async run(input) {
+      const file = need(input, 'file');
+      if (file.endsWith('.ts')) throw new CommandUsageError(`${file} is an embedded module: its text is TypeScript's to format, and poly fmt formats the standalone surface (S168)`);
+      if (!existsSync(file)) throw new CommandUsageError(`no such file ${file}`);
+      const src = readFileSync(file, 'utf8');
+      const parsed = parse(src);
+      if (!parsed.module) {
+        const d = parsed.diagnostics.map(toJson);
+        return { exit: EXIT_CODES.REFUSED, result: { file, formatted: src, changed: false, moduleDigest: '', diagnostics: d }, text: parsed.diagnostics.map((x) => `${x.code} ${x.message}\n`).join('') };
+      }
+      const formatted = format(parsed.module, parsed.trivia);
+      const changed = formatted !== src;
+      if (changed && input.write === true) writeFileSync(file, formatted);
+      const moduleDigest = digest(parsed.module);
+      return { exit: EXIT_CODES.CLEAN, result: { file, formatted, changed, moduleDigest }, text: input.write === true ? `${changed ? 'formatted' : 'unchanged'} ${file}\n${moduleDigest}\n` : formatted };
+    },
+  },
+  {
+    name: 'witness', mcp: 'poly_witness', lsp: true,
+    summary: 'Writes the witness with that id as {pre, action, data, post} windows (trace) or as a host test (test) (PT12.4).',
+    input: obj({ id: str('the witness id, or at least its first 12 hex digits'), kind: { type: 'string', enum: ['trace', 'test'] }, root: str('where .poly/report.json lives'), out: str('where to write') }, ['id', 'kind']),
+    output: obj({ path: str('the file written') }, ['path']),
+    async run(input) {
+      const id = need(input, 'id');
+      const kind = need(input, 'kind');
+      if (kind !== 'trace' && kind !== 'test') throw new CommandUsageError('kind is trace or test');
+      const base = opt(input, 'root') ?? process.cwd();
+      const looked = lookupWitness(readReport(base), id);
+      if (!('found' in looked)) throw new CommandUsageError(looked.reason);
+      const path = exportWitness(looked.found, { root: base, kind, out: opt(input, 'out') });
+      return { exit: EXIT_CODES.CLEAN, result: { path }, text: `${path}\n` };
+    },
+  },
+  {
+    name: 'fix', mcp: 'poly_fix', lsp: true,
+    summary: 'Applies the fix with that id if its target node still has the digest it was computed on; otherwise refuses it with PL0201 (PT12.1).',
+    input: obj({ id: str('the fix id'), root: str('where .poly/report.json lives') }, ['id']),
+    output: obj({ status: { type: 'string', enum: ['applied', 'refused'] }, file: str('the module changed'), code: str('PL0201 for a stale fix'), message: str('why it was refused') }, ['status']),
+    async run(input) {
+      const id = need(input, 'id');
+      const base = opt(input, 'root') ?? process.cwd();
+      const r = applyFixById(readReport(base), id);
+      if (r.status === 'applied') return { exit: 0, result: { status: 'applied', file: r.file }, text: `applied ${id} to ${r.file}; run poly check again (PT12.1)\n` };
+      return { exit: r.code === 'PL0201' ? EXIT_CODES.REFUSED : EXIT_CODES.USAGE, result: { status: 'refused', ...(r.code ? { code: r.code } : {}), message: r.message }, text: `${r.code ?? 'poly'}: ${r.message}\n` };
+    },
+  },
+  {
+    name: 'lint', mcp: 'poly_lint', lsp: true,
+    summary: 'Reads the handler modules poly.json names and the files they import, and refuses any reach for ambient authority (PL6401, S142).',
+    input: obj({ project: str('the project directory (default: the working directory)') }),
+    output: obj({ verdict: { type: 'string', enum: ['CLEAN', 'REFUSED'] }, files: { type: 'integer' }, diagnostics: { type: 'array', items: DIAGNOSTIC } }, ['verdict', 'files', 'diagnostics']),
+    async run(input) {
+      const projectDir = opt(input, 'project') ?? process.cwd();
+      const { handlers } = loadProject(projectDir);
+      if (!handlers) throw new CommandUsageError('poly.json names no handlers (S72)');
+      const closure = handlerClosure(projectDir, handlers);
+      const ds = closure.diagnostics;
+      const verdict = ds.length ? 'REFUSED' : 'CLEAN';
+      return { exit: ds.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN, result: { verdict, files: closure.bytes.size, diagnostics: ds.map(toJson) }, text: `${ds.map((d) => `${d.code} ${d.name}  ${d.message}\n`).join('')}handlers: lint ${verdict} over ${closure.bytes.size} file${closure.bytes.size === 1 ? '' : 's'} (PT6.5, S142)\n` };
+    },
+  },
+  {
+    name: 'admit', mcp: 'poly_admit', lsp: false,
+    summary: 'Checks the project and, when it is CLEAN (or every finding is accepted), writes and signs .poly/certificate.json with the admission key poly.json names (PT15, S126).',
+    input: obj({ project: str('the project directory') }, ['project']),
+    output: obj({ certificatePath: str('the certificate'), digest: str('its digest'), buildId: str('its build id'), limits: { type: 'array', items: { type: 'string' } } }, ['certificatePath', 'digest', 'buildId', 'limits']),
+    async run(input) {
+      const r = await admit(need(input, 'project'));
+      const limits = r.certificate.poly.limits;
+      return { exit: EXIT_CODES.CLEAN, result: { certificatePath: r.certificatePath, digest: r.certificate.digest, buildId: r.certificate.buildId, limits }, text: `admitted ${r.certificate.subject.project}: ${r.certificate.buildId}, ${r.certificate.digest}\n  ${r.certificatePath}\n${limits.map((l) => `  limit: ${l}\n`).join('')}` };
+    },
+  },
+  {
+    name: 'admit-witness', mcp: null, lsp: false,
+    summary: 'Writes a witness certificate, signed with a test key given by file, which the runtime loads only with allowWitness (S139).',
+    input: obj({ target: str('a module file or a project directory'), key: str('the private key file'), root: str('where .poly/ lives'), out: str('where to write the certificate') }, ['target', 'key']),
+    output: obj({ certificatePath: str('the certificate'), digest: str('its digest'), findings: { type: 'integer' } }, ['certificatePath', 'digest', 'findings']),
+    async run(input) {
+      const target = need(input, 'target');
+      const root = opt(input, 'root');
+      const base = root ?? (statSync(target).isDirectory() ? target : dirname(target));
+      const r = await admitWitness(target, { root, key: witnessKey(need(input, 'key')), out: opt(input, 'out') ?? join(base, '.poly', 'witness.certificate.json') });
+      const findings = r.certificate.findings?.length ?? 0;
+      return { exit: EXIT_CODES.CLEAN, result: { certificatePath: r.certificatePath, digest: r.certificate.digest, findings }, text: `witness certificate for ${r.certificate.subject.project}: ${findings} finding(s), ${r.certificate.digest}\n  ${r.certificatePath}\n  the runtime loads it only with allowWitness, never in production (S139)\n` };
+    },
+  },
+  {
+    name: 'approve', mcp: null, lsp: false,
+    summary: 'Signs the record of an intent\'s escalation with a person key given by file, for rt.approve (PT12.5, S150). Never over MCP.',
+    input: obj({ intent: str('the escalated intent'), by: str('the key id'), key: str('the private key file'), db: str('the store'), out: str('where to write the record') }, ['intent', 'by', 'key', 'db']),
+    output: obj({ record: { type: 'object', description: 'the signed approval record' }, path: str('where it was written, when out was given') }, ['record']),
+    async run(input) {
+      const record = await approvalRecord(need(input, 'db'), need(input, 'intent'), need(input, 'by'), need(input, 'key'));
+      const text = JSON.stringify(record, null, 2) + '\n';
+      const out = opt(input, 'out');
+      if (out) writeFileSync(out, text);
+      return { exit: EXIT_CODES.CLEAN, result: { record, ...(out ? { path: out } : {}) }, text: out ? '' : text };
+    },
+  },
+  {
+    name: 'accept', mcp: null, lsp: false,
+    summary: 'Records an accepted finding, signed with a person key given by file, in accepted/ (PT12.5, S150). Never over MCP.',
+    input: obj({ id: str('the witness id'), by: str('the key id'), key: str('the private key file'), root: str('where .poly/report.json lives') }, ['id', 'by', 'key']),
+    output: obj({ path: str('the acceptance written') }, ['path']),
+    async run(input) {
+      const base = opt(input, 'root') ?? process.cwd();
+      const path = writeAcceptance(base, acceptanceRecord(readReport(base), need(input, 'id'), need(input, 'by'), need(input, 'key')));
+      return { exit: EXIT_CODES.CLEAN, result: { path }, text: `${path}\n  admission reads it from accepted/ (PT12.5)\n` };
+    },
+  },
+  {
+    name: 'journal', mcp: 'poly_journal', lsp: false,
+    summary: 'Ledger verification, replay, export, evaluation and fitting (PF8.6, PD3.3): its arguments are those of the command line.',
+    input: obj({ sub: { type: 'string', enum: ['verify', 'replay', 'export', 'eval', 'fit'] }, args: { type: 'array', items: { type: 'string' }, description: 'the options, as on the command line (--db, --run, --trust …)' } }, ['sub']),
+    output: obj({ exit: { type: 'integer' }, output: str('what the subcommand printed') }, ['exit', 'output']),
+    async run(input) {
+      const sub = need(input, 'sub');
+      const args = Array.isArray(input.args) ? (input.args as unknown[]).map(String) : [];
+      let output = '';
+      const exit = await journalCommand(sub, ['journal', sub, ...args], (s) => { output += s; });
+      return { exit, result: { exit, output }, text: output };
+    },
+  },
+  {
+    name: 'bench', mcp: null, lsp: false,
+    summary: 'Measures the gate (AC4, PT9.6) over AC4\'s program in this checkout: latency and throughput, with no pass threshold.',
+    input: obj({ sizes: { type: 'array', items: { type: 'integer' } }, out: str('where to write the measurement') }),
+    output: obj({ bench: { type: 'object', description: 'the measurement, as docs/m5/gate-bench.json holds it' } }, ['bench']),
+    async run(input) {
+      const sizes = Array.isArray(input.sizes) ? (input.sizes as unknown[]).map(Number) : [1, 8, 64];
+      if (sizes.some((n) => !Number.isInteger(n) || n < 1)) throw new CommandUsageError('sizes are positive integers');
+      const { REPO_ROOT } = await import('@poly/runtime');
+      const r = await benchGate({ repo: REPO_ROOT, sizes, out: opt(input, 'out') });
+      const line = (t: { instances: number; perSecond: number; allowed: number; effects: number }) => `${t.instances}: ${t.perSecond}/s (${t.allowed}/${t.effects} allowed)`;
+      const lines = [`gate bench on ${r.machine.cpu}, Node ${r.node}\n`];
+      if ('notRun' in r.latencyMs) lines.push(`  latency: not run (${r.latencyMs.notRun})\n`);
+      else for (const [k, p] of Object.entries(r.latencyMs)) lines.push(`  latency ${k}: p50 ${p.p50} ms, p99 ${p.p99} ms over ${p.n}\n`);
+      lines.push(`  throughput runtime (no policy): ${r.throughput.runtime.map(line).join(', ')}\n`);
+      const s = r.throughput.session;
+      lines.push(`  throughput session ${r.program.session}: ${'notRun' in s ? `not run (${s.notRun})` : s.map(line).join(', ')}\n`);
+      if (opt(input, 'out')) lines.push(`  ${opt(input, 'out')}\n`);
+      return { exit: EXIT_CODES.CLEAN, result: { bench: r as unknown as Record<string, unknown> }, text: lines.join('') };
+    },
+  },
+];
+
+/**
+ * PT14's commands that poly does not have yet, each with the milestone or step that builds it: the registry lists
+ * them so that a command is either served or said to be missing, never silently absent.
+ */
+export const NOT_BUILT: { name: string; mcp: string; when: string }[] = [
+  { name: 'new', mcp: 'poly_new', when: 'M6 step 9 (S169)' },
+  { name: 'explain', mcp: 'poly_explain', when: 'not scheduled: PT14 names it, and no milestone builds it yet' },
+  { name: 'grade', mcp: 'poly_grade', when: 'not scheduled: polynv adequacy (PF7.7)' },
+  { name: 'deploy', mcp: 'poly_deploy', when: 'not scheduled: the version gate at load (PF8.7)' },
+  { name: 'dispatch', mcp: 'poly_dispatch', when: 'not scheduled: the development runtime' },
+  { name: 'export', mcp: 'poly_export', when: 'M7 (PF10.1)' },
+  { name: 'mine', mcp: 'poly_mine', when: 'M7 (PF10.2)' },
+  { name: 'propose', mcp: 'poly_propose', when: 'M7 (PF10.3)' },
+];
+
+export const commandNamed = (name: string): Command | undefined => COMMANDS.find((c) => c.name === name);

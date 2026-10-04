@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "the module"
+    },
+    "formatted": {
+      "type": "string",
+      "description": "the canonical text"
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "moduleDigest": {
+      "type": "string",
+      "description": "the AST digest, which comments do not change (PT1.4)"
+    }
+  },
+  "required": [
+    "file",
+    "formatted",
+    "changed",
+    "moduleDigest"
+  ]
+}

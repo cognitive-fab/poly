@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "the witness id, or at least its first 12 hex digits"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "trace",
+        "test"
+      ]
+    },
+    "root": {
+      "type": "string",
+      "description": "where .poly/report.json lives"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write"
+    }
+  },
+  "required": [
+    "id",
+    "kind"
+  ]
+}
