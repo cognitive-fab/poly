@@ -1,0 +1,20 @@
+{
+  "module": "payments",
+  "instances": {
+    "payments": { "machine": "Payment", "createdBy": "authorize", "keyArgument": "payment" }
+  },
+  "methods": {
+    "authorize": { "instance": "payments", "key": "$arg:payment", "action": "Authorize", "params": { "amt": "$arg:amount" } },
+    "timedOut": { "instance": "payments", "key": "$arg:payment", "action": "TimedOut" },
+    "capture": { "instance": "payments", "key": "$arg:payment", "action": "Capture", "params": { "amt": "$arg:amount" } },
+    "void": { "instance": "payments", "key": "$arg:payment", "action": "Void" },
+    "refund": { "instance": "payments", "key": "$arg:payment", "action": "Refund", "params": { "amt": "$arg:amount" } }
+  },
+  "queries": {
+    "payment": {
+      "instance": "payments",
+      "key": "$arg:payment",
+      "fields": { "status": "status", "authorized": "amount", "captured": "captured", "refunded": "refunded", "requests": "requests" }
+    }
+  }
+}

@@ -1,0 +1,306 @@
+{
+  "id": "T4-arm1-run5",
+  "arm": 1,
+  "task": "T4",
+  "run": 5,
+  "model": "claude-opus-5-5",
+  "budget": {
+    "tokens": 15000000,
+    "wallMs": 3600000,
+    "maxBudgetUsd": 15
+  },
+  "agent": "claude",
+  "started": "2026-10-04T01:37:52.148Z",
+  "workspace": [
+    "BRIEF.md",
+    "host.ts",
+    "node_modules/typescript/LICENSE.txt",
+    "node_modules/typescript/README.md",
+    "node_modules/typescript/SECURITY.md",
+    "node_modules/typescript/ThirdPartyNoticeText.txt",
+    "node_modules/typescript/bin/tsc",
+    "node_modules/typescript/bin/tsserver",
+    "node_modules/typescript/lib/_tsc.js",
+    "node_modules/typescript/lib/_tsserver.js",
+    "node_modules/typescript/lib/_typingsInstaller.js",
+    "node_modules/typescript/lib/cs/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/de/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/es/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/fr/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/it/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/ja/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/ko/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/lib.d.ts",
+    "node_modules/typescript/lib/lib.decorators.d.ts",
+    "node_modules/typescript/lib/lib.decorators.legacy.d.ts",
+    "node_modules/typescript/lib/lib.dom.asynciterable.d.ts",
+    "node_modules/typescript/lib/lib.dom.d.ts",
+    "node_modules/typescript/lib/lib.dom.iterable.d.ts",
+    "node_modules/typescript/lib/lib.es2015.collection.d.ts",
+    "node_modules/typescript/lib/lib.es2015.core.d.ts",
+    "node_modules/typescript/lib/lib.es2015.d.ts",
+    "node_modules/typescript/lib/lib.es2015.generator.d.ts",
+    "node_modules/typescript/lib/lib.es2015.iterable.d.ts",
+    "node_modules/typescript/lib/lib.es2015.promise.d.ts",
+    "node_modules/typescript/lib/lib.es2015.proxy.d.ts",
+    "node_modules/typescript/lib/lib.es2015.reflect.d.ts",
+    "node_modules/typescript/lib/lib.es2015.symbol.d.ts",
+    "node_modules/typescript/lib/lib.es2015.symbol.wellknown.d.ts",
+    "node_modules/typescript/lib/lib.es2016.array.include.d.ts",
+    "node_modules/typescript/lib/lib.es2016.d.ts",
+    "node_modules/typescript/lib/lib.es2016.full.d.ts",
+    "node_modules/typescript/lib/lib.es2016.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2017.arraybuffer.d.ts",
+    "node_modules/typescript/lib/lib.es2017.d.ts",
+    "node_modules/typescript/lib/lib.es2017.date.d.ts",
+    "node_modules/typescript/lib/lib.es2017.full.d.ts",
+    "node_modules/typescript/lib/lib.es2017.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2017.object.d.ts",
+    "node_modules/typescript/lib/lib.es2017.sharedmemory.d.ts",
+    "node_modules/typescript/lib/lib.es2017.string.d.ts",
+    "node_modules/typescript/lib/lib.es2017.typedarrays.d.ts",
+    "node_modules/typescript/lib/lib.es2018.asyncgenerator.d.ts",
+    "node_modules/typescript/lib/lib.es2018.asynciterable.d.ts",
+    "node_modules/typescript/lib/lib.es2018.d.ts",
+    "node_modules/typescript/lib/lib.es2018.full.d.ts",
+    "node_modules/typescript/lib/lib.es2018.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2018.promise.d.ts",
+    "node_modules/typescript/lib/lib.es2018.regexp.d.ts",
+    "node_modules/typescript/lib/lib.es2019.array.d.ts",
+    "node_modules/typescript/lib/lib.es2019.d.ts",
+    "node_modules/typescript/lib/lib.es2019.full.d.ts",
+    "node_modules/typescript/lib/lib.es2019.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2019.object.d.ts",
+    "node_modules/typescript/lib/lib.es2019.string.d.ts",
+    "node_modules/typescript/lib/lib.es2019.symbol.d.ts",
+    "node_modules/typescript/lib/lib.es2020.bigint.d.ts",
+    "node_modules/typescript/lib/lib.es2020.d.ts",
+    "node_modules/typescript/lib/lib.es2020.date.d.ts",
+    "node_modules/typescript/lib/lib.es2020.full.d.ts",
+    "node_modules/typescript/lib/lib.es2020.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2020.number.d.ts",
+    "node_modules/typescript/lib/lib.es2020.promise.d.ts",
+    "node_modules/typescript/lib/lib.es2020.sharedmemory.d.ts",
+    "node_modules/typescript/lib/lib.es2020.string.d.ts",
+    "node_modules/typescript/lib/lib.es2020.symbol.wellknown.d.ts",
+    "node_modules/typescript/lib/lib.es2021.d.ts",
+    "node_modules/typescript/lib/lib.es2021.full.d.ts",
+    "node_modules/typescript/lib/lib.es2021.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2021.promise.d.ts",
+    "node_modules/typescript/lib/lib.es2021.string.d.ts",
+    "node_modules/typescript/lib/lib.es2021.weakref.d.ts",
+    "node_modules/typescript/lib/lib.es2022.array.d.ts",
+    "node_modules/typescript/lib/lib.es2022.d.ts",
+    "node_modules/typescript/lib/lib.es2022.error.d.ts",
+    "node_modules/typescript/lib/lib.es2022.full.d.ts",
+    "node_modules/typescript/lib/lib.es2022.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2022.object.d.ts",
+    "node_modules/typescript/lib/lib.es2022.regexp.d.ts",
+    "node_modules/typescript/lib/lib.es2022.string.d.ts",
+    "node_modules/typescript/lib/lib.es2023.array.d.ts",
+    "node_modules/typescript/lib/lib.es2023.collection.d.ts",
+    "node_modules/typescript/lib/lib.es2023.d.ts",
+    "node_modules/typescript/lib/lib.es2023.full.d.ts",
+    "node_modules/typescript/lib/lib.es2023.intl.d.ts",
+    "node_modules/typescript/lib/lib.es2024.arraybuffer.d.ts",
+    "node_modules/typescript/lib/lib.es2024.collection.d.ts",
+    "node_modules/typescript/lib/lib.es2024.d.ts",
+    "node_modules/typescript/lib/lib.es2024.full.d.ts",
+    "node_modules/typescript/lib/lib.es2024.object.d.ts",
+    "node_modules/typescript/lib/lib.es2024.promise.d.ts",
+    "node_modules/typescript/lib/lib.es2024.regexp.d.ts",
+    "node_modules/typescript/lib/lib.es2024.sharedmemory.d.ts",
+    "node_modules/typescript/lib/lib.es2024.string.d.ts",
+    "node_modules/typescript/lib/lib.es5.d.ts",
+    "node_modules/typescript/lib/lib.es6.d.ts",
+    "node_modules/typescript/lib/lib.esnext.array.d.ts",
+    "node_modules/typescript/lib/lib.esnext.collection.d.ts",
+    "node_modules/typescript/lib/lib.esnext.d.ts",
+    "node_modules/typescript/lib/lib.esnext.decorators.d.ts",
+    "node_modules/typescript/lib/lib.esnext.disposable.d.ts",
+    "node_modules/typescript/lib/lib.esnext.error.d.ts",
+    "node_modules/typescript/lib/lib.esnext.float16.d.ts",
+    "node_modules/typescript/lib/lib.esnext.full.d.ts",
+    "node_modules/typescript/lib/lib.esnext.intl.d.ts",
+    "node_modules/typescript/lib/lib.esnext.iterator.d.ts",
+    "node_modules/typescript/lib/lib.esnext.promise.d.ts",
+    "node_modules/typescript/lib/lib.esnext.sharedmemory.d.ts",
+    "node_modules/typescript/lib/lib.scripthost.d.ts",
+    "node_modules/typescript/lib/lib.webworker.asynciterable.d.ts",
+    "node_modules/typescript/lib/lib.webworker.d.ts",
+    "node_modules/typescript/lib/lib.webworker.importscripts.d.ts",
+    "node_modules/typescript/lib/lib.webworker.iterable.d.ts",
+    "node_modules/typescript/lib/pl/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/pt-br/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/ru/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/tr/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/tsc.js",
+    "node_modules/typescript/lib/tsserver.js",
+    "node_modules/typescript/lib/tsserverlibrary.d.ts",
+    "node_modules/typescript/lib/tsserverlibrary.js",
+    "node_modules/typescript/lib/typesMap.json",
+    "node_modules/typescript/lib/typescript.d.ts",
+    "node_modules/typescript/lib/typescript.js",
+    "node_modules/typescript/lib/typingsInstaller.js",
+    "node_modules/typescript/lib/watchGuard.js",
+    "node_modules/typescript/lib/zh-cn/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/zh-tw/diagnosticMessages.generated.json",
+    "node_modules/typescript/package.json",
+    "package.json"
+  ],
+  "versions": [
+    {
+      "n": 0,
+      "attempted": true,
+      "promptSha256": "7e36465db017016a6a22c2887ee3ff718bd951bcb362b9df15f4bf8f4741d6e5",
+      "usage": {
+        "input_tokens": 8,
+        "cache_creation_input_tokens": 8295,
+        "cache_read_input_tokens": 87913,
+        "output_tokens": 3823
+      },
+      "tokens": 100039,
+      "costUsd": 0.1604346,
+      "cliCostUsd": 0.16043459999999998,
+      "usageSource": "result",
+      "running": {
+        "input_tokens": 8,
+        "cache_creation_input_tokens": 8295,
+        "cache_read_input_tokens": 87913,
+        "output_tokens": 166
+      },
+      "differs": [
+        "output_tokens"
+      ],
+      "wallMs": 82424,
+      "stopped": null,
+      "exitCode": 0,
+      "delivered": [
+        "src"
+      ],
+      "snapshots": 1
+    },
+    {
+      "n": 1,
+      "attempted": true,
+      "promptSha256": "dd7a1b14ddf3dc8d2aafd0e0a48dd4f3e9034aece2cee313bfd7ae3505f82198",
+      "usage": {
+        "input_tokens": 4,
+        "cache_creation_input_tokens": 2845,
+        "cache_read_input_tokens": 54222,
+        "output_tokens": 1277
+      },
+      "tokens": 58348,
+      "costUsd": 0.0591604,
+      "cliCostUsd": 0.21959499999999998,
+      "usageSource": "result",
+      "running": {
+        "input_tokens": 4,
+        "cache_creation_input_tokens": 2845,
+        "cache_read_input_tokens": 54222,
+        "output_tokens": 79
+      },
+      "differs": [
+        "output_tokens"
+      ],
+      "wallMs": 53665,
+      "stopped": null,
+      "exitCode": 0,
+      "delivered": [
+        "src"
+      ],
+      "snapshots": 2
+    },
+    {
+      "n": 2,
+      "attempted": true,
+      "promptSha256": "cda76f26251abf08b4858d71903e697f94615a0410f1b52fab5c0fe0736c094d",
+      "usage": {
+        "input_tokens": 4,
+        "cache_creation_input_tokens": 3244,
+        "cache_read_input_tokens": 59925,
+        "output_tokens": 1845
+      },
+      "tokens": 65018,
+      "costUsd": 0.074853,
+      "cliCostUsd": 0.29444799999999993,
+      "usageSource": "result",
+      "running": {
+        "input_tokens": 4,
+        "cache_creation_input_tokens": 3244,
+        "cache_read_input_tokens": 59925,
+        "output_tokens": 11
+      },
+      "differs": [
+        "output_tokens"
+      ],
+      "wallMs": 54224,
+      "stopped": null,
+      "exitCode": 0,
+      "delivered": [
+        "src"
+      ],
+      "snapshots": 2
+    },
+    {
+      "n": 3,
+      "attempted": true,
+      "promptSha256": "04e51c69d1347c9394a7747e31fa232f8489bcba479cffc462a45dde2a9ee977",
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 4156,
+        "cache_read_input_tokens": 102679,
+        "output_tokens": 2236
+      },
+      "tokens": 109077,
+      "costUsd": 0.0985278,
+      "cliCostUsd": 0.39297579999999993,
+      "usageSource": "result",
+      "running": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 4156,
+        "cache_read_input_tokens": 102679,
+        "output_tokens": 75
+      },
+      "differs": [
+        "output_tokens"
+      ],
+      "wallMs": 62348,
+      "stopped": null,
+      "exitCode": 0,
+      "delivered": [
+        "src"
+      ],
+      "snapshots": 2
+    }
+  ],
+  "environment": {
+    "current": {
+      "node": "v24.12.0",
+      "claude": "2.1.287",
+      "model": "claude-opus-5-5",
+      "os": {
+        "platform": "win32",
+        "release": "10.0.26300",
+        "arch": "x64"
+      }
+    },
+    "differs": []
+  },
+  "isolation": {
+    "configDir": "C:\\Users\\jjdub\\.poly-m3\\claude",
+    "authMethod": "claude.ai",
+    "subscriptionType": "max",
+    "after": []
+  },
+  "spent": {
+    "tokens": 332482,
+    "wallMs": 252661,
+    "costUsd": 0.39297580000000004
+  },
+  "finished": "2026-10-04T01:42:07.764Z",
+  "leftovers": [],
+  "cleanup": {
+    "ok": true
+  }
+}
