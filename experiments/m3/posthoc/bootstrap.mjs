@@ -4,7 +4,8 @@
 // The per-task values are the frozen script's own (perTask); this file only resamples them. The ten tasks are
 // resampled with replacement, 10,000 times, with a fixed seed, so the intervals reproduce exactly.
 //
-// Usage: node experiments/m3/posthoc/bootstrap.mjs [runs dir]
+// Usage: node experiments/m3/posthoc/bootstrap.mjs [runs dir] [--json out.json]   (stdout without --json)
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMPARISONS, loadRecords, perTask } from '../analysis/analyse.mjs';
@@ -46,7 +47,11 @@ export function intervals(table) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const dir = process.argv[2] ?? join(fileURLToPath(new URL('..', import.meta.url)), 'runs');
-  const r = intervals(perTask(loadRecords(dir)));
-  console.log(JSON.stringify({ resamples: RESAMPLES, seed: SEED, ...r }, null, 2));
+  const args = process.argv.slice(2);
+  const j = args.indexOf('--json');
+  const out = j >= 0 ? args.splice(j, 2)[1] : null;
+  const dir = args[0] ?? join(fileURLToPath(new URL('..', import.meta.url)), 'runs');
+  const text = JSON.stringify({ resamples: RESAMPLES, seed: SEED, ...intervals(perTask(loadRecords(dir))) }, null, 2) + '\n';
+  if (out) writeFileSync(out, text);
+  else process.stdout.write(text);
 }

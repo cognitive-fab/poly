@@ -1,6 +1,6 @@
-# M3 report (draft): the first experiment
+# M3 report: the first experiment
 
-M3 ran the experiment PT13 fixes: ten stateful tasks, four arms, five runs per task and arm, 200 runs in all. All 200 runs are recorded and scored. This draft gives the pre-registered analysis as `experiments/m3/analysis/analyse.mjs` computes it, then the deviations, then what is post hoc, then the observations already recorded, each in its own section.
+M3 ran the experiment PT13 fixes: ten stateful tasks, four arms, five runs per task and arm, 200 runs in all. All 200 runs are recorded and scored. This report gives the pre-registered analysis as `experiments/m3/analysis/analyse.mjs` computes it, then the deviations, then what is post hoc, then the observations already recorded, each in its own section.
 
 **To reproduce `docs/m3/analysis.json`.**
 
@@ -126,7 +126,7 @@ A suite stopped by the scorer's 30-minute timeout is now recorded as not scored 
 
 ### 3.3 The overlap flags
 
-Each block records the processes outside it that looked like tests or a review, sampled every 30 seconds, and each flag carries a classification, its raw record kept. Nine blocks are `genuine`: blocks 1 and 2 (the M5b worktree's commits, flagged by hand), block 22 (another session's polywatch review), and blocks 40, 42, 43, 45, 46 and 47 (polywatch reviews: in blocks 40 and 45 of this session's own commits, otherwise of other sessions of the owner). The other flagged blocks are `arm-own`: the arms' own test runs, which the earlier check could not tell apart. No block is dropped (ruling after block 39). The comparison of wall times with and without the genuine blocks is in section 4.1, post hoc.
+Each block records the processes outside it that looked like tests or a review, sampled every 30 seconds, and each flag carries a classification, its raw record kept. Nine blocks are `genuine`: blocks 1 and 2 (the M5b worktree's commits, flagged by hand), block 22 (another session's polywatch review), and blocks 40, 42, 43, 45, 46 and 47 (polywatch reviews: in blocks 40 and 45 of this session's own commits, otherwise of other sessions of the owner). The owner ruled blocks 40 and 42 genuine after block 42, and accepted the classification of blocks 43, 45, 46 and 47 as genuine after the draft of this report; `blocks.jsonl` records all six with their raw flags. The other flagged blocks are `arm-own`: the arms' own test runs, which the earlier check could not tell apart. No block is dropped (ruling after block 39). The comparison of wall times with and without the genuine blocks is in section 4.1, post hoc.
 
 ### 3.4 The runs stopped by a cap
 
@@ -171,7 +171,17 @@ The frozen script prints these counts (`capStops`, `4c630d2`), but they enter no
 
 ### 4.4 Post hoc: bootstrap intervals for the per-task differences
 
-`experiments/m3/posthoc/bootstrap.mjs` takes the frozen script's per-task values (`perTask`) and, for each comparison PT13 makes, the ten per-task differences (first arm minus second). It resamples the ten tasks with replacement 10,000 times, with the fixed seed 20261004, and gives the 95% percentile interval of the mean difference. Its output is `docs/m3/posthoc-bootstrap.json`; two runs wrote the same bytes. It is in no part of the freeze.
+`experiments/m3/posthoc/bootstrap.mjs` takes the frozen script's per-task values (`perTask`) and, for each comparison PT13 makes, the ten per-task differences (first arm minus second). It resamples the ten tasks with replacement 10,000 times, with the fixed seed 20261004, and gives the 95% percentile interval of the mean difference. It is in no part of the freeze.
+
+**To reproduce `docs/m3/posthoc-bootstrap.json`.**
+
+| | |
+|---|---|
+| Script | `experiments/m3/posthoc/bootstrap.mjs`, which imports `perTask`, `loadRecords` and `COMPARISONS` from the frozen `experiments/m3/analysis/analyse.mjs` (part digest `8b1eafcbca88b0dae782261fc05062067dedcb81eb6f9d560ddace198593e994`) |
+| Scored runs | `experiments/m3/runs/` at `ef28969f3aa09d25545d2ee52a108234981caf51`, as for `analysis.json` |
+| Command | `node experiments/m3/posthoc/bootstrap.mjs experiments/m3/runs --json docs/m3/posthoc-bootstrap.json`, from the repository root, with Node v24.12.0 |
+| Resamples and seed | 10,000 resamples of the ten tasks, seed `20261004` (mulberry32), both fixed in the script and recorded in the output |
+| Output | SHA-256 `b8bd82d965df5f8513fc1b00ede05e042821dd4c8bf5e95ee96ae62e410350a3`; a second run of the command wrote the same bytes |
 
 | Comparison | Escaped defects per delivered task: mean difference [95% interval] | Tokens per delivered task: mean difference [95% interval] |
 |---|---|---|
