@@ -21,7 +21,12 @@ const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, '-c', 'core.autocr
 function changedEvidence(dir) {
   const r = spawnSync(process.execPath, [join(dir, 'experiments', 'm3', 'freeze.mjs'), '--check'], { cwd: dir, encoding: 'utf8', timeout: 600_000 });
   const parts = [...r.stdout.matchAll(/^part changed since the freeze: (.+)$/gm)].map((m) => m[1].trim());
-  assert.ok(r.stdout.length || r.status === 0, r.stderr);
+  // A completed check exits 0 (no change) or 1 (changes listed); a timeout, a signal or a crash is no answer, and a
+  // crash also exits 1, so its stack on stderr refuses the result (polywatch).
+  assert.equal(r.error, undefined, String(r.error));
+  assert.equal(r.signal, null);
+  assert.ok(r.status === 0 || r.status === 1, `exit ${r.status}: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /Error|at .+:\d+:\d+/, r.stderr);
   return parts.filter((p) => !EXPECTED_TO_CHANGE.includes(p));
 }
 
