@@ -971,6 +971,8 @@ It also produces the five machine files. The run key is derived as `agent | inst
 - `workflow_start`, `workflow_report`, `workflow_state`, `workflow_signal`, `workflow_journal`, `workflow_list`;
 - with polycrew, also `workflow_next` and `workflow_claim`.
 
+**Limit: workflows are not gated (S164).** In M6 a workflow is checked and lowered by poly and run by polyflow, on polyflow's daemon and polyrun. No poly gate, ledger, claims or lineage applies to its effects, and polyflow's own `certify` admits it. This is an exception to G5, which says every effect crosses the gate. The certificate lists every workflow as `ungated: polyflow runtime`, so it never reads as covered by the gate (PA0.4). poly's certificate digest may be written into the descriptor's `certified` field, where polyflow lists it; polyflow would check it only after engine change E9, which is optional. Running workflows on `poly-runtime`, under the gate, is a named item of PT18 before the v1 release.
+
 ## PT11. Versions and migration
 
 ```poly
@@ -1285,6 +1287,8 @@ Each milestone ends with a gate. A milestone is not started until the previous g
 | M5b · Identity | identity and lineage (proposal PD5, S112); instances started from a configuration's initial values (S141, after E5); hashed handler dependencies (S142); the opt-in OpenShell sandbox (PT6.5) | PD5-A1 to PD5-A12, and PD4-A3 through the person-key adapter (S107). Each carried item has its test; sandbox enforcement is listed as not run where no gateway is configured. |
 | M6 · Agents | Workflow lowering, MCP server, language server, Claude Code plugin, `poly new` | AC5. A workflow in poly runs through unchanged polyflow tools. |
 | M7 · Feedback | `poly mine`, `poly propose`, `poly export traces` | A Polyx rule adjudicated `real` round-trips to an admitted obligation. A polyness proposal arrives as poly source and is admitted or refused by the pipeline. |
+
+**Named item before the v1 release: workflows on `poly-runtime` (S164).** M6 runs workflows on polyflow, outside the gate (PT10). Running them on `poly-runtime`, so that their effects cross the gate (G5) and are journaled in the ledger, is done before the v1 release, at the latest with M8 of the v1 proposal, since channels need the gate. Until then every workflow is listed in the certificate as `ungated: polyflow runtime`.
 
 Worlds (appendix A) are planned after M7 and are not part of v1.
 
