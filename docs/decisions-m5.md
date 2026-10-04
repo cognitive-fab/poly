@@ -94,6 +94,18 @@ The decision-table check proves statements a policy states. In M5a, PT8.1 gains 
 
 **The merge of `m4` into `main`** is ruled after the M5b report.
 
+## M5 closed
+
+**M5b and M5 are closed** on `m4`. The gate passes from a clean build at f56ca18: 1,376 tests, 1,371 pass, 0 fail, 1 skipped, 4 waiting, in 10 min 28 s; the boundary check passes. The record is `plan-m5.md` section 11 (762cd84).
+
+- **Skipped:** sandbox enforcement through an OpenShell gateway (S152). No gateway is configured here, and enforcement needs one on Linux 6.2 or later.
+- **Waiting, each on an engine item:** S141 and S153, instances started at a configuration's initial values (E5, polyrun); S160's end-to-end cross-scope send between configuration instances (E5, polyrun); the archive trace, a late duplicate after the receiver is purged (E1, polyrun tombstones at archive, S124); polyflow's own verifier on poly's chains (E2, polyflow's ledger kinds, S122).
+
+**Open findings for M6, not fixed in M5:**
+
+- **Checker time.** Over the 712 distinct programs the M3 arms wrote, measured one after another: mean 1.4 s, median 0.19 s, 31 over 10 s; the slowest, `experiments/m3/runs/T9-arm3-run4/deliveries/v3/src/system.poly` (5,645 bytes), took 53 s.
+- **Memory.** One process grew to 2.9 GB while checking 1,438 files in a row. It may be a leak per file checked. It is unexplained, and M6 measures it.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
