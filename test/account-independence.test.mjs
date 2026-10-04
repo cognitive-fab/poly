@@ -44,7 +44,9 @@ function runAt(home, files) {
       if (process.platform === 'win32') spawnSync('taskkill', ['/F', '/T', '/PID', String(p.pid)]);
       else try { process.kill(-p.pid, 'SIGKILL'); } catch { p.kill('SIGKILL'); }
     };
-    const timer = setTimeout(() => { out += '\nkilled: the run did not finish in 10 minutes\n'; killTree(); }, 600_000);
+    // Measured: alone a run takes about 3.5 minutes; beside the rest of the gate one took over 10 (4 October), so the
+    // limit is 30 minutes, which still ends a run that hangs.
+    const timer = setTimeout(() => { out += '\nkilled: the run did not finish in 30 minutes\n'; killTree(); }, 1_800_000);
     p.on('close', (status) => {
       clearTimeout(timer);
       const count = (k) => Number((out.match(new RegExp(`^ℹ ${k} (\\d+)`, 'm')) ?? [])[1] ?? NaN);
@@ -53,7 +55,7 @@ function runAt(home, files) {
   });
 }
 
-test('the tests that load the M3 runner pass whatever the M3 account holds, or with no account at all', { timeout: 1_200_000 }, async () => {
+test('the tests that load the M3 runner pass whatever the M3 account holds, or with no account at all', { timeout: 3_900_000 }, async () => {
   const files = runnerTests();
   assert.ok(files.includes(join('test', 'm3-runner.test.mjs')), files.join(', '));
   const base = mkdtempSync(join(tmpdir(), 'poly-account-'));

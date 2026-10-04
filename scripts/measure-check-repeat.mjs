@@ -7,8 +7,10 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFile } from '@poly/check';
+import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
+assertNotExperimentTree(ROOT);
 const [file, nText, out] = process.argv.slice(2);
 const n = Number(nText);
 if (!file || !out || !Number.isInteger(n) || n < 1 || typeof globalThis.gc !== 'function') { console.error('usage: node --expose-gc scripts/measure-check-repeat.mjs <file.poly> <n> <out.ndjson>'); process.exit(64); }

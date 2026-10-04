@@ -9,8 +9,10 @@ import { appendFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFile } from '@poly/check';
+import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
+assertNotExperimentTree(ROOT);
 const NOT_SOURCES = new Set(['node_modules', '.poly', '.git']);
 const sources = (dir) => readdirSync(dir).flatMap((e) => {
   const p = join(dir, e);

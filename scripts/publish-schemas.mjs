@@ -7,8 +7,10 @@ import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMMANDS } from '@poly/check';
+import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const dir = join(fileURLToPath(import.meta.url), '..', '..', 'schemas');
+assertNotExperimentTree(join(dir, '..'));
 mkdirSync(dir, { recursive: true });
 const want = new Map(COMMANDS.flatMap((c) => [[`${c.name}.input.json`, c.input], [`${c.name}.output.json`, c.output]]));
 for (const f of readdirSync(dir)) if (f.endsWith('.json') && !want.has(f)) rmSync(join(dir, f));

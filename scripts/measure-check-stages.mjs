@@ -5,8 +5,10 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFile } from '@poly/check';
+import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
+assertNotExperimentTree(ROOT);
 const file = process.argv[2];
 if (!file) { console.error('usage: node scripts/measure-check-stages.mjs <file.poly>'); process.exit(64); }
 const t0 = performance.now();
