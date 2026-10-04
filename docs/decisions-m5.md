@@ -81,6 +81,19 @@ The decision-table check proves statements a policy states. In M5a, PT8.1 gains 
 
 **M5 then closes.** Next is M6, planned from PT18's row and the M6 planning list in this file (a host-neutral core with thin host adapters).
 
+## S163 The M3 run programs are outside the standing tests
+
+**Ruled.** Merging `main` into `m4` (a71b412) brought the 1,130 programs the M3 arms wrote, 712 of them distinct, under `experiments/m3/runs/`. The standing test then checked 1,438 sources and did not finish in the gate. Those programs are frozen experiment evidence, written by the arms, not repository source, so they are outside the standing tests.
+
+- `test/standing.test.mjs` names `experiments/m3/runs/` as its only exception, with that reason, and a test that failed first requires the list to be exactly that path and a `.poly` file anywhere else to stay covered.
+- The slow program is recorded in `plan-m5.md` section 11 as an open checker performance finding for M6, not fixed in M5b.
+- No separate job checks the run programs now. Checking the distinct ones outside the gate is optional and can come later.
+- The issues of `plan-m6.md` are numbered from S164.
+
+**The M3 account.** The m4 gate gives the same answer whatever state the owner's `~/.poly-m3/claude` is in: `test/m3-runner.test.mjs` loads the runner with a home folder the test creates, and `test/account-independence.test.mjs` runs every test file that loads the runner against a refused stand-in account and against none.
+
+**The merge of `m4` into `main`** is ruled after the M5b report.
+
 ## Conclusion
 
 M5 is split so that identity is built on a gate that is already closed. Polyaxion decides in process without being copied into poly, every decision carries a session sequence that replays, and no allow is acted on once the state it read has moved. Approvals are signed by keys the certificate binds.
