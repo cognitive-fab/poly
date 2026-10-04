@@ -223,8 +223,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   }
   const pathProps = mutated.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'path');
   if (pathProps.length) files['effect-invariants.mjs'] = effectInvariantsModule(m.name, pathProps);
-  // PT10, S165: each workflow that runs this machine gets its descriptor. polyflow's admission needs at least one effect
-  // invariant, so a workflow machine with no path property is refused by polyflow (S172, proposed).
+  // PT10, S165: each workflow that runs this machine gets its descriptor; the machine has effect-invariants.mjs, since
+  // PL6804 refuses a workflow whose machine declares no path property (S172).
   const workflows = module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === m.name);
   for (const w of workflows) files[`../workflows/${w.name}/polyflow.workflow.json`] = JSON.stringify(workflowDescriptor(module.name, m.name, w, opts.fault), null, 2) + '\n';
   // S74: each liveness property's goal (and, for leads to, its start) as a state predicate, for exported witness

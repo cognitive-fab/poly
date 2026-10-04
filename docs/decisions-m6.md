@@ -15,6 +15,14 @@
 | **S170** Two hosts in the gate | **Accepted.** M6 may close on the Claude Code half. The DeepSeek Harness half is listed as waiting until the owner declares its plugin API stable. |
 | **S171** Commands through the language server | **Accepted.** |
 
+## S172 and the AC5 finding
+
+**S172 accepted, with the code `PL6804 WORKFLOW_UNCHECKED`.** A workflow whose machine declares no path property is REFUSED by `poly check`. The diagnostic sits at the workflow line and says that polyflow admits only workflows whose machine has at least one path property. It mirrors polyflow's rule exactly and goes no further: requiring a property per effect kind would be a separate proposal. No fix is attached, since the checker cannot invent a property for the author. The interim `ERROR` goes. S165 is amended in the spec: a workflow's machine always has `effect-invariants.mjs`, and `PL6804` guarantees its list is never empty. Built with a test that failed on the interim `ERROR`, and an error source for the code.
+
+**AC5 accepted.** The deny-path difference stays named in the test.
+
+**E12 (polyflow, for the owner's engine list).** polyflow's example workflow `customer-brief` breaks its own contract on the deny path: its contract declares `DENIED`'s `reason` as only `"not-ready"`, and a denied approval reported with free text writes that text into `reason`. The defect is in polyflow's example, not in poly. The vendored copy is not changed.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.

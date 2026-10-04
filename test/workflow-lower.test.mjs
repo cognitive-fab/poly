@@ -72,3 +72,20 @@ test('S164: a descriptor rewritten after the check is refused at admission, not 
   const tamper = () => writeFileSync(f, readFileSync(f, 'utf8').replace('"slack_send"', '"shell_exec"'));
   await assert.rejects(admit(dir, { afterCheck: tamper }), (e) => e instanceof AdmitError && /polyflow\.workflow\.json.*not the bytes the check checked/.test(e.message));
 });
+
+// S172 (decisions-m6.md): polyflow admits only a workflow whose machine has at least one path property, so poly check
+// refuses one with none, at the workflow's line, with PL6804; before the code, such a check ended in ERROR.
+test('S172: a workflow whose machine declares no path property is PL6804 and REFUSED, at the workflow line', async () => {
+  const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
+  const dir = join(ROOT, '.poly', 'test-workflow-unchecked');
+  mkdirSync(dir, { recursive: true });
+  const src = readFileSync(BRIEF, 'utf8').replace('  path property one-post: count("brief.post") <= 1\n\n', '');
+  writeFileSync(join(dir, 'brief.poly'), src);
+  const r = await checkFile(join(dir, 'brief.poly'), { root: dir });
+  assert.equal(r.verdict, 'REFUSED', r.error ?? '');
+  const d = r.diagnostics.find((x) => x.code === 'PL6804');
+  assert.ok(d, JSON.stringify(r.diagnostics));
+  assert.equal(d.at.line, src.split('\n').findIndex((l) => l.startsWith('workflow daily-brief')) + 1);
+  assert.match(d.message, /polyflow admits only workflows whose machine has at least one path property/);
+  assert.equal(d.fixes?.length ?? 0, 0);
+});

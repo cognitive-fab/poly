@@ -264,6 +264,11 @@ class Checker {
         if (refused.length) this.err('PL6802', f, `workflow ${w.name}: ${w.input}'s ${f.name} may be ${refused.slice(0, 3).map((v) => JSON.stringify(v)).join(', ')}${refused.length > 3 ? ` and ${refused.length - 3} more` : ''}, which the key's pattern refuses, so such a run could not start (S166)`);
       }
     }
+    // PL6804 (S172): polyflow admits a workflow only on at least one effect invariant, so its machine needs a path
+    // property. This mirrors polyflow's rule and goes no further; no fix is offered, since only the author can say it.
+    if (!m.items.some((i) => i.kind === 'Property' && i.form === 'path')) {
+      this.err('PL6804', w, `workflow ${w.name}: ${w.machine} declares no path property, and polyflow admits only workflows whose machine has at least one path property (S172)`);
+    }
     // PL6803: each effect kind of the machine has exactly one tool, and each tool's kind is an effect of the machine.
     const kinds = new Set([...facts.effects.values()].map((e) => effectKind(e)));
     const seen = new Set<string>();

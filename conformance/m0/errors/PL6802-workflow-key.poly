@@ -31,6 +31,8 @@ machine Brief {
     phase' = Posted
   }
 
+  path property one-post: count("brief.post") <= 1
+
   effect fetch(n: 0..1) {
     kind "brief.fetch"
     labels { read:store }

@@ -137,6 +137,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6802: { name: 'WORKFLOW_KEY', stage: 'types', severity: 'error' },
   // PT10, S166: an effect kind with no tool or two, or a tool for a kind that is no effect of the machine.
   PL6803: { name: 'WORKFLOW_TOOLS', stage: 'types', severity: 'error' },
+  // PT10, S172: a workflow whose machine declares no path property, which polyflow's admission cannot admit.
+  PL6804: { name: 'WORKFLOW_UNCHECKED', stage: 'types', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
   PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },
