@@ -1,6 +1,6 @@
 # poly v1 · Technical specification: channels, credentials, memory and routing
 
-*Cognitive Fab · October 2026 · proposal v0.1 · specification only, no code · ids `PT20` to `PT27`, continuing [`03-technical-spec.md`](../03-technical-spec.md) · requirements in [`v1-functional-spec.md`](v1-functional-spec.md) (`PF11` to `PF14`)*
+*Cognitive Fab · October 2026 · proposal v0.2 (after M6: codes moved, M8 before M7, workflows under the gate in M8) · specification only, no code · ids `PT20` to `PT27`, continuing [`03-technical-spec.md`](../03-technical-spec.md) · requirements in [`v1-functional-spec.md`](v1-functional-spec.md) (`PF11` to `PF14`)*
 
 This document fixes the syntax, lowering, runtime behaviour, formats, codes and milestones of the four v1 surfaces. Every construct lowers to constructs that already exist:
 
@@ -9,7 +9,7 @@ This document fixes the syntax, lowering, runtime behaviour, formats, codes and 
 
 Most of the standard library added here is written in poly and checked like any program. The new runtime code is in host adapters and in a few gate inputs.
 
-Codes, kernel assumptions and engine change ids are provisional until ruled. Code ranges follow PT12.2.
+Codes, kernel assumptions and engine change ids are provisional until ruled. Code ranges follow PT12.2; PL6801 to PL6804 belong to M6's workflow checks, so v1's codes start at PL6811. Sketches use the standalone syntax; every construct also gets its embedded TypeScript form, the surface M3 selected (S168).
 
 ## PT20. Shared mechanisms
 
@@ -220,9 +220,9 @@ effect refund(merchant: Principal, charge: ChargeRef, amount: int check 0..500) 
 ```
 
 - **PT22.1a** `grant` is `authorization_code pkce` or `client_credentials`. Client credentials have the service as holder, and `for` is omitted.
-- **PT22.1b** `scopes` is a finite set of provider scope names. `uses c { s… }` must name a subset of it, otherwise `PL6811 SCOPE_NOT_DECLARED`.
-- **PT22.1c** `for p` names a `Principal` parameter of the effect. An effect with `uses` on a delegated credential and no `for` is `PL6812 HOLDER_NOT_NAMED`.
-- **PT22.1d** An effect whose targets lie outside the provider's declared base addresses is `PL6813 TARGET_OUTSIDE_PROVIDER`. Each provider's base addresses are part of the adapter's declaration.
+- **PT22.1b** `scopes` is a finite set of provider scope names. `uses c { s… }` must name a subset of it, otherwise `PL6821 SCOPE_NOT_DECLARED`.
+- **PT22.1c** `for p` names a `Principal` parameter of the effect. An effect with `uses` on a delegated credential and no `for` is `PL6822 HOLDER_NOT_NAMED`.
+- **PT22.1d** An effect whose targets lie outside the provider's declared base addresses is `PL6823 TARGET_OUTSIDE_PROVIDER`. Each provider's base addresses are part of the adapter's declaration.
 
 ### PT22.2 The `Grant` machine
 
@@ -286,7 +286,7 @@ rt.handle('payments.refund', async (payload, { api }, ctx) =>
 - With `handlers: { isolation: "openshell" }`, the vault adapter runs outside the sandbox as an egress proxy. The handler's process never holds the token.
 - The handler lint (PT6.5) gains two rules:
   - an import of the vault adapter's module from a handler is `PL6401`;
-  - reading a response header the provider uses to return tokens (`set-cookie`, `authorization`) is `PL6814 TOKEN_READ_IN_HANDLER`.
+  - reading a response header the provider uses to return tokens (`set-cookie`, `authorization`) is `PL6824 TOKEN_READ_IN_HANDLER`.
 
 ### PT22.6 Revocation
 
@@ -358,7 +358,7 @@ decision answer(question: Content, context: Items) -> Reply {
   - `O = { r }`.
 
   The recipient's class comes from the step's claims or from the channel's declared default.
-- **PT23.3d** **Checking.** The flow rule is a path property over the configuration, with taint as a ghost component. A path that sends tainted content to a recipient outside its audience is `PL6821 AUDIENCE_LEAK`, with the shortest witness. AC22's variant is the seeded control: the concierge with `where owner == customer` removed.
+- **PT23.3d** **Checking.** The flow rule is a path property over the configuration, with taint as a ghost component. A path that sends tainted content to a recipient outside its audience is `PL6831 AUDIENCE_LEAK`, with the shortest witness. AC22's variant is the seeded control: the concierge with `where owner == customer` removed.
 - **PT23.3e** **Enforcement.** The gate receives the content's taint from the content store's metadata and the recipient's class and principal, and applies PT23.3c. A violation is denied `audience`.
 
 ### PT23.4 Freshness
@@ -373,7 +373,7 @@ effect note(subject: Principal, fact: Content) {
 }
 ```
 
-- **PT23.5a** `remember` writes an item to the project's `memory` source. It records the item's origin step, its provenance class (`observed`, `derived` or `verified`), its subject as owner, and the taint of the `Content` written. An item cannot be written with a lower class than its content's taint (`PL6822 TAINT_DOWNGRADE`).
+- **PT23.5a** `remember` writes an item to the project's `memory` source. It records the item's origin step, its provenance class (`observed`, `derived` or `verified`), its subject as owner, and the taint of the `Content` written. An item cannot be written with a lower class than its content's taint (`PL6832 TAINT_DOWNGRADE`).
 - **PT23.5b** `poly memory verify <item> --by <person>` promotes an item to `verified`, signed with a person key. It is not exposed over MCP.
 - **PT23.5c** Policies may require `verified` provenance for a use, for example `require items.provenance == verified else escalate`.
 
@@ -407,7 +407,7 @@ budget support {
 ```
 
 - **PT24.1a** Money is written in decimal and lowered to integer micro-units, so arithmetic is exact. Price tables are JSON files with one entry per token class. Their digests enter the certificate, and a price change is a new version.
-- **PT24.1b** `conf` and `margin` are the calibrated values of PD1.6, read through the tier's map. A tier without a calibration map is `PL6831 TIER_WITHOUT_CALIBRATION` when the route's `escalate` reads `conf` or `margin`.
+- **PT24.1b** `conf` and `margin` are the calibrated values of PD1.6, read through the tier's map. A tier without a calibration map is `PL6841 TIER_WITHOUT_CALIBRATION` when the route's `escalate` reads `conf` or `margin`.
 - **PT24.1c** A decision names its route with `route r`. A decision without a route uses its single `provider` as today (PD1).
 
 ### PT24.2 The `Route` machine
@@ -446,7 +446,7 @@ The `decision` event of PD2 gains:
 
 ### PT24.5 Swapping a tier's model
 
-The certificate records each tier's provider, model id and calibration map digest. `poly deploy` refuses a version where a tier's model changed and its map did not, with `PL6832 MODEL_WITHOUT_REFITTED_MAP`. This is PD3.2's rule, applied per tier.
+The certificate records each tier's provider, model id and calibration map digest. `poly deploy` refuses a version where a tier's model changed and its map did not, with `PL6842 MODEL_WITHOUT_REFITTED_MAP`. This is PD3.2's rule, applied per tier.
 
 ### PT24.6 Work orders
 
@@ -508,7 +508,7 @@ const rt = await load('./.poly/build', {
 ```
 
 - Adapters are named in source and bound here. A source name with no bound adapter refuses the load, and the certificate's adapter digests must match.
-- Adapter configuration names credentials, never values. The runtime refuses an adapter configuration that contains a string matching a known token format (`PL6815 SECRET_IN_CONFIG`, at load).
+- Adapter configuration names credentials, never values. The runtime refuses an adapter configuration that contains a string matching a known token format (`PL6825 SECRET_IN_CONFIG`, at load).
 - `recordedProvider` replays answers and usage from fixtures. Every test of M8 to M11 uses it, so no test calls a model (PA0.5).
 
 ## PT27. Codes, engine changes and plan
@@ -518,17 +518,17 @@ const rt = await load('./.poly/build', {
 | Code | Meaning | Section |
 |---|---|---|
 | `PL1209 CONTENT_NOT_OPAQUE` | `Content` used other than by storage, passing or equality. | PT20.1 |
-| `PL6801 CHANNEL_KIND_UNKNOWN` | A channel kind with no standard library module. | PT21.1a |
-| `PL6802 THREAD_KEY_INVALID` | A thread template over fields the adapter does not declare. | PT21.1b |
-| `PL6811 SCOPE_NOT_DECLARED` | `uses` names a scope its credential does not declare. | PT22.1b |
-| `PL6812 HOLDER_NOT_NAMED` | A delegated credential used with no `for`. | PT22.1c |
-| `PL6813 TARGET_OUTSIDE_PROVIDER` | Targets outside the provider's base addresses. | PT22.1d |
-| `PL6814 TOKEN_READ_IN_HANDLER` | A handler reads a token-bearing header. | PT22.5 |
-| `PL6815 SECRET_IN_CONFIG` | A token-shaped string in adapter configuration. | PT26 |
-| `PL6821 AUDIENCE_LEAK` | Tainted content can reach a recipient outside its audience. | PT23.3d |
-| `PL6822 TAINT_DOWNGRADE` | A memory item written below its content's taint. | PT23.5a |
-| `PL6831 TIER_WITHOUT_CALIBRATION` | A route reads `conf` or `margin` on a tier with no map. | PT24.1b |
-| `PL6832 MODEL_WITHOUT_REFITTED_MAP` | A tier's model changed without a new map. | PT24.5 |
+| `PL6811 CHANNEL_KIND_UNKNOWN` | A channel kind with no standard library module. | PT21.1a |
+| `PL6812 THREAD_KEY_INVALID` | A thread template over fields the adapter does not declare. | PT21.1b |
+| `PL6821 SCOPE_NOT_DECLARED` | `uses` names a scope its credential does not declare. | PT22.1b |
+| `PL6822 HOLDER_NOT_NAMED` | A delegated credential used with no `for`. | PT22.1c |
+| `PL6823 TARGET_OUTSIDE_PROVIDER` | Targets outside the provider's base addresses. | PT22.1d |
+| `PL6824 TOKEN_READ_IN_HANDLER` | A handler reads a token-bearing header. | PT22.5 |
+| `PL6825 SECRET_IN_CONFIG` | A token-shaped string in adapter configuration. | PT26 |
+| `PL6831 AUDIENCE_LEAK` | Tainted content can reach a recipient outside its audience. | PT23.3d |
+| `PL6832 TAINT_DOWNGRADE` | A memory item written below its content's taint. | PT23.5a |
+| `PL6841 TIER_WITHOUT_CALIBRATION` | A route reads `conf` or `margin` on a tier with no map. | PT24.1b |
+| `PL6842 MODEL_WITHOUT_REFITTED_MAP` | A tier's model changed without a new map. | PT24.5 |
 
 New reserved reject reasons (PL1207): `uncited`, `route-exhausted`. New gate deny reasons: `insufficient-scope`, `credential-unavailable`, `outside-mandate`, `audience`, `budget`, `stale-items`.
 
@@ -543,17 +543,17 @@ No change to polyrun, polygraph, polyflow or polycheck is needed. If polyaxion c
 
 ### PT27.3 Milestones
 
-PT18 gains four milestones after M7. Each needs the previous one closed.
+PT18 gains four milestones, M8 to M11. They follow M6 and come before M7, by the owner's ruling (Q6). Each needs the previous one closed.
 
 | Milestone | Scope | Gate |
 |---|---|---|
-| **M8 · Channels** | `Content`; `channel` grammar on both surfaces; the five conversation machines; ingress; channel adapters for email, WhatsApp, SMS, Slack and webhook, each tested against recorded provider traffic; generated configurations; proposal fields `channel` and `taint` (class only) | AC14 to AC17. Every conversation machine is clean, deadlock-free, and proves its `never` statements. |
+| **M8 · Channels** | Workflows moved onto `poly-runtime`, so every work order crosses the gate (S164); `Content`; `channel` grammar on both surfaces; the five conversation machines; ingress; channel adapters for email, WhatsApp, SMS, Slack and webhook, each tested against recorded provider traffic; generated configurations; proposal fields `channel` and `taint` (class only) | AC14 to AC17. Every conversation machine is clean, deadlock-free, and proves its `never` statements. AC5's workflow runs on `poly-runtime` with each work order gated and journaled, and its certificate no longer lists it as `ungated`. |
 | **M9 · Credentials** | PD6 ruled in (freshness and mandates, K12); `credential` and `uses`; `Grant`; vault adapters (a development keychain and a KMS-wrapped store); the authenticated capability; the lint rules; `poly grant` | AC18 to AC21. The canary scan is part of the gate's standing tests. |
-| **M10 · Memory** | `audience`, `source`, `retrieve`, `Items`; taint as a ghost component in poly-ref; citations; `remember`; `poly memory verify`; `poly forget`; source adapters for Postgres and a document index | AC22 to AC24. The flow rule's seeded control gives `PL6821` with the shortest witness. |
+| **M10 · Memory** | `audience`, `source`, `retrieve`, `Items`; taint as a ghost component in poly-ref; citations; `remember`; `poly memory verify`; `poly forget`; source adapters for Postgres and a document index | AC22 to AC24. The flow rule's seeded control gives `PL6831` with the shortest witness. |
 | **M11 · Routing and budgets** | `route`, `budget`; `Route` and `Budget`; reservations; `poly cost`; tier swap rule | AC25 and AC26, with all provider calls recorded. |
 | **v1 release** | The concierge example, both surfaces | AC27. The full gate runs from a clean build. |
 
-M8 can start after M6. M8 does not need M7, and M7 does not need M8. The order of M7 and M8 is the owner's call (Q6).
+M8 starts now that M6 is closed. M7 (feedback) follows M11 (Q6, ruled).
 
 ### PT27.4 Limits
 
@@ -569,7 +569,7 @@ M8 can start after M6. M8 does not need M7, and M7 does not need M8. The order o
 3. **Q3.** Is a total order of audiences enough for v1, or do projects need a partial order (for example `finance` and `legal` incomparable)?
 4. **Q4.** Should `forget` also cover derived memory items whose taint names the subject as an owner, or only items whose subject is the owner?
 5. **Q5.** Which providers ship as reference adapters, and which are left to users through the adapter interface?
-6. **Q6.** M7 (feedback) and M8 (channels) are independent. Which comes first?
+6. **Q6. Ruled:** M8 to M11 come before M7.
 7. **Q7.** Should the concierge tasks become the harder tasks of the second, pre-registered experiment proposed after M3?
 
 ## Conclusion

@@ -1,6 +1,6 @@
 # poly v1 · Functional specification: channels, credentials, memory and routing
 
-*Cognitive Fab · October 2026 · proposal v0.1 · specification only, no code · ids `PF11` to `PF14`, continuing [`01-functional-spec.md`](../01-functional-spec.md) · the technical counterpart is [`v1-technical-spec.md`](v1-technical-spec.md)*
+*Cognitive Fab · October 2026 · proposal v0.2 · specification only, no code · ids `PF11` to `PF14`, continuing [`01-functional-spec.md`](../01-functional-spec.md) · the technical counterpart is [`v1-technical-spec.md`](v1-technical-spec.md)*
 
 ## 0. Scope and status
 
@@ -34,7 +34,7 @@ Each surface follows the pattern that PD1 (typed decisions) and PD5 (verified cl
 | PF13 | Governed memory | Retrieving and remembering facts that carry their source, their age and who may see them | PD5, PD6.1 freshness, Polyaxion taint | M10 |
 | PF14 | Routing and budgets | Choosing a model tier by recorded numbers, and never crossing a cost cap | PD1, PD2, PD3 | M11 |
 
-v1 is M0 to M7 of PT18 plus M8 to M11 below. Nothing here is built before M6 closes, and each surface is ruled on separately.
+v1 is M0 to M7 of PT18 plus M8 to M11 below. M6 is closed, and M8 comes next, before M7. Each surface is ruled on separately.
 
 ## 1. The running example
 
