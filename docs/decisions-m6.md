@@ -49,6 +49,18 @@
 
 **Gate reports** include the per-file timings: the ten slowest files and the suite's total.
 
+## Step 9, the gate after it, and the closing gate
+
+**Step 9 accepted.** The DeepSeek Harness half is not waited for: its plugin API is not declared stable, so per S170 it is listed as waiting in the M6 record, and M6 closes on the Claude Code half.
+
+**The gate after step 9 accepted** (0b0a29e: 1,432 tests, 1,427 passed, 0 failed, 1 skipped, 4 waiting; 36 min 19 s). Its times rose because another session's economy simulation ran on the same machine from 18:58, during the last part of the suite and all of `test/after/` (the account check's child runs took 964 s and 998 s, against 231 s alone). Nothing is attributed to code until the closing gate gives an idle-machine comparison, file by file.
+
+**The closing gate** runs only when the machine is otherwise idle: no other session's simulation or gate is running, checked and recorded first. It is compared file by file with the gate after step 9.
+
+**The timing writer needs no guard.** `.poly/` is build output, not experiment evidence, and `npm test` must keep working on `main`, where the tree guard refuses to run. `test/reporters/file-times.mjs` writes nothing itself; `node --test` writes its output to `.poly/file-times.json` and `.poly/file-times-after.json`.
+
+**The provider fixes have tests** (196340d). The rule bars a real model and a real `claude` from tests, not tests of the launcher: a stand-in `claude` (`claude.cmd` on Windows) on a PATH the test builds echoes its stdin, and exits early in a second case. Both tests failed against the provider before 4ecddf8 and pass now; with a stand-in key variable present, the stand-in is never started.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.
