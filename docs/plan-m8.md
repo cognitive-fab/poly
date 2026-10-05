@@ -370,6 +370,36 @@ S178 is ruled with the PS5.2 extension written and ruled before any code. The te
 - **Seeded faults, each caught by translation validation with `PL2501` on `window.poly`:** `drop-never` (missing from the lowered property module), `invert-never-while`, `drop-never-filter`, and `never-post-state` (while evaluated on the post-state: `Close` sends and closes, which the lowered property then refuses).
 - **The regression check.** The 147 measured files are identical in verdict, diagnostic codes and every state and transition count; the eight new files since S176 are steps 4's and 5's own (`window.poly` and `chat-ruled-out.poly` CLEAN, `chat-confirmed.poly` FINDINGS by design). The full suite: 1,553 tests, 1,547 pass, 1 skipped, 4 waiting, and 1 failure, the m3-environment crash counted under load (`decisions-m8.md`).
 
+### The code review of M8a
+
+Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workflow tools, `poly run --mcp`, approvals and the store lock; B: `use`; C: `Content`; D: `never`), and each reproduced every finding with a script under `.poly/review-m8a-a` to `review-m8a-d`. They found 22. Twenty-one are fixed, each with a test in `test/review-m8a-a.test.mjs` to `review-m8a-d.test.mjs` that failed on the tree before its fix; one (B-F6) is a question for the owner.
+
+| Finding | What was wrong | Fix |
+|---|---|---|
+| A-F1 | a signer inside the project, named by its 8.3 short path, passed S188's check | paths compared through `realpathSync.native`, which expands short names |
+| A-F2 | one approvals entry that could not be read (a dangling junction, a file denied by an ACL) stopped every pass, with nothing journaled, and `poly run --mcp` could not start | the entry is refused `not-a-record` and journaled, the pass goes on; an entry that cannot be moved is journaled once and passed over |
+| A-F3 | a second runtime that named the owned store another way (its short name, a hard link) took a lock of its own and wrote to its own log | the store is opened and locked by its one real path; a store file with a second name is refused |
+| B-F1 | a used module the checker refuses was composed into a configuration that read CLEAN | its errors refuse the check that uses it, each at its own line |
+| B-F2 | module `b`'s spawn of `b.c.X` looked up machine `X` of module `c` | the spawner's module is stripped only when a machine's name remains |
+| B-F3 | two files declaring the checked module were not refused when another module used it | `PL1002`, naming both files |
+| B-F4 | a field whose enum another module declares was compared in the view module's namespace | read only with `is`, in its own module's types; any other use is `PL0901` until S190 |
+| B-F5 | a dotted module's machine could not name its group of detached instances | the whole member chain names the group, in the checker and in poly-ref |
+| C-F1 | a `map` of `Content` in a record field or a union payload escaped `PL1209`, and check counted too few representatives (CLEAN on a machine with a reachable violation) | `PL1209` through maps too |
+| C-F2 | an effect handler's reply could forge `$content` (and `$claims`, `$lineage`) on its completion | the reserved keys are dropped from a reply |
+| C-F3 | translation validation probed the content row only with `none`, which the runtime never marks | the probe's data names a body; the broken lowering `content-row-on-none` is in the explicit list and caught |
+| C-F4 | creation data outside its type was journaled as a step | refused before any step (S140), as at dispatch |
+| C-F5 | `match`, `is`, a bool position and a Content mixed with a string were `PL1201` | `PL1209`, as PS1.4a names |
+| C-F6 | two bodies with lone surrogates shared a digest | such a body is refused |
+| D-F1 | an unconstrained witness ruled out by a configuration hid a constrained one (a silent clean) | the never's finding is a constrained witness where one exists; only a finding with no constrained witness can be ruled out |
+| D-F2 | `emits` on an effect matched every effect of its kind | `PL1201` when two effects share the kind |
+| D-F3 | a timer cancelled before it fired still counted as asking for its completion | a cancel withdraws its timer |
+| D-F4 | an action that both an effect and a timer complete had one asker, the last declared | every asker counts |
+| D-F5 | a message sent through a `let`, map or record was not seen as sent | any send of the action by a machine that can hold its address is a message |
+| D-F6 | poly-ref read a filter constant named like a field as the field, and `T.C` was refused | a constant is read with no state; `T.C` is a constant |
+| D-F7 | two findings ruled out left the stage FINDINGS with none listed | the stage's verdict over what is left |
+
+**For the owner.** B-F6: `use m.M` makes every machine of `m` nameable, as PT as built says; the reviewer read the ruled proposal ("`use m.M` (one machine) … admits `m.M` and nothing else") as admitting that machine alone. D-F2: PS5.2 says `k` is "an effect kind", PT2.2 says it is an effect's name; the code takes the name and now refuses a name whose kind is shared. Both wait for a ruling, and nothing was changed beyond the refusal.
+
 ## Conclusion
 
 M8 first closes the one gap M6 left open: a workflow's work orders will cross the gate and enter the ledger like every other effect, served by poly over the same tools polyflow serves today, with polyflow kept only as the oracle AC5 compares against. Channels then follow PT21 with three changes proposed:

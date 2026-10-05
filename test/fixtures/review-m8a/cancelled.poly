@@ -1,0 +1,40 @@
+module cancelled
+
+enum Phase { Idle, Armed, Disarmed, Fired }
+
+service machine Alarm {
+  state { phase : Phase = Idle }
+
+  action Arm()
+  action Disarm()
+  action Ring()
+
+  on Arm {
+    require phase is Idle else reject "busy"
+    phase' = Armed
+    after 1m -> Ring() as t
+  }
+  on Disarm {
+    require phase is Armed else reject "idle"
+    phase' = Disarmed
+    cancel t
+  }
+  on Ring {
+    require phase is Armed || phase is Disarmed else reject "idle"
+    phase' = Fired
+    emit bell(loud: true)
+  }
+
+  effect bell(loud: bool) {
+    kind "alarm.bell"
+    labels { egress:external }
+  }
+
+  never no-bell-when-disarmed: emit bell while phase is Disarmed
+}
+
+configuration solo {
+  alarm : Alarm
+  inputs { alarm.Arm, alarm.Disarm }
+  bounds { transit 1 }
+}

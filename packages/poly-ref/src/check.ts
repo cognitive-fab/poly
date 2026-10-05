@@ -77,7 +77,9 @@ export interface CheckOptions {
  * completion), or a message that a machine of the program sends to this one and no earlier step of the path sent.
  */
 export function unconstrained(module: Module, M: RMachine, path: Edge<State>[], program: Module[] = []): boolean {
-  const asks = new Map<string, (i: Intent) => boolean>();
+  // Review D-F4: one action may complete several things (an effect's outcome and a timer); any of them asks for it.
+  const asks = new Map<string, ((i: Intent) => boolean)[]>();
+  const ask = (a: string, f: (i: Intent) => boolean) => asks.set(a, [...(asks.get(a) ?? []), f]);
   const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === M.name);
   if (!decl) return false;
   const walk = (body: A.Stmt[], visit: (s: A.IntentStmt) => void): void => {
@@ -91,40 +93,56 @@ export function unconstrained(module: Module, M: RMachine, path: Edge<State>[], 
   for (const it of decl.items) {
     if (it.kind === 'EffectDecl' || it.kind === 'Decision') {
       const kind = it.kind === 'EffectDecl' ? M.effects.get(it.name)?.kind : M.decisions.get(it.name)?.kind;
-      for (const o of it.items) if (o.kind === 'EffOutcome' && kind) asks.set(o.action, (i) => i.type === 'effect' && i.kind === kind);
+      for (const o of it.items) if (o.kind === 'EffOutcome' && kind) ask(o.action, (i) => i.type === 'effect' && i.kind === kind);
     }
     if (it.kind === 'Handler') walk(it.body, (s) => {
-      if (s.op === 'after') asks.set(s.target, (i) => i.type === 'timer' && i.action === s.target);
+      if (s.op === 'after') ask(s.target, (i) => i.type === 'timer' && i.action === s.target);
       const c = s.op === 'spawn' ? s.extra.indexOf('complete') : -1;
-      if (c >= 0) { const a = s.extra[c + 1]; asks.set(a, (i) => i.type === 'spawn' && i.onComplete === a); }
+      if (c >= 0) { const a = s.extra[c + 1]; ask(a, (i) => i.type === 'spawn' && i.onComplete === a); }
     });
   }
-  // A message to M: the target of a send whose address is a Ref<M> field or parameter of the sender, or self in M.
+  // A message to M: the target of a send in M itself (to self), or in a machine that can hold an address of M: a
+  // Ref<M> anywhere in its fields' or actions' types. The address expression is not resolved (review D-F5): a let, a
+  // map entry or a record field holding the address sends to M as a field does.
   for (const mod of [module, ...program]) {
     for (const x of mod.decls) {
       if (x.kind !== 'Machine') continue;
-      const refTo = (t: A.TypeExpr | undefined) => t?.kind === 'TRef' && t.machine[t.machine.length - 1] === M.name && (t.machine.length === 1 ? mod.name === module.name : t.machine.slice(0, -1).join('.') === module.name);
+      const refTo = (t: A.TypeExpr | undefined): boolean => !!t && ((t.kind === 'TRef' && t.machine[t.machine.length - 1] === M.name && (t.machine.length === 1 ? mod.name === module.name : t.machine.slice(0, -1).join('.') === module.name)) || (t.kind === 'TMap' && refTo(t.value)));
+      const decls = new Map(mod.decls.filter((d) => d.kind === 'TypeDecl').map((d) => [(d as { name: string }).name, d]));
+      // Whether a type can hold an address of M: a Ref<M> in it, through maps, records and payloads.
+      const holds = (t: unknown, seen = new Set<string>()): boolean => {
+        if (!t || typeof t !== 'object') return false;
+        if (Array.isArray(t)) return t.some((y) => holds(y, seen));
+        const n = t as { kind?: string; name?: string };
+        if (n.kind === 'TRef') return refTo(n as A.TypeExpr);
+        if (n.kind === 'TName' && n.name && decls.has(n.name) && !seen.has(n.name)) { seen.add(n.name); return holds(decls.get(n.name), seen); }
+        return Object.entries(n).some(([k, v]) => k !== 'span' && holds(v, seen));
+      };
+      const canName = (mod === module && x.name === M.name) || x.fields.some((f) => holds(f.type)) || x.items.some((a) => a.kind === 'Action' && a.params.some((p) => holds(p.type)));
       for (const h of x.items) {
         if (h.kind !== 'Handler') continue;
-        const act = x.items.find((a): a is A.Action => a.kind === 'Action' && a.name === h.action);
         walk(h.body, (s) => {
-          if (s.op !== 'send' || s.to?.kind !== 'Name' || asks.has(s.target)) return;
-          const n = s.to.name;
-          const toM = n === 'self' ? mod === module && x.name === M.name : refTo(x.fields.find((f) => f.name === n)?.type) || refTo(act?.params.find((p) => p.name === n)?.type);
-          if (toM) asks.set(s.target, (i) => i.type === 'send' && i.action === s.target);
+          if (s.op !== 'send' || !canName || !M.actions.some((a) => a.name === s.target)) return;
+          if (s.to?.kind === 'Name' && s.to.name === 'self' && !(mod === module && x.name === M.name)) return;
+          ask(s.target, (i) => i.type === 'send' && i.action === s.target);
         });
       }
     }
   }
   const issued: Intent[] = [];
   for (const e of path) {
-    const ask = asks.get(e.label.action);
-    if (ask) {
-      const k = issued.findIndex(ask);
+    const askers = asks.get(e.label.action);
+    if (askers) {
+      const k = issued.findIndex((i) => askers.some((f) => f(i)));
       if (k < 0) return true;
       issued.splice(k, 1);
     }
-    if (e.label.verdict.kind === 'accepted') issued.push(...e.label.effects);
+    if (e.label.verdict.kind !== 'accepted') continue;
+    for (const i of e.label.effects) {
+      // Review D-F3: a cancel withdraws its timer, and a timer set again replaces the one under its key (PT6.3).
+      if (i.type === 'cancel' || i.type === 'timer') { const j = issued.findIndex((x) => x.type === 'timer' && x.key === i.key); if (j >= 0) issued.splice(j, 1); }
+      if (i.type !== 'cancel') issued.push(i);
+    }
   }
   return false;
 }
@@ -162,13 +180,17 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   }
   // Step and reject properties, over edges in BFS order of their source.
   for (const p of M.stepProperties) {
-    const e = g.edges.find((x) => x.label.verdict.kind === 'accepted' && evaluate(p.expr, {
+    const violates = (x: Edge<State>) => x.label.verdict.kind === 'accepted' && evaluate(p.expr, {
       M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action, intents: x.label.effects,
-    }) !== true);
-    if (!e) continue;
+    }) !== true;
+    const first = g.edges.find(violates);
+    if (!first) continue;
+    // PS5.2a, PS4.4: a never's witness that needs an environment nothing provided is marked, for a configuration to
+    // judge. Review D-F1: only when every violating step's witness needs one; a constrained witness is the finding.
+    const loose0 = (x: Edge<State>) => M.nevers.has(p.name) && unconstrained(module, M, [...pathTo(g, x.from), x], opts.program ?? []);
+    const e = M.nevers.has(p.name) ? g.edges.find((x) => violates(x) && !loose0(x)) ?? first : first;
     const path = [...pathTo(g, e.from), e];
-    // PS5.2a, PS4.4: a never's witness that needs an environment nothing provided is marked, for a configuration to judge.
-    const loose = M.nevers.has(p.name) && unconstrained(module, M, path, opts.program ?? []);
+    const loose = loose0(e);
     const f = finding('PL3002', p.id, `${M.nevers.has(p.name) ? 'never' : 'step property'} ${p.name} is violated by ${e.label.action}${loose ? '; the witness takes a step nothing in its environment asked for (environment: unconstrained, PS4.4)' : ''}`, trace(path), { property: p.name, state: g.states[e.from] });
     if (loose) f.witness!.environment = 'unconstrained';
     findings.push(f);

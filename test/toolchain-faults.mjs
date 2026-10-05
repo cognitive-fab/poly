@@ -37,6 +37,8 @@ export const FAULT_SOURCES = {
   'skip-content': ['conformance/m8/content/notes.poly'],
   // PS3.2's first row order (S180 ruling): the content row lowered for an action with no handler.
   'content-before-unhandled': ['conformance/m8/content/unhandled.poly'],
+  // Review C-F3: the content row fired only on none, which the runtime never marks.
+  'content-row-on-none': ['conformance/m8/content/notes.poly'],
   // PS5.2a, S178: a machine's never statement, lowered to a step property over the step's intents.
   'drop-never': ['conformance/m8/never/window.poly'],
   'invert-never-while': ['conformance/m8/never/window.poly'],

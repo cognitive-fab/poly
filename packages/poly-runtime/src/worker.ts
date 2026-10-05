@@ -129,7 +129,9 @@ function mapCompletion(hook: { data?: Record<string, unknown>; map?: Record<stri
     }
     return out;
   }
-  return { ...fallback, ...out };
+  // Review C-F2, S155: the reserved keys are the runtime's to write; a handler's reply never supplies one.
+  const { $content: _c, $claims: _k, $lineage: _l, ...rest } = fallback;
+  return { ...rest, ...out };
 }
 
 export class EffectWorker {

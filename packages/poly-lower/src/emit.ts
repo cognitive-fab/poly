@@ -124,6 +124,7 @@ export function emitsCall(effect: string, fields: A.EmitsField[], cx: Cx): strin
     if (v.kind === 'Int' || v.kind === 'Bool') return String(v.value);
     if (v.kind === 'Unary' && v.op === '-' && v.arg.kind === 'Int') return String(-v.arg.value);
     if (v.kind === 'Name') return v.name === 'none' ? 'null' : q(v.name);
+    if (v.kind === 'Member') return q(v.prop);
     throw new Error('poly-lower: a filter value that is not a constant reached the lowering (the checker must refuse it)');
   };
   return `__emits(pre, action, ${cx.dataVar}, post, ${q(effectKind(eff))}, { ${fields.map((f) => `${q(f.name)}: ${constant(f.value)}`).join(', ')} })`;
@@ -421,7 +422,10 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
         // S60, PT6.4: createInstance, with the creation action as the child's first message; no wiring.
         const spec = childSpec(s, moduleOf(cx));
         // S176: a detached child may be a used module's machine; its id is spelled m.M either way.
-        const child = machineNamed(cx, spec.machine.startsWith(`${moduleOf(cx)}.`) ? spec.machine.slice(moduleOf(cx).length + 1) : spec.machine);
+        // Review B-F2: the spawner's own module is stripped only when what remains is a machine's name, so module b's
+        // spawn of b.c.X names machine X of module b.c, not of module c.
+        const own = `${moduleOf(cx)}.`;
+        const child = machineNamed(cx, spec.machine.startsWith(own) && !spec.machine.slice(own.length).includes('.') ? spec.machine.slice(own.length) : spec.machine);
         const parts = [`kind: "createInstance"`, `machineId: ${q(spec.machine)}`, `childKey: ${q(spec.key)}`];
         if (spec.create) {
           const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === spec.create);

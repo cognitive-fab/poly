@@ -1,0 +1,24 @@
+module shadow
+
+enum Kind { Loud, Quiet }
+enum Phase { Idle, Done }
+
+machine M {
+  state {
+    phase : Phase = Idle
+    Loud : Kind = Quiet
+  }
+  terminal phase is Done
+  action Go()
+  on Go {
+    require phase is Idle else reject "done"
+    phase' = Done
+    Loud' = Loud
+    emit post(k: Kind.Quiet)
+  }
+  effect post(k: Kind) {
+    kind "s.post"
+    labels { egress:external }
+  }
+  never no-loud: emit post(k: Loud)
+}

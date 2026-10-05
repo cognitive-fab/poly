@@ -571,6 +571,7 @@ M8 starts now that M6 is closed. M7 (feedback) follows M11 (Q6, ruled).
 5. **Q5.** Which providers ship as reference adapters, and which are left to users through the adapter interface?
 6. **Q6. Ruled:** M8 to M11 come before M7.
 7. **Q7.** Should the concierge tasks become the harder tasks of the second, pre-registered experiment proposed after M3?
+8. **Q8.** Should admitting or changing a policy require a person's signature, as accepting a finding and approving an escalation already do (PF9.6, PT12.5)? Agents are expected to write policies, and an agent may write the policy that governs its own effects. The proposal: an agent drafts the policy, the checker proves it, and a person signs it before admission; an unsigned policy change is refused at load. To be ruled before M9, since delegated credentials make policies more powerful.
 
 ## Conclusion
 

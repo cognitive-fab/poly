@@ -215,6 +215,13 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   opts = { ...opts, uses: uses.program };
   const checked = checkModule(module, { program: uses.program });
   report.diagnostics.push(...checked.diagnostics);
+  // Review B-F1: a used module the checker refuses refuses this check too, with its own errors, each at its own line;
+  // poly-ref would otherwise explore machines the compiler rejects, and a configuration over them could read CLEAN.
+  for (const m of uses.program) {
+    if (m === module) continue;
+    const errors = checkModule(m, { program: uses.program }).diagnostics.filter((d) => d.severity === 'error');
+    report.diagnostics.push(...errors.map((d) => ({ ...d, message: `in module ${m.name}, which this program uses: ${d.message}` })));
+  }
   report.effectKinds = [...checked.machines.values()].flatMap((f) => [...f.effects.values()].map((e) => ({ kind: effectKind(e), signature: effectSignature(e), effect: `${f.machine.name}.${e.name}`, line: e.span?.line, col: e.span?.col })));
   const refused = report.diagnostics.some((d) => d.severity === 'error');
   const engines = report.engines;
@@ -436,12 +443,13 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     }
   }
   const merged = mergeFindings(stage2, ref.findings, new Set(mc.instance.refOnly.map((r) => r.property)));
-  // PS5.2a, PS4.4: a never's witness that poly-ref marks environment: unconstrained is reported with poly-ref's trace,
-  // the one that was marked, so that a configuration can confirm it or rule it out.
+  // PS5.2a, PS4.4: a never's finding is reported with poly-ref's witness, the one judged for its environment: a
+  // constrained one where any exists (review D-F1), else one marked environment: unconstrained, for a configuration to
+  // confirm or rule out. polygraph's agreement on the property stays in its confirmation above.
   for (const [k, d] of merged.entries()) {
     if (d.code !== 'PL3002' || !d.property || !ref.model.nevers.has(d.property)) continue;
     const r = ref.findings.find((f) => f.code === 'PL3002' && f.property === d.property);
-    if (r?.witness?.environment === 'unconstrained' && d !== r) merged[k] = r;
+    if (r && d !== r) merged[k] = r;
   }
   STAGE2.set(mc, merged);
   mc.diagnostics.push(...merged);
@@ -730,7 +738,8 @@ function ruleOut(report: CheckReport, module: Module): void {
       (mc.ruledOut ??= []).push({ property: d.property, configurations: including.map((c) => c.configuration), witness: d.witness });
       const own = STAGE2.get(mc);
       const stage = mc.stages.find((s) => s.stage === 'model-check');
-      if (own && stage) stage.verdict = verdictOf(own.filter((x) => x !== d));
+      // Review D-F7: over what is left, so a second finding ruled out is not counted again.
+      if (own && stage) stage.verdict = verdictOf(own.filter((x) => mc.diagnostics.includes(x)));
     }
   }
 }

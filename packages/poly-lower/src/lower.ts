@@ -18,7 +18,7 @@ export interface LowerOptions {
   program?: A.Module[];
 }
 
-export type Fault = 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
@@ -105,6 +105,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const acceptors: string[] = [];
   // PS3.2 row 5 (S180): the actions whose data can carry a Content, for the content row in the first acceptor.
   const contentful = opts.fault === 'skip-content' ? [] : lowerable.filter((a) => carriesContent(a, env));
+  // The fault content-row-on-none fires the row only when the first Content parameter is none, which the runtime never marks.
+  const onNone = (a: A.Action) => (opts.fault === 'content-row-on-none' ? ` && proposal[${JSON.stringify(a.params.find((p) => tyOfTypeExpr(p.type, env).k === 'content')?.name ?? '')}] === null` : '');
   if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length || claimed.size || contentful.length) {
     const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2. It runs for handled actions only: no other is an intent (S35).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
     if (terminal && opts.fault !== 'skip-terminal') lines.push(`      if (TERMINAL(model)) return reject('terminal');`);
@@ -123,7 +125,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
       lines.push(`      if (action === ${JSON.stringify(name)} && !${claimsOkText}(proposal.$claims, ${JSON.stringify(spec)})) return reject('claims-unverified');`);
     }
     // PS3.2's content row (S180): after the claims row and before the guards, which are h_a's (polywatch muvf62zx-3c89f81a).
-    for (const a of contentful) lines.push(`      if (action === ${JSON.stringify(a.name)} && proposal.$content === 'missing') return reject('content-missing');`);
+    for (const a of contentful) lines.push(`      if (action === ${JSON.stringify(a.name)} && proposal.$content === 'missing'${onNone(a)}) return reject('content-missing');`);
     if (guards.length) {
       for (const g of guards) lines.push(`      if (${expr(g.cond, stateCx)}) return reject(${JSON.stringify(g.reason)});`);
     }
@@ -140,7 +142,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     // PS3.2, S180: a Content that names no body in the store is marked by the runtime under $content. The first acceptor
     // rejects it before the guards; the row is repeated here, as the claims row is, since this acceptor runs anyway
     // (A-F2). The fault skip-content drops it in both places.
-    if (carriesContent(a, env) && opts.fault !== 'skip-content') body.unshift(`      if (proposal.$content === 'missing') return reject('content-missing');`);
+    if (carriesContent(a, env) && opts.fault !== 'skip-content') body.unshift(`      if (proposal.$content === 'missing'${onNone(a)}) return reject('content-missing');`);
     if (h.by) body.unshift(...(opts.fault === 'skip-claims' ? [] : [`      if (!${claimsOkText}(proposal.$claims, ${JSON.stringify(claimed.get(a.name))})) return reject('claims-unverified');`]), `      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims };`);
     // S55: each map the handler writes entry by entry gathers its entries in an accumulator.
     for (const f of mapUpdated(h.body)) body.unshift(`      let __m_${f} = model[${JSON.stringify(f)}];`);

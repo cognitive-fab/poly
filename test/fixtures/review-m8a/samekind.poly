@@ -1,0 +1,24 @@
+module samekind
+
+enum Level { Low, High }
+
+machine M {
+  state { done : bool = false }
+  terminal done
+  action Go()
+  on Go {
+    require !done else reject "done"
+    done' = true
+    emit notify(level: High)
+  }
+  effect alert(level: Level) {
+    kind "ops.page"
+    labels { egress:external }
+  }
+  effect notify(level: Level) {
+    kind "ops.page"
+    labels { egress:external }
+  }
+  never no-alert: emit alert
+  never no-high-alert: emit alert(level: High)
+}

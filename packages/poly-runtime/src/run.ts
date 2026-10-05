@@ -6,8 +6,8 @@
 // is information only: the owner's process id and start time, for the journal and for the error text. The store must
 // be on a local disk; OS file locks are unreliable on network shares. No key is read from the environment.
 import { createPrivateKey, createPublicKey } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { parseManifest, type RunConfig } from '@poly/core';
 import { load, type PolyRuntime } from './runtime.js';
@@ -29,9 +29,24 @@ export interface LoadedRun {
 
 /** Whether a path, resolved through any link, lies inside the directory. */
 function inside(dir: string, path: string): boolean {
-  const real = (p: string) => { try { return realpathSync(p); } catch { return resolve(p); } };
+  // Review A-F1: the native call expands 8.3 short names too, so one file has one spelling here.
+  const real = (p: string) => { try { return realpathSync.native(p); } catch { return resolve(p); } };
   const rel = relative(real(dir), real(path));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * Review A-F3, S174: the store's one spelling, so that its lock and its write-ahead log, both named after the path, are
+ * the same for every process: the real path, 8.3 names expanded, links followed. A store file with a second name (a hard
+ * link) is refused, since no spelling would then be the only one.
+ */
+function canonicalStore(store: string): string {
+  mkdirSync(dirname(store), { recursive: true });
+  const real = join(realpathSync.native(dirname(store)), basename(store));
+  if (!existsSync(real)) return real;
+  const s = statSync(real);
+  if (s.nlink > 1) throw new RunConfigError(`the store ${real} has ${s.nlink} names (hard links); one store has one name, so that its lock and its log are one (S174)`);
+  return realpathSync.native(real);
 }
 
 /** The lock file's record: who owns the store, for the journal and the error text only. */
@@ -88,7 +103,7 @@ export async function loadRun(project: string, opts: { now?: () => number } = {}
   const dir = resolve(project);
   const run = runConfigOf(dir);
   const certificate = resolve(dir, run.certificate ?? '.poly/certificate.json');
-  const store = resolve(dir, run.store ?? '.poly/run/store.sqlite');
+  const store = canonicalStore(resolve(dir, run.store ?? '.poly/run/store.sqlite'));
   const approvals = resolve(dir, run.approvals ?? 'approvals');
   // Trust: public keys only. A private key here is refused, and its contents are not shown.
   const trust: Record<string, string> = {};

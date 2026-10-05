@@ -11,7 +11,7 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, type Verifier } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -91,6 +91,8 @@ export class RefusedDispatch extends Error {
 
 export class PolyRuntime {
   readonly handlers = new Map<string, Handler>();
+  /** Review A-F2: approvals entries refused or applied but not movable, journaled once and passed over since. */
+  private readonly unmovable = new Set<string>();
   readonly worker: EffectWorker;
   /** Review B5: whether a gate was given at load; only then are recorded gate decisions recomputed. */
   readonly gateGiven: boolean;
@@ -270,14 +272,21 @@ export class PolyRuntime {
   async takeApprovals(dir: string): Promise<{ file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[]> {
     const out: { file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[] = [];
     let names: string[];
-    try { names = readdirSync(dir).filter((f) => f.endsWith('.json') && statSync(join(dir, f)).isFile()).sort(); } catch { return out; }
+    try { names = readdirSync(dir, { withFileTypes: true }).filter((e) => e.name.endsWith('.json') && !e.isDirectory()).map((e) => e.name).sort(); } catch { return out; }
     this.store.ensureRun(APPROVALS_RUN, 'runtime', 'approvals');
     for (const file of names) {
-      const text = readFileSync(join(dir, file), 'utf8');
+      if (this.unmovable.has(file)) continue;
+      // Review A-F2: an entry that is not a regular file, or cannot be read, is refused like any bad record, and the
+      // pass goes on; one bad entry never holds back another's approval.
+      let text = '';
       let reason: ApprovalRefusal | undefined;
       let message = '';
       let record: unknown = null;
-      try { record = JSON.parse(text); } catch { reason = 'not-a-record'; message = 'the file is not JSON'; }
+      try {
+        if (!lstatSync(join(dir, file)).isFile()) { reason = 'not-a-record'; message = 'the entry is not a regular file'; }
+        else text = readFileSync(join(dir, file), 'utf8');
+      } catch (e) { reason = 'not-a-record'; message = `the file cannot be read (${(e as NodeJS.ErrnoException).code ?? 'error'})`; }
+      if (!reason) { try { record = JSON.parse(text); } catch { reason = 'not-a-record'; message = 'the file is not JSON'; } }
       if (!reason) {
         try { await this.approve(record); } catch (e) {
           if (!(e instanceof ApprovalRefused)) throw e;
@@ -291,8 +300,11 @@ export class PolyRuntime {
       const to = join(dir, reason ? 'refused' : 'applied');
       mkdirSync(to, { recursive: true });
       const target = freeName(to, file);
-      renameSync(join(dir, file), join(to, target));
-      if (reason) writeFileSync(join(to, `${target}.reason.txt`), `${reason}: ${message}\n`);
+      // An entry that cannot be moved stays where it is, journaled once, and is passed over from then on.
+      try {
+        renameSync(join(dir, file), join(to, target));
+        if (reason) writeFileSync(join(to, `${target}.reason.txt`), `${reason}: ${message}\n`);
+      } catch { this.unmovable.add(file); }
       out.push({ file, outcome: reason ? 'refused' : 'applied', ...(reason ? { reason } : {}) });
     }
     return out;
@@ -352,6 +364,13 @@ export class PolyRuntime {
         const reason = `PL1208 RESERVED_NAME: the creation ${creation.action} of ${id || machineId} supplies ${reserved.join(' and ')}, which only the runtime writes (S155)`;
         await this.store.insertAudit({ at: this.now(), instanceId: id, action: creation.action, actionId, rule: 'S155', reason });
         throw new RefusedDispatch(reason, 'S155');
+      }
+      // Review C-F4, S140: creation data outside its action's type is no step, as at dispatch: refused, audited, no journal row.
+      const why = this.outsideType(id, creation.action, d ?? {}, machineId);
+      if (why) {
+        const reason = `the creation ${creation.action} of ${id || machineId}: ${why}, so it is no step (PS3.2, S140)`;
+        await this.store.insertAudit({ at: this.now(), instanceId: id, action: creation.action, actionId, rule: 'S140', reason });
+        throw new RefusedDispatch(`${reason}: the input is outside its type`, 'S140');
       }
       if (this.claimed(machineId, creation.action)) {
         let claims: Record<string, unknown> | null = null;
@@ -453,6 +472,9 @@ export class PolyRuntime {
 
   /** S180: stores a body in the content store and returns its Content, the digest of its bytes. */
   async putContent(body: string): Promise<string> {
+    // Review C-F6, PS1.4a: a Content is the digest of the body's bytes. A string with a lone surrogate has no UTF-8
+    // bytes of its own (each becomes U+FFFD), so two such bodies would share a digest; it is refused.
+    if (typeof body !== 'string' || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(body)) throw new TypeError('putContent: a body is a well-formed string, with no lone surrogate (PS1.4a)');
     const d = `sha256:${createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex')}`;
     await this.store.txn(() => { this.store.db.prepare('INSERT OR IGNORE INTO poly_content (digest, body) VALUES (?, ?)').run(d, JSON.stringify(body)); });
     return d;

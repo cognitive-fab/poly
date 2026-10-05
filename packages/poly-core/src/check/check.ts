@@ -50,6 +50,11 @@ export function tyToString(t: Ty): string {
   }
 }
 
+/** Review C-F5, PS1.4a: a Content where another type is expected, or the reverse, is PL1209; any other mismatch PL1201. */
+function opaqueCode(a: Ty, b: Ty): 'PL1209' | 'PL1201' {
+  return (a.k === 'content') !== (b.k === 'content') && a.k !== 'error' && b.k !== 'error' ? 'PL1209' : 'PL1201';
+}
+
 function same(a: Ty, b: Ty): boolean {
   if (a.k === 'error' || b.k === 'error') return true;
   // PD1.3b: a Conf where it does not belong is PL1205, reported once by confUses, not also a type mismatch.
@@ -448,7 +453,7 @@ class Checker {
         given.add(x.field);
         if (ft.k === 'ref') { this.address(x.value, ft.machine, cfg, `${i.name}.${x.field}`); continue; }
         const vt = this.typeOf(x.value, this.scope('init'), ft);
-        if (!same(vt, ft)) { this.err('PL1201', x.value, `${i.name}.${x.field} is ${tyToString(ft)}, and the value is ${tyToString(vt)}`); continue; }
+        if (!same(vt, ft)) { this.err(opaqueCode(vt, ft), x.value, `${i.name}.${x.field} is ${tyToString(ft)}, and the value is ${tyToString(vt)}`); continue; }
         if (this.fold(x.value) === undefined && x.value.kind !== 'MapLit' && x.value.kind !== 'ArrayLit' && x.value.kind !== 'CtorExpr') { this.err('PL1201', x.value, 'an initial value in a configuration is a constant (PS13.1)'); continue; }
         this.checkConst(x.value, ft, inst.machine.fields.find((f) => f.name === x.field)!.check, `${i.name}.${x.field}`);
       }
@@ -565,7 +570,9 @@ class Checker {
       return { machine: inst.machine, facts: inst.facts, name: e.name };
     }
     // S176: the group of a used module's machine's detached instances is named as the machine is, m.M.
-    const groupName = e.kind === 'Index' ? (e.object.kind === 'Name' ? e.object.name : e.object.kind === 'Member' && e.object.object.kind === 'Name' && this.used.has(e.object.object.name) && !scope.locals.has(e.object.object.name) ? `${e.object.object.name}.${e.object.prop}` : null) : null;
+    // Review B-F5: the module may be dotted (std.channels.M[*]), so the whole member chain is the group's name.
+    const qualified = e.kind === 'Index' && e.object.kind === 'Member' ? dottedName(e.object) : null;
+    const groupName = e.kind === 'Index' ? (e.object.kind === 'Name' ? e.object.name : qualified && this.used.has(qualified.slice(0, qualified.lastIndexOf('.'))) && !scope.locals.has(qualified.split('.')[0]) ? qualified : null) : null;
     if (e.kind === 'Index' && groupName !== null) {
       const inst = cfg.instances.get(groupName);
       if (!inst) return null;
@@ -977,6 +984,8 @@ class Checker {
   /** Whether a type is, or holds through record fields, a type the predicate names (S25, S65). */
   private holds(t: Ty, p: (x: Ty) => boolean, seen: Set<string> = new Set()): boolean {
     if (p(t)) return true;
+    // Review C-F1: through a map's values too, so a map of Content in a record field or payload is found.
+    if (t.k === 'map') return this.holds(t.value, p, seen);
     if (t.k !== 'record' || seen.has(t.name)) return false;
     seen.add(t.name);
     return this.env.records.get(t.name)!.fields.some((f) => this.holds(this.tyOf(f.type), p, seen));
@@ -1036,7 +1045,7 @@ class Checker {
         continue;
       }
       const t = this.typeOf(a.value, this.scope('init'), pt);
-      if (!same(t, pt)) { this.err('PL1201', a.value, `${it.action}.${a.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`); continue; }
+      if (!same(t, pt)) { this.err(opaqueCode(t, pt), a.value, `${it.action}.${a.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`); continue; }
       // S67: any constant of a finite type, structured ones included; a field or a parameter is not one.
       if (!this.constant(a.value)) this.err('PL1201', a.value, 'a completion argument is a constant, since a manifest cannot compute: not a field, a parameter or a local (PT6.1, S67)');
       else this.checkConst(a.value, pt, p.check, `${it.action}.${a.name}`);
@@ -1507,7 +1516,7 @@ class Checker {
       if (pt === null) { this.err('PL0901', a.value, `${what}.${p.name} is a type its module declares, and a message across modules carries only types that need no module (booleans, ranges, int, strings, Principal, addresses) until types cross modules (S176, S190)`); this.typeOf(a.value, scope); return; }
       const whole = s.op === 'send' && a.value.kind === 'Name' && a.value.name === 'self';
       const t = this.typeOf(a.value, whole ? { ...scope, selfOk: true } : scope, pt);
-      if (!same(t, pt)) this.err('PL1201', a.value, `${what}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
+      if (!same(t, pt)) this.err(opaqueCode(t, pt), a.value, `${what}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
     });
     const missing = params.filter((p) => !given.has(p.name)).map((p) => p.name);
     if (!positional && missing.length) this.err('PL1201', s, `${what} is missing ${missing.join(', ')}`);
@@ -1647,7 +1656,7 @@ class Checker {
   // ── initial values ─────────────────────────────────────────────────────
   private checkInit(f: A.Field, ty: Ty): void {
     const got = this.typeOf(f.init, this.scope('init'), ty);
-    if (!same(got, ty)) { this.err('PL1201', f.init, `initial value of ${f.name} has type ${tyToString(got)}, not ${tyToString(ty)}`); return; }
+    if (!same(got, ty)) { this.err(opaqueCode(got, ty), f.init, `initial value of ${f.name} has type ${tyToString(got)}, not ${tyToString(ty)}`); return; }
     // Review finding 3: the initial state must be in the instance (PS4.2), so every initial value is
     // folded to a constant and checked against its declared type and check domain, part by part.
     this.checkConst(f.init, ty, f.check, f.name);
@@ -1788,7 +1797,7 @@ class Checker {
         const ft = fields.get(s.field);
         if (!ft) { this.err('PL1001', s, `${s.field} is not a declared field (PF1.1)`); this.typeOf(s.expr, scope); break; }
         const got = this.typeOf(s.expr, scope, ft);
-        if (!same(got, ft)) this.err('PL1201', s.expr, `${s.field}' is ${tyToString(ft)}, and the value is ${tyToString(got)}`);
+        if (!same(got, ft)) this.err(opaqueCode(got, ft), s.expr, `${s.field}' is ${tyToString(ft)}, and the value is ${tyToString(got)}`);
         break;
       }
       case 'MapUpdate': {
@@ -1845,7 +1854,7 @@ class Checker {
   private match(s: A.Match, scope: Scope): void {
     const st = this.typeOf(s.scrutinee, scope);
     if (st.k !== 'union') {
-      if (st.k !== 'error') this.err('PL1201', s.scrutinee, `match needs a union value, not ${tyToString(st)}`);
+      if (st.k !== 'error') this.err(st.k === 'content' ? 'PL1209' : 'PL1201', s.scrutinee, `match needs a union value, not ${tyToString(st)}`);
       for (const arm of s.arms) this.stmts(arm.body, scope);
       return;
     }
@@ -2057,7 +2066,7 @@ class Checker {
 
   private expectBool(e: A.Expr, scope: Scope): void {
     const t = this.typeOf(e, scope, BOOL);
-    if (t.k !== 'bool' && t.k !== 'error') this.err('PL1201', e, `expected a Bool condition, found ${tyToString(t)}`);
+    if (t.k !== 'bool' && t.k !== 'error') this.err(t.k === 'content' ? 'PL1209' : 'PL1201', e, `expected a Bool condition, found ${tyToString(t)}`);
   }
 
   private record(e: A.Expr, t: Ty): Ty {
@@ -2164,6 +2173,9 @@ class Checker {
         if (inf) {
           const t = inf.facts.fieldTypes.get(e.prop);
           if (!t) { this.err('PL1001', e, `${inf.machine.name} has no field ${e.prop}`); return ERR; }
+          // Review B-F4, S190: a field whose type another module declares is read here only through `is`, which resolves
+          // its constructors in that module; any other use would read them in this one's namespace.
+          if ((inf.facts.env ?? this.env) !== this.env && (t.k === 'union' || t.k === 'record')) { this.err('PL0901', e, `${inf.name}.${e.prop} has type ${t.name}, declared in another module; until S190 is ruled it is read only with \`is\` (PS1.0)`); return ERR; }
           return t;
         }
         // S22: `Type.C`, a constructor without payload named with its type.
@@ -2303,8 +2315,18 @@ class Checker {
         const inf = this.instanceForm(e.expr, scope);
         if (inf === 'error') return BOOL;
         if (inf) { this.configIs(e, inf); return BOOL; }
+        // Review B-F4: x.f is C on an instance of a used module's machine reads C in that module's types.
+        const owner = e.expr.kind === 'Member' ? this.instanceForm(e.expr.object, scope) : null;
+        if (owner && owner !== 'error' && owner.facts.env && owner.facts.env !== this.env && e.expr.kind === 'Member') {
+          const ft = owner.facts.fieldTypes.get(e.expr.prop);
+          if (!ft) { this.err('PL1001', e.expr, `${owner.machine.name} has no field ${e.expr.prop}`); return BOOL; }
+          const u = ft.k === 'union' ? owner.facts.env.unions.get(ft.name) : undefined;
+          if (!u) { this.err('PL1201', e, `\`is\` needs a union value, not ${tyToString(ft)}`); return BOOL; }
+          for (const c of e.ctors) if (!u.ctors.some((x) => x.name === c)) this.err('PL1201', e, `${c} is not a constructor of ${u.name}`);
+          return BOOL;
+        }
         const t = this.typeOf(e.expr, scope);
-        if (t.k !== 'union') { if (t.k !== 'error') this.err('PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
+        if (t.k !== 'union') { if (t.k !== 'error') this.err(t.k === 'content' ? 'PL1209' : 'PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
         const u = this.env.unions.get(t.name)!;
         for (const c of e.ctors) if (!u.ctors.some((x) => x.name === c)) this.err('PL1201', e, `${c} is not a constructor of ${u.name}`);
         return BOOL;
@@ -2414,6 +2436,9 @@ class Checker {
       if (!p) { this.err('PL1001', x, `effect ${name} has no payload field ${x.name} (PS5.2)`); continue; }
       this.emitsConstant(x.value, this.tyOf(p.type), `${name}.${x.name}`);
     }
+    // Review D-F2: an intent carries its effect's kind, not its name, so emits cannot tell apart two effects of one kind.
+    const twins = [...f.effects.values()].filter((o) => o !== eff && effectKind(o) === effectKind(eff)).map((o) => o.name);
+    if (twins.length) this.err('PL1201', at, `emits ${name} cannot be told from ${twins.join(' and ')}: they share the kind "${effectKind(eff)}", and an intent carries only its kind (PS5.2)`);
   }
 
   /** PS5.2: a field filter's value is a constant of the field's type: an enum constructor, an integer, a boolean, or none. */
@@ -2424,9 +2449,11 @@ class Checker {
     if (n !== null) { if (ty.k !== 'int' || n < ty.lo || n > ty.hi) bad(`${n}, not a value of ${tyToString(ty)}`); return; }
     if (v.kind === 'Bool') { if (ty.k !== 'bool') bad(`a boolean, not a value of ${tyToString(ty)}`); return; }
     if (v.kind === 'Name' && v.name === 'none') { if (ty.k !== 'content' && ty.k !== 'principal') bad(`none, not a value of ${tyToString(ty)}`); return; }
-    if (v.kind === 'Name') {
+    // A bare name is a constructor, never a field (review D-F6); `T.C` names it with its type.
+    const ctor = v.kind === 'Name' ? v.name : v.kind === 'Member' && v.object.kind === 'Name' && ty.k === 'union' && v.object.name === ty.name ? v.prop : null;
+    if (ctor !== null) {
       const u = ty.k === 'union' ? this.env.unions.get(ty.name) : undefined;
-      if (!u?.isEnum || !u.ctors.some((c) => c.name === v.name)) bad(`${v.name}, not a constructor of ${tyToString(ty)}`);
+      if (!u?.isEnum || !u.ctors.some((c) => c.name === ctor)) bad(`${ctor}, not a constructor of ${tyToString(ty)}`);
       return;
     }
     bad('an expression that is not a constant');
@@ -2597,11 +2624,18 @@ function starGroups(e: A.Expr, cfg: ConfigScope): string[] {
     const n = x as A.Expr;
     if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Name' && cfg.instances.has(n.object.name)) out.add(n.object.name);
     // S176: the group of a used module's machine, m.M[*].
-    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Member' && n.object.object.kind === 'Name' && cfg.instances.has(`${n.object.object.name}.${n.object.prop}`)) out.add(`${n.object.object.name}.${n.object.prop}`);
+    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Member') { const q = dottedName(n.object); if (q && cfg.instances.has(q)) out.add(q); }
     for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
   };
   walk(e);
   return [...out];
+}
+
+/** `a.b.c` as the string it spells, or null when the chain has anything but names and members (review B-F5). */
+function dottedName(e: A.Expr): string | null {
+  if (e.kind === 'Name') return e.name;
+  if (e.kind === 'Member') { const o = dottedName(e.object); return o === null ? null : `${o}.${e.prop}`; }
+  return null;
 }
 
 /** The families an aggregate's expression reads with `[*]`. */

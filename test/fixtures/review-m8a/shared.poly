@@ -1,0 +1,45 @@
+module shared
+
+enum Phase { Idle, Paying, Done }
+
+service machine Shop {
+  state { phase : Phase = Idle }
+
+  action Pay()
+  action Settle()
+  action Remind()
+
+  effect charge(amount: 0..1) {
+    kind "shop.charge"
+    labels { egress:external }
+    ok -> Settle()
+  }
+  effect receipt(amount: 0..1) {
+    kind "shop.receipt"
+    labels { egress:external }
+  }
+
+  on Pay {
+    require phase is Idle else reject "busy"
+    phase' = Paying
+    emit charge(1)
+  }
+  on Settle {
+    require phase is Paying else reject "idle"
+    phase' = Done
+    emit receipt(1)
+  }
+  on Remind {
+    require phase is Done else reject "not-done"
+    phase' = Idle
+    after 1m -> Settle() as t
+  }
+
+  never no-receipt-while-paying: emit receipt while phase is Paying
+}
+
+configuration solo {
+  shop : Shop
+  inputs { shop.Pay, shop.Remind }
+  bounds { transit 1 }
+}

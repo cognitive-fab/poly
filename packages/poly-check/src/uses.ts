@@ -57,7 +57,15 @@ export function resolveUses(module: Module, file: string, project?: { file: stri
     // The whole path may be a module (use m) or a module and a machine (use m.M); a found module decides.
     const tries = [decl.path.join('.'), decl.path.slice(0, -1).join('.')].filter((x) => x !== '');
     for (const t of tries) {
-      if (found.has(t)) break;
+      if (found.has(t)) {
+        // Review B-F3: a use of the checked module is resolved to its file only when no other file declares it too.
+        if (t === module.name && !asked.has(t)) {
+          asked.add(t);
+          const c = candidates(t);
+          if (c.length) diagnostics.push(diag('PL1002', { module: from.name, node: decl.id, line: decl.span?.line, col: decl.span?.col }, `module ${t}, used by module ${from.name}, is declared in ${[file, ...c.map((x) => x.file)].join(' and ')}; a module is named once, and the check never picks one (S176)`));
+        }
+        break;
+      }
       if (asked.has(t)) continue;
       asked.add(t);
       const c = candidates(t);

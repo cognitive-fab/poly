@@ -83,7 +83,10 @@ function instanceOf(e: A.Expr, env: Env): { M: RMachine; state: State } | undefi
 /** A group a configuration names: `G`, or `m.M` for the detached instances of a used module's machine (PS1.0, S176). */
 function groupNamed(e: A.Expr, g: GlobalView): string | null {
   if (e.kind === 'Name' && g.groups.has(e.name)) return e.name;
-  if (e.kind === 'Member' && e.object.kind === 'Name' && g.groups.has(`${e.object.name}.${e.prop}`)) return `${e.object.name}.${e.prop}`;
+  // A dotted module's machine, m.n.M (review B-F5).
+  const dotted = (x: A.Expr): string | null => (x.kind === 'Name' ? x.name : x.kind === 'Member' ? ((o) => (o === null ? null : `${o}.${x.prop}`))(dotted(x.object)) : null);
+  const q = e.kind === 'Member' ? dotted(e) : null;
+  if (q && g.groups.has(q)) return q;
   return null;
 }
 
@@ -177,7 +180,8 @@ export function evaluate(e: A.Expr, env: Env): Value {
       const want = e.fields.map((f) => {
         const p = eff.params.find((x) => x.name === f.name);
         if (!p) throw new EvalError(`poly-ref: effect ${e.effect} has no field ${f.name}`);
-        return [f.name, keyOf(evaluateAt(f.value, { ...env, data: {}, locals: new Map() }, p.type))] as const;
+        // Review D-F6: a constant reads no field, so a constructor named like a field is the constructor.
+        return [f.name, keyOf(evaluateAt(f.value, { ...env, state: {}, data: {}, locals: new Map(), params: false }, p.type))] as const;
       });
       return env.intents.some((i) => i.type === 'effect' && i.kind === eff.kind && want.every(([f, k]) => i.payload[f] !== undefined && keyOf(i.payload[f]) === k));
     }

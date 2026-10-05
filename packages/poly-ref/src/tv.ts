@@ -204,7 +204,10 @@ export async function translationValidate(module: Module, machineName: string, b
   // answers them unhandled, and the runtime never calls the module for them (PS9.1a), so a row order that differs
   // between the two is seen here and nowhere else, since check never offers a missing body.
   for (const a of M.actions.filter((x) => carriesContent(x.params.map((p) => p.type)))) {
-    const sample = dataDomain(a, M)[0];
+    // Review C-F3: the runtime marks a missing body only on a digest, never on none, so the probe's data names a body
+    // in every Content parameter; with none there, a row that fires only on none would pass.
+    const domain = dataDomain(a, M);
+    const sample = domain.find((d) => a.params.every((p) => p.type.k !== 'content' || d[p.name] !== null)) ?? domain[0];
     const good = flattenData(sample, a.name, M);
     for (const [i, s] of g.states.entries()) {
       const want = transition(M, s, a.name, { ...alphaData(good, a.name, M), $content: 'missing' }).verdict;

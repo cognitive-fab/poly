@@ -1,0 +1,36 @@
+// C-F1 repro: a record field holding a Content through a map escapes PL1209, and check then under-counts the
+// Content representatives (PS4.1f), so an invariant that fails with three distinct bodies is reported CLEAN.
+module recdistinct
+
+enum Phase { Empty, Holding, Done }
+
+type Pair = { m: map<0..1, Content> }
+
+machine Box {
+  state {
+    phase : Phase = Empty
+    pair  : Pair = { m: [none, none] }
+    fresh : bool = false
+  }
+
+  terminal phase is Done
+
+  action Put(a: Content, b: Content)
+  action Probe(c: Content)
+
+  on Put(a, b) {
+    require phase is Empty else reject "full"
+    require a != none && b != none && a != b else reject "bad"
+    phase' = Holding
+    pair' = { m: [a, b] }
+  }
+
+  on Probe(c) {
+    require phase is Holding else reject "empty"
+    require c != none else reject "none"
+    phase' = Done
+    fresh' = c != pair.m[0] && c != pair.m[1]
+  }
+
+  invariant never-fresh: !fresh
+}
