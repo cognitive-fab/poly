@@ -104,6 +104,57 @@ test('S174: one process owns a store at a time; a second is refused until the fi
   await again.close();
 });
 
+/** A child process that owns the project's store, ready when it prints its id. */
+async function holder(dir) {
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [join(ROOT, 'test', 'fixtures', 'hold-store.mjs'), dir], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let err = '';
+  child.stderr.on('data', (b) => { err += b; });
+  await new Promise((resolve, reject) => {
+    child.stdout.on('data', (b) => { if (String(b).startsWith('ready')) resolve(); });
+    child.on('exit', (code) => reject(new Error(`the holder exited (${code}): ${err}`)));
+  });
+  return child;
+}
+const killed = (child) => new Promise((resolve) => { if (child.exitCode !== null) return resolve(); child.once('exit', resolve); child.kill('SIGKILL'); });
+const takeovers = async (rt) => (await rt.chain('runtime:store')).filter((e) => e.body?.stage === 'store-lock').map((e) => e.body);
+
+test('S174: a live lock is refused: the store is held by a running process, named with its id', { timeout: 120_000 }, async () => {
+  const { dir } = await runProject('run-lock-live', [BRIEF]);
+  const child = await holder(dir);
+  try {
+    await assert.rejects(loadRun(dir), (e) => e instanceof RunConfigError && new RegExp(`owned by process ${child.pid}`).test(e.message));
+  } finally { await killed(child); }
+});
+
+test('S174: a stale lock, left by a server that crashed, is taken over and the takeover journaled with the old id and start time', { timeout: 120_000 }, async () => {
+  const { dir } = await runProject('run-lock-stale', [BRIEF]);
+  const child = await holder(dir);
+  const pid = child.pid;
+  await killed(child);
+  const lock = JSON.parse(readFileSync(join(dir, '.poly', 'run', 'store.sqlite.lock'), 'utf8'));
+  assert.equal(lock.pid, pid, 'the crash left its lock file behind');
+  const run = await loadRun(dir);
+  try {
+    const t = await takeovers(run.rt);
+    assert.equal(t.length, 1);
+    assert.deepEqual([t[0].outcome, t[0].previous.pid, t[0].previous.startedAt], ['taken-over', pid, lock.startedAt]);
+    assert.equal(JSON.parse(readFileSync(join(dir, '.poly', 'run', 'store.sqlite.lock'), 'utf8')).pid, process.pid);
+  } finally { await run.close(); }
+});
+
+test('S174: a lock file naming a live process with another start time (a reused id) is stale: the OS lock decides, not the file', async () => {
+  const { dir } = await runProject('run-lock-reused', [BRIEF]);
+  mkdirSync(join(dir, '.poly', 'run'), { recursive: true });
+  // The test's own process is alive; the lock file says it started long ago, as a reused id would.
+  writeFileSync(join(dir, '.poly', 'run', 'store.sqlite.lock'), JSON.stringify({ pid: process.pid, startedAt: '2001-01-01T00:00:00.000Z' }));
+  const run = await loadRun(dir);
+  try {
+    const t = await takeovers(run.rt);
+    assert.deepEqual([t[0]?.outcome, t[0]?.previous.pid, t[0]?.previous.startedAt], ['taken-over', process.pid, '2001-01-01T00:00:00.000Z']);
+  } finally { await run.close(); }
+});
+
 test('S174, S188: poly run --mcp serves the workflow tools from poly.json, with a ledger signer outside the project', { timeout: 300_000 }, async () => {
   const signer = signerAt(join(OUTSIDE, 'run-cli', 'ledger.pem'));
   const { dir } = await runProject('run-cli', [BRIEF], { ledger: { keyId: 'ops-ledger', signer: `file:${signer}` } });

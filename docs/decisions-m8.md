@@ -54,6 +54,18 @@ Neither option of the question raised at step 1 is taken: a report does not carr
 
 Tests come first for the replay, expired, unmatched and wrong-key cases, and a seeded fault that skips the single-use check must be caught. Then step 2 is finished: the command, its `install.json` entry and the boundary allowlist.
 
+## Step 2 accepted, and the stale store lock
+
+**Step 2 accepted (2026-10-05).** A server that crashes leaves its lock file behind, so the case is handled explicitly: a lock held by a running process is refused, as before; one whose process is not running is taken over, and the takeover is journaled with the old process id. Process ids are reused on Windows, so a matching id with a different start time is stale.
+
+**Ruled on the mechanism.** Reading another process's start time on Windows needs a subprocess, which boundary rule 4 bars outside poly-new. The owner chose an OS-held lock, with three additions:
+
+- The decision always comes from the OS lock (an exclusive SQLite lock on `<store>.lock.db`, held for the owner's life and released by the OS when its process ends), never from the lock file. The lock file is information only: it records the process id and start time for the journal and the error text.
+- A takeover is journaled with the old process id and start time.
+- OS file locks are unreliable on network shares, so "the store must be on a local disk" is a limit in the record.
+
+Tests first: a live lock, a stale lock and a reused id. Seeded faults: one that takes over a live lock, and one that decides from the lock file instead of the OS lock, which the reused-id test must catch.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

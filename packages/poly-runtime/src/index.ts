@@ -17,4 +17,4 @@ export { personKeyVerifier, type Verifier, type VerifierContext } from './verifi
 export { capabilitiesFor, withinPrefix, CapabilityRefused, MAX_REDIRECTS, type Transports, type EgressRequest, type EgressResponse } from './capabilities.js';
 export { policyEngine, actionOf, decisionOfReject, type EngineDecision } from './policy-engine.js';
 export { deriveKey, keyFields, runIdOf, keyOfRun, WorkflowError } from './workflows.js';
-export { loadRun, runConfigOf, RunConfigError, type LoadedRun } from './run.js';
+export { loadRun, runConfigOf, RunConfigError, STORE_RUN, type LoadedRun } from './run.js';

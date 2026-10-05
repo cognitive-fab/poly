@@ -1,12 +1,19 @@
 // `poly run` (S174, S188, S189): the project's runtime, loaded from the `run` field of its poly.json. Trust is admission
 // public keys only; the ledger signer is a `file:` outside the project, read once and never echoed: an error names its
-// path, never its contents, and nothing of it reaches output, logs or the journal. One process owns a store at a time,
-// by a lock file beside it that names the owner's process id. No key is read from the environment.
+// path, never its contents, and nothing of it reaches output, logs or the journal. One process owns a store at a time:
+// the decision comes from an exclusive SQLite lock on <store>.lock.db, held for the owner's whole life and released by
+// the OS when the process ends, however it ends, so a reused process id cannot fool it. The lock file beside the store
+// is information only: the owner's process id and start time, for the journal and for the error text. The store must
+// be on a local disk; OS file locks are unreliable on network shares. No key is read from the environment.
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { parseManifest, type RunConfig } from '@poly/core';
 import { load, type PolyRuntime } from './runtime.js';
+
+/** S174: the runtime's own ledger run for its store, where a takeover of a stale lock is journaled. */
+export const STORE_RUN = 'runtime:store';
 
 export class RunConfigError extends Error {
   constructor(message: string) { super(message); this.name = 'RunConfigError'; }
@@ -27,23 +34,42 @@ function inside(dir: string, path: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
-function alive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+/** The lock file's record: who owns the store, for the journal and the error text only. */
+interface LockInfo { pid: number; startedAt: string }
+
+const STARTED_AT = new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString();
+
+function lockInfo(file: string): LockInfo | null {
+  try { const j = JSON.parse(readFileSync(file, 'utf8')) as LockInfo; return Number.isInteger(j.pid) ? j : null; } catch { return null; }
 }
 
-/** S174: takes the store's lock, or refuses while a live process holds it. */
-function lockStore(store: string): string {
-  const lock = `${store}.lock`;
+/**
+ * S174: takes the store's lock, or refuses while another process holds it. The OS lock decides; the lock file is read
+ * only to say who held the store before, so a takeover of a stale lock can be journaled with its process id and start
+ * time.
+ */
+function lockStore(store: string): { previous: LockInfo | null; release(): void } {
+  const file = `${store}.lock`;
   mkdirSync(dirname(store), { recursive: true });
-  for (let k = 0; k < 2; k++) {
-    try { writeFileSync(lock, String(process.pid), { flag: 'wx' }); return lock; } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      const owner = Number(readFileSync(lock, 'utf8'));
-      if (Number.isInteger(owner) && alive(owner)) throw new RunConfigError(`the store ${store} is owned by process ${owner}; one process owns a store at a time (S174)`);
-      unlinkSync(lock); // its owner is gone
-    }
+  const db = new DatabaseSync(`${store}.lock.db`);
+  try {
+    db.exec('PRAGMA busy_timeout = 0');
+    db.exec('BEGIN EXCLUSIVE');
+  } catch {
+    db.close();
+    const owner = lockInfo(file);
+    throw new RunConfigError(`the store ${store} is owned by ${owner ? `process ${owner.pid}, started ${owner.startedAt}` : 'another process'}; one process owns a store at a time (S174)`);
   }
-  throw new RunConfigError(`the store ${store} could not be locked (S174)`);
+  const previous = lockInfo(file);
+  writeFileSync(file, JSON.stringify({ pid: process.pid, startedAt: STARTED_AT } satisfies LockInfo));
+  return {
+    previous,
+    release() {
+      try { unlinkSync(file); } catch { /* already gone */ }
+      try { db.exec('ROLLBACK'); } catch { /* nothing open */ }
+      db.close();
+    },
+  };
 }
 
 /** S188: the `run` field of the project's poly.json, or why not. */
@@ -87,14 +113,21 @@ export async function loadRun(project: string, opts: { now?: () => number } = {}
   try {
     rt = await load(join(dir, '.poly', 'build'), { certificate, trust, store: { sqlite: store }, ...(ledger ? { ledger } : {}), ...(opts.now ? { now: opts.now } : {}) });
   } catch (e) {
-    unlinkSync(lock);
+    lock.release();
     throw e;
+  }
+  // A lock file the OS lock did not stand behind was stale: its process ended without releasing the store. The
+  // takeover is journaled on the runtime's own store run, with the old process id and start time.
+  if (lock.previous) {
+    const previous = lock.previous;
+    rt.store.ensureRun(STORE_RUN, 'runtime', 'store');
+    await rt.store.txn(() => { rt.store.appendEvent(STORE_RUN, 'observation', { stage: 'store-lock', outcome: 'taken-over', previous, by: { pid: process.pid, startedAt: STARTED_AT } }, rt.now()); });
   }
   return {
     rt,
     approvals,
     async close() {
-      try { await rt.close(); } finally { try { unlinkSync(lock); } catch { /* already gone */ } }
+      try { await rt.close(); } finally { lock.release(); }
     },
   };
 }
