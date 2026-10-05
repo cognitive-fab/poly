@@ -157,6 +157,17 @@ export function evaluate(e: A.Expr, env: Env): Value {
         if (!child) throw new EvalError(`poly-ref: child ${e.object.prop} is read before it is spawned (S48)`);
         return field(child, e.prop);
       }
+      // PS1.0, S190: `m.E.C`, a member of another module's enum. Its value is the member's name, as every enum value is;
+      // the chain is one only when its first name is no field, local, parameter or instance.
+      {
+        const chain = (x: A.Expr): string | null => (x.kind === 'Name' ? x.name : x.kind === 'Member' ? ((o) => (o === null ? null : `${o}.${x.prop}`))(chain(x.object)) : null);
+        const q = chain(e.object);
+        const root = q?.split('.')[0];
+        // A machine knows the enums its types name; a configuration property's M is one instance's, so there a chain
+        // that names no instance is the member, as the checker typed it.
+        if (q && root && q.includes('.') && env.M.unions.get(q)?.ctors.some((c) => c.name === e.prop)) return { ctor: e.prop, payload: {} };
+        if (q && root && q.includes('.') && env.global && env.global.instance(root) === undefined && !env.locals.has(root)) return { ctor: e.prop, payload: {} };
+      }
       // S22: `Type.C`, a constructor named with its type.
       if (e.object.kind === 'Name' && env.M.unions.get(e.object.name)?.ctors.some((c) => c.name === e.prop)) return { ctor: e.prop, payload: {} };
       // S25: `r.f`, a field of a record value.
@@ -339,6 +350,9 @@ function lookup(name: string, env: Env): Value {
   if (name in env.state) return env.state[name];
   if (env.M.ctors.has(name)) return { ctor: name, payload: {} };
   if (name === 'none') return null;
+  // S190: in a configuration property, a bare member of another module's enum, which the checker let stand only where
+  // the expected type fixes the enum; the value is the member's name.
+  if (env.global) return { ctor: name, payload: {} };
   if (name === 'self') return env.self ?? selfAlone(env.M);
   throw new EvalError(`poly-ref: unknown name ${name}`);
 }

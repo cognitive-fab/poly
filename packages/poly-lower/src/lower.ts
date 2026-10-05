@@ -18,7 +18,7 @@ export interface LowerOptions {
   program?: A.Module[];
 }
 
-export type Fault = 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
@@ -223,7 +223,18 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     terminalStates,
     dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length || claimsOf(a.name)).map((a) => [a.name, { ...Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env, facts, a.name)])), ...(claimsOf(a.name) ? { $claims: valuesOfTy(claimsOf(a.name)!, env, facts.machine) } : {}) }])),
     invariants: 'invariants.mjs',
+    // S190: the AST digest of each module whose enums this machine uses, so that a build is never run against a
+    // changed declaration: the certificate records the same digests, and load compares them.
+    ...(typeModules(m, facts, opts.program ?? []) ?? {}),
   };
+  // The fault foreign-enum-member drops the last member of another module's enum from each parameter's domain.
+  if (opts.fault === 'foreign-enum-member') {
+    for (const a of lowerable) for (const p of a.params) {
+      const t = tyOfTypeExpr(p.type, env);
+      const d = (contract.dataDomain as Record<string, Record<string, unknown[]>>)[a.name];
+      if (t.k === 'union' && t.name.includes('.') && d?.[p.name]) d[p.name] = d[p.name].slice(0, -1);
+    }
+  }
 
   // ── invariants.mjs ───────────────────────────────────────────────────
   // PS5.2, S178: a step property that reads emits, or a never, reads the step's intents through a copy of the effects
@@ -676,6 +687,28 @@ function holdsMap(t: A.TypeExpr, env: TypeEnv, seen: Set<string>): boolean {
   const r = env.records.get(t.name);
   if (r) return r.fields.some((f) => holdsMap(f.type, env, seen));
   return (env.unions.get(t.name)?.ctors ?? []).some((c) => c.fields.some((f) => holdsMap(f.type, env, seen)));
+}
+
+/**
+ * S190: { typeModules: { m: digest } } for the modules whose enums the machine's types or members name, as m.E, or
+ * null when it names none.
+ */
+function typeModules(m: A.Machine, facts: MachineFacts, program: A.Module[]): { typeModules: Record<string, string> } | null {
+  const names = new Set<string>();
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== 'object') return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    const n = x as { kind?: string; name?: string };
+    if (n.kind === 'TName' && n.name?.includes('.')) names.add(n.name);
+    for (const [k, v] of Object.entries(n)) if (k !== 'span') walk(v);
+  };
+  walk(m);
+  for (const r of facts.resolutions.values()) if (r.k === 'ctor' && r.union.includes('.')) names.add(r.union);
+  for (const t of facts.fieldTypes.values()) if (t.k === 'union' && t.name.includes('.')) names.add(t.name);
+  const mods = [...new Set([...names].map((n) => n.slice(0, n.lastIndexOf('.'))))].sort();
+  const out: Record<string, string> = {};
+  for (const mod of mods) { const d = program.find((x) => x.name === mod); if (d) out[mod] = digest(d); }
+  return mods.length ? { typeModules: out } : null;
 }
 
 function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {

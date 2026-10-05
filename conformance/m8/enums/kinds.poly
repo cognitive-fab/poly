@@ -1,0 +1,15 @@
+// S190 (before M8b): a module that declares the enums another module uses. Kind is a channel's message kind; Tone is
+// declared too, so that use kinds.Kind can be shown to admit Kind alone.
+module kinds
+
+enum Kind { FreeForm, Templated }
+enum Tone { Calm, Loud }
+
+service machine Outbox {
+  state { last : Kind = Templated }
+  action Post(kind: Kind)
+  on Post(kind) {
+    require kind != last else reject "same"
+    last' = kind
+  }
+}

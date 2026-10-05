@@ -102,6 +102,22 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   }
   if (changed.length) throw new LoadError(`refused at load: PL6403 HANDLER_CHANGED: ${changed.join('; ')} (S142)`);
 
+  // S190: the modules whose enums a build uses. Each contract records their digests, which must be the certificate's,
+  // and each module's file must be the one certified: a member added to a std enum since the build refuses the load.
+  const typeModules = certificate.poly?.typeModules ?? {};
+  const stale: string[] = [];
+  for (const [mod, x] of Object.entries(typeModules)) {
+    const f = join(root, x.path);
+    const have = existsSync(f) ? sha256OfBytes(readFileSync(f)) : null;
+    if (have !== x.file) stale.push(`module ${mod} (${x.path}) changed since the build (certified ${x.file}, found ${have ?? 'nothing'})`);
+  }
+  for (const m of certificate.subject.machines) {
+    const c = bytes.get(`${m.dir}/contract.json`);
+    const recorded = c ? ((JSON.parse(c.toString('utf8')) as { typeModules?: Record<string, string> }).typeModules ?? {}) : {};
+    for (const [mod, d] of Object.entries(recorded)) if (typeModules[mod]?.digest !== d) stale.push(`${m.id} was built against module ${mod} at ${d}, and the certificate records ${typeModules[mod]?.digest ?? 'nothing'}`);
+  }
+  if (stale.length) throw new LoadError(`refused at load: PL6407 TYPE_MODULE_CHANGED: ${stale.join('; ')}; its enums are lowered into the build, so admit the program again (S190)`);
+
   // S150: the keyrings that sign approvals and acceptances are the certified ones; a change needs re-admission.
   const ring = certificate.poly?.keyrings;
   if (!ring || !Array.isArray(ring.people) || !Array.isArray(ring.agents)) throw new LoadError('refused at load: PL6405 KEYRING_CHANGED: the certificate binds no keyrings; it predates S150, so admit the program again');

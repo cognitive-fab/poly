@@ -95,14 +95,21 @@ test('S176: an attached spawn of another module\'s machine stays PL0901', async 
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
-test('S176: a message across modules may not carry a type its module declares (S190 to come)', async () => {
+test('S176, S190: a message across modules carries the enum of the receiver module; a record of its module stays PL0901', async () => {
   const flags = 'module flags\n\nenum Colour { Red, Blue }\n\nservice machine Lamp {\n  state { c: Colour = Red }\n  action Paint(c: Colour)\n  on Paint(c) { c\' = c }\n}\n';
   const user = 'module user\nuse flags\n\nmachine User {\n  state { lamp: Ref<flags.Lamp> = none   done: bool = false }\n  action Use(l: Ref<flags.Lamp>)\n  on Use(l) { done\' = true   lamp\' = l   send l <- Paint(c: Red) }\n}\n';
   const d = dir([['flags.poly', flags], ['user.poly', user]]);
   try {
     const r = await checkFile(join(d, 'user.poly'), { root: out() });
-    assert.ok(messages(r).some((m) => m.startsWith('PL0901') && /types that need no module/.test(m)), JSON.stringify(messages(r)));
+    assert.ok(!messages(r).some((m) => m.startsWith('PL0901')), JSON.stringify(messages(r)));
+    assert.notEqual(r.verdict, 'REFUSED', JSON.stringify(messages(r)));
   } finally { rmSync(d, { recursive: true, force: true }); }
+  const rec = flags.replace('enum Colour { Red, Blue }', 'type Colour = { red: bool }').replace("state { c: Colour = Red }", "state { c: Colour = { red: true } }");
+  const e = dir([['flags.poly', rec], ['user.poly', user.replace('Paint(c: Red)', 'Paint(c: { red: false })')]]);
+  try {
+    const r = await checkFile(join(e, 'user.poly'), { root: out() });
+    assert.ok(messages(r).some((m) => m.startsWith('PL0901')), JSON.stringify(messages(r)));
+  } finally { rmSync(e, { recursive: true, force: true }); }
 });
 
 test('S176 (ruled): a lone file\'s directory is a search path only: an unrelated broken file changes nothing', { timeout: 300_000 }, async () => {

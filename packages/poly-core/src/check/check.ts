@@ -210,6 +210,8 @@ class Checker {
   private readonly used = new Map<string, Set<string> | null>();
   /** S176: the facts of used modules' machines, by qualified name, computed once when a configuration reads them. */
   private readonly foreignFacts = new Map<string, MachineFacts | null>();
+  /** S190: the records and unions with payloads of used modules, as m.T, which stay PL0901. */
+  private readonly foreignOther = new Set<string>();
 
   constructor(private readonly module: A.Module, private readonly opts: CheckOptions = {}) {
     this.env = buildTypeEnv(module);
@@ -221,6 +223,16 @@ class Checker {
       const had = this.used.get(u.module);
       if (u.machine === null || had === null) this.used.set(u.module, null);
       else this.used.set(u.module, new Set([...(had ?? []), u.machine]));
+    }
+    // S190: the payload-free enums of each used module join this module's types as m.E, which no bare name reaches
+    // except through an expected type; its records and unions with payloads are known only to be refused (PL0901).
+    for (const mod of this.used.keys()) {
+      for (const d of this.program.get(mod)?.decls ?? []) {
+        const q = `${mod}.${(d as { name?: string }).name}`;
+        if (d.kind === 'EnumDecl') this.env.unions.set(q, { name: q, ctors: d.members.map((m) => ({ name: m, fields: [] })), isEnum: true });
+        else if (d.kind === 'TypeDecl' && d.ctors.every((c) => c.fields.length === 0)) this.env.unions.set(q, { name: q, ctors: d.ctors.map((c) => ({ name: c.name, fields: [] })), isEnum: true });
+        else if (d.kind === 'TypeDecl' || d.kind === 'RecordDecl') this.foreignOther.add(q);
+      }
     }
   }
 
@@ -285,7 +297,10 @@ class Checker {
         const owner = this.moduleNamed(mod);
         const declared = owner?.decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl' || d.kind === 'RecordDecl') && d.name === t.name);
         if (t.name === 'Content' && !declared) return { k: 'content' };
-        return t.name === 'Principal' && !declared ? { k: 'principal' } : null;
+        if (t.name === 'Principal' && !declared) return { k: 'principal' };
+        // S190: an enum of the receiver's module (or one it names m.E), spelled from here, when this module knows it.
+        const q = t.name.includes('.') ? (t.name.slice(0, t.name.lastIndexOf('.')) === this.view ? t.name.slice(t.name.lastIndexOf('.') + 1) : t.name) : this.canon(mod, t.name);
+        return this.env.unions.get(q)?.isEnum ? { k: 'union', name: q } : null;
       }
       default: return null;
     }
@@ -310,7 +325,10 @@ class Checker {
     if (u.module === this.module.name || d.path.join('.') === this.module.name) { this.err('PL1201', d, `module ${this.module.name} uses itself; \`use\` names another module (S176)`); return; }
     const m = this.program.get(u.module);
     if (!m) { this.err('PL1001', d, `use ${d.path.join('.')}: no module ${u.module} in the program (S176)`); return; }
-    if (u.machine !== null && !m.decls.some((x) => x.kind === 'Machine' && x.name === u.machine)) this.err('PL1001', d, `use ${d.path.join('.')}: no machine ${u.machine} in module ${u.module}`);
+    // S190: use m.E names an enum, as use m.M names a machine; a record or a union with payloads is PL0901.
+    const item = u.machine === null ? undefined : m.decls.find((x) => (x.kind === 'Machine' || x.kind === 'EnumDecl' || x.kind === 'TypeDecl' || x.kind === 'RecordDecl') && x.name === u.machine);
+    if (u.machine !== null && !item) this.err('PL1001', d, `use ${d.path.join('.')}: no machine or enum ${u.machine} in module ${u.module}`);
+    else if (item && (item.kind === 'RecordDecl' || (item.kind === 'TypeDecl' && item.ctors.some((c) => c.fields.length)))) this.err('PL0901', d, `use ${d.path.join('.')}: a record or a union with payloads does not cross modules; only payload-free enums do (S190)`);
   }
 
   private at(n: A.NodeBase): NodeAt {
@@ -725,9 +743,20 @@ class Checker {
         if (t.name === 'Principal' && !this.env.unions.has(t.name)) return { k: 'principal' };
         // PS1.4a, S180: Content is built in, unless the module declares a type of that name.
         if (t.name === 'Content' && !this.env.unions.has(t.name)) return { k: 'content' };
+        // S190: m.E, an enum of a used module, nameable where a use admits it.
+        if (t.name.includes('.')) {
+          const i = t.name.lastIndexOf('.');
+          const mod = t.name.slice(0, i), name = t.name.slice(i + 1);
+          if (this.foreignOther.has(t.name)) { this.errOnce('PL0901', t, `${t.name} is a record or a union with payloads of another module; only payload-free enums cross modules (S190)`); return ERR; }
+          if (!this.env.unions.has(t.name)) { this.errOnce('PL1001', t, this.used.has(mod) ? `module ${mod} declares no enum ${name}` : `${t.name}: module ${mod} is not used here; write \`use ${mod}\` (S190)`); return ERR; }
+          if (!this.admits(mod, name)) { this.errOnce('PL1001', t, `${t.name} is not used here; write \`use ${t.name}\` (S190)`); return ERR; }
+          return { k: 'union', name: t.name };
+        }
         if (!this.env.unions.has(t.name)) { this.errOnce('PL1001', t, `unknown type ${t.name}`); return ERR; }
         return { k: 'union', name: t.name };
       case 'TMap': {
+        // S190: a map of another module's types stays PL0901.
+        if ((t.key.kind === 'TName' && t.key.name.includes('.')) || (t.value.kind === 'TName' && t.value.name.includes('.'))) { this.errOnce('PL0901', t, 'a map of another module\'s types is not lowered; only a field, a parameter or a payload holds one (S190)'); return ERR; }
         const value = this.tyOf(t.value);
         if (t.key.kind === 'TRange') {
           if (t.key.lo !== 0) this.errOnce('PL1602', t.key, `a map keyed by a range must start at 0, as it lowers to a JSON array (${t.key.lo}..${t.key.hi})`);
@@ -2102,18 +2131,26 @@ class Checker {
 
   private ctorType(name: string, expected: Ty | undefined, at: A.NodeBase): { union: string; info: UnionInfo } | null {
     // S22: `Type.C` names its type; an unqualified name resolves against the expected type.
-    const dot = name.indexOf('.');
+    const dot = name.lastIndexOf('.');
     if (dot >= 0) {
       const union = name.slice(0, dot);
       const info = this.env.unions.get(union);
       if (!info || !info.ctors.some((c) => c.name === name.slice(dot + 1))) { this.err('PL1001', at, `${name}: ${info ? `${union} has no constructor ${name.slice(dot + 1)}` : `unknown type ${union}`}`); return null; }
+      // S190: m.E.C names an enum of another module, which a use must admit.
+      if (union.includes('.') && !this.admits(union.slice(0, union.lastIndexOf('.')), union.slice(union.lastIndexOf('.') + 1))) { this.err('PL1001', at, `${union} is not used here; write \`use ${union}\` (S190)`); return null; }
       return { union, info };
     }
     const owners = this.env.ctorOwners.get(name) ?? [];
+    // S190: the admitted enums of other modules that have the member; a bare one names them only through an expected type.
+    const foreign = [...this.env.unions.values()].filter((u) => u.name.includes('.') && u.ctors.some((c) => c.name === name) && this.admits(u.name.slice(0, u.name.lastIndexOf('.')), u.name.slice(u.name.lastIndexOf('.') + 1))).map((u) => u.name);
     let union: string | undefined;
-    if (expected?.k === 'union' && owners.includes(expected.name)) union = expected.name;
-    else if (owners.length === 1) union = owners[0];
-    else if (owners.length > 1) { this.err('PL1005', at, `${name} is a constructor of ${owners.join(' and ')}; write ${owners.map((o) => `${o}.${name}`).join(' or ')} (S22)`, { names: owners }); return null; }
+    if (expected?.k === 'union' && (owners.includes(expected.name) || (expected.name.includes('.') && this.env.unions.get(expected.name)?.ctors.some((c) => c.name === name)))) union = expected.name;
+    else if (owners.length === 1 && !foreign.length) union = owners[0];
+    else if (owners.length + foreign.length > 1 || foreign.length) {
+      const all = [...owners, ...foreign];
+      this.err('PL1005', at, `${name} is a member of ${all.join(' and ')}, and no expected type fixes which; write ${all.map((o) => `${o}.${name}`).join(' or ')} (S22, S190)`, { names: all });
+      return null;
+    }
     if (!union) return null;
     return { union, info: this.env.unions.get(union)! };
   }
@@ -2192,8 +2229,23 @@ class Checker {
           if (!t) { this.err('PL1001', e, `${inf.machine.name} has no field ${e.prop}`); return ERR; }
           // Review B-F4, S190: a field whose type another module declares is read here only through `is`, which resolves
           // its constructors in that module; any other use would read them in this one's namespace.
-          if ((inf.facts.env ?? this.env) !== this.env && (t.k === 'union' || t.k === 'record')) { this.err('PL0901', e, `${inf.name}.${e.prop} has type ${t.name}, declared in another module; until S190 is ruled it is read only with \`is\` (PS1.0)`); return ERR; }
+          // S190 (B-F4 lifted): a field of another module's machine has that module's types, spelled m.E from here.
+          const env = inf.facts.env ?? this.env;
+          if (env !== this.env && (t.k === 'union' || t.k === 'record')) {
+            const q = t.name.includes('.') ? t.name : `${env.module}.${t.name}`;
+            if (t.k === 'record' || !this.env.unions.has(q)) { this.err('PL0901', e, `${inf.name}.${e.prop} has type ${q}, which is not a payload-free enum of a used module; only those cross modules (S190)`); return ERR; }
+            return { k: 'union', name: q };
+          }
           return t;
+        }
+        // S190: `m.E.C`, a member of another module's enum, named with its module and enum.
+        const qualified = dottedName(e.object);
+        if (qualified && qualified.includes('.') && (this.env.unions.has(qualified) || this.foreignOther.has(qualified)) && !scope.locals.has(qualified.split('.')[0]) && !scope.params.has(qualified.split('.')[0]) && !fields.has(qualified.split('.')[0])) {
+          if (this.foreignOther.has(qualified)) { this.err('PL0901', e, `${qualified} is a record or a union with payloads of another module; only payload-free enums cross modules (S190)`); return ERR; }
+          const c = this.ctorType(`${qualified}.${e.prop}`, expected, e);
+          if (!c) return ERR;
+          this.resolve(e, { k: 'ctor', union: c.union, ctor: e.prop });
+          return { k: 'union', name: c.union };
         }
         // S22: `Type.C`, a constructor without payload named with its type.
         if (e.object.kind === 'Name' && this.env.unions.has(e.object.name) && !scope.locals.has(e.object.name) && !scope.params.has(e.object.name) && !fields.has(e.object.name)) {

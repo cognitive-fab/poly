@@ -42,6 +42,8 @@ export interface AdmitOptions {
   fault?: CertificateFault;
   /** For tests only: runs between the check and the certificate, as an edit during the check would land. */
   afterCheck?: () => void;
+  /** S190, for tests: the directory `std.*` modules are found in, instead of the repository's std/. */
+  std?: string;
 }
 
 export interface AdmitResult {
@@ -131,14 +133,14 @@ function moduleOf(file: string): A.Module | null {
 interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell' }
 
 /** A project directory, or one module file checked alone (its handler lint is then not run, S72). */
-async function checkTarget(target: string, root?: string): Promise<Checked> {
+async function checkTarget(target: string, root?: string, std?: string): Promise<Checked> {
   const abs = resolve(target);
   if (existsSync(join(abs, 'poly.json'))) {
     const { manifest, files } = loadProject(abs);
-    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}) };
+    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs, ...(std ? { std } : {}) }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}) };
   }
   const dir = resolve(root ?? dirname(abs));
-  const r = await checkFile(abs, { root: dir });
+  const r = await checkFile(abs, { root: dir, ...(std ? { std } : {}) });
   const hasEffects = (r.effectKinds ?? []).length > 0;
   const report: ProjectReport = {
     project: dir, name: r.module ?? 'module', files: [r],
@@ -156,7 +158,7 @@ export async function admit(target: string, opts: AdmitOptions & { root?: string
   // A failed admission leaves no certificate: an old one would describe a build this check is about to replace.
   const out = join(projectDir ?? resolve(opts.root ?? dirname(abs)), '.poly', 'certificate.json');
   rmSync(out, { force: true });
-  const c = await checkTarget(abs, opts.root);
+  const c = await checkTarget(abs, opts.root, opts.std);
   opts.afterCheck?.();
   // PT12.5: a CLEAN program is admitted; a program with findings only when a person signed the acceptance of each.
   let accepted: NonNullable<Certificate['boundAccepted']> | null = null;
@@ -243,11 +245,14 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const kernel = new Set<string>();
   const decisions: Certificate['poly']['decisions'] = [];
   const moduleDigests: Record<string, string> = {};
+  const typeModules: NonNullable<Certificate['poly']['typeModules']> = {};
   // PT10, S164, S175: the workflows, each run on poly-runtime with every work order through the gate (S173).
   const workflows: NonNullable<Certificate['poly']['workflows']> = [];
   for (const r of report.files) {
     if (!r.module || !r.moduleDigest) throw new AdmitError(`${r.file}: no module digest`);
     moduleDigests[r.module] = r.moduleDigest;
+    // S190: each module whose enums a build uses, by its file's bytes and its AST digest, which load compares.
+    for (const [mod, x] of Object.entries(r.typeModules ?? {})) typeModules[mod] = { path: rel(dir, x.file), digest: x.digest, file: sha256OfBytes(readFileSync(x.file)) };
     const ast = moduleOf(r.file);
     for (const w of ast?.decls.filter((d): d is A.Workflow => d.kind === 'Workflow') ?? []) {
       const m = r.machines.find((x) => x.machine === w.machine);
@@ -370,7 +375,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);

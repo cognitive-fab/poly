@@ -1,0 +1,38 @@
+// S190 (before M8b): enums across modules (PS1.0). Chat holds a kinds.Kind, takes one as a parameter, emits one in an
+// effect's payload, sends one to kinds.Outbox, compares it with == and != and takes it apart with a match that covers
+// every member. A bare member is written where the expected type fixes the enum, m.E.C elsewhere.
+module chat
+use kinds.Kind
+use kinds.Outbox
+
+service machine Chat {
+  state {
+    kind : kinds.Kind = kinds.Kind.Templated
+    sent : 0..2 = 0
+    out  : Ref<kinds.Outbox> = none
+  }
+
+  action Set(k: kinds.Kind)
+  action Send()
+
+  on Set(k) {
+    require k != kind else reject "same"
+    kind' = k
+  }
+  on Send {
+    require sent < 2 else reject "done"
+    sent' = sent + 1
+    match kind {
+      FreeForm => { emit post(kind: FreeForm) }
+      Templated => { emit post(kind: kinds.Kind.Templated) }
+    }
+    send out <- Post(kind: kind)
+  }
+
+  effect post(kind: kinds.Kind) {
+    kind "chat.post"
+    labels { egress:external }
+  }
+
+  invariant known: kind == FreeForm || kind == kinds.Kind.Templated
+}

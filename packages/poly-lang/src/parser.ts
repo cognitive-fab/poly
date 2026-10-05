@@ -551,7 +551,7 @@ class Parser {
         const hi = this.int();
         key = this.node<A.TRange>(ks, { kind: 'TRange', lo, hi });
       } else {
-        key = this.node<A.TName>(ks, { kind: 'TName', name: this.ident('a key type') });
+        key = this.node<A.TName>(ks, { kind: 'TName', name: this.dottedType(this.ident('a key type')) });
       }
       this.expect(',');
       const value = this.type();
@@ -564,7 +564,14 @@ class Parser {
       this.closeAngle();
       return this.node<A.TRef>(start, { kind: 'TRef', machine });
     }
-    return this.node<A.TName>(start, { kind: 'TName', name });
+    return this.node<A.TName>(start, { kind: 'TName', name: this.dottedType(name) });
+  }
+
+  /** S190: a type of another module, `m.E` (the module may be dotted); the name is kept whole. */
+  private dottedType(first: string): string {
+    let name = first;
+    while (this.atPunct('.') && this.peek(1).kind === 'ident') { this.next(); name += '.' + this.next().text; }
+    return name;
   }
 
   /** `>` closing a type argument list; `>=` is split so `map<A, B>= x` still parses. */

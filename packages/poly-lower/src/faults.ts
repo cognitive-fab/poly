@@ -5,7 +5,7 @@
 import type * as A from '@poly/core';
 import type { Fault } from './lower.js';
 
-export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal', 'outcome-entry', 'widen-target', 'skip-claims', 'widen-sandbox', 'drop-timer-target', 'workflow-tool', 'workflow-key', 'skip-content', 'content-before-unhandled', 'drop-never', 'invert-never-while', 'drop-never-filter', 'never-post-state', 'content-row-on-none'];
+export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal', 'outcome-entry', 'widen-target', 'skip-claims', 'widen-sandbox', 'drop-timer-target', 'workflow-tool', 'workflow-key', 'skip-content', 'content-before-unhandled', 'drop-never', 'invert-never-while', 'drop-never-filter', 'never-post-state', 'content-row-on-none', 'foreign-enum-member'];
 
 /** The machine as the broken lowering sees it. drop-frame, skip-terminal, the property faults and the effect faults act in the emitter instead. */
 export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {

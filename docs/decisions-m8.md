@@ -139,6 +139,22 @@ Seeded faults: a never dropped, its `while` inverted, a field filter dropped, an
 
 **Limits added.** `emits` cannot tell apart two effects of one kind: an intent, a witness and the journal show only the kind, so `emits` on either effect is `PL1201`. An author who needs the distinction gives the two effects different kinds.
 
+## S190 ruled: enums across modules
+
+**Accepted (2026-10-05), with five clarifications.**
+
+- An enum is identified by `m.E`. Two enums with the same members in different modules are different types (`PL1201`).
+- `use m` admits `m`'s enums, and `use m.E` admits only that one, as B-F6 rules for machines.
+- A bare member is allowed only where the expected type fixes the enum. Otherwise `m.E.C` is written, and an ambiguous member is refused.
+- `==`, `!=` and `match` work on a field from another module, and a match covers every member. This lifts the is-only limit of B-F4, which leaves the limits list.
+- A module's lowered artefacts and certificate record the digest of each module whose types they use. A mismatch at load is refused, with a test where a member added to a std enum makes a stale build fail.
+
+Records, unions with payloads and maps of another module's types stay `PL0901`. Per rule 7a the PS1.0 text was written before the code (5561a0c), then the tests, which failed first. poly-ref reads the declaring module's source. The seeded fault `foreign-enum-member` drops a member from a foreign enum's domain, and translation validation catches it.
+
+**As built.** The digests are the AST digests (PT1.4) of the modules whose enums a machine names, recorded in its `contract.json` under `typeModules`; the certificate records each such module with its file's path and the SHA-256 of its bytes. Load compares the bytes of each file and the digest of each contract with the certificate, and refuses a difference with `PL6407 TYPE_MODULE_CHANGED`, a new runtime code. A test may point the checker at a directory of its own for `std.*` (`std` in the options of `checkFile` and `admit`), since the repository has no `std/` yet.
+
+**The 147 files measured again** are identical in verdict, diagnostic codes and every state and transition count. One difference appeared while building, before the commit: `conformance/m1/records.poly` gave ERROR, because poly-ref's first reading of `m.E.C` took `post.box.count` for a member chain. That was a defect of the change itself, fixed before the measurement that counts; nothing differs in the committed tree.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

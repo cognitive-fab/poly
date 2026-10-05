@@ -43,6 +43,12 @@ export interface Certificate {
     /** Each source file by path relative to the project root, and each module's AST digest (PT1.4). */
     sources: Record<string, string>;
     moduleDigests: Record<string, string>;
+    /**
+     * S190: each module whose enums a machine's build uses: its source file by path relative to the project root (a std
+     * module's lies outside it), the SHA-256 of that file's bytes, and its AST digest, which each contract records too.
+     * Load refuses a file that changed since the build. Absent when no build uses another module's types.
+     */
+    typeModules?: Record<string, { path: string; file: string; digest: string }>;
     /** The checked instance of each machine and configuration (PT12.3a). */
     instances: Record<string, unknown>;
     kernelAssumptions: string[];

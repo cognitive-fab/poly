@@ -382,7 +382,7 @@ Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workfl
 | B-F1 | a used module the checker refuses was composed into a configuration that read CLEAN | its errors refuse the check that uses it, each at its own line |
 | B-F2 | module `b`'s spawn of `b.c.X` looked up machine `X` of module `c` | the spawner's module is stripped only when a machine's name remains |
 | B-F3 | two files declaring the checked module were not refused when another module used it | `PL1002`, naming both files |
-| B-F4 | a field whose enum another module declares was compared in the view module's namespace | read only with `is`, in its own module's types; any other use is `PL0901` until S190 |
+| B-F4 | a field whose enum another module declares was compared in the view module's namespace | read with `is` in its own module's types, then, once S190 was ruled, typed `m.E`, with `==`, `!=` and `match` |
 | B-F5 | a dotted module's machine could not name its group of detached instances | the whole member chain names the group, in the checker and in poly-ref |
 | B-F6 | `use m.M` made every machine of `m` nameable | as ruled, `use m.M` admits `m.M` only; two `use` clauses admit both, and `m`'s own machines still name each other |
 | C-F1 | a `map` of `Content` in a record field or a union payload escaped `PL1209`, and check counted too few representatives (CLEAN on a machine with a reachable violation) | `PL1209` through maps too |
@@ -425,7 +425,6 @@ The skipped test is S152's OpenShell enforcement (no gateway configured). The fo
 **The two M3 failures under load, counted to the close (`decisions-m8.md`).** Six full runs: the m3-environment crash (0xC0000409) twice, the dry run's `ENOTEMPTY` in the frozen runner once, both in runs during M8a's building and neither in the closing gate.
 
 **Limits, stated.**
-- A field whose enum another module declares is read in a configuration only with `is` (`PL0901` otherwise) until S190 is ruled, before M8b step 6.
 - `emits` cannot tell apart two effects of one kind (`PL1201`), since an intent, a witness and the journal carry the kind and not the name.
 - A configuration rules out only a never finding with no constrained witness; one whose machine no configuration includes stays a finding, marked `environment: unconstrained`.
 - The store must be on a local disk, and has one name: a store file with a hard link is refused.

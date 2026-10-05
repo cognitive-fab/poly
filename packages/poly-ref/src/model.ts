@@ -218,15 +218,34 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
         if (t.name === 'Principal' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Principal')) return { k: 'principal' };
         // PS1.4a: Content is built in, unless the module declares a type of that name.
         if (t.name === 'Content' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Content')) return { k: 'content' };
+        // PS1.0, S190: m.E, an enum of another module, read from the declaring module's own source.
+        if (t.name.includes('.')) return foreignEnum(t.name);
         return { k: 'union', name: t.name };
       case 'TMap': return { k: 'map', key: typeOf(t.key), value: typeOf(t.value) };
       case 'TRef': return { k: 'ref', machine: named(t.machine, module.name) };
       case 'TConf': return { k: 'conf' };
     }
   };
-  // A parameter of a used module's action: its addresses are spelled from the view; the checker lets only types that
-  // need no module cross (S176), so a named type here is a builtin.
-  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : t.kind === 'TName' && t.name === 'Content' ? { k: 'content' } : typeOf(t));
+  /**
+   * PS1.0, S190: the enum m.E, from module m's declarations; its members join the constructors a bare name reaches,
+   * since a value is its member's name whatever the enum (the checker lets a bare one stand only where the type is fixed).
+   */
+  const foreignEnum = (q: string): RType => {
+    const i = q.lastIndexOf('.');
+    const mod = q.slice(0, i), name = q.slice(i + 1);
+    if (mod === module.name) return { k: 'union', name };
+    if (!unions.has(q)) {
+      const d = moduleNamed(mod)?.decls.find((x) => (x.kind === 'EnumDecl' || x.kind === 'TypeDecl') && x.name === name);
+      if (!d) throw new Error(`poly-ref: no enum ${q} in the program`);
+      const members = d.kind === 'EnumDecl' ? d.members : (d as A.TypeDecl).ctors.map((c) => c.name);
+      unions.set(q, { name: q, ctors: members.map((c) => ({ name: c, fields: [] })) });
+      for (const c of members) if (!ctors.has(c)) ctors.set(c, q);
+    }
+    return { k: 'union', name: q };
+  };
+  // A parameter of a used module's action: its addresses and its enums are that module's, spelled from the view (S176,
+  // S190); Principal and Content are builtins.
+  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : t.kind === 'TName' && t.name === 'Content' ? { k: 'content' } : t.kind === 'TName' ? foreignEnum(t.name.includes('.') ? t.name : `${mod}.${t.name}`) : typeOf(t));
   for (const d of decls) {
     if (d.kind === 'EnumDecl') unions.set(d.name, { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })) });
     if (d.kind === 'TypeDecl') unions.set(d.name, { name: d.name, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) })) });
@@ -234,7 +253,8 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
   // S76: Tri, the enum True | False | Unknown, when a machine names it and the module declares none.
   if (!unions.has('Tri') && !recordNames.has('Tri') && mentionsType(decls, 'Tri')) unions.set('Tri', { name: 'Tri', ctors: ['True', 'False', 'Unknown'].map((name) => ({ name, fields: [] })) });
   for (const d of decls) if (d.kind === 'RecordDecl') records.set(d.name, { name: d.name, fields: d.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) });
-  for (const u of unions.values()) for (const c of u.ctors) if (!ctors.has(c.name)) ctors.set(c.name, u.name);
+  // A module's own constructors come first; another module's enum (S190) reaches a name none of them has.
+  for (const u of unions.values()) if (!u.name.includes('.')) for (const c of u.ctors) if (!ctors.has(c.name) || ctors.get(c.name)!.includes('.')) ctors.set(c.name, u.name);
 
   const m = decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machineName);
   if (!m) throw new Error(`poly-ref: no machine ${machineName} in module ${module.name}`);

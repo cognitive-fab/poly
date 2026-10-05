@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { parse } from '@poly/lang';
 import { checkModule } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
+import { resolveUses } from '@poly/check';
 
 export const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 export const BUILD = join(ROOT, '.poly', 'test-build');
@@ -24,24 +25,26 @@ export function polyFiles(dir) {
 export function load(file) {
   const r = parse(readFileSync(file, 'utf8'));
   if (!r.module) throw new Error(`${file}: ${r.diagnostics.map((d) => d.message).join('; ')}`);
-  const check = checkModule(r.module);
-  const errors = [...r.diagnostics, ...check.diagnostics];
+  // S176, S190: the modules its uses name, found as poly check finds them for a lone file.
+  const uses = resolveUses(r.module, file);
+  const check = checkModule(r.module, { program: uses.program });
+  const errors = [...r.diagnostics, ...uses.diagnostics, ...check.diagnostics];
   if (errors.length) throw new Error(`${file}: ${errors.map((d) => `${d.code} ${d.message}`).join('; ')}`);
-  return { module: r.module, check };
+  return { module: r.module, check, program: uses.program };
 }
 
 /** Lower every machine of a source and write each to BUILD/<name>/<module>.<Machine>/. */
 export function build(file, name, opts = {}) {
-  const { module, check } = load(file);
+  const { module, check, program } = load(file);
   const out = [];
   for (const machine of check.machines.keys()) {
-    const { lowered, diagnostics } = lowerMachine(module, check, machine, opts);
+    const { lowered, diagnostics } = lowerMachine(module, check, machine, { program, ...opts });
     if (!lowered) throw new Error(`${file}: ${diagnostics.map((d) => `${d.code} ${d.message}`).join('; ')}`);
     // One directory per source file: several sources declare intents.OutboxIntent.
     const dir = join(BUILD, name, basename(file, '.poly'), `${module.name}.${machine}`);
     mkdirSync(dir, { recursive: true });
     for (const [f, text] of Object.entries(lowered.files)) { mkdirSync(dirname(join(dir, f)), { recursive: true }); writeFileSync(join(dir, f), text); }
-    out.push({ machine, dir, lowered, module, check });
+    out.push({ machine, dir, lowered, module, check, program });
   }
   return out;
 }

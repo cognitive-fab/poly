@@ -139,6 +139,8 @@ export interface CheckReport {
   machines: MachineCheck[];
   /** Stage 4b: each configuration of the module (PS13). */
   configurations: ConfigCheck[];
+  /** S190: each module whose enums a machine's build uses: the file it was read from, and its AST digest. */
+  typeModules?: Record<string, { file: string; digest: string }>;
   error?: string;
   engines: Record<string, string>;
   /** Stage 5 (PT8): the module's policies, one report per trust scope. */
@@ -158,6 +160,8 @@ export interface CheckOptions {
   uses?: Module[];
   /** PT6.5, S152: generate the OpenShell sandbox policies (poly.json's `isolation`). */
   isolation?: 'openshell';
+  /** S190, for tests: the directory `std.*` modules are found in, instead of the repository's std/. */
+  std?: string;
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
   text?: string;
   /**
@@ -210,7 +214,8 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const module = parsed.module;
   report.module = module.name;
   // S176: the modules `use` names, found in the project or, for a lone file, in its directory and std/.
-  const uses = resolveUses(module, file, opts.programFiles);
+  const uses = resolveUses(module, file, opts.programFiles, ...(opts.std ? [opts.std] : []));
+  usesFiles.set(report, uses.files);
   report.diagnostics.push(...uses.diagnostics);
   opts = { ...opts, uses: uses.program };
   const checked = checkModule(module, { program: uses.program });
@@ -868,7 +873,19 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
   };
 }
 
+/** S190: the files of the modules a report's check used, so that finish can record those whose types a build used. */
+const usesFiles = new WeakMap<CheckReport, Map<string, string>>();
+
 function finish(report: CheckReport, module?: Module): CheckReport {
+  // S190: the modules whose enums a machine's build uses, from each contract, with the file each was read from.
+  for (const m of report.machines) {
+    if (!m.buildDir || !existsSync(join(m.buildDir, 'contract.json'))) continue;
+    const tm = (JSON.parse(readFileSync(join(m.buildDir, 'contract.json'), 'utf8')) as { typeModules?: Record<string, string> }).typeModules ?? {};
+    for (const [mod, d] of Object.entries(tm)) {
+      const file = usesFiles.get(report)?.get(mod);
+      if (file) (report.typeModules ??= {})[mod] = { file, digest: d };
+    }
+  }
   // S69, S86: a witness id is the digest of { moduleDigest, subject, property, trace }, the subject being the
   // machine or configuration it is about, so the same trace in another version of the module, or in another
   // machine with the same defect, is another witness.
@@ -995,7 +1012,7 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
     const m = (f.endsWith('.ts') ? readEmbedded(text, f) : parse(text)).module;
     if (m) { program.push(m); programFiles.push({ file: f, module: m }); }
   }
-  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, programFiles, ...(manifest.isolation ? { isolation: manifest.isolation } : {}) }));
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, programFiles, ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(opts.std ? { std: opts.std } : {}) }));
   // PT8.2: a scope's policies lower to one document, so they live in one module.
   const scopes = new Map<string, CheckReport>();
   for (const report of reports) {

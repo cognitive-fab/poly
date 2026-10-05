@@ -51,13 +51,14 @@ test('B-F3, S176: two files that declare the checked module are refused when ano
   assert.ok(r.diagnostics.some((x) => x.code === 'PL1002' && /module a/.test(x.message)), JSON.stringify(r.diagnostics.map((x) => x.message)));
 });
 
-test('B-F4, S190: a field whose enum another module declares is read in a configuration only with is', { timeout: 120_000 }, async () => {
+test('B-F4, lifted by S190: a field whose enum another module declares is typed by that module in a configuration', { timeout: 120_000 }, async () => {
   const B = 'module b\n\nenum S { Idle, Busy }\n\nmachine W {\n  state { st: S = Idle }\n  terminal st is Busy\n  action Go()\n  on Go { require st is Idle else reject "busy"   st\' = Busy }\n}\n';
   const A = (inv) => `module a\nuse b\n\nenum S { Idle, Gone }\n\nmachine A {\n  state { st: S = Idle }\n  terminal st is Gone\n  action Leave()\n  on Leave { require st is Idle else reject "gone"   st' = Gone }\n}\n\nconfiguration c {\n  w : b.W\n  x : A\n  inputs { w.Go, x.Leave }\n  bounds { transit 2 }\n  invariant p: ${inv}\n}\n`;
-  for (const [name, inv, want] of [['v1', 'w.st != Gone', 'REFUSED'], ['v2', 'w.st == x.st implies x.st is Idle', 'REFUSED'], ['v3', 'w.st is Busy implies x.st is Idle', null]]) {
+  for (const [name, inv, want] of [['v1', 'w.st != Gone', ['PL1201', 'PL1001']], ['v2', 'w.st == x.st implies x.st is Idle', ['PL1201']], ['v3', 'w.st is Busy implies x.st is Idle', null]]) {
     const d = dir(`f4-${name}`, [['b.poly', B], ['a.poly', A(inv)]]);
     const r = await check(join(d, 'a.poly'), `f4-${name}`);
-    if (want) assert.ok(r.diagnostics.some((x) => x.code === 'PL0901' && /S190/.test(x.message)), `${inv}: ${JSON.stringify(r.diagnostics.map((x) => x.message))}`);
+    // S190: b.S and a.S are different types; Gone is no member of b.S. Neither is read in a's namespace any more.
+    if (want) assert.ok(r.diagnostics.some((x) => want.includes(x.code)) && !r.diagnostics.some((x) => x.code === 'PL0901'), `${inv}: ${JSON.stringify(r.diagnostics.map((x) => `${x.code} ${x.message}`))}`);
     else assert.notEqual(r.verdict, 'REFUSED', `${inv}: ${JSON.stringify(all(r).map((x) => x.message))}`);
   }
 });

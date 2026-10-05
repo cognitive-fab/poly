@@ -14,7 +14,7 @@ const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, '
 for (const file of SOURCES) {
   test(`translation validation agrees: ${basename(file)}`, async (t) => {
     for (const b of build(file, 'tv')) {
-      const r = await translationValidate(b.module, b.machine, b.dir);
+      const r = await translationValidate(b.module, b.machine, b.dir, { program: b.program });
       assert.deepEqual(r.mismatches.map((d) => d.message), []);
       assert.ok(r.transitions > 0);
       t.diagnostic(`${b.machine}: ${r.report.states} states, ${r.transitions} transitions and ${r.propertyChecks} property evaluations compared`);
@@ -41,7 +41,7 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
         const read = (dir, f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null);
         const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs', 'contract.json', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'openshell.policies.yaml', ...Object.keys(b.lowered.files).filter((f) => f.startsWith('../workflows/'))].some((f) => read(b.dir, f) !== read(good[k].dir, f));
         if (!changed) continue;
-        const r = await translationValidate(b.module, b.machine, b.dir);
+        const r = await translationValidate(b.module, b.machine, b.dir, { program: b.program });
         if (r.mismatches.length === 0) { equivalent.push(basename(file)); continue; }
         caught++;
         assert.ok(r.mismatches.every((d) => d.code === 'PL2501'));

@@ -35,20 +35,23 @@ export interface Uses {
   /** Every module the program holds for this check: the checked module and the modules it uses, transitively. */
   program: Module[];
   diagnostics: Diagnostic[];
+  /** S190: the file each used module was read from, for the certificate's record of the modules whose types a build uses. */
+  files: Map<string, string>;
 }
 
 /**
  * The program a module is checked in. `project` gives a project's modules with their files; with none, the file's
  * directory and `std/` are searched, reading only the files whose header names a module `use` asks for.
  */
-export function resolveUses(module: Module, file: string, project?: { file: string; module: Module }[]): Uses {
+export function resolveUses(module: Module, file: string, project?: { file: string; module: Module }[], std: string = STD): Uses {
+  const files = new Map<string, string>([[module.name, resolve(file)]]);
   const diagnostics: Diagnostic[] = [];
   const found = new Map<string, Module>([[module.name, module]]);
   // Candidate files by module name, read lazily, never parsed unless named.
   const candidates = (name: string): { file: string; module: Module | null; text?: string }[] => {
     if (project && !name.startsWith('std.')) return project.filter((p) => p.module.name === name && resolve(p.file) !== resolve(file));
-    const files = name.startsWith('std.') ? (existsSync(STD) ? polyFiles(STD, true) : []) : polyFiles(dirname(resolve(file)), false).filter((f) => resolve(f) !== resolve(file));
-    return files.flatMap((f) => { const text = readFileSync(f, 'utf8'); return headerModule(text) === name ? [{ file: f, module: null, text }] : []; });
+    const found = name.startsWith('std.') ? (existsSync(std) ? polyFiles(std, true) : []) : polyFiles(dirname(resolve(file)), false).filter((f) => resolve(f) !== resolve(file));
+    return found.flatMap((f) => { const text = readFileSync(f, 'utf8'); return headerModule(text) === name ? [{ file: f, module: null, text }] : []; });
   };
   const queue: { from: Module; decl: A.UseDecl }[] = module.decls.filter((d): d is A.UseDecl => d.kind === 'Use').map((decl) => ({ from: module, decl }));
   const asked = new Set<string>();
@@ -83,10 +86,11 @@ export function resolveUses(module: Module, file: string, project?: { file: stri
         m = r.module;
       }
       found.set(t, m);
+      files.set(t, resolve(c[0].file));
       for (const d of m.decls) if (d.kind === 'Use') queue.push({ from: m, decl: d });
       break;
     }
   }
-  return { program: [...found.values()], diagnostics };
+  return { program: [...found.values()], diagnostics, files };
 }
 

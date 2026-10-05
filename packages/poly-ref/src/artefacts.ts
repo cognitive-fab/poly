@@ -49,6 +49,14 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     if (a.claims) want.$claims = valuesOf(a.claims.type, M).map((v) => flatValue(v, a.claims!.type, M));
     differ(`contract.json dataDomain.${a.name}`, contract.dataDomain?.[a.name], want);
   }
+  // S190: the modules whose enums the machine uses are recorded with their digests, which load compares with the
+  // certificate's. Each module of an enum in a field or parameter is listed, and nothing poly-ref knows no enum of.
+  const tm = Object.keys((contract as { typeModules?: Record<string, string> }).typeModules ?? {}).sort();
+  const modOf = (t: RType): string[] => (t.k === 'union' && t.name.includes('.') ? [t.name.slice(0, t.name.lastIndexOf('.'))] : t.k === 'map' ? [...modOf(t.key), ...modOf(t.value)] : []);
+  const needed = [...new Set([...M.fields.map((f) => f.type), ...M.actions.flatMap((x) => x.params.map((p) => p.type))].flatMap(modOf))].sort();
+  const known = new Set([...M.unions.keys()].filter((n) => n.includes('.')).map((n) => n.slice(0, n.lastIndexOf('.'))));
+  for (const mod of needed) if (!tm.includes(mod)) out.push(`contract.json typeModules: ${mod} is missing, and ${M.name} has a field or parameter of its enums (S190)`);
+  for (const mod of tm) if (!known.has(mod)) out.push(`contract.json typeModules: ${mod} is listed, and ${M.name} uses no enum of it (S190)`);
 
   // ── effects.manifest.json ──
   const effects = decl.items.filter((i): i is A.EffectDecl => i.kind === 'EffectDecl');

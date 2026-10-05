@@ -39,6 +39,8 @@ export const FAULT_SOURCES = {
   'content-before-unhandled': ['conformance/m8/content/unhandled.poly'],
   // Review C-F3: the content row fired only on none, which the runtime never marks.
   'content-row-on-none': ['conformance/m8/content/notes.poly'],
+  // S190: a member dropped from the domain of another module's enum.
+  'foreign-enum-member': ['conformance/m8/enums/chat.poly'],
   // PS5.2a, S178: a machine's never statement, lowered to a step property over the step's intents.
   'drop-never': ['conformance/m8/never/window.poly'],
   'invert-never-while': ['conformance/m8/never/window.poly'],
