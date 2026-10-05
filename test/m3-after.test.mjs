@@ -27,11 +27,12 @@ test('a run that leaves the folder clean is scored; one during which anything wa
   const synced = folder();
   try {
     const agent = () => ({ kind: 'stub', turns: stubScript(1).turns });
-    const a = await runOne({ arm: 1, task: 'T1', run: 0, model: 'stub', tokens: DRY.tokens, wallMs: DRY.wallMs, out, agent: agent(), isolation: { configDir: clean } });
+    // Run numbers of this file's own, apart from every other file's workspace under the frozen runner (decisions-m8.md).
+    const a = await runOne({ arm: 1, task: 'T1', run: 920, model: 'stub', tokens: DRY.tokens, wallMs: DRY.wallMs, out, agent: agent(), isolation: { configDir: clean } });
     assert.equal(a.record.unscored, undefined);
     assert.deepEqual(a.record.isolation.after, []);
     // The account's skills arrive during the run, as they did on the first call after the owner's login.
-    const b = await runOne({ arm: 1, task: 'T1', run: 1, model: 'stub', tokens: DRY.tokens, wallMs: DRY.wallMs, out, agent: { kind: 'stub', turns: stubScript(1).turns.map((t, i) => (i === 0 ? { ...t, before: () => mkdirSync(join(synced, 'skills', 'synced'), { recursive: true }) } : t)) }, isolation: { configDir: synced } });
+    const b = await runOne({ arm: 1, task: 'T1', run: 921, model: 'stub', tokens: DRY.tokens, wallMs: DRY.wallMs, out, agent: { kind: 'stub', turns: stubScript(1).turns.map((t, i) => (i === 0 ? { ...t, before: () => mkdirSync(join(synced, 'skills', 'synced'), { recursive: true }) } : t)) }, isolation: { configDir: synced } });
     assert.equal(b.record.unscored, 'synced');
     assert.ok(b.record.isolation.after.some((p) => /skills/.test(p)), JSON.stringify(b.record.isolation.after));
     assert.equal(JSON.parse(readFileSync(join(b.dir, 'run.json'), 'utf8')).unscored, 'synced');

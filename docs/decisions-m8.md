@@ -178,6 +178,10 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 - *The key c in every handler.* PS15.3 has `c` read the address of the conversation spawned under the key `c`; S78 binds a child's key only in the block that spawns it. As PS15.2 and PS15.3 say, `c` names `p/c` in every handler of the application, as the kernel's child marker, so no field is added.
 - *A refused starts.* polyrun's creation persists the instance and its rejected creation step, both journaled, as the ruling's order says. PS15.4 now says so: an `unknown-thread` refusal creates no instance; a `thread-not-started` one leaves the application in its initial state with no conversation, and each later message on its thread is refused the same way. The first wording ("a refusal changes no instance") was wider than the ruling.
 
+## ENOTEMPTY under load: a defect of the test setup
+
+**Ruled after M8b step 1 (2026-10-05).** The `ENOTEMPTY` on the frozen runner's workspace came first from the dry run (`test/m3-runner.test.mjs`) and then from `test/m3-environment.test.mjs`, so it is a defect of the test setup, not a fluke: the runner's workspace is `poly-m3-ws/T1-arm<a>-run<n>`, and three files ran arm 1 of T1 as run 0 (the dry run, which is frozen, `m3-environment` and `m3-after`) while `node --test` runs the files at once. Each test file now has run numbers of its own (`m3-environment` 910, `m3-after` 920 and 921, beside `m3-cleanup`'s 901 to 905 and `m3-runner`'s 9); the dry run keeps run 0. The runner is unchanged.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

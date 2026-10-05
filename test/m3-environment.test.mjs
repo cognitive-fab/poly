@@ -59,6 +59,8 @@ test('M3-10: an OS release change is recorded, not refused; the Node, CLI and mo
   const { runOne } = await import('../experiments/m3/runner/run.mjs');
   const { DRY, stubScript } = await import('../experiments/m3/runner/dry-run.mjs');
   const environment = { ...e, os: { ...e.os, release: '0' } };
-  const { record } = await runOne({ arm: 1, task: 'T1', run: 0, model: 'stub', tokens: DRY.tokens, wallMs: DRY.wallMs, out: join(tmpdir(), 'poly-m3-env-record'), agent: { kind: 'stub', turns: stubScript(1).turns }, environment: { current: environment, differs: environmentDiff(e, environment) } });
+  // A run number of this file's own: the frozen runner's workspace is poly-m3-ws/T1-arm1-run<n>, and the dry run of
+  // m3-runner.test.mjs uses run 0 while node --test runs the files at once (ENOTEMPTY under load, decisions-m8.md).
+  const { record } = await runOne({ arm: 1, task: 'T1', run: 910, model: 'stub', tokens: DRY.tokens, wallMs: DRY.wallMs, out: join(tmpdir(), 'poly-m3-env-record'), agent: { kind: 'stub', turns: stubScript(1).turns }, environment: { current: environment, differs: environmentDiff(e, environment) } });
   assert.deepEqual(record.environment, { current: environment, differs: ['os'] });
 });
