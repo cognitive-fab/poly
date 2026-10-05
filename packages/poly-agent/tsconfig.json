@@ -16,6 +16,9 @@
     },
     {
       "path": "../poly-lang"
+    },
+    {
+      "path": "../poly-new"
     }
   ]
 }

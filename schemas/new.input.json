@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "description": {
+      "type": "string",
+      "description": "what the module is for"
+    },
+    "into": {
+      "type": "string",
+      "description": "the .poly file to write the draft to"
+    }
+  },
+  "required": [
+    "description",
+    "into"
+  ]
+}

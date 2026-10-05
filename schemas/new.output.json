@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "properties": {
+    "file": {
+      "type": "string"
+    },
+    "rounds": {
+      "type": "integer"
+    },
+    "verdict": {
+      "type": "string"
+    },
+    "admitted": {
+      "type": "boolean"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      }
+    }
+  },
+  "required": [
+    "file",
+    "rounds",
+    "verdict",
+    "admitted",
+    "provider",
+    "diagnostics"
+  ]
+}

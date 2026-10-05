@@ -14,6 +14,7 @@
   "dependencies": {
     "@poly/check": "0.0.0",
     "@poly/core": "0.0.0",
-    "@poly/lang": "0.0.0"
+    "@poly/lang": "0.0.0",
+    "@poly/new": "0.0.0"
   }
 }

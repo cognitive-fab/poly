@@ -24,6 +24,9 @@
     },
     {
       "path": "packages/poly-agent"
+    },
+    {
+      "path": "packages/poly-new"
     }
   ]
 }

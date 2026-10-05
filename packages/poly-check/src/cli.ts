@@ -20,6 +20,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly fmt <file.poly> [--write] [--json]
        poly mcp      (an MCP server over stdio: the registry's commands as tools)
        poly lsp      (the language server over stdio, on both surfaces)
+       poly new "<description>" --into <file.poly>   (drafts with Claude Code under your login; never admitted)
        poly install --host <adapter> [--project <dir>]   (prints a host's entries from adapters/<adapter>/install.json)
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
@@ -121,7 +122,7 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const valued = new Set([args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();
@@ -138,6 +139,16 @@ export async function main(argv: string[]): Promise<number> {
       const { serveLsp } = (await import(agent)) as { serveLsp: () => Promise<void> };
       await serveLsp();
       return EXIT_CODES.CLEAN;
+    }
+    // S169: poly new is poly-new's, loaded by name only here: nothing on a check path imports it.
+    if (positional[0] === 'new' && positional.length === 2) {
+      const into = option(args, '--into');
+      if (!into) throw new UsageError('new needs --into <file.poly>');
+      const pkg = '@poly/new';
+      const { newCommand, claudeCliProvider } = (await import(pkg)) as { newCommand: (p: () => unknown) => { run(i: Record<string, unknown>): Promise<{ exit: number; result: unknown; text: string }> }; claudeCliProvider: () => unknown };
+      const o = await newCommand(() => claudeCliProvider()).run({ description: positional[1], into });
+      process.stdout.write(json ? JSON.stringify(o.result, null, 2) + '\n' : o.text);
+      return o.exit;
     }
     const call = inputOf(positional, args);
     if (!call) return usage();

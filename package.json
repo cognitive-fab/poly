@@ -16,6 +16,7 @@
     "packages/poly-check",
     "packages/poly-runtime",
     "packages/poly-agent",
+    "packages/poly-new",
     "vendor/sam-pattern",
     "vendor/polygraph",
     "vendor/polyflow/platform/packages/kernel",

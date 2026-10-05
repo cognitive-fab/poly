@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
 export function mcpClient(command, args, opts = {}) {
-  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], ...opts });
+  const { onRequest, capabilities, ...spawnOpts } = opts;
+  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], ...spawnOpts });
   const pending = new Map();
   let next = 1;
   let stderr = '';
@@ -17,6 +18,12 @@ export function mcpClient(command, args, opts = {}) {
   createInterface({ input: child.stdout }).on('line', (line) => {
     let msg;
     try { msg = JSON.parse(line); } catch { return; }
+    // A request from the server (sampling/createMessage): answered by the test's handler, or refused.
+    if (msg.method && msg.id !== undefined) {
+      Promise.resolve(onRequest ? onRequest(msg) : Promise.reject(new Error(`no handler for ${msg.method}`)))
+        .then((result) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\n'), (e) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: e.message } }) + '\n'));
+      return;
+    }
     const p = pending.get(msg.id);
     if (!p) return;
     pending.delete(msg.id);
@@ -33,7 +40,7 @@ export function mcpClient(command, args, opts = {}) {
     request,
     stderr: () => stderr,
     async initialize() {
-      const r = await request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'poly-test', version: '0' } });
+      const r = await request('initialize', { protocolVersion: '2025-06-18', capabilities: capabilities ?? {}, clientInfo: { name: 'poly-test', version: '0' } });
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
       return r;
     },

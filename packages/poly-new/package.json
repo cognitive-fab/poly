@@ -1,0 +1,18 @@
+{
+  "name": "@poly/new",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "poly new: drafts a module from a description with a provider, checked by poly check and never admitted (PF9.3, S169). The only package that may call a model.",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "dependencies": {
+    "@poly/check": "0.0.0",
+    "@poly/core": "0.0.0"
+  }
+}

@@ -6,7 +6,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { COMMANDS, NOT_BUILT, commandNamed } from '@poly/check';
+import { NOT_BUILT, commandNamed } from '@poly/check';
+import { agentCommands } from '@poly/agent';
+
+// The agent's commands: the registry's and poly-new's `new` (S169).
+const COMMANDS = agentCommands();
 import { ROOT } from './helpers.mjs';
 import { schemaProblems } from './json-schema.mjs';
 

@@ -13,6 +13,8 @@
 // 3. A host-neutral core with thin host adapters (S167, M6). No package names a host or imports a host's SDK
 //    (an MCP or language-server SDK, an editor's or an agent harness's API); what a host launches lives under
 //    adapters/<host>/, and an adapter is configuration only (.json and .md files), never code.
+// 4. poly new is the only place a model is called (PF9.3, S169). poly-new may start a subprocess (Claude Code, headless);
+//    no other package imports it, except poly-agent, which serves it, and the command line, which loads it by name.
 //
 // A file that cannot be read is an error, never a pass (no silent clean).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -71,12 +73,13 @@ export function violationsOf(pkg, file, text) {
     }
   }
   for (const imp of importsOf(text)) if (HOST_SDKS.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} imports host SDK '${imp.spec}' (the core is host-neutral, S167)`);
+  if (/['"`]@poly\/new['"`]/.test(text) && pkg !== 'poly-new' && pkg !== 'poly-agent' && file !== 'packages/poly-check/src/cli.ts') v.push(`${file} names @poly/new, the package that calls a model; only poly-agent and the command line may load it (PF9.3, S169)`);
   if (HOST_NAMES.test(text)) v.push(`${file} names a host (${HOST_NAMES.exec(text)[1]}); a host's name belongs in adapters/, never in the core (S167)`);
   if (/\bfetch\s*\(/.test(text)) v.push(`${file} calls fetch (no network or model call on a check path)`);
   // Review finding P8: indirect routes. A subprocess or a computed global can reach the network, and a
   // require made at run time, a template literal or a concatenated name can reach the compiler.
   for (const imp of importsOf(text)) {
-    if (PROCESS_MODULES.includes(imp.spec)) v.push(`${file}:${imp.line} imports '${imp.spec}' (a subprocess can reach a model; no model call on a check path)`);
+    if (PROCESS_MODULES.includes(imp.spec) && pkg !== 'poly-new') v.push(`${file}:${imp.line} imports '${imp.spec}' (a subprocess can reach a model; no model call on a check path)`);
   }
   if (/\bglobalThis\s*\[/.test(text)) v.push(`${file} reads a global by a computed name (it can reach fetch)`);
   if (pkg === 'poly-ref') {

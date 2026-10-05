@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { COMMANDS } from '@poly/check';
+import { agentCommands } from '@poly/agent';
+
+const COMMANDS = agentCommands();
 import { ROOT } from './helpers.mjs';
 import { mcpClient } from './mcp-client.mjs';
 import { schemaProblems } from './json-schema.mjs';

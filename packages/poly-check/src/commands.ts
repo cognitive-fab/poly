@@ -279,11 +279,11 @@ export const COMMANDS: Command[] = [
 ];
 
 /**
- * PT14's commands that poly does not have yet, each with the milestone or step that builds it: the registry lists
+ * PT14's commands that poly does not have yet, each with the milestone or step that builds it (`new` is poly-new's, the
+ * only package that may call a model, and poly-agent adds it to the agent's commands): the registry lists
  * them so that a command is either served or said to be missing, never silently absent.
  */
 export const NOT_BUILT: { name: string; mcp: string; when: string }[] = [
-  { name: 'new', mcp: 'poly_new', when: 'M6 step 9 (S169)' },
   { name: 'explain', mcp: 'poly_explain', when: 'not scheduled: PT14 names it, and no milestone builds it yet' },
   { name: 'grade', mcp: 'poly_grade', when: 'not scheduled: polynv adequacy (PF7.7)' },
   { name: 'deploy', mcp: 'poly_deploy', when: 'not scheduled: the version gate at load (PF8.7)' },
