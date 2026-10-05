@@ -9,6 +9,7 @@ export function lspClient(command, args, opts = {}) {
   const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], ...opts });
   const pending = new Map();
   const notes = [];
+  const received = [];
   const waiters = [];
   let next = 1;
   let buf = Buffer.alloc(0);
@@ -24,8 +25,11 @@ export function lspClient(command, args, opts = {}) {
       const end = buf.indexOf('\r\n\r\n');
       if (end < 0) return;
       const len = Number(/Content-Length: (\d+)/i.exec(buf.subarray(0, end).toString('ascii'))?.[1]);
+      // A header with no length is dropped, never parsed as an empty body (polywatch on the review's probe).
+      if (!Number.isFinite(len)) { buf = buf.subarray(end + 4); continue; }
       if (buf.length < end + 4 + len) return;
       const msg = JSON.parse(buf.subarray(end + 4, end + 4 + len).toString('utf8'));
+      received.push(msg);
       buf = buf.subarray(end + 4 + len);
       if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
         const p = pending.get(msg.id);
@@ -46,6 +50,11 @@ export function lspClient(command, args, opts = {}) {
   };
   return {
     stderr: () => stderr,
+    /** Every message the server sent, in order. */
+    received,
+    pid: child.pid,
+    /** Ends the server at once, as a crash or a closed editor would, with no shutdown. */
+    kill() { return new Promise((resolve) => { if (child.exitCode !== null) return resolve(); child.once('exit', resolve); child.kill(); }); },
     request(method, params = {}) {
       return new Promise((resolve, reject) => {
         if (child.exitCode !== null) return reject(new Error(`the server has exited: ${stderr.slice(-2000)}`));
@@ -55,6 +64,15 @@ export function lspClient(command, args, opts = {}) {
       });
     },
     notify(method, params = {}) { send({ method, params }); },
+    /** Bytes written as they are, for framing tests. */
+    raw(bytes) { child.stdin.write(bytes); },
+    /** Whether a reply to `id` arrives within `ms`, and the reply. */
+    replied(id, ms) {
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => { pending.delete(id); resolve(null); }, ms);
+        pending.set(id, { resolve: (r) => { clearTimeout(timer); resolve({ result: r }); }, reject: (e) => { clearTimeout(timer); resolve({ error: e }); } });
+      });
+    },
     /** The next notification that `match` accepts, among those still to come or already received and not taken. */
     wait(match, ms = 120_000) {
       const i = notes.findIndex(match);

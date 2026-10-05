@@ -14,7 +14,7 @@
     },
     "code": {
       "type": "string",
-      "description": "PL0201 for a stale fix"
+      "description": "PL0201 for a stale fix; PL0901 for a module holding text the parser skips"
     },
     "message": {
       "type": "string",

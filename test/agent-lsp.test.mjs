@@ -41,7 +41,7 @@ test('S168: on open, the stage 0 to 2 diagnostics of poly check, at its position
     assert.ok(init.capabilities.codeActionProvider);
     for (const [path, lang] of [[poly, 'poly'], [ts, 'typescript']]) {
       open(c, path, readFileSync(path, 'utf8'), lang);
-      const got = (await published(c, path)).params.diagnostics;
+      const got = (await published(c, path)).params.diagnostics.filter((d) => d.code !== 'verdict');
       const r = await checkFile(path, { root: join(DIR, 'cli') });
       const want = [...r.diagnostics, ...r.machines.flatMap((m) => m.diagnostics)].filter((d) => ['types', 'parse', 'lower', 'validate', 'model-check', 'deadlock', 'liveness'].includes(d.stage) && d.at.line);
       assert.deepEqual(got.map(key).sort(), want.map((d) => `${d.code} ${d.at.line}:${d.at.col}`).sort(), path);

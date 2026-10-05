@@ -167,7 +167,7 @@ export function attachFixes(diags: { d: Diagnostic; machine: string | null }[], 
   }
 }
 
-export type FixOutcome = { status: 'applied'; text: string } | { status: 'refused'; code: 'PL0201'; message: string };
+export type FixOutcome = { status: 'applied'; text: string } | { status: 'refused'; code: 'PL0201' | 'PL0901'; message: string };
 
 const stale = (message: string): FixOutcome => ({ status: 'refused', code: 'PL0201', message });
 
@@ -256,6 +256,9 @@ export function applyFix(src: string, fix: Fix, file = 'module.poly'): FixOutcom
     if (!back || digest(back) !== digest(parsed.module)) return stale(`${fix.id}: the edited embedded module does not read back as the edited AST`);
     return { status: 'applied', text };
   }
+  // Review C-F3: printing a module whose source holds text the parser skips (PL0901: a world, a migration) would
+  // delete that text, so the fix is refused instead.
+  if ((parsed as ReturnType<typeof parse>).diagnostics.some((d) => d.code === 'PL0901')) return { status: 'refused', code: 'PL0901', message: `${fix.id}: the module holds text the parser skips (PL0901), which the edited module would not print` };
   const text = format(parsed.module, (parsed as ReturnType<typeof parse>).trivia);
   if (!parse(text).module) return stale(`${fix.id}: the edited module does not print to a source that parses`);
   return { status: 'applied', text };

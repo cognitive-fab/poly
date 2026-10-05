@@ -121,6 +121,9 @@ export const COMMANDS: Command[] = [
         const d = parsed.diagnostics.map(toJson);
         return { exit: EXIT_CODES.REFUSED, result: { file, formatted: src, changed: false, moduleDigest: '', diagnostics: d }, text: parsed.diagnostics.map((x) => `${x.code} ${x.message}\n`).join('') };
       }
+      // Review C-F3: the parser skips a construct of a later milestone (PL0901), which the printed module would lose.
+      const skipped = parsed.diagnostics.filter((x) => x.code === 'PL0901');
+      if (skipped.length) return { exit: EXIT_CODES.REFUSED, result: { file, formatted: src, changed: false, moduleDigest: '', diagnostics: skipped.map(toJson) }, text: `${skipped.map((x) => `PL0901 ${x.message}\n`).join('')}poly fmt: formatting would delete the text the parser skips; nothing is written\n` };
       const formatted = format(parsed.module, parsed.trivia);
       const changed = formatted !== src;
       if (changed && input.write === true) writeFileSync(file, formatted);
@@ -148,13 +151,13 @@ export const COMMANDS: Command[] = [
     name: 'fix', mcp: 'poly_fix', lsp: true,
     summary: 'Applies the fix with that id if its target node still has the digest it was computed on; otherwise refuses it with PL0201 (PT12.1).',
     input: obj({ id: str('the fix id'), root: str('where .poly/report.json lives') }, ['id']),
-    output: obj({ status: { type: 'string', enum: ['applied', 'refused'] }, file: str('the module changed'), code: str('PL0201 for a stale fix'), message: str('why it was refused') }, ['status']),
+    output: obj({ status: { type: 'string', enum: ['applied', 'refused'] }, file: str('the module changed'), code: str('PL0201 for a stale fix; PL0901 for a module holding text the parser skips'), message: str('why it was refused') }, ['status']),
     async run(input) {
       const id = need(input, 'id');
       const base = opt(input, 'root') ?? process.cwd();
       const r = applyFixById(readReport(base), id);
       if (r.status === 'applied') return { exit: 0, result: { status: 'applied', file: r.file }, text: `applied ${id} to ${r.file}; run poly check again (PT12.1)\n` };
-      return { exit: r.code === 'PL0201' ? EXIT_CODES.REFUSED : EXIT_CODES.USAGE, result: { status: 'refused', ...(r.code ? { code: r.code } : {}), message: r.message }, text: `${r.code ?? 'poly'}: ${r.message}\n` };
+      return { exit: r.code ? EXIT_CODES.REFUSED : EXIT_CODES.USAGE, result: { status: 'refused', ...(r.code ? { code: r.code } : {}), message: r.message }, text: `${r.code ?? 'poly'}: ${r.message}\n` };
     },
   },
   {
