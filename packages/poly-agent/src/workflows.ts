@@ -45,7 +45,11 @@ const compact = (o: Record<string, unknown>) => Object.fromEntries(Object.entrie
 
 export interface WorkflowTool { name: string; description: string; inputSchema: unknown; outputSchema: unknown; annotations: Record<string, boolean>; handler: (args: Record<string, any>) => Promise<Record<string, unknown>> }
 
-/** The six tools over a runtime. Each call takes every step that is due before it answers, so a view is at rest. */
+/**
+ * The six tools over a runtime. A call that writes (start, report, signal) takes every step that is due before it
+ * answers, so its view is at rest. A read (list, state, journal) changes nothing, as polyflow keeps its reads pure; an
+ * order past its deadline is not shown as open by a read, since the open orders are those within their deadline.
+ */
 export function workflowTools(rt: PolyRuntime): WorkflowTool[] {
   const READ = { readOnlyHint: true };
   const WRITE = { readOnlyHint: false, destructiveHint: false };
@@ -62,9 +66,9 @@ export function workflowTools(rt: PolyRuntime): WorkflowTool[] {
       ...extra,
     });
   };
-  const guard = (f: (a: Record<string, any>) => Promise<Record<string, unknown>>) => async (a: Record<string, any>) => {
-    try { return await f(a ?? {}); } catch (e) { return { error: (e as Error).message }; }
-  };
+  // As polyflow's server: a refusal the tool returns ({ error }) is a view the agent reasons about; a call that throws
+  // is answered with isError (polywatch on step 2).
+  const guard = (f: (a: Record<string, any>) => Promise<Record<string, unknown>>) => (a: Record<string, any>) => f(a ?? {});
   return [
     {
       name: 'workflow_list', annotations: READ,
@@ -153,8 +157,12 @@ export function serveWorkflows(rt: PolyRuntime, opts: WorkflowServerOptions = {}
         const name = String(params?.name ?? '');
         const t = byName.get(name);
         if (!t) return fail(id, -32602, `unknown tool ${name}`);
-        const out = await t.handler((params?.arguments ?? {}) as Record<string, unknown>);
-        return reply(id, { content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out, isError: false });
+        try {
+          const out = await t.handler((params?.arguments ?? {}) as Record<string, unknown>);
+          return reply(id, { content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out });
+        } catch (e) {
+          return reply(id, { content: [{ type: 'text', text: `${name}: ${(e as Error).message}` }], isError: true });
+        }
       }
       default: return fail(id, -32601, `method not found: ${method}`);
     }

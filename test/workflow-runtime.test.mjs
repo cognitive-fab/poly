@@ -152,6 +152,20 @@ test('S175: a certificate from before M8a, listing a workflow as run by polyflow
   await assert.rejects(load(a.build, { certificate: path, trust: a.trust }), (e) => e instanceof LoadError && /predates S175/.test(e.message));
 });
 
+test('polywatch on step 2: a certificate whose workflow entry names the descriptor of another workflow is refused at load', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { certificateDigest, signDigest } = await import('@poly/core');
+  const { load, LoadError } = await import('@poly/runtime');
+  const a = await admitted('m8-run-name', [BRIEF]);
+  const cert = JSON.parse(readFileSync(a.certificate, 'utf8'));
+  cert.poly.workflows = cert.poly.workflows.map((w) => ({ ...w, name: 'another-brief' }));
+  delete cert.digest; delete cert.signatures;
+  const digest = certificateDigest(cert);
+  const path = join(a.dir, '.poly', 'renamed-certificate.json');
+  writeFileSync(path, JSON.stringify({ ...cert, digest, signatures: [signDigest(digest, a.key.id, readFileSync(a.key.file, 'utf8'))] }));
+  await assert.rejects(load(a.build, { certificate: path, trust: a.trust }), (e) => e instanceof LoadError && /has the descriptor of workflow customer-brief/.test(e.message));
+});
+
 test('S173, K9 over MCP: a report of an order not open, and a signal of a work order\'s completion, are refused and change nothing', async () => {
   const a = await admitted('m8-run-refusals', [BRIEF]);
   const run = polyRun(a);
@@ -161,8 +175,10 @@ test('S173, K9 over MCP: a report of an order not open, and a signal of a work o
     const [o] = v.next;
     const wrong = await run.c.call('workflow_report', { order_id: `${o.order_id.slice(0, o.order_id.lastIndexOf('#'))}#2`, ok: true, result: { count: 2 } });
     assert.match(wrong.error, /issued/);
-    const sig = await run.c.call('workflow_signal', { instance: v.instance, action: 'TICKETS_READY', data: { count: 2 } });
-    assert.match(sig.error, /K9/);
+    // A refused signal throws in the runtime, so the tool answers with isError, as polyflow's server does (polywatch).
+    const sig = await run.c.request('tools/call', { name: 'workflow_signal', arguments: { instance: v.instance, action: 'TICKETS_READY', data: { count: 2 } } });
+    assert.equal(sig.isError, true);
+    assert.match(sig.content[0].text, /K9/);
     const steps = (await run.c.call('workflow_journal', { instance: v.instance })).journal.length;
     const again = await run.c.call('workflow_start', { workflow: 'customer-brief', input: { date: '2026-10-05' }, key: 'another' });
     assert.equal((await run.c.call('workflow_journal', { instance: v.instance })).journal.length, steps, 'attaching takes no step');
