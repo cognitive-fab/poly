@@ -110,3 +110,35 @@ test('polywatch muva0r1v-3c89f81a finding 1: a module that declares its own Cont
   assert.ok(!text.includes('content-missing'), 'no content-missing row');
   assert.ok(!text.includes('$content'), 'no $content key');
 });
+
+test('PS3.2 (S180 ruling): an action with no handler is unhandled whatever its data, a missing body included', async () => {
+  const { buildMachine, transition, initialState } = await import('@poly/ref');
+  const r = parse(readFileSync(join(ROOT, 'conformance', 'm8', 'content', 'unhandled.poly'), 'utf8'));
+  const M = buildMachine(r.module, 'Shelf');
+  const s = initialState(M);
+  const c = `sha256:${'0'.repeat(63)}1`;
+  assert.equal(transition(M, s, 'Peek', { c, $content: 'missing' }).verdict.kind, 'unhandled');
+  assert.equal(transition(M, s, 'Peek', { c }).verdict.kind, 'unhandled');
+  assert.deepEqual(transition(M, s, 'Keep', { c, $content: 'missing' }).verdict, { kind: 'rejected', reason: 'content-missing' });
+});
+
+test('PS3.2, PS9.1a: translation validation probes the content row on an action with no handler, and the source is CLEAN', { timeout: 120_000 }, async () => {
+  const r = await checkFile(join(ROOT, 'conformance', 'm8', 'content', 'unhandled.poly'), { root: join(OUT, 'unhandled') });
+  assert.equal(r.verdict, 'CLEAN', JSON.stringify(r.machines.flatMap((m) => m.diagnostics.map((d) => `${d.code} ${d.message}`))));
+});
+
+test('PS3.2 (S180 ruling): at run time an action with no handler is unhandled with a missing body too, as in poly-ref', { timeout: 120_000 }, async () => {
+  const a = await admitted('content-unhandled', ['conformance/m8/content/unhandled.poly']);
+  const { rt } = await loaded(a);
+  try {
+    await rt.create('unhandled.Shelf', { id: 's-1' });
+    assert.equal((await rt.dispatch('s-1', 'Peek', { c: MISSING })).stepKind, 'unhandled');
+    assert.deepEqual(await rt.dispatch('s-1', 'Keep', { c: MISSING }).then((x) => [x.stepKind, x.rejectReason]), ['rejected', 'content-missing']);
+    assert.equal((await rt.getState('s-1')).state.phase, 'Open');
+  } finally { await rt.close(); }
+});
+
+test('PS3.2 (polywatch muvf62zx-3c89f81a): the content row comes before the guards, so a missing body is content-missing where a guard would reject', { timeout: 120_000 }, async () => {
+  const r = await checkFile(join(ROOT, 'conformance', 'm8', 'content', 'guarded.poly'), { root: join(OUT, 'guarded') });
+  assert.equal(r.verdict, 'CLEAN', JSON.stringify(r.machines.flatMap((m) => m.diagnostics.map((d) => `${d.code} ${d.message}`))));
+});

@@ -35,6 +35,8 @@ export const FAULT_SOURCES = {
   'skip-claims': ['conformance/m5/refund.poly'],
   // PS3.2, S180: the content row, which rejects a step whose Content names no body before the module.
   'skip-content': ['conformance/m8/content/notes.poly'],
+  // PS3.2's first row order (S180 ruling): the content row lowered for an action with no handler.
+  'content-before-unhandled': ['conformance/m8/content/unhandled.poly'],
   // S162: the actions timers start, which the runtime refuses from outside in a scope that requires attribution.
   'drop-timer-target': ['conformance/m5/lineage-timer.poly'],
   // PT10, S165: the workflow descriptor polyflow reads: a tool mapped to another kind, and a key field's pattern dropped.

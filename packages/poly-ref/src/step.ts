@@ -283,12 +283,13 @@ export function transition(M: RMachine, s: State, action: string, d: Record<stri
   for (const p of a.params) {
     if (p.strict && !inCheckDomain(d[p.name], p, M)) return { verdict: { kind: 'rejected', reason: 'outside-check-domain' }, next: s, effects: [] };
   }
-  // PD5.1.2c, S101: claims missing, malformed or outside their domains, applied before the module like row 2.
-  if (a.claims && !claimsInType(d.$claims ?? null, a.claims.type, M)) return { verdict: { kind: 'rejected', reason: 'claims-unverified' }, next: s, effects: [] };
-  // PS3.2, S180: a Content that names no body in the store, marked so by the runtime, is rejected before the module.
-  if (d.$content === 'missing' && carriesContent(a.params.map((p) => p.type))) return { verdict: { kind: 'rejected', reason: 'content-missing' }, next: s, effects: [] };
+  // Row 3 (S180 ruling): an action with no handler is unhandled whatever its data.
   const h = M.handlers.get(action);
   if (!h) return { verdict: { kind: 'unhandled' }, next: s, effects: [] };
+  // Row 4, PD5.1.2c, S101: claims missing, malformed or outside their domains, applied before the module like row 2.
+  if (a.claims && !claimsInType(d.$claims ?? null, a.claims.type, M)) return { verdict: { kind: 'rejected', reason: 'claims-unverified' }, next: s, effects: [] };
+  // Row 5, S180: a Content that names no body in the store, marked so by the runtime, is rejected before the module.
+  if (d.$content === 'missing' && carriesContent(a.params.map((p) => p.type))) return { verdict: { kind: 'rejected', reason: 'content-missing' }, next: s, effects: [] };
   const r = runHandler(M, h, s, d, self);
   if (r.kind === 'reject') return { verdict: { kind: 'rejected', reason: r.reason }, next: s, effects: [] };
   // s ⊕ w: every field not written is unchanged (the frame).

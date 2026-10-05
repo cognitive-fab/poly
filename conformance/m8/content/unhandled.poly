@@ -1,0 +1,25 @@
+// S180 ruling on PS3.2's row order: an action with no handler is unhandled whatever its data. Peek carries a Content
+// and has no handler, so with a missing body it is unhandled, not content-missing, in poly-ref and in polyrun alike.
+// Translation validation probes the content row on Peek as well as on the handled Keep.
+module unhandled
+
+enum Phase { Open, Kept }
+
+machine Shelf {
+  state {
+    phase : Phase = Open
+    body  : Content = none
+  }
+  terminal phase is Kept
+
+  action Keep(c: Content)
+  action Peek(c: Content)
+
+  on Keep(c) {
+    require c != none else reject "no-body"
+    phase' = Kept
+    body' = c
+  }
+
+  invariant kept-holds: phase is Kept implies body != none
+}

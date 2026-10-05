@@ -200,8 +200,10 @@ export async function translationValidate(module: Module, machineName: string, b
 
   // PS3.2's content row (S180): check never offers a missing body, so the row is compared here, in every reachable state
   // and for every action whose data can carry a Content, on the runtime's mark of a missing body. R_M rejects it with
-  // content-missing, unless an earlier row rejects it first.
-  for (const a of M.actions.filter((x) => M.handlers.has(x.name) && carriesContent(x.params.map((p) => p.type)))) {
+  // content-missing, unless an earlier row answers first. Actions with no handler are probed too (S180 ruling): R_M
+  // answers them unhandled, and the runtime never calls the module for them (PS9.1a), so a row order that differs
+  // between the two is seen here and nowhere else, since check never offers a missing body.
+  for (const a of M.actions.filter((x) => carriesContent(x.params.map((p) => p.type)))) {
     const sample = dataDomain(a, M)[0];
     const good = flattenData(sample, a.name, M);
     for (const [i, s] of g.states.entries()) {

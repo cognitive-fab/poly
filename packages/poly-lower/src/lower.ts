@@ -17,7 +17,7 @@ export interface LowerOptions {
   program?: A.Module[];
 }
 
-export type Fault = 'skip-content' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'skip-content' | 'content-before-unhandled' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
@@ -81,6 +81,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // ── acceptors ────────────────────────────────────────────────────────
   const handlers = new Map(mutated.items.filter((i): i is A.Handler => i.kind === 'Handler').map((h) => [h.action, h]));
   const guards = mutated.items.filter((i): i is A.Guard => i.kind === 'Guard');
+  // The fault content-before-unhandled lowers PS3.2's first row order (S180, before the ruling): an action with no handler
+  // that carries a Content gets an empty handler, so the module answers its missing body content-missing.
+  if (opts.fault === 'content-before-unhandled') for (const a of actions) if (!handlers.has(a.name) && carriesContent(a, env)) handlers.set(a.name, { kind: 'Handler', id: `${a.id}#fault`, action: a.name, params: null, body: [] });
   // S35: an action with no handler is not lowered. It is not an intent of the module and not in the
   // contract's actions, so the runtime answers it before any acceptor runs (PS9.1a): terminal in a terminal
   // state, unhandled elsewhere. sam-pattern 2.3 throws for an intent no acceptor constrains (S34, option b).
@@ -99,7 +102,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const claimsOkText = "((c, spec) => !!c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length === Object.keys(spec).length && Object.entries(spec).every(([f, d]) => d === 'principal' ? typeof c[f] === 'string' && c[f].length > 0 : d.includes(c[f])))";
   const claimsOf = (action: string): Ty | null => { const by = handlers.get(action)?.by; return by ? { k: 'record', name: by.type } : null; };
   const acceptors: string[] = [];
-  if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length || claimed.size) {
+  // PS3.2 row 5 (S180): the actions whose data can carry a Content, for the content row in the first acceptor.
+  const contentful = opts.fault === 'skip-content' ? [] : lowerable.filter((a) => carriesContent(a, env));
+  if ((terminal && opts.fault !== 'skip-terminal') || guards.length || strict.length || claimed.size || contentful.length) {
     const lines = [`    // PS3.2, rows 1 and 2, then the guards of PS2.2. It runs for handled actions only: no other is an intent (S35).`, `    '*': (model) => (proposal, { reject }) => {`, `      const action = proposal.__actionName;`];
     if (terminal && opts.fault !== 'skip-terminal') lines.push(`      if (TERMINAL(model)) return reject('terminal');`);
     for (const s of strict) {
@@ -116,6 +121,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
       if (opts.fault === 'skip-claims') continue;
       lines.push(`      if (action === ${JSON.stringify(name)} && !${claimsOkText}(proposal.$claims, ${JSON.stringify(spec)})) return reject('claims-unverified');`);
     }
+    // PS3.2's content row (S180): after the claims row and before the guards, which are h_a's (polywatch muvf62zx-3c89f81a).
+    for (const a of contentful) lines.push(`      if (action === ${JSON.stringify(a.name)} && proposal.$content === 'missing') return reject('content-missing');`);
     if (guards.length) {
       for (const g of guards) lines.push(`      if (${expr(g.cond, stateCx)}) return reject(${JSON.stringify(g.reason)});`);
     }
@@ -129,8 +136,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     // PD5.1.2: the claims binder reads the label's claims, carried under $claims (S155).
     // Review A-F2: sam-pattern runs this acceptor even after the first one rejects, so the body is guarded by the row too.
     // The fault skip-claims drops the row here too: with the row in either place the step is still rejected.
-    // PS3.2, S180: a Content that names no body in the store is marked by the runtime under $content, and the row
-    // rejects it before the handler, after the claims row. The fault skip-content drops it.
+    // PS3.2, S180: a Content that names no body in the store is marked by the runtime under $content. The first acceptor
+    // rejects it before the guards; the row is repeated here, as the claims row is, since this acceptor runs anyway
+    // (A-F2). The fault skip-content drops it in both places.
     if (carriesContent(a, env) && opts.fault !== 'skip-content') body.unshift(`      if (proposal.$content === 'missing') return reject('content-missing');`);
     if (h.by) body.unshift(...(opts.fault === 'skip-claims' ? [] : [`      if (!${claimsOkText}(proposal.$claims, ${JSON.stringify(claimed.get(a.name))})) return reject('claims-unverified');`]), `      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims };`);
     // S55: each map the handler writes entry by entry gathers its entries in an accumulator.

@@ -1,0 +1,22 @@
+// S180, PS3.2 row 5 before the guards (polywatch muvf62zx-3c89f81a): a missing body is rejected content-missing even in
+// a state where a guard would reject the step, since the content row comes before h_a and its guards.
+module guarded
+
+enum Mode { Open, Frozen }
+
+machine Box {
+  state {
+    mode : Mode = Open
+    body : Content = none
+  }
+
+  action Put(c: Content)
+  action Freeze()
+  action Thaw()
+
+  guard all when mode is Frozen && action == Put reject "frozen"
+
+  on Put(c) { body' = c }
+  on Freeze { mode' = Frozen }
+  on Thaw { mode' = Open }
+}
