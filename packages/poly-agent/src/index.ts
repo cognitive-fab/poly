@@ -2,3 +2,4 @@
 export { COMMANDS, NOT_BUILT, commandNamed, CommandUsageError, type Command, type Outcome, type Schema } from '@poly/check';
 export { serveMcp, mcpTools, agentCommands, type McpOptions } from './mcp.js';
 export { serveLsp, toLsp, type LspOptions } from './lsp.js';
+export { serveWorkflows, workflowTools, type WorkflowTool, type WorkflowServerOptions } from './workflows.js';

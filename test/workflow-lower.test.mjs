@@ -1,8 +1,8 @@
 // M6 step 3: the workflow lowering (PT10, S164, S165). poly check writes each workflow's polyflow.workflow.json under
 // .poly/build/workflows/<name>/, naming the machine's lowered files, and always writes the machine's
-// effect-invariants.mjs, which polyflow imports. The workflow stage runs polyflow's own admission (the vendored
-// library's certify, at its bounds), so CLEAN in poly means admitted by polyflow, and a bounded run is INCONCLUSIVE.
-// The certificate lists every workflow as ungated: polyflow runtime, so it never reads as covered by the gate (PA0.4).
+// effect-invariants.mjs. Since M8a (S175) a workflow runs on poly-runtime, each work order through the gate (S173):
+// polyflow's admission no longer runs in poly check, a workflow's machine is checked by poly's own stages, and the
+// certificate lists each workflow as run on poly-runtime and gated.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -27,37 +27,37 @@ test('S165: poly check writes the workflow descriptor beside the machine, naming
   for (const k of ['contract', 'machine', 'effects', 'manifest', 'effectInvariants', 'invariants']) assert.ok(existsSync(join(wfDir, d[k])), `${k}: ${d[k]}`);
   assert.equal(d.machine, '../../brief.Brief/next.cjs');
   assert.match(readFileSync(join(wfDir, d.effectInvariants), 'utf8'), /effectInvariants/);
-  const stage = r.machines[0].stages.find((s) => s.stage === 'workflow');
-  assert.equal(stage?.verdict, 'CLEAN', JSON.stringify(r.machines[0].stages));
-  assert.match(stage.engine, /polyflow/);
+  // S175: no stage runs polyflow's admission; the machine's own stages decide it.
+  assert.ok(!r.machines[0].stages.some((s) => /polyflow/.test(s.engine ?? '') || s.stage === 'workflow'), JSON.stringify(r.machines[0].stages));
+  assert.equal(r.machines[0].stages.find((s) => s.stage === 'effects')?.verdict, 'CLEAN');
 });
 
-test('S165: a workflow longer than polyflow\'s admission bound is INCONCLUSIVE, never CLEAN, and polyflow refuses it', async () => {
+test('S175: a workflow longer than polyflow\'s old admission bound is decided by poly\'s own effects stage, over every path', async () => {
   const r = await checkFile(join(ROOT, 'conformance', 'm6', 'long.poly'), { root: OUT });
-  const stage = r.machines[0].stages.find((s) => s.stage === 'workflow');
-  assert.equal(stage?.verdict, 'INCONCLUSIVE', JSON.stringify(r.machines[0].stages));
-  assert.notEqual(r.verdict, 'CLEAN');
-  assert.ok(r.machines[0].diagnostics.some((d) => d.code === 'PL3901' && /polyflow/.test(d.message)));
+  assert.equal(r.verdict, 'CLEAN', JSON.stringify(r.machines[0].diagnostics));
+  assert.equal(r.machines[0].stages.find((s) => s.stage === 'effects')?.verdict, 'CLEAN');
+  assert.ok(!r.machines[0].stages.some((s) => s.stage === 'workflow'));
 });
 
-test('S164: the certificate lists every workflow as ungated: polyflow runtime, and certifies its descriptor', async () => {
+test('S175: the certificate lists every workflow as run on poly-runtime and gated, with no ungated limit, and certifies its descriptor', async () => {
   const key = makeKey('workflow-cert');
   const dir = project('workflow-cert', ['conformance/m6/brief.poly'], key);
   const a = await admit(dir);
-  assert.deepEqual(a.certificate.poly.workflows, [{ name: 'daily-brief', machine: 'brief.Brief', runtime: 'polyflow', gated: false, descriptor: '.poly/build/workflows/daily-brief/polyflow.workflow.json' }]);
+  assert.deepEqual(a.certificate.poly.workflows, [{ name: 'daily-brief', machine: 'brief.Brief', runtime: 'poly-runtime', gated: true, descriptor: '.poly/build/workflows/daily-brief/polyflow.workflow.json' }]);
   assert.ok(a.certificate.artefacts['.poly/build/workflows/daily-brief/polyflow.workflow.json']);
-  assert.ok(a.certificate.poly.limits.some((l) => /ungated: polyflow runtime/.test(l) && /daily-brief/.test(l)), JSON.stringify(a.certificate.poly.limits));
+  assert.ok(!a.certificate.poly.limits.some((l) => /ungated|polyflow/.test(l)), JSON.stringify(a.certificate.poly.limits));
 });
 
-// Polywatch on step 3: a workflow stage an earlier stage stopped is listed as not run, never left out (review P7).
-test('S165: when an earlier stage stops, the workflow stage is listed as not run', async () => {
+// Polywatch on step 3: a stage an earlier stage stopped is listed as not run, never left out (review P7). Since S175 a
+// workflow's machine has no stage of its own, so its effects stage is the one listed.
+test('S165: when an earlier stage stops, a workflow machine\'s effects stage is listed as not run', async () => {
   const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
   const dir = join(ROOT, '.poly', 'test-workflow-notrun');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'brief.poly'), readFileSync(BRIEF, 'utf8').replace("    phase' = Posted\n", "    phase' = Posted\n    nothing' = 1\n"));
   const r = await checkFile(join(dir, 'brief.poly'), { root: dir });
   assert.equal(r.verdict, 'REFUSED');
-  const stage = r.machines[0].stages.find((s) => s.stage === 'workflow');
+  const stage = r.machines[0].stages.find((s) => s.stage === 'effects');
   assert.equal(stage?.status, 'not-run', JSON.stringify(r.machines[0].stages));
 });
 

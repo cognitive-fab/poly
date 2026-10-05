@@ -19,9 +19,10 @@ import { createRuntime, type Runtime, type DispatchResult, type JournalRow } fro
 import { RESERVED_MODULE, verifyRecord, type Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { dataOutside } from './types.js';
-import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type WorkOrderTool } from './load.js';
+import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type VerifiedWorkflow, type WorkOrderTool } from './load.js';
+import { deriveKey, keyFields, keyOfRun, runIdOf, WorkflowError } from './workflows.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
-import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift, type ReportOutcome } from './worker.js';
+import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift, type ReportOutcome, parseOrderId } from './worker.js';
 import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
@@ -467,6 +468,62 @@ export class PolyRuntime {
   /** S173: the agent's report of a work order, which settles its intent; any report but the open attempt's is refused and audited. */
   reportWorkOrder(orderId: string, report: { ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
     return this.worker.report(orderId, report);
+  }
+
+  /** S173: the run an order id belongs to, or null when no intent has that id. */
+  orderRun(orderId: string): string | null {
+    const p = parseOrderId(orderId);
+    return p ? (this.store.db.prepare('SELECT instance_id FROM pr_outbox WHERE intent_id = ?').get(p.intent)?.instance_id as string | undefined) ?? null : null;
+  }
+
+  /** PT10: the certified workflows, as polyflow's catalogue lists them (S174). */
+  workflowList(): { name: string; admitted: true; guarantees: string[]; tools: string[]; key: { template: string; derived_from: string[] } }[] {
+    return this.verified.workflows.map((w) => ({
+      name: w.name,
+      admitted: true as const,
+      guarantees: this.certificate.guarantees.filter((g) => g.startsWith(`${w.machine}:`) && g !== `${w.machine}:deadlock-free`).map((g) => g.slice(w.machine.length + 1)),
+      tools: Object.entries(w.tools).map(([kind, t]) => `${kind} -> ${t.tool}`),
+      key: { template: w.key.template, derived_from: keyFields(w) },
+    }));
+  }
+
+  private workflowNamed(name: string): VerifiedWorkflow {
+    const w = this.verified.workflows.find((x) => x.name === name);
+    if (!w) throw new WorkflowError(`unknown workflow '${name}'`);
+    return w;
+  }
+
+  /**
+   * PT10, S174: starts a run, or attaches to the run its key already names. The key is derived from the input (a key
+   * the caller passes is ignored, with a note), so starting is idempotent. The run is created with the input action.
+   */
+  async startWorkflow(name: string, input: Record<string, unknown> = {}, key?: string): Promise<{ instanceId: string; key: string; note?: string; attached: boolean }> {
+    const w = this.workflowNamed(name);
+    const derived = deriveKey(w, input);
+    const note = key && key !== derived ? `key '${key}' ignored: this workflow's runs are identified by ${w.key.template} = '${derived}', derived from the input you gave.` : undefined;
+    const instanceId = runIdOf(name, derived);
+    if (await this.store.getInstance(instanceId)) return { instanceId, key: derived, attached: true, ...(note ? { note } : {}) };
+    await this.create(w.machine, { id: instanceId, creation: { action: w.inputAction, data: input } });
+    return { instanceId, key: derived, attached: false, ...(note ? { note } : {}) };
+  }
+
+  /** PT10: a run as polyflow's tools show it: its state, whether it is done, and its open work orders. */
+  async workflowView(instanceId: string): Promise<{ instance: string; workflow: string; key: string; status: string; state: Record<string, unknown>; done: boolean; seq: number; orders: WorkOrder[] }> {
+    const inst = await this.store.getInstance(instanceId);
+    const w = inst ? this.verified.workflows.find((x) => x.machine === inst.machine_id && instanceId.startsWith(`${x.name}|`)) : undefined;
+    if (!inst || !w) throw new WorkflowError(`no run '${instanceId}'`);
+    return { instance: instanceId, workflow: w.name, key: keyOfRun(instanceId), status: inst.status, state: inst.state as Record<string, unknown>, done: inst.status !== 'active', seq: inst.seq, orders: await this.workOrders(instanceId) };
+  }
+
+  /**
+   * Takes every step that is due now (effects, timers and messages), until a pass finds nothing to do, at most `passes`
+   * times, so a view after a report shows the next order the gate allowed.
+   */
+  async advance(passes = 32): Promise<void> {
+    for (let k = 0; k < passes; k++) {
+      const r = await this.tick();
+      if (!r.effects && !r.timers && !r.messages) return;
+    }
   }
 
   /** The actions a machine's decisions complete with, which only the worker dispatches (K10). */

@@ -22,7 +22,6 @@
     "@poly/ref": "0.0.0",
     "@cognitive-fab/polygraph": "8.3.2",
     "@cognitive-fab/sam-pattern": "2.3.0",
-    "@cognitive-fab/polyflow-server": "0.4.2",
     "typescript": "~5.9.3",
     "@poly/runtime": "0.0.0"
   }

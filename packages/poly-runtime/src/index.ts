@@ -16,3 +16,4 @@ export { PolicyGate, GateUnavailable, type PolicyGateOptions, type ProgramView, 
 export { personKeyVerifier, type Verifier, type VerifierContext } from './verifier.js';
 export { capabilitiesFor, withinPrefix, CapabilityRefused, MAX_REDIRECTS, type Transports, type EgressRequest, type EgressResponse } from './capabilities.js';
 export { policyEngine, actionOf, decisionOfReject, type EngineDecision } from './policy-engine.js';
+export { deriveKey, keyFields, runIdOf, keyOfRun, WorkflowError } from './workflows.js';

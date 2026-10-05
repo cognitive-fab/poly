@@ -31,7 +31,7 @@ import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration' | 'workflow';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration';
 
 export interface StageRecord {
   stage: StageName;
@@ -288,43 +288,12 @@ function byContent(dir: string, file: string): string {
   return copy;
 }
 
-/**
- * PT10, S165: polyflow admits a workflow only if check-effects over its contract finds no violation and is not bounded
- * (depth 12, 50,000 paths). The stage runs that admission itself, with the vendored library's certify, so a workflow
- * poly reports CLEAN is one polyflow admits; a bounded run is INCONCLUSIVE (PL3901), never CLEAN. A violation polyflow
- * reports is one of the machine's path properties, which the effects stage decides over every path; it is listed here
- * as polyflow's refusal.
- */
-async function workflowStage(moduleName: string, w: A.Workflow, mc: MachineCheck, dir: string): Promise<void> {
-  const t0 = performance.now();
-  const engine = '@cognitive-fab/polyflow-server@0.4.2 (certify)';
-  const at = { module: moduleName, machine: mc.machine, node: w.id, line: w.span?.line, col: w.span?.col };
-  const { Library } = await import('@cognitive-fab/polyflow-server/library');
-  // Review A-F6: this workflow's descriptor alone, as polyflow reads it, so another directory there cannot stop the stage.
-  const lib = new Library(join(dir, '..', 'workflows')) as unknown as { _read(name: string, path: string): unknown; certify(wf: unknown): ReturnType<InstanceType<typeof Library>['certify']> };
-  let wf: unknown = null;
-  try { wf = lib._read(w.name, join(dir, '..', 'workflows', w.name)); } catch { wf = null; }
-  if (!wf) {
-    mc.diagnostics.push(diag('PL2501', at, `polyflow does not load the workflow ${w.name} from its lowered descriptor (addressed to the toolchain, not the author)`, { engine }));
-    mc.stages.push({ stage: 'workflow', status: 'ran', engine, verdict: 'REFUSED', ms: performance.now() - t0 });
-    return;
-  }
-  const c = await lib.certify(wf);
-  const out: Diagnostic[] = [];
-  if (c.bounded) out.push(diag('PL3901', at, `workflow ${w.name}: polyflow's admission explores at most depth 12 and 50,000 paths, and this machine's emission paths go beyond them, so polyflow would refuse it (S165)`, { engine }));
-  for (const v of c.violations) out.push(diag('PL4001', at, `workflow ${w.name}: polyflow's admission finds a path that violates ${v.invariant ?? v.name ?? 'an effect invariant'}, so it would refuse the workflow (S165)`, { engine }));
-  mc.diagnostics.push(...out);
-  mc.stages.push({ stage: 'workflow', status: 'ran', engine, verdict: verdictOf(out), ms: performance.now() - t0, note: `polyflow ${c.ok ? 'admits' : 'refuses'} ${w.name} (${c.pathsExplored} paths); it runs on polyflow, outside the gate (S164)` });
-}
-
 /** Stages 2c, 3 and 4, where the machine has them: listed as not run when an earlier stage stops (review finding P7). */
 function laterStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string): StageName[] {
   const f = checked.machines.get(machine)!;
   const mapper = f.effects.size > 0 || f.decisions.size > 0 || f.timerKeys.size > 0 || f.children.size > 0 || kernelIntents(f.machine).length > 0;
   const live = f.machine.items.some((i) => i.kind === 'Liveness');
-  // PT10, S165: a machine a workflow runs has the workflow stage too (polywatch on step 3).
-  const workflow = module.decls.some((d) => d.kind === 'Workflow' && d.machine === machine);
-  return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.decisions.size ? ['decisions' as const] : []), ...(f.children.size ? ['composition' as const] : []), ...(workflow ? ['workflow' as const] : [])];
+  return [...(live ? ['liveness' as const] : []), ...(mapper ? ['effects' as const] : []), ...(f.decisions.size ? ['decisions' as const] : []), ...(f.children.size ? ['composition' as const] : [])];
 }
 
 function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
@@ -472,8 +441,8 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 3: effects (PS5.4, S33) ─────────────────────────────────────
   if (lowered.files['effects.cjs']) await effectsStage(module, machine, mc, dir, contract, ref, engines);
-  // PT10, S165: each workflow that runs this machine, admitted by polyflow's own gate at its own bounds.
-  for (const w of module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === machine)) await workflowStage(module.name, w, mc, dir);
+  // S175: a workflow's machine is checked by these stages like any other. polyflow's admission no longer runs here: a
+  // workflow runs on poly-runtime, each work order through the gate (S164, S173).
 
   // ── stage 3b: decisions (PD1.4d, S75) ─────────────────────────────────
   if (ref.model.decisions.size) {

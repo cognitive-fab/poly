@@ -1,0 +1,11 @@
+// M8a step 2 (S164, S173): a policy over AC5's customer-brief that denies the public post, so its work order is never
+// issued and the run takes its failure branch.
+module brief_deny
+
+policy no-public-post {
+  scope "customer_brief"
+  obligation no-post "The brief is never posted publicly." rule {
+    when effect.kind == "post_brief"
+    require false else deny
+  }
+}

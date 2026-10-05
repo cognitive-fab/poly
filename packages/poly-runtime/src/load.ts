@@ -157,6 +157,8 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   // S173: a workflow's mapped kinds become work orders, so each must be an effect of its machine, as certified.
   const workflows: VerifiedWorkflow[] = [];
   for (const w of certificate.poly?.workflows ?? []) {
+    // S175: a certificate from before M8 lists a workflow as run by polyflow, outside the gate; it is not what runs here.
+    if ((w as { runtime: string }).runtime !== 'poly-runtime' || (w as { gated: boolean }).gated !== true) throw new LoadError(`refused at load: the certificate lists workflow ${w.name} as run by ${(w as { runtime: string }).runtime}, outside the gate; it predates S175, so admit the program again`);
     const d = JSON.parse(bytes.get(w.descriptor)!.toString('utf8')) as Omit<VerifiedWorkflow, 'machine'>;
     const m = machines.find((x) => x.id === w.machine);
     if (!m) throw new LoadError(`refused at load: workflow ${w.name} runs ${w.machine}, which the certificate does not name`);

@@ -77,7 +77,8 @@ test('review A-F6: a renamed workflow leaves no descriptor behind, and a leftove
   writeFileSync(file, SRC);
   const r2 = await checkFile(file, { root });
   assert.equal(r2.verdict, 'CLEAN', r2.error);
-  assert.equal(r2.machines[0].stages.find((s) => s.stage === 'workflow')?.verdict, 'CLEAN');
+  // S175: the workflow stage is retired; the machine's own effects stage is the one the leftover must not stop.
+  assert.equal(r2.machines[0].stages.find((s) => s.stage === 'effects')?.verdict, 'CLEAN');
 });
 
 test('review A-F7: a workflow in a module with a dotted name is admitted', async () => {

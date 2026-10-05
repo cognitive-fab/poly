@@ -55,7 +55,6 @@ test('AC5: customer-brief written in poly runs through polyflow\'s unchanged too
   rmSync(root, { recursive: true, force: true });
   const r = await checkFile(join(ROOT, 'conformance', 'm6', 'customer-brief.poly'), { root });
   assert.equal(r.verdict, 'CLEAN', JSON.stringify(r.machines.flatMap((m) => m.diagnostics.map((d) => d.message))));
-  assert.equal(r.machines[0].stages.find((s) => s.stage === 'workflow')?.verdict, 'CLEAN');
   const lowered = join(root, '.poly', 'build', 'workflows');
   for (const [name, answer] of Object.entries(SCRIPTS)) {
     const hand = await drive(HAND_WRITTEN, '2026-10-04', answer);
@@ -77,8 +76,9 @@ test('AC5: customer-brief written in poly runs through polyflow\'s unchanged too
 });
 
 // AC5's control: the same workflow with its approval check removed posts before any approval is asked for. poly check
-// reports the violated path property, and polyflow's own admission, which the workflow stage runs, refuses it.
-test('AC5, control: customer-brief without its approval check is FINDINGS in poly and refused by polyflow', { timeout: 120_000 }, async () => {
+// reports the violated path property in its effects stage (until M8a, polyflow's admission, run as a workflow stage,
+// refused it too; S175 retired that stage).
+test('AC5, control: customer-brief without its approval check is FINDINGS in poly', { timeout: 120_000 }, async () => {
   const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
   const src = readFileSync(join(ROOT, 'conformance', 'm6', 'customer-brief.poly'), 'utf8');
   const mutant = src.replace('    require briefState == review else reject "nothing-awaiting-approval"\n    briefState\' = posting', '    require briefState == review || briefState == drafting else reject "nothing-awaiting-approval"\n    briefState\' = posting');
@@ -90,7 +90,6 @@ test('AC5, control: customer-brief without its approval check is FINDINGS in pol
   assert.equal(r.verdict, 'FINDINGS');
   const m = r.machines[0];
   assert.ok(m.diagnostics.some((d) => d.code === 'PL4001' && /no-post-without-prior-approval/.test(d.message)), JSON.stringify(m.diagnostics.map((d) => d.message)));
-  const stage = m.stages.find((s) => s.stage === 'workflow');
-  assert.equal(stage.verdict, 'FINDINGS');
-  assert.match(stage.note, /polyflow refuses customer-brief/);
+  // S175: poly's own effects stage finds it; polyflow's admission no longer runs in poly check.
+  assert.equal(m.stages.find((s) => s.stage === 'effects').verdict, 'FINDINGS');
 });

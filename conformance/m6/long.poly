@@ -1,6 +1,6 @@
 // S165 (M6 step 3): a workflow whose emission paths are longer than polyflow's admission bound (depth 12). Each step
-// emits the next tick, so a run takes fourteen work orders; polyflow's certify would stop at its bound and refuse the
-// workflow, so poly's workflow stage reports it INCONCLUSIVE, never CLEAN.
+// emits the next tick, so a run takes fourteen work orders. polyflow's certify stopped at its bound and refused it, and
+// poly's workflow stage reported it INCONCLUSIVE; since S175 poly's own effects stage decides it over every path.
 module long
 
 machine Counter {
