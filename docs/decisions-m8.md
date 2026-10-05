@@ -84,6 +84,18 @@ Then step 3 is built, the 143 files and the evidence tests are measured again, a
 
 **Polywatch on the store lock (4cdd00e).** Four findings, all real: a lock file that could not be written, an approvals path that is a file, and a failing takeover entry each left the OS lock held; a load that failed after finding a stale lock lost the stale owner's record. Each is fixed, two with tests that failed first.
 
+## S180 in detail, ruled
+
+**Accepted (2026-10-05).** The text is written into `04-semantics.md` first (PS1.4a, the `content-missing` row of PS3.2, PS4.1f), with three precisions:
+
+- **Representatives.** PD5's rule for `Principal`, applied to `Content` separately: the number of `Content` positions and parameters in scope plus one, never fewer than two, plus `none`. With two `Content` values compared for equality, two representatives are needed to show all the cases. The verdict prints both counts in its instance.
+- **No literals.** The only constant of type `Content` is `none`. A digest written in source is `PL1209`. A body enters only at run time, through ingress or the store.
+- **Missing body.** A `Content` that names no body in the store is rejected before the module with a reserved reason, `content-missing`, added to `PL1207`'s list and to PS3.2's table beside `claims-unverified`. The step is journaled and the state is unchanged.
+
+Out of M8a, as proposed: taint, channels, and any decision that reads a body. Tests first, then the code, with seeded faults for: a digest literal accepted; arithmetic or ordering on `Content` accepted; a missing body reaching the module; one representative used where two `Content` values are compared.
+
+The lemma is written as PS4.1f, since PS4.1d already names the unconstrained environment (and PS4.1c is used twice, by the principals' lemma and by Polytrion worlds; that earlier clash is left as it is, for the owner).
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.
