@@ -36,7 +36,7 @@ const BOOL: Ty = { k: 'bool' };
 const INT: Ty = { k: 'int', lo: -Infinity, hi: Infinity };
 const ERR: Ty = { k: 'error' };
 /** The reasons the runtime gives (PS3.2, S101, S127), which a module may not use (PL1207). */
-export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing'];
+export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing', 'unknown-thread', 'thread-not-started'];
 
 export function tyToString(t: Ty): string {
   switch (t.k) {
@@ -781,7 +781,9 @@ class Checker {
     this.actions = new Map();
 
     if (m.version !== null) void 0; // `version N` is recorded; migrations were refused by the parser (PL0901)
-    if (m.fields.length === 0) this.err('PL1201', m, `machine ${m.name} declares no state; the first field is its control field (PT4.4a)`);
+    // PS15.0: an interface (a channel kind's Peer) has actions only: no state, no handler, no terminal.
+    const iface = m.items.every((i) => i.kind === 'Action');
+    if (m.fields.length === 0 && !iface) this.err('PL1201', m, `machine ${m.name} declares no state; the first field is its control field (PT4.4a)`);
     for (const f of m.fields) {
       if (facts.fieldTypes.has(f.name)) { this.err('PL1002', f, `field ${f.name} is declared twice`); continue; }
       const ty = this.tyOf(f.type);
@@ -1383,6 +1385,9 @@ class Checker {
       for (const a of s.args) this.typeOf(a.value, scope);
     }
     if (!child || !s.as || s.index) return;
+    // PS15.3: the spawn a channel's expansion writes binds the key its handlers already read as the conversation's address.
+    const own = scope.locals.get(s.as);
+    if (s.generated === 'channel' && own?.res.k === 'child' && own.res.key === s.as) return;
     if (scope.locals.has(s.as) || scope.params.has(s.as) || this.facts!.fieldTypes.has(s.as)) { this.err('PL1002', s, `${s.as} is already a name here`); return; }
     const name = this.targetName(s.target);
     scope.locals.set(s.as, { ty: { k: 'ref', machine: name }, res: { k: 'child', key: s.as, machine: name } });
@@ -1560,7 +1565,8 @@ class Checker {
       // S176: a message across modules carries only values whose types need no module.
       const pt = foreign ? foreign(p.type) : this.tyOf(p.type);
       if (pt === null) { this.err('PL0901', a.value, `${what}.${p.name} is a type its module declares, and a message across modules carries only types that need no module (booleans, ranges, int, strings, Principal, addresses) until types cross modules (S176, S190)`); this.typeOf(a.value, scope); return; }
-      const whole = s.op === 'send' && a.value.kind === 'Name' && a.value.name === 'self';
+      // S58, S177: self is a whole argument of a send, or of a detached spawn's creation action.
+      const whole = (s.op === 'send' || (s.op === 'spawn' && s.modifier === 'detached')) && a.value.kind === 'Name' && a.value.name === 'self';
       const t = this.typeOf(a.value, whole ? { ...scope, selfOk: true } : scope, pt);
       if (!same(t, pt)) this.err(opaqueCode(t, pt), a.value, `${what}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
     });
@@ -1785,6 +1791,8 @@ class Checker {
       this.err('PL1201', h, `on ${h.action}(${h.params.join(', ')}) must repeat the declared parameters (${declared.join(', ')}) in order (PT2.4a)`);
     }
     const scope = this.scope('handler');
+    // PS15.3: a channel's key names its conversation's address p/c in every handler of the application.
+    for (const c of this.machine?.channelKeys ?? []) scope.locals.set(c.key, { ty: { k: 'ref', machine: c.machine }, res: { k: 'child', key: c.key, machine: c.machine } });
     for (const p of act.params) scope.params.set(p.name, this.tyOf(p.type));
     // PD5.1.2: `by c: C` binds the claims, a claims type's value, in the handler.
     if (h.by) {
@@ -2490,6 +2498,8 @@ class Checker {
   private emitsFilter(at: A.NodeBase, name: string, fields: A.EmitsField[]): void {
     const f = this.facts!;
     const eff = f.effects.get(name);
+    // PS15.3: c.reply and c.template are messages to a channel's conversation after the expansion, not effects.
+    if (!eff && name.includes('.')) { this.err('PL1001', at, `${name} is a message to channel ${name.slice(0, name.indexOf('.'))}'s conversation, a send after the expansion (PS15.3), not an effect of ${this.machine!.name}; state the rule on the conversation, whose never statements are checked alone and in the channel's configuration (S178)`); return; }
     if (!eff) {
       const timer = f.timerKeys.has(name) || [...f.timerKeys].some((k) => new RegExp(`^${name}\\d+$`).test(k));
       const child = f.children.has(name) || f.families.has(name) || f.detached.has(name);

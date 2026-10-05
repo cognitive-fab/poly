@@ -36,6 +36,7 @@ import { AbsentInstance, evaluate, evaluateAt, type GlobalView } from './eval.js
 import { explore, pathTo, type Edge, type Graph, type Label, type Outcome, type System } from './explore.js';
 import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
 import { ENGINE } from './check.js';
+import { readChannels } from './channels.js';
 
 /** A message in transit: its target instance, action and data (PS13.2). */
 export interface Message {
@@ -124,7 +125,11 @@ export interface ConfigReport {
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
-export function buildConfiguration(module: Module, name: string, opts: { program?: Module[] } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
+export function buildConfiguration(source: Module, name: string, opts: { program?: Module[] } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
+  // PS15: a module with channels means its expansion, with the configuration of each channel.
+  const reading = readChannels(source, opts.program ?? []);
+  const module = reading.module;
+  opts = { ...opts, program: reading.program };
   const decl = module.decls.find((d): d is A.Configuration => d.kind === 'Configuration' && d.name === name);
   if (!decl) throw new Error(`poly-ref: no configuration ${name} in module ${module.name}`);
   const machines = new Map<string, RMachine>();

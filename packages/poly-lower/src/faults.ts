@@ -5,7 +5,7 @@
 import type * as A from '@poly/core';
 import type { Fault } from './lower.js';
 
-export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal', 'outcome-entry', 'widen-target', 'skip-claims', 'widen-sandbox', 'drop-timer-target', 'workflow-tool', 'workflow-key', 'skip-content', 'content-before-unhandled', 'drop-never', 'invert-never-while', 'drop-never-filter', 'never-post-state', 'content-row-on-none', 'foreign-enum-member'];
+export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal', 'outcome-entry', 'widen-target', 'skip-claims', 'widen-sandbox', 'drop-timer-target', 'workflow-tool', 'workflow-key', 'skip-content', 'content-before-unhandled', 'drop-never', 'invert-never-while', 'drop-never-filter', 'never-post-state', 'content-row-on-none', 'foreign-enum-member', 'channel-drop-spawn', 'channel-swap-rename', 'channel-inbound-to-app'];
 
 /** The machine as the broken lowering sees it. drop-frame, skip-terminal, the property faults and the effect faults act in the emitter instead. */
 export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {
@@ -23,6 +23,23 @@ export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {
       if (s.kind === 'For') visitStmts(s.body);
     }
   };
+  // PS15: the channel's expansion broken: the spawn in starts dropped, or two renamed sends of the conversation swapped
+  // (two whose arguments are the same, so the lowering still compiles them).
+  if (fault === 'channel-drop-spawn') {
+    const drop = (body: A.Stmt[]): A.Stmt[] => body.filter((s) => !(s.kind === 'Intent' && s.generated === 'channel')).map((s) => (s.kind === 'If' ? { ...s, then: drop(s.then), else: s.else ? drop(s.else) : s.else } : s));
+    for (const it of copy.items) if (it.kind === 'Handler') it.body = drop(it.body);
+    return copy;
+  }
+  if (fault === 'channel-swap-rename') {
+    const sends: A.IntentStmt[] = [];
+    const walk = (body: A.Stmt[]): void => { for (const s of body) { if (s.kind === 'Intent' && s.renamedFrom) sends.push(s); if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); } } };
+    for (const it of copy.items) if (it.kind === 'Handler') walk(it.body);
+    const sig = (s: A.IntentStmt) => s.args.map((a) => a.name).join(',');
+    const a = sends.find((s) => sends.some((o) => o.target !== s.target && sig(o) === sig(s)));
+    const b = a && sends.find((o) => o.target !== a.target && sig(o) === sig(a));
+    if (a && b) { const [x, y] = [a.target, b.target]; for (const s of sends) s.target = s.target === x ? y : s.target === y ? x : s.target; }
+    return copy;
+  }
   if (fault === 'skip-guard') {
     const i = copy.items.findIndex((x) => x.kind === 'Guard');
     if (i >= 0) copy.items.splice(i, 1);

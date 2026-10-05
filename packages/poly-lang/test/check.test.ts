@@ -48,9 +48,11 @@ test('each error source raises exactly the code it names', () => {
   // PL6405 is raised at load by a changed keyring (S150), tested by person-keys.test.mjs.
   // PL6302 is raised by the policy stage over a scope and the modules it governs (PS8.4), tested by policy-front.test.mjs.
   // PL6406 is raised at run time by a capability call outside its targets (S151), tested by capabilities.test.mjs.
+  // PL6811 to PL6815 are raised by the channel expansion (PS15), which needs a channel kind under std/; the test kind is
+  // test-only, so they are tested by channels.test.mjs.
   // PL6407 is raised at load by a module whose enums a build uses and that changed since (S190), tested by enums-across.test.mjs.
   // PL6001 is Polyaxion's refusal of a policy at admission (PT8.4), which needs the engine; tested by policy-front.test.mjs.
-  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404' && c !== 'PL6302' && c !== 'PL6405' && c !== 'PL6406' && c !== 'PL6407' && c !== 'PL6001').map(([c]) => c);
+  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404' && c !== 'PL6302' && c !== 'PL6405' && c !== 'PL6406' && c !== 'PL6407' && !/^PL681[1-5]$/.test(c) && c !== 'PL6001').map(([c]) => c);
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 

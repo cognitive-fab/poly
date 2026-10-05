@@ -10,6 +10,7 @@ export { antecedents, conjunction, judge, type Antecedent, type Vacuous } from '
 export { keyOf, stateKey, statePlain, toPlain, type Value, type State, type UnionValue, type MapValue } from './values.js';
 export { alpha, alphaData, flatten, flattenData, flatValue } from './alpha.js';
 export { translationValidate, type TvResult } from './tv.js';
+export { readChannels, machineHome, type ChannelReading } from './channels.js';
 export { loadLoweredModule } from './load.js';
 export { confirmWitness, confirmEffectsWitness, stateDigestOf, type Confirmation, type WitnessToConfirm, type FlatStep } from './confirm.js';
 export { checkJoint, jointStep, stimuliAt, jointKey, jointPlain, MAX_CASCADE_DEPTH, type Joint, type JointReport, type Stimulus, type CascadeStep } from './joint.js';

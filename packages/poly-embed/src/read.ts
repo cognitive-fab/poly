@@ -171,7 +171,7 @@ class Reader {
 
   // ── declarations ─────────────────────────────────────────────────────────
   private decl(node: ts.Expression): A.Decl {
-    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow');
+    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow', 'channel');
     switch (c.name) {
       case 'enumType': {
         const [name, members] = this.argsOf(c, 2, 2);
@@ -192,6 +192,17 @@ class Reader {
       }
       case 'machine': return this.machine(c);
       case 'workflow': return this.workflow(c);
+      case 'channel': {
+        // PT21.1, S186: channel(name, { kind, adapter?, thread, starts?, onInbound?, peer: { P: 'A.X' } }).
+        const [name, body] = this.argsOf(c, 2, 2);
+        const o = this.opts(body, ['kind', 'adapter', 'thread', 'starts', 'onInbound', 'peer']);
+        const dotted = (node: ts.Expression) => { const s = this.str(node); const i = s.indexOf('.'); if (i < 1) this.fail(node, 'expected Machine.Action'); return [s.slice(0, i), s.slice(i + 1)]; };
+        const onIn = o.get('onInbound');
+        const st = o.get('starts');
+        const starts = st ? { machine: dotted(st)[0], action: dotted(st)[1], onInbound: !!onIn && this.unparen(onIn).kind === ts.SyntaxKind.TrueKeyword } : null;
+        const maps = this.obj(o.get('peer')!).map(([peer, v, kn]) => { const [machine, action] = dotted(v); return this.mk<A.ChannelMap>(kn, { kind: 'ChannelMap', peer, machine, action }); });
+        return this.mk<A.Channel>(c.node, { kind: 'Channel', name: this.str(name), channelKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, thread: this.str(o.get('thread')!), starts, maps });
+      }
       default: return this.configuration(c);
     }
   }

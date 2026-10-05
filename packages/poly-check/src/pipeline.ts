@@ -19,7 +19,7 @@ import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
-import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
+import { expandChannels, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
@@ -162,6 +162,14 @@ export interface CheckOptions {
   isolation?: 'openshell';
   /** S190, for tests: the directory `std.*` modules are found in, instead of the repository's std/. */
   std?: string;
+  /** PS15, set by checkFile: the source as written, which poly-ref reads instead of the expansion. */
+  refModule?: Module;
+  /** PS15, set by checkFile: the program as written, which poly-ref reads with refModule. */
+  refProgram?: Module[];
+  /** PS15, set by checkFile: the machine as poly-ref names it (c.Conversation for a channel's conversation). */
+  refMachine?: string;
+  /** PS15, set by checkFile: each channel's expansion, for its descriptor. */
+  channels?: ChannelPlan[];
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
   text?: string;
   /**
@@ -211,23 +219,29 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const parsed = file.endsWith('.ts') ? readEmbedded(src, file) : parse(src);
   report.diagnostics.push(...parsed.diagnostics);
   if (!parsed.module) return finish(report);
-  const module = parsed.module;
-  report.module = module.name;
+  const original = parsed.module;
+  report.module = original.name;
   // S176: the modules `use` names, found in the project or, for a lone file, in its directory and std/.
-  const uses = resolveUses(module, file, opts.programFiles, ...(opts.std ? [opts.std] : []));
+  const uses = resolveUses(original, file, opts.programFiles, ...(opts.std ? [opts.std] : []));
   usesFiles.set(report, uses.files);
   report.diagnostics.push(...uses.diagnostics);
-  opts = { ...opts, uses: uses.program };
-  const checked = checkModule(module, { program: uses.program });
+  // PS15: each channel is expanded, and the program is checked and lowered as expanded; poly-ref is given the source
+  // as written, and expands it on its own. The modules m.c of the conversations join the program.
+  const expansion = expandChannels(original, uses.program);
+  report.diagnostics.push(...expansion.diagnostics);
+  const module = expansion.module;
+  const program = [...uses.program.filter((m) => m !== original), module, ...expansion.extra];
+  opts = { ...opts, uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans };
+  const checked = checkModule(module, { program });
   report.diagnostics.push(...checked.diagnostics);
   // Review B-F1: a used module the checker refuses refuses this check too, with its own errors, each at its own line;
   // poly-ref would otherwise explore machines the compiler rejects, and a configuration over them could read CLEAN.
   // Polywatch: each points at this file's use that reaches the module (the first use, for one reached through another),
   // since the report names this file, and its message names the module's own line.
   const useDecls = module.decls.filter((d): d is A.UseDecl => d.kind === 'Use');
-  for (const m of uses.program) {
+  for (const m of program) {
     if (m === module) continue;
-    const errors = checkModule(m, { program: uses.program }).diagnostics.filter((d) => d.severity === 'error');
+    const errors = checkModule(m, { program }).diagnostics.filter((d) => d.severity === 'error');
     const use = useDecls.find((d) => d.path.join('.') === m.name || d.path.slice(0, -1).join('.') === m.name) ?? useDecls[0];
     const at = { module: module.name, ...(use ? { node: use.id, line: use.span?.line, col: use.span?.col } : {}) };
     report.diagnostics.push(...errors.map((d) => ({ ...d, at, message: `in module ${m.name}${d.at.line !== undefined ? `, line ${d.at.line}` : ''}, which this program uses: ${d.message}` })));
@@ -242,6 +256,12 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
     if (refused) {
       notRun(mc, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(module, checked, machine)], 'the program was refused at stage 0');
+      continue;
+    }
+    // PS15.0: an interface (a channel kind's Peer) has actions only: no state, no handler, so no step to lower or explore.
+    const decl = checked.machines.get(machine)!.machine;
+    if (!decl.fields.length && decl.items.every((i) => i.kind === 'Action')) {
+      mc.stages[0].note = 'an interface (PS15.0): actions only, with no state and no handler, so it has no step to lower or explore';
       continue;
     }
     try {
@@ -261,12 +281,33 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
         cut.push(other);
       }
       for (const d of module.decls) if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
-      finish(report, module);
+      finish(report, original);
       for (const m of cut) m.verdict = fold([m.verdict, 'INCONCLUSIVE']);
       report.error = `${machine}: ${err.message}`;
       report.verdict = err.nondeterministic ? 'NONDETERMINISM' : 'ERROR';
       report.exit = err.nondeterministic ? EXIT_CODES.NONDETERMINISM : EXIT_CODES.ERROR;
       return report;
+    }
+  }
+  // PS15: each channel's conversation, the machine Conversation of the module m.c, reported as c.Conversation.
+  for (const x of expansion.extra) {
+    const channel = x.name.slice(module.name.length + 1);
+    const checkedX = checkModule(x, { program });
+    for (const machine of checkedX.machines.keys()) {
+      const mc: MachineCheck = { machine: `${channel}.${machine}`, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
+      report.machines.push(mc);
+      mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
+      if (refused) { notRun(mc, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(x, checkedX, machine)], 'the program was refused at stage 0'); continue; }
+      try {
+        await checkMachineStages(x, checkedX, machine, mc, { ...opts, refMachine: `${channel}.${machine}` }, engines);
+      } catch (e) {
+        notRun(mc, (['lower', 'validate', 'translation-validation', 'model-check', 'deadlock'] as StageName[]).filter((st) => !mc.stages.some((s) => s.stage === st)), `the check stopped with an error in ${mc.machine}`);
+        finish(report, original);
+        report.error = `${mc.machine}: ${(e as Error).message}`;
+        report.verdict = 'ERROR';
+        report.exit = EXIT_CODES.ERROR;
+        return report;
+      }
     }
   }
   // ── stage 4b: configurations (PS13) ─────────────────────────────────────
@@ -280,12 +321,12 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
       if (d.kind === 'Policy') report.policies.push({ scope: d.scope, policies: [d.name], stages: [{ stage: 'policy-types', status: 'not-run', engine: '', reason }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE', reads: [] });
     }
-    finish(report, module);
+    finish(report, original);
     for (const m of [...report.machines, ...report.configurations, ...report.policies]) if (m.verdict === 'CLEAN') m.verdict = 'INCONCLUSIVE';
     if (report.verdict === 'CLEAN') { report.verdict = 'INCONCLUSIVE'; report.exit = EXIT_CODES.INCONCLUSIVE; }
     return report;
   }
-  const configs = configurationReports(module, refused, opts.uses);
+  const configs = configurationReports(module, refused, opts.uses, original, uses.program);
   report.configurations.push(...configs.configurations);
   ruleOut(report, module);
   // ── stage 5: policies (PT8) ─────────────────────────────────────────────
@@ -294,7 +335,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       for (const d of module.decls) if (d.kind === 'Policy') report.policies.push({ scope: d.scope, policies: [d.name], stages: [{ stage: 'policy-types', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE', reads: [] });
     } else {
       try { report.policies.push(...await policyReports(module, opts.program ?? [module], resolve(opts.root ?? process.cwd()))); } catch (e) {
-        finish(report, module);
+        finish(report, original);
         report.error = `policies: ${(e as Error).message}`;
         report.verdict = 'ERROR';
         report.exit = EXIT_CODES.ERROR;
@@ -304,13 +345,13 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   }
   if (configs.error) {
     // As for a machine's stages: a throw is an ERROR report, never a rejected check (review finding).
-    finish(report, module);
+    finish(report, original);
     report.error = configs.error;
     report.verdict = 'ERROR';
     report.exit = EXIT_CODES.ERROR;
     return report;
   }
-  return finish(report, module);
+  return finish(report, original);
 }
 
 /**
@@ -340,7 +381,7 @@ function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
 async function checkMachineStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, opts: CheckOptions, engines: Record<string, string>): Promise<void> {
   // ── lower ─────────────────────────────────────────────────────────────
   let t0 = performance.now();
-  const { lowered, diagnostics } = lowerMachine(module, checked, machine, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses });
+  const { lowered, diagnostics } = lowerMachine(module, checked, machine, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses, ...(opts.channels?.length ? { channels: opts.channels } : {}) });
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
@@ -372,6 +413,8 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
       rmSync(wdir, { recursive: true, force: true });
       mkdirSync(wdir, { recursive: true });
     }
+    // PS15: a channel's descriptor sits in .poly/build/channels/, beside the machines' directories.
+    if (f.startsWith('../channels/')) mkdirSync(dirname(join(dir, f)), { recursive: true });
     writeFileSync(join(dir, f), text);
   }
   mc.buildDir = dir;
@@ -400,7 +443,9 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 1b: translation validation (PS9.3) ──────────────────────────
   t0 = performance.now();
-  const tv = await translationValidate(module, machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses });
+  // PS15: poly-ref is given the source as written (and c.Conversation for a channel's conversation), never the expansion.
+  const refProgram = opts.refProgram ?? opts.uses;
+  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram });
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {
@@ -514,7 +559,7 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const t0 = performance.now();
   const at = { module: module.name, machine };
   const engine = `polyrun@${engines.polygraph}`;
-  const joint = checkJoint(module, machine);
+  const joint = checkJoint(opts.refModule ?? module, opts.refMachine ?? machine);
   // Review B3: K11 stays when the machine's actions take claims (PD5.5).
   mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9', ...(mc.instance!.kernelAssumptions.includes('K11') ? ['K11'] : [])];
   mc.instance!.jointStates = joint.states;
@@ -695,14 +740,15 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  * engine checks configurations, so the stage is poly-ref's alone (PA0.1). Liveness is listed as not run (M1-2).
  * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
  */
-function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[]): ConfigCheck {
+function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program): ConfigCheck {
   const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
     return cc;
   }
   const t0 = performance.now();
-  const r = checkConfiguration(module, decl.name, { program });
+  // PS15: poly-ref reads the source as written, and generates a channel's configuration on its own.
+  const r = checkConfiguration(original, decl.name, { program: refProgram });
   cc.diagnostics.push(...r.findings);
   cc.vacuous = vacuousRecords(r.vacuous);
   cc.nevers = r.nevers;
@@ -755,12 +801,12 @@ function ruleOut(report: CheckReport, module: Module): void {
 }
 
 /** Stage 4b for every configuration of a module; the first explorer throw stops the stage and is reported. */
-export function configurationReports(module: Module, refused: boolean, program?: Module[]): { configurations: ConfigCheck[]; error?: string } {
+export function configurationReports(module: Module, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program): { configurations: ConfigCheck[]; error?: string } {
   const configurations: ConfigCheck[] = [];
   for (const d of module.decls) {
     if (d.kind !== 'Configuration') continue;
     try {
-      configurations.push(configurationStage(module, d, refused, program));
+      configurations.push(configurationStage(module, d, refused, program, original, refProgram));
     } catch (e) {
       return { configurations, error: `configuration ${d.name}: ${(e as Error).message}` };
     }

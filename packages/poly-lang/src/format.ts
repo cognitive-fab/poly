@@ -47,6 +47,18 @@ class Printer {
   }
 
   /** PT10: one line per clause; a tool name that is not an identifier is quoted. */
+  /** PT21.1, PS15: one canonical text per channel. */
+  private channel(c: A.Channel): void {
+    const q = (s: string) => JSON.stringify(s);
+    this.lead(c, '');
+    this.out.push(`channel ${c.name}: ${c.channelKind} {`);
+    if (c.adapter !== null) this.out.push(`${INDENT}adapter ${q(c.adapter)}`);
+    this.out.push(`${INDENT}thread ${q(c.thread)}`);
+    if (c.starts) this.out.push(`${INDENT}starts ${c.starts.machine}.${c.starts.action}${c.starts.onInbound ? ' on inbound' : ''}`);
+    for (const m of c.maps) this.emit(m, INDENT, [`${m.peer} -> ${m.machine}.${m.action}`]);
+    this.out.push(`}${this.trail(c)}`);
+  }
+
   private workflow(w: A.Workflow): void {
     const q = (s: string) => JSON.stringify(s);
     this.lead(w, '');
@@ -102,6 +114,8 @@ class Printer {
         return this.policy(d);
       case 'Workflow':
         return this.workflow(d);
+      case 'Channel':
+        return this.channel(d);
     }
   }
 

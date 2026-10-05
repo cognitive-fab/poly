@@ -10,6 +10,7 @@ import { buildMachine, dataDomain, valuesOf, monitorStart, monitorStep, clauseTe
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
 import { isTerminal, type Intent } from './step.js';
+import { machineHome } from './channels.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
@@ -147,7 +148,12 @@ export function unconstrained(module: Module, M: RMachine, path: Edge<State>[], 
   return false;
 }
 
-export function checkMachine(module: Module, machineName: string, opts: CheckOptions = {}): MachineReport {
+export function checkMachine(source: Module, sourceMachine: string, opts: CheckOptions = {}): MachineReport {
+  // PS15: the machine where the channel's expansion puts it (c.Conversation is the machine Conversation of m.c).
+  const home = machineHome(source, opts.program ?? [], sourceMachine);
+  const module = home.module;
+  const machineName = home.machine;
+  opts = { ...opts, program: home.program };
   const M = buildMachine(module, machineName, { principals: opts.principals, contents: opts.contents, program: opts.program });
   const g = explore(machineSystem(M), opts.maxStates);
   const findings: Diagnostic[] = [];

@@ -1,0 +1,77 @@
+// M8b step 1 (PS15): a channel kind for the tests only, found through the test-only std option. It never ships in
+// std/. Peer is the interface the application binds; Conversation keeps a window, opened by an inbound message, and
+// sends a reply only while it is open.
+module std.channels.test
+
+enum Window { Closed, Open }
+
+machine Peer {
+  state { }
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "window-closed" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    window  : Window = Closed
+    pending : 0..1 = 0
+    refused : bool = false
+    app     : Ref<Peer> = none
+  }
+
+  action Open(app: Ref<Peer>)
+  action Inbound(from: string check { "alice", "bob" }, body: Content)
+  action Reply(body: Content)
+  action Template()
+  action Sent()
+  action SendFailed()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+  on Inbound(from, body) {
+    require window is Closed else reject "open"
+    window' = Open
+    send app <- Message(body: body)
+  }
+  on Reply(body) {
+    require pending == 0 else reject "busy"
+    if window is Open {
+      pending' = 1
+      emit send(body: body)
+    } else {
+      require !refused else reject "refused"
+      refused' = true
+      send app <- Rejected(reason: "window-closed")
+    }
+  }
+  on Template {
+    require window is Open else reject "closed"
+    require pending == 0 else reject "busy"
+    pending' = 1
+    emit send(body: none)
+  }
+  on Sent {
+    require pending == 1 else reject "idle"
+    pending' = 0
+    send app <- Delivered()
+  }
+  on SendFailed {
+    require pending == 1 else reject "idle"
+    pending' = 0
+    send app <- Failed()
+  }
+
+  effect send(body: Content) {
+    kind "channel.send"
+    labels { egress:external }
+    ok -> Sent()
+    failed -> SendFailed()
+    exhausted -> SendFailed()
+  }
+
+  never free-when-closed: emit send while window is Closed
+}

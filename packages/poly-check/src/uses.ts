@@ -54,7 +54,9 @@ export function resolveUses(module: Module, file: string, project?: { file: stri
     const found = name.startsWith('std.') ? (existsSync(std) ? polyFiles(std, true) : []) : polyFiles(dirname(resolve(file)), false).filter((f) => resolve(f) !== resolve(file));
     return found.flatMap((f) => { const text = readFileSync(f, 'utf8'); return headerModule(text) === name ? [{ file: f, module: null, text }] : []; });
   };
-  const queue: { from: Module; decl: A.UseDecl }[] = module.decls.filter((d): d is A.UseDecl => d.kind === 'Use').map((decl) => ({ from: module, decl }));
+  // PS15: a channel of kind k uses std.channels.k, whose Peer and Conversation its expansion reads.
+  const asUse = (c: A.Channel): A.UseDecl => ({ kind: 'Use', id: c.id, span: c.span, path: ['std', 'channels', c.channelKind] });
+  const queue: { from: Module; decl: A.UseDecl }[] = [...module.decls.filter((d): d is A.UseDecl => d.kind === 'Use'), ...module.decls.filter((d): d is A.Channel => d.kind === 'Channel').map(asUse)].map((decl) => ({ from: module, decl }));
   const asked = new Set<string>();
   while (queue.length) {
     const { from, decl } = queue.shift()!;

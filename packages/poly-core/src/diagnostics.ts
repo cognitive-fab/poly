@@ -140,6 +140,12 @@ export const CODES: Record<string, CodeInfo> = {
   PL6803: { name: 'WORKFLOW_TOOLS', stage: 'types', severity: 'error' },
   // PT10, S172: a workflow whose machine declares no path property, which polyflow's admission cannot admit.
   PL6804: { name: 'WORKFLOW_UNCHECKED', stage: 'types', severity: 'error' },
+  // PT21.1, PS15 (M8b): a channel's kind, thread key and binding of the conversation's Peer.
+  PL6811: { name: 'CHANNEL_KIND_UNKNOWN', stage: 'types', severity: 'error' },
+  PL6812: { name: 'THREAD_KEY_INVALID', stage: 'types', severity: 'error' },
+  PL6813: { name: 'CHANNEL_BINDING_INCOMPLETE', stage: 'types', severity: 'error' },
+  PL6814: { name: 'CHANNEL_BINDING_NOT_ONE_TO_ONE', stage: 'types', severity: 'error' },
+  PL6815: { name: 'CHANNEL_BINDING_MISTYPED', stage: 'types', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
   PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },

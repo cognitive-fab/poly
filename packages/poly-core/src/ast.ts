@@ -27,7 +27,25 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow | Channel;
+
+// ── Channels (PT21.1, PS15) ────────────────────────────────────────────────
+
+/**
+ * `channel c: k { adapter "…"  thread "{f}"  starts A.S [on inbound]  P -> A.X … }` (PS15): an expansion into the
+ * conversation `m.c.Conversation` of `std.channels.k`, a spawn in `starts`, sends for `emit c.reply` and `emit
+ * c.template`, and the configuration `c`. Each `P -> A.X` binds a Peer action to an action of the application.
+ */
+export interface Channel extends NodeBase {
+  kind: 'Channel';
+  name: string;
+  channelKind: string;
+  adapter: string | null;
+  thread: string;
+  starts: { machine: string; action: string; onInbound: boolean } | null;
+  maps: ChannelMap[];
+}
+export interface ChannelMap extends NodeBase { kind: 'ChannelMap'; peer: string; machine: string; action: string }
 
 // ── Workflows (PT10, S166) ─────────────────────────────────────────────────
 
@@ -122,6 +140,8 @@ export interface Configuration extends NodeBase {
   inputs: InputRef[];
   bounds: ConfigBounds | null;
   properties: (Property | Liveness)[];
+  /** PS15.5: the configuration a channel generates, named after it. */
+  generated?: 'channel';
 }
 
 /** `x : M { f: e, … }`, or a group `g[n] : M { … }` of n instances g[0] … g[n-1] (PS13.1). */
@@ -233,6 +253,11 @@ export interface Machine extends NodeBase {
   version: number | null;
   fields: Field[];
   items: MachineItem[];
+  /**
+   * PS15.2, PS15.3: set by a channel's expansion: each channel's key c and its conversation's machine. In every handler
+   * of the application, c names the address p/c of the child spawned under that key.
+   */
+  channelKeys?: { key: string; machine: string }[];
 }
 
 export interface Field extends NodeBase {
@@ -428,6 +453,10 @@ export interface IntentStmt extends NodeBase {
   index: Expr | null;
   /** signal: the child key; spawn: the creation action ('create', A) and the completion wiring, as written (S43). */
   extra: string[];
+  /** PS15: a statement a channel's expansion wrote (the spawn in starts), for the faults that break it. */
+  generated?: 'channel';
+  /** PS15.1: a send of the instantiated conversation whose Peer action the binding renamed, as the Peer named it. */
+  renamedFrom?: string;
 }
 
 export interface NamedArg {

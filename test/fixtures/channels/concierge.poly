@@ -1,0 +1,52 @@
+// M8b step 1 (PS15): a support channel of the test kind. A thread starts on its first inbound message; Ticket
+// replies to each message once, and closes when the reply is delivered, refused or failed.
+module concierge
+
+enum Status { New, Open, Closed }
+
+channel support: test {
+  adapter "test"
+  thread "{from}"
+  starts Ticket.Start on inbound
+  Message -> Ticket.Got
+  Delivered -> Ticket.Delivered
+  Rejected -> Ticket.SendRejected
+  Failed -> Ticket.SendFailed
+}
+
+machine Ticket {
+  state {
+    status  : Status = New
+    replies : 0..1 = 0
+  }
+  terminal status is Closed
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require status is New else reject "started"
+    status' = Open
+  }
+  on Got(body) {
+    require status is Open else reject "closed"
+    require replies == 0 else reject "replied"
+    replies' = 1
+    emit support.reply(body: body)
+  }
+  on Delivered {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+  on SendRejected(reason) {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+  on SendFailed {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+}

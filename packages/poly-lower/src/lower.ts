@@ -4,6 +4,7 @@
 //                   schemas and domains, keyed acceptors, reject/next/unchanged
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
+import type { ChannelPlan } from '@poly/core';
 import { boundPath, diag, digest, effectKind, effectClass, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { emitsCall } from './emit.js';
@@ -16,13 +17,15 @@ export interface LowerOptions {
   isolation?: 'openshell';
   /** S176: the program's modules, for a send to or a spawn of a used module's machine. */
   program?: A.Module[];
+  /** PS15: the module's channels as expanded, for each one's descriptor, written with its application's build. */
+  channels?: ChannelPlan[];
 }
 
-export type Fault = 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'channel-drop-spawn' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -260,6 +263,14 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // PL6804 refuses a workflow whose machine declares no path property (S172).
   const workflows = module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === m.name);
   for (const w of workflows) files[`../workflows/${w.name}/polyflow.workflow.json`] = JSON.stringify(workflowDescriptor(module.name, m.name, w, opts.fault), null, 2) + '\n';
+  // PS15, PT21.2: each channel's descriptor, written with its application, which the runtime reads to route an inbound
+  // message: to the conversation's Inbound (the fault channel-inbound-to-app routes it to the application instead).
+  for (const p of opts.channels ?? []) {
+    if (p.application !== m.name) continue;
+    const lib = (opts.program ?? []).find((x) => x.name === p.library);
+    const inbound = opts.fault === 'channel-inbound-to-app' ? { to: 'application', action: p.peer.Message ?? Object.values(p.peer)[0] } : { to: 'conversation', action: 'Inbound' };
+    files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread: p.thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending }, null, 2) + '\n';
+  }
   // S74: each liveness property's goal (and, for leads to, its start) as a state predicate, for exported witness
   // tests. Its own module, so no engine can take it for an invariant; it is read back like every artefact.
   const live = mutated.items.filter((p): p is A.Liveness => p.kind === 'Liveness' && !p.quant);

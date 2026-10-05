@@ -162,6 +162,22 @@ Records, unions with payloads and maps of another module's types stay `PL0901`. 
 - **Relative paths.** The certificate records each type module's file relative to the project root, or as `std:<path>` relative to the std root; never absolute. Only the hash decides at load. Tested: an admitted project copied to another folder loads with no `PL6407`, and a change to the copy's own type module is still refused. A module outside both roots is not admitted. The copy sits at the same depth, since the certified lockfile (S154) is also named by its path relative to the project.
 - **The std option is for tests.** `std` on `checkFile`, `checkProject`, `admit` and `load` is an API option for tests only: no command-line flag and no `poly.json` field carries it, until the repository has `std/`.
 
+## PS15 ruled: the channel
+
+**Accepted (2026-10-05)** as proposed, with all four choices and five conditions.
+
+- **Peer by renaming.** The binding is total (every Peer action mapped), one-to-one (two Peer actions never map to one application action) and type-checked against the application's actions. Each failure gets its own code and test: `PL6813 CHANNEL_BINDING_INCOMPLETE`, `PL6814 CHANNEL_BINDING_NOT_ONE_TO_ONE`, `PL6815 CHANNEL_BINDING_MISTYPED`.
+- **Child key c**, address `p/c`; a clash is `PL1002`.
+- **Inbound goes to the conversation first.** Creating the application on inbound is declared on the channel (`starts A.S on inbound`). Without it, an inbound message for an unknown thread is refused and journaled with a reserved reason (`unknown-thread`). With it, the order is fixed: creation, the starts step with its spawn, then delivery of the inbound message, each journaled. A refused starts refuses the inbound message (`thread-not-started`). The thread key is a checked string, used only as a key.
+- **One generated configuration per channel**, named in the report so findings can be traced. Any declared configuration that includes the application also gets its conversation.
+- **An application-level `never emit c.reply` is `PL1001`**, with a message pointing to the conversation, since after the rewrite it is a send (S178).
+
+poly-ref expands the channel itself from the PS15 text and is not given the compiler's expansion. Three seeded faults: a starts with its spawn dropped, a renaming that swaps two actions, and inbound delivered to the application instead of the conversation; translation validation catches all three. The kind `channel.c.send` is per channel. `std.channels.test` stays under the test-only std option and never ships in `std/`. PS15 was written into `04-semantics.md` first (c77875f).
+
+**Two precisions made while building, for the owner's notice.**
+- *The key c in every handler.* PS15.3 has `c` read the address of the conversation spawned under the key `c`; S78 binds a child's key only in the block that spawns it. As PS15.2 and PS15.3 say, `c` names `p/c` in every handler of the application, as the kernel's child marker, so no field is added.
+- *A refused starts.* polyrun's creation persists the instance and its rejected creation step, both journaled, as the ruling's order says. PS15.4 now says so: an `unknown-thread` refusal creates no instance; a `thread-not-started` one leaves the application in its initial state with no conversation, and each later message on its thread is refused the same way. The first wording ("a refusal changes no instance") was wider than the ruling.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.
@@ -170,6 +186,7 @@ Records, unions with payloads and maps of another module's types stay `PL0901`. 
 - **E5** stays on the list and is not needed by M8 (S177).
 - **E12** is unchanged.
 - An engine item found while building gets the next id, from E13, and is recorded here the day it is found.
+- **E13** (polyrun), found at M8b step 1 (2026-10-05): the kernel has no `createInstance` intent, so a detached spawn does not run under polyrun 8.3.2 (it was on the owner's list since M1, "only if a task needs it"; S177 now does). Until E13 is vendored, a channel's conversation cannot be created at run time: `rt.inbound` on an unknown thread with creation declared fails at the kernel, and its test waits on E13 as E1's do. Everything else of the channel is checked from the semantics and lowered.
 
 ## The split
 

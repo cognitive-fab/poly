@@ -262,6 +262,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const typeModules: NonNullable<Certificate['poly']['typeModules']> = {};
   // PT10, S164, S175: the workflows, each run on poly-runtime with every work order through the gate (S173).
   const workflows: NonNullable<Certificate['poly']['workflows']> = [];
+  const channels: NonNullable<Certificate['poly']['channels']> = [];
   for (const r of report.files) {
     if (!r.module || !r.moduleDigest) throw new AdmitError(`${r.file}: no module digest`);
     moduleDigests[r.module] = r.moduleDigest;
@@ -273,10 +274,19 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
       if (!m?.buildDir) throw new AdmitError(`${r.module}: workflow ${w.name} runs ${w.machine}, which was checked without a build`);
       workflows.push({ name: w.name, machine: `${r.module}.${w.machine}`, runtime: 'poly-runtime', gated: true, descriptor: rel(dir, join(m.buildDir, '..', 'workflows', w.name, 'polyflow.workflow.json')) });
     }
+    // PS15: each channel's descriptor, written with its application's build, certified like a workflow's.
+    for (const ch of ast?.decls.filter((d): d is A.Channel => d.kind === 'Channel') ?? []) {
+      const appName = ch.maps[0]?.machine ?? ch.starts?.machine;
+      const m = r.machines.find((x) => x.machine === appName);
+      if (!m?.buildDir) throw new AdmitError(`${r.module}: channel ${ch.name} binds ${appName}, which was checked without a build`);
+      channels.push({ name: ch.name, application: `${r.module}.${appName}`, descriptor: rel(dir, join(m.buildDir, '..', 'channels', `${ch.name}.json`)) });
+    }
     for (const m of r.machines) {
       if (!m.buildDir || !m.instance) throw new AdmitError(`${r.module}.${m.machine}: checked without a build`);
       const id = `${r.module}.${m.machine}`;
-      machines.push({ id, module: r.module, machine: m.machine, dir: rel(dir, m.buildDir) });
+      // PS15: a channel's conversation, c.Conversation, is the machine Conversation of the module m.c.
+      const dot = m.machine.lastIndexOf('.');
+      machines.push({ id, module: dot < 0 ? r.module : `${r.module}.${m.machine.slice(0, dot)}`, machine: dot < 0 ? m.machine : m.machine.slice(dot + 1), dir: rel(dir, m.buildDir) });
       instances[id] = m.instance;
       domains[id] = m.instance.domains;
       for (const k of m.instance.kernelAssumptions) kernel.add(k);
@@ -320,12 +330,17 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const policyReports = report.files.flatMap((r) => r.policies ?? []);
   for (const p of policyReports) if (!p.artefact) throw new AdmitError(`not admitted: the policies of scope ${p.scope} were not lowered`);
   // The workflow descriptors are artefacts poly-runtime reads, certified with the policies (PT10, S164, S173).
-  const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor)];
+  const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor)];
   const artefacts = artefactsOf(dir, machines, opts.fault, policyPaths);
   for (const p of policyReports) {
     if (!opts.fault && artefacts[p.artefact!.path] !== p.artefact!.digest) throw new AdmitError(`not admitted: ${p.artefact!.path} on disk is not the policy the check checked (certified bytes must be the checked bytes)`);
   }
   // Polywatch on step 3: a workflow's descriptor is outside its machine's directory, so it is compared by its own name.
+  for (const ch of channels) {
+    const m = report.files.flatMap((r) => r.machines.map((x) => ({ r, x }))).find(({ r, x }) => `${r.module}.${x.machine}` === ch.application)?.x;
+    const want = m?.artefactDigests?.[`../channels/${ch.name}.json`];
+    if (!opts.fault && (want === undefined || artefacts[ch.descriptor] !== want)) throw new AdmitError(`not admitted: ${ch.descriptor} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
+  }
   for (const w of workflows) {
     const m = report.files.flatMap((r) => r.machines.map((x) => ({ r, x }))).find(({ r, x }) => `${r.module}.${x.machine}` === w.machine)?.x;
     const want = m?.artefactDigests?.[`../workflows/${w.name}/polyflow.workflow.json`];
@@ -389,7 +404,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);

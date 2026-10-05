@@ -41,6 +41,10 @@ export const FAULT_SOURCES = {
   'content-row-on-none': ['conformance/m8/content/notes.poly'],
   // S190: a member dropped from the domain of another module's enum.
   'foreign-enum-member': ['conformance/m8/enums/chat.poly'],
+  // PS15: the channel's expansion. The test kind std.channels.test is found under test/fixtures/std (the test-only std).
+  'channel-drop-spawn': ['test/fixtures/channels/concierge.poly'],
+  'channel-swap-rename': ['test/fixtures/channels/concierge.poly'],
+  'channel-inbound-to-app': ['test/fixtures/channels/concierge.poly'],
   // PS5.2a, S178: a machine's never statement, lowered to a step property over the step's intents.
   'drop-never': ['conformance/m8/never/window.poly'],
   'invert-never-while': ['conformance/m8/never/window.poly'],

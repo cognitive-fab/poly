@@ -29,7 +29,12 @@ export interface VerifiedBuild {
   policies: { scope: string; policies: string[]; doc: Record<string, unknown>; reads: string[] }[];
   /** PT10, S173: each certified workflow, from the verified bytes of its descriptor: the tool each effect kind maps to. */
   workflows: VerifiedWorkflow[];
+  /** PS15: each certified channel, from the verified bytes of its descriptor. */
+  channels: VerifiedChannel[];
 }
+
+/** PS15.4: what the runtime needs to route a channel's inbound message. */
+export interface VerifiedChannel { channel: string; application: string; conversation: string; thread: { template: string; fields: string[] }; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string } }
 
 export interface WorkOrderTool { tool: string; target?: string; why: string }
 export interface VerifiedWorkflow { name: string; machine: string; inputAction: string; key: { template: string; fields: Record<string, { pattern?: string }> }; tools: Record<string, WorkOrderTool> }
@@ -69,6 +74,11 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   for (const w of certificate.poly?.workflows ?? []) {
     const f = join(root, w.descriptor);
     if (existsSync(f)) bytes.set(w.descriptor, readFileSync(f));
+  }
+  // PS15: each channel's descriptor, read once like any artefact.
+  for (const c of certificate.poly?.channels ?? []) {
+    const f = join(root, c.descriptor);
+    if (existsSync(f)) bytes.set(c.descriptor, readFileSync(f));
   }
   const actual = Object.fromEntries([...bytes].map(([k, b]) => [k, sha256OfBytes(b)]));
   const problems = certificateProblems(certificate, actual, trust);
@@ -190,7 +200,14 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     }
     workflows.push({ name: d.name, machine: w.machine, inputAction: d.inputAction, key: d.key, tools: d.tools });
   }
-  return { certificate, root, runDir, machines, handlers, policies, workflows };
+  const channels: VerifiedChannel[] = [];
+  for (const c of certificate.poly?.channels ?? []) {
+    const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as VerifiedChannel;
+    if (d.channel !== c.name || d.application !== c.application) throw new LoadError(`refused at load: the certificate's channel ${c.name} has the descriptor of channel ${String(d.channel)} of ${String(d.application)} (PS15)`);
+    for (const id of [d.application, d.conversation]) if (!machines.some((x) => x.id === id)) throw new LoadError(`refused at load: channel ${c.name} names ${id}, which the certificate does not name (PS15)`);
+    channels.push({ channel: d.channel, application: d.application, conversation: d.conversation, thread: d.thread, starts: d.starts, inbound: d.inbound });
+  }
+  return { certificate, root, runDir, machines, handlers, policies, workflows, channels };
 }
 
 /**

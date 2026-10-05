@@ -203,6 +203,7 @@ class Parser {
     if (this.at('configuration') && this.peek(1).kind === 'ident') return this.configuration();
     if (this.at('policy') && this.peek(1).kind === 'ident') return this.policy();
     if (this.at('workflow') && this.peek(1).kind === 'ident') return this.workflow();
+    if (this.at('channel') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.channel();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -213,6 +214,42 @@ class Parser {
       return null;
     }
     this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, use)');
+  }
+
+  /** `channel c: k { adapter "…"  thread "…"  starts A.S [on inbound]  P -> A.X … }` (PT21.1, PS15). */
+  private channel(): A.Channel {
+    const start = this.next();
+    const name = this.ident('a channel name');
+    this.expect(':');
+    const channelKind = this.ident('a channel kind');
+    this.expect('{');
+    let adapter: string | null = null;
+    let thread = '';
+    let starts: A.Channel['starts'] = null;
+    const maps: A.ChannelMap[] = [];
+    while (!this.atPunct('}')) {
+      if (this.at('adapter')) { this.next(); adapter = this.str('an adapter name'); continue; }
+      if (this.at('thread')) { this.next(); thread = this.str('a thread template'); continue; }
+      if (this.at('starts')) {
+        this.next();
+        const machine = this.ident('the application machine');
+        this.expect('.');
+        const action = this.ident('the starting action');
+        let onInbound = false;
+        if (this.at('on') && this.at('inbound', 1)) { this.next(); this.next(); onInbound = true; }
+        starts = { machine, action, onInbound };
+        continue;
+      }
+      const ms = this.peek();
+      const peer = this.ident('a Peer action, adapter, thread or starts');
+      this.expect('->');
+      const machine = this.ident('the application machine');
+      this.expect('.');
+      const action = this.ident('an action of the application');
+      maps.push(this.node<A.ChannelMap>(ms, { kind: 'ChannelMap', peer, machine, action }, true));
+    }
+    this.next();
+    return this.node<A.Channel>(start, { kind: 'Channel', name, channelKind, adapter, thread, starts, maps }, true);
   }
 
   /** `workflow w runs M { input A  key "…" where f matches "…", …  tool "kind" -> t target "…" why "…" … }` (PT10, S166). */
@@ -740,7 +777,8 @@ class Parser {
         const name = this.dashedName();
         this.expect(':');
         this.expect('emit');
-        const effect = this.ident('an effect name');
+        let effect = this.ident('an effect name');
+        if (this.atPunct('.') && this.peek(1).kind === 'ident') { this.next(); effect += '.' + this.next().text; }
         const fields = this.atPunct('(') ? this.emitsFields() : [];
         let cond: A.Expr | null = null;
         if (this.at('while')) { this.next(); cond = this.expr(); }
@@ -1110,6 +1148,8 @@ class Parser {
     switch (op) {
       case 'emit':
         base.target = this.ident('an effect name');
+        // PS15.3: `emit c.reply(…)` names a channel's message, which the expansion makes a send.
+        if (this.atPunct('.') && this.peek(1).kind === 'ident') { this.next(); base.target += '.' + this.next().text; }
         base.args = this.args();
         break;
       case 'after':
@@ -1340,7 +1380,8 @@ class Parser {
       // PS5.2, S178: `emits(k, f: v, …)`, an effect's name and its field filter.
       if (start.text === 'emits' && this.atPunct('(')) {
         this.next();
-        const effect = this.ident('an effect name');
+        let effect = this.ident('an effect name');
+        if (this.atPunct('.') && this.peek(1).kind === 'ident') { this.next(); effect += '.' + this.next().text; }
         const fields: A.EmitsField[] = [];
         while (this.atPunct(',')) {
           this.next();

@@ -68,6 +68,8 @@ export interface WorkOrder { orderId: string; intent: string; instanceId: string
 
 /** S189: the runtime's own ledger run for the approvals drop folder; `runtime.*` is reserved for the runtime (S143). */
 export const APPROVALS_RUN = 'runtime:approvals';
+/** PS15.4: the runtime's own run, on which every inbound message's delivery or refusal is journaled. */
+export const INGRESS_RUN = 'runtime:ingress';
 
 /** A name under `dir` that no file has yet: `name`, else `name.2`, `name.3`, ... so a record is never overwritten. */
 function freeName(dir: string, name: string): string {
@@ -271,6 +273,43 @@ export class PolyRuntime {
    * journaled on the runtime's own `runtime:approvals` run, with the record kept by digest, so a replay reads the same
    * records in the same order; then the file is moved to applied/, or to refused/ with its reason in a sidecar file.
    */
+  /**
+   * PS15.4: a message from a channel's provider. Its thread key, from the channel's template over the message's
+   * fields, names the application instance `<channel>:<key>`, whose conversation is `<channel>:<key>/<channel>`. An
+   * unknown thread is created first when the channel declares it (`starts … on inbound`): the creation and its starts
+   * step, which spawns the conversation, then the delivery of `Inbound` to the conversation, each journaled; a starts
+   * step that is rejected refuses the message (`thread-not-started`). Otherwise an unknown thread is refused
+   * (`unknown-thread`). Every refusal is journaled on `runtime:ingress` and changes no instance. A message is one step
+   * however often it is delivered: its action id is `<channel>:<messageId>` (PF8.2).
+   */
+  async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<{ outcome: 'delivered' | 'refused'; reason?: 'unknown-thread' | 'thread-not-started'; application: string; conversation: string }> {
+    const d = this.verified.channels.find((c) => c.channel === channel);
+    if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
+    if (d.inbound.to !== 'conversation') throw new Error(`channel ${channel}: its descriptor routes inbound to ${d.inbound.to}, and PS15.4 routes it to the conversation`);
+    // The thread key is a checked string, used only as a key: each field the template reads is a string the
+    // conversation's Inbound declares; the delivery below refuses one outside its domain (S140).
+    const key = d.thread.template.replace(/\{([^}]*)\}/g, (_, f: string) => { const v = fields[f]; if (typeof v !== 'string') throw new RefusedDispatch(`channel ${channel}: the thread field ${f} is not a string (PT21.1b)`, 'S140'); return v; });
+    const application = `${channel}:${key}`;
+    const conversation = `${application}/${channel}`;
+    const refuse = async (reason: 'unknown-thread' | 'thread-not-started') => {
+      this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+      await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId: opts.messageId, outcome: 'refused', reason }, this.now()); });
+      return { outcome: 'refused' as const, reason, application, conversation };
+    };
+    if (!(await this.store.getInstance(application))) {
+      if (!d.starts.onInbound) return refuse('unknown-thread');
+      try { await this.create(d.application, { id: application, creation: { action: d.starts.action, data: {} } }); } catch (e) { if (e instanceof RefusedDispatch) return refuse('thread-not-started'); throw e; }
+      const started = (await this.getJournal(application)).find((j) => j.action === d.starts.action);
+      if (!started || started.step_kind !== 'accepted') return refuse('thread-not-started');
+    }
+    // A thread whose starts was rejected has no conversation, so its later messages are refused the same way.
+    if (!(await this.store.getInstance(conversation))) return refuse('thread-not-started');
+    await this.dispatch(conversation, d.inbound.action, fields, { actionId: `${channel}:${opts.messageId}` });
+    this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+    await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId: opts.messageId, outcome: 'delivered' }, this.now()); });
+    return { outcome: 'delivered', application, conversation };
+  }
+
   async takeApprovals(dir: string): Promise<{ file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[]> {
     const out: { file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[] = [];
     let names: string[];

@@ -44,6 +44,12 @@ class Printer {
       // PT1.1a: a policy lives in a .policy.poly file; the embedded surface has none (PT2.5).
       case 'Policy': throw new Error('policy ' + d.name + ' has no embedded form: policies are written in .policy.poly files (PT1.1a)');
       // PT10, PT2.5: a workflow, with its tools keyed by effect kind.
+      // PT21.1, S186: a channel, with its Peer bindings keyed by Peer action.
+      case 'Channel': {
+        const peer = d.maps.map((m) => `${ind}  ${this.key(m.peer)}: ${q(`${m.machine}.${m.action}`)},\n`).join('');
+        const starts = d.starts ? `, starts: ${q(`${d.starts.machine}.${d.starts.action}`)}${d.starts.onInbound ? ', onInbound: true' : ''}` : '';
+        return `${this.use('channel')}(${q(d.name)}, { kind: ${q(d.channelKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, thread: ${q(d.thread)}${starts}, peer: {\n${peer}${ind}} })`;
+      }
       case 'Workflow': {
         const key = d.key ? `, key: { template: ${q(d.key.template)}${d.key.fields.length ? `, where: { ${d.key.fields.map((f) => `${this.key(f.name)}: ${q(f.pattern)}`).join(', ')} }` : ''} }` : '';
         const tools = d.tools.map((t) => `${ind}  ${q(t.effect)}: { tool: ${q(t.tool)}${t.target === null ? '' : `, target: ${q(t.target)}`}, why: ${q(t.why)} },\n`).join('');

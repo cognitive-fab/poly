@@ -4,6 +4,7 @@
 // types, builds domains and finds handlers itself, from the definitions in
 // 04-semantics, sharing nothing with the compiler's checker.
 import type * as A from '@poly/core';
+import { machineHome } from './channels.js';
 import type { MapValue, RecordValue, UnionValue, Value } from './values.js';
 import { keyOf, isUnion, isMap, isRecord } from './values.js';
 
@@ -178,6 +179,8 @@ export interface RMachine {
   principals: number;
   /** PS4.1f: how many content representatives the check offers, besides none. */
   contents: number;
+  /** PS15.3: the keys of the channels whose application this machine is; each names its conversation's address. */
+  channelKeys: string[];
 }
 
 /**
@@ -193,9 +196,13 @@ export function usedModule(path: string[], program: A.Module[]): string {
   return program.some((m) => m.name === whole) ? whole : path.slice(0, -1).join('.');
 }
 
-export function buildMachine(module: A.Module, machineName: string, opts: BuildOptions = {}): RMachine {
+export function buildMachine(source: A.Module, sourceMachine: string, opts: BuildOptions = {}): RMachine {
+  // PS15: a module with channels means its expansion, which poly-ref reads from the text on its own.
+  const home = machineHome(source, opts.program ?? [], sourceMachine);
+  const module = home.module;
+  const machineName = home.machine;
   const view = opts.view ?? module.name;
-  const program = opts.program ?? [];
+  const program = home.program;
   const spell = (mod: string, name: string) => (mod === view ? name : `${mod}.${name}`);
   const moduleNamed = (mod: string) => (mod === module.name ? module : program.find((x) => x.name === mod));
   /** A machine named in module `inMod`'s source, spelled from the view. */
@@ -432,7 +439,7 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
     principals,
     contents,
     name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
-    actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness,
+    actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness, channelKeys: (m.channelKeys ?? []).map((c) => c.key),
   };
 }
 

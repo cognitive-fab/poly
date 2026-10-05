@@ -21,6 +21,7 @@ import type { Intent } from './step.js';
 import { dataDomain, detachedAlone, type RMachine } from './model.js';
 import { isTerminal, transition, carriesContent } from './step.js';
 import { readBack } from './artefacts.js';
+import { machineHome } from './channels.js';
 
 interface SamModule {
   instance: (o: object) => { lastStep: () => { intent?: string; classification: string; rejections: { reason?: string }[] } };
@@ -278,7 +279,19 @@ export async function translationValidate(module: Module, machineName: string, b
     }
   }
   // The standing rule after the M1 review: the artefacts the engines read without running the module are read back.
-  for (const message of await readBack(module, M, buildDir, g.states)) mismatch(message, []);
+  // PS15: the read-back reads the machine where the expansion puts it, and each channel's descriptor against PS15.
+  const home = machineHome(module, opts.program ?? [], machineName);
+  for (const message of await readBack(home.module, M, buildDir, g.states)) mismatch(message, []);
+  for (const [name, want] of home.reading.descriptors) {
+    if (want.application !== `${module.name}.${M.name}` || home.module !== home.reading.module) continue;
+    const file = join(buildDir, '..', 'channels', `${name}.json`);
+    if (!existsSync(file)) { mismatch(`channels/${name}.json is missing (PS15)`, []); continue; }
+    const got = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    for (const k of ['application', 'conversation', 'starts', 'inbound', 'peer', 'effectKind', 'pending'] as const) {
+      if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) mismatch(`channels/${name}.json ${k}: the artefact has ${JSON.stringify(got[k])}, PS15 gives ${JSON.stringify(want[k])}`, []);
+    }
+    if ((got.library as { module?: string } | undefined)?.module !== want.library) mismatch(`channels/${name}.json library: the artefact names ${JSON.stringify(got.library)}, PS15 gives ${want.library}`, []);
+  }
   // Review D-F1, S152: under isolation, a machine with effects must have its sandbox policy.
   if (opts.isolation === 'openshell' && M.effects.size && !existsSync(join(buildDir, 'openshell.policies.yaml'))) mismatch('openshell.policies.yaml is missing, and isolation is asked for (S152)', []);
   return { machine: M.name, transitions, propertyChecks, mismatches, report };
@@ -340,7 +353,12 @@ function loweredIntents(x: Intent): unknown[] {
     }];
   }
   // S60: createInstance carries no address; the kernel makes it <parent>/<k>.
-  if (x.type === 'create') return [{ kind: 'createInstance', machineId: x.machineId, childKey: x.key, ...(x.create ? { creation: { action: x.create.action, data: plainRecord(x.create.data) } } : {}) }];
+  if (x.type === 'create') {
+    // S177: an argument written self is the kernel's marker, as in a send.
+    const data = x.create ? plainRecord(x.create.data) : {};
+    for (const k of x.selfArgs ?? []) data[k] = { $ref: 'self' };
+    return [{ kind: 'createInstance', machineId: x.machineId, childKey: x.key, ...(x.create ? { creation: { action: x.create.action, data } } : {}) }];
+  }
   if (x.type === 'signal') return [{ kind: 'signalChild', childKey: x.key, action: x.action, data: plainRecord(x.data) }];
   // PT7a, S58: an address is its string, none is null, and an argument written `self` is the kernel's marker.
   if (x.type === 'send') {
@@ -356,7 +374,8 @@ function resolveChildren(v: unknown, M: RMachine, created: Set<string>): unknown
   if (Array.isArray(v)) return v.map((x) => resolveChildren(x, M, created));
   if (v === null || typeof v !== 'object') return v;
   const o = v as Record<string, unknown>;
-  if (o.$ref === 'child' && typeof o.key === 'string' && created.has(o.key)) return detachedAlone(M, o.key);
+  // PS15.3: a channel's key names its conversation in every handler, not only in the step that spawned it.
+  if (o.$ref === 'child' && typeof o.key === 'string' && (created.has(o.key) || M.channelKeys.includes(o.key))) return detachedAlone(M, o.key);
   return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, resolveChildren(x, M, created)]));
 }
 

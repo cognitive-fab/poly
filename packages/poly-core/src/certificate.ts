@@ -78,6 +78,8 @@ export interface Certificate {
      * descriptor's digest is under `artefacts`. Absent in a certificate with no workflow.
      */
     workflows?: { name: string; machine: string; runtime: 'poly-runtime'; gated: true; descriptor: string }[];
+    /** PS15: each channel, its application's machine id and its descriptor, whose digest is under `artefacts`. */
+    channels?: { name: string; application: string; descriptor: string }[];
     /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */
     keyrings: { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] };
   };

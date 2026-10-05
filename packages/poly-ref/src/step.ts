@@ -22,7 +22,7 @@ export type Intent =
   | { type: 'spawn'; kind: 'spawnChild'; key: string; machineId: string; create: { action: string; data: Record<string, Value> } | null; onComplete: string | null; onParentTerminal: string | null }
   | { type: 'signal'; kind: 'signalChild'; key: string; action: string; data: Record<string, Value> }
   /** `spawn detached M as k -> A(d)` (PS7.5, S60): a new instance at `address`, with A(d) as its first message. */
-  | { type: 'create'; kind: 'createInstance'; key: string; machine: string; machineId: string; address: string; create: { action: string; data: Record<string, Value> } | null }
+  | { type: 'create'; kind: 'createInstance'; key: string; machine: string; machineId: string; address: string; create: { action: string; data: Record<string, Value> } | null; selfArgs?: string[] }
   /** `send r <- A(d)` (PS2.2): a message to the address r; `selfArgs` are the arguments written as `self` (S58). */
   | { type: 'send'; kind: 'sendTo'; target: Value; action: string; data: Record<string, Value>; selfArgs: string[] };
 
@@ -54,6 +54,12 @@ export function runHandler(M: RMachine, h: A.Handler, s: State, d: Record<string
   // In the handler a bare name is local, then parameter, then field; pre.f names the field (S19). PD5.1.2: the claims
   // binder of `by c: C` reads the label's claims.
   const env: Env = { M, state: s, data: h.by ? { ...d, [h.by.name]: d.$claims ?? null } : d, locals: new Map(), pre: s, action: h.action, params: true, self };
+  // PS15.3: a channel's key c is the address p/c of its conversation, in every handler of the application.
+  for (const key of M.channelKeys) {
+    env.locals.set(key, self !== undefined ? `${self}/${key}` : detachedAlone(M, key));
+    const d = M.detached.find((x) => x.key === key);
+    if (d) (env.localTypes ??= new Map()).set(key, { k: 'ref', machine: d.machine });
+  }
   const w = new Map<string, Value>();
   const E: Intent[] = [];
   const r = block(h.body, env, w, E, M, s);
@@ -187,7 +193,9 @@ function block(body: A.Stmt[], outer: Env, w: Map<string, Value>, E: Intent[], M
           const address = env.self !== undefined ? `${env.self}/${d.key}` : detachedAlone(M, d.key);
           env.locals.set(d.key, address);
           (env.localTypes ??= new Map()).set(d.key, { k: 'ref', machine: d.machine });
-          E.push({ type: 'create', kind: 'createInstance', key: d.key, machine: d.machine, machineId: d.machineId, address, create: d.create ? { action: d.create, data: args(d.createParams, d.create) } : null });
+          // S177: an argument of the creation written self is the spawner's address, which the kernel writes at commit.
+          const selfArgs = st.args.flatMap((a, i) => (a.value.kind === 'Name' && a.value.name === 'self' ? [a.name ?? d.createParams[i].name] : []));
+          E.push({ type: 'create', kind: 'createInstance', key: d.key, machine: d.machine, machineId: d.machineId, address, create: d.create ? { action: d.create, data: args(d.createParams, d.create) } : null, ...(selfArgs.length ? { selfArgs } : {}) });
         } else throw new EvalError(`poly-ref: no intent ${st.op}`);
         break;
       }
