@@ -11,9 +11,9 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, type Verifier } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import { RESERVED_MODULE, verifyRecord, type Certificate } from '@poly/core';
@@ -64,13 +64,25 @@ export type Handler = EffectHandler;
 /** S173: an open work order, as an agent takes it: the gate's decision is the intent's, once; the order id is the attempt's (PF8.5a, S173 as amended). */
 export interface WorkOrder { orderId: string; intent: string; instanceId: string; workflow: string; kind: string; tool: string; target?: string; why: string; args: Record<string, unknown>; attempt: number; deadline: number }
 
+/** S189: the runtime's own ledger run for the approvals drop folder; `runtime.*` is reserved for the runtime (S143). */
+export const APPROVALS_RUN = 'runtime:approvals';
+
+/** A name under `dir` that no file has yet: `name`, else `name.2`, `name.3`, ... so a record is never overwritten. */
+function freeName(dir: string, name: string): string {
+  if (!existsSync(join(dir, name))) return name;
+  for (let k = 2; ; k++) if (!existsSync(join(dir, `${name}.${k}`))) return `${name}.${k}`;
+}
+
 export class OutcomeWithoutDecision extends Error {
   constructor(message: string) { super(message); this.name = 'OutcomeWithoutDecision'; }
 }
 
 /** PT12.5: an approval that is not a person's signed record for a waiting escalation. Audited, with no effect. */
+/** S189: why an approval was refused, as the drop folder names it. */
+export type ApprovalRefusal = 'not-a-record' | 'wrong-key' | 'unmatched' | 'replayed' | 'expired';
+
 export class ApprovalRefused extends Error {
-  constructor(message: string) { super(message); this.name = 'ApprovalRefused'; }
+  constructor(message: string, readonly reason: ApprovalRefusal = 'unmatched') { super(message); this.name = 'ApprovalRefused'; }
 }
 
 export class RefusedDispatch extends Error {
@@ -221,27 +233,64 @@ export class PolyRuntime {
     const subject = typeof r?.subject === 'string' ? r.subject : '';
     const found = subject ? await this.store.txn(() => this.store.db.prepare(`SELECT run, event FROM poly_ledger WHERE hash = ? AND kind = 'verdict'`).get(subject) as { run: string; event: string } | undefined) : undefined;
     const body = found ? JSON.parse(found.event).body : null;
-    const refuse = async (problem: string): Promise<never> => {
+    const refuse = async (problem: string, reason: ApprovalRefusal): Promise<never> => {
       await this.store.insertAudit({ at: this.now(), instanceId: found?.run ?? '', action: 'Approve', actionId: body?.intent ?? subject, rule: 'PT12.5', reason: problem });
-      throw new ApprovalRefused(`approval refused: ${problem}`);
+      throw new ApprovalRefused(`approval refused: ${problem}`, reason);
     };
     // O9 of the outage test: a keyring or verifier that cannot be read refuses the approval; nothing is assumed.
     let v: ReturnType<typeof verifyRecord>;
-    try { v = verifyRecord(record, this.verified.certificate.poly.keyrings, { kind: 'approval' }); } catch (e) { return refuse(`the keyring cannot be read: ${(e as Error).message}`); }
+    try { v = verifyRecord(record, this.verified.certificate.poly.keyrings, { kind: 'approval' }); } catch (e) { return refuse(`the keyring cannot be read: ${(e as Error).message}`, 'wrong-key'); }
     if (!v.ok) {
       // An unverifiable record is audited against the escalation it names, when it names one.
-      return refuse(v.problem);
+      return refuse(v.problem, /^not a signed record/.test(v.problem) ? 'not-a-record' : 'wrong-key');
     }
-    if (!found || body?.outcome !== 'escalated') return refuse(`the record names no escalation (${subject})`);
+    if (!found || body?.outcome !== 'escalated') return refuse(`the record names no escalation (${subject})`, 'unmatched');
     // Review A1, C3: one record lifts one escalation, once. After a Recheck an intent escalates again, and a record
     // naming the earlier escalation, or one already used, does not lift the new one.
     const current = await this.escalationOf(body.intent);
-    if (current?.hash !== subject) return refuse(`the record names escalation ${subject}, and the intent's current escalation is ${current?.hash ?? 'none'}`);
+    if (current?.hash !== subject) return refuse(`the record names escalation ${subject}, and the intent's current escalation is ${current?.hash ?? 'none'}`, 'unmatched');
     const used = this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict'`).all(found.run).some((x: any) => { const b = JSON.parse(x.event).body; return b?.outcome === 'approved' && b?.record === v.digest; });
-    if (used) return refuse(`the record ${v.digest} was already used`);
+    if (used) return refuse(`the record ${v.digest} was already used`, 'replayed');
     try {
       await this.worker.approve(body.intent, { by: v.person.keyId, person: v.person.name, record: v.digest, subject, at: (record as { at: string }).at });
-    } catch (e) { return refuse((e as Error).message); }
+    } catch (e) { return refuse((e as Error).message, /timed out/.test((e as Error).message) ? 'expired' : 'unmatched'); }
+  }
+
+  /**
+   * S189: one pass over the approvals drop folder. Each `*.json` record is taken in file-name order and applied through
+   * rt.approve, which verifies it against the certified keyring and the open escalation it names. Every outcome is
+   * journaled on the runtime's own `runtime:approvals` run, with the record kept by digest, so a replay reads the same
+   * records in the same order; then the file is moved to applied/, or to refused/ with its reason in a sidecar file.
+   */
+  async takeApprovals(dir: string): Promise<{ file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[]> {
+    const out: { file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[] = [];
+    let names: string[];
+    try { names = readdirSync(dir).filter((f) => f.endsWith('.json') && statSync(join(dir, f)).isFile()).sort(); } catch { return out; }
+    this.store.ensureRun(APPROVALS_RUN, 'runtime', 'approvals');
+    for (const file of names) {
+      const text = readFileSync(join(dir, file), 'utf8');
+      let reason: ApprovalRefusal | undefined;
+      let message = '';
+      let record: unknown = null;
+      try { record = JSON.parse(text); } catch { reason = 'not-a-record'; message = 'the file is not JSON'; }
+      if (!reason) {
+        try { await this.approve(record); } catch (e) {
+          if (!(e instanceof ApprovalRefused)) throw e;
+          reason = e.reason;
+          message = e.message;
+        }
+      }
+      await this.store.txn(() => {
+        this.store.appendEvent(APPROVALS_RUN, 'verdict', { stage: 'approval', file, record: this.store.keep(text), outcome: reason ? 'refused' : 'applied', ...(reason ? { reason } : {}) }, this.now());
+      });
+      const to = join(dir, reason ? 'refused' : 'applied');
+      mkdirSync(to, { recursive: true });
+      const target = freeName(to, file);
+      renameSync(join(dir, file), join(to, target));
+      if (reason) writeFileSync(join(to, `${target}.reason.txt`), `${reason}: ${message}\n`);
+      out.push({ file, outcome: reason ? 'refused' : 'applied', ...(reason ? { reason } : {}) });
+    }
+    return out;
   }
 
   /** The outbox rows of an instance (polyrun's), for hosts and tests that watch the intents. */

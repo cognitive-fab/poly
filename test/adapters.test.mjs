@@ -9,9 +9,10 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { join, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { checkFile, commandNamed } from '@poly/check';
+import { admit, commandNamed } from '@poly/check';
 import { ROOT } from './helpers.mjs';
 import { mcpClient } from './mcp-client.mjs';
+import { makeKey, HANDLERS_TS } from './runtime-helpers.mjs';
 import { checkRepository, violationsOf } from '../scripts/check-boundaries.mjs';
 
 const ADAPTER = join(ROOT, 'adapters', 'claude-code');
@@ -98,7 +99,14 @@ test('S170: the Claude Code entries poly install prints run the poly tools and A
       await new Promise((r) => setTimeout(r, 200));
     }
   });
-  const r = await checkFile(join(ROOT, 'conformance', 'm6', 'customer-brief.poly'), { root: project });
+  // S174, S188: the workflows entry is poly run --mcp over the admitted project, configured by poly.json's run field.
+  const key = makeKey(`install-${process.pid}`);
+  mkdirSync(join(project, 'src'), { recursive: true });
+  writeFileSync(join(project, 'src', 'customer-brief.poly'), readFileSync(join(ROOT, 'conformance', 'm6', 'customer-brief.poly')));
+  writeFileSync(join(project, 'admission.pub.pem'), key.publicKey);
+  writeFileSync(join(project, 'src', 'handlers.ts'), HANDLERS_TS);
+  writeFileSync(join(project, 'poly.json'), JSON.stringify({ poly: '1', name: 'install', modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` } }, run: { trust: { [key.id]: 'file:admission.pub.pem' } } }, null, 2));
+  const r = await admit(project);
   assert.equal(r.verdict, 'CLEAN');
   const o = await commandNamed('install').run({ host: 'claude-code', project });
   const file = o.result.files.find((f) => f.path.endsWith('.mcp.json'));
@@ -127,6 +135,21 @@ test('S170: the Claude Code entries poly install prints run the poly tools and A
     assert.deepEqual(tools, ['github_search_issues', 'ask', 'ask_user', 'slack_send']);
     assert.equal(v.state.briefState, 'posted');
   } finally { await wf.close(); }
+});
+
+test('S175: an adapter may launch poly run --mcp for the workflows, and no longer the polyflow server', () => {
+  const root = mkdtempSync(join(tmpdir(), 'poly-adapter-run-'));
+  try {
+    mkdirSync(join(root, 'packages'), { recursive: true });
+    mkdirSync(join(root, 'adapters', 'h'), { recursive: true });
+    const write = (server) => writeFileSync(join(root, 'adapters', 'h', 'install.json'), JSON.stringify({ files: [{ path: '${PROJECT}/.mcp.json', json: { mcpServers: { w: server } } }] }));
+    write({ command: 'poly', args: ['run', '--mcp', '--project', '${PROJECT}'] });
+    assert.deepEqual(checkRepository(root), []);
+    write({ command: 'node', args: ['${POLY_ROOT}/vendor/polyflow/bin/polyflow-mcp.mjs'], env: { POLYFLOW_WORKFLOWS: '${PROJECT}/.poly/build/workflows' } });
+    assert.ok(checkRepository(root).some((v) => /launches/.test(v)), 'the polyflow server is refused');
+    write({ command: 'poly', args: ['run', '--mcp', '--project', '${PROJECT}'], env: { LEDGER_KEY: 'x' } });
+    assert.ok(checkRepository(root).some((v) => /launches/.test(v)), 'an entry that sets the environment is refused');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('S170: the DeepSeek Harness half is listed as waiting, not built', async () => {

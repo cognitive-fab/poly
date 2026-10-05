@@ -135,7 +135,13 @@ export function workflowTools(rt: PolyRuntime): WorkflowTool[] {
 
 interface Message { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown> }
 
-export interface WorkflowServerOptions { stdin?: NodeJS.ReadableStream; stdout?: NodeJS.WritableStream; version?: string }
+export interface WorkflowServerOptions {
+  stdin?: NodeJS.ReadableStream;
+  stdout?: NodeJS.WritableStream;
+  version?: string;
+  /** Work done at a fixed interval, in the same queue as the calls, never beside one (S189: the approvals pass). */
+  every?: { ms: number; run: () => Promise<void> };
+}
 
 /** Serves the six tools over stdio until the client closes it. One call at a time, in arrival order. */
 export function serveWorkflows(rt: PolyRuntime, opts: WorkflowServerOptions = {}): Promise<void> {
@@ -170,6 +176,9 @@ export function serveWorkflows(rt: PolyRuntime, opts: WorkflowServerOptions = {}
   return new Promise((resolve) => {
     const rl = createInterface({ input: stdin });
     let chain: Promise<void> = Promise.resolve();
+    const timer = opts.every ? setInterval(() => {
+      chain = chain.then(() => opts.every!.run()).then(() => undefined, (e) => { process.stderr.write(`[poly run] ${(e as Error).message}\n`); });
+    }, opts.every.ms) : null;
     rl.on('line', (line) => {
       let msg: Message;
       try { msg = JSON.parse(line) as Message; } catch { fail(null, -32700, 'parse error'); return; }
@@ -180,6 +189,32 @@ export function serveWorkflows(rt: PolyRuntime, opts: WorkflowServerOptions = {}
         if (msg.id !== undefined && msg.id !== null) fail(msg.id, -32603, `${msg.method}: ${(e as Error).message}`);
       });
     });
-    rl.on('close', () => { void chain.then(resolve); });
+    rl.on('close', () => { if (timer) clearInterval(timer); void chain.then(resolve); });
   });
+}
+
+/** S189: the approvals drop folder is read once a second, in file-name order, never through filesystem events. */
+export const APPROVALS_INTERVAL_MS = 1000;
+
+/**
+ * `poly run --mcp` (S174, S188, S189): the project's runtime, loaded from poly.json's `run` field, serving the six tools
+ * on stdio until the client closes it. Once a second, in the same queue as the calls, it takes every due step, applies
+ * the approvals drop folder, and signs the ledger's heads when a signer is configured. Nothing is read from the
+ * environment, and the signer's contents never reach output.
+ */
+export async function serveRun(project: string, opts: Omit<WorkflowServerOptions, 'every'> = {}): Promise<void> {
+  const { loadRun } = await import('@poly/runtime');
+  const run = await loadRun(project);
+  try {
+    const tick = async () => {
+      await run.rt.advance();
+      await run.rt.takeApprovals(run.approvals);
+      await run.rt.signHeads();
+    };
+    await tick();
+    await serveWorkflows(run.rt, { ...opts, every: { ms: APPROVALS_INTERVAL_MS, run: tick } });
+    await run.rt.signHeads();
+  } finally {
+    await run.close();
+  }
 }

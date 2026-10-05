@@ -179,6 +179,11 @@ export class LedgerStore extends Store {
     return run;
   }
 
+  /** S189: a run of the runtime's own, with no instance behind it (the approvals drop folder's), named once. */
+  ensureRun(run: string, ns: string, wf: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO poly_run (run, ns, wf) VALUES (?, ?, ?)').run(run, ns, wf);
+  }
+
   /** Appends one event to a run's chain. Must be called inside a transaction of this store. */
   appendEvent(instanceId: string, kind: string, body: unknown, at: number): LedgerEvent {
     const run = this.runOfInstance(instanceId);

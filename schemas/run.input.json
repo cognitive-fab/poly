@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "mcp": {
+      "type": "boolean",
+      "description": "serve the workflow tools over MCP on stdio (the only mode)"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project directory (default: the working directory)"
+    }
+  },
+  "required": [
+    "mcp"
+  ]
+}

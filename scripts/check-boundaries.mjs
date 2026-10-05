@@ -13,7 +13,7 @@
 // 3. A host-neutral core with thin host adapters (S167, M6). No package names a host or imports a host's SDK
 //    (an MCP or language-server SDK, an editor's or an agent harness's API); what a host launches lives under
 //    adapters/<host>/, and an adapter is configuration only (.json and .md files), never code: it launches poly mcp,
-//    poly lsp or polyflow's server, and declares no hooks. Sources are .ts, .mts and .cts.
+//    poly lsp or poly run --mcp (the project's workflows, S175), and declares no hooks. Sources are .ts, .mts and .cts.
 // 4. poly new is the only place a model is called (PF9.3, S169). poly-new may start a subprocess (Claude Code, headless);
 //    no other package imports it, except poly-agent, which serves it, and the command line, which loads it by name.
 //
@@ -34,12 +34,13 @@ const HOST_NAMES = /(?<![\w-])(claude[- ]code|deepseek[- ]harness|dsh-mcp-client
 // A host SDK's name as a string, wherever it is: a computed or template import starts from one (review D-F1).
 const HOST_SDK_STRINGS = /['"`](@modelcontextprotocol\/|vscode-languageserver|vscode-jsonrpc|vscode['"`]|@anthropic-ai\/claude-code|@anthropic-ai\/claude-agent-sdk)/;
 const ADAPTER_FILES = /\.(json|md)$/;
-// Review D-F4: what an adapter may launch. poly's own two servers, and polyflow's server over the project's
-// workflows, the stated exception of S164.
+// Review D-F4: what an adapter may launch: poly's own two servers, and `poly run --mcp` over the project's
+// workflows on poly-runtime (S175).
 const ADAPTER_LAUNCHES = [
   (s) => s.command === 'poly' && JSON.stringify(s.args) === '["mcp"]',
   (s) => s.command === 'poly' && JSON.stringify(s.args) === '["lsp"]',
-  (s) => s.command === 'node' && JSON.stringify(s.args) === '["${POLY_ROOT}/vendor/polyflow/bin/polyflow-mcp.mjs"]',
+  // S175: the project's workflows, served on poly-runtime (the polyflow server's launch is no longer allowed).
+  (s) => s.command === 'poly' && JSON.stringify(s.args) === '["run","--mcp","--project","${PROJECT}"]' && s.env === undefined,
 ];
 
 // Every static import, re-export, dynamic import and require, with whether it is type-only.
@@ -163,7 +164,7 @@ function adapterJson(name, file) {
     for (const [k, x] of Object.entries(node)) {
       if (k === 'hooks') v.push(`${name}: an adapter carries no hooks (S167)`);
       if ((k === 'mcpServers' || k === 'lspServers') && x && typeof x === 'object') {
-        for (const [server, s] of Object.entries(x)) if (!ADAPTER_LAUNCHES.some((ok) => ok(s ?? {}))) v.push(`${name}: server ${server} launches ${JSON.stringify([s?.command, ...(s?.args ?? [])])}; an adapter launches poly mcp, poly lsp or polyflow's server only (S164, S167)`);
+        for (const [server, s] of Object.entries(x)) if (!ADAPTER_LAUNCHES.some((ok) => ok(s ?? {}))) v.push(`${name}: server ${server} launches ${JSON.stringify([s?.command, ...(s?.args ?? [])])}; an adapter launches poly mcp, poly lsp or poly run --mcp only (S167, S175)`);
       }
       visit(x);
     }

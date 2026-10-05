@@ -225,6 +225,20 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'run', mcp: null, lsp: false,
+    summary: 'Serves a project\'s workflows over stdio as the six workflow MCP tools, on poly-runtime, each work order through the gate; configured by poly.json\'s run field (S174, S188, S189).',
+    input: obj({ mcp: { type: 'boolean', description: 'serve the workflow tools over MCP on stdio (the only mode)' }, project: str('the project directory (default: the working directory)') }, ['mcp']),
+    output: obj({ served: { type: 'boolean', description: 'true once the client closed the session' } }, ['served']),
+    async run(input) {
+      if (input.mcp !== true) throw new CommandUsageError('poly run serves the workflow tools over MCP: pass --mcp (S174)');
+      // S167: the server is poly-agent's, loaded by name, so poly-check does not depend on it.
+      const agent = '@poly/agent';
+      const { serveRun } = (await import(agent)) as { serveRun: (project: string) => Promise<void> };
+      await serveRun(opt(input, 'project') ?? process.cwd());
+      return { exit: EXIT_CODES.CLEAN, result: { served: true }, text: '' };
+    },
+  },
+  {
     name: 'install', mcp: null, lsp: false,
     summary: 'Prints a host\'s entries for a project from its adapter\'s template (adapters/<host>/install.json): the commands the host launches. It names no host itself (S167).',
     input: obj({ host: str('the adapter\'s directory under adapters/'), project: str('the project directory (default: the working directory)') }, ['host']),

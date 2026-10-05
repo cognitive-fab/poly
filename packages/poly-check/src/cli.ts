@@ -22,6 +22,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly lsp      (the language server over stdio, on both surfaces)
        poly new "<description>" --into <file.poly>   (drafts with the headless provider under your login; never admitted)
        poly install --host <adapter> [--project <dir>]   (prints a host's entries from adapters/<adapter>/install.json)
+       poly run --mcp [--project <dir>]   (the workflow tools over stdio, on poly-runtime, from poly.json's run field)
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]
        poly lint handlers [project dir]
@@ -113,6 +114,10 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
     return { name: 'bench', input: { sizes, out } };
   }
   if (cmd === 'fix' && positional.length === 2) return { name: 'fix', input: { id: a, root } };
+  if (cmd === 'run' && positional.length === 1) {
+    if (!args.includes('--mcp')) throw new UsageError('run needs --mcp: it serves the workflow tools over stdio (S174)');
+    return { name: 'run', input: { mcp: true, project: option(args, '--project') ?? undefined } };
+  }
   if (cmd === 'install' && positional.length === 1) {
     const host = option(args, '--host');
     if (!host) throw new UsageError('install needs --host <adapter>');

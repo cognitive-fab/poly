@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "description": "what poly run --mcp loads the runtime from (S188, S189); paths are relative to the project",
+  "additionalProperties": false,
+  "required": [
+    "trust"
+  ],
+  "properties": {
+    "certificate": {
+      "type": "string",
+      "description": "the admitted certificate (default .poly/certificate.json)"
+    },
+    "store": {
+      "type": "string",
+      "description": "the SQLite store (default .poly/run/store.sqlite)"
+    },
+    "trust": {
+      "type": "object",
+      "description": "admission key id to its public key, as file:PATH",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "description": "the head signer: file:PATH, outside the project, never env:",
+      "additionalProperties": false,
+      "required": [
+        "keyId",
+        "signer"
+      ],
+      "properties": {
+        "keyId": {
+          "type": "string"
+        },
+        "signer": {
+          "type": "string"
+        }
+      }
+    },
+    "approvals": {
+      "type": "string",
+      "description": "the drop folder for signed approvals (default approvals, outside .poly/)"
+    }
+  }
+}

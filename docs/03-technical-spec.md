@@ -26,6 +26,17 @@ This document fixes the grammar, the semantics and the formats. It covers the lo
 
   `people` and `agents` are the keyrings of PT12.5, each a list of `{ name, keyId, publicKey }` with the public key as PEM or `file:PATH`; admission certifies both (S150). Each key is parsed and its SPKI export is what is certified; text holding a private key is refused, and one key listed under two ids, in one ring or across both, is refused (review A3, A4). `keys.admission` names the key `poly admit` signs with, by id and location, never by value: `{ "id": "ops-2026", "location": "env:POLY_ADMISSION_KEY" }` or `"file:/path/outside/the/repository.pem"`. A key file inside a version-controlled tree is refused (S126). `handlers` names the effect handler modules that `poly lint handlers` reads (PT6.5, S72), and that the certificate binds with the files they import (PT15, S142). `modules` may name `.poly` and `.ts` files; a `.ts` module is read by `poly-embed` (PT2.5, S71).
 
+  `run` configures `poly run --mcp` (S188, S189, M8a), with its schema published at `schemas/manifest/run.json`; an unknown field under it is refused:
+
+  ```json
+  "run": { "certificate": ".poly/certificate.json", "store": ".poly/run/store.sqlite",
+           "trust": { "ops-2026": "file:keys/admission.pub.pem" },
+           "ledger": { "keyId": "ops-ledger", "signer": "file:/path/outside/the/project.pem" },
+           "approvals": "approvals" }
+  ```
+
+  `trust` maps each admission key id to its public key, `file:` only; a private key there is refused at load. `ledger` is optional; its signer is `file:` only, never `env:` and never a value, and a signer whose path resolves inside the project is refused at load, since a key in the tree is one `git add` from being committed. The signer's path may appear in an error; its contents never appear in output, logs or the journal. `approvals` is the drop folder for people's signed approvals, outside `.poly/` by default, so cleaning build output never deletes a pending approval. One process owns a store at a time, by a lock file beside it.
+
 - **PT1.3** Imports are by module name within a project: `use payments.Payment`. Cross-project imports are out of scope for v1 (open question 4 in the architecture).
 - **PT1.4** The canonical formatter defines one text per AST. The module digest is the SHA-256 of the RFC 8785 canonical JSON of the AST. This is the same canonicalisation the polyflow platform kernel uses. The digest becomes the `machineVersion` of each machine it contains.
 - **PT1.4a** Comments and blank lines are trivia. They are kept by the formatter but are not part of the AST, so they do not change the digest. Two sources with the same AST have the same digest, whatever their comments.
@@ -982,7 +993,7 @@ It also produces the five machine files. The run key is derived as `agent | inst
 - The gate's decision is bound to the intent, once (PF8.5a). Each issued attempt has an order id of its own, derived from the intent and the attempt number and opaque to agents. An order not reported by its deadline (the effect's declared timeout) is a lost attempt, re-issued under a new order id at the next attempt and never proposed again. An order exists only once its issue is in the ledger.
 - The agent's report settles the intent, through the gate's settle and the completion, as a handler's result does. A report of an unknown order, of an order not issued, of a replaced or lapsed attempt, or a second report of one order, is refused and audited. A work order's kind takes no handler.
 - A work order's completion actions are delivered by the runtime only (K9): an outside dispatch of one is refused and audited.
-- The six tools keep polyflow's names and schemas; `workflow_report` names only `order_id`. They are served over a loaded runtime by `poly-agent` (`serveWorkflows`), with no approve or accept tool (S174).
+- The six tools keep polyflow's names and schemas; `workflow_report` names only `order_id`. They are served by `poly run --mcp`, which loads the runtime from `poly.json`'s `run` field (PT1.2, S188), with no approve or accept tool (S174). Once a second, in the same queue as the calls, the server takes every due step, signs the ledger's heads when a signer is configured, and takes the approvals drop folder (S189): each `*.json` record, in file-name order, is verified against the certified keyring and must name the open escalation (intent and gate sequence); it is applied once, and refused as `replayed` if it appears again under any name, as `expired` after its escalation timed out, as `unmatched` or `wrong-key` otherwise; every outcome is journaled on the runtime's own `runtime:approvals` run with the record kept by digest, and the file is moved to `applied/`, or to `refused/` with its reason in a sidecar file.
 
 The certificate lists each workflow as `{ runtime: "poly-runtime", gated: true }`, with no `ungated` limit, and a certificate that lists one as run by polyflow is refused at load. The descriptor `polyflow.workflow.json` stays the artefact the runtime reads, with its read-back unchanged. E9 is withdrawn (S175). The vendored polyflow server stays only as AC5's oracle in the tests.
 

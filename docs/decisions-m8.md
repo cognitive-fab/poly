@@ -34,6 +34,26 @@ Each ruling is copied exactly as written under its issue in `plan-m8.md` section
 
 Neither option of the question raised at step 1 is taken: a report does not carry an attempt, and a report without one is not taken as the open attempt's.
 
+## S188 and S189, raised at step 2
+
+**Step 2, part one, and the polywatch fix: accepted.** The fifth seeded fault (a second start creating the run again) is reasoned correctly, and the added check that attaching takes no step closes it.
+
+**S188 accepted, with three conditions.** `poly.json` gains a `run` field with the certificate path, the store, trust as admission public keys only, and an optional ledger signer.
+
+- **Signer location.** The signer is `file:` only, and its path must resolve outside the project directory. A key file inside the repository is refused at load, because a key inside the tree is one `git add` away from being committed. That refusal is tested first.
+- **Never echoed.** The signer's path may appear in errors. Its contents never appear in output, logs or the journal.
+- **Schema.** `run` gets a published schema, and a `poly.json` with an unknown field under `run` is refused, as PT1.2 intends.
+
+**S189 accepted, as a drop folder, with five conditions.**
+
+- **Location.** The folder is set in the `run` field. By default it lives outside `.poly/`, so `npm run clean` can never delete a pending approval.
+- **Signature and match.** Each record is verified against the certified keyring and must match an open escalation (intent and sseq), as PT9.2 requires. An agent can drop a file but cannot sign one with a person key (PF9.6).
+- **Single use.** A record applied once is refused if it appears again, even under a new file name. A record that arrives after its escalation timed out is refused with the reason `expired`.
+- **Order and journal.** Records are taken in a fixed order (by file name) at a fixed interval, not through filesystem events. Every application and every refusal is journaled, so replay reproduces them.
+- **Outcome.** Each record is moved to `applied/`, or to `refused/` with the reason in a sidecar file.
+
+Tests come first for the replay, expired, unmatched and wrong-key cases, and a seeded fault that skips the single-use check must be caught. Then step 2 is finished: the command, its `install.json` entry and the boundary allowlist.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

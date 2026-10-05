@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "served": {
+      "type": "boolean",
+      "description": "true once the client closed the session"
+    }
+  },
+  "required": [
+    "served"
+  ]
+}

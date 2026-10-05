@@ -33,18 +33,72 @@ export interface Manifest {
    */
   people?: { name: string; keyId: string; publicKey: string }[];
   agents?: { name: string; keyId: string; publicKey: string }[];
+  /**
+   * S188, S189: what `poly run --mcp` loads the runtime from. Paths are relative to the project. `trust` names the
+   * admission keys whose signatures the runtime accepts, as public keys only. The ledger signer is `file:` only, and the
+   * runtime refuses one inside the project; its contents are never echoed. `approvals` is the drop folder for people's
+   * signed approvals, outside `.poly/` by default.
+   */
+  run?: RunConfig;
 }
+
+export interface RunConfig {
+  certificate?: string;
+  store?: string;
+  trust: Record<string, string>;
+  ledger?: { keyId: string; signer: string };
+  approvals?: string;
+}
+
+/** S188: the published schema of poly.json's `run` field (schemas/manifest/run.json); parseManifest enforces it. */
+export const RUN_SCHEMA = {
+  type: 'object',
+  description: 'what poly run --mcp loads the runtime from (S188, S189); paths are relative to the project',
+  additionalProperties: false,
+  required: ['trust'],
+  properties: {
+    certificate: { type: 'string', description: 'the admitted certificate (default .poly/certificate.json)' },
+    store: { type: 'string', description: 'the SQLite store (default .poly/run/store.sqlite)' },
+    trust: { type: 'object', description: 'admission key id to its public key, as file:PATH', additionalProperties: { type: 'string' } },
+    ledger: {
+      type: 'object', description: 'the head signer: file:PATH, outside the project, never env:', additionalProperties: false, required: ['keyId', 'signer'],
+      properties: { keyId: { type: 'string' }, signer: { type: 'string' } },
+    },
+    approvals: { type: 'string', description: 'the drop folder for signed approvals (default approvals, outside .poly/)' },
+  },
+} as const;
 
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation', 'run']);
+const RUN_FIELDS = new Set(Object.keys(RUN_SCHEMA.properties));
+
+/** S188: poly.json's `run` field, held to RUN_SCHEMA. */
+function checkRun(r: unknown, where: string): void {
+  if (r === null || typeof r !== 'object' || Array.isArray(r)) throw new ManifestError(`${where}: "run" must be an object (S188)`);
+  const run = r as Record<string, unknown>;
+  for (const k of Object.keys(run)) if (!RUN_FIELDS.has(k)) throw new ManifestError(`${where}: unknown field "${k}" under "run" (S188 lists ${[...RUN_FIELDS].join(', ')})`);
+  for (const k of ['certificate', 'store', 'approvals']) if (run[k] !== undefined && (typeof run[k] !== 'string' || run[k] === '')) throw new ManifestError(`${where}: "run.${k}" must be a path (S188)`);
+  const t = run.trust as Record<string, unknown> | undefined;
+  if (!t || typeof t !== 'object' || Array.isArray(t) || !Object.keys(t).length || !Object.values(t).every((v) => typeof v === 'string' && /^file:./.test(v))) {
+    throw new ManifestError(`${where}: "run.trust" must map each admission key id to its public key as "file:PATH" (S188)`);
+  }
+  if (run.ledger !== undefined) {
+    const l = run.ledger as Record<string, unknown>;
+    const ok = l && typeof l === 'object' && !Array.isArray(l) && Object.keys(l).sort().join(',') === 'keyId,signer' && typeof l.keyId === 'string' && l.keyId !== '' && typeof l.signer === 'string';
+    if (!ok) throw new ManifestError(`${where}: "run.ledger" must be { "keyId": "...", "signer": "file:PATH" } (S188)`);
+    // S174, S188: the signer is a file, never the environment and never a value.
+    if (!/^file:./.test(l.signer as string)) throw new ManifestError(`${where}: "run.ledger.signer" must be "file:PATH", a file outside the project; env: and values are refused (S174, S188)`);
+  }
+}
 
 export function parseManifest(text: string, where = 'poly.json'): Manifest {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch (e) { throw new ManifestError(`${where}: not JSON (${(e as Error).message})`); }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ManifestError(`${where}: expected an object`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation, run)`);
+  if (m.run !== undefined) checkRun(m.run, where);
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
   if (!Array.isArray(m.modules) || m.modules.length === 0 || !m.modules.every((x) => typeof x === 'string' && x)) {

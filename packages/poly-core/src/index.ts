@@ -8,6 +8,6 @@ export * from './types.js';
 export * from './diagnostics.js';
 export { checkModule, tyToString, boundPath, effectKind, effectClass, effectSignature, childSpec, type ChildSpec, durationMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
 export { checkPolicies, policyProgram, type PolicyProgram, type PolicyMachine, type PType, type PolicyCheck } from './check/policy.js';
-export { parseManifest, loadProject, keyringsOf, ManifestError, type Manifest } from './manifest.js';
+export { parseManifest, loadProject, keyringsOf, ManifestError, RUN_SCHEMA, type Manifest, type RunConfig } from './manifest.js';
 export { signRecord, invocationSubject, verifyRecord, recordDigest, recordMessage, sameKeyrings, EMPTY_KEYRINGS, type SignedRecord, type RecordKind, type Keyrings, type KeyHolder } from './records.js';
 export { CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, certificateMessage, buildIdOf, signDigest, publicKeyOf, certificateProblems, type Certificate, type CertifiedMachine, type CertificateSignature, type CertificateProblem } from './certificate.js';
