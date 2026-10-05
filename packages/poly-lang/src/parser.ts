@@ -727,6 +727,18 @@ class Parser {
       case 'liveness':
         this.next();
         return this.liveness(start);
+      case 'never': {
+        // PS5.2a, S178: `never n: emit k(f: v, …) while P`; without `while`, P is true.
+        this.next();
+        const name = this.dashedName();
+        this.expect(':');
+        this.expect('emit');
+        const effect = this.ident('an effect name');
+        const fields = this.atPunct('(') ? this.emitsFields() : [];
+        let cond: A.Expr | null = null;
+        if (this.at('while')) { this.next(); cond = this.expr(); }
+        return this.node<A.NeverEmit>(start, { kind: 'NeverEmit', name, effect, fields, cond }, true);
+      }
       case 'effect':
         this.next();
         return this.effect(start);
@@ -734,7 +746,22 @@ class Parser {
         if (this.peek(1).kind === 'ident') { this.next(); return this.decision(start); }
         break;
     }
-    this.fail('expected a machine item (terminal, action, on, guard, a property, effect)');
+    this.fail('expected a machine item (terminal, action, on, guard, a property, never, effect)');
+  }
+
+  /** `(f: v, …)` after an effect's name in `never … emit k(…)`, the `(` not yet taken (PS5.2a). */
+  private emitsFields(): A.EmitsField[] {
+    this.expect('(');
+    const out: A.EmitsField[] = [];
+    while (!this.atPunct(')')) {
+      const fs = this.peek();
+      const name = this.ident('a payload field');
+      this.expect(':');
+      out.push(this.node<A.EmitsField>(fs, { kind: 'EmitsField', name, value: this.expr() }));
+      if (!this.atPunct(')')) this.expect(',');
+    }
+    this.next();
+    return out;
   }
 
   private params(close: string): A.Param[] {
@@ -1302,6 +1329,21 @@ class Parser {
       if (this.atPunct("'")) {
         this.next();
         return this.node<A.PrimedRef>(start, { kind: 'Primed', name: start.text });
+      }
+      // PS5.2, S178: `emits(k, f: v, …)`, an effect's name and its field filter.
+      if (start.text === 'emits' && this.atPunct('(')) {
+        this.next();
+        const effect = this.ident('an effect name');
+        const fields: A.EmitsField[] = [];
+        while (this.atPunct(',')) {
+          this.next();
+          const fs = this.peek();
+          const name = this.ident('a payload field');
+          this.expect(':');
+          fields.push(this.node<A.EmitsField>(fs, { kind: 'EmitsField', name, value: this.expr() }));
+        }
+        this.expect(')');
+        return this.node<A.Emits>(start, { kind: 'Emits', effect, fields });
       }
       if (this.atPunct('(')) {
         this.next();

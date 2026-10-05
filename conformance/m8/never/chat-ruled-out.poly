@@ -1,0 +1,66 @@
+// S178, PS5.2a: a witness that needs an environment nothing provides. Alone, Reply can arrive in any state, so Chat
+// sends from a closed window at once; Reply is a message only App sends, so that witness is marked
+// environment: unconstrained. In the configuration App replies only to a Message, which Chat sends when the window
+// opens, and nothing closes it again (Expired is a timer's completion, and the configuration does not offer it):
+// the configuration check rules the witness out, and it is not counted as a finding.
+module chat
+
+enum Window { Closed, Open }
+enum Kind { FreeForm, Templated }
+
+service machine Chat {
+  state {
+    window : Window = Closed
+    app    : Ref<App> = none
+    sent   : bool = false
+  }
+
+  action Inbound()
+  action Expired()
+  action Reply()
+
+  on Inbound {
+    require window is Closed else reject "open"
+    window' = Open
+    after 24h -> Expired() as w
+    send app <- Message()
+  }
+  on Expired {
+    require window is Open else reject "closed"
+    window' = Closed
+  }
+  on Reply {
+    require !sent else reject "sent"
+    sent' = true
+    emit send(kind: FreeForm)
+  }
+
+  effect send(kind: Kind) {
+    kind "chat.send"
+    labels { egress:external }
+  }
+
+  never free-when-closed: emit send(kind: FreeForm) while window is Closed
+}
+
+service machine App {
+  state {
+    chat    : Ref<Chat> = none
+    replied : bool = false
+  }
+
+  action Message()
+
+  on Message {
+    require !replied else reject "replied"
+    replied' = true
+    send chat <- Reply()
+  }
+}
+
+configuration pair {
+  chat : Chat { app: app }
+  app  : App { chat: chat }
+  inputs { chat.Inbound }
+  bounds { transit 2 }
+}

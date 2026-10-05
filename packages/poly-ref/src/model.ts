@@ -169,6 +169,8 @@ export interface RMachine {
   terminal: A.Expr | null;
   invariants: A.Property[];
   stepProperties: A.Property[];
+  /** PS5.2a, S178: the names of the step properties that are never statements, each `P(s) implies !emits(…)`. */
+  nevers: Set<string>;
   rejectProperties: A.Property[];
   /** Liveness properties (PS5.5), checked under their fairness (PS6). */
   liveness: A.Liveness[];
@@ -250,6 +252,7 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
   let terminal: A.Expr | null = null;
   const invariants: A.Property[] = [];
   const stepProperties: A.Property[] = [];
+  const nevers = new Set<string>();
   const rejectProperties: A.Property[] = [];
   const liveness: A.Liveness[] = [];
   const pathProperties: RPathProperty[] = [];
@@ -355,6 +358,13 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
     if (it.kind === 'Terminal') terminal = it.expr;
     if (it.kind === 'Property' && it.form === 'invariant') invariants.push(it);
     if (it.kind === 'Property' && it.form === 'step') stepProperties.push(it);
+    // PS5.2a: never n: emit k(f: v) while P is the step property n: P(s) implies !emits(k, f: v). P names fields, which
+    // a step property reads in the pre-state; without while, P is true and the property is !emits(k, f: v).
+    if (it.kind === 'NeverEmit') {
+      const emits: A.Expr = { kind: 'Unary', op: '!', arg: { kind: 'Emits', effect: it.effect, fields: it.fields, id: `${it.id}:emits` }, id: `${it.id}:not` };
+      stepProperties.push({ kind: 'Property', form: 'step', name: it.name, id: it.id, expr: it.cond ? { kind: 'Binary', op: 'implies', left: it.cond, right: emits, id: `${it.id}:implies` } : emits });
+      nevers.add(it.name);
+    }
     if (it.kind === 'Property' && it.form === 'reject') rejectProperties.push(it);
     if (it.kind === 'Liveness') liveness.push(it);
   }
@@ -402,7 +412,7 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
     principals,
     contents,
     name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
-    actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties, liveness,
+    actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness,
   };
 }
 

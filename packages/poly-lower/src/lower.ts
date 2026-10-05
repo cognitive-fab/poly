@@ -6,6 +6,7 @@
 import type * as A from '@poly/core';
 import { boundPath, diag, digest, effectKind, effectClass, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
+import { emitsCall } from './emit.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
 
 export interface LowerOptions {
@@ -17,7 +18,7 @@ export interface LowerOptions {
   program?: A.Module[];
 }
 
-export type Fault = 'skip-content' | 'content-before-unhandled' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
@@ -223,7 +224,11 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   };
 
   // ── invariants.mjs ───────────────────────────────────────────────────
-  const invariants = invariantsModule(mutated, facts, env, layout, pre, actions.filter((a) => !handlers.has(a.name)).map((a) => a.name), opts.fault);
+  // PS5.2, S178: a step property that reads emits, or a never, reads the step's intents through a copy of the effects
+  // mapper, generated as effects.cjs is but with no fault, so the property module stands alone.
+  const readsIntents = mutated.items.some((i) => i.kind === 'NeverEmit' || (i.kind === 'Property' && i.form === 'step' && JSON.stringify(i.expr).includes('"kind":"Emits"')));
+  const mapperCopy = readsIntents ? effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls, program: opts.program }, pre) : null;
+  const invariants = invariantsModule(mutated, facts, env, layout, pre, actions.filter((a) => !handlers.has(a.name)).map((a) => a.name), opts.fault, mapperCopy);
 
   const files: Lowered['files'] = { 'contract.json': JSON.stringify(contract, null, 2) + '\n', 'next.cjs': next, 'invariants.mjs': invariants };
   // ── effects (PT6.1, PT5): the mapper and manifest when the machine declares effects, the path properties' module when it has any ──
@@ -552,7 +557,7 @@ function effectInvariantsModule(machine: string, props: A.Property[]): string {
   ].join('\n');
 }
 
-function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layout: Layout, pre: string, unhandled: string[], fault?: Fault): string {
+function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layout: Layout, pre: string, unhandled: string[], fault?: Fault, mapper: string | null = null): string {
   const q = JSON.stringify;
   const state: string[] = [];
   const auto: string[] = [];
@@ -587,6 +592,17 @@ function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layou
   const trans = m.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'step' && p !== dropped)
     // S8: the engine calls transitionInvariants on every step; a step property holds on accepted steps only (PS5.2).
     .map((p) => `  { name: ${q(p.name)}, pred: (pre, action, data, post, v) => (!!(v && v.rejected)) || UNHANDLED.has(action) || ${expr(p.expr, stepCx)} },`);
+  // PS5.2a, S178: never n: emit k(f: v) while P is the step property P(pre) implies !emits(k, f: v). The faults
+  // drop-never, invert-never-while, drop-never-filter and never-post-state each break one part of it.
+  const nevers = m.items.filter((i): i is A.NeverEmit => i.kind === 'NeverEmit');
+  for (const [k, n] of nevers.entries()) {
+    if (fault === 'drop-never' && k === 0) continue;
+    const condCx: Cx = { facts, env, layout, mode: 'state', stateVar: fault === 'never-post-state' ? 'post' : 'pre', dataVar: 'data' };
+    const p = n.cond ? expr(n.cond, condCx) : 'true';
+    const cond = fault === 'invert-never-while' ? `(!${p})` : p;
+    const sends = emitsCall(n.effect, fault === 'drop-never-filter' ? [] : n.fields, stepCx);
+    trans.push(`  { name: ${q(n.name)}, pred: (pre, action, data, post, v) => (!!(v && v.rejected)) || UNHANDLED.has(action) || (!${cond} || !${sends}) },`);
+  }
   const rejCx: Cx = { facts, env, layout, mode: 'reject', stateVar: 'state', dataVar: 'data' };
   const rej = m.items.filter((p): p is A.Property => p.kind === 'Property' && p.form === 'reject' && p !== dropped)
     .map((p) => `  { name: ${q(p.name)}, pred: (state, action, data, v) => ${expr(p.expr, rejCx)} },`);
@@ -595,6 +611,14 @@ function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layou
     pre,
     `const UNHANDLED = new Set(${q(unhandled)});`,
     `void UNHANDLED;`,
+    ...(mapper ? [
+      `// PS5.2, S178: the step's intents, from a copy of the effects mapper; a step property reads them through __emits.`,
+      `const __EFFECTS = (() => { const module = { exports: {} };`,
+      mapper,
+      `return module.exports.effects; })();`,
+      `const __emits = (pre, action, data, post, kind, filter) => __EFFECTS(pre, action, data, post, 'accepted').some((i) => i.kind === kind && Object.entries(filter).every(([f, x]) => i.payload && i.payload[f] === x));`,
+      `void __emits;`,
+    ] : []),
     ``,
     `export const stateInvariants = [`,
     ...state,

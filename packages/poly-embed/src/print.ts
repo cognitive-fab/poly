@@ -130,6 +130,8 @@ class Printer {
       case 'Guard': return `${this.use('guard')}(${this.arrow(i.cond)}, ${q(i.reason)})`;
       case 'Property': return this.property(i);
       case 'Liveness': return this.liveness(i);
+      // PS5.2a, S178: the field filter is an arrow, as its constants are names read through $.
+      case 'NeverEmit': return `${this.use('never')}(${q(i.name)}, ${q(i.effect)}, (${this.p}) => (${i.fields.length ? `{ ${i.fields.map((f) => `${this.key(f.name)}: ${this.expr(f.value, 0)}`).join(', ')} }` : '{}'})${i.cond ? `, ${this.arrow(i.cond)}` : ''})`;
       case 'EffectDecl': return `${this.use('effect')}(${q(i.name)}, ${this.params(i.params)}, [${i.items.map((x) => this.effItem(x)).join(', ')}])`;
       case 'Decision': return `${this.use('decision')}(${q(i.name)}, ${this.params(i.params)}, ${this.type(i.result)}, [${i.items.map((x) => this.decisionItem(x)).join(', ')}])`;
     }
@@ -283,6 +285,7 @@ class Printer {
       case 'ArrayLit': return `[${e.items.map((x) => this.expr(x, 0)).join(', ')}]`;
       case 'Spawned': return `${this.use('spawned')}(${e.index ? `${this.p}.${e.key}[${this.expr(e.index, 0)}]` : `${this.p}.${e.key}`})`;
       case 'Quant': return `${this.use(e.q)}(${q(e.var)}, ${q(e.group)}, ${this.arrow(e.body)})`;
+      case 'Emits': return `${this.use('emits')}(${q(e.effect)}${e.fields.length ? `, { ${e.fields.map((f) => `${this.key(f.name)}: ${this.expr(f.value, 0)}`).join(', ')} }` : ''})`;
     }
   }
 

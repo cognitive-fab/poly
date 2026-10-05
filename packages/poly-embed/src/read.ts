@@ -319,7 +319,7 @@ class Reader {
   }
 
   private item(node: ts.Expression): A.MachineItem {
-    const c = this.call(node, 'terminal', 'action', 'on', 'guard', 'invariant', 'stepProperty', 'rejectProperty', 'pathProperty', 'composeInvariant', 'liveness', 'effect', 'decision');
+    const c = this.call(node, 'terminal', 'action', 'on', 'guard', 'invariant', 'stepProperty', 'rejectProperty', 'pathProperty', 'composeInvariant', 'liveness', 'never', 'effect', 'decision');
     switch (c.name) {
       case 'terminal': {
         const [e] = this.argsOf(c, 1, 1);
@@ -346,6 +346,11 @@ class Reader {
         return this.mk<A.Guard>(c.node, { kind: 'Guard', cond: this.arrow(cond, (b) => this.expr(b)), reason: this.str(reason) });
       }
       case 'liveness': return this.liveness(c);
+      // PS5.2a, S178: never(name, effect, ($) => ({ f: v }), ($) => P?).
+      case 'never': {
+        const [name, effect, fields, cond] = this.argsOf(c, 3, 4);
+        return this.mk<A.NeverEmit>(c.node, { kind: 'NeverEmit', name: this.str(name), effect: this.str(effect), fields: this.arrow(fields, (b) => this.emitsFields(b)), cond: cond ? this.arrow(cond, (b) => this.expr(b)) : null });
+      }
       case 'decision': {
         const [name, params, result, items] = this.argsOf(c, 4, 4);
         return this.mk<A.Decision>(c.node, { kind: 'Decision', name: this.str(name), params: this.paramList(params), result: this.type(result), items: this.arr(items).map((i) => this.decisionItem(i)) });
@@ -356,6 +361,11 @@ class Reader {
       }
       default: return this.property(c);
     }
+  }
+
+  /** PS5.2: a field filter `{ f: v, … }`, each value an expression. */
+  private emitsFields(node: ts.Expression): A.EmitsField[] {
+    return this.obj(node).map(([k, v, kn]) => this.mk<A.EmitsField>(kn, { kind: 'EmitsField', name: k, value: this.expr(v) }));
   }
 
   private property(c: { name: string; node: ts.CallExpression }): A.Property {
@@ -718,6 +728,11 @@ class Reader {
       case 'exists': {
         const [v, g, body] = this.argsOf(c, 3, 3);
         return this.mk<A.Quant>(n, { kind: 'Quant', q: name, var: this.str(v), group: this.str(g), body: this.arrow(body, (b) => this.expr(b)) });
+      }
+      case 'emits': {
+        // PS5.2, S178: emits('k', { f: v }?).
+        const [effect, fields] = this.argsOf(c, 1, 2);
+        return this.mk<A.Emits>(n, { kind: 'Emits', effect: this.str(effect), fields: fields ? this.emitsFields(fields) : [] });
       }
       case 'primed': return this.mk<A.PrimedRef>(n, { kind: 'Primed', name: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'lit': this.fail(n, 'lit({ … }) is written only as an operand of an operator; elsewhere a literal is plain (S84)');

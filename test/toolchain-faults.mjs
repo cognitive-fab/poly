@@ -37,6 +37,11 @@ export const FAULT_SOURCES = {
   'skip-content': ['conformance/m8/content/notes.poly'],
   // PS3.2's first row order (S180 ruling): the content row lowered for an action with no handler.
   'content-before-unhandled': ['conformance/m8/content/unhandled.poly'],
+  // PS5.2a, S178: a machine's never statement, lowered to a step property over the step's intents.
+  'drop-never': ['conformance/m8/never/window.poly'],
+  'invert-never-while': ['conformance/m8/never/window.poly'],
+  'drop-never-filter': ['conformance/m8/never/window.poly'],
+  'never-post-state': ['conformance/m8/never/window.poly'],
   // S162: the actions timers start, which the runtime refuses from outside in a scope that requires attribution.
   'drop-timer-target': ['conformance/m5/lineage-timer.poly'],
   // PT10, S165: the workflow descriptor polyflow reads: a tool mapped to another kind, and a key field's pattern dropped.

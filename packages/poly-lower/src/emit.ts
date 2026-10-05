@@ -112,6 +112,23 @@ function readField(cx: Cx, stateVar: string, name: string): string {
   return l.kind === 'union' ? `__u(${stateVar}, ${q(name)})` : `${stateVar}[${q(name)}]`;
 }
 
+/**
+ * PS5.2, S178: `emits(k, f: v, …)` in a step property's predicate. The step's intents come from the effects mapper
+ * embedded in invariants.mjs (`__emits`), so a step property reads the same intents the runtime is given. A filter value
+ * is a constant: an integer, a boolean, none, or an enum constructor's name, as a payload carries it.
+ */
+export function emitsCall(effect: string, fields: A.EmitsField[], cx: Cx): string {
+  const eff = cx.facts.effects.get(effect);
+  if (!eff) throw new Error(`poly-lower: emits names no effect ${effect} (the checker must refuse it)`);
+  const constant = (v: A.Expr): string => {
+    if (v.kind === 'Int' || v.kind === 'Bool') return String(v.value);
+    if (v.kind === 'Unary' && v.op === '-' && v.arg.kind === 'Int') return String(-v.arg.value);
+    if (v.kind === 'Name') return v.name === 'none' ? 'null' : q(v.name);
+    throw new Error('poly-lower: a filter value that is not a constant reached the lowering (the checker must refuse it)');
+  };
+  return `__emits(pre, action, ${cx.dataVar}, post, ${q(effectKind(eff))}, { ${fields.map((f) => `${q(f.name)}: ${constant(f.value)}`).join(', ')} })`;
+}
+
 export function expr(e: A.Expr, cx: Cx): string {
   switch (e.kind) {
     case 'Int': return String(e.value);
@@ -223,6 +240,7 @@ export function expr(e: A.Expr, cx: Cx): string {
     case 'ArrayLit': return `[${e.items.map((x) => expr(x, cx)).join(', ')}]`;
     case 'Spawned': return e.index ? `(joint.children[${q(e.key)} + (${expr(e.index, cx)})] !== undefined)` : `(joint.children[${q(e.key)}] !== undefined)`;
     case 'Star': return '__star';
+    case 'Emits': return emitsCall(e.effect, e.fields, cx);
     case 'Quant': {
       // S49: forall and exists over a family's indices.
       const r = cx.facts.families.get(e.group)!;

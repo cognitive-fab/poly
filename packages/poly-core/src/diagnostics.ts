@@ -199,6 +199,11 @@ export interface Witness {
   trace: WitnessStep[];
   /** A liveness lasso (S74): the index in trace where the cycle begins; the trace is the prefix, then the cycle. */
   cycle?: number;
+  /**
+   * PS4.4, PS5.2a (S178): the witness takes a completion no earlier step asked for, or a message nothing sent. A
+   * configuration that includes the machine confirms it or rules it out.
+   */
+  environment?: 'unconstrained';
 }
 
 /** A typed edit addressed to an AST node, applied only if the node still has digest `pre` (PT12.1). */

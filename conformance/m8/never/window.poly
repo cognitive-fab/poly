@@ -1,0 +1,54 @@
+// S178 (M8a step 5): never emit … while, PS5.2a. The window rule of PT21.3, checked on R_M. `while` reads the
+// pre-state: Reply sends from an open window and writes it open again, which is allowed; Close sends from an open
+// window and closes it, which is allowed too, since the window was open before the step. Template sends a templated
+// message while the window is closed, which the field filter allows. One send in all: a step that emits changes the
+// state (PL4002).
+module window
+
+enum Window { Closed, Open }
+enum Kind { FreeForm, Templated }
+
+service machine Chat {
+  state {
+    window : Window = Closed
+    sent   : bool = false
+  }
+
+  action Inbound()
+  action Reply()
+  action Close()
+  action Template()
+
+  on Inbound {
+    require window is Closed else reject "open"
+    window' = Open
+  }
+  on Reply {
+    require window is Open else reject "closed"
+    require !sent else reject "sent"
+    window' = Open
+    sent' = true
+    emit send(kind: FreeForm)
+  }
+  on Close {
+    require window is Open else reject "closed"
+    require !sent else reject "sent"
+    window' = Closed
+    sent' = true
+    emit send(kind: FreeForm)
+  }
+  on Template {
+    require window is Closed else reject "open"
+    require !sent else reject "sent"
+    sent' = true
+    emit send(kind: Templated)
+  }
+
+  effect send(kind: Kind) {
+    kind "chat.send"
+    labels { egress:external }
+  }
+
+  never free-when-closed: emit send(kind: FreeForm) while window is Closed
+  step property templated-only-when-closed: (pre.window is Closed && emits(send)) implies emits(send, kind: Templated)
+}

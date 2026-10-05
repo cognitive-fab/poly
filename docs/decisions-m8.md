@@ -115,7 +115,18 @@ The lemma is written as PS4.1f, since PS4.1d already names the unconstrained env
 | step 4, first (before 239b9e3) | 1,534 | 0 | 0 |
 | step 4 follow-up, second | 1,535 | 1 | 1 |
 | step 4 follow-up, final (b8f02ff) | 1,541 | 0 | 0 |
-| **Total, 3 runs** | | **1** | **1** |
+| step 5, S178 | 1,553 | 1 | 0 |
+| **Total, 4 runs** | | **2** | **1** |
+
+## S178 in detail, ruled
+
+**Accepted (2026-10-05).** PS5.2 and PS5.2a as proposed, with all five choices: `while` reads the pre-state; a never takes a name; `emits` names effects only; a filter compares a field with a constant; the lowering reads the step's intents through the effects mapper. The text is written into `04-semantics.md` first (f5df1f1). Three test requirements:
+
+- **Choice 1 both ways.** A step from an open window that writes it open and sends is allowed; a step that sends from a closed pre-state, even if it opens the window in the same step, is a finding. (The proposal's wording, "a step that opens the window and sends is allowed", read as a step from a closed window; the ruling's two cases are the ones tested, and PS5.2a's text says the rule directly.)
+- **Unconstrained witnesses, both outcomes.** One confirmed by the configuration check, and one ruled out by it, which then does not count as a finding.
+- **Out-of-scope kinds.** `emits` on a send, a timer or a spawn is `PL1001`, with a test for each.
+
+Seeded faults: a never dropped, its `while` inverted, a field filter dropped, and `while` evaluated on the post-state. After step 5, M8a's steps are done: the M8a record, the review, and the closing gate on a quiet machine, with the failure-count totals.
 
 ## Engine changes
 

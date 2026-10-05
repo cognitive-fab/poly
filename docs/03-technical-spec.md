@@ -63,7 +63,8 @@ Migrate     = "{" "migrate" "{" { "new" "." Ident "=" Expr } "}" "}" ;
 StateBlock  = "state" "{" { Field } "}" ;
 Field       = Ident ":" Type [ Check ] "=" Expr [ "internal" | "derived" ] ;
 Check       = "check" Domain [ "strict" | "disclosed" ] ;
-MachineItem = Terminal | Action | Handler | Guard | Property | Effect | Decision ;
+MachineItem = Terminal | Action | Handler | Guard | Property | Never | Effect | Decision ;
+Never       = "never" Ident ":" "emit" Ident [ "(" Ident ":" Expr { "," Ident ":" Expr } ")" ] [ "while" Expr ] ;   (* PS5.2a, S178 *)
 Terminal    = "terminal" Expr ;
 Action      = "action" Ident "(" [ Param { "," Param } ] ")" ;
 Param       = Ident ":" Type [ Check ] ;
@@ -128,6 +129,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
   - **name resolution (S19).** A bare name resolves to the innermost binding: a local (`let` or a pattern binder), then a parameter, then a field, as in TypeScript. `pre.f` always names the pre-state field `f`, in handlers as in properties, so a field hidden by a parameter of the same name stays readable. Parameters are visible only where the action is known: in a handler, and in a guard, step property or reject property only where `action == A` narrows it (PT5). With no narrowing, no parameter is in scope and a bare name is the field;
   - `== != < <= > >= && || !`, `+ - *`, and integer `/` and `%`. Division truncates toward zero, and `%` takes the sign of the dividend, as in TypeScript with the quotient truncated (`Math.trunc(a / b)`). A divisor whose static range contains 0 is `PL1204 DIVISION_BY_ZERO`, so division is total;
   - `implies`;
+  - `emits(k, f: v, …)` (in step properties, PS5.2, S178): true iff the step emits effect `k` with those payload values. `k` is an effect's name, never a send, a timer or a spawn (`PL1001`); each `f` is a payload field of `k` (`PL1001`) and each `v` a constant of its type, an enum constructor, an integer, a boolean or `none` (`PL1201`);
   - `count(kind)` and `before(k1, k2)` (in path properties). Their arguments are effect kinds, string literals. `before("k1", "k2")` holds on a path iff every emission of `k2` is preceded by an emission of `k1` (S37);
   - `in { … }`;
   - in configuration properties only: `forall i in g: …`, `exists i in g: …`, the aggregates `count`, `sum`, `all` and `any` over `g[*]`, and `init(e)` for the initial value of `e` (PS13.6). The same quantifiers and aggregates range over a child family `f` in a compose invariant (S49);
@@ -410,6 +412,7 @@ The five kinds and their meanings are defined in PS5. This section fixes how eac
 |---|---|---|---|
 | `invariant n: e` | state predicate on every reachable state (PS5.1) | `stateInvariants` | polygraph BFS; Polytrion monitors (v2) |
 | `step property n: e` | predicate on every accepted step (PS5.2) | `transitionInvariants` | polygraph BFS |
+| `never n: emit k(f: v) while P` | the step property `P(pre) implies !emits(k, f: v)` (PS5.2a, S178) | `transitionInvariants`, with the step's intents from a copy of the effects mapper embedded in `invariants.mjs` | polygraph BFS; each configuration that includes the machine, on its instances' steps |
 | `reject property n: e` | predicate on every step, any verdict (PS5.3) | `rejectionInvariants` | polygraph BFS with step verdicts |
 | `path property n: e` | prefix-closed predicate on emission paths (PS5.4) | `effect-invariants.mjs` | polyrun `check-effects` |
 | `compose invariant n: e` | invariant of the joint machine (PS7.3) | `invariants.compose.mjs` | polyrun `check-product` |
@@ -427,10 +430,13 @@ The engine formats keep their names (`transitionInvariants`, `effectInvariants`)
 | Kind | Names in scope |
 |---|---|
 | `invariant` | the state's fields |
-| `step property` | `pre.f` and `post.f` for every field `f`; `action`, compared with `==` or `!=` to an action name; the parameters of the step's action |
+| `step property` | `pre.f` and `post.f` for every field `f`; `action`, compared with `==` or `!=` to an action name; the parameters of the step's action; `emits(k, f: v)` (S178) |
+| `never … while P` | `P` reads the pre-state's fields alone: `pre.`, `post.`, a parameter, `action` or `emits` there is `PL1201` (S178) |
 | `reject property` | `pre.f`, or the bare field `f`, for the state the step starts from; `action`; the parameters of the step's action; `rejected("reason")`, true iff the step's verdict is `rejected` with that reason |
 
 Names resolve as in PT2.2 (S19): a bare name is a parameter where one is in scope and a field otherwise, and `pre.f` always names the field. A parameter is in scope only on steps of an action that declares it, so a property that reads one must first compare `action`: in `(action == Pay && amount > 10) implies …`, `amount` is read only when `action == Pay` holds. A parameter read where no declaring action is established is `PL1201 TYPE_MISMATCH`, not `false`. Step and reject properties are lowered with the step's verdict as an extra argument, so a step property is evaluated on accepted steps only (PS5.2), even though the engine calls `transitionInvariants` on every step.
+
+**`never` and unconstrained witnesses (S178, M8a).** A never's finding is `PL3002 STEP_PROPERTY`. Its witness is marked `environment: unconstrained` when a step takes a completion no earlier step asked for (an effect's or decision's outcome, a timer, a child's completion) or a message that a machine of the program sends to this one and no earlier step sent (PS4.4). Each configuration checks the never statements of its instances' machines on their global steps, and reports a violation as `PL3002` named `<instance>.<never>`. A machine's unconstrained finding is ruled out when at least one configuration includes the machine and every such configuration checked it to the end with no violation; it is then listed under the machine's `ruledOut` with its witness and the configurations, and not counted. A configuration that finds the violation confirms it, and the finding stays. Translation validation compares each lowered never with PS5.2a on every reachable step, and the broken lowerings `drop-never`, `invert-never-while`, `drop-never-filter` and `never-post-state` are in the explicit list of toolchain faults.
 
 **poly-ref is poly's model checker.** It is written from 04-semantics as a reference interpreter, and it explores the checked instance for translation validation. The same exploration yields the reachable graph, on which poly-ref checks deadlock freedom, liveness and configurations of communicating machines. No engine checks these today. The architecture states this plainly (PA0.1): poly has its own checker for everything that concerns how machines relate over time. It is also the part most likely to have bugs of its own, so its first acceptance tests are the evidence scripts in `reviews/evidence` (PT18, M0 and M1). If polygraph gains any of these checks, poly defers to it.
 

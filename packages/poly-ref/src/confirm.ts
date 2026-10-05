@@ -82,7 +82,7 @@ export function confirmWitness(report: MachineReport, w: WitnessToConfirm): Conf
     const p = M.stepProperties.find((x) => x.name === w.property);
     if (!p) return { status: 'disagrees', reason: `poly-ref has no step property ${w.property}` };
     if (edge.label.verdict.kind !== 'accepted') return { status: 'disagrees', reason: 'the step is not accepted, and a step property sees accepted steps only (PS5.2)' };
-    const holds = evaluate(p.expr, { M, state: s, data: edge.label.data, locals: new Map(), pre: s, post: edge.outcome.state, action: edge.label.action }) === true;
+    const holds = evaluate(p.expr, { M, state: s, data: edge.label.data, locals: new Map(), pre: s, post: edge.outcome.state, action: edge.label.action, intents: edge.label.effects }) === true;
     return holds ? { status: 'disagrees', reason: `step property ${w.property} holds on that step by PS5.2` } : { status: 'confirmed' };
   }
   if (w.kind === 'rejection') {

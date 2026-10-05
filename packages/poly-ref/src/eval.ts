@@ -27,6 +27,8 @@ export interface Env {
   post?: State;
   action?: string;
   verdict?: Verdict;
+  /** PS5.2, S178: a step property's intents E, which emits reads. */
+  intents?: import('./step.js').Intent[];
   /**
    * Whether the action's parameters are visible (PS2.2, S19): always in a handler; in a guard, step or
    * reject property only on the right of a conjunct `action == A` that holds.
@@ -166,6 +168,18 @@ export function evaluate(e: A.Expr, env: Env): Value {
       const m = evaluate(e.object, env);
       if (!isMap(m)) throw new EvalError('poly-ref: indexing a value that is not a map');
       return mapGet(m, evaluate(e.index, env));
+    }
+    case 'Emits': {
+      // PS5.2: true iff some intent of E is an effect of kind k whose payload field f equals v, for every f: v.
+      if (!env.intents) throw new EvalError('poly-ref: emits is read only on a step, whose intents it names (PS5.2)');
+      const eff = env.M.effects.get(e.effect);
+      if (!eff) throw new EvalError(`poly-ref: no effect ${e.effect}`);
+      const want = e.fields.map((f) => {
+        const p = eff.params.find((x) => x.name === f.name);
+        if (!p) throw new EvalError(`poly-ref: effect ${e.effect} has no field ${f.name}`);
+        return [f.name, keyOf(evaluateAt(f.value, { ...env, data: {}, locals: new Map() }, p.type))] as const;
+      });
+      return env.intents.some((i) => i.type === 'effect' && i.kind === eff.kind && want.every(([f, k]) => i.payload[f] !== undefined && keyOf(i.payload[f]) === k));
     }
     case 'Call': {
       if (e.callee === 'rejected' && env.verdict && e.args.length === 1 && e.args[0].kind === 'String') {

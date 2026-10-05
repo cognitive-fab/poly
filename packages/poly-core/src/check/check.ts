@@ -865,6 +865,13 @@ class Checker {
           this.expectBool(it.expr, this.scope(it.form === 'invariant' ? 'invariant' : it.form));
           break;
         }
+        case 'NeverEmit':
+          // PS5.2a, S178: a never shares the properties' names; its filter is emits', and while reads the pre-state.
+          if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
+          propNames.add(it.name);
+          this.emitsFilter(it, it.effect, it.fields);
+          if (it.cond) this.neverCond(it.cond);
+          break;
         case 'Liveness':
           if (propNames.has(it.name)) this.err('PL1002', it, `property ${it.name} is declared twice`);
           propNames.add(it.name);
@@ -2283,6 +2290,11 @@ class Checker {
         this.expectBool(e.body, inner);
         return BOOL;
       }
+      case 'Emits':
+        // PS5.2, S178: the step's intents are read only in a step property.
+        if (scope.ctx !== 'step') { this.err('PL1201', e, 'emits reads the intents of a step, so only a step property reads it (PS5.2)'); return BOOL; }
+        this.emitsFilter(e, e.effect, e.fields);
+        return BOOL;
       case 'Star':
         if (scope.config) { this.err('PL5403', e, '[*] stands for every member of a group only inside count, sum, all or any (PS13.6)'); return ERR; }
         this.err('PL1201', e, '[*] stands for the members of a family inside count, sum, all or any (S49)');
@@ -2378,6 +2390,64 @@ class Checker {
         return expected;
       }
     }
+  }
+
+  /**
+   * PS5.2, S178: `emits(k, f: v, …)` and `never … emit k(f: v, …)`. k names an effect of the machine; a send, a timer or
+   * a spawn is not one (PL1001). Each f is a payload field of k (PL1001), and each v a constant of its type (PL1201).
+   */
+  private emitsFilter(at: A.NodeBase, name: string, fields: A.EmitsField[]): void {
+    const f = this.facts!;
+    const eff = f.effects.get(name);
+    if (!eff) {
+      const timer = f.timerKeys.has(name) || [...f.timerKeys].some((k) => new RegExp(`^${name}\\d+$`).test(k));
+      const child = f.children.has(name) || f.families.has(name) || f.detached.has(name);
+      const what = timer ? 'a timer' : child ? 'a spawned child' : this.actions.has(name) ? 'an action, which a send or a timer delivers' : null;
+      this.err('PL1001', at, what ? `${name} is ${what}, not an effect: emits names an effect, never a send, a timer or a spawn (PS5.2, S178)` : `${this.machine!.name} declares no effect ${name} (PS5.2)`);
+      return;
+    }
+    const seen = new Set<string>();
+    for (const x of fields) {
+      if (seen.has(x.name)) this.err('PL1002', x, `the filter names ${x.name} twice`);
+      seen.add(x.name);
+      const p = eff.params.find((q) => q.name === x.name);
+      if (!p) { this.err('PL1001', x, `effect ${name} has no payload field ${x.name} (PS5.2)`); continue; }
+      this.emitsConstant(x.value, this.tyOf(p.type), `${name}.${x.name}`);
+    }
+  }
+
+  /** PS5.2: a field filter's value is a constant of the field's type: an enum constructor, an integer, a boolean, or none. */
+  private emitsConstant(v: A.Expr, ty: Ty, what: string): void {
+    const bad = (why: string) => this.err('PL1201', v, `${what} is compared with ${why}; a filter takes a constant of the field's type: an enum constructor, an integer, a boolean or none (PS5.2)`);
+    if (ty.k === 'error') return;
+    const n = v.kind === 'Int' ? v.value : v.kind === 'Unary' && v.op === '-' && v.arg.kind === 'Int' ? -v.arg.value : null;
+    if (n !== null) { if (ty.k !== 'int' || n < ty.lo || n > ty.hi) bad(`${n}, not a value of ${tyToString(ty)}`); return; }
+    if (v.kind === 'Bool') { if (ty.k !== 'bool') bad(`a boolean, not a value of ${tyToString(ty)}`); return; }
+    if (v.kind === 'Name' && v.name === 'none') { if (ty.k !== 'content' && ty.k !== 'principal') bad(`none, not a value of ${tyToString(ty)}`); return; }
+    if (v.kind === 'Name') {
+      const u = ty.k === 'union' ? this.env.unions.get(ty.name) : undefined;
+      if (!u?.isEnum || !u.ctors.some((c) => c.name === v.name)) bad(`${v.name}, not a constructor of ${tyToString(ty)}`);
+      return;
+    }
+    bad('an expression that is not a constant');
+  }
+
+  /** PS5.2a: while P reads the pre-state alone: its fields, and neither post., pre., a parameter, action nor emits. */
+  private neverCond(cond: A.Expr): void {
+    const fields = new Set(this.machine!.fields.map((f) => f.name));
+    let ok = true;
+    const no = (n: A.NodeBase, what: string) => { ok = false; this.err('PL1201', n, `while reads ${what}; it is a predicate on the pre-state's fields alone (PS5.2a)`); };
+    const walk = (x: unknown): void => {
+      if (!x || typeof x !== 'object') return;
+      if (Array.isArray(x)) { x.forEach(walk); return; }
+      const n = x as A.Expr;
+      if (n.kind === 'Member' && n.object.kind === 'Name' && (n.object.name === 'pre' || n.object.name === 'post')) { no(n, `${n.object.name}.${n.prop}`); return; }
+      if (n.kind === 'Emits') { no(n, 'emits'); return; }
+      if (n.kind === 'Name' && !fields.has(n.name) && (n.name === 'action' || this.isParamOfSomeAction(n.name))) { no(n, n.name === 'action' ? 'action' : `the parameter ${n.name}`); return; }
+      for (const [k, v] of Object.entries(n)) if (k !== 'span') walk(v);
+    };
+    walk(cond);
+    if (ok) this.expectBool(cond, this.scope('invariant'));
   }
 
   private isParamOfSomeAction(n: string): boolean {

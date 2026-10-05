@@ -244,7 +244,22 @@ export interface Field extends NodeBase {
   flag: 'internal' | 'derived' | null;
 }
 
-export type MachineItem = Terminal | Action | Handler | Guard | Property | Liveness | EffectDecl | Decision;
+export type MachineItem = Terminal | Action | Handler | Guard | Property | NeverEmit | Liveness | EffectDecl | Decision;
+
+/**
+ * `never n: emit k(f: v, …) while P` (PS5.2a, S178): the step property `P(pre) implies !emits(k, f: v, …)`. `cond` is
+ * null where `while` is left out, which means true.
+ */
+export interface NeverEmit extends NodeBase {
+  kind: 'NeverEmit';
+  name: string;
+  effect: string;
+  fields: EmitsField[];
+  cond: Expr | null;
+}
+
+/** `f: v` in `emits(k, f: v)` and `never … emit k(f: v)`: a payload field and a constant (PS5.2). */
+export interface EmitsField extends NodeBase { kind: 'EmitsField'; name: string; value: Expr }
 
 /**
  * `decision d(params) -> R { … }` (PD1.2, S76): a model call whose answer is a finite typed value. It lowers to an
@@ -442,7 +457,11 @@ export type Expr =
   | ArrayLit
   | Spawned
   | Star
-  | Quant;
+  | Quant
+  | Emits;
+
+/** `emits(k, f: v, …)` in a step property (PS5.2, S178): some intent of the step is an effect k with those values. */
+export interface Emits extends NodeBase { kind: 'Emits'; effect: string; fields: EmitsField[] }
 
 /** `g[*]` inside an aggregate: every member of a family (S49, PS13.6). */
 export interface Star extends NodeBase { kind: 'Star' }

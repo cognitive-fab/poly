@@ -96,6 +96,7 @@ const CODE = {
   PL5301: ['TRANSIT_BOUND_HIT', 'inconclusive'],
   PL5302: ['INSTANCE_BOUND_HIT', 'inconclusive'],
   PL5101: ['CHILDKEY_COLLISION', 'finding'],
+  PL3002: ['STEP_PROPERTY', 'finding'],
   PL5401: ['CONFIGURATION_INVARIANT', 'finding'],
   PL5402: ['STUCK', 'finding'],
   PL5404: ['SEND_TO_NONE', 'finding'],
@@ -116,6 +117,8 @@ export interface ConfigReport {
   graph: Graph<GlobalState>;
   /** PT12.3, S128: properties whose antecedent is never true in any explored global state. */
   vacuous: Vacuous[];
+  /** PS5.2a (S178): each instance's never statements, checked on its global steps, and whether one was violated. */
+  nevers: { instance: string; machine: string; property: string; violated: boolean }[];
 }
 
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
@@ -391,6 +394,25 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     const i = g.states.findIndex((s) => evaluate(p.expr, envOf(s)) !== true);
     if (i >= 0) findings.push(finding('PL5401', p.id, `configuration invariant ${p.name} is violated in a reachable global state`, pathTo(g, i), { property: p.name, state: g.states[i] }));
   }
+  // PS5.2a (S178): each instance's never statements, on that instance's accepted global steps; the first violating step
+  // in BFS order is the witness. Each is listed, violated or not, so that a machine's unconstrained witness can be
+  // confirmed or ruled out by the configurations that include the machine.
+  const nevers: ConfigReport['nevers'] = [];
+  instances.forEach((inst, k) => {
+    for (const p of inst.machine.stepProperties) {
+      if (!inst.machine.nevers.has(p.name)) continue;
+      const e = g.edges.find((x) => {
+        const l = x.label as GlobalLabel;
+        if (l.instance !== k || l.via === 'gate' || l.verdict.kind !== 'accepted') return false;
+        const pre = g.states[x.from].sigma[k];
+        const post = x.outcome.state.sigma[k];
+        if (!pre || !post) return false;
+        return evaluate(p.expr, { M: inst.machine, state: pre, data: l.data, locals: new Map(), pre, post, action: l.action, intents: l.effects, self: inst.name }) !== true;
+      });
+      nevers.push({ instance: inst.name, machine: inst.machine.id, property: p.name, violated: !!e });
+      if (e) findings.push(finding('PL3002', p.id, `${inst.name}: never ${p.name} is violated by ${e.label.action}`, [...pathTo(g, e.from), e], { property: `${inst.name}.${p.name}`, state: g.states[e.from] }));
+    }
+  });
   // S29: a send to none, one finding per instance's action, at its first step in BFS order.
   const none = new Set<string>();
   for (const e of g.edges) {
@@ -441,6 +463,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   }
   return {
     vacuous,
+    nevers,
     configuration: decl.name,
     states: g.states.length,
     transitions: g.edges.length,

@@ -19,7 +19,7 @@ import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
-import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict } from '@poly/core';
+import { canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
@@ -59,7 +59,15 @@ export interface MachineCheck {
   buildDir?: string;
   /** Review A1: the SHA-256 of each artefact as the lowering wrote it, the bytes every later stage checked. */
   artefactDigests?: Record<string, string>;
+  /**
+   * PS5.2a (S178): never findings whose witness was environment: unconstrained and which every configuration that
+   * includes the machine ruled out. They are not counted.
+   */
+  ruledOut?: { property: string; configurations: string[]; witness?: Witness }[];
 }
+
+/** The model-check stage's own diagnostics, so that its verdict can be recomputed when a finding is ruled out. */
+const STAGE2 = new WeakMap<MachineCheck, Diagnostic[]>();
 
 /** A vacuous property (PT12.3, S128): its name, its antecedent's source text, and the member it never held for. */
 export interface VacuousRecord {
@@ -99,6 +107,8 @@ export interface InstanceRecord {
 /** Stage 4b for one configuration (PS13): poly-ref's exploration of its global states. */
 export interface ConfigCheck {
   configuration: string;
+  /** PS5.2a (S178): the never statements of each instance's machine, checked on its global steps. */
+  nevers?: { instance: string; machine: string; property: string; violated: boolean }[];
   stages: StageRecord[];
   /** Liveness properties, listed as not run (M1-2). */
   notRun: { property: string; reason: string }[];
@@ -260,6 +270,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   }
   const configs = configurationReports(module, refused, opts.uses);
   report.configurations.push(...configs.configurations);
+  ruleOut(report, module);
   // ── stage 5: policies (PT8) ─────────────────────────────────────────────
   if (module.decls.some((d) => d.kind === 'Policy')) {
     if (refused) {
@@ -425,6 +436,14 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     }
   }
   const merged = mergeFindings(stage2, ref.findings, new Set(mc.instance.refOnly.map((r) => r.property)));
+  // PS5.2a, PS4.4: a never's witness that poly-ref marks environment: unconstrained is reported with poly-ref's trace,
+  // the one that was marked, so that a configuration can confirm it or rule it out.
+  for (const [k, d] of merged.entries()) {
+    if (d.code !== 'PL3002' || !d.property || !ref.model.nevers.has(d.property)) continue;
+    const r = ref.findings.find((f) => f.code === 'PL3002' && f.property === d.property);
+    if (r?.witness?.environment === 'unconstrained' && d !== r) merged[k] = r;
+  }
+  STAGE2.set(mc, merged);
   mc.diagnostics.push(...merged);
   mc.stages.push({ stage: 'model-check', status: 'ran', engine: `polygraph@${engines.polygraph}`, verdict: verdictOf(merged), ms: performance.now() - t0, note: `${pg.statesExplored} states explored${pg.capHit ? `, cap ${maxStates} hit` : ''}` });
 
@@ -668,6 +687,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   const r = checkConfiguration(module, decl.name, { program });
   cc.diagnostics.push(...r.findings);
   cc.vacuous = vacuousRecords(r.vacuous);
+  cc.nevers = r.nevers;
   const groups = new Map<string, { machine: string; n: number }>();
   for (const i of r.instances) {
     const key = i.group ?? i.name;
@@ -688,6 +708,31 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
     notes: missing.length ? [`${missingText(missing)}: the configuration is checked from the semantics, and its machines do not run under polyrun until it has`] : undefined,
   });
   return cc;
+}
+
+/**
+ * PS5.2a (S178): a machine's never finding whose witness is environment: unconstrained is ruled out when at least one
+ * configuration of the module includes the machine, and every one that does checked the never on that machine's
+ * instances to the end (no bound hit, no stage not run) and found it violated nowhere. It is then not counted, and is
+ * listed under the machine's ruledOut. A configuration that finds it violated confirms it, and the finding stays.
+ */
+function ruleOut(report: CheckReport, module: Module): void {
+  for (const mc of report.machines) {
+    const id = `${module.name}.${mc.machine}`;
+    for (const d of [...mc.diagnostics]) {
+      if (d.code !== 'PL3002' || d.witness?.environment !== 'unconstrained' || !d.property) continue;
+      const including = report.configurations.filter((c) => c.nevers?.some((n) => n.machine === id && n.property === d.property));
+      if (!including.length) continue;
+      const complete = (c: ConfigCheck) => c.stages.every((s) => s.status === 'ran') && !c.diagnostics.some((x) => x.severity === 'inconclusive' || x.severity === 'error');
+      const clear = including.every((c) => complete(c) && c.nevers!.every((n) => n.machine !== id || n.property !== d.property || !n.violated));
+      if (!clear) continue;
+      mc.diagnostics.splice(mc.diagnostics.indexOf(d), 1);
+      (mc.ruledOut ??= []).push({ property: d.property, configurations: including.map((c) => c.configuration), witness: d.witness });
+      const own = STAGE2.get(mc);
+      const stage = mc.stages.find((s) => s.stage === 'model-check');
+      if (own && stage) stage.verdict = verdictOf(own.filter((x) => x !== d));
+    }
+  }
 }
 
 /** Stage 4b for every configuration of a module; the first explorer throw stops the stage and is reported. */

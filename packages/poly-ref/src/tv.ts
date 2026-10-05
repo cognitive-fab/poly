@@ -261,7 +261,7 @@ export async function translationValidate(module: Module, machineName: string, b
       const lowered = lowStep.get(p.name);
       if (!lowered) continue; // reported missing above
       propertyChecks++;
-      const want = e.label.verdict.kind !== 'accepted' || evaluate(p.expr, { M, state: s, data: e.label.data, locals: new Map(), pre: s, post, action: e.label.action }) === true;
+      const want = e.label.verdict.kind !== 'accepted' || evaluate(p.expr, { M, state: s, data: e.label.data, locals: new Map(), pre: s, post, action: e.label.action, intents: e.label.effects }) === true;
       const got = call(() => lowered.pred(flatPre, e.label.action, flatData, flatPost, v));
       if (got !== want) mismatch(`step property ${p.name} is ${got} in the lowered module and ${want} by PS5.2`, [...pathTo(g, e.from), e]);
     }

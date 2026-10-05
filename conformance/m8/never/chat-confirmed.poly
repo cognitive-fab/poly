@@ -1,0 +1,64 @@
+// S178, PS5.2a: the same pair as chat-ruled-out.poly, with Expired offered by the configuration. Alone, the witness
+// is marked environment: unconstrained, as there; in the configuration the window can close after App was told
+// of the message, and App's Reply then arrives at a closed window: the configuration check confirms the witness.
+module chat
+
+enum Window { Closed, Open }
+enum Kind { FreeForm, Templated }
+
+service machine Chat {
+  state {
+    window : Window = Closed
+    app    : Ref<App> = none
+    sent   : bool = false
+  }
+
+  action Inbound()
+  action Expired()
+  action Reply()
+
+  on Inbound {
+    require window is Closed else reject "open"
+    window' = Open
+    after 24h -> Expired() as w
+    send app <- Message()
+  }
+  on Expired {
+    require window is Open else reject "closed"
+    window' = Closed
+  }
+  on Reply {
+    require !sent else reject "sent"
+    sent' = true
+    emit send(kind: FreeForm)
+  }
+
+  effect send(kind: Kind) {
+    kind "chat.send"
+    labels { egress:external }
+  }
+
+  never free-when-closed: emit send(kind: FreeForm) while window is Closed
+}
+
+service machine App {
+  state {
+    chat    : Ref<Chat> = none
+    replied : bool = false
+  }
+
+  action Message()
+
+  on Message {
+    require !replied else reject "replied"
+    replied' = true
+    send chat <- Reply()
+  }
+}
+
+configuration pair {
+  chat : Chat { app: app }
+  app  : App { chat: chat }
+  inputs { chat.Inbound, chat.Expired }
+  bounds { transit 2 }
+}

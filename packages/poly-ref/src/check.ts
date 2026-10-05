@@ -4,11 +4,12 @@
 //   - deadlock (PS5.6).
 // Liveness (PS6) and configurations (PS13) come in M1 and M2, as passes over
 // the same Graph.
+import type * as A from '@poly/core';
 import type { Diagnostic, Expr, FairGroup as AstFairGroup, Module, Witness, WitnessStep } from '@poly/core';
 import { buildMachine, dataDomain, valuesOf, monitorStart, monitorStep, clauseText, type PathClause, type RMachine, type RPathProperty, type RType } from './model.js';
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
-import { isTerminal } from './step.js';
+import { isTerminal, type Intent } from './step.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
@@ -70,6 +71,64 @@ export interface CheckOptions {
   program?: Module[];
 }
 
+/**
+ * PS4.4, PS5.2a (S178): whether a witness needs an environment nothing provided. A step does when it takes a completion
+ * that no earlier step of the path asked for (an effect's or a decision's outcome, a timer, an attached child's
+ * completion), or a message that a machine of the program sends to this one and no earlier step of the path sent.
+ */
+export function unconstrained(module: Module, M: RMachine, path: Edge<State>[], program: Module[] = []): boolean {
+  const asks = new Map<string, (i: Intent) => boolean>();
+  const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === M.name);
+  if (!decl) return false;
+  const walk = (body: A.Stmt[], visit: (s: A.IntentStmt) => void): void => {
+    for (const s of body) {
+      if (s.kind === 'Intent') visit(s);
+      if (s.kind === 'If') { walk(s.then, visit); walk(s.else ?? [], visit); }
+      if (s.kind === 'Match') for (const a of s.arms) walk(a.body, visit);
+      if (s.kind === 'For') walk(s.body, visit);
+    }
+  };
+  for (const it of decl.items) {
+    if (it.kind === 'EffectDecl' || it.kind === 'Decision') {
+      const kind = it.kind === 'EffectDecl' ? M.effects.get(it.name)?.kind : M.decisions.get(it.name)?.kind;
+      for (const o of it.items) if (o.kind === 'EffOutcome' && kind) asks.set(o.action, (i) => i.type === 'effect' && i.kind === kind);
+    }
+    if (it.kind === 'Handler') walk(it.body, (s) => {
+      if (s.op === 'after') asks.set(s.target, (i) => i.type === 'timer' && i.action === s.target);
+      const c = s.op === 'spawn' ? s.extra.indexOf('complete') : -1;
+      if (c >= 0) { const a = s.extra[c + 1]; asks.set(a, (i) => i.type === 'spawn' && i.onComplete === a); }
+    });
+  }
+  // A message to M: the target of a send whose address is a Ref<M> field or parameter of the sender, or self in M.
+  for (const mod of [module, ...program]) {
+    for (const x of mod.decls) {
+      if (x.kind !== 'Machine') continue;
+      const refTo = (t: A.TypeExpr | undefined) => t?.kind === 'TRef' && t.machine[t.machine.length - 1] === M.name && (t.machine.length === 1 ? mod.name === module.name : t.machine.slice(0, -1).join('.') === module.name);
+      for (const h of x.items) {
+        if (h.kind !== 'Handler') continue;
+        const act = x.items.find((a): a is A.Action => a.kind === 'Action' && a.name === h.action);
+        walk(h.body, (s) => {
+          if (s.op !== 'send' || s.to?.kind !== 'Name' || asks.has(s.target)) return;
+          const n = s.to.name;
+          const toM = n === 'self' ? mod === module && x.name === M.name : refTo(x.fields.find((f) => f.name === n)?.type) || refTo(act?.params.find((p) => p.name === n)?.type);
+          if (toM) asks.set(s.target, (i) => i.type === 'send' && i.action === s.target);
+        });
+      }
+    }
+  }
+  const issued: Intent[] = [];
+  for (const e of path) {
+    const ask = asks.get(e.label.action);
+    if (ask) {
+      const k = issued.findIndex(ask);
+      if (k < 0) return true;
+      issued.splice(k, 1);
+    }
+    if (e.label.verdict.kind === 'accepted') issued.push(...e.label.effects);
+  }
+  return false;
+}
+
 export function checkMachine(module: Module, machineName: string, opts: CheckOptions = {}): MachineReport {
   const M = buildMachine(module, machineName, { principals: opts.principals, contents: opts.contents, program: opts.program });
   const g = explore(machineSystem(M), opts.maxStates);
@@ -104,9 +163,15 @@ export function checkMachine(module: Module, machineName: string, opts: CheckOpt
   // Step and reject properties, over edges in BFS order of their source.
   for (const p of M.stepProperties) {
     const e = g.edges.find((x) => x.label.verdict.kind === 'accepted' && evaluate(p.expr, {
-      M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action,
+      M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action, intents: x.label.effects,
     }) !== true);
-    if (e) findings.push(finding('PL3002', p.id, `step property ${p.name} is violated by ${e.label.action}`, trace([...pathTo(g, e.from), e]), { property: p.name, state: g.states[e.from] }));
+    if (!e) continue;
+    const path = [...pathTo(g, e.from), e];
+    // PS5.2a, PS4.4: a never's witness that needs an environment nothing provided is marked, for a configuration to judge.
+    const loose = M.nevers.has(p.name) && unconstrained(module, M, path, opts.program ?? []);
+    const f = finding('PL3002', p.id, `${M.nevers.has(p.name) ? 'never' : 'step property'} ${p.name} is violated by ${e.label.action}${loose ? '; the witness takes a step nothing in its environment asked for (environment: unconstrained, PS4.4)' : ''}`, trace(path), { property: p.name, state: g.states[e.from] });
+    if (loose) f.witness!.environment = 'unconstrained';
+    findings.push(f);
   }
   for (const p of M.rejectProperties) {
     const e = g.edges.find((x) => evaluate(p.expr, {
@@ -395,7 +460,7 @@ export function machineVacuity(M: RMachine, g: Graph<State>): Vacuous[] {
   const out: Vacuous[] = [];
   const states = () => g.states.map((s) => ({ M, state: s, data: {}, locals: new Map() }));
   const accepted = () => g.edges.filter((x) => x.label.verdict.kind === 'accepted').map((x) => ({
-    M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action,
+    M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], post: x.outcome.state, action: x.label.action, intents: x.label.effects,
   }));
   const every = () => g.edges.map((x) => ({
     M, state: g.states[x.from], data: x.label.data, locals: new Map(), pre: g.states[x.from], action: x.label.action, verdict: x.label.verdict,

@@ -198,6 +198,13 @@ class Printer {
   }
   private lastItemLines = 0;
 
+  /** PS5.2: `(f: v, …)` after a never's effect, or `, f: v, …` inside emits(…); nothing when there is no filter. */
+  private emitsFields(fs: A.EmitsField[], open: '(' | ', '): string {
+    if (!fs.length) return '';
+    const list = fs.map((f) => `${f.name}: ${this.expr(f.value, 0)}`).join(', ');
+    return open === '(' ? `(${list})` : `, ${list}`;
+  }
+
   private item(it: A.MachineItem): string[] {
     switch (it.kind) {
       case 'Terminal': return [`terminal ${this.expr(it.expr, 0)}`];
@@ -208,6 +215,8 @@ class Printer {
         return [`${kw} ${it.name}: ${this.expr(it.expr, 0)}`];
       }
       case 'Liveness': return this.liveness(it);
+      // PS5.2a, S178.
+      case 'NeverEmit': return [`never ${it.name}: emit ${it.effect}${this.emitsFields(it.fields, '(')}${it.cond ? ` while ${this.expr(it.cond, 0)}` : ''}`];
       case 'Handler': {
         const head = `on ${it.action}${it.params ? `(${it.params.join(', ')})` : ''}${it.by ? ` by ${it.by.name}: ${it.by.type}` : ''}`;
         return this.blockLines(head, it.body);
@@ -395,6 +404,7 @@ class Printer {
       case 'Unary': return wrap(`${e.op}${this.expr(e.arg, 2, noStruct)}`, 2);
       case 'Spawned': return `${e.key}${e.index ? `[${this.expr(e.index, 0)}]` : ''} spawned`;
       case 'Star': return '*';
+      case 'Emits': return `emits(${e.effect}${this.emitsFields(e.fields, ', ')})`;
       case 'Quant': { const q = `${e.q} ${e.var} in ${e.group}: ${this.expr(e.body, 0)}`; return ctx === 0 && parentOp === null ? q : `(${q})`; }
       case 'Is': return wrap(`${this.expr(e.expr, 4, noStruct)} is ${e.ctors.join(' | ')}`, 5);
       case 'In': return wrap(`${this.expr(e.expr, 4, noStruct)} in { ${e.set.map((x) => this.expr(x, 0)).join(', ')} }`, 5);

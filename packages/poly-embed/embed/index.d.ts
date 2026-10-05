@@ -69,6 +69,8 @@ export declare function stepProperty(name: string, e: Arrow): Item;
 export declare function rejectProperty(name: string, e: Arrow): Item;
 export declare function pathProperty(name: string, e: Arrow): Item;
 export declare function composeInvariant(name: string, e: Arrow): Item;
+/** PS5.2a, S178: `never n: emit k(f: v) while P`; the field filter is an arrow to its constants, P an arrow. */
+export declare function never(name: string, effect: string, fields: Arrow<{ [field: string]: Expr }>, cond?: Arrow): Item;
 export declare function liveness(name: string, goal: { eventually: Arrow } | { from: Arrow; to: Arrow }, opts?: { forall?: [string, string]; exists?: [string, string]; fair?: string[][] }): Item;
 export declare function effect(name: string, params: { [param: string]: Type }, items: EffItem[]): Item;
 export declare function kind(kind: string): EffItem;
@@ -125,6 +127,8 @@ export declare function spawned(key: Expr): Expr;
 export declare function forall(v: string, group: string, body: Arrow): Expr;
 export declare function exists(v: string, group: string, body: Arrow): Expr;
 export declare function primed(field: string): Expr;
+/** PS5.2, S178: in a step property, whether the step emits effect k with those field values. */
+export declare function emits(effect: string, fields?: { [field: string]: Expr }): Expr;
 export declare function call(callee: string, ...args: Expr[]): Expr;
 export declare function count(...args: Expr[]): Expr;
 export declare function before(first: string, second: string): Expr;
