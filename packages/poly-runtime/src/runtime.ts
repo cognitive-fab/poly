@@ -19,9 +19,9 @@ import { createRuntime, type Runtime, type DispatchResult, type JournalRow } fro
 import { RESERVED_MODULE, verifyRecord, type Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { dataOutside } from './types.js';
-import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild } from './load.js';
+import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type WorkOrderTool } from './load.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
-import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift } from './worker.js';
+import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrift, type ReportOutcome } from './worker.js';
 import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
@@ -60,6 +60,9 @@ export type Handler = EffectHandler;
 
 /** An outside dispatch that the runtime refuses before any step, with an audit row (K9, K10). */
 /** PD2.4: an adjudication with no decision event to link; a checked program cannot reach it (PL6203). */
+/** S173: an open work order, as an agent takes it: the order id is the intent's, the same at every attempt. */
+export interface WorkOrder { orderId: string; instanceId: string; workflow: string; kind: string; tool: string; target?: string; why: string; args: Record<string, unknown>; attempt: number; deadline: number }
+
 export class OutcomeWithoutDecision extends Error {
   constructor(message: string) { super(message); this.name = 'OutcomeWithoutDecision'; }
 }
@@ -78,6 +81,8 @@ export class PolyRuntime {
   readonly worker: EffectWorker;
   /** Review B5: whether a gate was given at load; only then are recorded gate decisions recomputed. */
   readonly gateGiven: boolean;
+  /** S173: each workflow's work-order kinds, by machine id, with the tool each maps to. */
+  private readonly orderTools = new Map<string, Map<string, WorkOrderTool & { workflow: string }>>();
   /** PD2.2: each decision's record, from the provider's return to its completion's commit, by intent id. */
   private readonly records = new Map<string, DecisionRecord>();
   private readonly inputSubscribers = new Map<string, Set<(step: unknown) => void>>();
@@ -102,6 +107,10 @@ export class PolyRuntime {
     this.gateGiven = opts.gate?.gate !== undefined || this.policyGate !== null;
     store.decisionCompletions = (machineId) => this.decisionCompletions(machineId);
     store.allowWitnessCompletions = verified.certificate.purpose === 'witness';
+    for (const w of verified.workflows) {
+      if (!this.orderTools.has(w.machine)) this.orderTools.set(w.machine, new Map());
+      for (const [kind, t] of Object.entries(w.tools)) this.orderTools.get(w.machine)!.set(kind, { ...t, workflow: w.name });
+    }
     const builtins: Record<string, EffectHandler> = {};
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
     this.worker = new EffectWorker(kernel, store, this.handlers, {
@@ -117,6 +126,10 @@ export class PolyRuntime {
       }),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
+      workOrder: (row) => {
+        const t = this.orderToolOf(row.instance_id, row.kind);
+        return t ? { tool: t.tool, ...(t.target !== undefined ? { target: t.target } : {}), why: t.why } : null;
+      },
     });
     // PD2.4, S129: an adjudication's outcome event, linked to the run's most recent decision event for its decision.
     store.onOutbox = (instanceId, rows) => rows.filter((r) => r.kind.startsWith('outcome.')).map((r) => {
@@ -255,6 +268,8 @@ export class PolyRuntime {
 
   /** PT15: a handler for an effect kind. It runs only from the outbox worker, after the gate allows (PT9.2). */
   handle(kind: string, handler: Handler): void {
+    // S173: a workflow's mapped kind is a work order; the agent's report is its result, and no handler runs it.
+    for (const [machine, kinds] of this.orderTools) if (kinds.has(kind)) throw new Error(`${kind} is a work order of workflow ${kinds.get(kind)!.workflow} on ${machine}: the agent's report settles it through rt.reportWorkOrder, and no handler runs it (S173)`);
     // Review B2: a decision's handler is the provider host's, which keeps the record its completion commits with.
     if (kind.startsWith('decision.')) throw new Error(`${kind} is a decision: register its provider with rt.provide, never rt.handle (PD2.2, K10)`);
     if (kind.startsWith('outcome.')) throw new Error(`${kind} is an adjudication's outcome, handled by the runtime itself (PD2.4)`);
@@ -321,6 +336,12 @@ export class PolyRuntime {
       const reason = `${action} on ${instanceId}: ${why}, so it is no step (PS3.2, S140)`;
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S140', reason });
       throw new RefusedDispatch(`${reason}: the input is outside its type`, 'S140');
+    }
+    // S173: a work order's completions are delivered by the runtime only, from the agent's report (K9).
+    if (inst && this.workOrderCompletions(inst.machine_id).has(action)) {
+      const reason = `K9: '${action}' completes a work order of '${instanceId}', and only the runtime delivers it, from the agent's report (S173)`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'K9', reason });
+      throw new RefusedDispatch(reason, 'K9');
     }
     if (inst && this.decisionCompletions(inst.machine_id).has(action)) {
       const reason = `K10: '${action}' completes a decision of '${instanceId}', and only the outbox worker delivers it, with its decision event`;
@@ -416,6 +437,36 @@ export class PolyRuntime {
       for (const h of ['onSuccess', 'onFailure', 'onExhausted']) if (e[h]?.action) out.add(e[h].action);
     }
     return out;
+  }
+
+  /** S173: the tool a workflow maps an instance's effect kind to, or null when the kind is not a work order. */
+  orderToolOf(instanceId: string, kind: string): (WorkOrderTool & { workflow: string }) | null {
+    const id = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined;
+    return (id && this.orderTools.get(id)?.get(kind)) || null;
+  }
+
+  /** S173: the actions a machine's work orders complete with, which only the runtime delivers (K9). */
+  workOrderCompletions(machineId: string): Set<string> {
+    const m = this.verified.machines.find((x) => x.id === machineId);
+    const out = new Set<string>();
+    for (const kind of this.orderTools.get(machineId)?.keys() ?? []) {
+      const e = m?.manifest?.effects?.[kind];
+      for (const h of ['onSuccess', 'onFailure', 'onExhausted']) if (e?.[h]?.action) out.add(e[h].action);
+    }
+    return out;
+  }
+
+  /** S173: the work orders open now, of one run or of all: each issued after the gate allowed it, and not yet reported. */
+  async workOrders(instanceId?: string): Promise<WorkOrder[]> {
+    return (await this.worker.openOrders(instanceId)).map(({ row, attempt, deadline }) => {
+      const t = this.orderToolOf(row.instance_id, row.kind)!;
+      return { orderId: row.intent_id, instanceId: row.instance_id, workflow: t.workflow, kind: row.kind, tool: t.tool, ...(t.target !== undefined ? { target: t.target } : {}), why: t.why, args: row.payload as Record<string, unknown>, attempt, deadline };
+    });
+  }
+
+  /** S173: the agent's report of a work order, which settles its intent; any report but the open attempt's is refused and audited. */
+  reportWorkOrder(orderId: string, report: { attempt: number; ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+    return this.worker.report(orderId, report);
   }
 
   /** The actions a machine's decisions complete with, which only the worker dispatches (K10). */

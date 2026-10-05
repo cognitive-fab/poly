@@ -83,7 +83,12 @@ export interface WorkerOptions {
   capabilities?: (row: OutboxRow, decl: any) => Readonly<Record<string, unknown>>;
   /** PT15: called with each intent the gate allowed, after its transaction commits. Observation only. */
   onAllowed?: (row: OutboxRow, proposal: Proposal) => void;
+  /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
+  workOrder?: (row: OutboxRow) => { tool: string; target?: string; why: string } | null;
 }
+
+/** S173: what a work order's report came to. */
+export type ReportOutcome = { status: 'settled' | 'retrying' | 'failed' } | { status: 'refused'; reason: string };
 
 /** A worker whose claim was taken over (its lease expired and another pass reclaimed the row) stops quietly. */
 export class StaleClaim extends Error {
@@ -244,7 +249,8 @@ export class EffectWorker {
         const decl = this.decl(row);
         // As at a claim: a row whose machine or manifest is unavailable is parked and takes no transition.
         if (decl === null) await this.store.markEffectRetry(row.intent_id, row.attempts, now + 30_000, `parked: machine or manifest unavailable for effect '${row.kind}', not executed`);
-        else if (st?.intent === 'Running') await this.failed(row, decl, st.intent_attempt!, 'lease expired while running (a crash)', now, 'lost');
+        // S173: an issued work order's claim is its deadline, so an expired one is an order nobody reported in time.
+        else if (st?.intent === 'Running') await this.failed(row, decl, st.intent_attempt!, this.opts.workOrder?.(row) ? `the work order was not reported within ${decl.retry?.timeoutMs ?? 30_000} ms` : 'lease expired while running (a crash)', now, 'lost');
         else await this.store.txn(() => this.store.db.prepare(`UPDATE pr_outbox SET status = 'pending', claimed_until = NULL WHERE intent_id = ? AND status = 'inflight'`).run(row.intent_id));
       } catch (e) { if (!(e instanceof StaleClaim)) throw e; }
     }
@@ -391,6 +397,12 @@ export class EffectWorker {
             return;
           }
           await this.store.txn(() => this.transition(row, 'Start'));
+          // S173: a work order is issued, not executed. The intent stays Running until the agent's report, or until
+          // the order's deadline lapses and recovery counts the attempt, as a crash would.
+          {
+            const tool = this.opts.workOrder?.(row);
+            if (tool) { await this.issue(row, decl, (await this.intentState(row))!.intent_attempt!, tool, now); return; }
+          }
           ran = false;
           try {
             result = await this.execute(row, decl, (await this.intentState(row))!.intent_attempt!);
@@ -417,29 +429,7 @@ export class EffectWorker {
             await this.settleFailed(row, decl, n, 'settled before a crash, result lost', now, m);
             return;
           }
-          let s: 'ok' | 'failed';
-          try {
-            const r = await this.gate.settle({ ok: true, output: digest(result ?? null) }, (await this.proposalOf(row, decl)).proposal);
-            s = typeof r === 'string' ? r : r.result;
-            // S146: the gate's settle is a ledger event, with its session sequence.
-            if (typeof r === 'object' && r.record) {
-              const { action: settleAction, ...settleRecord } = r.record as Record<string, unknown>;
-              await this.store.txn(() => this.verdict(row, { outcome: 'settled', result: s, ...settleRecord, ...(settleAction ? { action: this.store.keep(settleAction) } : {}) }));
-            }
-          } catch { s = 'failed'; }
-          if (s !== 'ok') { await this.settleFailed(row, decl, n, 'the gate refused the settle', now, m); return; }
-          this.opts.beforeCompletion?.(row, decl, result);
-          try {
-            await this.finish(row, 'SettleOk', { hook: decl.onSuccess, suffix: ':done', data: mapCompletion(decl.onSuccess ?? {}, { result }, result && typeof result === 'object' ? result as Record<string, unknown> : {}) }, () => this.store.markEffectDone(row.intent_id).then(() => undefined));
-          } catch (e) {
-            if (!(e instanceof InputOutsideType) && !(e instanceof DecisionWithoutRecord)) throw e;
-            // S140, review B2: a completion that cannot be a step (outside its type, or a decision with no record) takes
-            // none; the settle failed, and the intent retries or dies.
-            const rule = e instanceof InputOutsideType ? 'S140' : 'K10';
-            await this.store.insertAudit({ at: now, instanceId: row.instance_id, action: decl.onSuccess.action, actionId: `${row.intent_id}:done`, rule, reason: e.message });
-            await this.settleFailed(row, decl, n, rule === 'S140' ? 'the completion is outside its type (S140)' : 'the decision has no record (K10)', now, m);
-            return;
-          } finally { this.opts.afterCompletion?.(row); }
+          await this.settle(row, decl, n, result, now, m);
           return;
         }
         case 'Done':
@@ -454,6 +444,110 @@ export class EffectWorker {
           throw new RuntimeFault(`intent ${row.intent_id} is in ${st.intent}, a state OutboxIntent does not have: PL2401 RUNTIME_MODEL_DRIFT`);
       }
     }
+  }
+
+  /** PT9.4: the gate's settle of a handler's result, then SettleOk with the success completion; true when it settled. */
+  private async settle(row: OutboxRow, decl: any, n: number, result: unknown, now: number, m: number): Promise<boolean> {
+    let s: 'ok' | 'failed';
+    try {
+      const r = await this.gate.settle({ ok: true, output: digest(result ?? null) }, (await this.proposalOf(row, decl)).proposal);
+      s = typeof r === 'string' ? r : r.result;
+      // S146: the gate's settle is a ledger event, with its session sequence.
+      if (typeof r === 'object' && r.record) {
+        const { action: settleAction, ...settleRecord } = r.record as Record<string, unknown>;
+        await this.store.txn(() => this.verdict(row, { outcome: 'settled', result: s, ...settleRecord, ...(settleAction ? { action: this.store.keep(settleAction) } : {}) }));
+      }
+    } catch { s = 'failed'; }
+    if (s !== 'ok') { await this.settleFailed(row, decl, n, 'the gate refused the settle', now, m); return false; }
+    this.opts.beforeCompletion?.(row, decl, result);
+    try {
+      await this.finish(row, 'SettleOk', { hook: decl.onSuccess, suffix: ':done', data: mapCompletion(decl.onSuccess ?? {}, { result }, result && typeof result === 'object' ? result as Record<string, unknown> : {}) }, () => this.store.markEffectDone(row.intent_id).then(() => undefined));
+    } catch (e) {
+      if (!(e instanceof InputOutsideType) && !(e instanceof DecisionWithoutRecord)) throw e;
+      // S140, review B2: a completion that cannot be a step (outside its type, or a decision with no record) takes
+      // none; the settle failed, and the intent retries or dies.
+      const rule = e instanceof InputOutsideType ? 'S140' : 'K10';
+      await this.store.insertAudit({ at: now, instanceId: row.instance_id, action: decl.onSuccess.action, actionId: `${row.intent_id}:done`, rule, reason: e.message });
+      await this.settleFailed(row, decl, n, rule === 'S140' ? 'the completion is outside its type (S140)' : 'the decision has no record (K10)', now, m);
+      return false;
+    } finally { this.opts.afterCompletion?.(row); }
+    return true;
+  }
+
+  /**
+   * S173: a work order is issued. The order (its tool, target, reason and arguments) is observed on the run by digest,
+   * and the row's claim is moved to the order's deadline, the effect's declared timeout, so the order stays open until
+   * the agent reports or the deadline lapses. The order id is the intent id at every attempt (PF8.5a).
+   */
+  private async issue(row: OutboxRow, decl: any, attempt: number, tool: { tool: string; target?: string; why: string }, now: number): Promise<void> {
+    const deadline = now + (decl.retry?.timeoutMs ?? 30_000);
+    await this.store.txn(() => {
+      this.checkFence(row);
+      this.store.appendEvent(row.instance_id, 'observation', { stage: 'work-order', intent: row.intent_id, attempt, outcome: 'issued', order: this.store.keep({ ...tool, args: row.payload }), deadline }, this.now);
+      this.store.db.prepare(`UPDATE pr_outbox SET claimed_until = ? WHERE intent_id = ? AND status = 'inflight'`).run(deadline, row.intent_id);
+    });
+  }
+
+  /** S173: the open work orders: issued, Running, and within their deadline. */
+  async openOrders(instanceId?: string): Promise<{ row: OutboxRow; attempt: number; deadline: number }[]> {
+    const rows = (instanceId === undefined
+      ? this.store.db.prepare(`SELECT * FROM pr_outbox WHERE status = 'inflight' AND kind <> 'sendTo' ORDER BY seq, intent_id`).all()
+      : this.store.db.prepare(`SELECT * FROM pr_outbox WHERE status = 'inflight' AND kind <> 'sendTo' AND instance_id = ? ORDER BY seq, intent_id`).all(instanceId)) as (OutboxRow & { claimed_until: number; payload: string })[];
+    const out: { row: OutboxRow; attempt: number; deadline: number }[] = [];
+    for (const r of rows) {
+      const row = { ...r, payload: JSON.parse(r.payload as unknown as string) } as OutboxRow;
+      if (!this.opts.workOrder?.(row) || r.claimed_until <= this.now) continue;
+      const st = await this.intentState(row);
+      if (st?.intent === 'Running') out.push({ row, attempt: st.intent_attempt!, deadline: r.claimed_until });
+    }
+    return out;
+  }
+
+  /**
+   * S173: the agent's report of a work order is the handler's result. It is taken only for the attempt that is open
+   * now, before its deadline; any other report (an unknown order, a superseded or lapsed attempt, a second report of
+   * one attempt) is refused and audited, so an agent is never credited twice (PF8.5a).
+   */
+  async report(orderId: string, rep: { attempt: number; ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+    // Two reports of one order taken at once: the second is refused, not raced into the hosted machine.
+    if (this.reporting.has(orderId)) {
+      const now = this.now;
+      await this.store.insertAudit({ at: now, instanceId: orderId, action: 'work-order', actionId: `${orderId}:report:${rep.attempt}`, rule: 'S173', reason: `work order ${orderId}: another report of it is being taken` });
+      return { status: 'refused', reason: 'another report of this order is being taken' };
+    }
+    this.reporting.add(orderId);
+    try { return await this.takeReport(orderId, rep); } finally { this.reporting.delete(orderId); }
+  }
+
+  private readonly reporting = new Set<string>();
+
+  private async takeReport(orderId: string, rep: { attempt: number; ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+    const now = this.now;
+    const raw = this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(orderId) as (OutboxRow & { claimed_until: number | null; status: string; payload: string }) | undefined;
+    const refuse = async (reason: string, instanceId = raw?.instance_id ?? orderId): Promise<ReportOutcome> => {
+      await this.store.insertAudit({ at: now, instanceId, action: raw?.kind ?? 'work-order', actionId: `${orderId}:report:${rep.attempt}`, rule: 'S173', reason: `work order ${orderId}: ${reason}` });
+      return { status: 'refused', reason };
+    };
+    if (!raw) return refuse('no such work order');
+    const row = { ...raw, payload: JSON.parse(raw.payload) } as OutboxRow;
+    if (!this.opts.workOrder?.(row)) return refuse(`${row.kind} is not a work order`);
+    const st = await this.intentState(row);
+    if (raw.status !== 'inflight' || st?.intent !== 'Running') return refuse(`it is not awaiting a report (the intent is ${st?.intent ?? 'unknown'})`);
+    if (rep.attempt !== st.intent_attempt) return refuse(`attempt ${rep.attempt} is superseded; attempt ${st.intent_attempt} is open`);
+    if (raw.claimed_until === null || now >= raw.claimed_until) return refuse(`attempt ${rep.attempt} lapsed at its deadline`);
+    (row as Fenced).fence = raw.claimed_until;
+    const decl = this.decl(row);
+    if (decl === null) return refuse('its machine or manifest is unavailable');
+    const n = st.intent_attempt!;
+    const m = await this.boundOf(row);
+    if (!rep.ok) {
+      const message = rep.error || 'the agent reported a failure';
+      if (rep.permanent) { await this.permanent(row, decl, n, message); return { status: 'failed' }; }
+      await this.failed(row, decl, n, message, now, 'failed', m);
+      return { status: n < m ? 'retrying' : 'failed' };
+    }
+    await this.store.txn(async () => { await this.transition(row, 'HandlerOk'); this.observed(row, n, 'ok'); });
+    return (await this.settle(row, decl, n, rep.result ?? {}, now, m)) ? { status: 'settled' } : { status: n < m ? 'retrying' : 'failed' };
   }
 
   /** S147: the allow this intent holds read a singleton that has moved on since. */

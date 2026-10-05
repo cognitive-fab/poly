@@ -256,7 +256,19 @@ Numbered from S173. Each has a proposal and waits for the owner's ruling.
 
 ## 9. Record of M8, as it is built
 
-Empty until M8a's first step lands.
+**M8a step 1, work orders on `poly-runtime` (S173).**
+
+- **Found first:** `poly-runtime` could not load a build with a workflow at all. The certificate lists each descriptor among its artefacts, and the runtime never read it, so the load was refused with "certified but missing". Every test of `test/workflow-orders.test.mjs` failed first on that.
+- **Built:**
+  - The load reads each certified descriptor once, checks it with the other artefacts, and refuses a workflow that maps a kind its machine does not emit.
+  - A workflow's mapped kinds are work orders. When the gate allows one, the worker takes `Start` and issues the order instead of running a handler. The order (tool, target, reason, arguments) is observed on the run by digest, after the `verdict` event, and its deadline is the effect's declared timeout.
+  - `rt.workOrders(run?)` lists the open orders. `rt.reportWorkOrder(id, { attempt, ok, result | error, permanent })` settles one: an ok report goes through the gate's settle and the success completion, as a handler's result does; a failed one retries, or delivers the exhausted completion at the bound.
+  - Registering a handler for a work-order kind is refused.
+- **The two additions of the ruling:**
+  - PF8.5a: a lapsed order is recovered as a lost attempt and re-issued under the same order id at the next attempt, with no second proposal. A report of an unknown order, of a superseded or lapsed attempt, or of an attempt already reported is refused and audited (rule `S173`).
+  - K9: an outside dispatch of a work order's completion action is refused and audited (rule `K9`).
+- **Controls.** Six seeded mutants of the built runtime were each caught by the test file: the K9 refusal removed, a superseded attempt taken, a lapsed attempt taken, a handler allowed for a work order, an order issued with no deadline, and a retry proposed again. The lapsed-attempt mutant was not caught by the first version of the tests, so a test for it was added before the commit.
+- **Not yet:** the MCP tools, run keys, the certificate's wording and the `workflow` stage are step 2. Until then the certificate still says `ungated: polyflow runtime`, though a build loaded in `poly-runtime` gates its work orders.
 
 ## Conclusion
 

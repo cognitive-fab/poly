@@ -23,7 +23,12 @@ export interface VerifiedBuild {
   handlers: Map<string, string>;
   /** PT8, PT9: each trust scope's certified policy document, from the verified bytes, and the machines it reads. */
   policies: { scope: string; policies: string[]; doc: Record<string, unknown>; reads: string[] }[];
+  /** PT10, S173: each certified workflow, from the verified bytes of its descriptor: the tool each effect kind maps to. */
+  workflows: VerifiedWorkflow[];
 }
+
+export interface WorkOrderTool { tool: string; target?: string; why: string }
+export interface VerifiedWorkflow { name: string; machine: string; inputAction: string; key: { template: string; fields: Record<string, { pattern?: string }> }; tools: Record<string, WorkOrderTool> }
 
 /** `load('./.poly/build', …)` (PT15) names the build; the certificate's paths are relative to the project above it. */
 export function projectRootOf(buildDir: string): string {
@@ -54,6 +59,12 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   for (const p of certificate.poly?.policies ?? []) {
     const f = join(root, p.path);
     if (existsSync(f)) bytes.set(p.path, readFileSync(f));
+  }
+  // PT10, S173: each workflow's descriptor, read once like any artefact. Before M8 nothing read it here, so a build with
+  // a workflow could not load at all ("certified but missing").
+  for (const w of certificate.poly?.workflows ?? []) {
+    const f = join(root, w.descriptor);
+    if (existsSync(f)) bytes.set(w.descriptor, readFileSync(f));
   }
   const actual = Object.fromEntries([...bytes].map(([k, b]) => [k, sha256OfBytes(b)]));
   const problems = certificateProblems(certificate, actual, trust);
@@ -143,7 +154,18 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     });
   }
   const policies = (certificate.poly?.policies ?? []).map((p) => ({ scope: p.scope, policies: p.policies, reads: p.reads, doc: JSON.parse(bytes.get(p.path)!.toString('utf8')) as Record<string, unknown> }));
-  return { certificate, root, runDir, machines, handlers, policies };
+  // S173: a workflow's mapped kinds become work orders, so each must be an effect of its machine, as certified.
+  const workflows: VerifiedWorkflow[] = [];
+  for (const w of certificate.poly?.workflows ?? []) {
+    const d = JSON.parse(bytes.get(w.descriptor)!.toString('utf8')) as Omit<VerifiedWorkflow, 'machine'>;
+    const m = machines.find((x) => x.id === w.machine);
+    if (!m) throw new LoadError(`refused at load: workflow ${w.name} runs ${w.machine}, which the certificate does not name`);
+    for (const kind of Object.keys(d.tools ?? {})) {
+      if (!m.manifest?.effects?.[kind]) throw new LoadError(`refused at load: workflow ${w.name} maps ${kind}, which is not an effect of ${w.machine} (S173)`);
+    }
+    workflows.push({ name: d.name, machine: w.machine, inputAction: d.inputAction, key: d.key, tools: d.tools });
+  }
+  return { certificate, root, runDir, machines, handlers, policies, workflows };
 }
 
 /**
