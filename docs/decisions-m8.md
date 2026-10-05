@@ -66,6 +66,22 @@ Tests come first for the replay, expired, unmatched and wrong-key cases, and a s
 
 Tests first: a live lock, a stale lock and a reused id. Seeded faults: one that takes over a live lock, and one that decides from the lock file instead of the OS lock, which the reused-id test must catch.
 
+## S176 in detail, ruled
+
+**Ruled (2026-10-05).** PS1.0 is written into `04-semantics.md` as proposed.
+
+- **Semantics (PS1.0): accepted.** `use` only makes names available and adds no behaviour. A test must show that adding an unused `use` changes no verdict and no state count.
+- **Qualified names only: accepted.** Agents get one spelling per machine, with no alias to resolve.
+- **Attached spawns across modules** stay `PL0901`.
+- **Types across modules: accepted for M8a, with a recorded gap.** M8b will need enums declared in a std module to cross the boundary: PT21.3's conversation takes `name: Template`, and channel kinds are enums. This is the next S issue (S190), with a proposal to allow payload-free enums from a used module, resolved before M8b's step 6, not now.
+- **Finding modules: accepted, with two clarifications.**
+  - *A search path only.* For a lone file, its directory is only searched. Only the modules named by `use` are read, and every other file in the directory is ignored. Tested with a directory holding an unrelated broken file: the result must not change.
+  - *Duplicate modules.* If two files declare the same module name, the check is refused with a named code, never resolved by picking one. Cycles are allowed.
+
+Then step 3 is built, the 143 files and the evidence tests are measured again, and any difference goes to the owner before the commit.
+
+**Polywatch on the store lock (4cdd00e).** Four findings, all real: a lock file that could not be written, an approvals path that is a file, and a failing takeover entry each left the OS lock held; a load that failed after finding a stale lock lost the stale owner's record. Each is fixed, two with tests that failed first.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

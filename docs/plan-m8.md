@@ -247,7 +247,10 @@ Numbered from S173. Each has a proposal and waits for the owner's ruling.
   - *Proposal:* the server watches an approvals folder, `.poly/approvals/` by default (`run.approvals`). `poly approve … --out .poly/approvals/<name>.json` writes the signed record there, as today; the server applies each new record through `rt.approve`, which verifies it against the certified keyring, and moves it to `applied/` or to `refused/` with the reason. Nothing crosses MCP, and an agent that writes a file there without a person's key gets a refusal.
   - *Alternative:* `poly approve --apply` opens the store itself, which needs a second writer on the store and so breaks S174's one process per store.
 
-### S176 in detail, for ruling before step 3's code
+- **S190. Enums across modules (raised at the S176 ruling; resolve before M8b's step 6).** S176 lets a message to another module's machine carry only values whose types need no module. M8b needs more: PT21.3's conversation takes `name: Template`, and channel kinds are enums, both declared in a std module.
+  - *Proposal:* a payload-free enum declared in a used module may be named as `m.E` and its members as `m.E.C` (or by the member alone where the expected type fixes the enum), in fields, parameters and message arguments, with the same check domains. Records, unions with payloads and maps of another module's types stay `PL0901`.
+
+### S176 in detail, for ruling before step 3's code (ruled: `decisions-m8.md`)
 
 S176 lowers `use` in general, within a project plus `std.*`. Rule 7a puts any change to `04-semantics.md` before its code, and `use` changes what a machine's name means, so the semantics text and the choices below are proposed first.
 

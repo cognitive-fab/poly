@@ -8,6 +8,7 @@ The definitions are mathematical and short. They are written so that a reference
 
 ## PS1. Machines and states
 
+- **PS1.0** **Programs and modules (S176).** A **program** is a finite set of modules. A machine is named by its module and its name, `m.M`, and two machines are the same only when both are. `use m` makes the machines of module `m` nameable in a module as `m.M`; it adds no behaviour, no state and no message. PS1.6 to PS13 read `M` as the qualified name throughout.
 - **PS1.1** A machine `M` is a tuple `(F, init, A, H, G, term)`:
   - `F` is a finite, ordered set of fields. Each field `f` has a type `T(f)` and a check domain `D(f) ⊆ T(f)`. The first field is the **control field**.
   - `init` is the initial state.
