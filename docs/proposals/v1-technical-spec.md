@@ -572,6 +572,30 @@ M8 starts now that M6 is closed. M7 (feedback) follows M11 (Q6, ruled).
 6. **Q6. Ruled:** M8 to M11 come before M7.
 7. **Q7.** Should the concierge tasks become the harder tasks of the second, pre-registered experiment proposed after M3?
 8. **Q8.** Should admitting or changing a policy require a person's signature, as accepting a finding and approving an escalation already do (PF9.6, PT12.5)? Agents are expected to write policies, and an agent may write the policy that governs its own effects. The proposal: an agent drafts the policy, the checker proves it, and a person signs it before admission; an unsigned policy change is refused at load. To be ruled before M9, since delegated credentials make policies more powerful.
+9. **Q9.** Where do PT28.1 and PT28.2 go in the plan? The proposal: generated host types and the playground in M8b, since neither needs a new construct and both shorten the agent's loop for every later milestone; the extraction pattern with the concierge (AC30) in the v1 release gate.
+
+## PT28. Agent experience (proposed)
+
+These sections specify PF15. They add no construct to the language.
+
+### PT28.1 Generated host types
+
+- **PT28.1a** `poly check` writes `types.d.ts` beside each machine's lowered artefacts. It declares the machine's actions as a union of `{ action, data }` records, its state type, each effect's payload type and each completion's data type. A `Content` is a branded digest string, and a `Principal` a branded opaque string, so host code can pass them but not build them by accident.
+- **PT28.1b** The host API gains typed overloads: `rt.dispatch<M>(id, action, data)` checks the action name and its data against `M`'s declarations.
+- **PT28.1c** The file is an artefact, so the standing rule applies: it is read back against the source, and a broken variant (a parameter type widened) is added to the list of toolchain faults. Its header carries the module digest, and the certificate lists its digest.
+- **PT28.1d** `poly check --host <tsconfig>` compiles the host code against the declarations and reports each type error as a finding at the host file's line. Its code is assigned when ruled.
+
+### PT28.2 The playground
+
+- **PT28.2a** `poly try` is a registry command, served on the command line, over MCP (`poly_try`) and through the language server. A session holds one machine instance in memory.
+- **PT28.2b** Operations: `start(module, machine)`, `dispatch(action, data)`, `state()`, `intents()` (the intents the last step emitted, not run), `gate(policy)` (the decision the policy would give each intent, against the emitting step's state, PT9.3), `witness(predicate)` (the shortest path the checker finds to a state satisfying the predicate), and `reset()`.
+- **PT28.2c** A step runs the lowered module through the same kernel step as the runtime, so the playground and the runtime cannot disagree on a step. No handler runs. A decision or a work order waits for the caller to supply its completion. No model is called (PA0.5).
+- **PT28.2d** Nothing is written to a store or a ledger. A session can be saved as a trace of `{pre, action, data, post}` windows, which `poly check --against` can replay and which can seed a test.
+
+### PT28.3 Extraction
+
+- **PT28.3a** The extraction pattern is a decision whose result type is a record of finite fields with strict check domains (PD1.2a), for example `decision amount(text: Content) -> { value: 0..500 }`.
+- **PT28.3b** No new check is needed: a machine cannot read `Content` (PT20.1a), so a body can reach a branch only through a decision. The guide shows the pattern with the concierge's refund amount (AC30).
 
 ## Conclusion
 
@@ -586,6 +610,8 @@ The trust boundary moves outward by three named assumptions (K13 to K15). It cov
 
 ## Glossary
 
+- **Generated host types:** the `types.d.ts` file written for each machine, against which host code is compiled (PT28.1).
+- **Playground:** `poly try`, an in-memory session that steps a machine through the runtime kernel with no handler, model, store or ledger (PT28.2).
 - **Authenticated capability (`api`):** the handler capability that calls a provider with a grant's token attached by the vault adapter.
 - **`Budget` machine:** the standard library machine that holds spent and reserved cost for one cap and accepts or rejects reservations.
 - **Channel descriptor:** the lowered file that binds a channel to its adapter, thread key and actions.

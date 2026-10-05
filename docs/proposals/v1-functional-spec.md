@@ -172,6 +172,14 @@ The users of 01-functional-spec section 3 are unchanged. Two roles gain needs:
 - **PF14.6** **Swapping a model.** Replacing a tier's model requires a calibration map fitted for it. Otherwise the change is refused at admission, because the program's thresholds would lose their meaning (PD3.2).
 - **PF14.7** **Agent work.** A workflow (PF5) may escalate a work order to a stronger agent in its own machine: on `failed`, it emits the effect kind mapped to the next agent tool. Work orders may carry a budget, metered from the usage the agent reports.
 
+### PF15 · Agent experience (proposed)
+
+These three proposals come from a review of poly as a language written by agents and read by people. They make the agent's loop shorter and the boundary between poly and its host code checked.
+
+- **PF15.1** **Generated host types.** For every machine, the toolchain generates TypeScript declarations for its action names and parameter types, its effect payloads, its completion data and its state. Host code that dispatches an unknown action, or passes data of the wrong type, fails to compile. Each declaration file carries the module digest, so a stale file is detected.
+- **PF15.2** **A playground.** `poly try` loads a machine without an admission and lets an agent or a person dispatch actions one at a time. Each step shows the new state or the rejection reason, the intents the step would emit, and the gate's decision under a chosen policy. It can also ask the checker for a witness that reaches a given state. No handler runs, no model is called, and nothing is written to a production store or ledger.
+- **PF15.3** **Extraction is a typed decision.** Pulling a value out of a message (an amount, a date, a choice) is a typed decision whose result has a strict check domain. Since a machine cannot read `Content` (PF11.4), this is the only path from a message body to a value the program can branch on. The guide documents it as the standard pattern.
+
 ## 6. Acceptance criteria for v1 surfaces
 
 | Id | Criterion |
@@ -190,6 +198,9 @@ The users of 01-functional-spec section 3 are unchanged. Two roles gain needs:
 | AC25 | A low-confidence answer escalates to the next tier. The route reaches an answer or `RouteExhausted` on every path. Replay reproduces every tier choice from the ledger with no model call. |
 | AC26 | With 64 concurrent runs in one scope, spent plus reserved never exceeds the cap. A reported cost above its reservation is recorded as an overrun, and the next calls see the corrected remainder. |
 | AC27 | The concierge runs end to end with recorded providers and fake channel, vault and source adapters. It is checked `CLEAN`, and its journal replays every post-state, gate decision and tier choice. |
+| AC28 | Renaming an action in a machine makes host code that dispatches the old name fail to compile against the generated declarations. A declaration file whose digest does not match the module is reported. |
+| AC29 | `poly try` reproduces the turnstile's deadlock step by step, and the witness it asks for is the one `poly check` reports. |
+| AC30 | The concierge extracts the refund amount with a typed decision. An extracted amount outside its strict domain is rejected at dispatch and journaled. |
 
 ## 7. Risks
 
@@ -207,6 +218,8 @@ The four surfaces are what AI projects build by hand today, and where they most 
 
 ## Glossary
 
+- **Generated host types:** TypeScript declarations derived from a machine, against which host code is compiled.
+- **Playground:** `poly try`, a step-by-step session over a machine with no handler, model, store or ledger.
 - **Adapter:** host code that connects poly to an outside system (a channel provider, a vault, a data source, a model provider) and returns typed results.
 - **Audience:** the finite class of people allowed to see an item, possibly with an owner.
 - **Authenticated capability:** a handler capability that calls one provider with a grant's token attached, without exposing the token.
