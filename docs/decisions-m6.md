@@ -65,6 +65,28 @@
 
 The code review's 26 findings are fixed, each with a test that failed first (7ad6bfb, ea4075c, 9190006, f29118d), and recorded in `plan-m6.md` section 10. The closing gate ran from a clean build at 9561785 on an otherwise idle machine, checked before it started and watched while it ran: 1,464 tests, 1,459 passed, 0 failed, 1 skipped, 4 waiting, in 16 min 5 s, with the account check's child runs at 206 s each. Compared file by file with the gate after step 9, the earlier rise was the machine's load; nothing is attributed to code. M6's close and the merge of `m4` into `main` wait on the owner's ruling.
 
+## M6 closed
+
+**Ruled: closed, on the Claude Code half.** The closing gate is green on an idle machine, the 26 findings are fixed with tests that failed first, and the comparison file by file shows that the earlier rise came from the machine's load. The DeepSeek Harness half stays waiting (S170).
+
+- **The gate:** at 9561785, from a clean build: 1,464 tests (1,463 in the suite, 1 in `test/after/`), 1,459 passed, 0 failed, 1 skipped (S152's OpenShell enforcement, with no gateway configured), 4 waiting, in 16 min 5 s; the account check's child runs took 206 s each.
+- **Docs only after the gate.** `git diff --stat 9561785..HEAD`, taken before the merge, lists `docs/decisions-m6.md` and `docs/plan-m6.md` and nothing else, so the gate at 9561785 covers every change of code and test merged.
+- **The limits, as stated:**
+  - Workflows run on polyflow, outside poly's gate, until they move to `poly-runtime` before v1, at the latest with M8 (S164, PT18).
+  - The DeepSeek Harness half is waiting until the owner declares its plugin API stable (S170).
+  - The language server, `poly fmt` and `poly fix` refuse a module holding a construct the parser skips (`PL0901`, a `world` or a migration), and offer it no formatting or fix, until that construct is lowered (review C-F3).
+
+**The four waiting tests**, each with its engine item. None moved and none changed status: the same four waited in the gate after step 9, and in M5's gates.
+
+| Test | File | Engine item | Why it waits |
+|---|---|---|---|
+| M4c across an archive: a late duplicate after the receiver is purged (K4) | `test/runtime-delivery.test.mjs` | **E1** (polyrun tombstones at archive, S124) | polyrun 8.3.2 dead-letters the duplicate. The test runs and fails as expected, and is reported as waiting. |
+| polyflow's own verifier accepts poly's chains once E2 is vendored (S122) | `test/runtime-journal.test.mjs` | **E2** | polyflow's `KINDS` refuses `step`, `advice`, `decision` and `outcome`. |
+| S153: `rt.createFrom(configuration)` creates each instance at its certified initial values | `test/config-instances.test.mjs` | **E5** (polyrun create at given initial values, S141, S153) | polyrun cannot create an instance at given values. |
+| S160: a cross-scope send between configuration instances, end to end | `test/config-instances.test.mjs` | **E5** | there are no configuration instances in the runtime before S153. |
+
+The report of this gate, and the record of it in 0fecd3d, named only E1 and E5. That was an error in the summary, not a change: the gate's output names all four, and the E2 test is unchanged and still waits on E2. `plan-m6.md` is corrected.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.
