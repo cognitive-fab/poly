@@ -76,7 +76,12 @@ export function claudeCliProvider(opts: { bin?: string; keyVariables?: string[] 
       const present = keyVariables.filter((k) => Object.prototype.hasOwnProperty.call(process.env, k));
       if (present.length) return Promise.reject(new Error(`poly new does not start Claude Code while ${present.join(' and ')} ${present.length === 1 ? 'is' : 'are'} set: a key would bill per token instead of your subscription (S169)`));
       return new Promise((resolve, reject) => {
-        const child = spawn(bin, ['-p', promptOf(req), '--output-format', 'text'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        // Polywatch on step 9: on Windows claude may be a .cmd shim, which only a shell starts, so the prompt goes on
+        // stdin, never into a command line a shell would read; the arguments are fixed words.
+        const child = spawn(bin, ['-p', '--output-format', 'text'], { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+        // A CLI that exits before reading its prompt closes the pipe: the run ends by its exit code, never by a crash.
+        child.stdin.on('error', () => { /* reported through close */ });
+        child.stdin.end(promptOf(req));
         let out = '';
         let err = '';
         child.stdout.on('data', (b) => { out += b; });

@@ -59,6 +59,8 @@ test('S167: the boundary check refuses code in an adapter, and a host\'s name or
   } finally { rmSync(root, { recursive: true, force: true }); }
   assert.ok(violationsOf('poly-agent', 'a.ts', "import { Server } from '@modelcontextprotocol/sdk/server';\n").some((v) => /host SDK/.test(v)));
   assert.ok(violationsOf('poly-check', 'a.ts', "const host = 'claude-code';\n").some((v) => /host's name/.test(v)));
+  // Polywatch on step 8: a host named outside a string, in a comment or a name, is a host named in the core too.
+  assert.ok(violationsOf('poly-check', 'a.ts', '// started by claude-code, through cordis.yml\n').some((v) => /host's name/.test(v)));
   assert.deepEqual(checkRepository(ROOT), []);
 });
 

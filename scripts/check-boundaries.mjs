@@ -27,7 +27,8 @@ const PROCESS_MODULES = ['node:child_process', 'child_process', 'node:worker_thr
 const REF_ALLOWED = [/^node:/, /^@cognitive-fab\/sam-pattern$/];
 // Rule 3: host SDKs, and the names of the hosts an adapter serves.
 const HOST_SDKS = [/^@modelcontextprotocol\//, /^vscode-languageserver/, /^vscode-jsonrpc/, /^vscode$/, /^@anthropic-ai\/claude-code/, /^@anthropic-ai\/claude-agent-sdk/];
-const HOST_NAMES = /['"`](claude-code|deepseek-harness|dsh|dsh-mcp-client|cordis\.yml)['"`]/;
+// Anywhere in a source, in a string, a comment or a name (polywatch on step 8): the core never names a host.
+const HOST_NAMES = /(?<![\w-])(claude-code|deepseek-harness|dsh-mcp-client|dsh|cordis\.yml)(?![\w-])/;
 const ADAPTER_FILES = /\.(json|md)$/;
 
 // Every static import, re-export, dynamic import and require, with whether it is type-only.
