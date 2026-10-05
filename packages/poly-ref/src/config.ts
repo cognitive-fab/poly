@@ -121,15 +121,23 @@ export interface ConfigReport {
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
-export function buildConfiguration(module: Module, name: string): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
+export function buildConfiguration(module: Module, name: string, opts: { program?: Module[] } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
   const decl = module.decls.find((d): d is A.Configuration => d.kind === 'Configuration' && d.name === name);
   if (!decl) throw new Error(`poly-ref: no configuration ${name} in module ${module.name}`);
   const machines = new Map<string, RMachine>();
-  const machineOf = (qual: string[]) => {
-    const n = qual[qual.length - 1];
-    if (!machines.has(n)) machines.set(n, buildMachine(module, n));
-    return machines.get(n)!;
+  // PS1.0 (S176): an instance may be of a used module's machine, spelled m.M; it is built with this module as its view,
+  // so every machine name in the configuration is spelled one way.
+  const machineNamed = (spelled: string) => {
+    if (!machines.has(spelled)) {
+      const i = spelled.lastIndexOf('.');
+      const mod = i < 0 ? module.name : spelled.slice(0, i);
+      const owner = mod === module.name ? module : opts.program?.find((x) => x.name === mod);
+      if (!owner) throw new Error(`poly-ref: no module ${mod} for machine ${spelled}`);
+      machines.set(spelled, buildMachine(owner, i < 0 ? spelled : spelled.slice(i + 1), { program: opts.program, view: module.name }));
+    }
+    return machines.get(spelled)!;
   };
+  const machineOf = (qual: string[]) => machineNamed(qual.length > 1 && qual.slice(0, -1).join('.') !== module.name ? qual.join('.') : qual[qual.length - 1]);
   const instances: ConfigInstance[] = [];
   for (const i of decl.instances) {
     const M = machineOf(i.machine);
@@ -147,7 +155,7 @@ export function buildConfiguration(module: Module, name: string): { decl: A.Conf
       for (const d of instances[p].machine.detached) {
         const k = members.get(d.machine) ?? 0;
         members.set(d.machine, k + 1);
-        instances.push({ name: `${instances[p].name}/${d.key}`, group: d.machine, machine: machineOf([d.machine]), init: {}, spawned: { parent: p, key: d.key }, member: `${d.machine}[${k}]`, scope: module.name });
+        instances.push({ name: `${instances[p].name}/${d.key}`, group: d.machine, machine: machineNamed(d.machine), init: {}, spawned: { parent: p, key: d.key }, member: `${d.machine}[${k}]`, scope: module.name });
         next.push(instances.length - 1);
       }
     }
@@ -158,7 +166,7 @@ export function buildConfiguration(module: Module, name: string): { decl: A.Conf
   const groups: string[] = [];
   const reach = [...new Set(instances.slice(0, declared).map((x) => x.machine.name))];
   for (let i = 0; i < reach.length; i++) {
-    for (const d of machineOf([reach[i]]).detached) {
+    for (const d of machineNamed(reach[i]).detached) {
       if (!groups.includes(d.machine)) groups.push(d.machine);
       if (!reach.includes(d.machine)) reach.push(d.machine);
     }
@@ -308,8 +316,8 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
 }
 
 /** Explores a configuration and checks it (PS13.5, PS13.6). */
-export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number } = {}): ConfigReport {
-  const { decl, instances, groups: spawnedGroups } = buildConfiguration(module, name);
+export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[] } = {}): ConfigReport {
+  const { decl, instances, groups: spawnedGroups } = buildConfiguration(module, name, { program: opts.program });
   const sys = configurationSystem(decl, instances);
   const absent = (err: unknown) => err instanceof AbsentInstance;
   const g = explore(sys, opts.maxStates);

@@ -1,0 +1,29 @@
+// S176 (M8a step 3): the dispatcher of conformance/m2/detached.poly, in a module of its own. It spawns the worker of
+// module workers as a detached child and greets it; its configuration composes machines of both modules.
+module dispatch
+use workers.Worker
+
+service machine Dispatcher {
+  state { worker: Ref<workers.Worker> = none   started: bool = false   done: 0..1 = 0 }
+  action Go()
+  action Done()
+
+  on Go {
+    require !started else reject "started"
+    spawn detached workers.Worker as w -> Start(n: 1)
+    started' = true
+    worker' = w
+    send w <- Hello(from: self)
+  }
+  on Done { require worker != none else reject "idle"   done' = 1 }
+
+  invariant done-after-start: done == 1 implies started
+}
+
+configuration pool {
+  d       : Dispatcher
+  inputs  { d.Go }
+  bounds  { transit 2, instances 2 }
+  invariant one-worker: count(workers.Worker[*] is Finished) <= 1
+  liveness  finishes: d.started leads to d.done == 1
+}

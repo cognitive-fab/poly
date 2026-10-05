@@ -25,6 +25,8 @@ export interface TypeEnv {
   records: Map<string, RecordInfo>;
   /** Constructor name to the unions that declare it. Two unions may share a name; uses are then resolved by expected type. */
   ctorOwners: Map<string, string[]>;
+  /** S176: the module these types are declared in, so a machine name in a type is spelled M here and m.M elsewhere. */
+  module?: string;
 }
 
 export function buildTypeEnv(module: Module): TypeEnv {
@@ -52,7 +54,7 @@ export function buildTypeEnv(module: Module): TypeEnv {
     unions.set('Tri', tri);
     for (const c of tri.ctors) ctorOwners.set(c.name, [...(ctorOwners.get(c.name) ?? []), 'Tri']);
   }
-  return { unions, ctorOwners, records };
+  return { unions, ctorOwners, records, module: module.name };
 }
 
 export function typeToString(t: TypeExpr): string {

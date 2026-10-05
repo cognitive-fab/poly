@@ -1,0 +1,9 @@
+// S176 (M8a step 3): a service machine another module sends to. Its action takes only a range, a type that needs no
+// module, so a message from another module may carry it.
+module ledger
+
+service machine Account {
+  state { balance: 0..4 = 0 }
+  action Credit(n: 1..2)
+  on Credit(n) { require balance + n <= 4 else reject "full"   balance' = balance + n }
+}

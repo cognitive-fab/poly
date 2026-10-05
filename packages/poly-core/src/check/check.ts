@@ -122,6 +122,8 @@ export interface MachineFacts {
   detached: Map<string, string>;
   /** PD1: the machine's decisions by name. */
   decisions: Map<string, A.Decision>;
+  /** S176: the type environment of the machine's own module, for `is` on an instance of a used module's machine. */
+  env?: TypeEnv;
 }
 
 export interface CheckResult {
@@ -136,7 +138,8 @@ type Ctx = 'init' | 'handler' | 'guard' | 'terminal' | 'invariant' | 'step' | 'r
 
 /** The instances of a configuration, by name, as its properties read them (PS13.6, S32). */
 interface ConfigScope {
-  instances: Map<string, { machine: A.Machine; facts: MachineFacts; count: number | null; spawned?: boolean }>;
+  /** S176: `machine` is the instance's machine as the view spells it (`M`, or `m.M` of a used module). */
+  instances: Map<string, { machine: A.Machine; name: string; facts: MachineFacts; count: number | null; spawned?: boolean }>;
   /** Inside `init(e)`: no second `init` (PS13.6). */
   inInit?: boolean;
 }
@@ -161,8 +164,22 @@ interface Scope {
   config?: ConfigScope;
 }
 
-export function checkModule(module: A.Module): CheckResult {
-  return new Checker(module).run();
+/**
+ * S176: the modules of the program a module is checked in. `program` holds every module `use` may name; `view` is the
+ * module whose names the result is spelled in (the checked module itself, unless a configuration of another module is
+ * reading this one's machines), so a machine of another module is always `m.M` and one of the view's is `M` (PS1.0).
+ */
+export interface CheckOptions { program?: A.Module[]; view?: string }
+
+export function checkModule(module: A.Module, opts: CheckOptions = {}): CheckResult {
+  return new Checker(module, opts).run();
+}
+
+/** S176: the module a `use` path names: the whole path when it is a module, else the path without its machine. */
+export function usedModuleOf(path: string[], program: A.Module[]): { module: string; machine: string | null } {
+  const whole = path.join('.');
+  if (program.some((m) => m.name === whole)) return { module: whole, machine: null };
+  return { module: path.slice(0, -1).join('.'), machine: path.length > 1 ? path[path.length - 1] : null };
 }
 
 class Checker {
@@ -176,8 +193,96 @@ class Checker {
   private facts: MachineFacts | null = null;
   private actions = new Map<string, A.Action>();
 
-  constructor(private readonly module: A.Module) {
+  /** S176: the program's modules by name, the module names are spelled from, and the modules this one uses. */
+  private readonly program: Map<string, A.Module>;
+  private readonly view: string;
+  private readonly used = new Set<string>();
+  /** S176: the facts of used modules' machines, by qualified name, computed once when a configuration reads them. */
+  private readonly foreignFacts = new Map<string, MachineFacts | null>();
+
+  constructor(private readonly module: A.Module, private readonly opts: CheckOptions = {}) {
     this.env = buildTypeEnv(module);
+    this.program = new Map((opts.program ?? []).map((m) => [m.name, m]));
+    this.view = opts.view ?? module.name;
+    for (const d of module.decls) if (d.kind === 'Use') this.used.add(usedModuleOf(d.path, opts.program ?? []).module);
+  }
+
+  /** PS1.0: a machine's name as the view spells it: `M` in the view's own module, `m.M` in any other. */
+  private canon(mod: string, name: string): string { return mod === this.view ? name : `${mod}.${name}`; }
+
+  /** The module and machine a name spelled from the view denotes. */
+  private decode(name: string): { mod: string; machine: string } {
+    const i = name.lastIndexOf('.');
+    return i < 0 ? { mod: this.view, machine: name } : { mod: name.slice(0, i), machine: name.slice(i + 1) };
+  }
+
+  private moduleNamed(mod: string): A.Module | undefined { return mod === this.module.name ? this.module : this.program.get(mod); }
+
+  /** The declaration of a machine named as the view spells it, in this module or a used one. */
+  private machineDecl(name: string | null): A.Machine | undefined {
+    if (name === null) return undefined;
+    const { mod, machine } = this.decode(name);
+    return this.moduleNamed(mod)?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === machine);
+  }
+
+  /**
+   * S176: a machine named in source: `M` of this module, or `m.M` of a module this one uses (qualified names only, no
+   * alias). Reports an unknown machine or a module not used, and returns its qualified name and declaration.
+   */
+  private machineRef(parts: string[], at: A.NodeBase, what: string, once = false): { name: string; decl: A.Machine; mod: string } | null {
+    const report = (code: string, msg: string) => (once ? this.errOnce(code, at, msg) : this.err(code, at, msg));
+    const mod = parts.length > 1 ? parts.slice(0, -1).join('.') : this.module.name;
+    const name = parts[parts.length - 1];
+    if (mod !== this.module.name && !this.used.has(mod)) { report('PL1001', `${what}: module ${mod} is not used here; write \`use ${mod}\` to name its machines (S176)`); return null; }
+    const decl = this.moduleNamed(mod)?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
+    if (!decl) { report('PL1001', `${what}: no machine ${name} in module ${mod}`); return null; }
+    return { name: this.canon(mod, name), decl, mod };
+  }
+
+  /**
+   * S176: the type of a parameter of a used module's action, as a message across modules may carry it: only types that
+   * need no module (booleans, ranges, int, strings, Principal, addresses). Null for a type the receiver's module
+   * declares; the caller reports it.
+   */
+  private foreignTy(t: A.TypeExpr, mod: string): Ty | null {
+    switch (t.kind) {
+      case 'TBool': return BOOL;
+      case 'TInt': return INT;
+      case 'TString': return { k: 'string' };
+      case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
+      case 'TRef': {
+        const m = t.machine.length > 1 ? t.machine.slice(0, -1).join('.') : mod;
+        return { k: 'ref', machine: this.canon(m, t.machine[t.machine.length - 1]) };
+      }
+      case 'TName': {
+        const owner = this.moduleNamed(mod);
+        const declared = owner?.decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl' || d.kind === 'RecordDecl') && d.name === t.name);
+        return t.name === 'Principal' && !declared ? { k: 'principal' } : null;
+      }
+      default: return null;
+    }
+  }
+
+  /** S176: the facts of a used module's machine, spelled from this view, for a configuration that instantiates it. */
+  private factsOf(name: string, local: Map<string, MachineFacts>): MachineFacts | undefined {
+    const { mod, machine } = this.decode(name);
+    if (mod === this.module.name) return local.get(machine);
+    if (!this.foreignFacts.has(name)) {
+      const m = this.program.get(mod);
+      const r = m ? new Checker(m, { program: [...this.program.values()], view: this.view }).run() : null;
+      for (const [k, f] of r?.machines ?? []) this.foreignFacts.set(this.canon(mod, k), f);
+      if (!this.foreignFacts.has(name)) this.foreignFacts.set(name, null);
+    }
+    return this.foreignFacts.get(name) ?? undefined;
+  }
+
+  /** S176: `use m` or `use m.M` names a module of the program other than this one, and the machine it names exists. */
+  private useDecl(d: A.UseDecl): void {
+    const u = usedModuleOf(d.path, [...this.program.values()]);
+    if (u.module === this.module.name || d.path.join('.') === this.module.name) { this.err('PL1201', d, `module ${this.module.name} uses itself; \`use\` names another module (S176)`); return; }
+    const m = this.program.get(u.module);
+    if (!m) { this.err('PL1001', d, `use ${d.path.join('.')}: no module ${u.module} in the program (S176)`); return; }
+    if (u.machine !== null && !m.decls.some((x) => x.kind === 'Machine' && x.name === u.machine)) this.err('PL1001', d, `use ${d.path.join('.')}: no machine ${u.machine} in module ${u.module}`);
   }
 
   private at(n: A.NodeBase): NodeAt {
@@ -194,7 +299,7 @@ class Checker {
     const reserved = RESERVED_MODULE.test(this.module.name) && !RUNTIME_MODEL_DIGESTS.has(digest(this.module));
     for (const d of this.module.decls) {
       if (reserved && d.kind === 'Machine') this.err('PL1208', d, `machine ${this.module.name}.${d.name}: the module name ${this.module.name} is reserved for the runtime's own OutboxIntent model (PT9.7), and only that model takes it; rename the module (S143)`);
-      if (d.kind === 'Use') this.err('PL0901', d, '`use` (imports between modules) is not lowered in milestone M0');
+      if (d.kind === 'Use') this.useDecl(d);
       if (d.kind !== 'Machine') continue;
       if (machines.has(d.name)) { this.err('PL1002', d, `machine ${d.name} is declared twice`); continue; }
       machines.set(d.name, this.checkMachine(d));
@@ -314,12 +419,14 @@ class Checker {
     for (const i of c.instances) {
       if (instances.has(i.name)) { this.err('PL1002', i, `instance ${i.name} is declared twice in ${c.name}`); continue; }
       if (i.count !== null && i.count < 1) this.err('PL1201', i, `a group has at least one instance: ${i.name}[${i.count}]`);
-      if (i.machine.length > 1 && i.machine.slice(0, -1).join('.') !== this.module.name) { this.err('PL0901', i, `an instance of a machine of another module needs \`use\`, which is not lowered yet (${i.machine.join('.')})`); continue; }
-      const facts = machines.get(i.machine[i.machine.length - 1]);
-      if (!facts) { this.err('PL1001', i, `no machine ${i.machine.join('.')} in module ${this.module.name}`); continue; }
+      // S176: an instance of this module's machine, or of a used module's as m.M.
+      const ref = this.machineRef(i.machine, i, `instance ${i.name}`);
+      if (!ref) continue;
+      const facts = this.factsOf(ref.name, machines);
+      if (!facts) { this.err('PL1001', i, `no machine ${i.machine.join('.')} in module ${ref.mod}`); continue; }
       // S61: an instance with attached children would need its joint machine inside the configuration.
       if (facts.children.size) this.err('PL0901', i, `${facts.machine.name} spawns attached children; a configuration of such a machine is checked from a later milestone (S61)`);
-      instances.set(i.name, { machine: facts.machine, facts, count: i.count });
+      instances.set(i.name, { machine: facts.machine, name: ref.name, facts, count: i.count });
     }
     this.spawnedGroups(c, instances, machines);
     const cfg: ConfigScope = { instances };
@@ -393,14 +500,14 @@ class Checker {
    */
   private spawnedGroups(c: A.Configuration, instances: ConfigScope['instances'], machines: Map<string, MachineFacts>): void {
     const declared: string[] = [];
-    for (const i of c.instances) { const inst = instances.get(i.name); if (inst) for (let k = 0; k < (i.count ?? 1); k++) declared.push(inst.machine.name); }
-    const spawner = declared.find((m) => machines.get(m)?.detached.size);
+    for (const i of c.instances) { const inst = instances.get(i.name); if (inst) for (let k = 0; k < (i.count ?? 1); k++) declared.push(inst.name); }
+    const spawner = declared.find((m) => this.factsOf(m, machines)?.detached.size);
     if (!spawner) return;
     // Every machine a spawn can reach has its group, empty when the bound admits none of its instances.
     const counts = new Map<string, number>();
     const reach = [...new Set(declared)];
     for (let i = 0; i < reach.length; i++) {
-      for (const t of machines.get(reach[i])?.detached.values() ?? []) {
+      for (const t of this.factsOf(reach[i], machines)?.detached.values() ?? []) {
         if (!counts.has(t)) counts.set(t, 0);
         if (!reach.includes(t)) reach.push(t);
       }
@@ -410,17 +517,17 @@ class Checker {
     let level = declared;
     for (let depth = 1; limit !== null && limit !== undefined && depth <= limit - declared.length && level.length; depth++) {
       const next: string[] = [];
-      for (const m of level) for (const t of machines.get(m)?.detached.values() ?? []) next.push(t);
+      for (const m of level) for (const t of this.factsOf(m, machines)?.detached.values() ?? []) next.push(t);
       for (const t of next) counts.set(t, (counts.get(t) ?? 0) + 1);
       if ([...counts.values()].reduce((a, b) => a + b, 0) > 256) { this.err('PL0901', c, `configuration ${c.name} has more than 256 potential detached instances within instances ${limit}; checked from a later milestone (S60)`); return; }
       level = next;
     }
     for (const [t, count] of counts) {
-      const facts = machines.get(t);
+      const facts = this.factsOf(t, machines);
       if (!facts) continue;
       if (instances.has(t)) { this.err('PL1002', c, `the detached ${t} instances form the group ${t}, and ${c.name} also declares an instance ${t} (S60)`); continue; }
       if (facts.children.size) this.err('PL0901', c, `${t} spawns attached children; a configuration of such a machine is checked from a later milestone (S61)`);
-      instances.set(t, { machine: facts.machine, facts, count, spawned: true });
+      instances.set(t, { machine: facts.machine, name: t, facts, count, spawned: true });
     }
   }
 
@@ -435,7 +542,7 @@ class Checker {
       if (inst.count === null) { this.err('PL1201', e, `${name} is one instance, not a group`); return; }
       if (e.index.kind !== 'Int' || e.index.value < 0 || e.index.value >= inst.count) { this.err('PL1201', e, `${name}[…] takes a constant index from 0 to ${inst.count - 1}`); return; }
     }
-    if (machine !== null && inst.machine.name !== machine) this.err('PL1201', e, `${what} is Ref<${machine}>, and ${name} is a ${inst.machine.name}`);
+    if (machine !== null && inst.name !== machine) this.err('PL1201', e, `${what} is Ref<${machine}>, and ${name} is a ${inst.name}`);
   }
 
   /**
@@ -451,29 +558,33 @@ class Checker {
       if (inst.count !== null) { this.err('PL5403', e, `${e.name} is a group; quantify it, forall i in ${e.name}: …, or aggregate it, count(${e.name}[*] …) (PS13.6)`); return 'error'; }
       return { machine: inst.machine, facts: inst.facts, name: e.name };
     }
-    if (e.kind === 'Index' && e.object.kind === 'Name') {
-      const inst = cfg.instances.get(e.object.name);
+    // S176: the group of a used module's machine's detached instances is named as the machine is, m.M.
+    const groupName = e.kind === 'Index' ? (e.object.kind === 'Name' ? e.object.name : e.object.kind === 'Member' && e.object.object.kind === 'Name' && this.used.has(e.object.object.name) && !scope.locals.has(e.object.object.name) ? `${e.object.object.name}.${e.object.prop}` : null) : null;
+    if (e.kind === 'Index' && groupName !== null) {
+      const inst = cfg.instances.get(groupName);
       if (!inst) return null;
-      if (inst.count === null) { this.err('PL1201', e, `${e.object.name} is one instance, not a group`); return 'error'; }
+      if (inst.count === null) { this.err('PL1201', e, `${groupName} is one instance, not a group`); return 'error'; }
       if (e.index.kind === 'Star') {
-        if (!scope.star) { this.err('PL5403', e, `${e.object.name}[*] stands for every member only inside count, sum, all or any; elsewhere write forall i in ${e.object.name}: … (PS13.6)`); return 'error'; }
+        if (!scope.star) { this.err('PL5403', e, `${groupName}[*] stands for every member only inside count, sum, all or any; elsewhere write forall i in ${groupName}: … (PS13.6)`); return 'error'; }
       } else {
         const it = this.typeOf(e.index, scope);
         if (it.k !== 'int' && it.k !== 'error') { this.err('PL1201', e.index, `an index is an int, not ${tyToString(it)}`); return 'error'; }
         // S60: which spawned members exist depends on the state, so a spawned group is read through a quantifier
         // or an aggregate, never at a fixed index (review C2).
-        if (inst.spawned && !(e.index.kind === 'Name' && scope.locals.has(e.index.name))) { this.err('PL1201', e, `${e.object.name} is a group of detached instances; read it with forall, exists or an aggregate (S60)`); return 'error'; }
+        if (inst.spawned && !(e.index.kind === 'Name' && scope.locals.has(e.index.name))) { this.err('PL1201', e, `${groupName} is a group of detached instances; read it with forall, exists or an aggregate (S60)`); return 'error'; }
         // The members are g[0] … g[n-1]; an index whose range leaves them names no instance (review finding).
-        if (it.k === 'int' && (it.lo < 0 || it.hi > inst.count - 1)) { this.err('PL1201', e.index, `${e.object.name}[…] takes an index in 0..${inst.count - 1}, and this one ranges over ${tyToString(it)}`); return 'error'; }
+        if (it.k === 'int' && (it.lo < 0 || it.hi > inst.count - 1)) { this.err('PL1201', e.index, `${groupName}[…] takes an index in 0..${inst.count - 1}, and this one ranges over ${tyToString(it)}`); return 'error'; }
       }
-      return { machine: inst.machine, facts: inst.facts, name: e.object.name };
+      return { machine: inst.machine, facts: inst.facts, name: groupName };
     }
     return null;
   }
 
   /** S32: `g[i] is C` tests the one field of the machine whose type has every constructor named. */
   private configIs(e: A.Is, inst: { machine: A.Machine; facts: MachineFacts; name: string }): void {
-    const owners = e.ctors.map((c) => inst.machine.fields.filter((f) => { const t = inst.facts.fieldTypes.get(f.name)!; return t.k === 'union' && this.env.unions.get(t.name)!.ctors.some((x) => x.name === c); }).map((f) => f.name));
+    // S176: an instance of a used module's machine is read with its own module's types.
+    const env = inst.facts.env ?? this.env;
+    const owners = e.ctors.map((c) => inst.machine.fields.filter((f) => { const t = inst.facts.fieldTypes.get(f.name)!; return t.k === 'union' && env.unions.get(t.name)!.ctors.some((x) => x.name === c); }).map((f) => f.name));
     const field = owners[0]?.length === 1 ? owners[0][0] : null;
     if (!field || owners.some((o) => o.length !== 1 || o[0] !== field)) {
       this.err('PL1005', e, `${e.ctors.join(' | ')} names no single field of ${inst.machine.name}${owners.some((o) => o.length > 1) ? `; several fields have it, so write ${inst.name}[…].f is ${e.ctors[0]}` : ''} (S32)`);
@@ -570,11 +681,9 @@ class Checker {
         if (t.lo > t.hi) { this.errOnce('PL1201', t, `empty range ${t.lo}..${t.hi}`); return ERR; }
         return { k: 'int', lo: t.lo, hi: t.hi };
       case 'TRef': {
-        // PS1.6: an address of a machine of this module; another module's needs `use`.
-        if (t.machine.length > 1 && t.machine.slice(0, -1).join('.') !== this.module.name) { this.errOnce('PL0901', t, `an address of a machine of another module needs \`use\`, which is not lowered yet (${t.machine.join('.')})`); return ERR; }
-        const name = t.machine[t.machine.length - 1];
-        if (!this.module.decls.some((d) => d.kind === 'Machine' && d.name === name)) { this.errOnce('PL1001', t, `Ref<${t.machine.join('.')}>: no machine ${name} in module ${this.module.name}`); return ERR; }
-        return { k: 'ref', machine: name };
+        // PS1.6: an address of a machine of this module, or of a used module's as m.M (S176).
+        const r = this.machineRef(t.machine, t, `Ref<${t.machine.join('.')}>`, true);
+        return r ? { k: 'ref', machine: r.name } : ERR;
       }
       case 'TName':
         // A recursive record was reported at its declaration; its uses say nothing more (one mistake, one diagnostic).
@@ -603,7 +712,7 @@ class Checker {
   // ── machines ────────────────────────────────────────────────────────────
   private checkMachine(m: A.Machine): MachineFacts {
     this.machine = m;
-    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map(), families: new Map(), detached: new Map(), decisions: new Map() };
+    const facts: MachineFacts = { machine: m, resolutions: new Map(), types: new Map(), fieldTypes: new Map(), unhandled: [], patternLiterals: new Map(), effects: new Map(), strictParams: new Set(), timerKeys: new Set(), children: new Map(), childKeyDomains: new Map(), families: new Map(), detached: new Map(), decisions: new Map(), env: this.env };
     this.facts = facts;
     this.actions = new Map();
 
@@ -680,7 +789,7 @@ class Checker {
         if (s.op === 'spawn' && s.modifier === 'detached') {
           // S60: one key, one address <parent>/<k>; a family of detached children is not in M2.
           if (s.index) { this.err('PL0901', s, `spawn detached … as ${s.as}[…]: a family of detached children is checked from a later milestone (S60)`); continue; }
-          const name = s.target.split('.').pop()!;
+          const name = this.targetName(s.target);
           const prev = facts.detached.get(s.as);
           if (prev && prev !== name) this.err('PL1002', s, `child key ${s.as} names two children; one key names one child (PT6.4, S60)`);
           else facts.detached.set(s.as, name);
@@ -1113,14 +1222,23 @@ class Checker {
     this.machine = null;
   }
 
-  /** The machine an attached spawn names: one of this module (S28); another module's needs `use`. */
+  /**
+   * The machine a spawn names: one of this module (S28), or, for a detached spawn, a used module's as m.M (S176). An
+   * attached child is checked as one cascade with its parent (PT7), so an attached spawn of another module's machine
+   * stays PL0901.
+   */
   private childMachine(s: A.IntentStmt): A.Machine | null {
     const parts = s.target.split('.');
-    if (parts.length > 1 && parts.slice(0, -1).join('.') !== this.module.name) { this.err('PL0901', s, `spawning a machine of another module needs \`use\`, which is not lowered yet (${s.target})`); return null; }
-    const name = parts[parts.length - 1];
-    const m = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
-    if (!m) { this.err('PL1001', s, `no machine ${s.target} in module ${this.module.name}`); return null; }
-    return m;
+    const mod = parts.length > 1 ? parts.slice(0, -1).join('.') : this.module.name;
+    if (mod !== this.module.name && s.modifier !== 'detached') { this.err('PL0901', s, `an attached spawn of another module's machine (${s.target}) is checked from a later milestone: an attached child is one cascade with its parent (PT7, S176)`); return null; }
+    return this.machineRef(parts, s, `spawn ${s.target}`)?.decl ?? null;
+  }
+
+  /** S176: the qualified name of the machine a spawn names, as the view spells it. */
+  private targetName(target: string): string {
+    const parts = target.split('.');
+    const mod = parts.length > 1 ? parts.slice(0, -1).join('.') : this.module.name;
+    return this.canon(mod, parts[parts.length - 1]);
   }
 
   /**
@@ -1182,7 +1300,7 @@ class Checker {
       if (!act) { this.err('PL1001', s, `${child.name} has no action ${spec.create}`); for (const a of s.args) this.typeOf(a.value, scope); }
       else {
         if (!child.items.some((i) => i.kind === 'Handler' && i.action === spec.create)) this.err('PL6101', s, `creation action ${child.name}.${spec.create} has no handler, so the child cannot take its first message; add a handler (S43, S60)`);
-        this.intentArgs(s, act.params, `${child.name}.${spec.create}`, scope);
+        this.intentArgs(s, act.params, `${child.name}.${spec.create}`, scope, this.foreignParams(s.target));
       }
     } else if (!child || s.args.length) {
       if (child && s.args.length) this.err('PL1201', s, `a spawn passes arguments only to a creation action: spawn detached ${s.target} as ${s.as} -> A(…) (S43)`);
@@ -1190,7 +1308,8 @@ class Checker {
     }
     if (!child || !s.as || s.index) return;
     if (scope.locals.has(s.as) || scope.params.has(s.as) || this.facts!.fieldTypes.has(s.as)) { this.err('PL1002', s, `${s.as} is already a name here`); return; }
-    scope.locals.set(s.as, { ty: { k: 'ref', machine: child.name }, res: { k: 'child', key: s.as, machine: child.name } });
+    const name = this.targetName(s.target);
+    scope.locals.set(s.as, { ty: { k: 'ref', machine: name }, res: { k: 'child', key: s.as, machine: name } });
   }
 
   /**
@@ -1344,7 +1463,7 @@ class Checker {
   }
 
   /** Arguments of an intent against declared parameters: all positional or all named, typed, none missing. */
-  private intentArgs(s: A.IntentStmt, params: A.Param[], what: string, scope: Scope): void {
+  private intentArgs(s: A.IntentStmt, params: A.Param[], what: string, scope: Scope, foreign?: (t: A.TypeExpr) => Ty | null): void {
     const positional = s.args.every((a) => a.name === null);
     if (!positional && !s.args.every((a) => a.name !== null)) {
       this.err('PL1201', s, `the arguments of ${what} are all positional or all named`);
@@ -1362,7 +1481,9 @@ class Checker {
       if (!p) { this.err('PL1001', a.value, `${what} has no parameter ${a.name}`); this.typeOf(a.value, scope); return; }
       if (given.has(p.name)) this.err('PL1002', a.value, `${p.name} is given twice`);
       given.add(p.name);
-      const pt = this.tyOf(p.type);
+      // S176: a message across modules carries only values whose types need no module.
+      const pt = foreign ? foreign(p.type) : this.tyOf(p.type);
+      if (pt === null) { this.err('PL0901', a.value, `${what}.${p.name} is a type its module declares, and a message across modules carries only types that need no module (booleans, ranges, int, strings, Principal, addresses) until types cross modules (S176, S190)`); this.typeOf(a.value, scope); return; }
       const whole = s.op === 'send' && a.value.kind === 'Name' && a.value.name === 'self';
       const t = this.typeOf(a.value, whole ? { ...scope, selfOk: true } : scope, pt);
       if (!same(t, pt)) this.err('PL1201', a.value, `${what}.${p.name} is ${tyToString(pt)}, and the value is ${tyToString(t)}`);
@@ -1383,13 +1504,20 @@ class Checker {
     if (tt.k === 'error') { rest(); return; }
     if (tt.k !== 'ref') { this.err('PL1201', s.to!, `a send's target is an address, Ref<M>, not ${tyToString(tt)}`); rest(); return; }
     if (tt.machine === null) { this.err('PL1201', s.to!, "a send's target is none here, so it names no machine and no action; send to a field or parameter of type Ref<M>"); rest(); return; }
-    const receiver = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === tt.machine);
+    const receiver = this.machineDecl(tt.machine);
     const act = receiver?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
     if (!act) { this.err('PL1001', s, `send … <- ${s.target}: ${tt.machine} has no action ${s.target}`); rest(); return; }
     // M4 review C5, K10: a decision's completion is delivered by the outbox worker only, with its decision event.
     const decision = receiver!.items.find((i): i is A.Decision => i.kind === 'Decision' && i.items.some((x) => x.kind === 'EffOutcome' && (x as A.EffOutcomeItem).action === s.target));
     if (decision) { this.err('PL6204', s, `send … <- ${s.target}: ${s.target} completes decision ${decision.name} of ${tt.machine}, and only the outbox worker delivers it, with its decision event (K10)`); rest(); return; }
-    this.intentArgs(s, act.params, `${tt.machine}.${s.target}`, scope);
+    this.intentArgs(s, act.params, `${tt.machine}.${s.target}`, scope, tt.machine.includes('.') ? this.foreignParams(tt.machine) : undefined);
+  }
+
+  /** S176: for a machine of another module, how its parameters are typed here; undefined for this module's own. */
+  private foreignParams(target: string): ((t: A.TypeExpr) => Ty | null) | undefined {
+    const parts = target.split('.');
+    const mod = parts.length > 1 ? parts.slice(0, -1).join('.') : this.module.name;
+    return mod === this.module.name ? undefined : (t) => this.foreignTy(t, mod);
   }
 
   private emit(s: A.IntentStmt, scope: Scope): void {
@@ -1984,7 +2112,7 @@ class Checker {
           // S58: the mapper has no instance id, so `self` lowers to a marker the kernel resolves in a send's data.
           if (!scope.selfOk) { this.err('PL0901', e, 'self is legal only as a whole argument of a send in milestone M1 (S58)'); return ERR; }
           this.resolve(e, { k: 'self' });
-          return { k: 'ref', machine: this.machine.name };
+          return { k: 'ref', machine: this.canon(this.module.name, this.machine.name) };
         }
         const c = this.ctorType(n, expected, e);
         if (c) {
@@ -2376,6 +2504,8 @@ function starGroups(e: A.Expr, cfg: ConfigScope): string[] {
     if (Array.isArray(x)) { x.forEach(walk); return; }
     const n = x as A.Expr;
     if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Name' && cfg.instances.has(n.object.name)) out.add(n.object.name);
+    // S176: the group of a used module's machine, m.M[*].
+    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Member' && n.object.object.kind === 'Name' && cfg.instances.has(`${n.object.object.name}.${n.object.prop}`)) out.add(`${n.object.object.name}.${n.object.prop}`);
     for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
   };
   walk(e);
@@ -2457,8 +2587,10 @@ function substitute(body: A.Stmt[], v: string, k: number): A.Stmt[] {
 /** A spawn's child as a ChildSpec: its machine id `<module>.<Machine>` (S28), creation action and wiring. */
 export function childSpec(s: A.IntentStmt, module: string): ChildSpec {
   const pair = (tag: string) => { const i = s.extra.indexOf(tag); return i >= 0 ? s.extra[i + 1] : null; };
-  const name = s.target.split('.').pop()!;
-  return { key: s.as ?? '', machine: `${module}.${name}`, create: pair('create'), onComplete: pair('complete'), onParentTerminal: pair('parent-terminal') };
+  // S28, S176: the machine id is module.Machine; a used module's machine is written qualified, as its id.
+  const parts = s.target.split('.');
+  const name = parts[parts.length - 1];
+  return { key: s.as ?? '', machine: parts.length > 1 ? s.target : `${module}.${name}`, create: pair('create'), onComplete: pair('complete'), onParentTerminal: pair('parent-terminal') };
 }
 
 function spawnsOrSignals(m: A.Machine): boolean {

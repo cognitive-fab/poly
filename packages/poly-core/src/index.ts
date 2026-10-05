@@ -6,7 +6,7 @@ export { assignIds, idOfPath } from './ids.js';
 export * from './truth.js';
 export * from './types.js';
 export * from './diagnostics.js';
-export { checkModule, tyToString, boundPath, effectKind, effectClass, effectSignature, childSpec, type ChildSpec, durationMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
+export { checkModule, usedModuleOf, type CheckOptions as CheckModuleOptions, tyToString, boundPath, effectKind, effectClass, effectSignature, childSpec, type ChildSpec, durationMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
 export { checkPolicies, policyProgram, type PolicyProgram, type PolicyMachine, type PType, type PolicyCheck } from './check/policy.js';
 export { parseManifest, loadProject, keyringsOf, ManifestError, RUN_SCHEMA, type Manifest, type RunConfig } from './manifest.js';
 export { signRecord, invocationSubject, verifyRecord, recordDigest, recordMessage, sameKeyrings, EMPTY_KEYRINGS, type SignedRecord, type RecordKind, type Keyrings, type KeyHolder } from './records.js';

@@ -44,7 +44,8 @@ export function parseType(text: string): TypeNode {
   if (t === 'string') return { k: 'string' };
   if (t === 'boolean') return { k: 'bool' };
   if (t === 'null') return { k: 'null' };
-  if ((m = /^address of (\w+)$/.exec(t))) return { k: 'address', machine: m[1] };
+  // S176: a used module's machine is spelled m.M, with the module's dots.
+  if ((m = /^address of (\w+(?:\.\w+)*)$/.exec(t))) return { k: 'address', machine: m[1] };
   if (t.startsWith('{') && t.endsWith('}')) {
     const inner = t.slice(1, -1).trim();
     const fields = (inner ? split(inner, ',') : []).map((f): [string, TypeNode] => {

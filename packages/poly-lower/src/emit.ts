@@ -61,6 +61,18 @@ export interface Cx {
   /** The module's name and declarations, for spawns and signals (PT6.4). */
   module?: string;
   moduleDecls?: A.Decl[];
+  /** S176: the modules this one uses, for a send to or a spawn of a machine named m.M. */
+  program?: A.Module[];
+}
+
+/** S176: a machine named as the checker spells it: `M` of this module, or `m.M` of a used module. */
+export function machineNamed(cx: Pick<Cx, 'moduleDecls' | 'program' | 'module'>, name: string | null | undefined): A.Machine | undefined {
+  if (!name) return undefined;
+  const i = name.lastIndexOf('.');
+  const mod = i < 0 ? cx.module : name.slice(0, i);
+  const decls = i < 0 || mod === cx.module ? cx.moduleDecls : cx.program?.find((m) => m.name === mod)?.decls;
+  const n = i < 0 ? name : name.slice(i + 1);
+  return decls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === n);
 }
 
 const q = (s: string) => JSON.stringify(s);
@@ -379,7 +391,7 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       if (s.op === 'send') {
         // PT7a, S58: sendTo { target, action, data }; the target is an address, a string, or null for none.
         const t = cx.facts.types.get(s.to!.id);
-        const receiver = t?.k === 'ref' ? cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === t.machine) : undefined;
+        const receiver = t?.k === 'ref' ? machineNamed(cx, t.machine) : undefined;
         const act = receiver?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === s.target);
         if (!act) throw new Error(`poly-lower: send … <- ${s.target} is unresolved (the checker must refuse it)`);
         return [`${ind}__E.push({ kind: "sendTo", target: ${expr(s.to!, cx)}, action: ${q(s.target)}, data: { ${argList(s, act.params, cx).join(', ')} } });`];
@@ -390,7 +402,8 @@ function stmt(s: A.Stmt, cx: Cx, ind: string, opts: EmitOptions): string[] {
       if (s.op === 'spawn' && s.modifier === 'detached') {
         // S60, PT6.4: createInstance, with the creation action as the child's first message; no wiring.
         const spec = childSpec(s, moduleOf(cx));
-        const child = cx.moduleDecls?.find((d): d is A.Machine => d.kind === 'Machine' && d.name === spec.machine.split('.').pop());
+        // S176: a detached child may be a used module's machine; its id is spelled m.M either way.
+        const child = machineNamed(cx, spec.machine.startsWith(`${moduleOf(cx)}.`) ? spec.machine.slice(moduleOf(cx).length + 1) : spec.machine);
         const parts = [`kind: "createInstance"`, `machineId: ${q(spec.machine)}`, `childKey: ${q(spec.key)}`];
         if (spec.create) {
           const act = child?.items.find((i): i is A.Action => i.kind === 'Action' && i.name === spec.create);

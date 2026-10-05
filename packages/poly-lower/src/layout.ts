@@ -47,7 +47,8 @@ export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
       // PD5.1.2b: Principal is built in, unless the module declares a type of that name.
       if (t.name === 'Principal' && !env?.unions.has(t.name)) return { k: 'principal' };
       return { k: 'union', name: t.name };
-    case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
+    // S176: spelled as the checker spells it: M for this module's machine, m.M for a used module's.
+    case 'TRef': return { k: 'ref', machine: t.machine.length > 1 && env?.module !== undefined && t.machine.slice(0, -1).join('.') !== env.module ? t.machine.join('.') : t.machine[t.machine.length - 1] };
     case 'TMap': return { k: 'map', key: tyOfTypeExpr(t.key, env), value: tyOfTypeExpr(t.value, env), array: t.key.kind === 'TRange' };
     case 'TConf': return { k: 'conf' };
   }

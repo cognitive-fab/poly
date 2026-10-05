@@ -62,10 +62,12 @@ export interface CheckOptions {
   maxStates?: number;
   /** PD5.1.3c: the number of principal representatives, forced (a control); by default the rule's count. */
   principals?: number;
+  /** PS1.0 (S176): the modules the machine's module uses, for a send to or a spawn of a machine named m.M. */
+  program?: Module[];
 }
 
 export function checkMachine(module: Module, machineName: string, opts: CheckOptions = {}): MachineReport {
-  const M = buildMachine(module, machineName, { principals: opts.principals });
+  const M = buildMachine(module, machineName, { principals: opts.principals, program: opts.program });
   const g = explore(machineSystem(M), opts.maxStates);
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, machine: M.name, ...(node ? { node } : {}) });

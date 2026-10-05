@@ -13,6 +13,8 @@ export interface LowerOptions {
   fault?: Fault;
   /** PT6.5, S152: generate an OpenShell policy per effect kind (`isolation: "openshell"` in poly.json). */
   isolation?: 'openshell';
+  /** S176: the program's modules, for a send to or a spawn of a used module's machine. */
+  program?: A.Module[];
 }
 
 export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
@@ -215,7 +217,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // A machine that arms timers needs the mapper too: a timer is an intent (PT6.3).
   // A machine that sends needs it too (S58): a send is an intent.
   if (facts.effects.size || facts.decisions.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
-    files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls }, pre, opts.fault);
+    files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls, program: opts.program }, pre, opts.fault);
     files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data', fault: opts.fault }), null, 2) + '\n';
     // PT6.5, S152: the opt-in sandbox, one OpenShell policy per effect kind, from its labels and targets.
     // The broken variant widen-sandbox generates it too, so translation validation has a policy to catch.
@@ -604,15 +606,18 @@ function invariantsModule(m: A.Machine, facts: MachineFacts, env: TypeEnv, layou
  * the most Ref<M> parameters of one action, plus one per key of a detached spawn of M (S78), plus one for self when
  * M is the machine itself, so every pattern of equalities between addresses is realised.
  */
-function refDomain(m: A.Machine, target: string): unknown[] {
-  const isRef = (t: A.TypeExpr) => t.kind === 'TRef' && t.machine[t.machine.length - 1] === target;
+function refDomain(m: A.Machine, target: string, module: string): unknown[] {
+  // S176: a target is spelled M for this module's machine and m.M for a used module's; a name in source is compared
+  // in the same spelling.
+  const spelled = (parts: string[]) => (parts.length > 1 && parts.slice(0, -1).join('.') !== module ? parts.join('.') : parts[parts.length - 1]);
+  const isRef = (t: A.TypeExpr) => t.kind === 'TRef' && spelled(t.machine) === target;
   const fields = m.fields.filter((f) => isRef(f.type)).length;
   const params = Math.max(0, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.filter((p) => isRef(p.type)).length));
   // S78: each key of a detached spawn of the target is one more distinct address.
   const keys = new Set<string>();
   const walk = (body: A.Stmt[]): void => {
     for (const s of body) {
-      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier === 'detached' && s.as && s.target.split('.').pop() === target) keys.add(s.as);
+      if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier === 'detached' && s.as && spelled(s.target.split('.')) === target) keys.add(s.as);
       if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); }
       if (s.kind === 'Match') for (const a of s.arms) walk(a.body);
       if (s.kind === 'For') walk(s.body);
@@ -647,7 +652,7 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
   }
   if (t.k === 'ref') {
     if (!m || t.machine === null) throw new Error('poly-lower: an address domain needs its machine (S57)');
-    return refDomain(m, t.machine);
+    return refDomain(m, t.machine, env.module ?? '');
   }
   if (t.k === 'bool') return [false, true];
   if (t.k === 'int') {

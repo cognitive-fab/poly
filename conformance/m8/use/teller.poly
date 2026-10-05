@@ -1,0 +1,26 @@
+// S176 (M8a step 3): a machine that holds an address of another module's machine and sends to it. The address is
+// Ref<ledger.Account>, qualified as every name of another module is (PS1.0).
+module teller
+use ledger.Account
+
+enum TillState { Closed, Open, Paid }
+
+machine Till {
+  state { st: TillState = Closed   account: Ref<ledger.Account> = none }
+  terminal st is Paid
+  action Open(account: Ref<ledger.Account>)
+  action Pay()
+
+  on Open(account) {
+    require st is Closed else reject "open"
+    require account != none else reject "no-account"
+    st' = Open
+    account' = account
+  }
+  on Pay {
+    require st is Open else reject "closed"
+    require account != none else reject "no-account"
+    st' = Paid
+    send account <- Credit(n: 1)
+  }
+}

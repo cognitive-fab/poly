@@ -69,12 +69,20 @@ function instanceOf(e: A.Expr, env: Env): { M: RMachine; state: State } | undefi
     return x;
   };
   if (e.kind === 'Name' && !env.locals.has(e.name)) return present(e.name);
-  if (e.kind === 'Index' && e.object.kind === 'Name' && g.groups.has(e.object.name)) {
+  const group = e.kind === 'Index' ? groupNamed(e.object, g) : null;
+  if (e.kind === 'Index' && group !== null) {
     const k = e.index.kind === 'Star' ? env.star : int(evaluate(e.index, env), 'an index');
     if (k === undefined) throw new EvalError('poly-ref: g[*] outside an aggregate (PS13.6)');
-    return present(`${e.object.name}[${k}]`);
+    return present(`${group}[${k}]`);
   }
   return undefined;
+}
+
+/** A group a configuration names: `G`, or `m.M` for the detached instances of a used module's machine (PS1.0, S176). */
+function groupNamed(e: A.Expr, g: GlobalView): string | null {
+  if (e.kind === 'Name' && g.groups.has(e.name)) return e.name;
+  if (e.kind === 'Member' && e.object.kind === 'Name' && g.groups.has(`${e.object.name}.${e.prop}`)) return `${e.object.name}.${e.prop}`;
+  return null;
 }
 
 /** The group an aggregate reads with `g[*]` (PS13.6). */
@@ -84,7 +92,7 @@ function starGroup(e: A.Expr, g: GlobalView): string | null {
     if (!x || typeof x !== 'object' || found) return;
     if (Array.isArray(x)) { x.forEach(walk); return; }
     const n = x as A.Expr;
-    if (n.kind === 'Index' && n.index.kind === 'Star' && n.object.kind === 'Name' && g.groups.has(n.object.name)) { found = n.object.name; return; }
+    if (n.kind === 'Index' && n.index.kind === 'Star' && groupNamed(n.object, g) !== null) { found = groupNamed(n.object, g); return; }
     for (const [k, v] of Object.entries(x)) if (k !== 'span') walk(v);
   };
   walk(e);

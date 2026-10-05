@@ -78,6 +78,8 @@ Tests first: a live lock, a stale lock and a reused id. Seeded faults: one that 
   - *A search path only.* For a lone file, its directory is only searched. Only the modules named by `use` are read, and every other file in the directory is ignored. Tested with a directory holding an unrelated broken file: the result must not change.
   - *Duplicate modules.* If two files declare the same module name, the check is refused with a named code, never resolved by picking one. Cycles are allowed.
 
+**S190, open: enums across modules.** Raised at this ruling, with its proposal in `plan-m8.md` section 7: a payload-free enum declared in a used module (a std module's `Template`, a channel kind) may be named and carried across the boundary. To be resolved before M8b's step 6, not in M8a.
+
 Then step 3 is built, the 143 files and the evidence tests are measured again, and any difference goes to the owner before the commit.
 
 **Polywatch on the store lock (4cdd00e).** Four findings, all real: a lock file that could not be written, an approvals path that is a file, and a failing takeover entry each left the OS lock held; a load that failed after finding a stale lock lost the stale owner's record. Each is fixed, two with tests that failed first.

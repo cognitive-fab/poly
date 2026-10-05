@@ -174,7 +174,26 @@ export interface RMachine {
   principals: number;
 }
 
-export function buildMachine(module: A.Module, machineName: string, opts: { principals?: number } = {}): RMachine {
+/**
+ * PS1.0 (S176): a program is a set of modules, and a machine is named m.M. `program` holds the modules `use` may name;
+ * `view` is the module whose spelling names take: M for its own machines, m.M for any other's. A machine built for a
+ * configuration of another module is built with that module as its view.
+ */
+export interface BuildOptions { principals?: number; program?: A.Module[]; view?: string }
+
+/** PS1.0: the module a `use` path names, the whole path when it is a module, else the path without its machine. */
+export function usedModule(path: string[], program: A.Module[]): string {
+  const whole = path.join('.');
+  return program.some((m) => m.name === whole) ? whole : path.slice(0, -1).join('.');
+}
+
+export function buildMachine(module: A.Module, machineName: string, opts: BuildOptions = {}): RMachine {
+  const view = opts.view ?? module.name;
+  const program = opts.program ?? [];
+  const spell = (mod: string, name: string) => (mod === view ? name : `${mod}.${name}`);
+  const moduleNamed = (mod: string) => (mod === module.name ? module : program.find((x) => x.name === mod));
+  /** A machine named in module `inMod`'s source, spelled from the view. */
+  const named = (parts: string[], inMod: string) => spell(parts.length > 1 ? parts.slice(0, -1).join('.') : inMod, parts[parts.length - 1]);
   const unions = new Map<string, RUnion>();
   const ctors = new Map<string, string>();
   const decls = module.decls;
@@ -193,10 +212,13 @@ export function buildMachine(module: A.Module, machineName: string, opts: { prin
         if (t.name === 'Principal' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Principal')) return { k: 'principal' };
         return { k: 'union', name: t.name };
       case 'TMap': return { k: 'map', key: typeOf(t.key), value: typeOf(t.value) };
-      case 'TRef': return { k: 'ref', machine: t.machine[t.machine.length - 1] };
+      case 'TRef': return { k: 'ref', machine: named(t.machine, module.name) };
       case 'TConf': return { k: 'conf' };
     }
   };
+  // A parameter of a used module's action: its addresses are spelled from the view; the checker lets only types that
+  // need no module cross (S176), so a named type here is a builtin.
+  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : typeOf(t));
   for (const d of decls) {
     if (d.kind === 'EnumDecl') unions.set(d.name, { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })) });
     if (d.kind === 'TypeDecl') unions.set(d.name, { name: d.name, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) })) });
@@ -247,7 +269,9 @@ export function buildMachine(module: A.Module, machineName: string, opts: { prin
     decisions.set(it.name, { id: it.id, name: it.name, kind: `decision.${it.name}`, params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })), ok: ok ? { action: ok.action, answer: bound(['answer']), confidence: bound(['conf', 'margin']) } : null });
   }
   const guardedInputs = strictInputs(m, effects);
-  const receivers = new Map(decls.filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [d.name, d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) }))]));
+  // PS2.2, S176: what a send may name: this module's machines, and those of the modules it uses.
+  const receiverModules = [module.name, ...decls.filter((d): d is A.UseDecl => d.kind === 'Use').map((d) => usedModule(d.path, program))];
+  const receivers = new Map([...new Set(receiverModules)].flatMap((mod) => (moduleNamed(mod)?.decls ?? []).filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [spell(mod, d.name), d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeIn(mod)(p.type) })) }))] as const)));
   // PT6.4: attached children, by the key their spawn names (declared by use, like timer keys).
   const children = new Map<string, RChild>();
   const detached: RDetached[] = [];
@@ -266,13 +290,16 @@ export function buildMachine(module: A.Module, machineName: string, opts: { prin
     for (const s of body) {
       if (s.kind === 'For') { spawns(s.body, action, [...loops, { v: s.var, lo: s.lo, hi: loopTop(s, action) }]); continue; }
       if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier === 'detached' && s.as && !detached.some((x) => x.key === s.as)) {
-        const name = s.target.split('.').pop()!;
-        const child = decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
+        // S176: a detached child may be a used module's machine, spelled m.M; its id is always module.Machine.
+        const parts = s.target.split('.');
+        const mod = parts.length > 1 ? parts.slice(0, -1).join('.') : module.name;
+        const name = parts[parts.length - 1];
+        const child = moduleNamed(mod)?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
         if (!child) throw new Error(`poly-ref: no machine ${s.target}`);
         const i = s.extra.indexOf('create');
         const create = i >= 0 ? s.extra[i + 1] : null;
         const act = create ? child.items.find((x): x is A.Action => x.kind === 'Action' && x.name === create) : undefined;
-        detached.push({ key: s.as, machine: name, machineId: `${module.name}.${name}`, create, createParams: (act?.params ?? []).map((p) => ({ name: p.name, type: typeOf(p.type) })) });
+        detached.push({ key: s.as, machine: spell(mod, name), machineId: `${mod}.${name}`, create, createParams: (act?.params ?? []).map((p) => ({ name: p.name, type: typeIn(mod)(p.type) })) });
       }
       if (s.kind === 'Intent' && s.op === 'spawn' && s.modifier !== 'detached' && s.as) {
         const name = s.target.split('.').pop()!;
@@ -362,7 +389,7 @@ export function buildMachine(module: A.Module, machineName: string, opts: { prin
   const principals = opts.principals ?? Math.max(2, fields.reduce((n, f) => n + positions(f.type, new Set()), 0) + label);
   return {
     principals,
-    name: m.name, records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
+    name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties, liveness,
   };
 }

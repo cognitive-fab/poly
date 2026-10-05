@@ -1,0 +1,17 @@
+// S176 (M8a step 3): conformance/m2/detached.poly split in two modules. The worker names its dispatcher's machine
+// across modules, as dispatch names the worker's; the two modules use each other (a cycle). Checked together, they
+// give the same verdicts and state counts as the one-module original: `use` adds no behaviour (PS1.0).
+module workers
+use dispatch
+
+type WorkerState = Idle | Ready | Finished
+
+machine Worker {
+  state { st: WorkerState = Idle   boss: Ref<dispatch.Dispatcher> = none   size: 0..2 = 0 }
+  terminal st is Finished
+  action Start(n: 1..2)
+  action Hello(from: Ref<dispatch.Dispatcher>)
+
+  on Start(n)    { require st is Idle else reject "started"     st' = Ready   size' = n }
+  on Hello(from) { require st is Ready else reject "not-ready"  boss' = from  st' = Finished  send from <- Done() }
+}

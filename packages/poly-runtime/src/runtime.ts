@@ -456,7 +456,8 @@ export class PolyRuntime {
     if (!m) return null;
     // Review C9: an address names a live instance of its machine, in the module of the machine that receives it.
     const module = m.id.slice(0, m.id.lastIndexOf('.'));
-    const exists = (machine: string, ref: string) => this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(ref)?.machine_id === `${module}.${machine}`;
+    // S176: a machine spelled m.M is a used module's, already its id.
+    const exists = (machine: string, ref: string) => this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(ref)?.machine_id === (machine.includes('.') ? machine : `${module}.${machine}`);
     return dataOutside(m.types, action, data, exists);
   }
 

@@ -30,6 +30,7 @@ import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint,
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
+import { resolveUses } from './uses.js';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration';
 
@@ -141,6 +142,10 @@ export interface CheckOptions {
   root?: string;
   /** PT8: the modules the policies of this file govern; the file's own module when it is checked alone. */
   program?: Module[];
+  /** S176: a project's modules with their files, where `use` finds the modules it names; absent for a lone file. */
+  programFiles?: { file: string; module: Module }[];
+  /** S176: the program this module is checked in (it and the modules it uses), set by checkFile for its stages. */
+  uses?: Module[];
   /** PT6.5, S152: generate the OpenShell sandbox policies (poly.json's `isolation`). */
   isolation?: 'openshell';
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
@@ -194,7 +199,11 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   if (!parsed.module) return finish(report);
   const module = parsed.module;
   report.module = module.name;
-  const checked = checkModule(module);
+  // S176: the modules `use` names, found in the project or, for a lone file, in its directory and std/.
+  const uses = resolveUses(module, file, opts.programFiles);
+  report.diagnostics.push(...uses.diagnostics);
+  opts = { ...opts, uses: uses.program };
+  const checked = checkModule(module, { program: uses.program });
   report.diagnostics.push(...checked.diagnostics);
   report.effectKinds = [...checked.machines.values()].flatMap((f) => [...f.effects.values()].map((e) => ({ kind: effectKind(e), signature: effectSignature(e), effect: `${f.machine.name}.${e.name}`, line: e.span?.line, col: e.span?.col })));
   const refused = report.diagnostics.some((d) => d.severity === 'error');
@@ -249,7 +258,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     if (report.verdict === 'CLEAN') { report.verdict = 'INCONCLUSIVE'; report.exit = EXIT_CODES.INCONCLUSIVE; }
     return report;
   }
-  const configs = configurationReports(module, refused);
+  const configs = configurationReports(module, refused, opts.uses);
   report.configurations.push(...configs.configurations);
   // ── stage 5: policies (PT8) ─────────────────────────────────────────────
   if (module.decls.some((d) => d.kind === 'Policy')) {
@@ -303,7 +312,7 @@ function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
 async function checkMachineStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, opts: CheckOptions, engines: Record<string, string>): Promise<void> {
   // ── lower ─────────────────────────────────────────────────────────────
   let t0 = performance.now();
-  const { lowered, diagnostics } = lowerMachine(module, checked, machine, opts.isolation ? { isolation: opts.isolation } : {});
+  const { lowered, diagnostics } = lowerMachine(module, checked, machine, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses });
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
@@ -363,7 +372,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
 
   // ── stage 1b: translation validation (PS9.3) ──────────────────────────
   t0 = performance.now();
-  const tv = await translationValidate(module, machine, dir, opts.isolation ? { isolation: opts.isolation } : {});
+  const tv = await translationValidate(module, machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses });
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {
@@ -499,7 +508,7 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const children = ids.map((id) => {
     const name = id.split('.').pop()!;
     // Review D-F1: a child is lowered as its own stages lowered it, sandbox policy included.
-    const { lowered } = lowerMachine(module, checked, name, opts.isolation ? { isolation: opts.isolation } : {});
+    const { lowered } = lowerMachine(module, checked, name, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses });
     const cdir = join(root, id);
     rmSync(cdir, { recursive: true, force: true });
     mkdirSync(cdir, { recursive: true });
@@ -649,14 +658,14 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  * engine checks configurations, so the stage is poly-ref's alone (PA0.1). Liveness is listed as not run (M1-2).
  * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
  */
-function configurationStage(module: Module, decl: A.Configuration, refused: boolean): ConfigCheck {
+function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[]): ConfigCheck {
   const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
     return cc;
   }
   const t0 = performance.now();
-  const r = checkConfiguration(module, decl.name);
+  const r = checkConfiguration(module, decl.name, { program });
   cc.diagnostics.push(...r.findings);
   cc.vacuous = vacuousRecords(r.vacuous);
   const groups = new Map<string, { machine: string; n: number }>();
@@ -682,12 +691,12 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
 }
 
 /** Stage 4b for every configuration of a module; the first explorer throw stops the stage and is reported. */
-export function configurationReports(module: Module, refused: boolean): { configurations: ConfigCheck[]; error?: string } {
+export function configurationReports(module: Module, refused: boolean, program?: Module[]): { configurations: ConfigCheck[]; error?: string } {
   const configurations: ConfigCheck[] = [];
   for (const d of module.decls) {
     if (d.kind !== 'Configuration') continue;
     try {
-      configurations.push(configurationStage(module, d, refused));
+      configurations.push(configurationStage(module, d, refused, program));
     } catch (e) {
       return { configurations, error: `configuration ${d.name}: ${(e as Error).message}` };
     }
@@ -921,12 +930,13 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
   const reports: CheckReport[] = [];
   // PT8: policies govern the whole project, so every module is read first and given to each file's policy stage.
   const program: Module[] = [];
+  const programFiles: { file: string; module: Module }[] = [];
   for (const f of files) {
     const text = readFileSync(f, 'utf8');
     const m = (f.endsWith('.ts') ? readEmbedded(text, f) : parse(text)).module;
-    if (m) program.push(m);
+    if (m) { program.push(m); programFiles.push({ file: f, module: m }); }
   }
-  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, ...(manifest.isolation ? { isolation: manifest.isolation } : {}) }));
+  for (const f of files) reports.push(await checkFile(f, { root: opts.root ?? dir, program, programFiles, ...(manifest.isolation ? { isolation: manifest.isolation } : {}) }));
   // PT8.2: a scope's policies lower to one document, so they live in one module.
   const scopes = new Map<string, CheckReport>();
   for (const report of reports) {

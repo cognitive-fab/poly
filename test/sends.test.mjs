@@ -78,7 +78,8 @@ test('the checker types sends against the receiver, and refuses self outside a s
   assert.deepEqual(swap('send inv <- Query(from: self)', 'send inv <- Query(from: self) as q'), ['PL0901']);
   assert.deepEqual(swap("owner' = from", "owner' = self"), ['PL0901']);
   assert.deepEqual(swap('inv: Ref<Inventory> = none', 'inv: Ref<Warehouse> = none'), ['PL1001']);
-  assert.deepEqual(swap('inv: Ref<Inventory> = none', 'inv: Ref<other.Inventory> = none'), ['PL0901']);
+  // S176: another module's machine is nameable once its module is used; without `use` it is an unknown name.
+  assert.deepEqual(swap('inv: Ref<Inventory> = none', 'inv: Ref<other.Inventory> = none'), ['PL1001']);
 });
 
 test('M3-2: a machine that sends and has a path property runs polyrun\'s check-effects at stage 3', async () => {
