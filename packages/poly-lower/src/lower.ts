@@ -17,7 +17,7 @@ export interface LowerOptions {
   program?: A.Module[];
 }
 
-export type Fault = 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'skip-content' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
@@ -129,6 +129,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     // PD5.1.2: the claims binder reads the label's claims, carried under $claims (S155).
     // Review A-F2: sam-pattern runs this acceptor even after the first one rejects, so the body is guarded by the row too.
     // The fault skip-claims drops the row here too: with the row in either place the step is still rejected.
+    // PS3.2, S180: a Content that names no body in the store is marked by the runtime under $content, and the row
+    // rejects it before the handler, after the claims row. The fault skip-content drops it.
+    if (carriesContent(a, env) && opts.fault !== 'skip-content') body.unshift(`      if (proposal.$content === 'missing') return reject('content-missing');`);
     if (h.by) body.unshift(...(opts.fault === 'skip-claims' ? [] : [`      if (!${claimsOkText}(proposal.$claims, ${JSON.stringify(claimed.get(a.name))})) return reject('claims-unverified');`]), `      proposal = { ...proposal, ${JSON.stringify(h.by.name)}: proposal.$claims };`);
     // S55: each map the handler writes entry by entry gathers its entries in an accumulator.
     for (const f of mapUpdated(h.body)) body.unshift(`      let __m_${f} = model[${JSON.stringify(f)}];`);
@@ -143,7 +146,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
   const intentDecls = lowerable.map((a) => {
     // S58: an address is a string, and none is null.
-    const schema: Record<string, unknown> = Object.fromEntries(a.params.map((p) => { const ty = tyOfTypeExpr(p.type, env); return [p.name, { type: jsType(ty, env), required: true, ...(p.type.kind === 'TRef' || ty.k === 'principal' ? { nullable: true } : {}) }]; }));
+    const schema: Record<string, unknown> = Object.fromEntries(a.params.map((p) => { const ty = tyOfTypeExpr(p.type, env); return [p.name, { type: jsType(ty, env), required: true, ...(p.type.kind === 'TRef' || ty.k === 'principal' || ty.k === 'content' ? { nullable: true } : {}) }]; }));
+    // PS3.2, S180: the runtime's mark of a missing body travels under the reserved key $content.
+    if (carriesContent(a, env)) schema.$content = { type: 'string', required: false, nullable: true };
     // PD5.1.2c, S155: the claims travel under the reserved key $claims; their absence is refused by the acceptor, not
     // the schema, so it is the reserved rejection claims-unverified (PS3.2).
     if (claimed.has(a.name)) schema.$claims = { type: ['object', 'string', 'number', 'boolean', 'array'], required: false, nullable: true };
@@ -650,6 +655,13 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
     const n = Math.max(2, state + label);
     return Array.from({ length: n }, (_, i) => `p${i + 1}`);
   }
+  // PS4.1f, S180: the content representatives c1..cn and none, n by PS4.1c's rule applied to Content apart. Each ci is
+  // spelled as a digest (sha256: and i in 64 hex digits) so that every value of the contract's domain is in the type
+  // the runtime reads (S140); none of them names a body.
+  if (t.k === 'content') {
+    if (!m) throw new Error('poly-lower: a content domain needs its machine (PS4.1f)');
+    return [null, ...Array.from({ length: contentCount(m, env) }, (_, i) => `sha256:${(i + 1).toString(16).padStart(64, '0')}`)];
+  }
   if (t.k === 'ref') {
     if (!m || t.machine === null) throw new Error('poly-lower: an address domain needs its machine (S57)');
     return refDomain(m, t.machine, env.module ?? '');
@@ -733,6 +745,27 @@ function sandboxPolicies(facts: MachineFacts, fault?: Fault): Record<string, unk
   return Object.fromEntries(Object.entries(out).sort(([x], [y]) => (x < y ? -1 : 1)));
 }
 
+/** PS4.1f: the Content positions of a type: one for a Content, one per key for a map of them. */
+function contentPositions(t: Ty, env: TypeEnv): number {
+  if (t.k === 'content') return 1;
+  if (t.k === 'map') return contentPositions(t.value, env) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? env.unions.get(t.key.name)!.ctors.length : 1);
+  return 0;
+}
+
+/** PS4.1f: the Content positions of the state plus the most Content values one label carries (at least one), at least 2. */
+export function contentCount(m: A.Machine, env: TypeEnv): number {
+  const state = m.fields.reduce((k, f) => k + contentPositions(tyOfTypeExpr(f.type, env), env), 0);
+  const label = Math.max(1, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.reduce((k, p) => k + contentPositions(tyOfTypeExpr(p.type, env), env), 0)));
+  return Math.max(2, state + label);
+}
+
+/** S180: whether an action's data can carry a Content, so the runtime may mark a missing body. */
+function carriesContent(a: A.Action, env: TypeEnv): boolean {
+  // By the resolved type, not the name: a module may declare its own type named Content (polywatch muva0r1v-3c89f81a).
+  const holds = (t: Ty): boolean => t.k === 'content' || (t.k === 'map' && holds(t.value));
+  return a.params.some((p) => holds(tyOfTypeExpr(p.type, env)));
+}
+
 function principalPositions(t: Ty, env: TypeEnv, seen: Set<string>): number {
   if (t.k === 'principal') return 1;
   if (t.k === 'record' && !seen.has(t.name)) return env.records.get(t.name)!.fields.reduce((n, f) => n + principalPositions(tyOfTypeExpr(f.type, env), env, new Set([...seen, t.name])), 0);
@@ -764,6 +797,7 @@ function typeText(t: Ty, env: TypeEnv): string {
     case 'map': return t.array ? `array of ${typeText(t.value, env)}, indexed ${typeText(t.key, env)}` : `object of ${typeText(t.value, env)}, keyed ${typeText(t.key, env)}`;
     case 'ref': return `address of ${t.machine} | null`;
     case 'principal': return 'principal | null';
+    case 'content': return 'content | null';
     default: return t.k;
   }
 }

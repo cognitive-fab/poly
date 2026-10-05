@@ -1,0 +1,8 @@
+// expect: PL1209 (a digest written in source: the only constant of type Content is none, S180)
+module errors
+
+machine M {
+  state { body : Content = none }
+  action A()
+  on A { body' = "sha256:abc" }
+}

@@ -12,6 +12,8 @@ export type TypeNode =
   | { k: 'bool' }
   | { k: 'null' }
   | { k: 'address'; machine: string }
+  /** PS1.4a, S180: a body's digest, sha256:<64 hex>. */
+  | { k: 'content' }
   | { k: 'record'; fields: [string, TypeNode][] }
   | { k: 'union'; alts: TypeNode[] };
 
@@ -41,6 +43,8 @@ export function parseType(text: string): TypeNode {
   // PD5.1.2b: a principal is a non-empty string; none is null.
   if (t === 'principal') return { k: 'string' };
   if (t === 'conf') return { k: 'range', lo: 0, hi: 1000 };
+  // PS1.4a, S180: a Content is a body's digest; none is null.
+  if (t === 'content') return { k: 'content' };
   if (t === 'string') return { k: 'string' };
   if (t === 'boolean') return { k: 'bool' };
   if (t === 'null') return { k: 'null' };
@@ -70,6 +74,7 @@ export function outside(t: TypeNode, v: unknown, at = 'the value', exists?: Inst
     case 'string': return typeof v === 'string' ? null : `${at} is ${JSON.stringify(v)}, not a string`;
     case 'bool': return typeof v === 'boolean' ? null : `${at} is ${JSON.stringify(v)}, not a boolean`;
     case 'null': return v === null ? null : `${at} is ${JSON.stringify(v)}, not none`;
+    case 'content': return typeof v === 'string' && /^sha256:[0-9a-f]{64}$/.test(v) ? null : `${at} is ${JSON.stringify(v)}, not a body's digest (sha256:<64 hex digits>)`;
     case 'address': {
       if (typeof v !== 'string' || v === '') return `${at} is ${JSON.stringify(v)}, not an address of ${t.machine}`;
       // Review C9, PS2.1: Ref<M> holds the addresses of instances of M, so an id naming no instance of M is outside it.
@@ -109,6 +114,14 @@ export function actionTypes(contract: { actions?: Record<string, { dataFields?: 
  * Why `data` is outside the type of action `a`, or null. Keys that are not parameters are left to the kernel,
  * which supplies some itself (a child's completion, a failure's reason).
  */
+/** S180: the Content values of an action's data, by its contract's types: each parameter of type Content. */
+export function contentValues(types: Map<string, [string, TypeNode][]>, action: string, data: unknown): string[] {
+  const params = types.get(action);
+  if (!params || !data || typeof data !== 'object') return [];
+  const isContent = (t: TypeNode): boolean => t.k === 'content' || (t.k === 'union' && t.alts.some(isContent));
+  return params.filter(([p, t]) => isContent(t) && typeof (data as Record<string, unknown>)[p] === 'string').map(([p]) => (data as Record<string, string>)[p]);
+}
+
 export function dataOutside(types: Map<string, [string, TypeNode][]>, action: string, data: unknown, exists?: InstanceOf): string | null {
   const params = types.get(action);
   if (!params) return null; // not in the module: the kernel answers it (unhandled, PS9.1a)

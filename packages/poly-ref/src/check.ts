@@ -36,6 +36,8 @@ export interface InstanceLine {
   params: { name: string; domain: string }[];
   /** PD5.1.3c: the principal representatives, when the machine has claims or Principal fields. */
   principals?: number;
+  /** PS4.1f: the content representatives, when the machine's state or labels hold a Content. */
+  contents?: number;
 }
 
 export interface MachineReport {
@@ -62,12 +64,14 @@ export interface CheckOptions {
   maxStates?: number;
   /** PD5.1.3c: the number of principal representatives, forced (a control); by default the rule's count. */
   principals?: number;
+  /** PS4.1f: the number of content representatives, forced (a control); by default the rule's count. */
+  contents?: number;
   /** PS1.0 (S176): the modules the machine's module uses, for a send to or a spawn of a machine named m.M. */
   program?: Module[];
 }
 
 export function checkMachine(module: Module, machineName: string, opts: CheckOptions = {}): MachineReport {
-  const M = buildMachine(module, machineName, { principals: opts.principals, program: opts.program });
+  const M = buildMachine(module, machineName, { principals: opts.principals, contents: opts.contents, program: opts.program });
   const g = explore(machineSystem(M), opts.maxStates);
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, machine: M.name, ...(node ? { node } : {}) });
@@ -344,6 +348,8 @@ export function instanceOf(M: RMachine): InstanceLine {
     fields: M.fields.filter((f) => f.check || f.type.k === 'int').map((f) => ({ name: f.name, domain: domainText(f.check, f.type, M) })),
     params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'record' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) }))),
     ...(usesPrincipals(M) ? { principals: M.principals } : {}),
+    // PS4.1f: and the content representatives, counted apart.
+    ...([...M.fields.map((f) => f.type), ...M.actions.flatMap((a) => a.params.map((p) => p.type))].some(function deep(t: RType): boolean { return t.k === 'content' || (t.k === 'map' && deep(t.value)); }) ? { contents: M.contents } : {}),
   };
 }
 

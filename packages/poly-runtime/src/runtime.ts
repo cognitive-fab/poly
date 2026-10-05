@@ -12,13 +12,13 @@ import { personKeyVerifier, type Verifier } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import { RESERVED_MODULE, verifyRecord, type Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
-import { dataOutside } from './types.js';
+import { contentValues, dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type VerifiedWorkflow, type WorkOrderTool } from './load.js';
 import { deriveKey, keyFields, keyOfRun, runIdOf, WorkflowError } from './workflows.js';
 import { verifyRunChain, type LedgerEvent, type ChainResult } from './ledger.js';
@@ -129,6 +129,11 @@ export class PolyRuntime {
     this.worker = new EffectWorker(kernel, store, this.handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
+      // S180: an effect's completion is marked like a dispatch when its Content names no body.
+      markContent: (instanceId, action, data) => {
+        const id = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined;
+        return id ? this.markContent(id, action, data) as Record<string, unknown> : data;
+      },
       // PD2.2, K10: the decision event is written with the completion step, in its transaction.
       beforeCompletion: (row, decl) => {
         const record = decl?.decision ? this.records.get(row.intent_id) : undefined;
@@ -342,7 +347,7 @@ export class PolyRuntime {
       const id = opts.id ?? '';
       const actionId = `$create:${creation.action}`;
       const d = creation.data;
-      const reserved = d && typeof d === 'object' && !Array.isArray(d) ? ['$claims', '$lineage'].filter((k) => k in (d as object)) : [];
+      const reserved = d && typeof d === 'object' && !Array.isArray(d) ? ['$claims', '$lineage', '$content'].filter((k) => k in (d as object)) : [];
       if (reserved.length) {
         const reason = `PL1208 RESERVED_NAME: the creation ${creation.action} of ${id || machineId} supplies ${reserved.join(' and ')}, which only the runtime writes (S155)`;
         await this.store.insertAudit({ at: this.now(), instanceId: id, action: creation.action, actionId, rule: 'S155', reason });
@@ -356,6 +361,7 @@ export class PolyRuntime {
         creation = { ...creation, data: { ...((d ?? {}) as object), $claims: claims ?? null } };
       }
     }
+    if (creation) creation = { ...creation, data: this.markContent(machineId, creation.action, creation.data) };
     const r = await this.kernel.create(machineId, opts.id, creation);
     return { id: r.instanceId, state: r.state };
   }
@@ -369,9 +375,9 @@ export class PolyRuntime {
     const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
     const inst = await this.store.getInstance(instanceId);
     // S155: $claims and $lineage are the runtime's; a dispatch that supplies either is refused before any step.
-    const reserved = data && typeof data === 'object' && !Array.isArray(data) ? ['$claims', '$lineage'].filter((k) => k in (data as object)) : [];
+    const reserved = data && typeof data === 'object' && !Array.isArray(data) ? ['$claims', '$lineage', '$content'].filter((k) => k in (data as object)) : [];
     if (reserved.length) {
-      const reason = `PL1208 RESERVED_NAME: ${action} on ${instanceId} supplies ${reserved.join(' and ')}, which only the runtime writes (S155)`;
+      const reason = `PL1208 RESERVED_NAME: ${action} on ${instanceId} supplies ${reserved.join(' and ')}, which only the runtime writes (S155, S180)`;
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S155', reason });
       throw new RefusedDispatch(reason, 'S155');
     }
@@ -408,13 +414,13 @@ export class PolyRuntime {
     }
     // PD5.1.4, K11: an action with claims gets them from the verifier adapter, under $claims; the module's first acceptor
     // rejects missing or bad ones (PS3.2's claims row). A verifier that throws is no answer: no claims (O10).
-    let payload = data;
+    let payload = inst ? this.markContent(inst.machine_id, action, data) : data;
     if (inst && this.claimed(inst.machine_id, action)) {
       let claims: Record<string, unknown> | null = null;
       if (opts.credentials !== undefined) {
         try { claims = await this.verifier(opts.credentials, { instance: instanceId, action, data: data ?? {}, actionId }); } catch { claims = null; }
       }
-      payload = { ...((data ?? {}) as object), $claims: claims ?? null };
+      payload = { ...((payload ?? {}) as object), $claims: claims ?? null };
     }
     // PD5.2.2a: an outside dispatch starts a chain, whatever its action id.
     this.store.outside.add(`${instanceId}\u0000${actionId}`);
@@ -431,6 +437,31 @@ export class PolyRuntime {
     } finally {
       this.store.outside.delete(`${instanceId}\u0000${actionId}`);
     }
+  }
+
+  /**
+   * PS3.2, S180: data whose Content names no body in the content store is marked, under the reserved key $content, so
+   * the module's first acceptor rejects the step content-missing: journaled, the state unchanged. Every way in is
+   * marked: a dispatch, a creation and an effect's completion.
+   */
+  markContent(machineId: string, action: string, data: unknown): unknown {
+    const m = this.verified.machines.find((x) => x.id === machineId);
+    if (!m) return data;
+    const missing = contentValues(m.types, action, data).some((d) => !this.store.db.prepare('SELECT 1 FROM poly_content WHERE digest = ?').get(d));
+    return missing ? { ...((data ?? {}) as object), $content: 'missing' } : data;
+  }
+
+  /** S180: stores a body in the content store and returns its Content, the digest of its bytes. */
+  async putContent(body: string): Promise<string> {
+    const d = `sha256:${createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex')}`;
+    await this.store.txn(() => { this.store.db.prepare('INSERT OR IGNORE INTO poly_content (digest, body) VALUES (?, ?)').run(d, JSON.stringify(body)); });
+    return d;
+  }
+
+  /** S180: the body a Content names, or null when the store holds none. */
+  async contentBody(d: string): Promise<string | null> {
+    const r = this.store.db.prepare('SELECT body FROM poly_content WHERE digest = ?').get(d) as { body: string } | undefined;
+    return r ? (JSON.parse(r.body) as string) : null;
   }
 
   /** PD5.2.2: a step's lineage, with its seq, or null. */

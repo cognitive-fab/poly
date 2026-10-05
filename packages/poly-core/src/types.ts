@@ -106,6 +106,8 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
       if (visiting.has(t.name)) return null;
       // PD5.1.3: a Principal is explored by representatives, so it is finite in the checked instance.
       if (t.name === 'Principal' && !env.unions.has(t.name) && !env.records.has(t.name)) return 2;
+      // PS4.1f: and so is a Content, by its representatives, plus none.
+      if (t.name === 'Content' && !env.unions.has(t.name) && !env.records.has(t.name)) return 3;
       visiting = new Set([...visiting, t.name]);
       const r = env.records.get(t.name);
       if (r) {

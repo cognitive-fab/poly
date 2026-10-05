@@ -83,6 +83,8 @@ export interface WorkerOptions {
   capabilities?: (row: OutboxRow, decl: any) => Readonly<Record<string, unknown>>;
   /** PT15: called with each intent the gate allowed, after its transaction commits. Observation only. */
   onAllowed?: (row: OutboxRow, proposal: Proposal) => void;
+  /** S180: the completion's data, marked when a Content in it names no body in the content store. */
+  markContent?: (instanceId: string, action: string, data: Record<string, unknown>) => Record<string, unknown>;
   /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
   workOrder?: (row: OutboxRow) => { tool: string; target?: string; why: string } | null;
 }
@@ -219,7 +221,7 @@ export class EffectWorker {
       await this.store.insertAudit({ at: this.now, instanceId: row.instance_id, action: hook.action, actionId: `${row.intent_id}${suffix}`, rule: 'S140', reason: message });
       return;
     }
-    await this.kernel.dispatch(row.instance_id, hook.action, data, `${row.intent_id}${suffix}`);
+    await this.kernel.dispatch(row.instance_id, hook.action, this.opts.markContent ? this.opts.markContent(row.instance_id, hook.action, data) : data, `${row.intent_id}${suffix}`);
   }
 
   private journaled(row: OutboxRow, suffix: string): boolean {

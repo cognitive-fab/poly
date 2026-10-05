@@ -285,6 +285,8 @@ export function transition(M: RMachine, s: State, action: string, d: Record<stri
   }
   // PD5.1.2c, S101: claims missing, malformed or outside their domains, applied before the module like row 2.
   if (a.claims && !claimsInType(d.$claims ?? null, a.claims.type, M)) return { verdict: { kind: 'rejected', reason: 'claims-unverified' }, next: s, effects: [] };
+  // PS3.2, S180: a Content that names no body in the store, marked so by the runtime, is rejected before the module.
+  if (d.$content === 'missing' && carriesContent(a.params.map((p) => p.type))) return { verdict: { kind: 'rejected', reason: 'content-missing' }, next: s, effects: [] };
   const h = M.handlers.get(action);
   if (!h) return { verdict: { kind: 'unhandled' }, next: s, effects: [] };
   const r = runHandler(M, h, s, d, self);
@@ -293,6 +295,12 @@ export function transition(M: RMachine, s: State, action: string, d: Record<stri
   const next: State = {};
   for (const f of M.fieldNames) next[f] = r.w.has(f) ? r.w.get(f)! : s[f];
   return { verdict: { kind: 'accepted' }, next, effects: r.E };
+}
+
+/** S180: whether an action's data can carry a Content: a Content parameter, or a map of them. */
+export function carriesContent(types: RType[]): boolean {
+  const holds = (t: RType): boolean => t.k === 'content' || (t.k === 'map' && holds(t.value));
+  return types.some(holds);
 }
 
 /** PS3.2's claims row: a value of the claims type in which every principal is asserted, a non-empty string (review A-F6). */

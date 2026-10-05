@@ -46,6 +46,8 @@ export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
       if (env?.records.has(t.name)) return { k: 'record', name: t.name };
       // PD5.1.2b: Principal is built in, unless the module declares a type of that name.
       if (t.name === 'Principal' && !env?.unions.has(t.name)) return { k: 'principal' };
+      // PS1.4a, S180: Content is built in, unless the module declares a type of that name.
+      if (t.name === 'Content' && !env?.unions.has(t.name)) return { k: 'content' };
       return { k: 'union', name: t.name };
     // S176: spelled as the checker spells it: M for this module's machine, m.M for a used module's.
     case 'TRef': return { k: 'ref', machine: t.machine.length > 1 && env?.module !== undefined && t.machine.slice(0, -1).join('.') !== env.module ? t.machine.join('.') : t.machine[t.machine.length - 1] };
@@ -78,6 +80,8 @@ function scalarShape(t: Ty, env: TypeEnv): ShapeSpec | null {
     case 'ref': return { type: 'string', nullable: true };
     // PD5.1.2b: a principal is its identity's string; none is null.
     case 'principal': return { type: 'string', nullable: true };
+    // PS1.4a: a Content is its body's digest string; none is null.
+    case 'content': return { type: 'string', nullable: true };
     default: return null;
   }
 }

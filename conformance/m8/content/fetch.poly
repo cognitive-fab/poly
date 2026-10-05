@@ -1,0 +1,42 @@
+// S180 (M8a step 4): a Content that arrives as an effect's completion. A handler's result names a body by its digest;
+// a digest whose body is not in the content store is rejected before the module, content-missing (PS3.2).
+module fetch
+
+enum Phase { Idle, Waiting, Got, Failed }
+
+machine Fetcher {
+  state {
+    phase : Phase = Idle
+    body  : Content = none
+  }
+  terminal phase in { Got, Failed }
+
+  action Start()
+  action Got(c: Content)
+  action Failed()
+
+  on Start {
+    require phase is Idle else reject "started"
+    phase' = Waiting
+    emit fetch()
+  }
+  on Got(c) {
+    require phase is Waiting else reject "stale"
+    phase' = Got
+    body' = c
+  }
+  on Failed {
+    require phase is Waiting else reject "stale"
+    phase' = Failed
+  }
+
+  effect fetch() {
+    kind "doc.fetch"
+    labels { read:web }
+    class none
+    retry { attempts 1, base 1s, timeout 30s }
+    ok(r) -> Got(c: r.body)
+    failed -> Failed()
+    exhausted -> Failed()
+  }
+}

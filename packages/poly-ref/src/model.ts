@@ -20,7 +20,9 @@ export type RType =
   /** `Conf` (PD1.3): a confidence in thousandths, 0..1000. */
   | { k: 'conf' }
   /** `Principal` (PD5.1.2b): an opaque identity, a string at run time, or null for `none`. */
-  | { k: 'principal' };
+  | { k: 'principal' }
+  /** PS1.4a (S180): an opaque reference to a body, or none. */
+  | { k: 'content' };
 
 export interface RUnion {
   name: string;
@@ -172,6 +174,8 @@ export interface RMachine {
   liveness: A.Liveness[];
   /** PD5.1.3c: how many principal representatives the check offers. */
   principals: number;
+  /** PS4.1f: how many content representatives the check offers, besides none. */
+  contents: number;
 }
 
 /**
@@ -179,7 +183,7 @@ export interface RMachine {
  * `view` is the module whose spelling names take: M for its own machines, m.M for any other's. A machine built for a
  * configuration of another module is built with that module as its view.
  */
-export interface BuildOptions { principals?: number; program?: A.Module[]; view?: string }
+export interface BuildOptions { principals?: number; contents?: number; program?: A.Module[]; view?: string }
 
 /** PS1.0: the module a `use` path names, the whole path when it is a module, else the path without its machine. */
 export function usedModule(path: string[], program: A.Module[]): string {
@@ -210,6 +214,8 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
         if (recordNames.has(t.name)) return { k: 'record', name: t.name };
         // PD5.1.2b: Principal is built in, unless the module declares a type of that name.
         if (t.name === 'Principal' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Principal')) return { k: 'principal' };
+        // PS1.4a: Content is built in, unless the module declares a type of that name.
+        if (t.name === 'Content' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Content')) return { k: 'content' };
         return { k: 'union', name: t.name };
       case 'TMap': return { k: 'map', key: typeOf(t.key), value: typeOf(t.value) };
       case 'TRef': return { k: 'ref', machine: named(t.machine, module.name) };
@@ -218,7 +224,7 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
   };
   // A parameter of a used module's action: its addresses are spelled from the view; the checker lets only types that
   // need no module cross (S176), so a named type here is a builtin.
-  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : typeOf(t));
+  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : t.kind === 'TName' && t.name === 'Content' ? { k: 'content' } : typeOf(t));
   for (const d of decls) {
     if (d.kind === 'EnumDecl') unions.set(d.name, { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })) });
     if (d.kind === 'TypeDecl') unions.set(d.name, { name: d.name, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) })) });
@@ -387,8 +393,14 @@ export function buildMachine(module: A.Module, machineName: string, opts: BuildO
   // fewer than 2 (S102, review A-F3).
   const label = Math.max(1, ...actions.map((a) => a.params.reduce((n, p) => n + positions(p.type, new Set()), 0) + (a.claims ? positions(a.claims.type, new Set()) : 0)));
   const principals = opts.principals ?? Math.max(2, fields.reduce((n, f) => n + positions(f.type, new Set()), 0) + label);
+  // PS4.1f: the same rule applied to Content apart: its positions in the state, plus the most Content values one label
+  // carries (at least one), and never fewer than 2. Content is never a record field or a payload (PS1.4a).
+  const contentPositions = (t: RType): number => (t.k === 'content' ? 1 : t.k === 'map' ? contentPositions(t.value) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? (unions.get(t.key.name)?.ctors.length ?? 1) : 1) : 0);
+  const contentLabel = Math.max(1, ...actions.map((a) => a.params.reduce((n, p) => n + contentPositions(p.type), 0)));
+  const contents = opts.contents ?? Math.max(2, fields.reduce((n, f) => n + contentPositions(f.type), 0) + contentLabel);
   return {
     principals,
+    contents,
     name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, rejectProperties, liveness,
   };
@@ -471,6 +483,9 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
     case 'string': throw new Error('poly-ref: a string has no enumeration; it needs a check domain (PT3.2)');
     // PD5.1.3: a principal ranges over the representatives p1..pn; none is never asserted, only stored.
     case 'principal': return Array.from({ length: M.principals }, (_, i) => `p${i + 1}`);
+    // PS4.1f: a Content ranges over none and the representatives c1..cn, ci written as the digest of i (PT: Content lowers
+    // to sha256:<hex>), so a representative is a value of the runtime's type.
+    case 'content': return [null, ...Array.from({ length: M.contents }, (_, i) => `sha256:${(i + 1).toString(16).padStart(64, '0')}`)];
     case 'ref': {
       // S57, PS1.6: alone, none and one address per Ref<M> field plus the most Ref<M> parameters of one action, and
       // self when M is the machine's own type. Addresses are only compared and passed on, so these realise every
@@ -571,6 +586,7 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     case 'string': return typeof v === 'string';
     case 'ref': return v === null || typeof v === 'string';
     case 'principal': return v === null || (typeof v === 'string' && v.length > 0);
+    case 'content': return v === null || (typeof v === 'string' && v.length > 0);
     case 'conf': return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1000;
     case 'record': {
       if (!isRecord(v)) return false;

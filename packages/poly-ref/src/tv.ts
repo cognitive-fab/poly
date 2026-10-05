@@ -19,7 +19,7 @@ import { alpha, alphaData, flatten, flattenData } from './alpha.js';
 import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
 import type { Intent } from './step.js';
 import { dataDomain, detachedAlone, type RMachine } from './model.js';
-import { isTerminal, transition } from './step.js';
+import { isTerminal, transition, carriesContent } from './step.js';
 import { readBack } from './artefacts.js';
 
 interface SamModule {
@@ -195,6 +195,22 @@ export async function translationValidate(module: Module, machineName: string, b
         if (got.verdict.kind !== want.kind || (want.kind === 'rejected' && got.verdict.reason !== want.reason)) mismatch(`${text}: the lowered module gives ${verdictText(got.verdict)}, R_M gives ${verdictText(want)}`, pathTo(g, i));
         transitions++;
       }
+    }
+  }
+
+  // PS3.2's content row (S180): check never offers a missing body, so the row is compared here, in every reachable state
+  // and for every action whose data can carry a Content, on the runtime's mark of a missing body. R_M rejects it with
+  // content-missing, unless an earlier row rejects it first.
+  for (const a of M.actions.filter((x) => M.handlers.has(x.name) && carriesContent(x.params.map((p) => p.type)))) {
+    const sample = dataDomain(a, M)[0];
+    const good = flattenData(sample, a.name, M);
+    for (const [i, s] of g.states.entries()) {
+      const want = transition(M, s, a.name, { ...alphaData(good, a.name, M), $content: 'missing' }).verdict;
+      const got = stepModule(mod, rt, flatten(s, M), a.name, { ...good, $content: 'missing' });
+      const text = `${a.name} with a missing body from ${stateKey(s, M.fieldNames)}`;
+      if ('error' in got) { mismatch(`the lowered module threw on ${text}: ${got.error}; R_M gives ${verdictText(want)}`, pathTo(g, i)); continue; }
+      if (got.verdict.kind !== want.kind || (want.kind === 'rejected' && got.verdict.reason !== want.reason)) mismatch(`${text}: the lowered module gives ${verdictText(got.verdict)}, R_M gives ${verdictText(want)}`, pathTo(g, i));
+      transitions++;
     }
   }
 

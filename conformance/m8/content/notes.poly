@@ -1,0 +1,33 @@
+// S180 (M8a step 4): Content, an opaque body reference (PS1.4a). The machine stores a body, compares a second one with
+// it, and records whether they were equal; it never reads a body. Check explores Content by representatives (PS4.1f):
+// one Content field and one Content value per label, so two representatives, plus none.
+module notes
+
+enum Phase { Empty, Holding, Compared }
+
+machine Note {
+  state {
+    phase : Phase = Empty
+    body  : Content = none
+    same  : bool = false
+  }
+  terminal phase is Compared
+
+  action Write(c: Content)
+  action Compare(c: Content)
+
+  on Write(c) {
+    require phase is Empty else reject "full"
+    require c != none else reject "no-body"
+    phase' = Holding
+    body' = c
+  }
+
+  on Compare(c) {
+    require phase is Holding else reject "empty"
+    phase' = Compared
+    same' = c == body
+  }
+
+  invariant held-when-holding: phase is Holding implies body != none
+}
