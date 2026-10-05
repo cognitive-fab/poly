@@ -144,6 +144,69 @@ Numbered from S164; S163 is the ruling on the M3 runs (`decisions-m5.md`). Each 
 
 **Step 4, AC5.** `conformance/m6/customer-brief.poly` is polyflow's `customer-brief` written in poly. It is checked `CLEAN`, and the vendored polyflow server, unchanged, admits and runs its lowered directory. A scripted MCP client drives the same three scripts through it and through the hand-written workflow: approve (5 steps, ends `posted`), deny (4 steps, ends `denied`) and an empty brief (2 steps, ends `denied`). The catalogue entries and every step's work order (tool, target, arguments, why) and state are equal, with one difference named in the test: on the deny path the hand-written workflow writes the reporter's free text into `reason`, outside its own contract's declared domain for `DENIED` (`"not-ready"`), and poly, which keeps the declared domain, writes `"not-ready"`. The control removes the approval check: `poly check` reports `PL4001` on `no-post-without-prior-approval`, and the workflow stage reports that polyflow refuses the workflow.
 
+**S172 and E12** (208ec5f). A workflow whose machine declares no path property is `PL6804 WORKFLOW_UNCHECKED`, as ruled. E12, the deny-path defect in polyflow's own example, is on the owner's engine list; the vendored copy is unchanged.
+
+| Step | What was built | Commits |
+|---|---|---|
+| 5 | The command registry (`packages/poly-check/src/commands.ts`, re-exported by `poly-agent`, S167 amended): each command once, with its input and output schemas, published under `schemas/`; the command line runs over it | eab505c |
+| 6 | `poly mcp`: the registry's commands as MCP tools, with `structuredContent`; `poly approve` and `poly accept` absent | 38baba2 |
+| 7 | `poly lsp` on both surfaces: stages 0 to 2 on each edit, the rest on save, formatting on the standalone surface, typed fixes as code actions, the registry as `workspace/executeCommand` (S168, S171) | 9b96c38, a7ab9fb |
+| 8 | The Claude Code plugin (`adapters/claude-code`), its marketplace entry, and `poly install --host claude-code`; validated in a stand-in Claude configuration, and listed as not run where `claude` is not installed | 34205a1, 24acb8b |
+| 9 | `poly new`: MCP sampling first, then headless Claude Code under the user's login, refused while an API key or cloud-billing variable is present (checked by name); five rounds; never admitted; tests use recorded drafts and a stand-in `claude` only | 6654661, 4ecddf8, 196340d |
+| 10 | The second host: **waiting** (S170). DeepSeek Harness has not declared its plugin API stable; `adapters/dsh/install.json` says so, and `poly install --host dsh` refuses with that reason | 34205a1 |
+| 11 | The code review, this record, and the gate from a clean build | 7ad6bfb, ea4075c, 9190006, f29118d |
+
+**Fixes found on the way, each with a test that failed first.** The gate after step 6 found the new scripts without the tree guard, and an account check that needed more than 10 minutes under load (1445bef); its two child runs are timed in every gate report, and it now runs after the suite (a7ab9fb). The M3 cleanup cap test failed under gate load, because the cap's clock started before the stand-in CLI had; it was reproduced with a suspended launcher (`test/fixtures/suspend.ps1`) and fixed by starting the clock at the stand-in's ready marker, with the assertion unchanged (344c1cb). Polywatch found the headless provider passing the prompt in its arguments and leaving its stdin without an error listener; both were fixed (4ecddf8) and tested with a stand-in `claude` that failed against the provider before the fix (196340d).
+
+### The code review of M6
+
+Four reviewers read `e6f1730..d9c3f11` in four parts (workflows; the registry, the MCP server and `poly new`; the language server; the boundary check, the adapters and the vendored engines), and each reproduced every finding with a script under `.poly/review-m6-a` to `review-m6-d`. They found 26. Each was fixed with a test in `test/review-m6-a.test.mjs` to `review-m6-d.test.mjs` that failed on the tree before its fix.
+
+| Findings | What was wrong | Fix | Commit |
+|---|---|---|---|
+| A-F1 | a workflow name such as `../../../victim` became a path, and the lowering removed a directory outside the build | `PL1201`; the lowering writes and removes only directly under `.poly/build/workflows` | 7ad6bfb |
+| A-F2, A-F3 | `PL6802` tested some values of a key field only, took an empty value, and allowed two patterns for one field | every declared value tested (a range in full up to a million, an enum by member, a bool); an empty value and a second pattern refused | 7ad6bfb |
+| A-F4, A-F5 | two workflows could map one effect kind two ways, and a name could be used twice across a project, though a project's workflows are one polyflow library | `PL6803` in a module and across a project; `PL1002` for a name used twice | 7ad6bfb |
+| A-F6 | a renamed workflow left its descriptor, and a leftover directory stopped the workflow stage | stale descriptors removed; the stage reads its own workflow only | 7ad6bfb |
+| A-F7 | a workflow in a module with a dotted name was not admitted | the machine is found by its full id | 7ad6bfb |
+| B-F1 | the headless provider started while Bedrock or Vertex billing was switched on | refused, checked by name only | ea4075c |
+| B-F2 | `poly new --into` could overwrite a module that was not its own draft | refused before any provider runs | ea4075c |
+| B-F3, B-F4 | the MCP server did not answer a ping while a call waited on sampling, and replied to a client's response | ping answered at once; no reply to a response | ea4075c |
+| B-F5 | the module was taken from the first fenced block of an answer | the `poly` block, read fence by fence | ea4075c |
+| B-F6 | `poly bench gate` with bad sizes lost its usage text | the usage text again | ea4075c |
+| C-F1, C-F2 | a header with no `Content-Length` wedged the language server; a request whose handler threw, or a body that was not JSON, got no reply | the header dropped; `-32603` and `-32700` (id null) | 9190006 |
+| C-F3 | formatting, code actions, `poly fmt` and `poly fix` printed the parsed module and deleted a `world` or a migration the parser skips; an action's title cut the fix id | all four refuse a module with `PL0901`; the whole id in the title | 9190006 |
+| C-F4 | two servers on one workspace built in one folder and deleted each other's lowerings | a folder per server process | 9190006 |
+| C-F5 | the verdict, stages not run and vacuous properties never reached the editor | an information diagnostic `verdict` for any verdict other than CLEAN (PT12.3a) | 9190006 |
+| C-F6 | a command with no root ran in the server's working directory | the workspace is the default root and project | 9190006 |
+| C-F7 | a killed server left its folder behind; an `untitled:` buffer threw | folders named by process id and swept by the next server; untitled buffers checked under the server's folder | 9190006 |
+| D-F1 | a host's name was missed with a space, in capitals or as `'claude'`, and a host SDK reached by a template or computed import passed | matched in any case and spelling, poly-new alone exempt; SDK names refused in strings; two lines of the core reworded | f29118d |
+| D-F2 | rule 4 was bypassed by a subpath of `@poly/new`, a relative path, a name built at run time, and `getBuiltinModule` | each refused | f29118d |
+| D-F3 | `.mts` and `.cts` sources were not checked | checked | f29118d |
+| D-F4 | an adapter's JSON could launch any command or declare hooks | it launches `poly mcp`, `poly lsp` or polyflow's server (S164) only, and declares no hooks | f29118d |
+| D-F5 | the `package.json` files written for poly were not pinned, so an added file or a redirected export passed the vendor test | a second table per `PROVENANCE.md`; every file under `vendor/` must be in one of the two | f29118d |
+| D-F6 | the install test left its project in `.poly/` | named by its process and removed once its servers exit | f29118d |
+
+**The gate, item by item.**
+
+| Item | Status | Measured |
+|---|---|---|
+| AC5 | **passes** | `customer-brief` in poly runs through the unchanged polyflow server step for step as the hand-written one, on approve, deny and an empty brief, with the deny-path difference named (E12). |
+| AC5, controls | **pass** | The approval check removed is `PL4001` and refused by polyflow's own admission; `workflow-tool`, `workflow-key` and `drop-timer-target` are caught by the read-back. |
+| S164 | **passes** | Every workflow is listed in the certificate as `ungated: polyflow runtime`. |
+| S165, S172 | **pass** | The workflow stage runs polyflow's admission at depth 12 and 50,000 paths; a bounded run is `INCONCLUSIVE`; a machine with no path property is `PL6804`. |
+| PF9.1, PF9.2 | **pass** | Every command is in the registry, the command line, the MCP tool list and the language server's commands, with its published schemas, and its output validates against them. |
+| MCP, language server | **pass** | Scripted clients, both surfaces, the review's protocol cases included. |
+| Thin adapters | **pass** | Configuration only, launching the three allowed servers, no hooks; the plugin passes `claude plugin validate` in a stand-in configuration where `claude` is installed, and is listed as not run where it is not. |
+| PF9.3 | **passes** | Recorded drafts only: CLEAN within five rounds, the last diagnostics after five, never admitted; the key and cloud-billing refusals tested by name with stand-in variables. |
+| Two hosts | **Claude Code half passes; DeepSeek Harness half waiting** (S170) | The entries `poly install` prints are launched exactly as printed and run AC5's workflow. |
+| M5 findings | **measured** | The leak over one file checked again is fixed (`test/check-memory.test.mjs`); the 2.9 GB is memory kept after the largest explorations, not held live; the 53-second program is its configuration's state space. |
+
+**Limits, stated.**
+- Workflows run on polyflow, outside poly's gate, until they move to `poly-runtime` before v1, at the latest with M8 (S164, PT18).
+- The DeepSeek Harness half waits on its plugin API (S170). The agent runs under each host are a demonstration for the owner to make, not gated.
+- The language server refuses to format, and offers no fix for, a module holding a construct the parser skips (`PL0901`), until that construct is lowered.
+
 ## Conclusion
 
 M6 gives poly an agent interface and a second runtime target. Workflows get a front end and a lowering that polyflow loads without change, and AC5 is tested by driving polyflow's own server with a scripted client, step for step against the hand-written workflow. The commands are defined once and served three ways, by the CLI, an MCP server and a language server, none of which knows a host; the Claude Code plugin and the DeepSeek Harness entry are configuration over them. `poly new` is the only place a model is called, and it never admits what it drafts. No engine change is needed; E9 is offered so that polyflow could check poly's certificate. The eight issues are ruled: workflows run on polyflow in M6, listed as ungated until they move to `poly-runtime` before v1 (S164), the language server serves both surfaces fully (S168), `poly new` spends no per-token API money (S169), and M6 closes on the Claude Code half (S170).
