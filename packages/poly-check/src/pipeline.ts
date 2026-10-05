@@ -217,10 +217,15 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   report.diagnostics.push(...checked.diagnostics);
   // Review B-F1: a used module the checker refuses refuses this check too, with its own errors, each at its own line;
   // poly-ref would otherwise explore machines the compiler rejects, and a configuration over them could read CLEAN.
+  // Polywatch: each points at this file's use that reaches the module (the first use, for one reached through another),
+  // since the report names this file, and its message names the module's own line.
+  const useDecls = module.decls.filter((d): d is A.UseDecl => d.kind === 'Use');
   for (const m of uses.program) {
     if (m === module) continue;
     const errors = checkModule(m, { program: uses.program }).diagnostics.filter((d) => d.severity === 'error');
-    report.diagnostics.push(...errors.map((d) => ({ ...d, message: `in module ${m.name}, which this program uses: ${d.message}` })));
+    const use = useDecls.find((d) => d.path.join('.') === m.name || d.path.slice(0, -1).join('.') === m.name) ?? useDecls[0];
+    const at = { module: module.name, ...(use ? { node: use.id, line: use.span?.line, col: use.span?.col } : {}) };
+    report.diagnostics.push(...errors.map((d) => ({ ...d, at, message: `in module ${m.name}${d.at.line !== undefined ? `, line ${d.at.line}` : ''}, which this program uses: ${d.message}` })));
   }
   report.effectKinds = [...checked.machines.values()].flatMap((f) => [...f.effects.values()].map((e) => ({ kind: effectKind(e), signature: effectSignature(e), effect: `${f.machine.name}.${e.name}`, line: e.span?.line, col: e.span?.col })));
   const refused = report.diagnostics.some((d) => d.severity === 'error');

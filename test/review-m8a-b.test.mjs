@@ -25,6 +25,10 @@ test('B-F1: a used module the checker refuses refuses the check that uses it, wi
   const r = await check(join(d, 'a.poly'), 'f1');
   assert.equal(r.verdict, 'REFUSED', JSON.stringify(all(r).map((x) => x.message)));
   assert.ok(r.diagnostics.some((x) => x.code === 'PL2101' && /module b/.test(x.message)));
+  // Polywatch: the error points at this file's use of b, where a reader of this report can find it, and names b's line.
+  const e = r.diagnostics.find((x) => x.code === 'PL2101');
+  assert.deepEqual([e.at.module, e.at.line], ['a', 2]);
+  assert.match(e.message, /line 7/);
 });
 
 test('B-F2, PS1.0: module b spawns b.c.X, the machine X of module b.c', { timeout: 120_000 }, async () => {
