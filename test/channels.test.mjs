@@ -95,7 +95,7 @@ test('PS15.4: inbound on an unknown thread creates the application, takes starts
     const body = await rt.putContent('where is my order');
     const r = await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-1' });
     assert.deepEqual([r.outcome, r.application, r.conversation], ['delivered', 'support:alice', 'support:alice/support']);
-    assert.deepEqual((await rt.getJournal('support:alice')).map((j) => [j.action, j.step_kind]), [['$create', 'accepted']]);
+    assert.deepEqual((await rt.getJournal('support:alice')).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Start', 'accepted']]);
     assert.deepEqual((await rt.getJournal('support:alice/support')).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Inbound', 'accepted']]);
     // A redelivered message is one step (PF8.2).
     await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-1' });
@@ -117,7 +117,7 @@ test('PS15.4: without creation declared, an inbound message for an unknown threa
   } finally { await rt.close(); }
 });
 
-test('PS15.4: a refused starts refuses the inbound message, thread-not-started', { timeout: 300_000 }, async () => {
+test('PS15.4: a refused starts refuses the inbound message, thread-not-started', { timeout: 300_000, todo: 'waiting on E13 (polyrun createInstance): until then a creation is refused creation-unavailable before starts runs' }, async () => {
   // Start is rejected until Enable has run, which an inbound message never does; Ticket is a service, so the check does
   // not call it stuck.
   let src = swap(SRC, 'machine Ticket {', 'service machine Ticket {');
@@ -150,4 +150,48 @@ test('PT21.1, S186: a channel prints and reads back on both surfaces to the same
   const back = readEmbedded(ts);
   assert.ok(back.module, JSON.stringify(back.diagnostics));
   assert.equal(digest(back.module), digest(a));
+});
+
+test('PS15.4, E13: until the kernel can create an instance, an inbound message that would create the application is refused, creation-unavailable, before the kernel is reached', { timeout: 300_000 }, async (t) => {
+  const { a } = await admitted('channels-unavailable', SRC);
+  const { rt } = await loaded(a, { std: STD });
+  try {
+    if (rt.kernelCreatesInstances) { t.skip('the vendored kernel has createInstance (E13): the real path is tested above'); return; }
+    const body = await rt.putContent('hello');
+    const r = await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-5' });
+    assert.deepEqual([r.outcome, r.reason], ['refused', 'creation-unavailable']);
+    assert.deepEqual(await rt.getJournal('support:alice'), []);
+    assert.deepEqual(await ingress(rt), [['refused', 'creation-unavailable']]);
+  } finally { await rt.close(); }
+});
+
+// A Ping that replies with no precondition on starts, so a reply can be sent before the conversation exists.
+const PING = swap(swap(SRC, '  action Start()\n', '  action Start()\n  action Ping()\n'), '  on Start {', "  on Ping {\n    require replies == 0 else reject \"replied\"\n    replies' = 1\n    emit support.reply(body: none)\n  }\n  on Start {");
+
+test('PS15.4: before starts has run, c names no instance: in a configuration the send is PL5404, and at run time it is dead-lettered on the sender\'s run', { timeout: 300_000 }, async () => {
+  const r = await check(`${PING}\nconfiguration early {\n  t : Ticket\n  inputs { t.Ping, t.Start }\n  bounds { transit 1, instances 1 }\n}\n`);
+  const early = r.configurations.find((c) => c.configuration === 'early');
+  const f = early?.diagnostics.find((d) => d.code === 'PL5404');
+  assert.ok(f && /names no instance/.test(f.message), text(r));
+  const { a } = await admitted('channels-early', PING);
+  const { rt } = await loaded(a, { std: STD });
+  try {
+    await rt.create('concierge.Ticket', { id: 't-1' });
+    assert.equal((await rt.dispatch('t-1', 'Ping')).stepKind, 'accepted');
+    await rt.advance();
+    const dead = (await rt.getJournal('t-1')).find((j) => j.action === '$undeliverable');
+    assert.ok(dead && /no instance 't-1\/support'/.test(dead.reject_reason), JSON.stringify(await rt.getJournal('t-1')));
+  } finally { await rt.close(); }
+});
+
+test('PS15.4: a thread whose starts never ran has no conversation and stays dead: every message on it is refused, thread-not-started', { timeout: 300_000 }, async () => {
+  const { a } = await admitted('channels-dead', SRC);
+  const { rt } = await loaded(a, { std: STD });
+  try {
+    // The host creates the application with no creation action, so starts never runs and no conversation exists.
+    await rt.create('concierge.Ticket', { id: 'support:bob' });
+    const body = await rt.putContent('hello');
+    for (const id of ['m-6', 'm-7']) assert.equal((await rt.inbound('support', { from: 'bob', body }, { messageId: id })).reason, 'thread-not-started');
+    assert.deepEqual(await ingress(rt), [['refused', 'thread-not-started'], ['refused', 'thread-not-started']]);
+  } finally { await rt.close(); }
 });

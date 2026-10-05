@@ -36,7 +36,7 @@ const BOOL: Ty = { k: 'bool' };
 const INT: Ty = { k: 'int', lo: -Infinity, hi: Infinity };
 const ERR: Ty = { k: 'error' };
 /** The reasons the runtime gives (PS3.2, S101, S127), which a module may not use (PL1207). */
-export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing', 'unknown-thread', 'thread-not-started'];
+export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing', 'unknown-thread', 'thread-not-started', 'creation-unavailable'];
 
 export function tyToString(t: Ty): string {
   switch (t.k) {

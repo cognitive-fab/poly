@@ -86,6 +86,8 @@ export interface GlobalLabel extends Label {
   instance: number;
   /** A send of this step to none (S29). */
   toNone: boolean;
+  /** PS15.4: the address a send named that names no instance, reported as a send to none. */
+  absent?: string;
   /** S60: the delivery of a creation message. */
   creation?: boolean;
 }
@@ -249,6 +251,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     sigma[k] = st.next;
     const next = [...mu];
     let toNone = false;
+    let absent: string | null = null;
     let over = false;
     let collision: { key: string; address: string } | null = null;
     // PS2.2: E in statement order, so a child exists before a send of the same step reaches it.
@@ -268,11 +271,13 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       if (x.type !== 'send') continue; // S61: other intents are completed only through declared inputs
       if (x.target === null) { toNone = true; continue; } // S29: nothing joins μ
       const t = index.get(x.target as string);
-      if (t === undefined || sigma[t] === null) throw new Error(`poly-ref: ${inst.name} sends to ${keyOf(x.target)}, which is no instance of the configuration`);
+      // PS15.4, S89: an address that names no instance (a channel's conversation before starts) takes nothing; it is
+      // reported as a send to none is.
+      if (t === undefined || sigma[t] === null) { toNone = true; absent = keyOf(x.target); continue; }
       // PS8.7: a send between two trust scopes waits for the gate.
       next.push({ ...(inst.scope !== instances[t].scope ? { target: t, action: x.action, data: x.data, gate: 'pending' as const, from: k } : { target: t, action: x.action, data: x.data }), ...(origin ? { origin } : {}) });
     }
-    const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone, ...(creation ? { creation } : {}) };
+    const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone, ...(absent ? { absent } : {}), ...(creation ? { creation } : {}) };
     const g: GlobalState = { sigma, mu: sortMu(next) };
     if (collision) return { label, outcome: { kind: 'collision', state: g, field: collision.address, value: collision.key } };
     if (over) return { label, outcome: { kind: 'bound', state: g, field: 'instances', value: N + 1 } };
@@ -426,7 +431,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     const key = `${instances[l.instance].machine.name}.${l.action}`;
     if (none.has(key)) continue;
     none.add(key);
-    findings.push(finding('PL5404', instances[l.instance].machine.handlers.get(l.action)?.id, `${instances[l.instance].name} sends to none on ${l.action}; the message goes nowhere (S29)`, [...pathTo(g, e.from), e], { property: key }));
+    findings.push(finding('PL5404', instances[l.instance].machine.handlers.get(l.action)?.id, l.absent ? `${instances[l.instance].name} sends to ${l.absent} on ${l.action}, an address that names no instance (a channel's conversation is spawned by starts, PS15.2); the message goes nowhere, and at run time it is dead-lettered (S89)` : `${instances[l.instance].name} sends to none on ${l.action}; the message goes nowhere (S29)`, [...pathTo(g, e.from), e], { property: key }));
   }
   // PS13.6: a quiescent state (μ empty, no declared input accepted) where a non-service instance is not terminal.
   const stuck = g.states.findIndex((s, i) => s.mu.length === 0

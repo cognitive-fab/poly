@@ -182,6 +182,18 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 
 **Ruled after M8b step 1 (2026-10-05).** The `ENOTEMPTY` on the frozen runner's workspace came first from the dry run (`test/m3-runner.test.mjs`) and then from `test/m3-environment.test.mjs`, so it is a defect of the test setup, not a fluke: the runner's workspace is `poly-m3-ws/T1-arm<a>-run<n>`, and three files ran arm 1 of T1 as run 0 (the dry run, which is frozen, `m3-environment` and `m3-after`) while `node --test` runs the files at once. Each test file now has run numbers of its own (`m3-environment` 910, `m3-after` 920 and 921, beside `m3-cleanup`'s 901 to 905 and `m3-runner`'s 9); the dry run keeps run 0. The runner is unchanged.
 
+## M8b step 1 accepted
+
+**Ruled (2026-10-05).** Step 1 is accepted, with both changes to PS15 (the key `c` in every handler, and the reworded refusal of a thread whose `starts` was refused).
+
+- **Until E13 lands**, `rt.inbound` on an unknown thread with creation declared is refused with the new reserved reason `creation-unavailable`, journaled on `runtime:ingress`, and never reaches the kernel's create. The todo test for the real path stays; a test for this refusal is added. The test of a refused `starts` waits on E13 too, since a creation no longer reaches `starts` before it; a thread created by the host with no `starts` shows the same refusal today.
+- **`c` before `starts` has run** names no instance: a send to it is refused as one to an address that names no instance (dead-lettered and journaled on the sender's run, S89; `PL5404` in a configuration). Tested both ways.
+- **E13 is approved**; the owner takes it in polyrun, from its specification in `plan-m8.md`.
+
+**Limits added.**
+- *A thread whose `starts` was refused stays dead:* the application exists with no conversation, and every later message on its thread is refused `thread-not-started`.
+- *Until E13*, no channel thread is created at run time (`creation-unavailable`).
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

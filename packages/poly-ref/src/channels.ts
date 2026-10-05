@@ -12,18 +12,16 @@ export interface ChannelReading {
   descriptors: Map<string, { application: string; conversation: string; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string }; peer: Record<string, string>; effectKind: string; pending: number; library: string }>;
 }
 
-const readings = new WeakMap<A.Module, ChannelReading>();
+const readings = new WeakMap<A.Module, { libraries: A.Module[]; reading: ChannelReading }>();
 
 /** PS15.0: a module with no channel means itself. */
 export function readChannels(module: A.Module, program: A.Module[]): ChannelReading {
-  const known = readings.get(module);
-  if (known) return known;
   const channels = module.decls.filter((d): d is A.Channel => d.kind === 'Channel');
-  if (!channels.length) {
-    const plain: ChannelReading = { module, conversations: [], program, descriptors: new Map() };
-    readings.set(module, plain);
-    return plain;
-  }
+  if (!channels.length) return { module, conversations: [], program, descriptors: new Map() };
+  // Polywatch: a reading is the module's with the libraries it was read against; another program is read again.
+  const libraries = channels.map((ch) => program.find((x) => x.name === `std.channels.${ch.channelKind}`)!);
+  const known = readings.get(module);
+  if (known && known.libraries.every((l, i) => l === libraries[i])) return known.reading;
   const decls: A.Decl[] = structuredClone(module.decls.filter((d) => d.kind !== 'Channel'));
   const conversations: A.Module[] = [];
   const descriptors: ChannelReading['descriptors'] = new Map();
@@ -89,7 +87,7 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
   }
   const expanded: A.Module = { ...module, decls };
   const reading: ChannelReading = { module: expanded, conversations, program: [...program.filter((x) => x.name !== module.name), expanded, ...conversations], descriptors };
-  readings.set(module, reading);
+  readings.set(module, { libraries, reading });
   return reading;
 }
 

@@ -14,6 +14,7 @@ import { capabilitiesFor, type Transports } from './capabilities.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import { RESERVED_MODULE, verifyRecord, type Certificate } from '@poly/core';
@@ -68,6 +69,17 @@ export interface WorkOrder { orderId: string; intent: string; instanceId: string
 
 /** S189: the runtime's own ledger run for the approvals drop folder; `runtime.*` is reserved for the runtime (S143). */
 export const APPROVALS_RUN = 'runtime:approvals';
+/** E13: the vendored polygraph's version, from its package.json beside the kernel's entry point. */
+function polygraphVersion(): string {
+  let dir = dirname(createRequire(import.meta.url).resolve('@cognitive-fab/polygraph/polyrun/src/index.mjs'));
+  for (let i = 0; i < 6; i++) {
+    const p = join(dir, 'package.json');
+    if (existsSync(p)) { const j = JSON.parse(readFileSync(p, 'utf8')) as { name?: string; version?: string }; if (j.name === '@cognitive-fab/polygraph' && j.version) return j.version; }
+    dir = dirname(dir);
+  }
+  return '0.0.0';
+}
+
 /** PS15.4: the runtime's own run, on which every inbound message's delivery or refusal is journaled. */
 export const INGRESS_RUN = 'runtime:ingress';
 
@@ -282,7 +294,16 @@ export class PolyRuntime {
    * (`unknown-thread`). Every refusal is journaled on `runtime:ingress` and changes no instance. A message is one step
    * however often it is delivered: its action id is `<channel>:<messageId>` (PF8.2).
    */
-  async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<{ outcome: 'delivered' | 'refused'; reason?: 'unknown-thread' | 'thread-not-started'; application: string; conversation: string }> {
+  /**
+   * E13: whether the vendored kernel runs a detached spawn (polyrun's createInstance intent), expected from polygraph
+   * 8.4.0. Before it, a channel's thread cannot be created at run time (PS15.4, creation-unavailable).
+   */
+  get kernelCreatesInstances(): boolean {
+    const [maj, min] = polygraphVersion().split('.').map(Number);
+    return maj > 8 || (maj === 8 && min >= 4);
+  }
+
+  async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<{ outcome: 'delivered' | 'refused'; reason?: 'unknown-thread' | 'thread-not-started' | 'creation-unavailable'; application: string; conversation: string }> {
     const d = this.verified.channels.find((c) => c.channel === channel);
     if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
     if (d.inbound.to !== 'conversation') throw new Error(`channel ${channel}: its descriptor routes inbound to ${d.inbound.to}, and PS15.4 routes it to the conversation`);
@@ -291,13 +312,15 @@ export class PolyRuntime {
     const key = d.thread.template.replace(/\{([^}]*)\}/g, (_, f: string) => { const v = fields[f]; if (typeof v !== 'string') throw new RefusedDispatch(`channel ${channel}: the thread field ${f} is not a string (PT21.1b)`, 'S140'); return v; });
     const application = `${channel}:${key}`;
     const conversation = `${application}/${channel}`;
-    const refuse = async (reason: 'unknown-thread' | 'thread-not-started') => {
+    const refuse = async (reason: 'unknown-thread' | 'thread-not-started' | 'creation-unavailable') => {
       this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
       await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId: opts.messageId, outcome: 'refused', reason }, this.now()); });
       return { outcome: 'refused' as const, reason, application, conversation };
     };
     if (!(await this.store.getInstance(application))) {
       if (!d.starts.onInbound) return refuse('unknown-thread');
+      // Until E13 the kernel cannot spawn the conversation, so a creation is refused before it reaches the kernel.
+      if (!this.kernelCreatesInstances) return refuse('creation-unavailable');
       try { await this.create(d.application, { id: application, creation: { action: d.starts.action, data: {} } }); } catch (e) { if (e instanceof RefusedDispatch) return refuse('thread-not-started'); throw e; }
       const started = (await this.getJournal(application)).find((j) => j.action === d.starts.action);
       if (!started || started.step_kind !== 'accepted') return refuse('thread-not-started');
