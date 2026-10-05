@@ -372,7 +372,7 @@ S178 is ruled with the PS5.2 extension written and ruled before any code. The te
 
 ### The code review of M8a
 
-Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workflow tools, `poly run --mcp`, approvals and the store lock; B: `use`; C: `Content`; D: `never`), and each reproduced every finding with a script under `.poly/review-m8a-a` to `review-m8a-d`. They found 22. Twenty-one are fixed, each with a test in `test/review-m8a-a.test.mjs` to `review-m8a-d.test.mjs` that failed on the tree before its fix; one (B-F6) is a question for the owner.
+Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workflow tools, `poly run --mcp`, approvals and the store lock; B: `use`; C: `Content`; D: `never`), and each reproduced every finding with a script under `.poly/review-m8a-a` to `review-m8a-d`. They found 22. Each is fixed, with a test in `test/review-m8a-a.test.mjs` to `review-m8a-d.test.mjs` that failed on the tree before its fix; B-F6 after the owner's ruling.
 
 | Finding | What was wrong | Fix |
 |---|---|---|
@@ -384,6 +384,7 @@ Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workfl
 | B-F3 | two files declaring the checked module were not refused when another module used it | `PL1002`, naming both files |
 | B-F4 | a field whose enum another module declares was compared in the view module's namespace | read only with `is`, in its own module's types; any other use is `PL0901` until S190 |
 | B-F5 | a dotted module's machine could not name its group of detached instances | the whole member chain names the group, in the checker and in poly-ref |
+| B-F6 | `use m.M` made every machine of `m` nameable | as ruled, `use m.M` admits `m.M` only; two `use` clauses admit both, and `m`'s own machines still name each other |
 | C-F1 | a `map` of `Content` in a record field or a union payload escaped `PL1209`, and check counted too few representatives (CLEAN on a machine with a reachable violation) | `PL1209` through maps too |
 | C-F2 | an effect handler's reply could forge `$content` (and `$claims`, `$lineage`) on its completion | the reserved keys are dropped from a reply |
 | C-F3 | translation validation probed the content row only with `none`, which the runtime never marks | the probe's data names a body; the broken lowering `content-row-on-none` is in the explicit list and caught |
@@ -398,7 +399,7 @@ Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workfl
 | D-F6 | poly-ref read a filter constant named like a field as the field, and `T.C` was refused | a constant is read with no state; `T.C` is a constant |
 | D-F7 | two findings ruled out left the stage FINDINGS with none listed | the stage's verdict over what is left |
 
-**For the owner.** B-F6: `use m.M` makes every machine of `m` nameable, as PT as built says; the reviewer read the ruled proposal ("`use m.M` (one machine) … admits `m.M` and nothing else") as admitting that machine alone. D-F2: PS5.2 says `k` is "an effect kind", PT2.2 says it is an effect's name; the code takes the name and now refuses a name whose kind is shared. Both wait for a ruling, and nothing was changed beyond the refusal.
+**Ruled after the review (`decisions-m8.md`).** B-F6: `use m.M` admits `m.M` only, and PT's as-built text says so. D-F2: `k` is the effect's name (PT2.2), and PS5.2 now says so; the refusal of a name whose kind is shared stays, and is a limit.
 
 ### The M8a record
 
@@ -409,7 +410,7 @@ Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workfl
 | 3 | `use` within a project and `std/` (S176, PS1.0) | 85402e5, ef6f1ad, 2b86562 |
 | 4 | `Content` (S180, PS1.4a, PS4.1f), the row order of PS3.2 as ruled, and m3-isolation's folder deletion | 45c1fa9, 239b9e3, 52179de, b8f02ff, 1916c0e, eee2a8c |
 | 5 | `never emit … while` (S178, PS5.2, PS5.2a) | 6d815b1, f5df1f1, 6e0920f |
-| Review | 22 findings, 21 fixed, one for the owner (above) | ac28361, d923503 |
+| Review | 22 findings, all fixed; B-F6 and PS5.2's wording after the owner's ruling | ac28361, d923503, and the commit of the rulings |
 
 **The closing gate, from a clean build.** It ran at d923503 from 11:27 to 11:40 on 5 October 2026, after `npm run clean`, as `npm test` (build, boundary check, the suite, then `test/after/`). Before it started no simulation and no other test run was on the machine: the process list held language servers, MCP servers and idle sessions only. A watcher listed every minute, 14 times, each node or python process that was a test run or a simulation and did not descend from the gate: it found none, apart from the idle TypeScript language servers of an editor open on another folder, matched by that folder's name.
 
@@ -425,7 +426,7 @@ The skipped test is S152's OpenShell enforcement (no gateway configured). The fo
 
 **Limits, stated.**
 - A field whose enum another module declares is read in a configuration only with `is` (`PL0901` otherwise) until S190 is ruled, before M8b step 6.
-- `emits` cannot tell apart two effects of one kind (`PL1201`), since an intent carries its kind.
+- `emits` cannot tell apart two effects of one kind (`PL1201`), since an intent, a witness and the journal carry the kind and not the name.
 - A configuration rules out only a never finding with no constrained witness; one whose machine no configuration includes stays a finding, marked `environment: unconstrained`.
 - The store must be on a local disk, and has one name: a store file with a hard link is refused.
 - Taint, channels and any decision that reads a body are M8b's or later (S180, S181).

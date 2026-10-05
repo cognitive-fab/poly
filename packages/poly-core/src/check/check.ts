@@ -206,7 +206,8 @@ class Checker {
   /** S176: the program's modules by name, the module names are spelled from, and the modules this one uses. */
   private readonly program: Map<string, A.Module>;
   private readonly view: string;
-  private readonly used = new Set<string>();
+  /** S176 (B-F6 ruling): each used module, with the machines its uses admit, or null where `use m` admits them all. */
+  private readonly used = new Map<string, Set<string> | null>();
   /** S176: the facts of used modules' machines, by qualified name, computed once when a configuration reads them. */
   private readonly foreignFacts = new Map<string, MachineFacts | null>();
 
@@ -214,7 +215,13 @@ class Checker {
     this.env = buildTypeEnv(module);
     this.program = new Map((opts.program ?? []).map((m) => [m.name, m]));
     this.view = opts.view ?? module.name;
-    for (const d of module.decls) if (d.kind === 'Use') this.used.add(usedModuleOf(d.path, opts.program ?? []).module);
+    for (const d of module.decls) {
+      if (d.kind !== 'Use') continue;
+      const u = usedModuleOf(d.path, opts.program ?? []);
+      const had = this.used.get(u.module);
+      if (u.machine === null || had === null) this.used.set(u.module, null);
+      else this.used.set(u.module, new Set([...(had ?? []), u.machine]));
+    }
   }
 
   /** PS1.0: a machine's name as the view spells it: `M` in the view's own module, `m.M` in any other. */
@@ -224,6 +231,14 @@ class Checker {
   private decode(name: string): { mod: string; machine: string } {
     const i = name.lastIndexOf('.');
     return i < 0 ? { mod: this.view, machine: name } : { mod: name.slice(0, i), machine: name.slice(i + 1) };
+  }
+
+  /** S176: whether this module may name machine `name` of module `mod`: its own, or one its uses admit. */
+  private admits(mod: string, name: string): boolean {
+    if (mod === this.module.name) return true;
+    if (!this.used.has(mod)) return false;
+    const s = this.used.get(mod);
+    return s === null || s!.has(name);
   }
 
   private moduleNamed(mod: string): A.Module | undefined { return mod === this.module.name ? this.module : this.program.get(mod); }
@@ -244,6 +259,8 @@ class Checker {
     const mod = parts.length > 1 ? parts.slice(0, -1).join('.') : this.module.name;
     const name = parts[parts.length - 1];
     if (mod !== this.module.name && !this.used.has(mod)) { report('PL1001', `${what}: module ${mod} is not used here; write \`use ${mod}\` to name its machines (S176)`); return null; }
+    // S176, as ruled (review B-F6): `use m.M` admits m.M and nothing else of m; m's own machines still name each other.
+    if (!this.admits(mod, name)) { report('PL1001', `${what}: ${mod}.${name} is not used here; this module uses ${[...(this.used.get(mod) ?? [])].map((x) => `${mod}.${x}`).join(' and ')} only; write \`use ${mod}.${name}\` (S176)`); return null; }
     const decl = this.moduleNamed(mod)?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === name);
     if (!decl) { report('PL1001', `${what}: no machine ${name} in module ${mod}`); return null; }
     return { name: this.canon(mod, name), decl, mod };
@@ -572,7 +589,7 @@ class Checker {
     // S176: the group of a used module's machine's detached instances is named as the machine is, m.M.
     // Review B-F5: the module may be dotted (std.channels.M[*]), so the whole member chain is the group's name.
     const qualified = e.kind === 'Index' && e.object.kind === 'Member' ? dottedName(e.object) : null;
-    const groupName = e.kind === 'Index' ? (e.object.kind === 'Name' ? e.object.name : qualified && this.used.has(qualified.slice(0, qualified.lastIndexOf('.'))) && !scope.locals.has(qualified.split('.')[0]) ? qualified : null) : null;
+    const groupName = e.kind === 'Index' ? (e.object.kind === 'Name' ? e.object.name : qualified && this.admits(qualified.slice(0, qualified.lastIndexOf('.')), qualified.slice(qualified.lastIndexOf('.') + 1)) && !scope.locals.has(qualified.split('.')[0]) ? qualified : null) : null;
     if (e.kind === 'Index' && groupName !== null) {
       const inst = cfg.instances.get(groupName);
       if (!inst) return null;

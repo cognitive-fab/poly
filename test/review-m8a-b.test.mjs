@@ -70,3 +70,24 @@ test('B-F5, PS1.0: a dotted module\'s machine names its group of detached instan
   assert.equal(r.verdict, 'CLEAN', `${r.error ?? ''} ${JSON.stringify(all(r).map((x) => x.message))}`);
   assert.equal(r.configurations[0].instance.states, 5);
 });
+
+test('B-F6, S176 as ruled: use m.M admits m.M only; M\'s own references within m still resolve; two uses admit both', { timeout: 180_000 }, async () => {
+  const ledger = 'module ledger\n\nservice machine Account {\n  state { n: 0..1 = 0 }\n  action Credit()\n  on Credit {\n    require n == 0 else reject "full"\n    n\' = 1\n    spawn detached Vault as v -> Lock()\n  }\n}\n\nservice machine Vault {\n  state { n: 0..1 = 0 }\n  action Lock()\n  on Lock { require n == 0 else reject "locked"   n\' = 1 }\n}\n';
+  const teller = (uses, ref) => `module teller\n${uses}\n\nmachine Till {\n  state { done: bool = false   v: Ref<ledger.${ref}> = none }\n  terminal done\n  action Open(v: Ref<ledger.${ref}>)\n  on Open(v) { require !done else reject "d"   require v != none else reject "none"   v' = v   done' = true }\n}\n\nconfiguration c {\n  t : Till\n  a : ledger.Account\n  inputs { a.Credit }\n  bounds { transit 2, instances 3 }\n}\n`;
+  // Naming ledger.Vault after use ledger.Account is refused.
+  let d = dir('f6-refused', [['ledger.poly', ledger], ['teller.poly', teller('use ledger.Account', 'Vault')]]);
+  let r = await check(join(d, 'teller.poly'), 'f6-refused');
+  assert.ok(r.diagnostics.some((x) => x.code === 'PL1001' && /ledger\.Vault/.test(x.message)), JSON.stringify(r.diagnostics.map((x) => x.message)));
+  // Account's own spawn of Vault, within ledger, still resolves when teller composes Account.
+  d = dir('f6-own', [['ledger.poly', ledger], ['teller.poly', teller('use ledger.Account', 'Account')]]);
+  r = await check(join(d, 'teller.poly'), 'f6-own');
+  // Till is never opened here, so the configuration is stuck (PL5402); what matters is that it is checked at all.
+  assert.ok(!r.error && r.verdict !== 'REFUSED' && !all(r).some((x) => x.code === 'PL1001'), `${r.error ?? ''} ${JSON.stringify(all(r).map((x) => x.message))}`);
+  assert.equal(r.configurations[0].stages[0].status, 'ran');
+  assert.ok(r.configurations[0].instance.states > 1);
+  // Two use clauses admit both machines.
+  d = dir('f6-both', [['ledger.poly', ledger], ['teller.poly', teller('use ledger.Account\nuse ledger.Vault', 'Vault')]]);
+  r = await check(join(d, 'teller.poly'), 'f6-both');
+  assert.ok(!all(r).some((x) => x.code === 'PL1001'), JSON.stringify(all(r).map((x) => x.message)));
+  assert.notEqual(r.verdict, 'REFUSED');
+});

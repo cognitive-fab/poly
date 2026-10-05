@@ -130,6 +130,15 @@ The lemma is written as PS4.1f, since PS4.1d already names the unconstrained env
 
 Seeded faults: a never dropped, its `while` inverted, a field filter dropped, and `while` evaluated on the post-state. After step 5, M8a's steps are done: the M8a record, the review, and the closing gate on a quiet machine, with the failure-count totals.
 
+## M8a accepted, and the two questions of the review
+
+**Ruled (2026-10-05).** M8a is accepted.
+
+- **B-F6.** `use m.M` admits `m.M` only, as ruled for S176. The resolver and PT's as-built text are fixed. `m`'s own machines still name each other in `m`'s source; the using module names only `M`. Tested first: naming `m.N` after `use m.M` is refused (`PL1001`); `M`'s spawn of `m.N` still works when the using module composes `M`; two `use` clauses admit both. The review table lists it as fixed.
+- **PS5.2.** `k` is the effect's name (PT2.2), and PS5.2 and PS5.2a now say so. The `PL1201` refusal of a name whose effect shares its kind with another stays.
+
+**Limits added.** `emits` cannot tell apart two effects of one kind: an intent, a witness and the journal show only the kind, so `emits` on either effect is `PL1201`. An author who needs the distinction gives the two effects different kinds.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.
