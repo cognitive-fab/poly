@@ -95,3 +95,53 @@ test('PF9.3: a package on a check path that loads poly new is refused by the bou
   assert.deepEqual(violationsOf('poly-check', 'packages/poly-check/src/cli.ts', "const pkg = '@poly/new';\n"), []);
   assert.deepEqual(checkRepository(ROOT), []);
 });
+
+// decisions-m6.md (the provider fixes need tests): the headless provider's launcher, with a stand-in claude on a PATH the
+// test builds, never the real CLI and never a model. Each runs in a child process, whose environment carries no key
+// variable, so the provider's refusal does not stop it; with a stand-in key variable present, the stand-in never starts.
+async function launcher(mode, description, opts = {}) {
+  const { mkdtempSync, writeFileSync, chmodSync, existsSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { delimiter } = await import('node:path');
+  const bin = mkdtempSync(join(tmpdir(), 'poly-fake-claude-'));
+  const fake = join(ROOT, 'test', 'fixtures', 'fake-claude-cli.mjs');
+  if (process.platform === 'win32') writeFileSync(join(bin, 'claude.cmd'), `@"${process.execPath}" "${fake}" %*\r\n`);
+  else { writeFileSync(join(bin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`); chmodSync(join(bin, 'claude'), 0o755); }
+  const started = join(bin, 'started');
+  const code = `
+    const { claudeCliProvider } = await import('@poly/new');
+    const p = claudeCliProvider(${opts.keyVariables ? `{ keyVariables: ${JSON.stringify(opts.keyVariables)} }` : ''});
+    try { const text = await p.draft({ description: process.env.POLY_TEST_DESCRIPTION, grammar: '' }); console.log('DRAFTED ' + JSON.stringify(text)); }
+    catch (e) { console.log('REJECTED ' + e.message); }
+    console.log('ALIVE');
+  `;
+  const env = { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, FAKE_CLAUDE_MODE: mode, FAKE_CLAUDE_STARTED: started, POLY_TEST_DESCRIPTION: description, ...(opts.env ?? {}) };
+  for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete env[k];
+  try {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: ROOT, encoding: 'utf8', env, timeout: 60_000 });
+    return { ...r, started: existsSync(started) ? readFileSync(started, 'utf8') : null };
+  } finally { rmSync(bin, { recursive: true, force: true }); }
+}
+
+test('S169: the headless provider starts the claude on the PATH, a .cmd shim on Windows, with the prompt on stdin', async () => {
+  const r = await launcher('echo', 'a turnstile with "quotes" & a %PATH% and\nsecond line');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /DRAFTED /, r.stdout + r.stderr);
+  const text = JSON.parse(r.stdout.match(/DRAFTED (.*)/)[1]);
+  assert.ok(text.includes('a turnstile with "quotes" & a %PATH% and\nsecond line'), 'the prompt reached the CLI on stdin, unchanged');
+  assert.equal(r.started, '-p --output-format text', 'the arguments are fixed words; the prompt is not among them');
+});
+
+test('S169: a CLI that exits before reading its prompt ends the draft by its exit code, and the process survives', async () => {
+  const r = await launcher('exit', 'x'.repeat(4 * 1024 * 1024));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /REJECTED .*exited 3/, r.stdout + r.stderr);
+  assert.match(r.stdout, /ALIVE/);
+});
+
+test('S169: with a stand-in key variable present, the stand-in CLI is never started', async () => {
+  const r = await launcher('echo', 'x', { keyVariables: ['POLY_TEST_STANDIN_KEY'], env: { POLY_TEST_STANDIN_KEY: 'stand-in' } });
+  assert.match(r.stdout, /REJECTED .*POLY_TEST_STANDIN_KEY/);
+  assert.equal(r.started, null);
+  assert.doesNotMatch(r.stdout + r.stderr, /stand-in"/);
+});
