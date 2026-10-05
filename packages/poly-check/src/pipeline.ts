@@ -14,7 +14,6 @@
 import { readFileSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { importArtefact } from './import-artefact.js';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
@@ -238,7 +237,15 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // PT14, S168: stages 0 to 2 only, as the language server asks on an edit: no configuration and no policy is checked,
   // and a report that would read CLEAN is INCONCLUSIVE, so it never reads as the whole check (PA0.4).
   if (opts.through === 2) {
+    // Polywatch on step 7: each configuration and policy is listed as not run, and nothing whose later stages did not
+    // run reads CLEAN: not the machines, not the configurations, not the report.
+    const reason = 'stages 3 and later run on save or on request (PT14)';
+    for (const d of module.decls) {
+      if (d.kind === 'Configuration') report.configurations.push({ configuration: d.name, stages: [{ stage: 'configuration', status: 'not-run', engine: '', reason }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE' });
+      if (d.kind === 'Policy') report.policies.push({ scope: d.scope, policies: [d.name], stages: [{ stage: 'policy-types', status: 'not-run', engine: '', reason }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE', reads: [] });
+    }
     finish(report, module);
+    for (const m of [...report.machines, ...report.configurations, ...report.policies]) if (m.verdict === 'CLEAN') m.verdict = 'INCONCLUSIVE';
     if (report.verdict === 'CLEAN') { report.verdict = 'INCONCLUSIVE'; report.exit = EXIT_CODES.INCONCLUSIVE; }
     return report;
   }

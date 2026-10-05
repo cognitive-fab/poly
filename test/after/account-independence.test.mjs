@@ -4,13 +4,17 @@
 // (plan-m5.md section 11). This test runs every test file that loads the runner with the home directory pointed at a
 // stand-in folder it creates, once with an account the runner refuses and once with none, and requires each run to
 // pass. A test that reaches the live account fails here whatever the live account holds.
+//
+// It runs after the rest of the suite (test/after/, decisions-m6.md): beside it, each child run took about three times
+// as long as alone, and the gap grew with the suite (measured 4 October: alone 231 s each; in the gate 663 s for
+// both, then 685 s and 689 s).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
-import { ROOT } from './helpers.mjs';
+import { ROOT } from '../helpers.mjs';
 
 /** The test files that load the M3 runner, found by what they import, so a new one is covered too. */
 function runnerTests() {

@@ -10,6 +10,7 @@
 //     returns the command's JSON (S171).
 //
 // The server knows no host: an editor or an agent harness starts it, configured by a host adapter (adapters/).
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -24,10 +25,12 @@ export interface LspOptions { stdin?: NodeJS.ReadableStream; stdout?: NodeJS.Wri
 
 const SEVERITY: Record<string, number> = { error: 1, finding: 1, warning: 2, note: 3 };
 
-/** A poly diagnostic as the editor shows it: at poly check's line and column (1-based there, 0-based here). */
-function toLsp(d: Diagnostic): LspDiagnostic | null {
-  if (!d.at.line) return null;
-  const at = { line: d.at.line - 1, character: Math.max(0, (d.at.col ?? 1) - 1) };
+/**
+ * A poly diagnostic as the editor shows it: at poly check's line and column (1-based there, 0-based here). One poly
+ * check reports with no position is shown at the top of the file, never dropped (polywatch on step 7).
+ */
+export function toLsp(d: Diagnostic): LspDiagnostic {
+  const at = d.at.line ? { line: d.at.line - 1, character: Math.max(0, (d.at.col ?? 1) - 1) } : { line: 0, character: 0 };
   return { range: { start: at, end: at }, severity: SEVERITY[d.severity] ?? 1, code: d.code, source: 'poly', message: d.message, ...(d.fixes?.length ? { data: { fixes: d.fixes } } : {}) };
 }
 
@@ -37,8 +40,11 @@ export function serveLsp(opts: LspOptions = {}): Promise<void> {
   const stdin = opts.stdin ?? process.stdin;
   const stdout = opts.stdout ?? process.stdout;
   const docs = new Map<string, { path: string; text: string }>();
-  // The builds of the editor's checks go here, never into the project's own .poly/build.
-  let buildRoot = opts.root ?? join(tmpdir(), 'poly-lsp');
+  // The builds of the editor's checks go here, never into the project's own .poly/build. With no workspace, a folder
+  // of this server's own: a shared one would let two servers delete each other's lowerings (polywatch on step 7).
+  const own = opts.root ? null : mkdtempSync(join(tmpdir(), 'poly-lsp-'));
+  if (own) process.on('exit', () => rmSync(own, { recursive: true, force: true }));
+  let buildRoot = opts.root ?? own!;
   const served = COMMANDS.filter((c) => c.lsp);
 
   const write = (m: unknown) => {
@@ -55,7 +61,7 @@ export function serveLsp(opts: LspOptions = {}): Promise<void> {
     let ds: LspDiagnostic[] = [];
     try {
       const r = await checkFile(doc.path, { root: buildRoot, text: doc.text, ...(full ? {} : { through: 2 as const }) });
-      ds = diagnosticsOf(r).map(toLsp).filter((x): x is LspDiagnostic => x !== null);
+      ds = diagnosticsOf(r).map(toLsp);
       if (r.error) ds.push({ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, severity: 1, code: 'ERROR', source: 'poly', message: `the check stopped: ${r.error}` });
     } catch (e) {
       ds = [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, severity: 1, code: 'ERROR', source: 'poly', message: `the check stopped: ${(e as Error).message}` }];

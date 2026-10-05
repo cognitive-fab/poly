@@ -130,3 +130,41 @@ test('S171: every command the registry gives the language server is an executabl
     await assert.rejects(c.request('workspace/executeCommand', { command: 'poly.approve', arguments: [{}] }), /unknown command/);
   } finally { await c.close(); }
 });
+
+// Polywatch on step 7: a check of stages 0 to 2 lists every configuration and policy as not run, and no machine of it
+// reads CLEAN, since its later stages did not run (PA0.4).
+test('S168: a check through stage 2 lists configurations and policies as not run, and no machine is CLEAN', async () => {
+  const r = await checkFile(join(ROOT, 'examples', 'checkout', 'checkout.poly'), { root: join(DIR, 'through'), through: 2 });
+  assert.notEqual(r.verdict, 'CLEAN');
+  assert.ok(r.machines.length > 0 && r.machines.every((m) => m.verdict !== 'CLEAN'), JSON.stringify(r.machines.map((m) => m.verdict)));
+  assert.ok(r.configurations.length > 0, 'the configuration is listed');
+  assert.ok(r.configurations.every((c) => c.stages.every((s) => s.status === 'not-run') && c.verdict !== 'CLEAN'), JSON.stringify(r.configurations));
+  const p = await checkFile(join(ROOT, 'conformance', 'm5', 'orders.policy.poly'), { root: join(DIR, 'through'), through: 2, program: [] });
+  assert.ok(p.policies.length > 0 && p.policies.every((x) => x.stages.every((s) => s.status === 'not-run')), JSON.stringify(p.policies));
+});
+
+// Polywatch on step 7: a diagnostic poly check reports with no line is shown at the top of the file, never dropped.
+test('S168: a diagnostic with no line is published at the top of the file', async () => {
+  const { toLsp } = await import('@poly/agent');
+  const d = toLsp({ code: 'PL2501', name: 'X', severity: 'error', stage: 'model-check', at: { module: 'm' }, message: 'an engine finding with no position' });
+  assert.deepEqual(d?.range, { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } });
+  assert.equal(d.code, 'PL2501');
+});
+
+// Polywatch on step 7: a server started with no workspace builds in a folder of its own, so two servers never
+// delete or overwrite each other's lowerings in a shared temporary folder.
+test('S168: a server with no workspace builds in its own folder, not a shared one', { timeout: 120_000 }, async () => {
+  const { tmpdir } = await import('node:os');
+  const { existsSync } = await import('node:fs');
+  const shared = join(tmpdir(), 'poly-lsp', '.poly', 'build', 'brief.Brief');
+  rmSync(join(tmpdir(), 'poly-lsp'), { recursive: true, force: true });
+  const c = lspClient(process.execPath, [CLI, 'lsp'], { cwd: ROOT });
+  try {
+    await c.request('initialize', { processId: null, rootUri: null, capabilities: {} });
+    c.notify('initialized', {});
+    const path = join(ROOT, 'conformance', 'm6', 'brief.poly');
+    open(c, path, readFileSync(path, 'utf8'));
+    await published(c, path);
+    assert.equal(existsSync(shared), false, 'nothing is built in the shared poly-lsp folder');
+  } finally { await c.close(); }
+});

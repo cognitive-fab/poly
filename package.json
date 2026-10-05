@@ -26,7 +26,7 @@
     "build": "tsc -b",
     "clean": "tsc -b --clean",
     "check:boundaries": "node scripts/check-boundaries.mjs",
-    "test": "npm run build && npm run check:boundaries && node --test \"packages/*/dist/test/*.test.js\" \"test/*.test.mjs\""
+    "test": "npm run build && npm run check:boundaries && node --test \"packages/*/dist/test/*.test.js\" \"test/*.test.mjs\" && node --test \"test/after/*.test.mjs\""
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
