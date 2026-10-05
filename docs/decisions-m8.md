@@ -104,6 +104,19 @@ The lemma is written as PS4.1f, since PS4.1d already names the unconstrained env
 
 **A test defect under parallel load.** `test/m3-isolation.test.mjs`, "markers in the owner's own CLAUDE.md, settings and skills never reach the arm", failed once in the full suite (1,534 tests) with `EPERM` when deleting its temporary home, and passed alone. Reproduced: a folder that a running child process has as its working folder cannot be deleted on Windows (`EPERM`). The fix follows the runner's cleanup (37beede): the folder is deleted with bounded retries (20, 250 ms apart, by the promise form of `rm`, since `rmSync`'s retries block the event loop and all failed in the reproduction), and the test fails only if the folder is still there afterwards. It is a defect of the test, not of the runner, which stays frozen. Two other M3 tests failed once each in one later full run and passed alone (12 of 12): `test/m3-environment.test.mjs` ended with exit code 3221226505 (0xC0000409, a native crash of the test process), and the dry run in `test/m3-runner.test.mjs` hit `ENOTEMPTY` deleting the shared run-0 workspace inside the frozen runner's `makeWorkspace`. Neither is touched by this change, and neither is fixed here: the second is in the frozen runner. Both are listed for the owner. The final full run had no failure (1,541 tests: 1,536 passed, 1 skipped, 4 waiting).
 
+## Step 4 follow-up accepted, and the two M3 failures under load
+
+**Ruled (2026-10-05).** The row order, the extended probe, the guard defect and the m3-isolation fix are accepted. The two M3 failures seen under load are not fixed now, since the runner is frozen: the crash of `test/m3-environment.test.mjs` (exit code 3221226505, 0xC0000409) and `ENOTEMPTY` in the frozen runner's `makeWorkspace` during the dry run of `test/m3-runner.test.mjs`. Every occurrence is counted in each full run until M8a closes, and the count is brought to the owner then.
+
+**How a run is counted.** A full run is the whole suite (`packages/*/dist/test/*.test.js`, `test/*.test.mjs`, `test/after/*.test.mjs`) in one `node --test`. In its TAP output, a crash is a `not ok` line naming `m3-environment` and a dry-run failure is a `not ok` line naming "the dry run" whose error is `ENOTEMPTY`. A run that excludes the M3 tests is not counted.
+
+| Full run | Tests | m3-environment crash | dry run ENOTEMPTY |
+|---|---|---|---|
+| step 4, first (before 239b9e3) | 1,534 | 0 | 0 |
+| step 4 follow-up, second | 1,535 | 1 | 1 |
+| step 4 follow-up, final (b8f02ff) | 1,541 | 0 | 0 |
+| **Total, 3 runs** | | **1** | **1** |
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.
