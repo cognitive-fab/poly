@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "properties": {
+    "host": {
+      "type": "string",
+      "description": "the host"
+    },
+    "description": {
+      "type": "string",
+      "description": "what the entries are"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "where the host reads the file"
+          },
+          "content": {
+            "type": "string",
+            "description": "the file"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "host",
+    "files",
+    "notes"
+  ]
+}

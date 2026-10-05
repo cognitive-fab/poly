@@ -1,0 +1,26 @@
+{
+  "description": "The project's MCP entries for Claude Code: poly's own tools, and polyflow's server over the project's lowered workflows (PT10, AC5). Claude Code reads them from the project's .mcp.json.",
+  "files": [
+    {
+      "path": "${PROJECT}/.mcp.json",
+      "json": {
+        "mcpServers": {
+          "poly": { "command": "poly", "args": ["mcp"] },
+          "poly-workflows": {
+            "command": "node",
+            "args": ["${POLY_ROOT}/vendor/polyflow/bin/polyflow-mcp.mjs"],
+            "env": {
+              "POLYFLOW_WORKFLOWS": "${PROJECT}/.poly/build/workflows",
+              "POLYFLOW_POLYRUN": "${POLY_ROOT}/vendor/polygraph",
+              "POLYFLOW_DB": "${PROJECT}/.poly/polyflow.sqlite"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "notes": [
+    "The plugin (the language server and the skill): claude plugin marketplace add ${POLY_ROOT}/adapters, then claude plugin install poly@poly.",
+    "Workflows run on polyflow, outside poly's gate (S164): run poly check first, so .poly/build/workflows holds the checked descriptors."
+  ]
+}

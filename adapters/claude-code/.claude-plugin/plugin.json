@@ -1,0 +1,13 @@
+{
+  "name": "poly",
+  "version": "0.0.0",
+  "description": "poly for Claude Code: the poly MCP tools, the poly language server for .poly files, and a skill for writing and checking poly. Configuration only: it launches poly mcp and poly lsp, which must be on the PATH.",
+  "author": { "name": "Cognitive Fab" },
+  "license": "Apache-2.0",
+  "mcpServers": {
+    "poly": { "command": "poly", "args": ["mcp"] }
+  },
+  "lspServers": {
+    "poly": { "command": "poly", "args": ["lsp"], "extensionToLanguage": { ".poly": "poly" } }
+  }
+}

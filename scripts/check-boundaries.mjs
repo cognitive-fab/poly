@@ -10,6 +10,9 @@
 //    @poly/lower, @poly/embed or @poly/check, ever.
 // 2. No language-model call on a check or decision path. No package may import
 //    a model SDK, and no check package may call fetch or open a socket.
+// 3. A host-neutral core with thin host adapters (S167, M6). No package names a host or imports a host's SDK
+//    (an MCP or language-server SDK, an editor's or an agent harness's API); what a host launches lives under
+//    adapters/<host>/, and an adapter is configuration only (.json and .md files), never code.
 //
 // A file that cannot be read is an error, never a pass (no silent clean).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -20,6 +23,10 @@ const MODEL_SDKS = [/^@anthropic-ai\//, /^openai$/, /^@openai\//, /^@google\/gen
 const NETWORK_MODULES = ['node:http', 'node:https', 'node:net', 'node:tls', 'node:dgram', 'http', 'https', 'net', 'tls', 'dgram'];
 const PROCESS_MODULES = ['node:child_process', 'child_process', 'node:worker_threads', 'worker_threads'];
 const REF_ALLOWED = [/^node:/, /^@cognitive-fab\/sam-pattern$/];
+// Rule 3: host SDKs, and the names of the hosts an adapter serves.
+const HOST_SDKS = [/^@modelcontextprotocol\//, /^vscode-languageserver/, /^vscode-jsonrpc/, /^vscode$/, /^@anthropic-ai\/claude-code/, /^@anthropic-ai\/claude-agent-sdk/];
+const HOST_NAMES = /['"`](claude-code|deepseek-harness|dsh|dsh-mcp-client|cordis\.yml)['"`]/;
+const ADAPTER_FILES = /\.(json|md)$/;
 
 // Every static import, re-export, dynamic import and require, with whether it is type-only.
 const IMPORT_RE = /(^|[\n;])\s*(import|export)\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
@@ -63,6 +70,8 @@ export function violationsOf(pkg, file, text) {
       if (!REF_ALLOWED.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} poly-ref imports '${imp.spec}', which is outside its boundary`);
     }
   }
+  for (const imp of importsOf(text)) if (HOST_SDKS.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} imports host SDK '${imp.spec}' (the core is host-neutral, S167)`);
+  if (HOST_NAMES.test(text)) v.push(`${file} names a host (${HOST_NAMES.exec(text)[1]}); a host's name belongs in adapters/, never in the core (S167)`);
   if (/\bfetch\s*\(/.test(text)) v.push(`${file} calls fetch (no network or model call on a check path)`);
   // Review finding P8: indirect routes. A subprocess or a computed global can reach the network, and a
   // require made at run time, a template literal or a concatenated name can reach the compiler.
@@ -102,7 +111,19 @@ export function checkRepository(root) {
       violations.push(...violationsOf(pkg, relative(root, file).split(sep).join('/'), readFileSync(file, 'utf8')));
     }
   }
+  // Rule 3: an adapter is configuration only.
+  const adapters = join(root, 'adapters');
+  for (const file of everyFile(adapters)) {
+    const name = relative(root, file).split(sep).join('/');
+    if (!ADAPTER_FILES.test(file)) violations.push(`${name} is not configuration: an adapter holds .json and .md files only, and launches poly mcp or poly lsp (S167)`);
+  }
   return violations;
+}
+
+function everyFile(dir) {
+  let entries;
+  try { entries = readdirSync(dir); } catch { return []; }
+  return entries.flatMap((e) => (statSync(join(dir, e)).isDirectory() ? everyFile(join(dir, e)) : [join(dir, e)]));
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

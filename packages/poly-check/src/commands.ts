@@ -8,7 +8,8 @@
 // It lives beside the CLI, in poly-check, and poly-agent re-exports it: the `poly` binary, its tests and the frozen
 // M3 runner name the CLI here.
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EXIT_CODES, digest, loadProject, toJson } from '@poly/core';
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
@@ -218,6 +219,27 @@ export const COMMANDS: Command[] = [
       const base = opt(input, 'root') ?? process.cwd();
       const path = writeAcceptance(base, acceptanceRecord(readReport(base), need(input, 'id'), need(input, 'by'), need(input, 'key')));
       return { exit: EXIT_CODES.CLEAN, result: { path }, text: `${path}\n  admission reads it from accepted/ (PT12.5)\n` };
+    },
+  },
+  {
+    name: 'install', mcp: null, lsp: false,
+    summary: 'Prints a host\'s entries for a project from its adapter\'s template (adapters/<host>/install.json): the commands the host launches. It names no host itself (S167).',
+    input: obj({ host: str('the adapter\'s directory under adapters/'), project: str('the project directory (default: the working directory)') }, ['host']),
+    output: obj({ host: str('the host'), description: str('what the entries are'), files: { type: 'array', items: obj({ path: str('where the host reads the file'), content: str('the file') }, ['path', 'content']) }, notes: { type: 'array', items: { type: 'string' } } }, ['host', 'files', 'notes']),
+    async run(input) {
+      const host = need(input, 'host');
+      if (!/^[a-z0-9-]+$/.test(host)) throw new CommandUsageError(`${host} is not an adapter name`);
+      const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+      const template = join(root, 'adapters', host, 'install.json');
+      if (!existsSync(template)) throw new CommandUsageError(`no adapter for ${host} under adapters/`);
+      const project = resolve(opt(input, 'project') ?? process.cwd());
+      const slash = (p: string) => p.split('\\').join('/');
+      const fill = (s: string) => s.split('${PROJECT}').join(slash(project)).split('${POLY_ROOT}').join(slash(root));
+      const t = JSON.parse(readFileSync(template, 'utf8')) as { description?: string; waiting?: string; files?: { path: string; json: unknown }[]; notes?: string[] };
+      if (t.waiting) throw new CommandUsageError(`${host} is waiting: ${t.waiting}`);
+      const files = (t.files ?? []).map((f) => ({ path: fill(f.path), content: fill(JSON.stringify(f.json, null, 2)) + '\n' }));
+      const notes = (t.notes ?? []).map(fill);
+      return { exit: EXIT_CODES.CLEAN, result: { host, description: t.description ?? '', files, notes }, text: `${files.map((f) => `── ${f.path}\n${f.content}`).join('')}${notes.map((n) => `  ${n}\n`).join('')}` };
     },
   },
   {

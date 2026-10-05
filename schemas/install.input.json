@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "host": {
+      "type": "string",
+      "description": "the adapter's directory under adapters/"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project directory (default: the working directory)"
+    }
+  },
+  "required": [
+    "host"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "poly",
+  "description": "The poly host adapters that install as Claude Code plugins.",
+  "owner": { "name": "Cognitive Fab" },
+  "plugins": [
+    { "name": "poly", "source": "./claude-code", "description": "The poly MCP tools, language server and skill." }
+  ]
+}

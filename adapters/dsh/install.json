@@ -1,0 +1,4 @@
+{
+  "description": "DeepSeek Harness, through its dsh-mcp-client plugin in cordis.yml (plan-m6.md section 7).",
+  "waiting": "S170: the DeepSeek Harness adapter is built once the owner declares its plugin API stable; until then it is listed as waiting."
+}
