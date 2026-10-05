@@ -37,6 +37,8 @@ export interface LoadOptions {
   trust: Record<string, string>;
   /** S135: SQLite only. ':memory:' when omitted. */
   store?: { sqlite: string };
+  /** S190, for tests only: the std root a certificate's `std:` paths are read under, instead of the repository's std/. */
+  std?: string;
   now?: () => number;
   /** S139: load a witness certificate, for an exported witness test only; refused when NODE_ENV is production. */
   allowWitness?: boolean;
@@ -937,7 +939,7 @@ export class PolyRuntime {
 }
 
 export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRuntime> {
-  const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust, { allowWitness: opts.allowWitness });
+  const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust, { allowWitness: opts.allowWitness, ...(opts.std ? { std: opts.std } : {}) });
   const dbPath = opts.store?.sqlite ?? ':memory:';
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true });
   // S143: runtime.* and runtime<m>.* are the runtime's own ids, whatever this build or store needs. The checker refuses

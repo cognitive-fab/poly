@@ -11,7 +11,8 @@ import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
 
 /** The repository's standard library (PT20.4), beside the packages. */
-const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
+/** The repository's std/, where `std.*` modules are found. */
+export const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
 
 /** A module's name from the head of its source, with no parse: the first `module` line after comments. */
 export function headerModule(text: string): string | null {

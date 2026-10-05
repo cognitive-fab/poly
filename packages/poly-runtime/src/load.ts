@@ -5,6 +5,10 @@
 // digests. A manifest entry without its retry bound is refused too (S120).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** S190: the repository's std/, where a certificate's `std:` paths are read. */
+const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
 import { actionTypes, type TypeNode } from './types.js';
 import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, parseManifest, keyringsOf, sameKeyrings, EMPTY_KEYRINGS, type Certificate, type CertificateProblem } from '@poly/core';
 
@@ -36,7 +40,7 @@ export function projectRootOf(buildDir: string): string {
   return basename(abs) === 'build' && basename(dirname(abs)) === '.poly' ? dirname(dirname(abs)) : abs;
 }
 
-export function verifyBuild(buildDir: string, certificatePath: string, trust: Record<string, string>, opts: { allowWitness?: boolean } = {}): VerifiedBuild {
+export function verifyBuild(buildDir: string, certificatePath: string, trust: Record<string, string>, opts: { allowWitness?: boolean; std?: string } = {}): VerifiedBuild {
   const root = projectRootOf(buildDir);
   if (!existsSync(certificatePath)) throw new LoadError(`no certificate at ${certificatePath}: the runtime loads only admitted programs (PF8.1)`);
   let certificate: Certificate;
@@ -107,7 +111,8 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   const typeModules = certificate.poly?.typeModules ?? {};
   const stale: string[] = [];
   for (const [mod, x] of Object.entries(typeModules)) {
-    const f = join(root, x.path);
+    // A path is relative to the project root, or std: and relative to the std root; only the hash decides.
+    const f = x.path.startsWith('std:') ? join(opts.std ?? STD, x.path.slice(4)) : join(root, x.path);
     const have = existsSync(f) ? sha256OfBytes(readFileSync(f)) : null;
     if (have !== x.file) stale.push(`module ${mod} (${x.path}) changed since the build (certified ${x.file}, found ${have ?? 'nothing'})`);
   }

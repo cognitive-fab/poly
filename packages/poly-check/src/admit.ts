@@ -15,6 +15,7 @@ import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { checkFile, checkProject, type ProjectReport } from './pipeline.js';
+import { STD } from './uses.js';
 import { LINT_VERSION, handlerClosure } from './handlers.js';
 
 export class AdmitError extends Error {
@@ -56,6 +57,19 @@ export interface AdmitResult {
 }
 
 const rel = (root: string, p: string) => relative(root, p).split(sep).join('/');
+
+/**
+ * S190: where a type module's file is, as the certificate records it: relative to the project root, or `std:` and its
+ * path under the std root. Never absolute, so an admitted project loads wherever it is copied; only the hash decides.
+ */
+function typeModulePath(dir: string, std: string, file: string, mod: string): string {
+  const under = (root: string) => { const r = relative(root, file); return r !== '' && !r.startsWith('..') && !isAbsolute(r) ? r.split(sep).join('/') : null; };
+  const p = under(dir);
+  if (p !== null) return p;
+  const s = under(std);
+  if (s !== null) return `std:${s}`;
+  throw new AdmitError(`not admitted: module ${mod}, whose enums the build uses, is at ${file}, outside the project and outside std; the certificate records a type module by a path relative to one of them (S190)`);
+}
 
 /**
  * A key file inside a version-controlled tree could be committed; it is refused whatever it holds (S126). The test
@@ -252,7 +266,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     if (!r.module || !r.moduleDigest) throw new AdmitError(`${r.file}: no module digest`);
     moduleDigests[r.module] = r.moduleDigest;
     // S190: each module whose enums a build uses, by its file's bytes and its AST digest, which load compares.
-    for (const [mod, x] of Object.entries(r.typeModules ?? {})) typeModules[mod] = { path: rel(dir, x.file), digest: x.digest, file: sha256OfBytes(readFileSync(x.file)) };
+    for (const [mod, x] of Object.entries(r.typeModules ?? {})) typeModules[mod] = { path: typeModulePath(dir, opts.std ?? STD, x.file, mod), digest: x.digest, file: sha256OfBytes(readFileSync(x.file)) };
     const ast = moduleOf(r.file);
     for (const w of ast?.decls.filter((d): d is A.Workflow => d.kind === 'Workflow') ?? []) {
       const m = r.machines.find((x) => x.machine === w.machine);

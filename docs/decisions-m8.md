@@ -155,6 +155,13 @@ Records, unions with payloads and maps of another module's types stay `PL0901`. 
 
 **The 147 files measured again** are identical in verdict, diagnostic codes and every state and transition count. One difference appeared while building, before the commit: `conformance/m1/records.poly` gave ERROR, because poly-ref's first reading of `m.E.C` took `post.box.count` for a member chain. That was a defect of the change itself, fixed before the measurement that counts; nothing differs in the committed tree.
 
+## S190 accepted, and two checks before M8b
+
+**Ruled (2026-10-05).** S190 is accepted, with two checks made in one commit before M8b's step 1.
+
+- **Relative paths.** The certificate records each type module's file relative to the project root, or as `std:<path>` relative to the std root; never absolute. Only the hash decides at load. Tested: an admitted project copied to another folder loads with no `PL6407`, and a change to the copy's own type module is still refused. A module outside both roots is not admitted. The copy sits at the same depth, since the certified lockfile (S154) is also named by its path relative to the project.
+- **The std option is for tests.** `std` on `checkFile`, `checkProject`, `admit` and `load` is an API option for tests only: no command-line flag and no `poly.json` field carries it, until the repository has `std/`.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

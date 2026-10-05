@@ -108,8 +108,34 @@ test('S190: the build and the certificate record each type module\'s digest; a m
   const contract = JSON.parse(readFileSync(join(dir, '.poly', 'build', 'chat.Chat', 'contract.json'), 'utf8'));
   assert.equal(contract.typeModules['std.kinds'], tm['std.kinds'].digest);
   const a = { build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey } };
-  const ok = await loaded(a);
+  const ok = await loaded(a, { std });
   await ok.rt.close();
   writeFileSync(join(std, 'kinds.poly'), kinds.replace('Templated }', 'Templated, Voice }'));
-  await assert.rejects(loaded(a), /std\.kinds/);
+  await assert.rejects(loaded(a, { std }), /PL6407[^]*std\.kinds/);
+});
+
+test('S190: the certificate\'s module paths are relative (to the project root, or std: to the std root), so an admitted project copied elsewhere loads with no PL6407', { timeout: 300_000 }, async () => {
+  const { cpSync } = await import('node:fs');
+  const std = join(OUT, 'std-copy');
+  rmSync(std, { recursive: true, force: true });
+  mkdirSync(std, { recursive: true });
+  writeFileSync(join(std, 'kinds.poly'), 'module std.kinds\n\nenum Kind { FreeForm, Templated }\n');
+  const key = makeKey('enums-copy');
+  const dir = project('enums-copy', [], key, 'test-enums-across');
+  writeFileSync(join(dir, 'src', 'tones.poly'), 'module tones\n\nenum Tone { Calm, Loud }\n');
+  writeFileSync(join(dir, 'src', 'chat.poly'), 'module chat\nuse std.kinds.Kind\nuse tones.Tone\n\nservice machine Chat {\n  state { kind : std.kinds.Kind = std.kinds.Kind.Templated   tone : tones.Tone = tones.Tone.Calm }\n  action Set(k: std.kinds.Kind, t: tones.Tone)\n  on Set(k, t) { require k != kind || t != tone else reject "same"   kind\' = k   tone\' = t }\n}\n');
+  const r = await admit(dir, { std });
+  const tm = r.certificate.poly.typeModules;
+  assert.deepEqual(Object.fromEntries(Object.entries(tm).map(([m, x]) => [m, x.path])), { 'std.kinds': 'std:kinds.poly', tones: 'src/tones.poly' });
+  for (const x of Object.values(tm)) assert.ok(!/^[A-Za-z]:|^\//.test(x.path) && !x.path.includes('..'), x.path);
+  // Another folder at the same depth: the certified lockfile (S154) is found by its path relative to the project too.
+  const copy = join(ROOT, '.poly', 'test-enums-across-moved', 'enums-copy');
+  rmSync(copy, { recursive: true, force: true });
+  cpSync(dir, copy, { recursive: true });
+  const a = { build: join(copy, '.poly', 'build'), certificate: join(copy, '.poly', 'certificate.json'), trust: { [key.id]: key.publicKey } };
+  const ok = await loaded(a, { std });
+  await ok.rt.close();
+  // Only the hash decides: the copy's own tones.poly changed is refused, as the original's would be.
+  writeFileSync(join(copy, 'src', 'tones.poly'), 'module tones\n\nenum Tone { Calm, Loud, Hushed }\n');
+  await assert.rejects(loaded(a, { std }), /PL6407[^]*tones/);
 });
