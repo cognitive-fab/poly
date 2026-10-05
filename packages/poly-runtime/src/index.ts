@@ -1,4 +1,4 @@
-export { EffectWorker, ALLOW_ALL, RuntimeFault, WORKER_DRIFTS, type Gate, type GateDecision, type Proposal, type EffectHandler, type WorkerDrift, type ReportOutcome } from './worker.js';
+export { EffectWorker, ALLOW_ALL, RuntimeFault, WORKER_DRIFTS, type Gate, type GateDecision, type Proposal, type EffectHandler, type WorkerDrift, type ReportOutcome, orderIdOf, parseOrderId } from './worker.js';
 export { calibrate, mapDigest, answerProbability, decisionHandler, type Provider, type ProviderAnswer, type ProviderConfig, type CalibrationMap, type DecisionRecord } from './provider.js';
 export { load, PolyRuntime, RefusedDispatch, ApprovalRefused, OutcomeWithoutDecision, LoadError, type LoadOptions, type Handler, type WorkOrder } from './runtime.js';
 export { LedgerStore, openLedgerStore, type StepEvents } from './ledger-store.js';

@@ -1,7 +1,7 @@
 // M8a step 1 (S173): a workflow's effects run on poly-runtime as work orders. The gate decides before an order exists;
-// the agent's report settles the intent and is journaled; a lapsed order is re-issued under the same id at the next
-// attempt and never proposed again, and a report against a superseded attempt is refused and audited (PF8.5a); a work
-// order's completions are delivered by the runtime only (K9). A scripted agent drives the runtime API; no model runs.
+// the agent's report settles the intent and is journaled. The gate's decision is bound to the intent, once; a lapsed
+// attempt is re-issued under a new order id and never proposed again, and a report naming a replaced attempt's order is
+// refused and audited (PF8.5a, S173 as amended); a work order's completions are delivered by the runtime only (K9). A scripted agent drives the runtime API; no model runs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RefusedDispatch } from '@poly/runtime';
@@ -21,7 +21,7 @@ async function drive(rt, id, tools, limit = 10) {
     const [order] = await rt.workOrders(id);
     if (!order) return;
     tools.push(order.tool);
-    const r = await rt.reportWorkOrder(order.orderId, { attempt: order.attempt, ok: true, result: RESULTS[order.kind] });
+    const r = await rt.reportWorkOrder(order.orderId, { ok: true, result: RESULTS[order.kind] });
     assert.equal(r.status, 'settled', JSON.stringify(r));
   }
 }
@@ -39,11 +39,11 @@ test('S173: each effect of a workflow is a work order issued after the gate allo
     assert.deepEqual({ kind: order.kind, tool: order.tool, why: order.why, args: order.args, attempt: order.attempt }, { kind: 'fetch_tickets', tool: 'github_search_issues', why: "gather yesterday's support tickets", args: { window: 'yesterday' }, attempt: 1 });
     // The gate's allow is in the ledger before the order is issued.
     const chain = await rt.chain('run-1');
-    const allowed = chain.findIndex((e) => e.kind === 'verdict' && e.body.intent === order.orderId && e.body.outcome === 'allowed');
-    const issued = chain.findIndex((e) => e.kind === 'observation' && e.body.stage === 'work-order' && e.body.intent === order.orderId && e.body.outcome === 'issued');
+    const allowed = chain.findIndex((e) => e.kind === 'verdict' && e.body.intent === order.intent && e.body.outcome === 'allowed');
+    const issued = chain.findIndex((e) => e.kind === 'observation' && e.body.stage === 'work-order' && e.body.orderId === order.orderId && e.body.outcome === 'issued');
     assert.ok(allowed >= 0 && issued > allowed, `allowed at ${allowed}, issued at ${issued}`);
     const tools = [order.tool];
-    assert.equal((await rt.reportWorkOrder(order.orderId, { attempt: 1, ok: true, result: { count: 2 } })).status, 'settled');
+    assert.equal((await rt.reportWorkOrder(order.orderId, { ok: true, result: { count: 2 } })).status, 'settled');
     assert.equal((await state(rt, 'run-1')).briefState, 'drafting');
     await drive(rt, 'run-1', tools);
     assert.deepEqual(tools, ['github_search_issues', 'ask', 'ask_user', 'slack_send']);
@@ -97,8 +97,10 @@ test('S173: an escalated work order is issued only after a signed approval', asy
   } finally { await rt.close(); }
 });
 
-test('S173, PF8.5a: a lapsed order is re-issued under the same id at the next attempt, never proposed again, and a superseded attempt\'s report is refused and audited', async () => {
-  const { rt, clock } = await loaded(await build());
+test('S173 as amended, PF8.5a: a lapsed attempt is re-issued under a new order id, the gate is proposed once across both attempts, and a late report of the old order is refused and audited', async () => {
+  let proposals = 0;
+  const gate = { propose: (p) => { if (p.effectKind === 'fetch_tickets') proposals++; return { decision: 'allow' }; }, settle: () => 'ok' };
+  const { rt, clock } = await loaded(await build(), { gate: { gate } });
   try {
     await start(rt, 'run-retry');
     await rt.tick();
@@ -110,23 +112,64 @@ test('S173, PF8.5a: a lapsed order is re-issued under the same id at the next at
     clock.advance(1_000); // the declared backoff
     await rt.tick();
     const [second] = await rt.workOrders('run-retry');
-    assert.equal(second.orderId, first.orderId);
     assert.equal(second.attempt, 2);
-    const allows = (await verdicts(rt, 'run-retry')).filter((v) => v.intent === first.orderId && v.outcome === 'allowed');
-    assert.equal(allows.length, 1, 'the retry is not proposed again');
-    // The agent that held attempt 1 reports late: refused and audited, and nothing changes.
-    const late = await rt.reportWorkOrder(first.orderId, { attempt: 1, ok: true, result: { count: 3 } });
+    assert.equal(second.intent, first.intent, 'the same intent');
+    assert.notEqual(second.orderId, first.orderId, 'a new order id for the new attempt');
+    assert.equal(proposals, 1, 'the gate is proposed exactly once across both attempts');
+    assert.equal((await verdicts(rt, 'run-retry')).filter((v) => v.intent === first.intent && v.outcome === 'allowed').length, 1);
+    // The agent that held attempt 1 reports late, with its own order id, while attempt 2 is open: refused and audited.
+    const late = await rt.reportWorkOrder(first.orderId, { ok: true, result: { count: 3 } });
     assert.equal(late.status, 'refused');
-    assert.match(late.reason, /superseded/);
+    assert.match(late.reason, /replaced/);
     assert.equal((await state(rt, 'run-retry')).briefState, 'gathering');
-    assert.equal((await rt.reportWorkOrder(second.orderId, { attempt: 2, ok: true, result: { count: 2 } })).status, 'settled');
-    // A second report of the same attempt is refused too: an agent is never credited twice.
-    const again = await rt.reportWorkOrder(second.orderId, { attempt: 2, ok: true, result: { count: 1 } });
-    assert.equal(again.status, 'refused');
+    assert.equal((await rt.workOrders('run-retry'))[0]?.orderId, second.orderId, 'the new attempt is still open');
+    // The new attempt's report is accepted.
+    assert.equal((await rt.reportWorkOrder(second.orderId, { ok: true, result: { count: 2 } })).status, 'settled');
     assert.equal((await state(rt, 'run-retry')).ticketCount, 2);
-    assert.equal((await rt.reportWorkOrder('intent:no-such-order', { attempt: 1, ok: true })).status, 'refused');
+    // A second report of the same order is refused too: an agent is never credited twice.
+    assert.equal((await rt.reportWorkOrder(second.orderId, { ok: true, result: { count: 1 } })).status, 'refused');
+    assert.equal((await state(rt, 'run-retry')).ticketCount, 2);
+    assert.equal(proposals, 1);
     const audit = (await rt.audit('run-retry')).filter((r) => r.rule === 'S173');
     assert.equal(audit.length, 2, JSON.stringify(audit));
+  } finally { await rt.close(); }
+});
+
+test('S173, polywatch: an order exists only once it is issued; a report of an order id not issued is refused and audited', async () => {
+  const { rt } = await loaded(await build());
+  try {
+    await start(rt, 'run-early');
+    const intent = rt.store.db.prepare("SELECT intent_id FROM pr_outbox WHERE instance_id = ? AND kind = 'fetch_tickets'").get('run-early').intent_id;
+    for (const id of [`${intent}#1`, `${intent}#2`, intent, 'no-such-order#1']) {
+      const r = await rt.reportWorkOrder(id, { ok: true, result: { count: 2 } });
+      assert.equal(r.status, 'refused', id);
+    }
+    assert.equal((await state(rt, 'run-early')).briefState, 'gathering');
+    await rt.tick();
+    const [o] = await rt.workOrders('run-early');
+    assert.equal((await rt.reportWorkOrder(`${o.intent}#2`, { ok: true, result: { count: 2 } })).status, 'refused', 'an attempt not issued');
+    assert.equal((await rt.reportWorkOrder(o.orderId, { ok: true, result: { count: 2 } })).status, 'settled');
+  } finally { await rt.close(); }
+});
+
+test('S173, polywatch: an intent Running whose order was never issued (a crash between Start and the issue) lists no order and takes no report', async () => {
+  const { rt, clock } = await loaded(await build());
+  try {
+    await start(rt, 'run-window');
+    const intent = rt.store.db.prepare("SELECT intent_id FROM pr_outbox WHERE instance_id = ? AND kind = 'fetch_tickets'").get('run-window').intent_id;
+    // The hosted machine taken to Running as the worker takes it, with the row claimed, and no issue after it.
+    const id = `intent:${intent}`;
+    await rt.kernel.create('runtime.OutboxIntent', id);
+    for (const action of ['Propose', 'GateAllow', 'Start']) {
+      const inst = await rt.store.getInstance(id);
+      assert.equal((await rt.kernel.dispatch(id, action, {}, `${action}@${inst.seq}`)).stepKind, 'accepted', action);
+    }
+    rt.store.db.prepare("UPDATE pr_outbox SET status = 'inflight', claimed_until = ? WHERE intent_id = ?").run(clock.now() + 60_000, intent);
+    assert.deepEqual(await rt.workOrders('run-window'), []);
+    const r = await rt.reportWorkOrder(`${intent}#1`, { ok: true, result: { count: 2 } });
+    assert.equal(r.status, 'refused');
+    assert.match(r.reason, /issued/);
+    assert.equal((await state(rt, 'run-window')).briefState, 'gathering');
   } finally { await rt.close(); }
 });
 
@@ -137,7 +180,7 @@ test('S173, PF8.5a: a report that arrives after its order\'s deadline is refused
     await rt.tick();
     const [o] = await rt.workOrders('run-lapse');
     clock.advance(120_000);
-    const late = await rt.reportWorkOrder(o.orderId, { attempt: 1, ok: true, result: { count: 2 } });
+    const late = await rt.reportWorkOrder(o.orderId, { ok: true, result: { count: 2 } });
     assert.equal(late.status, 'refused');
     assert.match(late.reason, /lapsed/);
     assert.equal((await state(rt, 'run-lapse')).briefState, 'gathering');
@@ -150,7 +193,7 @@ test('S173, PF8.5a: a report that arrives after its order\'s deadline is refused
   } finally { await rt.close(); }
 });
 
-test('S173: a failed report retries under the same order, and the last attempt delivers the exhausted completion', async () => {
+test('S173: a failed report retries the intent under a new order, and the last attempt delivers the exhausted completion', async () => {
   const { rt, clock } = await loaded(await build());
   try {
     await start(rt, 'run-fail');
@@ -158,7 +201,7 @@ test('S173: a failed report retries under the same order, and the last attempt d
       await rt.tick();
       const [o] = await rt.workOrders('run-fail');
       assert.equal(o.attempt, n);
-      assert.equal((await rt.reportWorkOrder(o.orderId, { attempt: n, ok: false, error: 'api down' })).status, n < 3 ? 'retrying' : 'failed');
+      assert.equal((await rt.reportWorkOrder(o.orderId, { ok: false, error: 'api down' })).status, n < 3 ? 'retrying' : 'failed');
       clock.advance(10_000);
     }
     assert.equal((await state(rt, 'run-fail')).briefState, 'failed');

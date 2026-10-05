@@ -24,6 +24,16 @@ Each ruling is copied exactly as written under its issue in `plan-m8.md` section
 | **S186** The embedded form of a channel | Accepted. |
 | **S187** Split M8 | Accepted. M8a closes (review, record, and a clean gate on a quiet machine, compared file by file with M6's closing gate) before M8b starts. |
 
+## S173 amended: an order id per attempt
+
+**Ruled after step 1 (2026-10-05).** Addition (1) of the S173 ruling is amended. Where it said a retry re-issues "the same order id", read "the same intent, under a new order id per attempt".
+
+- The gate's decision stays bound to the intent, once (PF8.5a), and a retry is never proposed again.
+- Each issued attempt gets its own order id, derived from the intent and the attempt number. Agents treat it as opaque.
+- `workflow_report` keeps polyflow's schema and names only `order_id`. The order id identifies the attempt, so a report from an agent working on an attempt that has since been replaced is refused and audited by its order id.
+
+Neither option of the question raised at step 1 is taken: a report does not carry an attempt, and a report without one is not taken as the open attempt's.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

@@ -60,8 +60,8 @@ export type Handler = EffectHandler;
 
 /** An outside dispatch that the runtime refuses before any step, with an audit row (K9, K10). */
 /** PD2.4: an adjudication with no decision event to link; a checked program cannot reach it (PL6203). */
-/** S173: an open work order, as an agent takes it: the order id is the intent's, the same at every attempt. */
-export interface WorkOrder { orderId: string; instanceId: string; workflow: string; kind: string; tool: string; target?: string; why: string; args: Record<string, unknown>; attempt: number; deadline: number }
+/** S173: an open work order, as an agent takes it: the gate's decision is the intent's, once; the order id is the attempt's (PF8.5a, S173 as amended). */
+export interface WorkOrder { orderId: string; intent: string; instanceId: string; workflow: string; kind: string; tool: string; target?: string; why: string; args: Record<string, unknown>; attempt: number; deadline: number }
 
 export class OutcomeWithoutDecision extends Error {
   constructor(message: string) { super(message); this.name = 'OutcomeWithoutDecision'; }
@@ -458,14 +458,14 @@ export class PolyRuntime {
 
   /** S173: the work orders open now, of one run or of all: each issued after the gate allowed it, and not yet reported. */
   async workOrders(instanceId?: string): Promise<WorkOrder[]> {
-    return (await this.worker.openOrders(instanceId)).map(({ row, attempt, deadline }) => {
+    return (await this.worker.openOrders(instanceId)).map(({ row, orderId, attempt, deadline }) => {
       const t = this.orderToolOf(row.instance_id, row.kind)!;
-      return { orderId: row.intent_id, instanceId: row.instance_id, workflow: t.workflow, kind: row.kind, tool: t.tool, ...(t.target !== undefined ? { target: t.target } : {}), why: t.why, args: row.payload as Record<string, unknown>, attempt, deadline };
+      return { orderId, intent: row.intent_id, instanceId: row.instance_id, workflow: t.workflow, kind: row.kind, tool: t.tool, ...(t.target !== undefined ? { target: t.target } : {}), why: t.why, args: row.payload as Record<string, unknown>, attempt, deadline };
     });
   }
 
   /** S173: the agent's report of a work order, which settles its intent; any report but the open attempt's is refused and audited. */
-  reportWorkOrder(orderId: string, report: { attempt: number; ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+  reportWorkOrder(orderId: string, report: { ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
     return this.worker.report(orderId, report);
   }
 

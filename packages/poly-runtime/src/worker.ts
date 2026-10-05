@@ -90,6 +90,17 @@ export interface WorkerOptions {
 /** S173: what a work order's report came to. */
 export type ReportOutcome = { status: 'settled' | 'retrying' | 'failed' } | { status: 'refused'; reason: string };
 
+/**
+ * S173 as amended: each issued attempt has an order id of its own, derived from its intent and its attempt number, so a
+ * report names the attempt it was for. Agents treat it as opaque.
+ */
+export const orderIdOf = (intentId: string, attempt: number): string => `${intentId}#${attempt}`;
+export function parseOrderId(orderId: string): { intent: string; attempt: number } | null {
+  const i = orderId.lastIndexOf('#');
+  const attempt = i > 0 ? Number(orderId.slice(i + 1)) : NaN;
+  return Number.isInteger(attempt) && attempt >= 1 ? { intent: orderId.slice(0, i), attempt } : null;
+}
+
 /** A worker whose claim was taken over (its lease expired and another pass reclaimed the row) stops quietly. */
 export class StaleClaim extends Error {
   constructor(message: string) { super(message); this.name = 'StaleClaim'; }
@@ -476,43 +487,52 @@ export class EffectWorker {
 
   /**
    * S173: a work order is issued. The order (its tool, target, reason and arguments) is observed on the run by digest,
-   * and the row's claim is moved to the order's deadline, the effect's declared timeout, so the order stays open until
-   * the agent reports or the deadline lapses. The order id is the intent id at every attempt (PF8.5a).
+   * with its order id, and the row's claim is moved to the order's deadline, the effect's declared timeout, so the
+   * order stays open until the agent reports or the deadline lapses. The gate's decision is bound to the intent, once;
+   * each attempt is issued under an order id of its own (PF8.5a, S173 as amended).
    */
   private async issue(row: OutboxRow, decl: any, attempt: number, tool: { tool: string; target?: string; why: string }, now: number): Promise<void> {
     const deadline = now + (decl.retry?.timeoutMs ?? 30_000);
     await this.store.txn(() => {
       this.checkFence(row);
-      this.store.appendEvent(row.instance_id, 'observation', { stage: 'work-order', intent: row.intent_id, attempt, outcome: 'issued', order: this.store.keep({ ...tool, args: row.payload }), deadline }, this.now);
+      this.store.appendEvent(row.instance_id, 'observation', { stage: 'work-order', intent: row.intent_id, attempt, orderId: orderIdOf(row.intent_id, attempt), outcome: 'issued', order: this.store.keep({ ...tool, args: row.payload }), deadline }, this.now);
       this.store.db.prepare(`UPDATE pr_outbox SET claimed_until = ? WHERE intent_id = ? AND status = 'inflight'`).run(deadline, row.intent_id);
     });
   }
 
-  /** S173: the open work orders: issued, Running, and within their deadline. */
-  async openOrders(instanceId?: string): Promise<{ row: OutboxRow; attempt: number; deadline: number }[]> {
+  /** S173: whether the order with this id was issued: an order exists only once its issue is in the ledger (polywatch). */
+  private issued(row: OutboxRow, orderId: string): boolean {
+    return this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'observation'`).all(row.instance_id)
+      .some((r: { event: string }) => { const b = JSON.parse(r.event).body; return b?.stage === 'work-order' && b.outcome === 'issued' && b.orderId === orderId; });
+  }
+
+  /** S173: the open work orders: issued, Running at the attempt they were issued for, and within their deadline. */
+  async openOrders(instanceId?: string): Promise<{ row: OutboxRow; orderId: string; attempt: number; deadline: number }[]> {
     const rows = (instanceId === undefined
       ? this.store.db.prepare(`SELECT * FROM pr_outbox WHERE status = 'inflight' AND kind <> 'sendTo' ORDER BY seq, intent_id`).all()
       : this.store.db.prepare(`SELECT * FROM pr_outbox WHERE status = 'inflight' AND kind <> 'sendTo' AND instance_id = ? ORDER BY seq, intent_id`).all(instanceId)) as (OutboxRow & { claimed_until: number; payload: string })[];
-    const out: { row: OutboxRow; attempt: number; deadline: number }[] = [];
+    const out: { row: OutboxRow; orderId: string; attempt: number; deadline: number }[] = [];
     for (const r of rows) {
       const row = { ...r, payload: JSON.parse(r.payload as unknown as string) } as OutboxRow;
       if (!this.opts.workOrder?.(row) || r.claimed_until <= this.now) continue;
       const st = await this.intentState(row);
-      if (st?.intent === 'Running') out.push({ row, attempt: st.intent_attempt!, deadline: r.claimed_until });
+      if (st?.intent !== 'Running') continue;
+      const orderId = orderIdOf(row.intent_id, st.intent_attempt!);
+      if (this.issued(row, orderId)) out.push({ row, orderId, attempt: st.intent_attempt!, deadline: r.claimed_until });
     }
     return out;
   }
 
   /**
-   * S173: the agent's report of a work order is the handler's result. It is taken only for the attempt that is open
-   * now, before its deadline; any other report (an unknown order, a superseded or lapsed attempt, a second report of
-   * one attempt) is refused and audited, so an agent is never credited twice (PF8.5a).
+   * S173: the agent's report of a work order is the handler's result. The order id names the attempt, so a report is
+   * taken only for the attempt open now, issued and before its deadline; any other report (an unknown order, an order
+   * not yet issued, a replaced or lapsed attempt, a second report of one attempt) is refused and audited, so an agent
+   * is never credited for an attempt it does not hold (PF8.5a).
    */
-  async report(orderId: string, rep: { attempt: number; ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+  async report(orderId: string, rep: { ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
     // Two reports of one order taken at once: the second is refused, not raced into the hosted machine.
     if (this.reporting.has(orderId)) {
-      const now = this.now;
-      await this.store.insertAudit({ at: now, instanceId: orderId, action: 'work-order', actionId: `${orderId}:report:${rep.attempt}`, rule: 'S173', reason: `work order ${orderId}: another report of it is being taken` });
+      await this.store.insertAudit({ at: this.now, instanceId: orderId, action: 'work-order', actionId: `${orderId}:report`, rule: 'S173', reason: `work order ${orderId}: another report of it is being taken` });
       return { status: 'refused', reason: 'another report of this order is being taken' };
     }
     this.reporting.add(orderId);
@@ -521,20 +541,22 @@ export class EffectWorker {
 
   private readonly reporting = new Set<string>();
 
-  private async takeReport(orderId: string, rep: { attempt: number; ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+  private async takeReport(orderId: string, rep: { ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
     const now = this.now;
-    const raw = this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(orderId) as (OutboxRow & { claimed_until: number | null; status: string; payload: string }) | undefined;
-    const refuse = async (reason: string, instanceId = raw?.instance_id ?? orderId): Promise<ReportOutcome> => {
-      await this.store.insertAudit({ at: now, instanceId, action: raw?.kind ?? 'work-order', actionId: `${orderId}:report:${rep.attempt}`, rule: 'S173', reason: `work order ${orderId}: ${reason}` });
+    const parsed = parseOrderId(orderId);
+    const raw = parsed ? this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(parsed.intent) as (OutboxRow & { claimed_until: number | null; status: string; payload: string }) | undefined : undefined;
+    const refuse = async (reason: string): Promise<ReportOutcome> => {
+      await this.store.insertAudit({ at: now, instanceId: raw?.instance_id ?? orderId, action: raw?.kind ?? 'work-order', actionId: `${orderId}:report`, rule: 'S173', reason: `work order ${orderId}: ${reason}` });
       return { status: 'refused', reason };
     };
-    if (!raw) return refuse('no such work order');
+    if (!parsed || !raw) return refuse('no such work order');
     const row = { ...raw, payload: JSON.parse(raw.payload) } as OutboxRow;
     if (!this.opts.workOrder?.(row)) return refuse(`${row.kind} is not a work order`);
+    if (!this.issued(row, orderId)) return refuse('no such work order was issued');
     const st = await this.intentState(row);
     if (raw.status !== 'inflight' || st?.intent !== 'Running') return refuse(`it is not awaiting a report (the intent is ${st?.intent ?? 'unknown'})`);
-    if (rep.attempt !== st.intent_attempt) return refuse(`attempt ${rep.attempt} is superseded; attempt ${st.intent_attempt} is open`);
-    if (raw.claimed_until === null || now >= raw.claimed_until) return refuse(`attempt ${rep.attempt} lapsed at its deadline`);
+    if (orderId !== orderIdOf(row.intent_id, st.intent_attempt!)) return refuse(`its attempt was replaced; order ${orderIdOf(row.intent_id, st.intent_attempt!)} is open`);
+    if (raw.claimed_until === null || now >= raw.claimed_until) return refuse('it lapsed at its deadline');
     (row as Fenced).fence = raw.claimed_until;
     const decl = this.decl(row);
     if (decl === null) return refuse('its machine or manifest is unavailable');
