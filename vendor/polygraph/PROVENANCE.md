@@ -30,6 +30,14 @@ The files of `@cognitive-fab/polygraph` 8.3.2 that poly imports, and nothing els
 | `scripts/sam-lib.mjs` | `127136dfce2c5a29a6e00e40d94d8116628f4435dfbdad58d18fddb23af38ce4` |
 | `scripts/vendor/sam-pattern.cjs` | `11b7ee8680bd850f649bff4e5abef6498dc3e02e1f932a18366ee00618541973` |
 
+## Written for poly
+
+This file is poly's, not the engine's, and is pinned by hash all the same: an unpinned `package.json` could point the engine's name at any file (review D-F5). `test/vendor.test.mjs` checks each hash, and that no file in this folder is outside the two tables.
+
+| File | sha256 | Origin |
+|---|---|---|
+| `package.json` | `8fc4b5d29e6e0d3a61c0aaf689cbe99bd62ed3ed7d36bccfe9499f51b508db71` | written for poly |
+
 ## Conclusion
 
 These files are polygraph at 4949de4, byte for byte. To take a newer polygraph, copy the same closure from the new commit and update this table in the same commit.

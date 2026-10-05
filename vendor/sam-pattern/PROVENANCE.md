@@ -11,6 +11,14 @@ The built bundle of `@cognitive-fab/sam-pattern` 2.3.0, copied unchanged. The sa
 |---|---|
 | `dist/SAM.js` | `879d0fd4bba08d4bdf6e72944c116aedb72c6a61852eced0dbac2b08ef80b46c` |
 
+## Written for poly
+
+This file is poly's, not the engine's, and is pinned by hash all the same: an unpinned `package.json` could point the engine's name at any file (review D-F5). `test/vendor.test.mjs` checks each hash, and that no file in this folder is outside the two tables.
+
+| File | sha256 | Origin |
+|---|---|---|
+| `package.json` | `05cbc13452ffb8b956c08efc3745aa9de9187fdc354c4bbf32d5cfe1aefd8d60` | written for poly |
+
 ## Conclusion
 
 This is sam-lib 3047024's build, byte for byte, and the same bytes polygraph 583b82c carries after its provenance header.

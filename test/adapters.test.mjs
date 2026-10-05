@@ -85,10 +85,19 @@ test('S167: the plugin passes the host\'s own validation, where the host is inst
   assert.match(r.output, /Validation passed/);
 });
 
-test('S170: the Claude Code entries poly install prints run the poly tools and AC5\'s workflow, launched exactly as printed', { timeout: 300_000 }, async () => {
-  const project = join(ROOT, '.poly', 'test-install');
+test('S170: the Claude Code entries poly install prints run the poly tools and AC5\'s workflow, launched exactly as printed', { timeout: 300_000 }, async (t) => {
+  const project = join(ROOT, '.poly', `test-install-${process.pid}`);
   rmSync(project, { recursive: true, force: true });
   mkdirSync(project, { recursive: true });
+  // Review D-F6: the project is build output of this test alone, removed once the servers it launched are closed.
+  // On Windows the servers run under a shell: closing a client ends the shell, and the server under it exits on its own
+  // when its stdin closes, a moment later, holding the folder until then. The removal is retried for up to 30 s.
+  t.after(async () => {
+    for (let k = 0; ; k++) {
+      try { rmSync(project, { recursive: true, force: true }); return; } catch (e) { if (k >= 150) throw e; }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  });
   const r = await checkFile(join(ROOT, 'conformance', 'm6', 'customer-brief.poly'), { root: project });
   assert.equal(r.verdict, 'CLEAN');
   const o = await commandNamed('install').run({ host: 'claude-code', project });

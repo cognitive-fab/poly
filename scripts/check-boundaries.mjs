@@ -12,7 +12,8 @@
 //    a model SDK, and no check package may call fetch or open a socket.
 // 3. A host-neutral core with thin host adapters (S167, M6). No package names a host or imports a host's SDK
 //    (an MCP or language-server SDK, an editor's or an agent harness's API); what a host launches lives under
-//    adapters/<host>/, and an adapter is configuration only (.json and .md files), never code.
+//    adapters/<host>/, and an adapter is configuration only (.json and .md files), never code: it launches poly mcp,
+//    poly lsp or polyflow's server, and declares no hooks. Sources are .ts, .mts and .cts.
 // 4. poly new is the only place a model is called (PF9.3, S169). poly-new may start a subprocess (Claude Code, headless);
 //    no other package imports it, except poly-agent, which serves it, and the command line, which loads it by name.
 //
@@ -27,14 +28,24 @@ const PROCESS_MODULES = ['node:child_process', 'child_process', 'node:worker_thr
 const REF_ALLOWED = [/^node:/, /^@cognitive-fab\/sam-pattern$/];
 // Rule 3: host SDKs, and the names of the hosts an adapter serves.
 const HOST_SDKS = [/^@modelcontextprotocol\//, /^vscode-languageserver/, /^vscode-jsonrpc/, /^vscode$/, /^@anthropic-ai\/claude-code/, /^@anthropic-ai\/claude-agent-sdk/];
-// Anywhere in a source, in a string, a comment or a name (polywatch on step 8): the core never names a host.
-const HOST_NAMES = /(?<![\w-])(claude-code|deepseek-harness|dsh-mcp-client|dsh|cordis\.yml)(?![\w-])/;
+// Anywhere in a source, in a string, a comment or a name (polywatch on step 8), in any case and with a space or a
+// hyphen (review D-F1): the core never names a host. A host's command line, quoted on its own, is its name too.
+const HOST_NAMES = /(?<![\w-])(claude[- ]code|deepseek[- ]harness|dsh-mcp-client|dsh|cordis\.yml)(?![\w-])|['"`]claude(\.cmd|\.exe)?['"`]/i;
+// A host SDK's name as a string, wherever it is: a computed or template import starts from one (review D-F1).
+const HOST_SDK_STRINGS = /['"`](@modelcontextprotocol\/|vscode-languageserver|vscode-jsonrpc|vscode['"`]|@anthropic-ai\/claude-code|@anthropic-ai\/claude-agent-sdk)/;
 const ADAPTER_FILES = /\.(json|md)$/;
+// Review D-F4: what an adapter may launch. poly's own two servers, and polyflow's server over the project's
+// workflows, the stated exception of S164.
+const ADAPTER_LAUNCHES = [
+  (s) => s.command === 'poly' && JSON.stringify(s.args) === '["mcp"]',
+  (s) => s.command === 'poly' && JSON.stringify(s.args) === '["lsp"]',
+  (s) => s.command === 'node' && JSON.stringify(s.args) === '["${POLY_ROOT}/vendor/polyflow/bin/polyflow-mcp.mjs"]',
+];
 
 // Every static import, re-export, dynamic import and require, with whether it is type-only.
 const IMPORT_RE = /(^|[\n;])\s*(import|export)\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
 const BARE_IMPORT_RE = /(^|[\n;])\s*import\s+['"]([^'"]+)['"]/g;
-const DYNAMIC_RE = /\b(import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const DYNAMIC_RE = /\b(import|require)\s*\(\s*['"`]([^'"`$]+)['"`]\s*\)/g;
 
 /** Imports of one source text: [{ spec, typeOnly, line }]. */
 export function importsOf(text) {
@@ -74,14 +85,25 @@ export function violationsOf(pkg, file, text) {
     }
   }
   for (const imp of importsOf(text)) if (HOST_SDKS.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} imports host SDK '${imp.spec}' (the core is host-neutral, S167)`);
-  if (/['"`]@poly\/new['"`]/.test(text) && pkg !== 'poly-new' && pkg !== 'poly-agent' && file !== 'packages/poly-check/src/cli.ts') v.push(`${file} names @poly/new, the package that calls a model; only poly-agent and the command line may load it (PF9.3, S169)`);
-  if (HOST_NAMES.test(text)) v.push(`${file} names a host (${HOST_NAMES.exec(text)[1]}); a host's name belongs in adapters/, never in the core (S167)`);
+  const sdkStrings = (text.match(new RegExp(HOST_SDK_STRINGS.source, 'g')) ?? []).length;
+  if (sdkStrings > importsOf(text).filter((i) => HOST_SDKS.some((re) => re.test(i.spec))).length) v.push(`${file} names a host SDK in a string (${HOST_SDK_STRINGS.exec(text)[1]}); the core is host-neutral (S167)`);
+  // Rule 4, every route to poly-new (review D-F2): its name or a subpath of it, a relative path into it, or a @poly
+  // name built at run time, which can be any package.
+  if (pkg !== 'poly-new' && pkg !== 'poly-agent' && file !== 'packages/poly-check/src/cli.ts') {
+    if (/['"`]@poly\/new(\/[^'"`]*)?['"`]/.test(text)) v.push(`${file} names @poly/new, the package that calls a model; only poly-agent and the command line may load it (PF9.3, S169)`);
+    if (importsOf(text).some((i) => /(^|\/)poly-new(\/|$)/.test(i.spec))) v.push(`${file} reaches poly-new by a relative path; only poly-agent and the command line may load it (PF9.3, S169)`);
+    if (/['"`]@poly\/[^'"`]*['"`]\s*\+|`@poly\/[^`]*\$\{/.test(text)) v.push(`${file} builds a @poly package name at run time, a route to poly-new (PF9.3, S169)`);
+  }
+  // poly-new starts the host's command line (S169), so it alone may name the host.
+  if (pkg !== 'poly-new' && HOST_NAMES.test(text)) { const m = HOST_NAMES.exec(text); v.push(`${file} names a host (${m[1] ?? m[0]}); a host's name belongs in adapters/, never in the core (S167)`); }
   if (/\bfetch\s*\(/.test(text)) v.push(`${file} calls fetch (no network or model call on a check path)`);
   // Review finding P8: indirect routes. A subprocess or a computed global can reach the network, and a
   // require made at run time, a template literal or a concatenated name can reach the compiler.
   for (const imp of importsOf(text)) {
     if (PROCESS_MODULES.includes(imp.spec) && pkg !== 'poly-new') v.push(`${file}:${imp.line} imports '${imp.spec}' (a subprocess can reach a model; no model call on a check path)`);
   }
+  // Review D-F2: a builtin reached without an import statement, by a name the import check cannot see.
+  if (pkg !== 'poly-new' && /\bgetBuiltinModule\b|\bprocess\s*\.\s*binding\b/.test(text)) v.push(`${file} loads a builtin module by name at run time (it can reach a subprocess or the network)`);
   if (/\bglobalThis\s*\[/.test(text)) v.push(`${file} reads a global by a computed name (it can reach fetch)`);
   if (pkg === 'poly-ref') {
     const compiler = text.match(/['"`]@poly\/(lang|lower|check|embed)\b/g) ?? [];
@@ -102,7 +124,8 @@ function sources(dir) {
   for (const e of entries) {
     const p = join(dir, e);
     if (statSync(p).isDirectory()) out.push(...sources(p));
-    else if (p.endsWith('.ts') && !p.endsWith('.d.ts')) out.push(p);
+    // Review D-F3: tsc compiles .mts and .cts sources under src as well.
+    else if (/\.[mc]?ts$/.test(p) && !/\.d\.[mc]?ts$/.test(p)) out.push(p);
   }
   return out;
 }
@@ -119,9 +142,34 @@ export function checkRepository(root) {
   const adapters = join(root, 'adapters');
   for (const file of everyFile(adapters)) {
     const name = relative(root, file).split(sep).join('/');
-    if (!ADAPTER_FILES.test(file)) violations.push(`${name} is not configuration: an adapter holds .json and .md files only, and launches poly mcp or poly lsp (S167)`);
+    if (!ADAPTER_FILES.test(file)) { violations.push(`${name} is not configuration: an adapter holds .json and .md files only, and launches poly mcp or poly lsp (S167)`); continue; }
+    if (file.endsWith('.json')) violations.push(...adapterJson(name, file));
   }
   return violations;
+}
+
+/**
+ * Review D-F4: an adapter's JSON is configuration, but configuration can launch anything. Every server it declares
+ * (mcpServers, lspServers, at any depth) must be one ADAPTER_LAUNCHES allows, and it declares no hooks: a hook runs a
+ * command on the host's events, which is code by another name. A file that does not parse is refused.
+ */
+function adapterJson(name, file) {
+  const v = [];
+  let doc;
+  try { doc = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { return [`${name} does not parse as JSON (${e.message})`]; }
+  if (/(^|\/)hooks(\/|\.json$)/.test(name)) v.push(`${name}: an adapter carries no hooks (S167)`);
+  const visit = (node) => {
+    if (!node || typeof node !== 'object') return;
+    for (const [k, x] of Object.entries(node)) {
+      if (k === 'hooks') v.push(`${name}: an adapter carries no hooks (S167)`);
+      if ((k === 'mcpServers' || k === 'lspServers') && x && typeof x === 'object') {
+        for (const [server, s] of Object.entries(x)) if (!ADAPTER_LAUNCHES.some((ok) => ok(s ?? {}))) v.push(`${name}: server ${server} launches ${JSON.stringify([s?.command, ...(s?.args ?? [])])}; an adapter launches poly mcp, poly lsp or polyflow's server only (S164, S167)`);
+      }
+      visit(x);
+    }
+  };
+  visit(doc);
+  return v;
 }
 
 function everyFile(dir) {

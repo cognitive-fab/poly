@@ -6,8 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from 'node:fs';
+import { join, dirname, relative, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { ROOT } from './helpers.mjs';
 
@@ -21,6 +21,10 @@ const table = (dir) => {
   const text = readFileSync(join(ROOT, 'vendor', dir, 'PROVENANCE.md'), 'utf8');
   return [...text.matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \|$/gm)].map((m) => ({ file: m[1], sha: m[2] }));
 };
+const written = (dir) => {
+  const text = readFileSync(join(ROOT, 'vendor', dir, 'PROVENANCE.md'), 'utf8');
+  return [...text.matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \| written for poly \|$/gm)].map((m) => ({ file: m[1], sha: m[2] }));
+};
 
 for (const v of VENDORED) {
   test(`vendor/${v.dir}: every file matches its PROVENANCE.md hash`, () => {
@@ -31,6 +35,18 @@ for (const v of VENDORED) {
       assert.equal(got, sha, file);
     }
     assert.match(readFileSync(join(ROOT, 'vendor', v.dir, 'PROVENANCE.md'), 'utf8'), new RegExp(`commit \`${v.commit}\``));
+  });
+
+  // Review D-F5: the files written for poly are pinned too, and no file in the folder is outside the two tables, so an
+  // added file, or a package.json pointing the engine's name at one, cannot pass.
+  test(`vendor/${v.dir}: the files written for poly match their hashes, and every file is pinned`, () => {
+    const mine = written(v.dir);
+    assert.ok(mine.some((r) => r.file === 'package.json'));
+    for (const { file, sha } of mine) assert.equal(createHash('sha256').update(readFileSync(join(ROOT, 'vendor', v.dir, file))).digest('hex'), sha, file);
+    const pinned = new Set([...table(v.dir).map((r) => r.file), ...mine.map((r) => r.file), 'PROVENANCE.md']);
+    const base = join(ROOT, 'vendor', v.dir);
+    const walk = (d) => readdirSync(d).flatMap((e) => (statSync(join(d, e)).isDirectory() ? walk(join(d, e)) : [join(d, e)]));
+    assert.deepEqual(walk(base).map((f) => relative(base, f).split(sep).join('/')).filter((f) => !pinned.has(f)), []);
   });
 
   test(`vendor/${v.dir}: every file equals the source at ${v.commit}, where the checkout exists`, { skip: existsSync(v.source) ? false : 'source checkout not present' }, () => {
@@ -53,7 +69,7 @@ test('poly resolves the engines to the vendored copies', () => {
 // Review finding P1: a pinned file that is ignored by git exists only on the disk that vendored it.
 test('every vendored file is tracked by git, and none is ignored', () => {
   for (const v of VENDORED) {
-    for (const { file } of table(v.dir)) {
+    for (const { file } of [...table(v.dir), ...written(v.dir)]) {
       const path = `vendor/${v.dir}/${file}`;
       const tracked = execFileSync('git', ['-C', ROOT, 'ls-files', '--', path], { encoding: 'utf8' }).trim();
       assert.equal(tracked, path, `${path} is not tracked`);

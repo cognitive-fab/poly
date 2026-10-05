@@ -20,7 +20,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly fmt <file.poly> [--write] [--json]
        poly mcp      (an MCP server over stdio: the registry's commands as tools)
        poly lsp      (the language server over stdio, on both surfaces)
-       poly new "<description>" --into <file.poly>   (drafts with Claude Code under your login; never admitted)
+       poly new "<description>" --into <file.poly>   (drafts with the headless provider under your login; never admitted)
        poly install --host <adapter> [--project <dir>]   (prints a host's entries from adapters/<adapter>/install.json)
        poly witness <id> --trace | --test [--root <dir>] [--out <file>]
        poly fix <id> [--root <dir>]

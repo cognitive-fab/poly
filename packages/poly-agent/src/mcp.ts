@@ -9,8 +9,8 @@ import { claudeCliProvider, newCommand, samplingProvider, type Provider } from '
 
 /**
  * The agent's commands: the registry's, and `new` (S169), which poly-new defines since it is the only package that may
- * call a model. Its provider is the host's: the client's model by MCP sampling when the client offers it, Claude Code
- * headless under the user's login otherwise.
+ * call a model. Its provider is the host's: the client's model by MCP sampling when the client offers it, the
+ * headless command-line provider of poly-new under the user's login otherwise.
  */
 export function agentCommands(providerOf: () => Provider = () => claudeCliProvider()): Command[] {
   return [...COMMANDS, newCommand(providerOf)];

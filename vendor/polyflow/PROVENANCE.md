@@ -37,6 +37,16 @@ Two selections from polyflow, copied unchanged: the files of the platform's `ker
 | `workflows/customer-brief/machine.cjs` | `0c3a665fc5836155c2185c5fc06c3ea4d7f08080a9974a7e82c07d8fe36ccb1b` |
 | `workflows/customer-brief/polyflow.workflow.json` | `cdc6e58b8e039c5f3b1e5cc6b98123bfbf82927cee19f45fdab4638404bbf0d7` |
 
+## Written for poly
+
+These files are poly's, not the engine's, and are pinned by hash all the same: an unpinned `package.json` could point the engine's name at any file (review D-F5). `test/vendor.test.mjs` checks each hash, and that no file in this folder is outside the two tables.
+
+| File | sha256 | Origin |
+|---|---|---|
+| `package.json` | `12f0f42442d77a33d6aea473ff32da69ff01a893118790f2f6df3cc103118615` | written for poly |
+| `platform/packages/kernel/package.json` | `68d240fc9f92dbe958b87e838f247c913ab7b5cdca8a2d8846603b5ae0b8fa58` | written for poly |
+| `platform/packages/verify/package.json` | `e502c4704d622dee5eea7a09ab9a9e04ab20a88814c15e8842ee69a3d1ccd136` | written for poly |
+
 ## Conclusion
 
 These files are polyflow at 5170add, byte for byte. To take a newer polyflow (E2 first), copy the same selections from the new commit and update this table in the same commit.
