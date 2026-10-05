@@ -41,6 +41,14 @@
 
 **The rest checked.** No other M3 cleanup test has a cap or a timeout that can fire before a child process has started: the other runs there have a 600-second cap and turns that end by themselves, `endsOnce` assigns a process that already exists, and `hostFailsFast` waits up to 30 seconds for a failure that comes at once.
 
+## Step 8, and the rules for step 9
+
+**Step 8 accepted, with one change to its test.** `claude plugin validate` runs with `CLAUDE_CONFIG_DIR` at a stand-in folder the test creates and removes, so the gate never reads or writes the owner's own Claude configuration; where `claude` is not installed, the check is listed as not run, never as passed. Built with a test that failed first.
+
+**Step 9 approved, with one rule.** The headless Claude Code provider refuses to start when an Anthropic API key variable is present in its environment: it checks only that the variable is present, never reads or logs its value, as the M3 runner does, since a key would move billing from the owner's subscription to per-token spend. The refusal is tested with a stand-in variable name in a child process, never a real key. As ruled: tests use only the recorded provider, no provider runs in the gate, and nothing reads or records the environment.
+
+**Gate reports** include the per-file timings: the ten slowest files and the suite's total.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.

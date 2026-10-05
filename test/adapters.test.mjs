@@ -15,6 +15,25 @@ import { mcpClient } from './mcp-client.mjs';
 import { checkRepository, violationsOf } from '../scripts/check-boundaries.mjs';
 
 const ADAPTER = join(ROOT, 'adapters', 'claude-code');
+const statSyncOrNull = (p) => { try { return statSync(p); } catch { return null; } };
+
+/**
+ * Runs `<bin> plugin validate <dir>` with CLAUDE_CONFIG_DIR at a stand-in folder created for the call and removed after
+ * it, so the owner's own configuration is never read or written. A host that cannot be started is not run.
+ */
+function validateInStandIn(bin, dir) {
+  const configDir = mkdtempSync(join(tmpdir(), 'poly-claude-config-'));
+  try {
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
+    const version = spawnSync(bin, ['--version'], { encoding: 'utf8', env, shell: process.platform === 'win32', timeout: 60_000 });
+    if (version.status !== 0) return { ran: false, reason: `not run: ${bin} is not installed here, so the host's own validation did not run` };
+    const r = spawnSync(bin, ['plugin', 'validate', dir], { encoding: 'utf8', env, shell: process.platform === 'win32', timeout: 120_000 });
+    return { ran: true, status: r.status, output: (r.stdout ?? '') + (r.stderr ?? ''), configDir };
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
+}
+
 const walk = (d) => readdirSync(d).flatMap((e) => (statSync(join(d, e)).isDirectory() ? walk(join(d, e)) : [join(d, e)]));
 
 test('S167: the Claude Code adapter is a plugin that launches poly mcp and poly lsp, with a skill, and holds no code', () => {
@@ -43,10 +62,25 @@ test('S167: the boundary check refuses code in an adapter, and a host\'s name or
   assert.deepEqual(checkRepository(ROOT), []);
 });
 
-test('S167: the plugin passes the host\'s own validation, where the host is installed', { skip: spawnSync('claude', ['--version'], { shell: true }).status === 0 ? false : 'not run: the claude CLI is not installed here' }, () => {
-  const r = spawnSync('claude', ['plugin', 'validate', ADAPTER], { encoding: 'utf8', shell: true });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout + r.stderr, /Validation passed/);
+// decisions-m6.md (step 8 accepted with one change): the host's validation runs with CLAUDE_CONFIG_DIR at a stand-in
+// folder the test creates, so it never reads or writes the owner's own Claude configuration; and where the host is not
+// installed the check is listed as not run, never as passed.
+test('S167: the host\'s validation runs in a stand-in configuration, and a host that is not installed is not run, not passed', () => {
+  const missing = validateInStandIn('poly-no-such-claude-cli', ADAPTER);
+  assert.equal(missing.ran, false);
+  assert.match(missing.reason, /not run/);
+  const real = validateInStandIn('claude', ADAPTER);
+  if (real.ran) {
+    assert.ok(real.configDir.startsWith(tmpdir()), real.configDir);
+    assert.equal(statSyncOrNull(real.configDir), null, 'the stand-in folder is removed after the check');
+  }
+});
+
+test('S167: the plugin passes the host\'s own validation, where the host is installed', (t) => {
+  const r = validateInStandIn('claude', ADAPTER);
+  if (!r.ran) { t.skip(r.reason); return; }
+  assert.equal(r.status, 0, r.output);
+  assert.match(r.output, /Validation passed/);
 });
 
 test('S170: the Claude Code entries poly install prints run the poly tools and AC5\'s workflow, launched exactly as printed', { timeout: 300_000 }, async () => {
