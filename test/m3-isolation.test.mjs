@@ -8,7 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { M3 } from '../experiments/m3/lib/task.mjs';
@@ -16,6 +17,18 @@ import { claudeArgs } from '../experiments/m3/runner/agent.mjs';
 import { armEnv, configProblems, apiKeyProblems, SETTINGS } from '../experiments/m3/runner/isolation.mjs';
 
 const MARKERS = ['M3-MARKER-USER-CLAUDE-MD', 'M3-MARKER-ANCESTOR-CLAUDE-MD', 'M3-MARKER-SKILL', 'm3-marker-skill', 'Explanatory', 'M3_MARKER_ENV'];
+
+/**
+ * Deletes a test's folder, retrying a bounded number of times: under the full suite's parallel load a CLI that has
+ * just exited may still hold a file in it for a moment (measured: EPERM on poly-m3-owner-*, decisions-m8.md). The test
+ * fails only if the folder is still there after the retries, as the runner's cleanUp records it (37beede).
+ */
+async function removeDir(dir) {
+  // The promise form: rmSync's retries block the event loop, and in a reproduction (a child process whose working
+  // folder is inside dir) its 20 retries all failed while the promise form's succeeded once the child had exited.
+  try { await rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch { /* judged below */ }
+  assert.equal(existsSync(dir), false, `${dir} is still there after 20 retries`);
+}
 
 /** A stand-in for the owner's home: markers in the user CLAUDE.md, settings and skills, and a CLAUDE.md above the workspace. */
 function ownerHome() {
@@ -80,8 +93,8 @@ test('markers in the owner\'s own CLAUDE.md, settings and skills never reach the
     assert.deepEqual(arm.init.mcp_servers, []);
     assert.equal(arm.init.permissionMode, 'dontAsk');
   } finally {
-    rmSync(home, { recursive: true, force: true });
-    rmSync(config, { recursive: true, force: true });
+    await removeDir(home);
+    await removeDir(config);
   }
 });
 
