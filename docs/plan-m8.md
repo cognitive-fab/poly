@@ -8,7 +8,7 @@ This plan covers milestone M8 of the v1 proposal. Its first item is moving workf
 - the `channel` grammar on both surfaces;
 - the five conversation machines and the configurations generated around them;
 - ingress, and channel adapters for email, WhatsApp, SMS, Slack and webhook, tested against recorded provider traffic;
-- the proposal fields `channel` and `taint` (class only).
+- the proposal field `channel` (taint waits for M10, S181).
 
 The gate is AC14 to AC17. Every conversation machine must be clean, free of deadlock, and prove its `never` statements. AC5's workflow must run on `poly-runtime`, with each work order gated and journaled, and its certificate must no longer list it as `ungated`.
 
@@ -21,7 +21,7 @@ The plan sets out:
 - how each gate item is tested;
 - the spec issues found, numbered from S173.
 
-Nothing is built until the owner rules on the plan.
+The owner ruled on S173 to S187 and E10 on 2026-10-05. Each ruling is under its issue in section 7 and is recorded in `decisions-m8.md`. M8a may start.
 
 ## 1. What was read, and what was found before planning
 
@@ -63,7 +63,7 @@ Nothing was measured while planning.
 
 | Id | Engine | Change | Needed for | Status in this plan |
 |---|---|---|---|---|
-| **E10** | polyaxion | Accept the proposal fields of PT25.1 (here `channel`, and `taint` with its class), and per-value taint beside session taint. | PT21.5; AC17 with a policy over `effect.channel` | **Needed in M8.** If polyaxion cannot take it, PT27.2's fallback applies: `poly-runtime` computes the check before the proposal and passes the result as a field, and the certificate lists the check as poly's, not the gate's. |
+| **E10** | polyaxion | Accept the proposal fields of PT25.1 (in M8 the `channel` field only; taint waits for M10, S181). Per-value taint waits for M10 too. | PT21.5; AC17 with a policy over `effect.channel` | **Needed in M8.** If polyaxion cannot take it, PT27.2's fallback applies: `poly-runtime` computes the check before the proposal and passes the result as a field, and the certificate lists the check as poly's, not the gate's. |
 | **E11** | polyaxion | Expose consult-by-message as a declared input source. | PT21.6 keyed counters, PT22.4, PT24.3 | **Not needed in M8** under S184. Needed in M9. |
 | E5 | polyrun | Create an instance at given initial values. | S141, S153; PT21.2 as written | Still on the list. **Not needed by M8** under S177. |
 | E9 | polyflow | Verify poly's certificate in the descriptor's `certified` field. | S164 under polyflow | **Withdrawn, if S175 is accepted.** Once workflows run on `poly-runtime`, polyflow admits nothing of poly's. |
@@ -106,7 +106,7 @@ AC5's gate item after the move:
 | `poly-lower` | The channel descriptor `channels/<name>.json`; the rewrite of `emit c.reply(…)` into a `send` to the conversation; the generated spawn in the `starts` handler (S177). |
 | `poly-ref` | Written from the semantics, sharing no code with the compiler: `Content` representatives, the extended step property (S178), and the read-back of the channel descriptor. Each read-back gets its broken variants in the list of toolchain faults. |
 | `poly-check` | The workflow stage without polyflow (S175); the certificate's limits; `poly run` in the command registry (S174). |
-| `poly-runtime` | Work orders (S173); `Content` bodies in the ledger's store; the proposal fields `channel` and `taint`; dispatching inbound messages idempotently by provider message id (PF8.2); binding runtime adapters by name and digest (PT26). |
+| `poly-runtime` | Work orders (S173); `Content` bodies in the ledger's store; the proposal field `channel`; dispatching inbound messages idempotently by provider message id (PF8.2); binding runtime adapters by name and digest (PT26). |
 | `poly-agent` | The workflow tools served over the runtime (S174); the language server and MCP pick up the new constructs through the registry. |
 | `poly-io` (new, S182) | Ingress (the webhook endpoint), the runtime adapter interface of PT20.2 for channels, and the five channel adapters. It is the only package allowed a network module. No check package may import it. |
 | `std/` (new) | `std.channels.email`, `whatsapp`, `sms`, `slack` and `webhook`, each with a `PROVENANCE.md` naming the provider documentation and the date of each rule (PT20.4). |
@@ -118,7 +118,7 @@ AC5's gate item after the move:
 
 Each step ends with a commit. Every defect gets a regression test that fails first. A confirmation test, one that cannot fail first, gets a seeded control that must fail. The split into M8a and M8b is proposed in S187. Without that split, the steps are one milestone.
 
-0. **Rulings.** The owner rules on this plan, S173 to S187, and E10. Nothing is built before.
+0. **Rulings.** Given on 2026-10-05 (section 7).
 1. **Work orders on `poly-runtime` (S173).** The runtime-handled path for a workflow's effect kinds: gate, order, report, settle, all journaled. Tested with a scripted agent through the runtime API.
 2. **`poly run --mcp` and AC5 under the gate (S174, S175).**
    - The six tools are served over the runtime.
@@ -134,7 +134,7 @@ Each step ends with a commit. Every defect gets a regression test that fails fir
    - The send rewrite, the generated spawn (S177) and the generated configuration.
 7. **The five conversation machines.** Each starts from its provider's documentation, read that day and recorded in `PROVENANCE.md`. Each must be clean, free of deadlock, and prove its `never` statements. A seeded mutant of each rule must give a finding.
 8. **`poly-io`: ingress and the channel adapters (S182, S183).** `verify`, `send` and `receipts` for each adapter, against recorded provider traffic, forged webhooks included (K11).
-9. **The proposal fields `channel` and `taint`, by class (S181, S185).** Through E10, or through the fallback if it is not vendored.
+9. **The proposal field `channel` (S181, S185).** Through E10, or through the fallback if it is not vendored.
 10. **AC14 to AC17**, end to end, on a small concierge that uses only the channel surface.
 11. **The M8 record**, the code review, and the gate from a clean build.
 
@@ -167,10 +167,12 @@ Numbered from S173. Each has a proposal and waits for the owner's ruling.
     - The agent's report settles the intent: ok or failed, with its data bound by digest. A report for an order not issued, or issued and already settled, is refused and audited.
     - A work order not reported within the effect's declared timeout follows the effect's retry and `exhausted` rules (PT6.1).
   - *Alternative:* a generic "remote handler" for any effect kind. That is wider than S164 needs.
+  - *Ruling (2026-10-05):* Accepted, with two additions. (1) PF8.5a holds: once the gate allows a work order, a retry re-issues the same order id and is never proposed again; a report against a superseded attempt is refused and audited, so an agent is never credited twice. (2) A work order's completion actions are delivered by the runtime only (K9): `workflow_signal` cannot dispatch them, and an attempt is refused and audited.
 - **S174. Who serves the workflow tools.**
   - *Proposal:* `poly run --mcp` is a new registry command. It loads the project's runtime from `poly.json`: its store, its gate policy and its ledger key. It serves the six workflow tools over stdio, with polyflow's names and schemas, framed by `poly-agent`'s MCP server.
   - One process owns a store at a time, and a second refuses with a clear error.
   - `poly mcp` (the checker's tools) is unchanged.
+  - *Ruling (2026-10-05):* Accepted, with conditions. `poly run --mcp` takes the ledger key only from the configured signer, never from a tool argument or the environment. It serves no approve or accept tool (PT12.5). It never logs or records the environment.
 - **S175. What is left of polyflow.**
   - *Proposal:*
     - `polyflow.workflow.json` stays as the artefact `poly-runtime` reads, with its read-back unchanged.
@@ -180,48 +182,69 @@ Numbered from S173. Each has a proposal and waits for the owner's ruling.
     - E9 is withdrawn.
     - `PL6804` stays: the gate checks each order, but only a path property checks their order, so a workflow without one still checks nothing about its sequence.
   - *Alternative:* drop `PL6804` now that polyflow's rule no longer binds.
+  - *Ruling (2026-10-05):* Accepted. `PL6804` stays, for the reason given. E9 is withdrawn.
 - **S176. `use`.**
   - *Proposal:* lower `use` in general. Every module a project uses, `std.*` included, is checked together with it. Machine ids are qualified (S28), and a configuration may instantiate a used module's machines.
   - *Alternative:* lower `use std.*` only, and keep `use` between user modules at `PL0901`. That saves little, since the generated configurations need cross-module machines either way.
+  - *Ruling (2026-10-05):* Accepted, in general: a project's own modules plus `std.*`. Imports across projects stay out of v1 (PT1.3). After the change, every conformance case, example and evidence script is checked again and must give the same verdicts and state counts.
 - **S177. Linking an application instance and its conversation.**
   - *Proposal:*
     - The compiler adds `spawn detached std.channels.<kind>.Conversation as channel:<name> -> Open(app: self)` to the channel's `starts` handler.
     - `self` becomes legal as a whole argument of a detached spawn's creation action, as it is of a `send` (S58 extended).
     - Ingress dispatches `Inbound` to `<app>/channel:<name>`.
   - This replaces PT21.2's "the runtime creates both and gives each the other's `Ref`", which needs E5, with the detached spawn built in M2. The checked configuration is the same pair.
+  - *Ruling (2026-10-05):* Accepted. The child key is fixed by the compiler, never built from an ingress string. If `channel:<name>` is not a key the checker already accepts, use a form it does accept and say which.
 - **S178. Conversation rules as checked properties.**
   - *Proposal:* a machine may declare `never emit k(f: v, …) while P`. It lowers to a step property that reads the step's emitted intents: "no accepted step from a state satisfying `P` emits `k` with those fields". PS5.2 is extended so that a step property may read `emits(k, …)` on its label.
   - poly-ref evaluates it from the semantics. It is checked in every configuration that includes the machine.
+  - *Ruling (2026-10-05):* Accepted, semantics first: the PS5.2 extension is written into `04-semantics.md` and ruled before any code. Each `never` statement has a seeded control that must fail, and translation validation covers the lowering.
 - **S179. Reply on rejection (Q1).**
   - *Proposal:* rejection stays message-free (PT6.1). A conversation machine accepts the forbidden send, records the refusal in a counter so that `PL2201` does not fire, and sends `Rejected(reason)` to the application. No new construct, as PT21.3 already states for the final machine.
+  - *Ruling (2026-10-05):* Accepted. Q1 is closed.
 - **S180. `Content`.**
   - *Proposal:* an opaque type with representatives, as `Principal` (PD5.1.3), and `PL1209` for any other use.
   - Bodies live in the ledger's store by SHA-256 and are written at ingress. A machine holds digests only.
   - PS gains a section on `Content`, written before poly-ref's code, which follows it.
+  - *Ruling (2026-10-05):* Accepted, with the PS section written and ruled before poly-ref's code.
 - **S181. The taint class before M10.**
   - *Proposal:* bring the `audience` declaration forward from M10 as a declaration only: a total order of classes (Q3 stays open for M10). A channel declares the class of what it receives.
   - In M8, ingress tags each inbound body with that class, and the proposal's `taint.class` is the class of the bodies an effect carries. Propagation through decisions and retrieval, the ghost component, comes in M10.
   - *Alternative:* leave `taint` out of M8 entirely and add it in M10.
+  - *Ruling (2026-10-05):* The alternative is taken: no taint in M8. Taint and audiences arrive together in M10. In M8 the proposal carries the `channel` field only, and AC14 to AC17 need no taint.
 - **S182. Runtime adapters, and where network code lives.**
   - *Proposal:* a new package `poly-io` holds ingress and the channel adapters. It is the only package where network modules are allowed. No check package (`poly-core`, `poly-lang`, `poly-lower`, `poly-ref`, `poly-embed`, `poly-check`, `poly-agent`) may import it.
   - PT20.2's adapters are called runtime adapters, so that they are never confused with S167's host adapters. Each is bound in the certificate by package name, version and digest (PT20.2, PT26).
+  - *Ruling (2026-10-05):* Accepted. In addition, `poly-io` imports no check package; it may import `poly-runtime`'s runtime adapter interface only. The boundary check enforces both directions.
 - **S183. Reference providers (Q5), and recorded traffic.**
   - *Proposal:* the reference adapters are WhatsApp Cloud API, Twilio SMS, the Slack Events API with `chat.postMessage`, email by an inbound-mail webhook with SMTP submission, and a generic webhook signed with HMAC.
   - Recorded traffic is built from each provider's documented payloads, with signatures computed under test secrets in the test. No live account enters the repository or the gate.
   - *Alternative:* the owner names different providers.
+  - *Ruling (2026-10-05):* Accepted, with this provider list. Only recorded traffic enters the tests; test secrets are generated inside each test and never written to disk. A live run on a real account is the owner's demonstration. No test or gate sends a real message.
 - **S184. Keyed send counters.**
   - *Proposal:* M8 has per-period counters as policy `var`s, which exist. Counters keyed by recipient (PT21.6) move to M9, where E11 is needed for grants anyway. AC14 to AC17 do not need them.
+  - *Ruling (2026-10-05):* Accepted. E11 is not needed in M8.
 - **S185. Policies over the new proposal fields.**
   - *Proposal:* the policy front end types `effect.channel.{name, kind, recipient, recipientClass, messageKind}` and `effect.taint.class`. A policy that reads a field the proposal does not carry gets unknown (PS8.2).
   - With E10 the gate reads these fields. Without E10, the fallback of PT27.2 applies, and the certificate says so.
+  - *Ruling (2026-10-05):* Accepted without `effect.taint` (S181): the policy front end types `effect.channel.*` only in M8.
 - **S186. The embedded form of a channel.**
   - *Proposal:* `channel(name, { kind, adapter, thread, inbound, starts, delivered, rejected, failed })`, with the same checks. The language server serves it on both surfaces (S168).
+  - *Ruling (2026-10-05):* Accepted.
 - **S187. Split M8.**
   - *Proposal:* split M8 the way M5 was split:
     - **M8a, the gate's reach:** workflows under the gate (steps 1 and 2), `use`, `Content` and `never` (steps 3 to 5);
     - **M8b, channels:** steps 6 to 10.
   - Each closes with its own review and its own clean gate. M8a's gate is AC5 under the gate and the three language items. M8b's gate is AC14 to AC17 and the conversation machines.
   - *Alternative:* one milestone and one gate at the end.
+  - *Ruling (2026-10-05):* Accepted. M8a closes (review, record, and a clean gate on a quiet machine, compared file by file with M6's closing gate) before M8b starts.
+
+## 7a. Rules for the whole milestone
+
+- **Gates.** Every gate in M8 runs from a clean build on a quiet machine, checked and recorded first. Per-file timings are compared with the previous closing gate.
+- **Semantics first.** Any change to `04-semantics.md` (S178, S180) is written and ruled before the code that follows it.
+- **Fail first.** Every defect gets a regression test that fails first; a confirmation test gets a seeded control that must fail.
+- **No live secrets.** No provider account, secret, API key or real message enters the repository, the tests or the gate. No code reads, logs or records the environment.
+- **Records.** Each ruling and each engine item found while building (from E13) is recorded in `decisions-m8.md` the day it is made.
 
 ## 8. Risks
 
@@ -233,7 +256,7 @@ Numbered from S173. Each has a proposal and waits for the owner's ruling.
 
 ## 9. Record of M8, as it is built
 
-Empty until the owner rules on this plan.
+Empty until M8a's first step lands.
 
 ## Conclusion
 
@@ -243,4 +266,4 @@ M8 first closes the one gap M6 left open: a workflow's work orders will cross th
 - conversation rules become a `never` statement checked as a step property over emitted intents (S178);
 - network code is confined to one new package that no check package may import (S182).
 
-Fifteen issues need rulings, S173 to S187, and E10 goes on the engine list. Nothing is built before the rulings.
+The fifteen issues, S173 to S187, are ruled, and E10 is on the engine list for the `channel` field.
