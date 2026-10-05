@@ -117,7 +117,8 @@ The lemma is written as PS4.1f, since PS4.1d already names the unconstrained env
 | step 4 follow-up, final (b8f02ff) | 1,541 | 0 | 0 |
 | step 5, S178 | 1,553 | 1 | 0 |
 | the M8a review's fixes | 1,584 | 0 | 0 |
-| **Total, 5 runs** | | **2** | **1** |
+| M8a closing gate (d923503) | 1,584 | 0 | 0 |
+| **Total at M8a's close, 6 runs** | | **2** | **1** |
 
 ## S178 in detail, ruled
 

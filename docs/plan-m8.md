@@ -400,6 +400,36 @@ Four reviewers read `d9ad88c..6e0920f` in four parts (A: work orders, the workfl
 
 **For the owner.** B-F6: `use m.M` makes every machine of `m` nameable, as PT as built says; the reviewer read the ruled proposal ("`use m.M` (one machine) … admits `m.M` and nothing else") as admitting that machine alone. D-F2: PS5.2 says `k` is "an effect kind", PT2.2 says it is an effect's name; the code takes the name and now refuses a name whose kind is shared. Both wait for a ruling, and nothing was changed beyond the refusal.
 
+### The M8a record
+
+| Step | What | Commits |
+|---|---|---|
+| 1 | Work orders on `poly-runtime` under the gate (S173, amended: an order id per attempt) | ffcceba, f847f4e |
+| 2 | The six workflow tools over the runtime (S175); `poly run --mcp`, `poly.json`'s `run` field and the approvals folder (S188, S189); the store lock | 1bace30, 304b88a, df2f79d, 03bd9cf, 4cdd00e |
+| 3 | `use` within a project and `std/` (S176, PS1.0) | 85402e5, ef6f1ad, 2b86562 |
+| 4 | `Content` (S180, PS1.4a, PS4.1f), the row order of PS3.2 as ruled, and m3-isolation's folder deletion | 45c1fa9, 239b9e3, 52179de, b8f02ff, 1916c0e, eee2a8c |
+| 5 | `never emit … while` (S178, PS5.2, PS5.2a) | 6d815b1, f5df1f1, 6e0920f |
+| Review | 22 findings, 21 fixed, one for the owner (above) | ac28361, d923503 |
+
+**The closing gate, from a clean build.** It ran at d923503 from 11:27 to 11:40 on 5 October 2026, after `npm run clean`, as `npm test` (build, boundary check, the suite, then `test/after/`). Before it started no simulation and no other test run was on the machine: the process list held language servers, MCP servers and idle sessions only. A watcher listed every minute, 14 times, each node or python process that was a test run or a simulation and did not descend from the gate: it found none, apart from the idle TypeScript language servers of an editor open on another folder, matched by that folder's name.
+
+| Gate | Commit | Tests (suite and `test/after/`) | Passed | Failed | Skipped | Waiting | Total |
+|---|---|---|---|---|---|---|---|
+| **M8a closing, from a clean build** | d923503 | 1,584 | 1,579 | 0 | 1 | 4 | 13 min 24 s |
+
+The skipped test is S152's OpenShell enforcement (no gateway configured). The four waiting are E1's, E2's and E5's (two), as in every earlier gate.
+
+**Compared file by file with M6's closing gate.** The suite took 619 s against 727 s, `test/after/` 161 s against 209 s, and the summed time of every file 5,047 s over 130 files against 5,933 s over 119. Of the 119 files in both, 101 were faster, and none was slower by more than 20% and 5 s. The eleven new files are M8a's own; the slowest are `workflow-runtime` 60 s and `run-config` 49 s. The ten slowest files: `m3-runner` 384 s, `m4f-recheck` 332 s, `m3-freeze-eol` 325 s, `standing` 318 s, `outbox-intent` 313 s, `m3-tasks` 277 s, `m3-o1r` 185 s, `account-independence` 160 s, `m3-cleanup` 155 s, `check-memory` 154 s.
+
+**The two M3 failures under load, counted to the close (`decisions-m8.md`).** Six full runs: the m3-environment crash (0xC0000409) twice, the dry run's `ENOTEMPTY` in the frozen runner once, both in runs during M8a's building and neither in the closing gate.
+
+**Limits, stated.**
+- A field whose enum another module declares is read in a configuration only with `is` (`PL0901` otherwise) until S190 is ruled, before M8b step 6.
+- `emits` cannot tell apart two effects of one kind (`PL1201`), since an intent carries its kind.
+- A configuration rules out only a never finding with no constrained witness; one whose machine no configuration includes stays a finding, marked `environment: unconstrained`.
+- The store must be on a local disk, and has one name: a store file with a hard link is refused.
+- Taint, channels and any decision that reads a body are M8b's or later (S180, S181).
+
 ## Conclusion
 
 M8 first closes the one gap M6 left open: a workflow's work orders will cross the gate and enter the ledger like every other effect, served by poly over the same tools polyflow serves today, with polyflow kept only as the oracle AC5 compares against. Channels then follow PT21 with three changes proposed:
