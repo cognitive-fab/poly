@@ -48,7 +48,7 @@ function lockInfo(file: string): LockInfo | null {
  * only to say who held the store before, so a takeover of a stale lock can be journaled with its process id and start
  * time.
  */
-function lockStore(store: string): { previous: LockInfo | null; release(): void } {
+function lockStore(store: string): { previous: LockInfo | null; release(opts?: { failed?: boolean }): void } {
   const file = `${store}.lock`;
   mkdirSync(dirname(store), { recursive: true });
   const db = new DatabaseSync(`${store}.lock.db`);
@@ -61,13 +61,15 @@ function lockStore(store: string): { previous: LockInfo | null; release(): void 
     throw new RunConfigError(`the store ${store} is owned by ${owner ? `process ${owner.pid}, started ${owner.startedAt}` : 'another process'}; one process owns a store at a time (S174)`);
   }
   const previous = lockInfo(file);
-  writeFileSync(file, JSON.stringify({ pid: process.pid, startedAt: STARTED_AT } satisfies LockInfo));
+  const unlock = () => { try { db.exec('ROLLBACK'); } catch { /* nothing open */ } db.close(); };
+  // Polywatch: a lock file that cannot be written gives the OS lock back before the error leaves.
+  try { writeFileSync(file, JSON.stringify({ pid: process.pid, startedAt: STARTED_AT } satisfies LockInfo)); } catch (e) { unlock(); throw e; }
   return {
     previous,
-    release() {
-      try { unlinkSync(file); } catch { /* already gone */ }
-      try { db.exec('ROLLBACK'); } catch { /* nothing open */ }
-      db.close();
+    release(opts = {}) {
+      // A load that failed puts back the stale owner it found, so the next load still journals the takeover.
+      try { if (opts.failed && previous) writeFileSync(file, JSON.stringify(previous)); else unlinkSync(file); } catch { /* already gone */ }
+      unlock();
     },
   };
 }
@@ -108,26 +110,31 @@ export async function loadRun(project: string, opts: { now?: () => number } = {}
     ledger = { keyId: run.ledger.keyId, privateKeyPem: pem };
   }
   const lock = lockStore(store);
-  mkdirSync(approvals, { recursive: true });
-  let rt: PolyRuntime;
+  // Polywatch: everything after the lock is taken gives it back on failure: the approvals folder, the load and the
+  // takeover's journal entry.
+  let rt: PolyRuntime | null = null;
   try {
+    mkdirSync(approvals, { recursive: true });
     rt = await load(join(dir, '.poly', 'build'), { certificate, trust, store: { sqlite: store }, ...(ledger ? { ledger } : {}), ...(opts.now ? { now: opts.now } : {}) });
+    // A lock file the OS lock did not stand behind was stale: its process ended without releasing the store. The
+    // takeover is journaled on the runtime's own store run, with the old process id and start time.
+    if (lock.previous) {
+      const previous = lock.previous;
+      const loaded = rt;
+      loaded.store.ensureRun(STORE_RUN, 'runtime', 'store');
+      await loaded.store.txn(() => { loaded.store.appendEvent(STORE_RUN, 'observation', { stage: 'store-lock', outcome: 'taken-over', previous, by: { pid: process.pid, startedAt: STARTED_AT } }, loaded.now()); });
+    }
   } catch (e) {
-    lock.release();
+    if (rt) { try { await rt.close(); } catch { /* the error that matters is e */ } }
+    lock.release({ failed: true });
     throw e;
   }
-  // A lock file the OS lock did not stand behind was stale: its process ended without releasing the store. The
-  // takeover is journaled on the runtime's own store run, with the old process id and start time.
-  if (lock.previous) {
-    const previous = lock.previous;
-    rt.store.ensureRun(STORE_RUN, 'runtime', 'store');
-    await rt.store.txn(() => { rt.store.appendEvent(STORE_RUN, 'observation', { stage: 'store-lock', outcome: 'taken-over', previous, by: { pid: process.pid, startedAt: STARTED_AT } }, rt.now()); });
-  }
+  const runtime = rt;
   return {
-    rt,
+    rt: runtime,
     approvals,
     async close() {
-      try { await rt.close(); } finally { lock.release(); }
+      try { await runtime.close(); } finally { lock.release(); }
     },
   };
 }

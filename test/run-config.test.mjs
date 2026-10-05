@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -152,6 +152,40 @@ test('S174: a lock file naming a live process with another start time (a reused 
   try {
     const t = await takeovers(run.rt);
     assert.deepEqual([t[0]?.outcome, t[0]?.previous.pid, t[0]?.previous.startedAt], ['taken-over', process.pid, '2001-01-01T00:00:00.000Z']);
+  } finally { await run.close(); }
+});
+
+// Polywatch on the store lock: a load that fails after the lock is taken gives it back, and keeps the record of a stale
+// owner, so the next load still journals the takeover.
+test('S174, polywatch: a load that fails after taking the store gives the lock back', async () => {
+  const { dir } = await runProject('run-lock-release', [BRIEF]);
+  // The lock file cannot be written (a directory stands in its place): the OS lock is given back.
+  const lockFile = join(dir, '.poly', 'run', 'store.sqlite.lock');
+  mkdirSync(lockFile, { recursive: true });
+  await assert.rejects(loadRun(dir));
+  rmSync(lockFile, { recursive: true, force: true });
+  // The approvals folder cannot be made (a file stands in its place): the lock is given back.
+  writeFileSync(join(dir, 'approvals'), 'not a folder');
+  await assert.rejects(loadRun(dir));
+  rmSync(join(dir, 'approvals'), { force: true });
+  const run = await loadRun(dir);
+  await run.close();
+});
+
+test('S174, polywatch: a load that fails after finding a stale lock keeps the stale owner on record, and the next load journals the takeover', async () => {
+  const { dir } = await runProject('run-lock-keep-stale', [BRIEF]);
+  mkdirSync(join(dir, '.poly', 'run'), { recursive: true });
+  const stale = { pid: 999_999, startedAt: '2001-01-01T00:00:00.000Z' };
+  writeFileSync(join(dir, '.poly', 'run', 'store.sqlite.lock'), JSON.stringify(stale));
+  const cert = join(dir, '.poly', 'certificate.json');
+  const saved = readFileSync(cert);
+  rmSync(cert);
+  await assert.rejects(loadRun(dir));
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, '.poly', 'run', 'store.sqlite.lock'), 'utf8')), stale, 'the stale owner is still on record');
+  writeFileSync(cert, saved);
+  const run = await loadRun(dir);
+  try {
+    assert.deepEqual((await takeovers(run.rt)).map((t) => t.previous), [stale]);
   } finally { await run.close(); }
 });
 
