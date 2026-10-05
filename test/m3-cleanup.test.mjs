@@ -6,7 +6,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { runOne } from '../experiments/m3/runner/run.mjs';
@@ -45,11 +46,36 @@ test('a workspace that cannot be deleted is recorded as a failed cleanup, and th
   }
 });
 
+/**
+ * Runs `f` with the cap's clock started only once the stand-in CLI has signalled that it is ready (decisions-m6.md, a
+ * test defect found under gate load): the runner reads Date.now for its wall cap, and until the stand-in writes its
+ * marker the clock stands still, so a cap measures the CLI's run and never fires before the CLI has started. The
+ * runner is frozen and untouched; the clock is the test's.
+ */
+async function withCapClockFromReady(f) {
+  const marker = join(mkdtempSync(join(tmpdir(), 'poly-m3-ready-')), 'ready');
+  const real = Date.now;
+  const base = real();
+  let readyAt = null;
+  Date.now = () => {
+    if (readyAt === null && existsSync(marker)) readyAt = real();
+    return readyAt === null ? base : base + (real() - readyAt);
+  };
+  process.env.M3_FAKE_READY = marker;
+  try {
+    return await f();
+  } finally {
+    Date.now = real;
+    delete process.env.M3_FAKE_READY;
+    rmSync(dirname(marker), { recursive: true, force: true });
+  }
+}
+
 test('a run a cap stops ends the CLI and everything under it, at once, and lists them as leftovers', { skip: process.platform !== 'win32' && 'Windows jobs only' }, async () => {
   const out = mkdtempSync(join(tmpdir(), 'poly-m3-cleanup-cap-'));
   process.env.M3_FAKE_HANG = '1';
   try {
-    const { record } = await runOne({ arm: 1, task: 'T1', run: 903, model: 'stub', tokens: 1_000_000, wallMs: 4_000, out, agent: agent() });
+    const { record } = await withCapClockFromReady(() => runOne({ arm: 1, task: 'T1', run: 903, model: 'stub', tokens: 1_000_000, wallMs: 4_000, out, agent: agent() }));
     assert.equal(record.versions[0].stopped, 'wall');
     assert.equal(record.versions[1].attempted, false);
     // The CLI itself, its launcher and the process it left: all ended, all listed.
@@ -69,3 +95,28 @@ test('a job host that cannot start fails at once, instead of leaving the run wai
 test('ending a job twice ends it once, and the second call waits for the same ending', { skip: process.platform !== 'win32' && 'Windows jobs only' }, () => checks.endsOnce());
 
 test('a CLI the job cannot hold is never started, and the run is unscored, to be rerun', () => checks.unheldNeverStarts());
+
+// Reproduction of the gate failure of 4 October (decisions-m6.md): under the gate's load the launcher had not started
+// the stand-in CLI when the 4-second cap fired, so only the launcher was listed. Holding the launcher suspended for 6
+// seconds once the job holds it does the same every time: it cannot start the CLI before the cap.
+const SUSPEND = fileURLToPath(new URL('fixtures/suspend.ps1', import.meta.url));
+const ps = (pid, action) => execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SUSPEND, '-ProcessId', String(pid), '-Action', action], { stdio: 'ignore' });
+const slowLauncher = (ms) => async () => {
+  const { openJob } = await import('../experiments/m3/runner/jobs.mjs');
+  const job = await openJob();
+  return { ...job, windows: job.windows, assign: async (pid) => { const ok = await job.assign(pid); ps(pid, 'suspend'); setTimeout(() => { try { ps(pid, 'resume'); } catch { /* ended by the cap */ } }, ms).unref?.(); return ok; }, leftovers: (...a) => job.leftovers(...a), end: (...a) => job.end(...a), close: (...a) => job.close(...a) };
+};
+
+test('a run a cap stops lists the CLI and what it left, even when the CLI starts after the cap would have fired', { skip: process.platform !== 'win32' && 'Windows jobs only' }, async () => {
+  const out = mkdtempSync(join(tmpdir(), 'poly-m3-cleanup-cap-slow-'));
+  process.env.M3_FAKE_HANG = '1';
+  try {
+    const { record } = await withCapClockFromReady(() => runOne({ arm: 1, task: 'T1', run: 905, model: 'stub', tokens: 1_000_000, wallMs: 4_000, out, agent: agent(), jobs: slowLauncher(6_000) }));
+    assert.equal(record.versions[0].stopped, 'wall');
+    assert.ok(record.leftovers.length >= 2, JSON.stringify(record.leftovers));
+    for (const p of record.leftovers) assert.equal(alive(p.pid), false, `leftover ${p.pid} is still running`);
+  } finally {
+    delete process.env.M3_FAKE_HANG;
+    rmSync(out, { recursive: true, force: true });
+  }
+});

@@ -29,6 +29,18 @@
 
 **S167 amended.** The registry stays in `packages/poly-check/src/commands.ts`, next to the command line, and `poly-agent` re-exports it: the `poly` binary, its tests and the frozen M3 runner all point there, so moving it would touch frozen paths. The boundary rules apply to the registry unchanged: it imports no host name and no host SDK.
 
+## A test defect found under gate load: the M3 cleanup cap test
+
+**Ruled.** M3 is closed, and its tests now belong to the toolchain, which may change after the close; the runner stays frozen and untouched. The test is fixed in M6.
+
+**The defect.** `test/m3-cleanup.test.mjs`, "a run a cap stops ends the CLI and everything under it, at once, and lists them as leftovers", failed in the gate after the account check moved after the suite (1,419 tests: 1,413 passed, 1 failed, 1 skipped, 4 waiting), and again in the rerun. The run's 4-second wall cap is counted by the runner from the turn's start, and under the gate's load the launcher had not yet started the stand-in CLI when the cap fired, so only the launcher was listed where at least two are expected.
+
+**Reproduced first.** A version that holds the launcher suspended for 6 seconds once the job holds it (`test/fixtures/suspend.ps1`) fails every time, listing only the launcher, as in the gate.
+
+**The fix.** The stand-in CLI signals that it is ready (a marker file, once it has started and left its process), and the test starts the cap's clock only at that signal: until then the clock the runner reads stands still. The assertion is unchanged: at least two leftovers, all ended. Both cap tests, the original and the suspended version, pass with it.
+
+**The rest checked.** No other M3 cleanup test has a cap or a timeout that can fire before a child process has started: the other runs there have a 600-second cap and turns that end by themselves, `endsOnce` assigns a process that already exists, and `hostFailsFast` waits up to 30 seconds for a failure that comes at once.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.
