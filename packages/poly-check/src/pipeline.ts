@@ -11,7 +11,7 @@
 // A stage that cannot run because an earlier one refused is listed as not
 // run, with the reason; it never lowers the verdict (02 §5). No stage calls a
 // language model.
-import { readFileSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { importArtefact } from './import-artefact.js';
@@ -300,13 +300,16 @@ async function workflowStage(moduleName: string, w: A.Workflow, mc: MachineCheck
   const engine = '@cognitive-fab/polyflow-server@0.4.2 (certify)';
   const at = { module: moduleName, machine: mc.machine, node: w.id, line: w.span?.line, col: w.span?.col };
   const { Library } = await import('@cognitive-fab/polyflow-server/library');
-  const wf = new Library(join(dir, '..', 'workflows')).load().get(w.name);
+  // Review A-F6: this workflow's descriptor alone, as polyflow reads it, so another directory there cannot stop the stage.
+  const lib = new Library(join(dir, '..', 'workflows')) as unknown as { _read(name: string, path: string): unknown; certify(wf: unknown): ReturnType<InstanceType<typeof Library>['certify']> };
+  let wf: unknown = null;
+  try { wf = lib._read(w.name, join(dir, '..', 'workflows', w.name)); } catch { wf = null; }
   if (!wf) {
     mc.diagnostics.push(diag('PL2501', at, `polyflow does not load the workflow ${w.name} from its lowered descriptor (addressed to the toolchain, not the author)`, { engine }));
     mc.stages.push({ stage: 'workflow', status: 'ran', engine, verdict: 'REFUSED', ms: performance.now() - t0 });
     return;
   }
-  const c = await new Library(join(dir, '..', 'workflows')).certify(wf);
+  const c = await lib.certify(wf);
   const out: Diagnostic[] = [];
   if (c.bounded) out.push(diag('PL3901', at, `workflow ${w.name}: polyflow's admission explores at most depth 12 and 50,000 paths, and this machine's emission paths go beyond them, so polyflow would refuse it (S165)`, { engine }));
   for (const v of c.violations) out.push(diag('PL4001', at, `workflow ${w.name}: polyflow's admission finds a path that violates ${v.invariant ?? v.name ?? 'an effect invariant'}, so it would refuse the workflow (S165)`, { engine }));
@@ -342,9 +345,27 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   // A file left by an earlier build (effects.cjs, effect-invariants.mjs) would be read as this program's (review finding P2).
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
+  // Review A-F6: a descriptor an earlier source of this machine left (a workflow renamed or removed) goes, so polyflow,
+  // which loads the whole directory, never runs a workflow the source no longer has over the machine's new files.
+  const library = resolve(dir, '..', 'workflows');
+  const current = new Set(Object.keys(lowered.files).filter((f) => f.startsWith('../workflows/')).map((f) => f.split('/')[2]));
+  if (existsSync(library)) {
+    for (const name of readdirSync(library)) {
+      if (current.has(name)) continue;
+      let machineOf: unknown;
+      try { machineOf = (JSON.parse(readFileSync(join(library, name, 'polyflow.workflow.json'), 'utf8')) as { machine?: unknown }).machine; } catch { continue; }
+      if (machineOf === `../../${module.name}.${machine}/next.cjs`) rmSync(join(library, name), { recursive: true, force: true });
+    }
+  }
   for (const [f, text] of Object.entries(lowered.files)) {
-    // PT10: a workflow's descriptor sits in its own directory under .poly/build/workflows/, written afresh.
-    if (f.startsWith('../workflows/')) { rmSync(dirname(join(dir, f)), { recursive: true, force: true }); mkdirSync(dirname(join(dir, f)), { recursive: true }); }
+    // PT10: a workflow's descriptor sits in its own directory under .poly/build/workflows/, written afresh. Review
+    // A-F1: the directory is one under the library, whatever the name says, or nothing is removed or written.
+    if (f.startsWith('../workflows/')) {
+      const wdir = resolve(dirname(join(dir, f)));
+      if (dirname(wdir) !== library) throw new Error(`a workflow's descriptor would be written outside .poly/build/workflows: ${f}`);
+      rmSync(wdir, { recursive: true, force: true });
+      mkdirSync(wdir, { recursive: true });
+    }
     writeFileSync(join(dir, f), text);
   }
   mc.buildDir = dir;
@@ -956,6 +977,26 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
     if (!prev) { named.set(report.module, report); continue; }
     report.diagnostics.push(diag('PL1002', { module: report.module, line: 1, col: 1 }, `module ${report.module} is also declared in ${prev.file}; a project names each module once (PT1.3)`));
     refold(report);
+  }
+  // Review A-F4, A-F5: a project's workflows are one polyflow library (.poly/build/workflows), which names a workflow by
+  // its directory and refuses one effect kind mapped two ways: a name is used once in a project, and a kind maps one way.
+  const workflowNamed = new Map<string, string>();
+  const kindMapped = new Map<string, { w: string; spec: string }>();
+  for (const m of program) {
+    const report = reports.find((r) => r.module === m.name);
+    if (!report) continue;
+    for (const d of m.decls) {
+      if (d.kind !== 'Workflow') continue;
+      const prev = workflowNamed.get(d.name);
+      if (prev && prev !== m.name) { report.diagnostics.push(diag('PL1002', { module: m.name, node: d.id, line: d.span?.line, col: d.span?.col }, `workflow ${d.name} is also declared in module ${prev}; polyflow names a workflow by its directory, so a project names each workflow once (PT10)`)); refold(report); }
+      else workflowNamed.set(d.name, m.name);
+      for (const t of d.tools) {
+        const spec = JSON.stringify([t.tool, t.target, t.why]);
+        const first = kindMapped.get(t.effect);
+        if (!first) { kindMapped.set(t.effect, { w: `${m.name}.${d.name}`, spec }); continue; }
+        if (first.spec !== spec && !first.w.startsWith(`${m.name}.`)) { report.diagnostics.push(diag('PL6803', { module: m.name, node: t.id, line: t.span?.line, col: t.span?.col }, `workflow ${d.name}: "${t.effect}" is mapped to another tool, target or reason than in workflow ${first.w}, and polyflow refuses a library that maps one kind two ways (S166)`)); refold(report); }
+      }
+    }
   }
   // S72, PT6.5: the handler lint. A violation is not admitted (REFUSED); a project with effects and no handlers
   // field lists the lint as not run, never as clean.

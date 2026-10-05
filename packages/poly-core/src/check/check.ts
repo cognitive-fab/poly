@@ -220,6 +220,17 @@ class Checker {
       workflows.add(d.name);
       this.checkWorkflow(d, machines);
     }
+    // Review A-F4: polyflow refuses its whole library when two workflows map one effect kind to different tools.
+    const mapped = new Map<string, { w: string; spec: string }>();
+    for (const d of this.module.decls) {
+      if (d.kind !== 'Workflow') continue;
+      for (const t of d.tools) {
+        const spec = JSON.stringify([t.tool, t.target, t.why]);
+        const first = mapped.get(t.effect);
+        if (!first) { mapped.set(t.effect, { w: d.name, spec }); continue; }
+        if (first.w !== d.name && first.spec !== spec) this.err('PL6803', t, `workflow ${d.name}: "${t.effect}" is mapped to another tool, target or reason than in workflow ${first.w}, and polyflow refuses a library that maps one kind two ways (S166)`);
+      }
+    }
     // S41: polyrun keys handlers by kind, so effects that share a kind must declare the same payload,
     // completions and class. Identical declarations may share it. Across modules, poly-check compares
     // the signatures of a project's files.
@@ -237,6 +248,8 @@ class Checker {
 
   // ── workflows (PT10, S166) ─────────────────────────────────────────────
   private checkWorkflow(w: A.Workflow, machines: Map<string, MachineFacts>): void {
+    // Review A-F1: the name is the descriptor's directory, so it is a name, as the standalone surface's grammar gives.
+    if (!/^[A-Za-z_][A-Za-z0-9_]*(-[A-Za-z0-9_]+)*$/.test(w.name)) { this.err('PL1201', w, `${JSON.stringify(w.name)} is not a workflow name: letters, digits, underscores and single hyphens (PT10)`); return; }
     const m = this.module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === w.machine);
     const facts = machines.get(w.machine);
     if (!m || !facts) { this.err('PL1001', w, `workflow ${w.name} runs ${w.machine}, which is no machine of module ${this.module.name}`); return; }
@@ -250,17 +263,30 @@ class Checker {
       const named = [...w.key.template.matchAll(/\{(\w+)\}/g)].map((x) => x[1]);
       if (!named.length) this.err('PL6802', w.key, `workflow ${w.name}: the key template ${JSON.stringify(w.key.template)} names no field, so every run would have one name (S166)`);
       for (const f of named) if (act && !act.params.some((p) => p.name === f)) this.err('PL6802', w.key, `workflow ${w.name}: the key field ${f} is no parameter of ${w.input} (S166)`);
+      const patterned = new Set<string>();
       for (const f of w.key.fields) {
         if (!named.includes(f.name)) { this.err('PL6802', f, `workflow ${w.name}: ${f.name} has a pattern, and the key template does not name it (S166)`); continue; }
+        // Review A-F3: one pattern per field; the descriptor holds one, so a second would be checked and then lost.
+        if (patterned.has(f.name)) { this.err('PL6802', f, `workflow ${w.name}: ${f.name} is given a second pattern, and polyflow keeps one (S166)`); continue; }
+        patterned.add(f.name);
         let re: RegExp;
         try { re = new RegExp(f.pattern); } catch (e) { this.err('PL6802', f, `workflow ${w.name}: the pattern of ${f.name} does not compile: ${(e as Error).message} (S166)`); continue; }
         const p = act?.params.find((x) => x.name === f.name);
         // Every declared value of the field: a set's members, or each integer of a range, whether the range is the
         // check domain or the type (polywatch on step 2). A value the pattern refuses is a run that could not start.
+        // Review A-F2: every value, ranges in full and enums by member, as the contract gives them to polyflow.
         const d = p?.check?.domain;
         const range = d?.kind === 'DomainRange' ? d : p?.type.kind === 'TRange' ? p.type : null;
-        const values = d?.kind === 'DomainSet' ? d.values.map((v) => String((v as { value?: unknown }).value)) : range ? Array.from({ length: Math.min(range.hi - range.lo + 1, 10_000) }, (_, k) => String(range.lo + k)) : [];
-        const refused = values.filter((v) => !re.test(v));
+        const members = p?.type.kind === 'TName' ? this.env.unions.get(p.type.name) : undefined;
+        let values: string[] | null;
+        if (d?.kind === 'DomainSet') values = d.values.map((v) => String((v as { value?: unknown }).value));
+        else if (range) values = range.hi - range.lo + 1 > 1_000_000 ? null : Array.from({ length: range.hi - range.lo + 1 }, (_, k) => String(range.lo + k));
+        else if (members?.isEnum) values = members.ctors.map((c) => c.name);
+        else if (p?.type.kind === 'TBool') values = ['true', 'false'];
+        else values = null;
+        if (p && values === null) { this.err('PL6802', f, `workflow ${w.name}: ${w.input}'s ${f.name} has no finite set of values poly can test against the key's pattern; give it a check domain, an enum or a range of at most a million values (S166)`); continue; }
+        if ((values ?? []).includes('')) this.err('PL6802', f, `workflow ${w.name}: ${w.input}'s ${f.name} may be empty, which polyflow refuses as a missing key field (S166)`);
+        const refused = (values ?? []).filter((v) => v !== '' && !re.test(v));
         if (refused.length) this.err('PL6802', f, `workflow ${w.name}: ${w.input}'s ${f.name} may be ${refused.slice(0, 3).map((v) => JSON.stringify(v)).join(', ')}${refused.length > 3 ? ` and ${refused.length - 3} more` : ''}, which the key's pattern refuses, so such a run could not start (S166)`);
       }
     }
