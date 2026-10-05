@@ -87,6 +87,12 @@ The code review's 26 findings are fixed, each with a test that failed first (7ad
 
 The report of this gate, and the record of it in 0fecd3d, named only E1 and E5. That was an error in the summary, not a change: the gate's output names all four, and the E2 test is unchanged and still waits on E2. `plan-m6.md` is corrected.
 
+## m4 merged into main
+
+**Ruled and done.** The main tree at `C:\Users\jjdub\code\poly` was clean on `main` at 34305c8, with no lock file and no file written in it in the two hours before. The only processes holding it were an editor's TypeScript language server, which writes nothing. `git merge --ff-only m4` moved `main` from 34305c8 to 40b2a98, `m4`'s HEAD, with no merge commit: `main` was an ancestor of `m4`. The gate at 9561785 covers every change of code and test merged, since only `docs/` changed after it.
+
+**The freeze.** `node experiments/m3/freeze.mjs --check` on `main` at 40b2a98 lists two parts as changed: `examples` (the four files under `examples/evidence`) and `toolchain` (poly's package sources, the vendored engines and `package-lock.json`, 163 files in all with `examples`). Both are expected parts. Every evidence part reports no change: the tasks T1 to T10 at every version, P1, O1-R, O1, the O1 prompt, `template`, `controls`, `adapter`, `runner and prompts`, `analysis`, `manual` and `arm 2 polygraph`, as the standing rule of `decisions-m3.md` requires. `toolchain build` also reports no change: it hashes the packages' `dist` in the main tree, build output that a merge does not rebuild.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.
