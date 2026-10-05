@@ -61,6 +61,10 @@
 
 **The provider fixes have tests** (196340d). The rule bars a real model and a real `claude` from tests, not tests of the launcher: a stand-in `claude` (`claude.cmd` on Windows) on a PATH the test builds echoes its stdin, and exits early in a second case. Both tests failed against the provider before 4ecddf8 and pass now; with a stand-in key variable present, the stand-in is never started.
 
+## Step 11: the review and the closing gate
+
+The code review's 26 findings are fixed, each with a test that failed first (7ad6bfb, ea4075c, 9190006, f29118d), and recorded in `plan-m6.md` section 10. The closing gate ran from a clean build at 9561785 on an otherwise idle machine, checked before it started and watched while it ran: 1,464 tests, 1,459 passed, 0 failed, 1 skipped, 4 waiting, in 16 min 5 s, with the account check's child runs at 206 s each. Compared file by file with the gate after step 9, the earlier rise was the machine's load; nothing is attributed to code. M6's close and the merge of `m4` into `main` wait on the owner's ruling.
+
 ## Changes to the plan
 
 - **Step 0.** `main` is already merged (34305c8, which contains `m4`'s merge), and `m4` is at it; the merge is dropped from the step.

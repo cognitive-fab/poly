@@ -202,6 +202,22 @@ Four reviewers read `e6f1730..d9c3f11` in four parts (workflows; the registry, t
 | Two hosts | **Claude Code half passes; DeepSeek Harness half waiting** (S170) | The entries `poly install` prints are launched exactly as printed and run AC5's workflow. |
 | M5 findings | **measured** | The leak over one file checked again is fixed (`test/check-memory.test.mjs`); the 2.9 GB is memory kept after the largest explorations, not held live; the 53-second program is its configuration's state space. |
 
+**The gates.**
+
+| Gate | Commit | Tests (suite and `test/after/`) | Passed | Failed | Skipped | Waiting | Total | Account check's child runs |
+|---|---|---|---|---|---|---|---|---|
+| After step 6, account check moved after the suite | a7ab9fb | 1,419 | 1,413 | 1 (the M3 cleanup cap test, fixed in 344c1cb) | 1 | 4 | | |
+| After step 9 | 0b0a29e | 1,432 | 1,427 | 0 | 1 | 4 | 36 min 19 s | 964 s and 998 s |
+| **Closing, from a clean build** | 9561785 | 1,464 | 1,459 | 0 | 1 | 4 | 16 min 5 s | 206 s and 206 s |
+
+The closing gate ran from 20:22 to 20:38 on 4 October 2026, after `npm run clean`. Before it started, no other session's simulation or gate was running (the process list had no `run-strike.mjs`, no polysim process and no other test runner), and a watcher listed every node or python process every minute while it ran: none outside this gate's own process tree. The skipped test is S152's OpenShell enforcement (no gateway configured); the four waiting are E1's and E5's.
+
+**Compared file by file with the gate after step 9.** The suite took 727 s against 1,107 s, `test/after/` 209 s against 1,024 s, and the summed time of every file 5,933 s over 119 files against 7,693 s over 115. Of the 115 files in both, 91 were faster. The largest drops are the files that ran while the other session's simulation did: `test/after/account-independence.test.mjs` 1,015 to 208 s, `standing` 745 to 381 s. So the rise reported after step 9 was the machine's load, as ruled, and none of it is attributed to code. Two files were slower by more than 20% and 5 s:
+- `test/poly-new.test.mjs`, 32 to 60 s: it gained the three launcher tests of 196340d after the step-9 gate (12.5, 15.2 and 7.7 s), not a slower path.
+- `test/detached.test.mjs`, 23 to 29 s: the test is unchanged, and the only change since on any path it runs is `check.ts`'s workflow checks, which run only for a module with a workflow, and none of its modules has one. One sample; nothing is attributed to code.
+
+The ten slowest files: `m3-runner` 460 s, `outbox-intent` 387 s, `standing` 381 s, `m4f-recheck` 358 s, `m3-freeze-eol` 348 s, `m3-tasks` 333 s, `m3-o1r` 252 s, `account-independence` 208 s, `review-m2` 184 s, `m3-cleanup` 177 s.
+
 **Limits, stated.**
 - Workflows run on polyflow, outside poly's gate, until they move to `poly-runtime` before v1, at the latest with M8 (S164, PT18).
 - The DeepSeek Harness half waits on its plugin API (S170). The agent runs under each host are a demonstration for the owner to make, not gated.
