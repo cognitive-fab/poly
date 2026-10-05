@@ -59,8 +59,11 @@ export function samplingProvider(sample: (prompt: string) => Promise<string>): P
   return { name: 'sampling', draft: (req) => sample(promptOf(req)) };
 }
 
-/** The variables whose presence would make Claude Code bill an API key instead of the user's subscription. */
-export const API_KEY_VARIABLES = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+/**
+ * The variables whose presence would make Claude Code bill per token instead of the user's subscription: an API key, or
+ * Bedrock or Vertex billing switched on (review B-F1).
+ */
+export const API_KEY_VARIABLES = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX'];
 
 /**
  * Claude Code, headless, under the user's own login (S169). It refuses to start while an API key variable is present:
@@ -74,7 +77,7 @@ export function claudeCliProvider(opts: { bin?: string; keyVariables?: string[] 
     name: 'claude-cli',
     draft(req) {
       const present = keyVariables.filter((k) => Object.prototype.hasOwnProperty.call(process.env, k));
-      if (present.length) return Promise.reject(new Error(`poly new does not start Claude Code while ${present.join(' and ')} ${present.length === 1 ? 'is' : 'are'} set: a key would bill per token instead of your subscription (S169)`));
+      if (present.length) return Promise.reject(new Error(`poly new does not start Claude Code while ${present.join(' and ')} ${present.length === 1 ? 'is' : 'are'} set: it would bill per token instead of your subscription (S169)`));
       return new Promise((resolve, reject) => {
         // Polywatch on step 9: on Windows claude may be a .cmd shim, which only a shell starts, so the prompt goes on
         // stdin, never into a command line a shell would read; the arguments are fixed words.

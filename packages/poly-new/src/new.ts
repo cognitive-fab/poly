@@ -2,7 +2,7 @@
 // poly as the target. Each draft is checked by poly check, its diagnostics go back to the provider, and the loop stops at
 // CLEAN or after five rounds. The last draft is written with a header saying it is not admitted; admission stays a
 // person's step (poly admit), and the check is never relaxed to let a draft through.
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -16,10 +16,22 @@ export const HEADER = '// Drafted by poly new: not admitted. Run poly check, rea
 
 export interface DraftResult { file: string; rounds: number; verdict: string; admitted: false; provider: string; diagnostics: { code: string; message: string; line?: number }[] }
 
-/** A model's answer as a module: the first ```poly block, or the whole answer when it has none. */
+/**
+ * A model's answer as a module: its first ```poly block, else its first fenced block, else the whole answer. Fences are
+ * read line by line, so a closing fence is never taken for an opening one (review B-F5).
+ */
 export function sourceOf(answer: string): string {
-  const m = /```(?:poly)?\s*\n([\s\S]*?)```/.exec(answer);
-  const text = (m ? m[1] : answer).replace(/\r\n/g, '\n');
+  const lines = answer.replace(/\r\n/g, '\n').split('\n');
+  const blocks: { lang: string; body: string[] }[] = [];
+  let open: { lang: string; body: string[] } | null = null;
+  for (const line of lines) {
+    const fence = /^\s*```\s*([\w-]*)\s*$/.exec(line);
+    if (fence && !open) { open = { lang: fence[1], body: [] }; continue; }
+    if (fence && open) { blocks.push(open); open = null; continue; }
+    if (open) open.body.push(line);
+  }
+  const block = blocks.find((b) => b.lang === 'poly') ?? blocks[0];
+  const text = block ? block.body.join('\n') : answer.replace(/\r\n/g, '\n');
   return text.endsWith('\n') ? text : text + '\n';
 }
 
@@ -60,6 +72,8 @@ export function newCommand(providerOf: () => Provider): Command {
       const into = input.into;
       if (typeof description !== 'string' || !description) throw new CommandUsageError('description is required');
       if (typeof into !== 'string' || !into.endsWith('.poly')) throw new CommandUsageError('into is required: the .poly file to write the draft to');
+      // Review B-F2: a module that is not an earlier draft of poly new's is a person's work, and is never overwritten.
+      if (existsSync(into) && !readFileSync(into, 'utf8').startsWith(HEADER)) throw new CommandUsageError(`${into} already holds a module that is not a draft of poly new's; give another file`);
       const r = await draftModule({ description, into, provider: providerOf() });
       const exit = r.verdict === 'CLEAN' ? EXIT_CODES.CLEAN : EXIT_CODES.REFUSED;
       return { exit, result: r as unknown as Record<string, unknown>, text: `drafted ${r.file} in ${r.rounds} round${r.rounds === 1 ? '' : 's'} with ${r.provider}: ${r.verdict}, not admitted\n${r.diagnostics.map((d) => `  ${d.code}${d.line ? ` line ${d.line}` : ''}: ${d.message}\n`).join('')}` };

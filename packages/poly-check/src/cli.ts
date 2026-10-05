@@ -108,6 +108,8 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
   if (cmd === 'admit' && positional.length === 2) return { name: 'admit', input: { project: a } };
   if (cmd === 'bench' && a === 'gate' && positional.length === 2) {
     const sizes = (option(args, '--sizes') ?? '1,8,64').split(',').map(Number);
+    // Review B-F6: bad sizes print the usage text, as before the registry.
+    if (sizes.some((n) => !Number.isInteger(n) || n < 1)) return null;
     return { name: 'bench', input: { sizes, out } };
   }
   if (cmd === 'fix' && positional.length === 2) return { name: 'fix', input: { id: a, root } };

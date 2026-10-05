@@ -56,7 +56,7 @@ test('S169: the headless Claude Code provider refuses to start while an API key 
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, POLY_TEST_STANDIN_KEY: 'stand-in-value-never-printed' } });
   assert.equal(r.status, 0, r.stderr);
   const [names, outcome] = r.stdout.trim().split('\n');
-  assert.deepEqual(JSON.parse(names), ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
+  assert.deepEqual(JSON.parse(names), ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX']);
   assert.match(outcome, /^REFUSED .*POLY_TEST_STANDIN_KEY/);
   assert.doesNotMatch(r.stdout + r.stderr, /stand-in-value-never-printed/);
 });
@@ -116,7 +116,7 @@ async function launcher(mode, description, opts = {}) {
     console.log('ALIVE');
   `;
   const env = { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, FAKE_CLAUDE_MODE: mode, FAKE_CLAUDE_STARTED: started, POLY_TEST_DESCRIPTION: description, ...(opts.env ?? {}) };
-  for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete env[k];
+  for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX']) delete env[k];
   try {
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: ROOT, encoding: 'utf8', env, timeout: 60_000 });
     return { ...r, started: existsSync(started) ? readFileSync(started, 'utf8') : null };

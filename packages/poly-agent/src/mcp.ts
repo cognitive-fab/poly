@@ -88,12 +88,17 @@ export function serveMcp(opts: McpOptions = {}): Promise<void> {
       try { msg = JSON.parse(line) as Message; } catch { fail(null, -32700, 'parse error'); return; }
       // The client's answer to a request of the server's: settled at once, not queued behind the call that waits on it.
       const answer = msg as Message & { result?: unknown; error?: { message?: string } };
-      if (!answer.method && typeof answer.id === 'string' && answer.id.startsWith('poly-')) {
-        const w = waiting.get(Number(answer.id.slice(5)));
-        waiting.delete(Number(answer.id.slice(5)));
-        if (answer.error) w?.reject(new Error(answer.error.message ?? 'the client refused')); else w?.resolve(answer.result);
+      if (!answer.method) {
+        // A response is never answered (JSON-RPC 2.0, review B-F4); one to a request of the server's settles it.
+        if (typeof answer.id === 'string' && answer.id.startsWith('poly-')) {
+          const w = waiting.get(Number(answer.id.slice(5)));
+          waiting.delete(Number(answer.id.slice(5)));
+          if (answer.error) w?.reject(new Error(answer.error.message ?? 'the client refused')); else w?.resolve(answer.result);
+        }
         return;
       }
+      // Review B-F3: a ping is answered at once, even while a call waits on the client's model.
+      if (msg.method === 'ping' && msg.id !== undefined && msg.id !== null) { reply(msg.id, {}); return; }
       chain = chain.then(() => handle(msg)).then(() => undefined, (e) => { process.stderr.write(`[poly mcp] ${(e as Error).stack ?? e}\n`); });
     });
     rl.on('close', () => { void chain.then(resolve); });
