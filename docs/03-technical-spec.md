@@ -1061,8 +1061,8 @@ A credential is a top-level declaration, and an effect names the one it uses:
 ```poly
 credential payments: oauth2 {
   provider "stripe-connect"
-  grant authorization_code pkce
-  scopes { refunds.write, charges.read }
+  grant authorization_code
+  scopes { read_write }
   holder Principal
 }
 
@@ -1070,13 +1070,13 @@ effect refund(merchant: Principal, amount: 0..500) {
   kind "payments.refund"
   labels { egress:external }
   targets { egress: "https://api.stripe.com/v1/refunds" }
-  uses payments { refunds.write } for merchant
+  uses payments { read_write } for merchant
   class irreversible
 }
 ```
 
-- **The declaration.** `oauth2` is the one kind. `grant` is `authorization_code pkce` (on behalf of a person, the holder) or `client_credentials` (the service itself, no holder). `scopes` is a finite set of provider scope names, each an identifier or a dotted one; `holder Principal` is required for `authorization_code` and absent for `client_credentials`. Each item is written once.
-- **The provider profile.** `provider "p"` names `std/credentials/providers/p.json`, data the vault adapter and the checker both read: the provider's base addresses, its authorization, token and revocation endpoints, and the source and date they were read from (`PROVENANCE.md` beside it). A provider with no profile is `PL1001`.
+- **The declaration.** `oauth2` is the one kind. `grant` is `authorization_code`, with `pkce` where the provider supports it (on behalf of a person, the holder), or `client_credentials` (the service itself, no holder). `scopes` is a finite set of provider scope names, each an identifier or a dotted one; `holder Principal` is required for `authorization_code` and absent for `client_credentials`. Each item is written once.
+- **The provider profile.** `provider "p"` names `std/credentials/providers/p.json`, data the vault adapter and the checker both read: the provider's base addresses, its authorization, token and revocation endpoints, the grants it supports, whether it supports PKCE, the scope names it defines, and the source and date they were read from (`PROVENANCE.md` beside it). A provider with no profile is `PL1001`; so is a scope the profile does not define. A grant the provider does not support, or `pkce` where it has none, is `PL1201`. The example's profile is Stripe Connect's, as its OAuth reference documents it: the scopes `read_write` and `read_only`, the authorization code grant, and no PKCE.
 - **`uses c { s… } for p`** in an effect. `c` names a credential of the module (`PL1001`); each scope is one `c` declares (`PL6821 SCOPE_NOT_DECLARED`); an `authorization_code` credential needs `for p` (`PL6822 HOLDER_NOT_NAMED`), and `p` names a `Principal` parameter of the effect (`PL1201`); a `client_credentials` credential takes no `for` (`PL1201`). Every egress target of the effect lies under one of the provider's base addresses (`PL6823 TARGET_OUTSIDE_PROVIDER`), and an effect with `uses` declares at least one egress target.
 - **Lowering.** Each credential an effect uses is written to `.poly/build/credentials/<c>.json` (the provider, the grant, PKCE, the scopes, whether it has a holder, and the profile's digest), and the effect's manifest entry gains `uses: { credential, scopes, holder }`. poly-ref reads both back from the source on its own; the broken lowerings `credential-scope-added`, `credential-holder-dropped` and `credential-base-widened` are in the explicit list of toolchain faults.
 - **Both surfaces.** The embedded form is `credential(name, { kind, provider, grant, pkce?, scopes, holder? })` and the effect item `uses(credential, [scopes], holder?)`.
