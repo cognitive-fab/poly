@@ -1,0 +1,116 @@
+# poly · Plan for milestone M11, routing and budgets
+
+*Cognitive Fab · October 2026 · plan, written before any M11 code, while M9 is built · on branch `m4` in the worktree `poly-m4` · from PT27.3's M11 row and PT24 of `proposals/v1-technical-spec.md` (v0.2), PF14 and AC25 and AC26 of `proposals/v1-functional-spec.md`, and the brief `handoff-m11.md` · spec issues S350 to S399, new codes PL6843 to PL6849 (`decisions-m9.md`, how M9 to M11 run)*
+
+This plan covers milestone M11 of the v1 proposal: routing and budgets. Its scope, as PT27.3 sets it:
+
+- `route` and `budget`;
+- the standard library machines `std.routing.Route` and `std.routing.Budget`;
+- reservations, taken before a model call and settled after it;
+- `poly cost`, from the ledger alone;
+- the tier swap rule (`PL6842`).
+
+The gate is AC25 and AC26, with every provider call recorded. M11 is built after M9 closes, in its own worktree and session, in parallel with M10. Section 6 lists every change it makes to `04-semantics.md` and to shared packages, so that it can be ruled together with M10's plan.
+
+Nothing is built before the plan is ruled.
+
+## 1. What was read, and what was found before planning
+
+**Documents read:** `handoff-m11.md`; PF14 and AC25 and AC26; PT20.3 (intervals), PT24, PT25.1 (the fields `route` and `budget`), PT27; PD1 (decisions, PD1.6 calibration), PD2 (decision records), PD3.2 (a model change); `plan-m9.md` and its ruling (S199: the runtime reads a keyed machine itself).
+
+| Finding | Where | Consequence |
+|---|---|---|
+| A decision calls one provider, registered with `rt.provide`, and its completion carries the provider's answer, `conf` and `margin`. | PD1, `poly-runtime` | A route is an ordered list of providers with thresholds over the same values; each tier's call is its own intent (S351). |
+| `poly journal fit` already fits a monotone calibration map from decision events and outcomes (PD1.6, S132), and writes to no chain. | `poly-check/src/journal.ts` | A tier's calibration map is that command's output, bound by digest (S355). |
+| `poly deploy` is not built (PF8.7, "not scheduled"). | `commands.ts` | PT24.5 refuses a model change at `poly deploy`; with no deploy, the refusal moves to admission, as PF14.6 already says (S355). |
+| The boundary refuses a model SDK in every package. | `scripts/check-boundaries.mjs` | Live providers stay host code, bound by `rt.provide`; poly ships only the recorded provider (S356). |
+| The gate reads a keyed machine only through the runtime's own read (S199, E11 not needed). | `decisions-m9.md` | `Budget` instances are read and written by poly-runtime the same way (S353). |
+| A decision event records the provider's answer by digest (PD2), not its usage or cost. | `poly-runtime` | The event gains tier, model, usage, cost, reservation and the price table's digest (S358). |
+
+Nothing was measured while planning.
+
+## 2. Engine changes
+
+- **E11 (consult-by-message): proposed not needed** for `Budget` and `Route` (S353), as for grants in M9: poly-runtime reads and writes the instances itself, settled by test, fail closed.
+- No other engine change. One found while building gets the next free id, recorded the same day.
+
+## 3. Packages and what changes in each
+
+| Package | Change |
+|---|---|
+| `poly-lang`, `poly-embed` | `route r { tier … escalate when … budget b }`, `budget b { cap … on exhausted … }`, and `route r` in a decision; both surfaces. |
+| `poly-core` | Money in decimal lowered to integer micro-units; `PL6841`, `PL6842`, and new codes from `PL6843`; `route-exhausted` among PL1207's reserved reasons. |
+| `poly-lower` | Each route's descriptor `routes/<name>.json` (tiers, providers, price table and map digests, thresholds, budget) and each budget's `budgets/<name>.json`, with their read-backs and broken variants. |
+| `poly-ref` | The `Route` and `Budget` machines checked as programs; the confidence intervals the thresholds cut; the reservation invariant. |
+| `poly-runtime` | One intent per tier; reservations before each tier's call, settled after it, recovered after a crash (S352); the fields `route` and `budget`; the extended decision event; replay of every tier choice with no model call. |
+| `poly-check` | Admission binds price tables and calibration maps by digest, refuses `PL6841` and `PL6842`; `poly cost`. |
+| `std/` | `std.routing`, with `Route` and `Budget` and their `PROVENANCE.md` (poly's own rules; each price table names its source and date). |
+
+## 4. Order of work
+
+Each step ends with the full suite and a commit; every defect gets a test that fails first; the 147 measured files are compared at every step.
+
+1. **PS text.** The semantics changes of section 6, written into `04-semantics.md` before any code.
+2. **Money and price tables** (S350): micro-units, the price table format with its source and date, `PL6843`.
+3. **`std.routing.Route`** (S351), checked: every path reaches `Answered` or `Exhausted` under the fairness of provider completion; each rule's seeded mutant.
+4. **`std.routing.Budget` and the reservation property** (S352): the invariant checked over the intervals the caps cut.
+5. **`route` and `budget`** on both surfaces, the descriptors, their read-backs and broken variants, `PL6841`.
+6. **Runtime: one intent per tier, reservations, settlement, crash recovery** (S352, S353); AC26 with 64 concurrent runs and an injected overrun.
+7. **Records, replay and `poly cost`** (S358); AC25's replay half.
+8. **Calibration maps and the tier swap rule** (S355), `PL6842` at admission.
+9. **The M11 record, the review, and the gate** from a clean build on a quiet machine, compared file by file with M9's.
+
+## 5. How each gate item is tested
+
+| Gate item | Test | Fails first because |
+|---|---|---|
+| AC25 | `test/routing.test.mjs`. A recorded low-confidence answer from the first tier escalates to the second; the route reaches `Answered` or `Exhausted` on every path (`poly check`, with a seeded mutant that loops); replay reproduces every tier choice from the ledger with no provider registered. | No routes. |
+| AC26 | `test/budget.test.mjs`. 64 concurrent runs in one scope, each reserving before its recorded call: spent plus reserved never exceeds the cap at any step of the journal. A recorded usage above its reservation is recorded as an overrun in the `verdict` event and the `Budget` instance, and the next reservation sees the corrected remainder. A crash between reservation and settlement leaves the reservation held until the intent settles or dies, and none is lost or double-counted. | No budgets. |
+| Tier swap | `test/routing-swap.test.mjs`. A tier whose model changed with its map unchanged is refused `PL6842` at admission; a map refitted for the new model is admitted. | No rule. |
+| Read-backs | `test/tv.test.mjs` and `test/toolchain-faults.mjs`: the route and budget descriptors' broken variants (a threshold changed, a tier dropped, a cap raised, a price table digest stale). | No descriptors. |
+| `poly cost` | `test/cost.test.mjs`. Cost per run, scope and period from the ledger alone, equal to the sum of the recorded costs, recomputed under another price table version by its digest. | No command. |
+
+Every provider call in every test is recorded and replayed. No test calls a live provider and no test spends money; nothing in M11 runs against the owner's API account.
+
+## 6. Changes to `04-semantics.md` and shared packages, to rule with M10's plan
+
+- **`04-semantics.md`:** a decision's `route` (PD1's single provider generalised to tiers, PS for decisions); `route-exhausted` in PS3.2's reserved reasons; the reservation as a message to the `Budget` instance before an effect is proposed (PS13, as a runtime-generated input); money as integers.
+- **`poly-core`:** the grammar and checks of section 3; the reserved reason `route-exhausted` in PL1207's list.
+- **`poly-ref`:** the confidence intervals of a route's thresholds; the reservation invariant.
+- **`poly-runtime`:** the decision path's tiers and reservations, the proposal fields `route` and `budget`, the decision event's new fields, replay of tier choices.
+- **Shared with M10:** the decision clause grammar (`route` here, `cites` in M10), PL1207's reserved reasons, the decision completion path, and PT25.1's proposal fields. Proposal, as in M10's plan: each milestone adds its own clause, reason and field in its own function or file, the completion path keeps one ordered list of checks each appends to, and M10 merges first where both touch the same lines.
+
+## 7. Spec issues
+
+Numbered S350 to S399. Each has a proposal and waits for the owner's ruling.
+
+- **S350. Money and price tables.** Money is written in decimal and lowered to integer micro-units. A price table is a JSON file `{ v, provider, model, currency, perMillionTokens: { input, output, … } in micro-units, source, readOn }`; a table without its source URL and the date it was read is `PL6843 PRICE_UNSOURCED`. Its digest enters the certificate; a price change is a new table.
+- **S351. The `Route` machine.** PT24.2's states; each tier's call is its own intent and crosses the gate; an answer moves to `Answered` when it meets the thresholds, otherwise to the next tier; after the last, `Exhausted`, and the decision's `failed` path runs with `route-exhausted`. Liveness: every path reaches `Answered` or `Exhausted`, under the fairness of provider completion.
+- **S352. Reservations, and the property proved.**
+  - *Proposal:* before a tier's intent is proposed, poly-runtime sends `Reserve(r)` to the `Budget` instance, `r` being the tier's `max tokens` at its highest price; the reservation and the intent's proposal commit in one transaction. After the call, `Settle(r, actual)`. A dead intent (exhausted, denied, or refused) releases its reservation with `Release(r)`. **The property checked:** `spent + reserved ≤ cap + overrun` in every reachable state of `Budget`, over the intervals the caps cut. **The crash case tested:** a runtime stopped between the reservation's commit and the call's completion restarts with the reservation held, and the worker settles or releases it exactly once.
+- **S353. Reading `Budget` and `Route` (E11).** poly-runtime reads and writes the keyed instances itself, as S199 does for grants: a reservation the `Budget` instance rejects denies (or escalates, as `on exhausted` says) before the policy runs, and a missing or unreadable instance refuses the call, fail closed. The proposal carries `route` and `budget` so policies may add rules. E11 is settled by test.
+- **S354. Concurrency.** A `Budget` instance is one actor, so its steps are serialized (K1, K2); 64 concurrent runs in one scope reserve through it one at a time. AC26 checks the journal's every step against the cap.
+- **S355. Calibration maps and the tier swap.** A tier's map is the output of `poly journal fit`, a file naming the model it was fitted for, bound by digest in the certificate with the tier's provider and model id. Admission refuses a tier whose model is not the map's (`PL6842`), since `poly deploy` is not built; `PL6841` for a route whose `escalate` reads `conf` or `margin` on a tier with no map.
+- **S356. Providers.** Live providers stay host code, registered with `rt.provide` per tier and certified by name; poly ships only the recorded provider, which replays answers and usage from fixtures. No model SDK enters poly.
+- **S357. Usage and overruns (K15).** The provider's usage report is the cost; the adapter passes `max tokens` as the provider's own output limit, so an overrun is a provider reporting more than it was asked to allow. It is recorded, never hidden, and the next reservation sees it.
+- **S358. Records and `poly cost`.** The `decision` event gains `tier`, `model`, `usage`, `cost`, `reservation` and the price table's digest. `poly cost [--run] [--scope] [--period]` sums them from the ledger alone, and recomputes under another table version by its digest. No prompt, completion body or key enters the journal, the ledger or a certificate: bodies are `Content` digests.
+- **S359. Work orders with budgets (PT24.6)** are not in M11: PT27.3's scope does not list them, and self-reported usage is weaker evidence. They wait for M7 (feedback), where workflows are revisited.
+
+## 8. Risks
+
+1. **The reservation under a crash.** The property holds only if the reservation and the proposal commit together, and settlement or release happens exactly once; the crash test covers the window between them.
+2. **Calibration drift.** A map holds on the traffic it was fitted on (PD1.6); the tier swap rule catches a model change, not a drift in traffic.
+3. **Merge with M10.** Section 6 lists every shared change, to be ruled with M10's plan.
+
+## Conclusion
+
+M11 makes a budget a checked invariant and a route a checked machine: a reservation is taken before every model call and settled after it, so spent plus reserved never passes a cap, and every tier choice replays from the ledger with no model call. Every provider call in the tests is recorded, nothing spends money, and each change shared with M10 is listed for a joint ruling.
+
+## Glossary
+
+- **Route:** an ordered list of tiers a decision tries, each a provider with a price table and a calibration map.
+- **Budget:** a cap per run, scope or period, held by a `Budget` instance as spent and reserved micro-units.
+- **Reservation:** the worst-case cost of a call, held against a budget before the call.
+- **Overrun:** a settled cost above its reservation, recorded and carried into the next reservation.
+- **Micro-unit:** one millionth of a currency unit, the integer unit of all costs.
+- **Calibration map:** the monotone map from a provider's reported confidence to a calibrated one, fitted by `poly journal fit`.
