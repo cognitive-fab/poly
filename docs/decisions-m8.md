@@ -437,7 +437,7 @@ An application that answers a message from one channel on another gets `PL5407` 
 
 ## M8 closes (owner, 2026-10-06)
 
-The M8b closing gate (286dc34, recorded in b303a74) is accepted, and M8 closes. E13 is carried over: polyrun's `createInstance` must be vendored, with its seven waiting tests passing, before any channel is used outside tests and before M9's gate. The question on replies across channels (PL5407 in the first channel's configuration) stays open.
+The M8b closing gate (286dc34, recorded in b303a74) is accepted, and M8 closes. E13 is carried over: polyrun's `createInstance` must be vendored, with its seven waiting tests passing, before any channel is used outside tests and before M9's gate. Replies across channels (PL5407 in the first channel's configuration) are ruled above as S193: a limit in M8, and one joint configuration in M9.
 
 ## Engine changes
 

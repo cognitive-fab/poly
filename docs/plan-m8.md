@@ -569,7 +569,7 @@ AC14 to AC17 ran in `channels-ingress`, `channels-whatsapp`, `channels-escalatio
 - **E10** is settled for the `channel` proposal field by test, with no engine change; per-value taint waits for M10 (S181).
 - **The vendored polygraph is still 8.3.2.** E1's, E2's and E5's tests wait as before (one, one and two).
 - **WhatsApp's window, on the safe side.** A message that finds the backlog full while the window is open is refused `backlog` and does not reset the module's timer, so the module may refuse a free-form reply WhatsApp would take, and never sends one WhatsApp would refuse (`std/channels/whatsapp/PROVENANCE.md`).
-- **A reply on another channel** gets `PL5407` in the first channel's configuration (above), open for a ruling.
+- **A reply on another channel** gets `PL5407` in the first channel's configuration (above): S193, a limit in M8; in M9, one joint configuration with every conversation live (`decisions-m8.md`).
 - **`check-memory` under load**: 2 failures in 19 full runs, each passing alone.
 
 ## Conclusion
