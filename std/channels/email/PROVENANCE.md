@@ -12,6 +12,10 @@ The rules of `std/channels/email.poly` were taken from RFC 8058 and from Gmail's
 | `no-send-to-suppressed` (never) | https://support.google.com/a/answer/81126 | "Automatically unsubscribe recipients who have multiple bounced messages." |
 | `Inbound` with the event `Bounce` (ruled on step 8) | https://documentation.mailgun.com/docs/mailgun/user-manual/webhooks/webhook-payloads/ | A bounce reported after the send was accepted, Mailgun's event `failed` with severity `permanent`, is the provider event `Bounce` on the recipient's thread (PS15.4), so the suppression counts it at run time. A failure of the SMTP submission itself (a 5yz reply) is the send's `failed` completion, `Bounced`. |
 
+## State kept per address
+
+Bounces and unsubscribes belong to an address. The conversation's `Inbound` has one checked string, `from`, the correspondent's address, so a channel's thread key reads only that address and each address has exactly one thread per channel: two bounces of two different mails to one address reach the same thread and suppress it. A channel is one sending domain (Mailgun keeps suppressions per domain), and the runtime refuses a second channel that sends from the same domain (`rt.connectChannel`), so the provider's per-address state is one thread's `bounces` and `subscribed`.
+
 ## Constants
 
 | Constant | Source |
@@ -23,7 +27,7 @@ The rules of `std/channels/email.poly` were taken from RFC 8058 and from Gmail's
 | Rule in the module | Why |
 |---|---|
 | A reply is allowed after an unsubscribe | A reply answers the correspondent's own message, and is not list mail. Suppression still stops it. |
-| `one-send-at-a-time` (never) | Nothing is sent while a send is in flight, so a receipt names the send it settles. |
+| `one-send-at-a-time` (never) | Nothing is sent while a send is in flight (`while slot is Sending`), so a receipt names the send it settles. Reworded on step 8 from `while !(slot is Free)`: a queued reply leaves on the step that acknowledges the previous receipt, while the slot still reads `Receipt`. |
 | `Ack` and the slot (ruled after step 7) | One slot holds a send, then its receipt (`Delivered`, `Rejected` or `Failed`), until the application acknowledges the receipt with `Ack`, which the channel's expansion appends to every handler bound to a receipt (PS15.3). With the receipt counted, every message between the application and its conversation stays within `pending`'s bound. |
 | `queued: 0..2`, `queue1`, `queue2` (ruled on step 8) | A reply that answers a waiting message, while the slot is held, waits in the queue, in order, and takes the slot when `Ack` frees it, under the rules as they stand then. A template, or a reply that answers no waiting message, is refused `busy` while the slot is held, and the generated configuration reports that as `PL5407` wherever it is reachable (PS15.5). The invariant `queue-while-held` says a queue exists only while the slot is held. |
 | `waiting: 0..2`, refusal `backlog` | At most two messages wait, for an answer or in the queue. A third is a rejected step, journaled. |

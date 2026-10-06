@@ -108,6 +108,7 @@ export class RefusedDispatch extends Error {
 
 export class PolyRuntime {
   readonly handlers = new Map<string, Handler>();
+  private readonly channelSenders = new Map<string, { kind: string; sender: string }>();
   /** Review A-F2: approvals entries refused or applied but not movable, journaled once and passed over since. */
   private readonly unmovable = new Set<string>();
   readonly worker: EffectWorker;
@@ -347,12 +348,13 @@ export class PolyRuntime {
 
   /**
    * PT21.4: takes a provider's nonce once (Mailgun's token). The store keeps it, so a replay after a restart is refused;
-   * a nonce older than its time to live is forgotten, since the provider's timestamp check refuses it anyway.
+   * a nonce older than its time to live is forgotten, on every channel, since the provider's timestamp check refuses it.
    */
   async claimNonce(channel: string, key: string, at: number, ttlMs: number): Promise<boolean> {
     let taken = false;
     await this.store.txn(() => {
-      this.store.db.prepare('DELETE FROM poly_ingress_nonce WHERE channel = ? AND at < ?').run(channel, at - ttlMs);
+      // Every channel's nonces older than the window are pruned, so the table holds at most a window's worth.
+      this.store.db.prepare('DELETE FROM poly_ingress_nonce WHERE at < ?').run(at - ttlMs);
       taken = this.store.db.prepare('INSERT OR IGNORE INTO poly_ingress_nonce (channel, nonce, at) VALUES (?, ?, ?)').run(channel, key, at).changes === 1;
     });
     return taken;
@@ -367,6 +369,10 @@ export class PolyRuntime {
   connectChannel(channel: string, adapter: ChannelAdapter, transports: ChannelTransports): void {
     const d = this.verified.channels.find((c) => c.channel === channel);
     if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
+    // What a provider ties to an address (an SMS opt-out, an email bounce) it ties to its sender and the address; a
+    // thread is one address of one channel, so two channels may not send as one sender (std PROVENANCE.md).
+    for (const [other, s] of this.channelSenders) if (other !== channel && s.kind === adapter.kind && s.sender === adapter.sender) throw new Error(`channel ${other} already sends as ${adapter.kind} sender ${adapter.sender}; two channels that send as one sender would keep the provider's per-address state on two threads`);
+    this.channelSenders.set(channel, { kind: adapter.kind, sender: adapter.sender });
     const kind = `channel.${channel}.send`;
     const handler: EffectHandler = async (payload, _caps, ctx) => {
       // The conversation is <channel>:<key>/<channel>, and its thread's recipient is the key (PS15.4).

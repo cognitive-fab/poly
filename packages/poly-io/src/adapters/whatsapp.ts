@@ -25,6 +25,7 @@ export function whatsapp(c: WhatsAppConfig): ChannelAdapter {
   return {
     kind: 'whatsapp',
     provider: 'whatsapp-cloud-api',
+    sender: c.phoneNumberId,
     verify(w): Verified | Refusal {
       const url = new URL(w.url);
       if (w.method === 'GET') {

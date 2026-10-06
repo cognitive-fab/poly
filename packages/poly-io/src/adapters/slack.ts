@@ -3,6 +3,7 @@
 // signing secret over v0:<X-Slack-Request-Timestamp>:<body>, and a timestamp more than five minutes from now is
 // refused. url_verification is answered with its challenge. A message, an archive and an unarchive of the channel are
 // the conversation's Inbound; the event id is the provider's message id, so Slack's retries are one step.
+import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
 import { fresh, hmac, httpFailure, json, noAnswer, signatureMatches, type AdapterFault } from '../util.js';
 
@@ -22,6 +23,8 @@ export function slack(c: SlackConfig): ChannelAdapter {
   return {
     kind: 'slack',
     provider: 'slack-events-api',
+    // The bot's token names the workspace and app it posts as; its digest stands for it.
+    sender: `bot:${createHash('sha256').update(c.botToken).digest('hex').slice(0, 16)}`,
     verify(w, now): Verified | Refusal {
       const ts = w.headers['x-slack-request-timestamp'];
       const sig = w.headers['x-slack-signature'];

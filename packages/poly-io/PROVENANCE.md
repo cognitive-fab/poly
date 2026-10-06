@@ -50,6 +50,8 @@ Each runtime channel adapter (S182, S183) was written from its provider's docume
 ## Choices that are poly's own
 
 - **Sender claims (K11).** WhatsApp, Slack and a signed webhook source authenticate the sender, so the claim is verified. An SMS number and an email address from a route webhook are not authenticated, so the claim is unverified. A one-click unsubscribe carries a token only the adapter can make, so its claim is verified.
+- **The sender.** Each adapter names the identity it sends as (`sender`): the WhatsApp phone number id, the Twilio number, the mail domain, a digest of the Slack bot token, the webhook endpoint. The runtime refuses two channels that send as one sender, so state a provider keeps per sender and address is one thread's.
+- **Twilio 21610.** A send refused because the recipient opted out is the provider event `Reported` for that number (PS15.4).
 - **Idempotency.** The email Message-ID and the webhook-id of a delivery come from the outbox's idempotency key, so a retried send carries the same id.
 - **Mailgun as the inbound mail provider.** S183 names an inbound-mail webhook; Mailgun's route webhook was chosen because it is signed.
 

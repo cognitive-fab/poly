@@ -32,6 +32,7 @@ export function webhook(c: WebhookConfig): ChannelAdapter {
   return {
     kind: 'webhook',
     provider: 'standard-webhooks',
+    sender: c.endpoint,
     verify(w, now): Verified | Refusal {
       const id = w.headers['webhook-id'];
       const ts = w.headers['webhook-timestamp'];

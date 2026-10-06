@@ -41,6 +41,7 @@ export function sms(c: TwilioConfig): ChannelAdapter {
   return {
     kind: 'sms',
     provider: 'twilio',
+    sender: c.from,
     verify(w): Verified | Refusal {
       if (w.method !== 'POST') return { refused: 'not-a-post' };
       const sig = w.headers['x-twilio-signature'];
@@ -72,7 +73,9 @@ export function sms(c: TwilioConfig): ChannelAdapter {
       let doc: { sid?: unknown; code?: unknown; message?: unknown } = {};
       try { doc = JSON.parse(r.body) as typeof doc; } catch { /* judged by its status */ }
       if ((r.status === 200 || r.status === 201) && typeof doc.sid === 'string') return { ok: true, providerId: doc.sid };
-      // 21610: the recipient has opted out; a retry fails the same way.
+      // 21610: the recipient has opted out of this sender, perhaps by a keyword poly never saw; a retry fails the same
+      // way, and it is the provider event Reported, which std.channels.sms's consent reads (PS15.4).
+      if (doc.code === 21610) return { ok: false, permanent: true, error: `${r.status} 21610 ${doc.message ?? ''}`.trim(), events: [{ providerId: `21610:${out.to}`, fields: { from: out.to, keyword: 'Reported' } }] };
       return httpFailure(r, `${r.status} ${doc.code ?? ''} ${doc.message ?? ''}`.trim());
     },
   };

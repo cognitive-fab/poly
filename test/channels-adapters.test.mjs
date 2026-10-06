@@ -126,6 +126,8 @@ test('sms: a status callback is a receipt; a send posts the documented form; 216
   assert.deepEqual(Object.fromEntries(new URLSearchParams(t.sent[0].body)), { To: '+15558675310', From: '+15557122661', Body: 'Your order shipped.' });
   const r = await a.send({ to: '+15558675310', body: 'x', idempotencyKey: 'k2', now: NOW }, transport(answer(400, recorded('twilio/error-21610.json'))));
   assert.deepEqual([r.ok, r.permanent, /21610/.test(r.error)], [false, true, true]);
+  // PS15.4: 21610 is an opt-out std.channels.sms's consent reads: the provider event Reported for the number.
+  assert.deepEqual(r.events, [{ providerId: '21610:+15558675310', fields: { from: '+15558675310', keyword: 'Reported' } }]);
 });
 
 // ── Email: Mailgun inbound routes, RFC 8058 one-click unsubscribe, SMTP submission ──

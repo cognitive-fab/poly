@@ -53,6 +53,8 @@ export function email(c: EmailConfig): ChannelAdapter {
   return {
     kind: 'email',
     provider: 'mailgun-routes+smtp',
+    // Mailgun keeps bounces and unsubscribes per sending domain.
+    sender: c.from.split('@')[1] ?? c.from,
     verify(w, now): Verified | Refusal {
       if (w.method !== 'POST') return { refused: 'not-a-post' };
       const url = new URL(w.url);

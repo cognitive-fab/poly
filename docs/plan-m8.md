@@ -500,6 +500,14 @@ The skipped test is S152's OpenShell enforcement (no gateway configured). The fo
 - **Tests first, each failing before its code:** `PL5406` and `PL5407` on the test kind (2); for each std kind, the answering application with the queue taken out gets `PL5407` (5), and `PL5406` on a WhatsApp application whose `Delivered` can be rejected; Mailgun's event webhooks, Slack's event on `is_archived`, the nonce at ingress and the two mutant tests; and `test/channels-events.test.mjs`: Slack's archived post, two Mailgun bounces, three failed webhook deliveries, each to the refused send, and the replay after a restart.
 - **The regression check.** The 147 measured files are identical in verdict, diagnostic codes and every state and transition count. The full suite: 1,708 tests (1,707 and the one after the M3 runs), 1,701 pass, no failure, 1 skipped and 6 waiting (E1 and E13 among them); `check-memory` passed.
 
+**The step 8 rework accepted, with one fix (state per address).**
+
+- **Per address.** The thread key of `sms` and `email` reads only `from`, the address, so a channel has one thread per address; each adapter names its `sender`, and `rt.connectChannel` refuses two channels that send as one sender, so a provider's per-sender-and-address state is one thread's. Twilio's 21610 is the provider event `Reported` (a new `Keyword`), so an opt-out poly never saw reaches the thread. Each `PROVENANCE.md` states it. Tests: a STOP in one message blocks the answers to a later message from the same number; two bounces of two mails to one address suppress it; 21610 to the refused send; two channels with one sender refused.
+- **`one-send-at-a-time`** is recorded in each `PROVENANCE.md` as poly's rule, with its rewording on step 8.
+- **Nonces pruned.** `rt.claimNonce` deletes every channel's nonces older than the window, so the table holds at most a window's worth; tested.
+- **Open, for plan step 10.** `rt.connectChannel` takes the adapter as runtime configuration: it is not yet certified by package, version and digest (PT20.2). The sender claims are journaled on `runtime:ingress` and not yet carried in the step label, so a program cannot yet read `verified` (AC14).
+- **The regression check.** The 147 measured files are identical in verdict, diagnostic codes and every state and transition count. The full suite: 1,712 tests (1,711 and the one after the M3 runs), 1,705 pass, no failure, 1 skipped and 6 waiting (E1 and E13 among them); `check-memory` passed.
+
 ## Conclusion
 
 M8 first closes the one gap M6 left open: a workflow's work orders will cross the gate and enter the ledger like every other effect, served by poly over the same tools polyflow serves today, with polyflow kept only as the oracle AC5 compares against. Channels then follow PT21 with three changes proposed:

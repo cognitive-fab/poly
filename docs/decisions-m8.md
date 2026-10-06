@@ -225,7 +225,7 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 
 ## check-memory under load: an existing failure, counted
 
-**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 7 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, three of plan step 8).
+**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 8 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, four of plan step 8).
 
 ## Plan step 8: choices for the owner's notice
 
@@ -243,6 +243,17 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 - **Provider events** (PS15.4). A status a rule reads reaches the conversation: Mailgun's permanent failure is the event `Bounce` on the recipient's thread (a new `Event` of `std.channels.email`); Slack's `is_archived` answer to a post is the event `Archived`, delivered by the runtime before the send's failure completes; a failed webhook delivery is the send's `Undelivered` completion. Each rule has an end-to-end test from recorded traffic to the refused send (`test/channels-events.test.mjs`). Until E13 those tests create the conversation beside its application, as the spawn of `starts` would.
 - **Mailgun's token cache** is in the store: the adapter names the token as the webhook's nonce, ingress claims it with `rt.claimNonce` (table `poly_ingress_nonce`), and a replay after a restart is refused `token-replayed`.
 - **The seeded controls are permanent**: `ADAPTER_FAULTS` (`signature-always-matches`, `timestamp-never-stale`), taken by an adapter from its configuration, and two tests that show each lets a forged or stale webhook through every adapter that checks it.
+
+## Step 8 accepted, with one fix before plan step 9 (owner, 2026-10-05)
+
+Step 8's rework (d2e41d3, 59469de) is accepted: PL5406, PL5407, the reply queue, provider statuses to the conversation, the persisted Mailgun tokens and the permanent adapter faults. One defect and three follow-ups remain, to be done and committed before plan step 9 starts.
+
+1. **State tied to an address is kept per address, not per thread.** SMS opt-out is per number; email bounces and one-click unsubscribe are per address. As built, a bounce lands on the recipient's thread, so two threads to one address count bounces apart, and mail continues after two. Either the thread key of `sms` and `email` is the address (stated in each PROVENANCE.md), or the state lives where every thread to that address shares it. Tests first: a STOP on one thread blocks a send on another thread to the same number; two bounces on two threads to one address block the next send.
+2. **The one-send rule as reworded** ("no send while a send is in flight") is recorded in each PROVENANCE.md as poly's rule, not the provider's.
+3. **Claimed nonces are pruned** once older than the timestamp window, so the table stays bounded. A test covers it.
+4. **Open for plan step 10**, recorded in plan-m8.md: `rt.connectChannel` takes its adapter as runtime configuration and is not yet certified by digest; sender claims are journaled but not yet carried in the step label (AC14).
+
+Then: the 147 files measured, the full suite run with the check-memory count, a commit on m4 (not pushed), a report, and plan step 9.
 
 ## Engine changes
 

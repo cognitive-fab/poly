@@ -90,6 +90,8 @@ export interface ChannelTransports { http?: HttpTransport; smtp?: SmtpTransport 
 export interface ChannelAdapter {
   kind: string;
   provider: string;
+  /** The identity the provider sends as (a number, a mail domain, a bot), to which it ties per-address state. */
+  sender: string;
   verify(webhook: Webhook, now: number): Verified | Refusal;
   send(out: OutboundSend, transports: ChannelTransports): Promise<SendResult>;
 }

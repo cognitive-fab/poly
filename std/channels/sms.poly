@@ -9,7 +9,7 @@
 // is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
 module std.channels.sms
 
-enum Keyword { Plain, OptOut, OptIn, Help }
+enum Keyword { Plain, OptOut, OptIn, Help, Reported }
 
 enum Slot { Free, Sending, Receipt }
 
@@ -56,26 +56,31 @@ service machine Conversation {
   // already wait, so the backlog can never keep an opt-out from taking effect; only the message to the application is
   // then dropped. A plain message is refused "backlog".
   on Inbound(from, body, keyword) {
-    if keyword is OptOut {
+    if keyword is Reported {
+      // The provider refused a send because the number opted out (Twilio 21610): a provider event, no message.
       consent' = false
-      if waiting + queued < 2 {
-        waiting' = waiting + 1
-        pending' = pending + 1
-        send app <- Message(body: body)
-      }
     } else {
-      if keyword is OptIn {
-        consent' = true
+      if keyword is OptOut {
+        consent' = false
         if waiting + queued < 2 {
           waiting' = waiting + 1
           pending' = pending + 1
           send app <- Message(body: body)
         }
       } else {
-        require waiting + queued < 2 else reject "backlog"
-        waiting' = waiting + 1
-        pending' = pending + 1
-        send app <- Message(body: body)
+        if keyword is OptIn {
+          consent' = true
+          if waiting + queued < 2 {
+            waiting' = waiting + 1
+            pending' = pending + 1
+            send app <- Message(body: body)
+          }
+        } else {
+          require waiting + queued < 2 else reject "backlog"
+          waiting' = waiting + 1
+          pending' = pending + 1
+          send app <- Message(body: body)
+        }
       }
     }
   }
@@ -170,7 +175,7 @@ service machine Conversation {
 
   step property consent-changes-only-by-keyword: pre.consent == post.consent || action == Inbound
 
-  reject property opt-keyword-never-refused: (action == Inbound && (keyword is OptOut || keyword is OptIn)) implies !rejected("backlog")
+  reject property opt-keyword-never-refused: (action == Inbound && (keyword is OptOut || keyword is OptIn || keyword is Reported)) implies !rejected("backlog")
 
   never no-send-after-opt-out: emit send while !consent
   never one-send-at-a-time: emit send while slot is Sending
