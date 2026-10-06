@@ -30,6 +30,16 @@ CREATE TABLE IF NOT EXISTS poly_content (
   digest TEXT PRIMARY KEY,
   body   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS poly_evidence (
+  run  TEXT NOT NULL,
+  seq  INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (run, seq)
+);
+CREATE TABLE IF NOT EXISTS poly_revoked_mandate (
+  id TEXT PRIMARY KEY,
+  at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS poly_ingress_nonce (
   channel TEXT NOT NULL,
   nonce   TEXT NOT NULL,
@@ -103,6 +113,8 @@ export class DecisionWithoutRecord extends Error {
 export interface StepEvents {
   before?: { kind: string; body: unknown }[];
   after?: { kind: string; body: unknown }[];
+  /** PS8.8, PS8.9: the evidence the verifier gave beside the step's claims, kept with the step and bound into its event. */
+  evidence?: Record<string, unknown>;
 }
 
 export class LedgerStore extends Store {
@@ -261,6 +273,7 @@ export class LedgerStore extends Store {
     const prev = parent ? parent.digest : null;
     const lineage = lineageDigest(row.instanceId, row.seq, origin, intent, prev);
     this.db.prepare('INSERT OR REPLACE INTO poly_lineage (run, seq, origin, intent, prev, digest) VALUES (?, ?, ?, ?, ?, ?)').run(row.instanceId, row.seq, JSON.stringify(origin), intent, prev, lineage);
+    if (extra?.evidence) this.db.prepare('INSERT OR REPLACE INTO poly_evidence (run, seq, body) VALUES (?, ?, ?)').run(row.instanceId, row.seq, JSON.stringify(extra.evidence));
     // A decision event keeps its question in the content store and carries its digest as `request` (PD2.2a).
     for (const e of extra?.before ?? []) {
       const { question, ...rest } = (e.body ?? {}) as Record<string, unknown>;
@@ -279,6 +292,7 @@ export class LedgerStore extends Store {
       ...(extra?.before?.length ? { decision: this.lastHash(row.instanceId, 'decision') } : {}),
       // PD5-A11: the digest of the claims that admitted the step, and its lineage digest.
       claims: digest((row.data as { $claims?: unknown } | null)?.$claims ?? null),
+      ...(extra?.evidence ? { evidence: digest(extra.evidence) } : {}),
       lineage,
     }, row.now);
     for (const e of extra?.after ?? []) this.appendEvent(row.instanceId, e.kind, e.body, row.now);

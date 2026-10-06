@@ -50,7 +50,7 @@ export async function journalCommand(sub: string, args: string[], write: (s: str
       const adapter = cs ? ((await import(pathToFileURL(resolve(cs)).href)) as { default: { scheme: string; verify: (h: string, s: string) => boolean | Promise<boolean> } }).default : null;
       for (const r of runs) {
         const heads = await store.heads(r.run);
-        const v = verifyRun(await store.chain(r.run), heads, trust, await store.journal(r.run), await store.lineage(r.run));
+        const v = verifyRun(await store.chain(r.run), heads, trust, await store.journal(r.run), await store.lineage(r.run), await store.evidence(r.run));
         const counter = await store.countersignatures(r.run);
         const notes: string[] = [];
         if (counter.length) {

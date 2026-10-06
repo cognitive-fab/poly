@@ -58,6 +58,9 @@ export function px(e: A.Expr, vars: Set<string>): string {
     }
     case 'Call':
       if (e.callee === 'unknown') return `isNull(${r(e.args[0])})`;
+      // PS8.8: the gate host computes the ages of the emitting step's claims at the decision, as reserved action fields.
+      if (e.callee === 'age') return 'action.step.age';
+      if (e.callee === 'statusAge') return 'action.step.statusAge';
       if (e.callee === 'has') return `(${r(e.args[1])} in ${r(e.args[0])})`;
       throw new Error(`no PX form for ${e.callee}(…)`);
     case 'Unary': return `${e.op}(${r(e.arg)})`;

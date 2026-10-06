@@ -1,0 +1,29 @@
+// PD6 (M9, S195 to S198): a desk that refunds on a caller's request. Each request is a step with claims, and its
+// refund an irreversible effect, so a policy can read how old the caller's evidence is, and a mandate can bound it.
+module pd6
+
+enum Kind { Person, Agent }
+
+claims Caller {
+  kind: Kind
+  principal: Principal
+}
+
+service machine Desk {
+  state {
+    n : 0..1 = 0
+  }
+
+  action Ask(amount: 0..500)
+
+  on Ask(amount) by c: Caller {
+    n' = 1 - n
+    emit refund(amount: amount)
+  }
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    class irreversible
+  }
+}

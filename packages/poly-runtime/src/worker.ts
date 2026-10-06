@@ -87,6 +87,8 @@ export interface WorkerOptions {
   onAllowed?: (row: OutboxRow, proposal: Proposal) => void;
   /** PT25.1: the channel field of a proposal, for a channel's send; null for any other effect. */
   channelOf?: (row: OutboxRow) => Proposal['channel'] | null;
+  /** PS8.9, S199: whether the emitting step's innermost mandate excludes this effect; such a proposal is denied before any policy. */
+  outsideMandate?: (row: OutboxRow) => boolean;
   /** S180: the completion's data, marked when a Content in it names no body in the content store. */
   markContent?: (instanceId: string, action: string, data: Record<string, unknown>) => Record<string, unknown>;
   /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
@@ -364,7 +366,8 @@ export class EffectWorker {
           const { proposal, snapshot } = await this.proposalOf(row, decl, approval, st.intent_rechecks ?? 0);
           let g: GateDecision;
           try {
-            g = await this.gate.propose(proposal, snapshot);
+            // PS8.9, S199: the runtime's own mandate check comes first, and its refusal is final whatever a policy says.
+            g = this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot);
           } catch (e) {
             // Review C6: a gate that fails holds only this intent, Proposed with a backoff, and never allows it (PT9.5).
             const held = (e as { record?: Record<string, unknown> })?.record;

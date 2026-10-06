@@ -196,7 +196,9 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
           // PD5.1.2d, S104: the claims of the step that emitted the proposal.
           if (e.object.kind === 'Name' && e.object.name === 'step' && !vars.has('step')) {
             if (e.prop === 'claims') return { k: 'record', fields: program.claims };
-            err('PL1001', e, `step has no field ${e.prop} (claims)`);
+            // PS8.9, PD6.2: the agent and the person it acts for, from the step's innermost mandate.
+            if (e.prop === 'mandate') return { k: 'record', fields: { delegate: { k: 'str', values: null }, delegator: { k: 'str', values: null } } };
+            err('PL1001', e, `step has no field ${e.prop} (claims, mandate)`);
             return null;
           }
           if (e.object.kind === 'Name' && e.object.name === 'proposal' && !vars.has('proposal')) {
@@ -249,6 +251,12 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (!program.decisions.has(a.value)) { err('PL1001', e, `decision("${a.value}") names no decision of the program`); return null; }
             return { k: 'decisionRef', decision: a.value };
           }
+          // PS8.8, PD6.1: the age of the step's claims, in milliseconds since verifiedAt or statusAt.
+          if (e.callee === 'age' || e.callee === 'statusAge') {
+            const a = e.args[0];
+            if (e.args.length !== 1 || a.kind !== 'Member' || a.object.kind !== 'Name' || a.object.name !== 'step' || a.prop !== 'claims') { err('PL1201', e, `${e.callee}(…) takes step.claims`); return null; }
+            return { k: 'int', lo: 0, hi: 1_000_000_000_000 };
+          }
           if (e.callee === 'unknown') {
             if (e.args.length !== 1) { err('PL1201', e, 'unknown(x) takes one argument'); return null; }
             type(e.args[0]);
@@ -262,7 +270,7 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             else if (x?.k === 'str' && x.values) for (const v of x.values) if (!LABELS.has(v)) err('PL1001', e.args[1], `${JSON.stringify(v)} is not a label of the closed vocabulary (PT6.2)`);
             return { k: 'tri' };
           }
-          err('PL1001', e, `${e.callee}(…) is not a policy function (machine, decision, unknown)`);
+          err('PL1001', e, `${e.callee}(…) is not a policy function (machine, decision, unknown, age, statusAge)`);
           return null;
         }
         case 'Unary': {

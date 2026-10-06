@@ -199,7 +199,7 @@ export interface RunVerification {
  * The chain, the signed heads, the closure, and the binding of every step event to the journal row it records
  * (while the journal exists; after an archive the step events and the content store are what remains).
  */
-export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Record<string, string>, journal: JournalRow[] | null, lineage: Map<number, { origin: unknown; intent: string; prev: string | null; digest: string }> | null = null): RunVerification {
+export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Record<string, string>, journal: JournalRow[] | null, lineage: Map<number, { origin: unknown; intent: string; prev: string | null; digest: string }> | null = null, evidence: Map<number, unknown> | null = null): RunVerification {
   const run = events[0]?.run.run ?? '';
   const chain = verifyRunChain(events);
   const problems: string[] = [];
@@ -234,6 +234,11 @@ export function verifyRun(events: LedgerEvent[], heads: SignedHead[], trust: Rec
       }
       // PD5-A11: the claims that admitted the step, and its lineage record, which recomputes.
       if (b.claims !== undefined && b.claims !== digest((row.data as { $claims?: unknown } | null)?.$claims ?? null)) problems.push(`journal row ${row.seq}: its claims differ from the step event's claims digest`);
+      // PS8.8, PS8.9: the evidence kept with the step is the one its event binds.
+      if (b.evidence !== undefined) {
+        const ev = evidence?.get(row.seq);
+        if (evidence && (ev === undefined || digest(ev) !== b.evidence)) problems.push(`journal row ${row.seq}: its evidence differs from the step event's evidence digest`);
+      }
       if (b.lineage !== undefined && lineage) {
         const l = lineage.get(row.seq);
         if (!l || l.digest !== b.lineage || lineageDigest(run, row.seq, l.origin, l.intent, l.prev) !== l.digest) problems.push(`journal row ${row.seq}: its lineage record does not match the step event's lineage digest`);
@@ -276,6 +281,8 @@ export interface JournalReader {
   countersignatures(instanceId: string): Promise<Countersignature[]>;
   /** PD5-A11: the run's lineage records, by seq. */
   lineage(instanceId: string): Promise<Map<number, { origin: unknown; intent: string; prev: string | null; digest: string }>>;
+  /** PS8.8, PS8.9: the evidence kept with the run's steps, by seq. */
+  evidence(instanceId: string): Promise<Map<number, unknown>>;
   close(): Promise<void>;
 }
 
@@ -289,6 +296,12 @@ export function readerOf(store: LedgerStore): JournalReader {
     anchors: () => anchors(store),
     countersignatures: (id) => countersignaturesOf(store, id),
     lineage: async (id) => new Map((store.db.prepare('SELECT seq, origin, intent, prev, digest FROM poly_lineage WHERE run = ?').all(id) as { seq: number; origin: string; intent: string; prev: string | null; digest: string }[]).map((r) => [r.seq, { origin: JSON.parse(r.origin), intent: r.intent, prev: r.prev, digest: r.digest }])),
+    evidence: async (id) => evidenceOf(store, id),
     close: () => store.close(),
   };
+}
+
+/** PS8.8, PS8.9: the evidence kept with a run's steps, by seq. */
+export function evidenceOf(store: LedgerStore, run: string): Map<number, unknown> {
+  return new Map((store.db.prepare('SELECT seq, body FROM poly_evidence WHERE run = ?').all(run) as { seq: number; body: string }[]).map((r) => [r.seq, JSON.parse(r.body)]));
 }

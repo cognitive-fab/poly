@@ -29,6 +29,10 @@ export interface ProgramView {
   nextSseq(session: string): number;
   /** PD5.1.2d, S104: the claims of a run's step at a seq (its journal row's $claims), or null. */
   stepClaims?(run: string, seq: number): Record<string, unknown> | null;
+  /** PS8.8, PS8.9: the evidence kept with a run's step (its times and mandate chain), or null. */
+  stepEvidence?(run: string, seq: number): { verifiedAt?: number; statusAt?: number; mandates?: { delegate: string; delegator: string }[] } | null;
+  /** PS8.8: the runtime's clock, by which the gate computes ages at the decision. */
+  now?(): number;
   /** PD5.2.2c: the lineage of a run's step at a seq, as a policy reads it: its origin and intent. */
   lineage?(run: string, seq: number): { origin: Record<string, unknown> | null; intent: string } | null;
   /**
@@ -184,7 +188,16 @@ export class PolicyGate implements Gate {
     const claims = this.view.stepClaims?.(proposal.instance, proposal.seq) ?? null;
     // PD5.2.2c: the emitting step's lineage, its origin and intent.
     const lineage = this.view.lineage?.(proposal.instance, proposal.seq) ?? null;
-    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine, ...(proposal.channel ? { channel: proposal.channel } : {}) }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(claims ? { step: { claims } } : {}), ...(lineage ? { lineage } : {}) };
+    // PS8.8: the ages of the claims at the decision, by the runtime's clock, recorded with the action; a time missing,
+    // or after the decision, gives no age (unknown). PS8.9: the innermost mandate's agent and the person it acts for.
+    const ev = claims ? this.view.stepEvidence?.(proposal.instance, proposal.seq) ?? null : null;
+    const now = this.view.now?.() ?? Date.now();
+    const ageOf = (t: number | undefined) => (typeof t === 'number' && t <= now ? { v: now - t } : null);
+    const age = ageOf(ev?.verifiedAt);
+    const statusAge = ageOf(ev?.statusAt);
+    const inner = ev?.mandates?.length ? ev.mandates[ev.mandates.length - 1] : null;
+    const step = claims ? { claims, ...(age ? { age: age.v } : {}), ...(statusAge ? { statusAge: statusAge.v } : {}), ...(inner ? { mandate: { delegate: inner.delegate, delegator: inner.delegator } } : {}) } : null;
+    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine, ...(proposal.channel ? { channel: proposal.channel } : {}) }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(step ? { step } : {}), ...(lineage ? { lineage } : {}) };
     return { action: actionOf(row), reads, singletons, claims };
   }
 

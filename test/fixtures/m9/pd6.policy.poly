@@ -1,0 +1,13 @@
+// PD6.1: an irreversible effect needs a presentation whose status is at most ten minutes old (600,000 ms); with no
+// status time the age is unknown, and a person decides.
+module pd6_policy
+
+policy freshness {
+  scope "pd6"
+  obligation fresh-status "An irreversible effect needs status information at most ten minutes old." rule {
+    when proposal.kind == "effect" && effect.class == "irreversible" && statusAge(step.claims) > 600000
+    require false else deny
+    on unknown escalate
+  }
+  never stale-irreversible "No irreversible effect is allowed on status older than ten minutes.": allow when proposal.kind == "effect" && effect.class == "irreversible" && statusAge(step.claims) > 600000
+}

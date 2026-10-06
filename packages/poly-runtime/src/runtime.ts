@@ -8,7 +8,7 @@
 //
 // What M4's runtime does not do is stated in the certificate's `limits` and printed with it (S118, S134, S135).
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
-import { personKeyVerifier, type Verifier } from './verifier.js';
+import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
 import type { ChannelAdapter, ChannelTransports, IngressAnswer, Verified, Webhook } from './adapters.js';
@@ -29,7 +29,7 @@ import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionRecord, type ProviderConfig } from './provider.js';
-import { signHeads, headsOf, publishAnchor, verifyRun, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
+import { signHeads, headsOf, publishAnchor, verifyRun, evidenceOf, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
 export { LoadError };
 
@@ -215,6 +215,7 @@ export class PolyRuntime {
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
       // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a
       // keyed digest (never the address itself, G10), its class (external in M8, S181), and the message kind it carries.
+      outsideMandate: (row) => this.outsideMandate(row.instance_id, row.seq, row.kind, (row.payload ?? {}) as Record<string, unknown>),
       channelOf: (row) => {
         const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
         const d = m && verified.channels.find((c) => c.channel === m[1]);
@@ -682,15 +683,27 @@ export class PolyRuntime {
     // PD5.1.4, K11: an action with claims gets them from the verifier adapter, under $claims; the module's first acceptor
     // rejects missing or bad ones (PS3.2's claims row). A verifier that throws is no answer: no claims (O10).
     let payload = inst ? this.markContent(inst.machine_id, action, data) : data;
+    let evidence: Evidence | null = null;
     if (inst && this.claimed(inst.machine_id, action)) {
       let claims: Record<string, unknown> | null = opts[SUPPLIED_CLAIMS] ?? null;
       if (!claims && opts.credentials !== undefined) {
         try { claims = await this.verifier(opts.credentials, { instance: instanceId, action, data: data ?? {}, actionId }); } catch { claims = null; }
+        evidence = claims ? claimsEvidence(claims) : null;
       }
-      payload = { ...((payload ?? {}) as object), $claims: claims ?? null };
+      // PS8.9, K12: a mandate chain that widens anywhere, or holds a revoked mandate, is refused before any step.
+      const problem = evidence?.mandates?.length ? chainProblem(evidence.mandates, (id) => this.mandateRevoked(id)) : null;
+      if (problem) {
+        const reason = `${problem}: ${action} on ${instanceId} carries a mandate chain that ${problem === 'mandate-revoked' ? 'holds a revoked mandate' : 'widens'}, so it is no step (PS8.9, K12)`;
+        await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'PD6', reason });
+        throw new RefusedDispatch(reason, 'PD6');
+      }
+      payload = { ...((payload ?? {}) as object), $claims: claims ? { ...claims } : null };
     }
     // PD5.2.2a: an outside dispatch starts a chain, whatever its action id.
     this.store.outside.add(`${instanceId}\u0000${actionId}`);
+    // PS8.8, PS8.9: the evidence beside the claims is kept with the step and bound into its event.
+    const evidenceKey = `${instanceId}\u0000${actionId}`;
+    if (evidence && (evidence.verifiedAt !== undefined || evidence.statusAt !== undefined || evidence.mandates?.length)) this.store.pending.set(evidenceKey, { ...(this.store.pending.get(evidenceKey) ?? {}), evidence: { ...(evidence.verifiedAt !== undefined ? { verifiedAt: evidence.verifiedAt } : {}), ...(evidence.statusAt !== undefined ? { statusAt: evidence.statusAt } : {}), ...(evidence.mandates?.length ? { mandates: evidence.mandates } : {}) } });
     try {
       return await this.kernel.dispatch(instanceId, action, payload, actionId);
     } catch (e) {
@@ -703,7 +716,32 @@ export class PolyRuntime {
       throw new RefusedDispatch(e.message, 'PD2.4');
     } finally {
       this.store.outside.delete(`${instanceId}\u0000${actionId}`);
+      if (evidence) this.store.pending.delete(evidenceKey);
     }
+  }
+
+  /** PS8.9: whether a mandate was revoked; revoking one revokes every mandate beneath it, since every chain holds it. */
+  mandateRevoked(id: string): boolean {
+    return !!this.store.db.prepare('SELECT 1 FROM poly_revoked_mandate WHERE id = ?').get(id);
+  }
+
+  /** PS8.9, PD6-A6: revokes a mandate, and with it every mandate beneath it, from the next dispatch and the next proposal. */
+  async revokeMandate(id: string): Promise<void> {
+    await this.store.txn(() => { this.store.db.prepare('INSERT OR IGNORE INTO poly_revoked_mandate (id, at) VALUES (?, ?)').run(id, this.now()); });
+  }
+
+  /** PS8.8, PS8.9: the evidence kept with a run's step, or null. */
+  stepEvidence(run: string, seq: number): Evidence | null {
+    const r = this.store.db.prepare('SELECT body FROM poly_evidence WHERE run = ? AND seq = ?').get(run, seq) as { body: string } | undefined;
+    return r ? (JSON.parse(r.body) as Evidence) : null;
+  }
+
+  /** PS8.9, S199: the runtime's mandate check of a proposal, before any policy: the innermost scope, at the decision time. */
+  outsideMandate(run: string, seq: number, kind: string, payload: Record<string, unknown>): boolean {
+    const chain = this.stepEvidence(run, seq)?.mandates as Mandate[] | undefined;
+    if (!chain?.length) return false;
+    if (chain.some((m) => this.mandateRevoked(m.id))) return true;
+    return !withinScope(chain[chain.length - 1], kind, payload, this.now());
   }
 
   /**
@@ -1008,7 +1046,7 @@ export class PolyRuntime {
     const exists = await this.store.getInstance(instanceId);
     // PD5-A11, review B4: with the run's lineage records, so the lineage digest is bound here as in poly journal verify.
     const lineage = new Map((this.store.db.prepare('SELECT seq, origin, intent, prev, digest FROM poly_lineage WHERE run = ?').all(instanceId) as { seq: number; origin: string; intent: string; prev: string | null; digest: string }[]).map((r) => [r.seq, { origin: JSON.parse(r.origin), intent: r.intent, prev: r.prev, digest: r.digest }]));
-    return verifyRun(await this.chain(instanceId), await this.heads(instanceId), trust, exists ? await this.getJournal(instanceId) : null, lineage);
+    return verifyRun(await this.chain(instanceId), await this.heads(instanceId), trust, exists ? await this.getJournal(instanceId) : null, lineage, evidenceOf(this.store, instanceId));
   }
 
   /**
@@ -1251,6 +1289,9 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
         return out;
       },
       lineage: (run, seq) => { const l = store.lineage(run, seq); return l ? { origin: l.origin, intent: l.intent } : null; },
+      // PS8.8, PS8.9: the evidence kept with a step, and the clock the gate decides by.
+      stepEvidence: (run, seq) => { const r = store.db.prepare('SELECT body FROM poly_evidence WHERE run = ? AND seq = ?').get(run, seq) as { body: string } | undefined; return r ? JSON.parse(r.body) : null; },
+      now: () => (opts.now ? opts.now() : Date.now()),
       stepClaims: (run, seq) => { const r = store.db.prepare('SELECT data FROM pr_journal WHERE instance_id = ? AND seq = ?').get(run, seq) as { data: string } | undefined; const c = r ? JSON.parse(r.data)?.$claims : null; return c && typeof c === 'object' ? c : null; },
       nextSseq: (session) => (store.db.prepare('INSERT INTO poly_gate_session (session, sseq) VALUES (?, 1) ON CONFLICT(session) DO UPDATE SET sseq = sseq + 1 RETURNING sseq').get(session) as { sseq: number }).sseq,
       recordLate: (run, record) => {
