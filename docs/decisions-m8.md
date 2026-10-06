@@ -225,7 +225,7 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 
 ## check-memory under load: an existing failure, counted
 
-**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 10 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, four of plan step 8, two of plan step 9).
+**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 11 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, four of plan step 8, three of plan step 9).
 
 ## Plan step 8: choices for the owner's notice
 
@@ -274,6 +274,23 @@ Step 8 is complete and accepted as reported, including the two additions beyond 
 - **E10 settled by test: not needed.** `test/policy-channel.test.mjs` lowers a policy over `effect.channel.*` as poly lowers every policy and steps it on the pinned Polyaxion. A proposal carrying `channel` is denied on it, and one with another channel is allowed, so the engine reads the field. A proposal without the field is never allowed: `on unknown deny` denies and the default escalates (PS8.2), and a raw Polyaxion rule over the missing field is applied, not skipped, so the engine fails closed on its own. A seeded control, the policy fault `drop-unknown-rule`, lets that proposal through, so the fail-closed test can fail. No engine change; E10 stays on the list for taint (M10).
 - **The engine pinned.** A build with policies records `poly.policyEngine` (`polyaxion` and its commit) in the certificate, and is not admitted when the commit is unknown; `load` refuses a build admitted with another commit, or with none.
 - **A note for authors.** A rule over `effect.*` is also read on a send between trust scopes (PS8.7), where `effect` is unknown; with `on unknown deny` it denies the send. `proposal.kind == "effect" && …` makes the condition false on a send.
+
+## Step 9 accepted, with two fixes before plan step 10 (the Cowork coordinator, for the owner, 2026-10-05)
+
+Step 9 (cbcd4ab) is accepted. Two fixes come before plan step 10.
+
+1. **The recipient digest is keyed.** An unkeyed SHA-256 of a phone number can be inverted by enumeration, and the proposal is journaled with its verdict. The digest is HMAC-SHA256 under a key the store generates when it is created, keeps, and never exports, logs, journals or certifies; one address gives one digest in one store. Tests first, and a seeded control (the unkeyed hash).
+2. **The engine pin covers the files as loaded.** Admission and load refuse when a pinned file of the Polyaxion checkout differs from the pinned commit, naming the files; untracked files are ignored. Tested with a seeded modified file.
+
+**Recorded only.** The effect of `on unknown deny` on sends between scopes stays as documented, and the plan step 10 concierge's policy uses the `proposal.kind` guard. On the owner's list: a lint for that guard, polywatch's missing *out of scope* verdict, and the M3 runner's crash on a failed spawn.
+
+**Then plan step 10**, AC14 to AC17 end to end, as far as it goes without E13: the concierge, its policies and every test of plan section 6 for AC14 to AC17, each AC with its real-path test through `rt.inbound` marked todo for E13; `rt.connectChannel` certified by digest, and the sender claims in the step label; the concierge CLEAN, free of deadlock, every `never` proved, with its checked instance. Stop after step 10.
+
+**Done (the two fixes).**
+
+- **Fix 1.** The store makes a 32-byte key when it is created (table `poly_store_key`), read only by `recipientDigest`, which `channelOf` calls; the recipient is `hmac-sha256:<hex>`. Tests: two denied replies to one address in one store give one digest, two stores give two, no proposal holds the address, and neither the ledger nor the content store holds its unkeyed hash. The seeded control, the runtime fault `unkeyed-recipient` (`RUNTIME_FAULTS`), puts the unkeyed hash in the content store, where the check finds it. **For the owner:** the thread key is part of an instance's id (`support:<address>/support`, PS15.4), so the address is in the journal as the run's name. The test checks the proposals and the unkeyed hash; keeping the address out of instance ids would change PS15.4's addressing, and is a question for a ruling. The address is also in the conversation's `Inbound` step data (`from`) and in the ingress records (the thread, the claims' `sender`). Polywatch confirmed both as a gap against the ruling's words; the fix is a ruling's, since it changes what a thread key is: one way is that ingress replaces each thread field by its keyed digest, so instance ids, step data and records hold digests, and the store alone maps a digest to the address a send needs.
+- **The full suite** for the two fixes: 1,723 tests (1,722 and the one after the M3 runs), 1,716 pass, no failure, 1 skipped and 6 waiting; `check-memory` passed. The 147 measured files are identical.
+- **Fix 2.** Admission and load check the checkout afresh (no status cached before an edit), and refuse naming each differing file. The pinned files are the ones the engine runs (each package's `src`, `package.json` and `LICENSE`); a tracked file outside them is never loaded. Tested on a copy of the pinned files, so the sibling checkout is never changed: the copy passes, an extra untracked file changes nothing, and a changed `src/core/expr.mjs` is refused at load and at admission by name. Both take a test-only `policyEngine` option naming the checkout, as `std` names a std root.
 
 ## Engine changes
 

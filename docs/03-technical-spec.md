@@ -1017,9 +1017,9 @@ The certificate lists each workflow as `{ runtime: "poly-runtime", gated: true }
 
 ## PT10c. The proposal field `channel`, as built (M8 plan step 9, S181, S185, PT25.1)
 
-- **The field.** A proposal for `channel.<c>.send` carries `effect.channel = { name, kind, recipient, recipientClass, messageKind }`: the channel, its std kind, the recipient as `sha256` of `<kind>:<thread key>` (never the address, G10), the class `external` (every recipient in M8; audiences come in M10, S181), and the message kind of the send's payload where the kind has one (`FreeForm`, `Templated`, `Direct`, `Bulk`). Any other proposal has no `channel`.
+- **The field.** A proposal for `channel.<c>.send` carries `effect.channel = { name, kind, recipient, recipientClass, messageKind }`: the channel, its std kind, the recipient as `hmac-sha256` of `<kind>:<thread key>` under the store's own key (never the address, and not invertible by enumerating addresses, G10), the class `external` (every recipient in M8; audiences come in M10, S181), and the message kind of the send's payload where the kind has one (`FreeForm`, `Templated`, `Direct`, `Bulk`). Any other proposal has no `channel`.
 - **The front end** types `effect.channel.*` against the program: `name` among its channels, `kind` among their kinds, `messageKind` among their conversations' kinds, `recipientClass` `external`, `recipient` any string; another field is `PL1001`. A missing field is unknown (PS8.2).
-- **The engine.** Polyaxion reads the field as it reads every reserved action field, with no change (E10 not needed for `channel`, settled by test). The certificate pins its commit (`poly.policyEngine`), and `load` refuses another.
+- **The engine.** Polyaxion reads the field as it reads every reserved action field, with no change (E10 not needed for `channel`, settled by test). The certificate pins its commit (`poly.policyEngine`); admission and `load` read the pinned files afresh and refuse a checkout whose files differ, naming them, and `load` refuses a build admitted with another commit.
 
 ## PT10a. Channels, as built (M8b step 1, PS15)
 

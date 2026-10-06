@@ -41,6 +41,10 @@ export interface LoadOptions {
   store?: { sqlite: string };
   /** S190, for tests only: the std root a certificate's `std:` paths are read under, instead of the repository's std/. */
   std?: string;
+  /** Ruled on step 9, for tests only: the Polyaxion checkout to check against its pin, instead of the sibling one. */
+  policyEngine?: string;
+  /** For one test only (ruled on step 9): a recipient digest without the store's key, the seeded control. */
+  fault?: (typeof RUNTIME_FAULTS)[number];
   now?: () => number;
   /** S139: load a witness certificate, for an exported witness test only; refused when NODE_ENV is production. */
   allowWitness?: boolean;
@@ -83,6 +87,9 @@ function polygraphVersion(): string {
 
 /** PS15.4: the runtime's own run, on which every inbound message's delivery or refusal is journaled. */
 export const INGRESS_RUN = 'runtime:ingress';
+
+/** Deliberately broken runtimes, for one test each: the recipient digest without the store's key (ruled on step 9). */
+export const RUNTIME_FAULTS = ['unkeyed-recipient'] as const;
 
 /** A name under `dir` that no file has yet: `name`, else `name.2`, `name.3`, ... so a record is never overwritten. */
 function freeName(dir: string, name: string): string {
@@ -132,7 +139,7 @@ export class PolyRuntime {
   /** PD5.1.4: the verifier adapter. */
   private readonly verifier: Verifier;
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
     this.verifier = opts.verifier ?? personKeyVerifier(verified.certificate.poly.keyrings ?? { people: [], agents: [] });
     this.certified = opts.certified ?? new Map();
@@ -165,7 +172,7 @@ export class PolyRuntime {
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
       // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a
-      // digest (never the address itself, G10), its class (external in M8, S181), and the message kind it carries.
+      // keyed digest (never the address itself, G10), its class (external in M8, S181), and the message kind it carries.
       channelOf: (row) => {
         const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
         const d = m && verified.channels.find((c) => c.channel === m[1]);
@@ -173,7 +180,9 @@ export class PolyRuntime {
         const suffix = `/${m[1]}`;
         const key = row.instance_id.startsWith(`${m[1]}:`) && row.instance_id.endsWith(suffix) ? row.instance_id.slice(m[1].length + 1, -suffix.length) : row.instance_id;
         const p = (row.payload ?? {}) as { kind?: unknown };
-        return { name: m[1], kind: d.kind, recipient: `sha256:${createHash('sha256').update(`${d.kind}:${key}`).digest('hex')}`, recipientClass: 'external', ...(typeof p.kind === 'string' ? { messageKind: p.kind } : {}) };
+        // Ruled on step 9: keyed by the store's key, so the journaled proposal cannot be inverted to the address.
+        const recipient = opts.fault === 'unkeyed-recipient' ? `sha256:${createHash('sha256').update(`${d.kind}:${key}`).digest('hex')}` : store.recipientDigest(`${d.kind}:${key}`);
+        return { name: m[1], kind: d.kind, recipient, recipientClass: 'external', ...(typeof p.kind === 'string' ? { messageKind: p.kind } : {}) };
       },
       workOrder: (row) => {
         const t = this.orderToolOf(row.instance_id, row.kind);
@@ -1118,7 +1127,8 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   let policyGate: PolicyGate | null = null;
   if (verified.policies.length) {
     if (opts.gate?.gate) { await kernel.close(); throw new LoadError('refused at load: the build has policies, so its gate is the policy gate, and no other gate is taken (PT9)'); }
-    const peer = polyaxionPeer();
+    // Ruled on step 9: the checkout as it is now, never a status cached before it changed.
+    const peer = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
     if (!peer.ok) { await kernel.close(); throw new LoadError(`refused at load: the build has policies, and the gate engine is not available: ${peer.reason}`); }
     // Plan step 9: the engine that decides is the one the build was admitted with.
     const pinned = verified.certificate.poly.policyEngine;
@@ -1151,5 +1161,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
       throw new LoadError(`refused at load: the policy gate did not open: ${(e as Error).message}`);
     }
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier });
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault });
 }

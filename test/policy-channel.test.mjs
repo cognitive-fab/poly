@@ -4,14 +4,16 @@
 // rule that reads it (PS8.2: unknown, then `on unknown` decides; deny or escalate, never allow).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { admit, checkFile, checkProject } from '@poly/check';
 import { certificateDigest, signDigest } from '@poly/core';
 import { parse } from '@poly/lang';
 import { lowerPolicyScope } from '@poly/lower';
 import { polyaxionPeer, loadPolyaxion, policyEngine, load } from '@poly/runtime';
 import { whatsapp } from '@poly/io';
+import { ROOT } from './helpers.mjs';
 import { loaded, makeKey, project } from './runtime-helpers.mjs';
 
 const peer = polyaxionPeer();
@@ -146,7 +148,7 @@ async function admittedWith(name, policy) {
   const dir = project(name, [], key, 'test-policy-channel');
   writeFileSync(join(dir, 'src', 'desk.poly'), APP);
   writeFileSync(join(dir, 'src', 'desk.policy.poly'), policy);
-  return { key, dir, run: () => admit(dir, {}) };
+  return { key, dir, run: (opts = {}) => admit(dir, opts) };
 }
 
 test('S185: the policy front end types effect.channel.{name, kind, recipient, recipientClass, messageKind}; another field, or a channel the program has not, is refused', { skip, timeout: 300_000 }, async () => {
@@ -184,7 +186,7 @@ test('PT25.1, AC17 in part: a channel send carries the field `channel`, and a po
     assert.equal(sent.length, 0, 'the denied reply never reaches the provider');
     const proposed = await rt.store.body(denied.action);
     assert.deepEqual(proposed.effect.channel, { name: 'support', kind: 'whatsapp', recipient: proposed.effect.channel.recipient, recipientClass: 'external', messageKind: 'FreeForm' });
-    assert.match(proposed.effect.channel.recipient, /^sha256:[0-9a-f]{64}$/);
+    assert.match(proposed.effect.channel.recipient, /^hmac-sha256:[0-9a-f]{64}$/);
   } finally { await rt.close(); }
 });
 
@@ -219,4 +221,75 @@ policy channels {
   const text = JSON.stringify([...r.diagnostics, ...(r.policies ?? []).flatMap((p) => p.diagnostics ?? [])].map((d) => `${d.code} ${d.message}`));
   assert.doesNotMatch(text, /PL1001/, text);
   assert.ok((r.policies ?? []).length > 0, text);
+});
+
+// ── Ruled on step 9 (fix 1): the recipient is a keyed digest. A phone number is a space small enough to invert an
+// unkeyed hash by enumeration, and the proposal is journaled with its verdict, so the digest is an HMAC under a key the
+// store generates and keeps, never exported, logged, journaled or certified. ──
+async function denials(a, r, extra = {}, times = 1) {
+  const { rt } = await loaded({ build: join(a.dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [a.key.id]: a.key.publicKey } }, extra);
+  const cfg = { appSecret: 'a', accessToken: 'b', phoneNumberId: '106540352242922', verifyToken: 'c', apiVersion: 'v23.0' };
+  rt.connectChannel('support', whatsapp(cfg), { http: { async request() { return { status: 200, headers: {}, body: JSON.stringify({ messages: [{ id: 'wamid.1' }] }) }; } } });
+  await rt.create('desk.Agent', { id: 'support:wa-1' });
+  await rt.create('desk.support.Conversation', { id: 'support:wa-1/support', creation: { action: 'Open', data: { app: 'support:wa-1' } } });
+  for (let i = 0; i < times; i++) {
+    await rt.dispatch('support:wa-1/support', 'Inbound', { from: 'wa-1', body: await rt.putContent(`Hello ${i}`) });
+    await rt.advance();
+  }
+  const denied = (await rt.chain('support:wa-1/support')).filter((e) => e.kind === 'verdict' && e.body.outcome === 'denied').map((e) => e.body);
+  const actions = await Promise.all(denied.map((b) => rt.store.body(b.action)));
+  const ledger = rt.store.db.prepare('SELECT event FROM poly_ledger').all().map((x) => x.event).join('\n');
+  const content = rt.store.db.prepare('SELECT body FROM poly_content').all().map((x) => x.body).join('\n');
+  await rt.close();
+  return { recipients: actions.map((p) => p.effect.channel.recipient), actions, ledger, content };
+}
+const unkeyed = 'sha256:' + createHash('sha256').update('whatsapp:wa-1').digest('hex');
+
+test('fix 1: one address gives one recipient digest in one store and two in two stores; the journal holds neither the address nor its unkeyed hash', { skip, timeout: 300_000 }, async () => {
+  const a = await admittedWith('pc-keyed', POLICY(FREE_FORM));
+  const r = await a.run();
+  const one = await denials(a, r, {}, 2);
+  assert.equal(one.recipients.length, 2);
+  assert.equal(one.recipients[0], one.recipients[1], 'one address, one store: one digest');
+  assert.match(one.recipients[0], /^hmac-sha256:[0-9a-f]{64}$/);
+  const two = await denials(a, r);
+  assert.notEqual(two.recipients[0], one.recipients[0], 'two stores: two digests');
+  for (const x of [one, two]) {
+    for (const p of x.actions) assert.doesNotMatch(JSON.stringify(p), /wa-1/, 'the proposal holds no address');
+    assert.ok(!x.ledger.includes(unkeyed.slice(7)) && !x.content.includes(unkeyed.slice(7)), 'the journal holds no unkeyed hash');
+  }
+});
+
+test('fix 1, seeded control: with the unkeyed hash (fault unkeyed-recipient), the journal check finds it', { skip, timeout: 300_000 }, async () => {
+  const a = await admittedWith('pc-unkeyed', POLICY(FREE_FORM));
+  const r = await a.run();
+  const x = await denials(a, r, { fault: 'unkeyed-recipient' });
+  assert.equal(x.recipients[0], unkeyed);
+  assert.ok(x.content.includes(unkeyed.slice(7)), 'the check above would fail');
+});
+
+// ── Ruled on step 9 (fix 2): the engine as loaded is the engine pinned. Admission and load refuse a checkout whose
+// pinned (tracked) file differs from the pinned commit, naming it; an untracked file is ignored. Tested on a copy of
+// the pinned files, so the sibling checkout is never changed. ──
+function pinnedCopy(name) {
+  const text = readFileSync(join(ROOT, 'peers', 'polyaxion', 'PROVENANCE.md'), 'utf8');
+  const files = [...text.matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \|$/gm)].map((m) => m[1]);
+  const dir = join(ROOT, '.poly', 'test-policy-channel', name);
+  rmSync(dir, { recursive: true, force: true });
+  for (const f of files) { mkdirSync(dirname(join(dir, f)), { recursive: true }); copyFileSync(join(peer.dir, f), join(dir, f)); }
+  return { dir, files };
+}
+
+test('fix 2: a copy of the pinned files is the pinned engine; an untracked file changes nothing; a changed pinned file is refused at admission and at load, by name', { skip, timeout: 300_000 }, async () => {
+  const { dir, files } = pinnedCopy('engine-copy');
+  assert.equal(polyaxionPeer({ dir, fresh: true }).ok, true);
+  writeFileSync(join(dir, 'packages', 'polyaxion', 'src', 'untracked-note.mjs'), '// not tracked\n');
+  assert.equal(polyaxionPeer({ dir, fresh: true }).ok, true, 'an untracked file is ignored');
+  const a = await admittedWith('pc-modified', POLICY(FREE_FORM));
+  const r = await a.run();
+  const changed = files.find((f) => f.endsWith('src/core/expr.mjs'));
+  writeFileSync(join(dir, changed), `${readFileSync(join(dir, changed), 'utf8')}\n// a local edit\n`);
+  await assert.rejects(load(join(a.dir, '.poly', 'build'), { certificate: r.certificatePath, trust: { [a.key.id]: a.key.publicKey }, policyEngine: dir }), (e) => e.message.includes(`${changed} differs`));
+  // Last, since a refused admission leaves no certificate.
+  await assert.rejects(a.run({ policyEngine: dir }), (e) => e.message.includes(`${changed} differs`));
 });

@@ -10,6 +10,7 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
 import { nextEvent, runOf, type LedgerEvent, type Run } from './ledger.js';
 import { initJournalTables } from './journal.js';
+import { createHmac, randomBytes } from 'node:crypto';
 
 const LEDGER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS poly_ledger (
@@ -34,6 +35,10 @@ CREATE TABLE IF NOT EXISTS poly_ingress_nonce (
   nonce   TEXT NOT NULL,
   at      INTEGER NOT NULL,
   PRIMARY KEY (channel, nonce)
+);
+CREATE TABLE IF NOT EXISTS poly_store_key (
+  id  INTEGER PRIMARY KEY CHECK (id = 1),
+  key BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS poly_gate_session (
   session TEXT PRIMARY KEY,
@@ -164,7 +169,17 @@ export class LedgerStore extends Store {
     super.initSync();
     this.db.exec(LEDGER_SCHEMA);
     initJournalTables(this);
+    // Ruled on step 9: the store's own key, made when the store is, for keyed digests of addresses. It is read only by
+    // recipientDigest, and never exported, logged, journaled or certified.
+    this.db.prepare('INSERT OR IGNORE INTO poly_store_key (id, key) VALUES (1, ?)').run(randomBytes(32));
     return this;
+  }
+
+  /** PT25.1, ruled on step 9: a recipient's digest, an HMAC-SHA256 under the store's key, so it cannot be inverted by
+   * enumerating addresses; one address gives one digest in one store. */
+  recipientDigest(text: string): string {
+    const k = this.db.prepare('SELECT key FROM poly_store_key WHERE id = 1').get() as { key: Uint8Array };
+    return `hmac-sha256:${createHmac('sha256', Buffer.from(k.key)).update(text, 'utf8').digest('hex')}`;
   }
 
   /** The digest of a body, stored in the content store under it. Called inside a transaction. */

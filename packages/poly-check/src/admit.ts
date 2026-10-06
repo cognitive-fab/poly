@@ -45,6 +45,8 @@ export interface AdmitOptions {
   afterCheck?: () => void;
   /** S190, for tests: the directory `std.*` modules are found in, instead of the repository's std/. */
   std?: string;
+  /** Ruled on step 9, for tests only: the Polyaxion checkout to check against its pin, instead of the sibling one. */
+  policyEngine?: string;
 }
 
 export interface AdmitResult {
@@ -174,6 +176,12 @@ export async function admit(target: string, opts: AdmitOptions & { root?: string
   rmSync(out, { force: true });
   const c = await checkTarget(abs, opts.root, opts.std);
   opts.afterCheck?.();
+  // Ruled on step 9: a build with policies is admitted only with the gate engine as pinned, its files read now.
+  if (c.report.files.some((f) => (f.policies ?? []).length)) {
+    const { polyaxionPeer } = await import('@poly/runtime');
+    const p = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
+    if (!p.ok) throw new AdmitError(`not admitted: the build has policies, and the gate engine is not the pinned one: ${p.reason}`);
+  }
   // PT12.5: a CLEAN program is admitted; a program with findings only when a person signed the acceptance of each.
   let accepted: NonNullable<Certificate['boundAccepted']> | null = null;
   if (c.report.verdict === 'FINDINGS') {
@@ -334,7 +342,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   let policyEngine: { name: 'polyaxion'; commit: string } | null = null;
   if (policyReports.length) {
     const { polyaxionPeer } = await import('@poly/runtime');
-    const p = polyaxionPeer();
+    const p = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
     if (!p.ok || !/^[0-9a-f]{7,40}$/.test(p.commit)) throw new AdmitError(`not admitted: the build has policies, and the gate engine's commit is unknown (${p.ok ? p.commit : p.reason})`);
     policyEngine = { name: 'polyaxion', commit: p.commit };
   }
