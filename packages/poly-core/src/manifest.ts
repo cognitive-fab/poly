@@ -26,7 +26,8 @@ export interface Manifest {
    * S126: the admission key, named by id and location, never by value. A location is `env:NAME` (a variable
    * holding the private key, PEM) or `file:PATH` (a file outside version control). No private key is committed.
    */
-  keys?: { admission: { id: string; location: string } };
+  /** S194: `anchor`, the keyring anchor of PT12.5, `file:PATH` outside the project. */
+  keys?: { admission: { id: string; location: string }; anchor?: string };
   /**
    * PT12.5, S150: the people whose keys sign approvals and acceptances, and the agents whose keys never may. A public
    * key is PEM, or `file:PATH` relative to the project. Admission certifies both keyrings.
@@ -124,9 +125,11 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
   if (m.keys !== undefined) {
     const k = m.keys as Record<string, unknown>;
     const a = (k && typeof k === 'object' && !Array.isArray(k) ? k.admission : undefined) as Record<string, unknown> | undefined;
-    const ok = a && typeof a === 'object' && Object.keys(k).length === 1 && Object.keys(a).sort().join(',') === 'id,location'
-      && typeof a.id === 'string' && a.id !== '' && typeof a.location === 'string' && /^(env|file):./.test(a.location);
-    if (!ok) throw new ManifestError(`${where}: "keys" must be { "admission": { "id": "...", "location": "env:NAME" or "file:PATH" } } (S126)`);
+    const others = Object.keys(k ?? {}).filter((x) => x !== 'admission' && x !== 'anchor');
+    const ok = a && typeof a === 'object' && !others.length && Object.keys(a).sort().join(',') === 'id,location'
+      && typeof a.id === 'string' && a.id !== '' && typeof a.location === 'string' && /^(env|file):./.test(a.location)
+      && (k.anchor === undefined || (typeof k.anchor === 'string' && /^file:./.test(k.anchor)));
+    if (!ok) throw new ManifestError(`${where}: "keys" must be { "admission": { "id": "...", "location": "env:NAME" or "file:PATH" }, "anchor"?: "file:PATH" } (S126, S194)`);
   }
   const ids = new Set<string>();
   for (const ring of ['people', 'agents'] as const) {

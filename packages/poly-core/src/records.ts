@@ -10,7 +10,8 @@ import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'nod
 import { canonicalize } from './jcs.js';
 
 /** `invocation` (PD5.1.4, S107): a person's signature on one dispatch, which the person-key adapter turns into claims. */
-export type RecordKind = 'approval' | 'acceptance' | 'invocation';
+/** `keyring` (S194, M9): a person's signature on a change of the people or agents ring, over { parent, rings }. */
+export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring';
 
 export interface SignedRecord {
   v: 1;
@@ -64,6 +65,20 @@ export function verifyRecord(record: unknown, keyrings: Keyrings, expect: { kind
   try { ok = verify(null, Buffer.from(recordMessage(digest), 'utf8'), createPublicKey(person.publicKey), Buffer.from(r.sig, 'base64')); } catch { ok = false; }
   if (!ok) return { ok: false, problem: `the signature by ${r.by} does not verify` };
   return { ok: true, person, digest };
+}
+
+/**
+ * S194: the digest of a pair of rings, as admission certifies them: each holder's name, id and SPKI public key,
+ * sorted by key id, under RFC 8785. Two spellings of one key give one digest.
+ */
+export function keyringDigest(k: Keyrings): string {
+  const norm = (l: KeyHolder[]) => [...l].map((p) => ({ name: p.name, keyId: p.keyId, publicKey: createPublicKey(p.publicKey).export({ type: 'spki', format: 'pem' }).toString().trim() })).sort((x, y) => (x.keyId < y.keyId ? -1 : x.keyId > y.keyId ? 1 : 0));
+  return 'sha256:' + createHash('sha256').update(canonicalize({ people: norm(k.people), agents: norm(k.agents) }), 'utf8').digest('hex');
+}
+
+/** S194: the subject of a keyring record, binding the rings it admits to the rings it replaces. */
+export function keyringSubject(parent: string, rings: string): string {
+  return 'sha256:' + createHash('sha256').update(canonicalize({ parent, rings }), 'utf8').digest('hex');
 }
 
 /** Keyrings compared as admission certifies them: the same holders, ids and public keys, in any order. */

@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the history written"
+    },
+    "head": {
+      "type": "string",
+      "description": "the digest of the rings signed"
+    }
+  },
+  "required": [
+    "path",
+    "head"
+  ]
+}

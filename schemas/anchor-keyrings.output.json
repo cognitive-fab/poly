@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the anchor written"
+    },
+    "digest": {
+      "type": "string",
+      "description": "the digest of the rings"
+    }
+  },
+  "required": [
+    "path",
+    "digest"
+  ]
+}

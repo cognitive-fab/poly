@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { admit } from '@poly/check';
 import { load } from '@poly/runtime';
-import { signRecord } from '@poly/core';
+import { keyringDigest, signRecord } from '@poly/core';
 import { ROOT } from './helpers.mjs';
 
 const KEYS = mkdtempSync(join(tmpdir(), 'poly-keys-'));
@@ -61,7 +61,10 @@ export function project(name, sources, key, base = 'test-cert') {
   mkdirSync(join(dir, 'src'), { recursive: true });
   for (const s of sources) copyFileSync(join(ROOT, s), join(dir, 'src', s.split('/').pop()));
   writeFileSync(join(dir, 'src', 'handlers.ts'), HANDLERS_TS);
-  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` } }, people: [{ name: PERSON.name, keyId: PERSON.keyId, publicKey: PERSON.publicKey }], agents: [{ name: AGENT.name, keyId: AGENT.keyId, publicKey: AGENT.publicKey }] }, null, 2));
+  // S194: the first rings are anchored by a file outside the project, which only the test writes, holding their digest.
+  const anchor = join(KEYS, `${base}-${name}.anchor`);
+  writeFileSync(anchor, `${keyringDigest({ people: [PERSON], agents: [AGENT] })}\n`);
+  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` }, anchor: `file:${anchor}` }, people: [{ name: PERSON.name, keyId: PERSON.keyId, publicKey: PERSON.publicKey }], agents: [{ name: AGENT.name, keyId: AGENT.keyId, publicKey: AGENT.publicKey }] }, null, 2));
   return dir;
 }
 

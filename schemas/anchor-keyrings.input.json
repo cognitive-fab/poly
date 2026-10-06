@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "out": {
+      "type": "string",
+      "description": "the anchor file, outside the project"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project directory (default: the working directory)"
+    }
+  },
+  "required": [
+    "out"
+  ]
+}

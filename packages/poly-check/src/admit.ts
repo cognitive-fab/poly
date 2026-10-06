@@ -17,13 +17,14 @@ import { readEmbedded } from '@poly/embed';
 import { checkFile, checkProject, type ProjectReport } from './pipeline.js';
 import { STD } from './uses.js';
 import { LINT_VERSION, handlerClosure } from './handlers.js';
+import { KeyringError, keyringChain } from './keyrings.js';
 
 export class AdmitError extends Error {
   constructor(message: string) { super(message); this.name = 'AdmitError'; }
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -50,6 +51,8 @@ export interface AdmitOptions {
   std?: string;
   /** Ruled on step 9, for tests only: the Polyaxion checkout to check against its pin, instead of the sibling one. */
   policyEngine?: string;
+  /** S194, for tests only: the digest of the first rings, in place of the anchor file poly.json names. */
+  trustAnchor?: string;
 }
 
 export interface AdmitResult {
@@ -177,6 +180,8 @@ export async function admit(target: string, opts: AdmitOptions & { root?: string
   // A failed admission leaves no certificate: an old one would describe a build this check is about to replace.
   const out = join(projectDir ?? resolve(opts.root ?? dirname(abs)), '.poly', 'certificate.json');
   rmSync(out, { force: true });
+  // S194: the rings are anchored, and every change to them signed by a person already trusted, before any check runs.
+  chainOf(projectDir, opts.trustAnchor);
   const c = await checkTarget(abs, opts.root, opts.std);
   opts.afterCheck?.();
   // Ruled on step 9: a build with policies is admitted only with the gate engine as pinned, its files read now.
@@ -260,8 +265,17 @@ export async function admitWitness(target: string, opts: { root?: string; key: {
   return issue(c, opts.key, resolve(opts.out), { now: opts.now }, { purpose: 'witness', findings });
 }
 
+/** S194: the keyring chain of a project as it is on disk now, or null for a module admitted alone or a project with no rings. */
+function chainOf(projectDir: string | null, trustAnchor?: string): { anchor: string; head: string } | null {
+  if (!projectDir) return null;
+  const { manifest } = loadProject(projectDir);
+  try { return keyringChain(projectDir, manifest, keyringsOf(projectDir, manifest), trustAnchor); } catch (e) { if (e instanceof KeyringError) throw new AdmitError(e.message); throw e; }
+}
+
 async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out: string, opts: AdmitOptions, witness?: { purpose: 'witness'; findings: NonNullable<Certificate['findings']> }, accepted: Certificate['boundAccepted'] = null): Promise<AdmitResult> {
   const { dir, files, report } = c;
+  const projectDir = existsSync(join(c.dir, 'poly.json')) ? c.dir : null;
+  const chain = chainOf(projectDir, opts.trustAnchor);
   const machines: CertifiedMachine[] = [];
   const instances: Record<string, unknown> = {};
   const domains: Record<string, string[]> = {};
@@ -444,7 +458,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(channels.length ? [CHANNEL_ADDRESS_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(channels.length ? [CHANNEL_ADDRESS_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -471,6 +485,8 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     const p = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
     if (!p.ok || back.poly.policyEngine?.name !== 'polyaxion' || back.poly.policyEngine.commit !== p.commit) problems.push({ name: 'policyEngine', problem: `the certificate names ${JSON.stringify(back.poly.policyEngine ?? null)}, and the pinned engine is ${p.ok ? p.commit : `unknown (${p.reason})`}` });
   } else if (back.poly.policyEngine) problems.push({ name: 'policyEngine', problem: 'a gate engine is certified for a build with no policies' });
+  // S194: the chain read back is the one on disk now, anchor and head.
+  if (JSON.stringify(back.poly.keyringChain ?? null) !== JSON.stringify(chainOf(projectDir, opts.trustAnchor))) problems.push({ name: 'keyrings', problem: 'the certified keyring chain is not the chain on disk' });
   // S150: the keyrings read back are the ones the manifest names now.
   if (!sameKeyrings(back.poly.keyrings, existsSync(join(dir, 'poly.json')) ? keyringsOf(dir, loadProject(dir).manifest) : EMPTY_KEYRINGS)) problems.push({ name: 'keyrings', problem: 'the keyrings changed while the program was admitted' });
   // S142: the handlers read back are the closure of the roots as it is on disk now, file for file.

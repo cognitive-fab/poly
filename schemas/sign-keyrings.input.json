@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project directory (default: the working directory)"
+    }
+  },
+  "required": [
+    "by",
+    "key"
+  ]
+}

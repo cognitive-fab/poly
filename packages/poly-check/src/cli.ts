@@ -30,6 +30,8 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly admit --witness <file | project dir> --key <private key file> [--root <dir>] [--out <file>]
        poly approve <intent> --by <keyId> --key <private key file> --db <store> [--out <file>]
        poly accept <witness id> --by <keyId> --key <private key file> [--root <dir>]
+       poly anchor keyrings --out <file outside the project> [--project <dir>]
+       poly sign keyrings --by <keyId> --key <private key file> [--project <dir>]
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
        poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
        poly journal export --db <store> --run <id>
@@ -100,6 +102,18 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
       return { name: 'approve', input: { intent: a, by, key, db, out } };
     }
     return { name: 'accept', input: { id: a, by, key, root } };
+  }
+  // S194: the owner's keyring commands, never served over MCP.
+  if (cmd === 'anchor' && a === 'keyrings' && positional.length === 2) {
+    const o = option(args, '--out');
+    if (!o) throw new UsageError('anchor keyrings needs --out <file outside the project>');
+    return { name: 'anchor-keyrings', input: { out: o, project: option(args, '--project') ?? undefined } };
+  }
+  if (cmd === 'sign' && a === 'keyrings' && positional.length === 2) {
+    const by = option(args, '--by');
+    const key = option(args, '--key');
+    if (!by || !key) throw new UsageError('sign keyrings needs --by <keyId> and --key <private key file>');
+    return { name: 'sign-keyrings', input: { by, key, project: option(args, '--project') ?? undefined } };
   }
   if (cmd === 'admit' && positional.length === 2 && args.includes('--witness')) {
     const key = option(args, '--key');

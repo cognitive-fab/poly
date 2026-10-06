@@ -10,14 +10,15 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXIT_CODES, digest, loadProject, toJson } from '@poly/core';
+import { EXIT_CODES, digest, loadProject, toJson, type Certificate } from '@poly/core';
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
 import { render } from './render.js';
 import { exportWitness, lookupWitness } from './witness.js';
 import { applyFixById } from './fix.js';
-import { admit, admitWitness, witnessKey } from './admit.js';
+import { admit, admitWitness, personKey, witnessKey } from './admit.js';
+import { signKeyrings, writeAnchor } from './keyrings.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
 import { journalCommand } from './journal.js';
 import { benchGate } from './bench.js';
@@ -222,6 +223,30 @@ export const COMMANDS: Command[] = [
       const base = opt(input, 'root') ?? process.cwd();
       const path = writeAcceptance(base, acceptanceRecord(readReport(base), need(input, 'id'), need(input, 'by'), need(input, 'key')));
       return { exit: EXIT_CODES.CLEAN, result: { path }, text: `${path}\n  admission reads it from accepted/ (PT12.5)\n` };
+    },
+  },
+  {
+    name: 'anchor-keyrings', mcp: null, lsp: false,
+    summary: 'Writes the digest of the people and agents rings in poly.json to the keyring anchor, a file outside the project (PT12.5, S194). The owner\'s command; never over MCP.',
+    input: obj({ out: str('the anchor file, outside the project'), project: str('the project directory (default: the working directory)') }, ['out']),
+    output: obj({ path: str('the anchor written'), digest: str('the digest of the rings') }, ['path', 'digest']),
+    async run(input) {
+      const dir = resolve(opt(input, 'project') ?? process.cwd());
+      const r = writeAnchor(dir, loadProject(dir).manifest, `file:${resolve(need(input, 'out'))}`);
+      return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.digest}\n  written to ${r.path}; name it in poly.json as keys.anchor (S194)\n` };
+    },
+  },
+  {
+    name: 'sign-keyrings', mcp: null, lsp: false,
+    summary: 'Appends the rings in poly.json to keyrings/history.json with a keyring record signed by a person of the last rings (PT12.5, S194). The owner\'s command; never over MCP.',
+    input: obj({ by: str('the key id'), key: str('the private key file'), project: str('the project directory (default: the working directory)') }, ['by', 'key']),
+    output: obj({ path: str('the history written'), head: str('the digest of the rings signed') }, ['path', 'head']),
+    async run(input) {
+      const dir = resolve(opt(input, 'project') ?? process.cwd());
+      const cert = join(dir, '.poly', 'certificate.json');
+      const certified = existsSync(cert) ? (JSON.parse(readFileSync(cert, 'utf8')) as Certificate).poly.keyrings : undefined;
+      const r = signKeyrings(dir, loadProject(dir).manifest, need(input, 'by'), personKey(need(input, 'key')), new Date().toISOString(), certified);
+      return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.head}\n  appended to ${r.path}; admission checks it against the anchor (S194)\n` };
     },
   },
   {
