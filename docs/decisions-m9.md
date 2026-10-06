@@ -140,6 +140,10 @@ The alternative is ruled: **no refresh in the runtime.** A presentation whose cl
 
 **`poly bench gate`'s run key is accepted as recorded:** its key is generated for the run, held in memory, anchored as a test anchor in that process only, so its certificate cannot be loaded outside it.
 
+### Built, as ruled
+
+PS8.8 and S198 were amended first (6267af3). A rule over a claim's age denies: one written `escalate` or `warn` is refused at check (`PL1201`), and the gate reports a denial by such a rule as `stale-claims` (the engine names the obligation; the gate host knows which obligations read an age from the certified document). The runtime never refreshes claims. Tests, written first and failing first: a stale presentation is denied `stale-claims`, journaled in the verdict, and the same action dispatched again with fresh claims, a new intent, is allowed; a rule over an age that escalates, or warns, is refused. `test/pd6.test.mjs` has eight tests. The 159 measured files are identical; the full suite: 1,832 tests and one after the M3 runs, 1,820 pass, no failure, 1 skipped and 11 waiting.
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.

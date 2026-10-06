@@ -101,8 +101,14 @@ export class PolicyGate implements Gate {
   private inflight = new Map<string, Promise<unknown>>();
   private engine: any;
 
-  private constructor(private readonly pxPackage: any, engine: any, private readonly view: ProgramView, private readonly reads: Map<string, string[]>, private readonly opts: PolicyGateOptions, private readonly attributed: Set<string> = new Set()) {
+  private constructor(private readonly pxPackage: any, engine: any, private readonly view: ProgramView, private readonly reads: Map<string, string[]>, private readonly opts: PolicyGateOptions, private readonly attributed: Set<string> = new Set(), private readonly ageRules: Set<string> = new Set()) {
     this.engine = engine;
+  }
+
+  /** PS8.8, as ruled: a denial by a rule over a claim's age is reported as stale-claims. */
+  private staleReason(reason: string | null): string | null {
+    const id = reason?.split('::').pop();
+    return id && this.ageRules.has(id) ? 'stale-claims' : reason;
   }
 
   /**
@@ -123,7 +129,9 @@ export class PolicyGate implements Gate {
     for (const m of modules) reads.set(m, [...new Set(policies.filter((p) => core.scopeMatches(p.scope, m)).flatMap((p) => p.reads))].sort());
     // S162: the modules whose scope requires attribution: their certified document holds the scope's attribution rule.
     const attributed = new Set(modules.filter((m) => policies.some((p) => core.scopeMatches(p.scope, m) && ((p.doc.obligations ?? []) as { source?: { obligation?: string } }[]).some((o) => o.source?.obligation === '$attribution'))));
-    return new PolicyGate(pxPackage, engine, view, reads, opts, attributed);
+    // PS8.8: the obligations whose rule reads a claim's age, from each certified document.
+    const ageRules = new Set(policies.flatMap((p) => ((p.doc.obligations ?? []) as { id?: string; when?: string; require?: string }[]).filter((o) => /action\.step\.(age|statusAge)\b/.test(`${o.when ?? ''} ${o.require ?? ''}`)).map((o) => o.id!)));
+    return new PolicyGate(pxPackage, engine, view, reads, opts, attributed, ageRules);
   }
 
   /** S162: whether a module's trust scope requires attribution. */
@@ -262,7 +270,7 @@ export class PolicyGate implements Gate {
       // PD5-A4: the verdict records the digest of the claims the decision read.
       const record = { session, sseq, action, singletons, ...(claims ? { claims: digest(claims) } : {}), stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
       if (decision === 'allow') return { decision, reads, record };
-      if (decision === 'deny') return { decision, reason: reason ?? 'denied', witnessDigest: v.witnesses?.length ? digest(v.witnesses) : undefined, reads, record };
+      if (decision === 'deny') return { decision, reason: this.staleReason(reason) ?? 'denied', witnessDigest: v.witnesses?.length ? digest(v.witnesses) : undefined, reads, record };
       return { decision, reason: reason ?? undefined, reads, record };
     });
   }

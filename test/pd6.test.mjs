@@ -1,7 +1,6 @@
 // PD6 (M9, S195 to S198, PS8.8, PS8.9): the age of a step's claims, read by policies and recorded in the verdict, and
 // mandates that only narrow (K12), checked before the module and against every proposal. PD6-A1 to A6, each written
-// before the code. The refresh of stale claims (PS8.8, S198) is not here: it needs a transition of the OutboxIntent
-// model, a measured file, and waits for the owner (decisions-m9.md).
+// before the code. Stale claims are denied, never refreshed, as the owner ruled (PS8.8 as amended, S198).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -137,4 +136,38 @@ test('PD6-A6: revoking a parent mandate stops every action under its sub-mandate
     assert.deepEqual((await verdicts(rt, 'a6')).filter((v) => v.outcome === 'denied').map((v) => v.reason), ['outside-mandate']);
     await assert.rejects(rt.dispatch('a6', 'Ask', { amount: 10 }, { credentials: 'present', actionId: 'a6-after' }), (e) => e instanceof RefusedDispatch && /mandate-revoked/.test(e.message));
   } finally { await rt.close(); }
+});
+
+// As ruled ("Stale claims: denied, not refreshed"): a stale presentation is denied stale-claims and journaled; the host
+// dispatches the action again with a fresh presentation, a new intent, which is allowed; age alone never escalates.
+test('PS8.8, as ruled: a stale presentation is denied stale-claims; the same action dispatched again with fresh claims is allowed', { skip, timeout: 300_000 }, async () => {
+  let clockNow = 0;
+  let statusAgo = 20 * MIN;
+  const { rt, clock } = await desk('stale-again', () => ({ verifiedAt: clockNow, statusAt: clockNow - statusAgo }));
+  try {
+    clockNow = clock.now();
+    await rt.dispatch('stale-again', 'Ask', { amount: 10 }, { credentials: 'present', actionId: 'ask-1' });
+    await rt.advance();
+    statusAgo = MIN;
+    await rt.dispatch('stale-again', 'Ask', { amount: 10 }, { credentials: 'present', actionId: 'ask-2' });
+    await rt.advance();
+    const outcomes = (await verdicts(rt, 'stale-again')).filter((v) => ['allowed', 'denied', 'escalated'].includes(v.outcome)).map((v) => [v.outcome, v.reason ?? null]);
+    assert.deepEqual(outcomes, [['denied', 'stale-claims'], ['allowed', null]]);
+    const intents = rt.store.db.prepare("SELECT intent_id FROM pr_outbox WHERE instance_id = ? AND kind = 'payments.refund'").all('stale-again').map((r) => r.intent_id);
+    assert.equal(new Set(intents).size, 2, 'two intents, one per presentation');
+  } finally { await rt.close(); }
+});
+
+test('PS8.8, as ruled: a rule over an age that escalates, or warns, is refused PL1201; age alone denies', { timeout: 300_000 }, async () => {
+  const dir = join(ROOT, '.poly', 'test-pd6', 'escalate');
+  for (const severity of ['escalate', 'warn']) {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'pd6.poly'), readFileSync(join(ROOT, SOURCES[0]), 'utf8'));
+    writeFileSync(join(dir, 'pd6.policy.poly'), readFileSync(join(ROOT, SOURCES[1]), 'utf8').replace('require false else deny', `require false else ${severity}`));
+    writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name: 'esc', modules: ['*.poly'] }));
+    const r = await checkProject(dir);
+    const d = r.files.flatMap((f) => [...f.diagnostics, ...(f.policies ?? []).flatMap((p) => p.diagnostics ?? [])]);
+    assert.ok(d.some((x) => x.code === 'PL1201' && /age/.test(x.message)), `${severity}: ${JSON.stringify(d.map((x) => `${x.code} ${x.message}`))}`);
+  }
 });

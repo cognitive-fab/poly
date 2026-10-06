@@ -329,10 +329,14 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
       if (names.has(it.name)) err('PL1002', it, `${it.name} is declared twice in policy ${p.name}`);
       names.add(it.name);
       switch (it.kind) {
-        case 'RuleObligation':
+        case 'RuleObligation': {
           if (it.when) condition(it.when, 'when');
           condition(it.require, 'require');
+          // PS8.8, as ruled: a rule over a claim's age denies; it never escalates or warns on age alone.
+          const readsAge = (x: unknown): boolean => !!x && typeof x === 'object' && (((x as { kind?: string; callee?: string }).kind === 'Call' && ['age', 'statusAge'].includes((x as { callee: string }).callee)) || Object.values(x as object).some(readsAge));
+          if (it.severity !== 'deny' && (readsAge(it.when) || readsAge(it.require))) err('PL1201', it, `obligation ${it.name} reads a claim's age and is ${it.severity}: a rule over an age denies, and the host presents fresh claims again (PS8.8)`);
           break;
+        }
         case 'MachineObligation': {
           const states = new Set(it.states);
           if (states.size !== it.states.length) err('PL1002', it, `obligation ${it.name} names a state twice`);
