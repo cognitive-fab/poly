@@ -184,7 +184,7 @@ export class PolicyGate implements Gate {
     const claims = this.view.stepClaims?.(proposal.instance, proposal.seq) ?? null;
     // PD5.2.2c: the emitting step's lineage, its origin and intent.
     const lineage = this.view.lineage?.(proposal.instance, proposal.seq) ?? null;
-    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(claims ? { step: { claims } } : {}), ...(lineage ? { lineage } : {}) };
+    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine, ...(proposal.channel ? { channel: proposal.channel } : {}) }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(claims ? { step: { claims } } : {}), ...(lineage ? { lineage } : {}) };
     return { action: actionOf(row), reads, singletons, claims };
   }
 

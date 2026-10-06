@@ -334,7 +334,16 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     if (refused) {
       for (const d of module.decls) if (d.kind === 'Policy') report.policies.push({ scope: d.scope, policies: [d.name], stages: [{ stage: 'policy-types', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' }], notRun: [], vacuous: [], diagnostics: [], verdict: 'INCONCLUSIVE', reads: [] });
     } else {
-      try { report.policies.push(...await policyReports(module, opts.program ?? [module], resolve(opts.root ?? process.cwd()))); } catch (e) {
+      // S185: a channel's std module, which its policies' effect.channel.messageKind reads, is in the program too.
+      // Polywatch on step 9: a single file's policy program is its resolved program, its expansion included, with the
+      // module as written first, whose channel declarations the expansion removed.
+      const base = opts.program ?? [...(original !== module ? [original] : []), ...(opts.uses ?? [module])];
+      const stdModules: Module[] = [];
+      for (const pf of opts.programFiles ?? []) {
+        if (!pf.module.decls.some((d) => d.kind === 'Channel')) continue;
+        for (const x of resolveUses(pf.module, pf.file, opts.programFiles, ...(opts.std ? [opts.std] : [])).program) if (!base.some((y) => y.name === x.name) && !stdModules.some((y) => y.name === x.name)) stdModules.push(x);
+      }
+      try { report.policies.push(...await policyReports(module, [...base, ...stdModules], resolve(opts.root ?? process.cwd()))); } catch (e) {
         finish(report, original);
         report.error = `policies: ${(e as Error).message}`;
         report.verdict = 'ERROR';

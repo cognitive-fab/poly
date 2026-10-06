@@ -80,6 +80,8 @@ export interface Certificate {
     workflows?: { name: string; machine: string; runtime: 'poly-runtime'; gated: true; descriptor: string }[];
     /** PS15: each channel, its application's machine id and its descriptor, whose digest is under `artefacts`. */
     channels?: { name: string; application: string; descriptor: string }[];
+    /** Plan step 9: the gate engine that decides this build's policies, pinned by commit (Polyaxion is a peer, S145). */
+    policyEngine?: { name: 'polyaxion'; commit: string };
     /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */
     keyrings: { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] };
   };

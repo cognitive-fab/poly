@@ -164,6 +164,17 @@ export class PolyRuntime {
       }),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
+      // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a
+      // digest (never the address itself, G10), its class (external in M8, S181), and the message kind it carries.
+      channelOf: (row) => {
+        const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
+        const d = m && verified.channels.find((c) => c.channel === m[1]);
+        if (!m || !d) return null;
+        const suffix = `/${m[1]}`;
+        const key = row.instance_id.startsWith(`${m[1]}:`) && row.instance_id.endsWith(suffix) ? row.instance_id.slice(m[1].length + 1, -suffix.length) : row.instance_id;
+        const p = (row.payload ?? {}) as { kind?: unknown };
+        return { name: m[1], kind: d.kind, recipient: `sha256:${createHash('sha256').update(`${d.kind}:${key}`).digest('hex')}`, recipientClass: 'external', ...(typeof p.kind === 'string' ? { messageKind: p.kind } : {}) };
+      },
       workOrder: (row) => {
         const t = this.orderToolOf(row.instance_id, row.kind);
         return t ? { tool: t.tool, ...(t.target !== undefined ? { target: t.target } : {}), why: t.why } : null;
@@ -1109,6 +1120,9 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (opts.gate?.gate) { await kernel.close(); throw new LoadError('refused at load: the build has policies, so its gate is the policy gate, and no other gate is taken (PT9)'); }
     const peer = polyaxionPeer();
     if (!peer.ok) { await kernel.close(); throw new LoadError(`refused at load: the build has policies, and the gate engine is not available: ${peer.reason}`); }
+    // Plan step 9: the engine that decides is the one the build was admitted with.
+    const pinned = verified.certificate.poly.policyEngine;
+    if (!pinned || pinned.commit !== peer.commit) { await kernel.close(); throw new LoadError(`refused at load: the build was ${pinned ? `admitted with Polyaxion ${pinned.commit}` : 'admitted with no pinned gate engine'}; this runtime has Polyaxion ${peer.commit}`); }
     const modules = [...new Set(verified.machines.map((m) => m.id.slice(0, m.id.lastIndexOf('.'))))];
     const view: ProgramView = {
       singleton: (machineId) => {

@@ -34,7 +34,7 @@ export interface VerifiedBuild {
 }
 
 /** PS15.4: what the runtime needs to route a channel's inbound message. */
-export interface VerifiedChannel { channel: string; application: string; conversation: string; thread: { template: string; fields: string[] }; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string } }
+export interface VerifiedChannel { channel: string; kind: string; application: string; conversation: string; thread: { template: string; fields: string[] }; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string } }
 
 export interface WorkOrderTool { tool: string; target?: string; why: string }
 export interface VerifiedWorkflow { name: string; machine: string; inputAction: string; key: { template: string; fields: Record<string, { pattern?: string }> }; tools: Record<string, WorkOrderTool> }
@@ -205,7 +205,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as VerifiedChannel;
     if (d.channel !== c.name || d.application !== c.application) throw new LoadError(`refused at load: the certificate's channel ${c.name} has the descriptor of channel ${String(d.channel)} of ${String(d.application)} (PS15)`);
     for (const id of [d.application, d.conversation]) if (!machines.some((x) => x.id === id)) throw new LoadError(`refused at load: channel ${c.name} names ${id}, which the certificate does not name (PS15)`);
-    channels.push({ channel: d.channel, application: d.application, conversation: d.conversation, thread: d.thread, starts: d.starts, inbound: d.inbound });
+    channels.push({ channel: d.channel, kind: d.kind, application: d.application, conversation: d.conversation, thread: d.thread, starts: d.starts, inbound: d.inbound });
   }
   return { certificate, root, runDir, machines, handlers, policies, workflows, channels };
 }

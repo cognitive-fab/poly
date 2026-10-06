@@ -508,6 +508,14 @@ The skipped test is S152's OpenShell enforcement (no gateway configured). The fo
 - **Open, for plan step 10.** `rt.connectChannel` takes the adapter as runtime configuration: it is not yet certified by package, version and digest (PT20.2). The sender claims are journaled on `runtime:ingress` and not yet carried in the step label, so a program cannot yet read `verified` (AC14).
 - **The regression check.** The 147 measured files are identical in verdict, diagnostic codes and every state and transition count. The full suite: 1,712 tests (1,711 and the one after the M3 runs), 1,705 pass, no failure, 1 skipped and 6 waiting (E1 and E13 among them); `check-memory` passed.
 
+**Plan step 9, the proposal field `channel` (S181, S185; `test/policy-channel.test.mjs`).**
+
+- **E10 by test, as guided.** Four engine tests (the field read, fail closed with poly's rewrite, fail closed in the engine alone, and a seeded control that must fail) passed on the pinned Polyaxion with no code: the engine passes the field through and fails closed. No engine change.
+- **Tests first, failing before the code:** the front end typing `effect.channel.*` (and refusing another field, another channel and another message kind), a channel send denied by a policy over it before the adapter is reached, with the field as proposed, and the certificate's engine pin with load's refusal of another commit.
+- **Built.** The policy front end's `effect.channel` record, with the channels and message kinds of the program (a channel's std module joins the policy's program); the worker's `channelOf` and the gate passing `effect.channel`; `poly.policyEngine` in the certificate, checked at admission and at load.
+- **Found by review, fixed with a test that failed first.** A single-file check gave the policy stage only the expanded module, so a policy beside its channel saw no channel and no message kind; its program is now the file's resolved program, with the module as written.
+- **The regression check.** The 147 measured files are identical in verdict, diagnostic codes and every state and transition count, before and after the review fix. The full suite before the fix: 1,719 tests (1,718 and the one after the M3 runs), 1,712 pass, no failure, 1 skipped and 6 waiting; `check-memory` passed. After it: 1,720 tests, 1,713 pass, no failure, 1 skipped and 6 waiting; `check-memory` passed.
+
 ## Conclusion
 
 M8 first closes the one gap M6 left open: a workflow's work orders will cross the gate and enter the ledger like every other effect, served by poly over the same tools polyflow serves today, with polyflow kept only as the oracle AC5 compares against. Channels then follow PT21 with three changes proposed:

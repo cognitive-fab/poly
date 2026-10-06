@@ -27,6 +27,8 @@ export interface Proposal {
   approved?: { by: string; ref: string };
   /** S147: how many times a stale allow of this intent was rechecked, when it was. */
   rechecks?: number;
+  /** PT25.1, S185: a channel send's channel. */
+  channel?: { name: string; kind: string; recipient: string; recipientClass: string; messageKind?: string };
 }
 
 /**
@@ -83,6 +85,8 @@ export interface WorkerOptions {
   capabilities?: (row: OutboxRow, decl: any) => Readonly<Record<string, unknown>>;
   /** PT15: called with each intent the gate allowed, after its transaction commits. Observation only. */
   onAllowed?: (row: OutboxRow, proposal: Proposal) => void;
+  /** PT25.1: the channel field of a proposal, for a channel's send; null for any other effect. */
+  channelOf?: (row: OutboxRow) => Proposal['channel'] | null;
   /** S180: the completion's data, marked when a Content in it names no body in the content store. */
   markContent?: (instanceId: string, action: string, data: Record<string, unknown>) => Record<string, unknown>;
   /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
@@ -245,6 +249,8 @@ export class EffectWorker {
       ...(approved ? { approved } : {}),
       ...(rechecks ? { rechecks } : {}),
     };
+    const channel = this.opts.channelOf?.(row);
+    if (channel) proposal.channel = channel;
     return { proposal, snapshot };
   }
 

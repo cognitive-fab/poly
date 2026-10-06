@@ -41,6 +41,8 @@ export interface PolicyProgram {
   claimsConflicts: Map<string, string[]>;
   /** PD5.2.2c: every action of the program as an intent, `module.Machine.Action`. */
   intents: string[];
+  /** S185, PT25.1: the program's channels, their kinds, and the message kinds their conversations send. */
+  channels: { name: string; kind: string; messageKinds: string[] }[];
 }
 
 const CLASSES = ['none', 'reversible', 'compensable', 'irreversible'];
@@ -94,8 +96,21 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
       machines.set(id, { id, service: d.service, fields, effects });
     }
   }
+  // S185: a channel's message kinds are the members of its conversation's send effect's `kind` parameter, an enum of its
+  // std module (std.channels.whatsapp's FreeForm and Templated); a kind with none has none.
+  const channels: PolicyProgram['channels'] = [];
+  for (const m of modules) for (const d of m.decls) {
+    if (d.kind !== 'Channel') continue;
+    // The std module, or the channel's own conversation module m.c of the expansion, which carries its types (PS15.1).
+    const lib = modules.find((x) => x.name === `std.channels.${d.channelKind}`) ?? modules.find((x) => x.name === `${m.name}.${d.name}`);
+    const conv = lib?.decls.find((x): x is A.Machine => x.kind === 'Machine' && x.name === 'Conversation');
+    const send = conv?.items.find((i): i is A.EffectDecl => i.kind === 'EffectDecl' && i.name === 'send');
+    const k = send?.params.find((p) => p.name === 'kind')?.type;
+    const e = k?.kind === 'TName' ? lib!.decls.find((x): x is A.EnumDecl => x.kind === 'EnumDecl' && x.name === k.name) : undefined;
+    channels.push({ name: d.name, kind: d.channelKind, messageKinds: e ? [...e.members] : [] });
+  }
   const all = [...machines.values()].flatMap((m) => m.effects);
-  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
+  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
 }
 
 const DECISION_FIELDS = (result: PType): Record<string, PType> => ({
@@ -159,7 +174,9 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (e.prop === 'class') return { k: 'str', values: CLASSES };
             if (e.prop === 'machine') return { k: 'str', values: [...program.machines.keys()] };
             if (e.prop === 'labels') return { k: 'labels' };
-            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine)`);
+            // S185, PT25.1: a channel send's channel. Every recipient is external in M8 (audiences arrive in M10, S181).
+            if (e.prop === 'channel') return { k: 'record', fields: { name: { k: 'str', values: program.channels.map((c) => c.name) }, kind: { k: 'str', values: [...new Set(program.channels.map((c) => c.kind))] }, recipient: { k: 'str', values: null }, recipientClass: { k: 'str', values: ['external'] }, messageKind: { k: 'str', values: [...new Set(program.channels.flatMap((c) => c.messageKinds))] } } };
+            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel)`);
             return null;
           }
           if (e.object.kind === 'Name' && e.object.name === 'send' && !vars.has('send')) {

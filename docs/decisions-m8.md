@@ -225,7 +225,7 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 
 ## check-memory under load: an existing failure, counted
 
-**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 8 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, four of plan step 8).
+**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 10 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, four of plan step 8, two of plan step 9).
 
 ## Plan step 8: choices for the owner's notice
 
@@ -254,6 +254,26 @@ Step 8's rework (d2e41d3, 59469de) is accepted: PL5406, PL5407, the reply queue,
 4. **Open for plan step 10**, recorded in plan-m8.md: `rt.connectChannel` takes its adapter as runtime configuration and is not yet certified by digest; sender claims are journaled but not yet carried in the step label (AC14).
 
 Then: the 147 files measured, the full suite run with the check-memory count, a commit on m4 (not pushed), a report, and plan step 9.
+
+## Step 8 closed (e24919b); guidance for plan step 9 (owner, 2026-10-05)
+
+Step 8 is complete and accepted as reported, including the two additions beyond the ruling (Twilio 21610 as `Reported`, and one channel per sender).
+
+- **Polywatch findings on files a change does not touch** are recorded as *out of scope*, not *false*, with the file named, so they are not lost. The two on `experiments/m3/runner-mutant-assign/agent.mjs` go on the list for the owner.
+
+**Plan step 9: settle E10 by test, not by reading.** The question is whether polyaxion passes a new `channel` field of a `custom.poly.effect` proposal through to the policy rules.
+
+1. Write the test first: a proposal carrying `channel`, and a policy that reads `effect.channel.*` and denies on it. The test passes only if the deny happens.
+2. **Fail closed.** Also test a policy that reads `effect.channel.*` against a proposal without the field. It must deny or be refused at load, never allow. If polyaxion evaluates a missing field as allow or as no match, that is a fail-open defect: stop and bring it to the owner as part of E10.
+3. **Pin the engine.** Polyaxion is loaded from the sibling checkout, not vendored. Record its commit in the certificate (or refuse to admit when it is unknown), so a policy decision can be traced to the engine that made it.
+4. If the field passes through and fails closed, no engine change: the policy front end types `effect.channel.*` and the worker adds the field. Otherwise build the PT27.2 fallback, list the check as poly's in the certificate, and bring E10 to the owner.
+
+**Done (plan step 9).**
+
+- **Polywatch findings out of scope**, for the owner's list: two findings of review `muw7859c` on `experiments/m3/runner-mutant-assign/agent.mjs`, a file the reviewed change did not touch. (1) `runTurn` spawns the agent with no `error` listener, so a spawn failure (ENOENT, EACCES) would throw out of the runner instead of ending the turn as stopped. (2) The review read that file in place of the change. The polywatch command takes only *real* or *false*, so both were recorded there as *false* with the file named; they are out of scope, not false, and the first is a real question about frozen M3 evidence for the owner.
+- **E10 settled by test: not needed.** `test/policy-channel.test.mjs` lowers a policy over `effect.channel.*` as poly lowers every policy and steps it on the pinned Polyaxion. A proposal carrying `channel` is denied on it, and one with another channel is allowed, so the engine reads the field. A proposal without the field is never allowed: `on unknown deny` denies and the default escalates (PS8.2), and a raw Polyaxion rule over the missing field is applied, not skipped, so the engine fails closed on its own. A seeded control, the policy fault `drop-unknown-rule`, lets that proposal through, so the fail-closed test can fail. No engine change; E10 stays on the list for taint (M10).
+- **The engine pinned.** A build with policies records `poly.policyEngine` (`polyaxion` and its commit) in the certificate, and is not admitted when the commit is unknown; `load` refuses a build admitted with another commit, or with none.
+- **A note for authors.** A rule over `effect.*` is also read on a send between trust scopes (PS8.7), where `effect` is unknown; with `on unknown deny` it denies the send. `proposal.kind == "effect" && …` makes the condition false on a send.
 
 ## Engine changes
 

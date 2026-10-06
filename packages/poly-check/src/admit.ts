@@ -329,6 +329,15 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // PT8: the policies of every scope, as the check lowered them.
   const policyReports = report.files.flatMap((r) => r.policies ?? []);
   for (const p of policyReports) if (!p.artefact) throw new AdmitError(`not admitted: the policies of scope ${p.scope} were not lowered`);
+  // Plan step 9: a policy decision is traced to the engine that made it. Polyaxion is resolved from a checkout, so its
+  // pinned commit is certified, and a build with policies is not admitted when the commit is unknown.
+  let policyEngine: { name: 'polyaxion'; commit: string } | null = null;
+  if (policyReports.length) {
+    const { polyaxionPeer } = await import('@poly/runtime');
+    const p = polyaxionPeer();
+    if (!p.ok || !/^[0-9a-f]{7,40}$/.test(p.commit)) throw new AdmitError(`not admitted: the build has policies, and the gate engine's commit is unknown (${p.ok ? p.commit : p.reason})`);
+    policyEngine = { name: 'polyaxion', commit: p.commit };
+  }
   // The workflow descriptors are artefacts poly-runtime reads, certified with the policies (PT10, S164, S173).
   const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor)];
   const artefacts = artefactsOf(dir, machines, opts.fault, policyPaths);
@@ -404,7 +413,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(policyEngine ? { policyEngine } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
