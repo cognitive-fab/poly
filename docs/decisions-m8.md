@@ -194,6 +194,22 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 - *A thread whose `starts` was refused stays dead:* the application exists with no conversation, and every later message on its thread is refused `thread-not-started`.
 - *Until E13*, no channel thread is created at run time (`creation-unavailable`).
 
+## M8b step 2: the conversation machines, for the owner's notice
+
+**Choices made while writing them (2026-10-05).**
+
+- **A conversation is a `service`.** A thread has no end, so a conversation is never terminal; read otherwise, the generated configuration calls it stuck (`PL5402`) once the application closes. PS5.6 does not run on a service (PS1.7), so the tests check the same machine read without `service`: no reachable state is a deadlock.
+- **poly's own bounds.** One send in flight, so a receipt names the send it settles; at most two messages waiting for an answer, a third refused with the reason `backlog` and journaled. `pending` counts both (`0..3`), so the transit bound of the generated configuration is three: two waiting messages and one receipt.
+- **A template is `Template(body: Content)`.** The body names the template and its values. A template's name would be an application's type, which a std module cannot know.
+- **Numbers the sources do not give.** Gmail's "multiple bounced messages" is read as two; Standard Webhooks' "fail consistently" as three failed deliveries in a row, each after its ten attempts. Each is listed in `PROVENANCE.md` as poly's choice.
+- **Durations are constants.** poly checks no time: `24h` (WhatsApp) and `1s` (Slack) are recorded with their sources, and what is checked is the order (the window closes only on its timer; a post waits for its timer).
+
+**For a ruling: unacknowledged receipts.** The receipts a conversation sends (`Delivered`, `Rejected`, `Failed`) are never acknowledged, so an application that answers every message can leave receipts in transit without bound. Its generated configuration reaches the transit bound and is `INCONCLUSIVE` with `PL5301` and the witness, never `CLEAN` (PS13.5); a test records it. An application that answers finitely often (one ticket per thread, as in the tests) is `CLEAN`. Three ways out, none taken: (a) a budget on the environment's `Inbound` in a generated configuration, stated in its report; (b) an acknowledgement action on `Peer`, which the application must send; (c) leave it, and say in the report of every generated configuration that hits the bound that the receipts are the cause. (a) changes PS15.5, (b) changes PS15.0 and every binding.
+
+**Limits added.**
+- *A provider rule a module does not encode is not checked.* Each `PROVENANCE.md` lists what is, and what is not.
+- *A thread holds at most two unanswered messages*; a third is refused `backlog`.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

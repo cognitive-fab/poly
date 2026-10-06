@@ -1,0 +1,139 @@
+// The WhatsApp conversation (PS15, PT21.3), written from the WhatsApp Cloud API documentation. Each rule, its source
+// and the date it was read are in whatsapp/PROVENANCE.md. A thread is one customer. A customer's message opens the
+// customer service window for 24 hours, and a later one resets it; a free-form reply goes out only inside the window,
+// a template in or outside it. A send the rules forbid is accepted, and the application is told why (Q1, S179).
+//
+// poly's own bounds: one send is in flight at a time, so a receipt names the send it settles; at most two customer
+// messages wait for an answer, and a third is refused "backlog". pending counts both, so its bound 3 is the transit
+// bound of the configuration the channel generates (PS15.5): two waiting messages and one receipt.
+module std.channels.whatsapp
+
+enum Window { Closed, Open }
+
+enum Kind { FreeForm, Templated }
+
+machine Peer {
+  state {
+  }
+
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "window-closed", "busy" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    window  : Window = Closed
+    waiting : 0..2 = 0
+    sending : bool = false
+    pending : 0..3 = 0
+    app     : Ref<Peer> = none
+  }
+
+  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+
+  action Open(app: Ref<Peer>)
+  action Inbound(from: string check { "wa-1", "wa-2" }, body: Content)
+  action WindowExpired()
+  action Reply(body: Content)
+  action Template(body: Content)
+  action Sent()
+  action SendFailed()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+
+  // The window starts on a customer's message and resets to 24 hours on the next one: the old timer is cancelled
+  // before the new one is set (polyrun cancels before it inserts).
+  on Inbound(from, body) {
+    require waiting < 2 else reject "backlog"
+    waiting' = waiting + 1
+    pending' = pending + 1
+    window' = Open
+    cancel w
+    after 24h -> WindowExpired() as w
+    send app <- Message(body: body)
+  }
+
+  on WindowExpired {
+    require window is Open else reject "closed"
+    window' = Closed
+  }
+
+  // An answer, sent or refused, settles one waiting message.
+  on Reply(body) {
+    if sending {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "busy")
+    } else {
+      if window is Closed {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "window-closed")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body, kind: FreeForm)
+      }
+    }
+  }
+
+  // A template is the one message allowed outside the window. Its body names the approved template and its values.
+  on Template(body) {
+    if sending {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "busy")
+    } else {
+      if waiting > 0 {
+        waiting' = waiting - 1
+      } else {
+        pending' = pending + 1
+      }
+      sending' = true
+      emit send(body: body, kind: Templated)
+    }
+  }
+
+  on Sent {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    send app <- Delivered()
+  }
+
+  on SendFailed {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    send app <- Failed()
+  }
+
+  effect send(body: Content, kind: Kind) {
+    kind "channel.send"
+    labels { egress:external }
+    class irreversible
+    ok -> Sent()
+    failed -> SendFailed()
+    exhausted -> SendFailed()
+  }
+
+  step property window-opens-on-inbound: (pre.window is Closed && post.window is Open) implies action == Inbound
+
+  never free-form-outside-window: emit send(kind: FreeForm) while window is Closed
+  never one-send-at-a-time: emit send while sending
+}

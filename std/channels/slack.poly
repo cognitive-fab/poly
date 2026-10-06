@@ -1,0 +1,153 @@
+// The Slack conversation (PS15), written from Slack's documentation of chat.postMessage and of the channel_archive
+// and channel_unarchive events. Each rule, its source and the date it was read are in slack/PROVENANCE.md. A thread is
+// one Slack channel. Nothing is posted to an archived channel, and at most one message is posted per second: after a
+// post, the next waits until a one-second timer has fired. A send the rules forbid is accepted, and the application
+// is told why (Q1, S179).
+//
+// poly's own bounds, as in every std conversation: one send is in flight at a time; at most two messages wait for an
+// answer, and a third is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
+module std.channels.slack
+
+enum Event { Posted, Archived, Unarchived }
+
+machine Peer {
+  state {
+  }
+
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "channel-archived", "busy" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    archived : bool = false
+    cooling  : bool = false
+    waiting  : 0..2 = 0
+    sending  : bool = false
+    pending  : 0..3 = 0
+    app      : Ref<Peer> = none
+  }
+
+  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+
+  action Open(app: Ref<Peer>)
+  action Inbound(channel: string check { "C-1", "C-2" }, body: Content, event: Event)
+  action Reply(body: Content)
+  action Template(body: Content)
+  action Sent()
+  action Cooled()
+  action SendFailed()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+
+  // The Events API reports an archive and an unarchive of the channel; only a posted message reaches the application.
+  on Inbound(channel, body, event) {
+    if event is Archived {
+      require !archived else reject "already-archived"
+      archived' = true
+    } else {
+      if event is Unarchived {
+        require archived else reject "not-archived"
+        archived' = false
+      } else {
+        require waiting < 2 else reject "backlog"
+        waiting' = waiting + 1
+        pending' = pending + 1
+        send app <- Message(body: body)
+      }
+    }
+  }
+
+  on Reply(body) {
+    if archived {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "channel-archived")
+    } else {
+      if sending || cooling {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "busy")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body)
+      }
+    }
+  }
+
+  // Slack has no template of its own: a template is a message the application started, under the same rules.
+  on Template(body) {
+    if archived {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "channel-archived")
+    } else {
+      if sending || cooling {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "busy")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body)
+      }
+    }
+  }
+
+  on Sent {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    cooling' = true
+    after 1s -> Cooled() as cool
+    send app <- Delivered()
+  }
+
+  on Cooled {
+    require cooling else reject "idle"
+    cooling' = false
+  }
+
+  // is_archived, not_in_channel, channel_not_found and rate_limited after its retries are a failed send.
+  on SendFailed {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    send app <- Failed()
+  }
+
+  effect send(body: Content) {
+    kind "channel.send"
+    labels { egress:external }
+    class irreversible
+    ok -> Sent()
+    failed -> SendFailed()
+    exhausted -> SendFailed()
+  }
+
+  never no-post-to-archived: emit send while archived
+  never one-message-per-second: emit send while cooling
+  never one-send-at-a-time: emit send while sending
+}

@@ -1010,6 +1010,8 @@ The certificate lists each workflow as `{ runtime: "poly-runtime", gated: true }
 
 ## PT10a. Channels, as built (M8b step 1, PS15)
 
+**The std kinds (M8b step 2).** `std/channels` holds `whatsapp`, `sms`, `email`, `slack` and `webhook`, each written from its provider's documentation and recorded in its `PROVENANCE.md` with the date it was read. A conversation is a `service`, accepts a forbidden send and sends `Rejected(reason)`, keeps one send in flight and at most two unanswered messages (`backlog` refuses a third), and declares `pending: 0..3`. Each states its provider's rules as `never` statements and step properties, and each rule has a seeded mutant in `test/std-channels.test.mjs`.
+
 A channel is the top-level declaration of PT21.1 with a binding per Peer action:
 
 ```poly

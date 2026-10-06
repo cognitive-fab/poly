@@ -1,0 +1,152 @@
+// The webhook conversation (PS15), written from the Standard Webhooks specification. Each rule, its source and the
+// date it was read are in webhook/PROVENANCE.md. A thread is one source: inbound webhooks arrive from it, their
+// signatures verified by the adapter, and outbound deliveries go to its endpoint. A delivery succeeds on a 2xx answer
+// and is retried with exponential backoff; when deliveries fail consistently the endpoint is disabled, and nothing is
+// delivered to it until an operator enables it again. A send the rules forbid is accepted, and the application is
+// told why (Q1, S179).
+//
+// poly's own bounds, as in every std conversation: one send is in flight at a time; at most two messages wait for an
+// answer, and a third is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5). Three
+// failed deliveries in a row, each after its retries, count as consistent failure.
+module std.channels.webhook
+
+machine Peer {
+  state {
+  }
+
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "endpoint-disabled", "busy" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    enabled  : bool = true
+    failures : 0..3 = 0
+    waiting  : 0..2 = 0
+    sending  : bool = false
+    pending  : 0..3 = 0
+    app      : Ref<Peer> = none
+  }
+
+  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+  invariant disabled-at-three: enabled == failures < 3
+
+  action Open(app: Ref<Peer>)
+  action Inbound(source: string check { "hook-1", "hook-2" }, body: Content)
+  action Reply(body: Content)
+  action Template(body: Content)
+  action Sent()
+  action Undelivered()
+  action Enable()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+
+  on Inbound(source, body) {
+    require waiting < 2 else reject "backlog"
+    waiting' = waiting + 1
+    pending' = pending + 1
+    send app <- Message(body: body)
+  }
+
+  on Reply(body) {
+    if !enabled {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "endpoint-disabled")
+    } else {
+      if sending {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "busy")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body)
+      }
+    }
+  }
+
+  // A webhook has no template of its own: a template is a delivery the application started, under the same rules.
+  on Template(body) {
+    if !enabled {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "endpoint-disabled")
+    } else {
+      if sending {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "busy")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body)
+      }
+    }
+  }
+
+  on Sent {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    failures' = 0
+    send app <- Delivered()
+  }
+
+  // A delivery that failed after its retries. The third in a row disables the endpoint.
+  on Undelivered {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    if failures < 2 {
+      failures' = failures + 1
+    } else {
+      failures' = 3
+      enabled' = false
+    }
+    send app <- Failed()
+  }
+
+  // An operator enables the endpoint again, once it answers; the count starts over.
+  on Enable {
+    require !enabled else reject "enabled"
+    enabled' = true
+    failures' = 0
+  }
+
+  effect send(body: Content) {
+    kind "channel.send"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 10, base 5s, timeout 15s }
+    ok -> Sent()
+    failed -> Undelivered()
+    exhausted -> Undelivered()
+  }
+
+  step property disabled-only-after-failures: !(pre.enabled && !post.enabled) || pre.failures == 2
+
+  never no-delivery-while-disabled: emit send while !enabled
+  never one-send-at-a-time: emit send while sending
+}

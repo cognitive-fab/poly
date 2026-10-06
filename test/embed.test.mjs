@@ -18,7 +18,8 @@ const EMBED = join(ROOT, 'conformance', 'm2', 'embed');
 const TSC = join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
 const DECLS = join(ROOT, 'packages', 'poly-embed', 'embed', 'index.d.ts');
 const walk = (d) => readdirSync(d).flatMap((e) => { const p = join(d, e); return statSync(p).isDirectory() ? walk(p) : p.endsWith('.poly') ? [p] : []; });
-const SOURCES = [...walk(join(ROOT, 'conformance')), ...walk(join(ROOT, 'examples'))];
+// M8b step 2: the std modules are sources too, and print on both surfaces like any other.
+const SOURCES = [...walk(join(ROOT, 'conformance')), ...walk(join(ROOT, 'examples')), ...walk(join(ROOT, 'std'))];
 const TWINS = [
   ['turnstile.ts', join(ROOT, 'examples', 'field-studies', 'turnstile', 'turnstile.poly')],
   ['orders.ts', join(ROOT, 'examples', 'orders', 'orders.poly')],

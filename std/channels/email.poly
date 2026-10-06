@@ -1,0 +1,165 @@
+// The email conversation (PS15), written from RFC 8058 (one-click unsubscribe) and Gmail's email sender guidelines.
+// Each rule, its source and the date it was read are in email/PROVENANCE.md. A thread is one correspondent. A
+// one-click unsubscribe ends bulk mail to the correspondent for good; a reply to their own message is still allowed.
+// Two bounced messages suppress the address, and nothing is sent to it again. A send the rules forbid is accepted,
+// and the application is told why (Q1, S179).
+//
+// poly's own bounds, as in every std conversation: one send is in flight at a time; at most two messages wait for an
+// answer, and a third is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
+module std.channels.email
+
+enum Event { Mail, Unsubscribe }
+
+enum Kind { Direct, Bulk }
+
+machine Peer {
+  state {
+  }
+
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "unsubscribed", "suppressed", "busy" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    subscribed : bool = true
+    bounces    : 0..2 = 0
+    waiting    : 0..2 = 0
+    sending    : bool = false
+    pending    : 0..3 = 0
+    app        : Ref<Peer> = none
+  }
+
+  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+
+  action Open(app: Ref<Peer>)
+  action Inbound(from: string check { "mail-1", "mail-2" }, body: Content, event: Event)
+  action Reply(body: Content)
+  action Template(body: Content)
+  action Sent()
+  action Bounced()
+  action SendFailed()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+
+  // The adapter turns a verified one-click POST (List-Unsubscribe=One-Click) into the event Unsubscribe. It carries
+  // no message for the application.
+  on Inbound(from, body, event) {
+    if event is Unsubscribe {
+      require subscribed else reject "unsubscribed"
+      subscribed' = false
+    } else {
+      require waiting < 2 else reject "backlog"
+      waiting' = waiting + 1
+      pending' = pending + 1
+      send app <- Message(body: body)
+    }
+  }
+
+  // A reply answers the correspondent's own message, so an unsubscribe does not stop it; suppression does.
+  on Reply(body) {
+    if bounces == 2 {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "suppressed")
+    } else {
+      if sending {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "busy")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body, kind: Direct)
+      }
+    }
+  }
+
+  // A template is bulk mail: it needs a subscribed, unsuppressed address, and goes out with the one-click headers.
+  on Template(body) {
+    if bounces == 2 {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "suppressed")
+    } else {
+      if !subscribed {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "unsubscribed")
+      } else {
+        if sending {
+          if waiting > 0 {
+            waiting' = waiting - 1
+            pending' = pending - 1
+          }
+          send app <- Rejected(reason: "busy")
+        } else {
+          if waiting > 0 {
+            waiting' = waiting - 1
+          } else {
+            pending' = pending + 1
+          }
+          sending' = true
+          emit send(body: body, kind: Bulk)
+        }
+      }
+    }
+  }
+
+  on Sent {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    send app <- Delivered()
+  }
+
+  // A hard bounce is the provider's permanent failure of a send.
+  on Bounced {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    if bounces < 2 {
+      bounces' = bounces + 1
+    }
+    send app <- Failed()
+  }
+
+  on SendFailed {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    send app <- Failed()
+  }
+
+  effect send(body: Content, kind: Kind) {
+    kind "channel.send"
+    labels { egress:external }
+    class irreversible
+    ok -> Sent()
+    failed -> Bounced()
+    exhausted -> SendFailed()
+  }
+
+  step property unsubscribe-holds: pre.subscribed || !post.subscribed
+
+  never no-bulk-after-unsubscribe: emit send(kind: Bulk) while !subscribed
+  never no-send-to-suppressed: emit send while bounces == 2
+  never one-send-at-a-time: emit send while sending
+}

@@ -1,0 +1,157 @@
+// The SMS conversation (PS15), written from Twilio's documentation of opt-out keywords. Each rule, its source and the
+// date it was read are in sms/PROVENANCE.md. A thread is one phone number. An opt-out keyword withdraws the number's
+// consent and an opt-in keyword gives it back; no message is sent to a number without consent. The adapter classifies
+// a message's keyword, matching the provider's lists without regard to case; the conversation reads only the class.
+// A send the rules forbid is accepted, and the application is told why (Q1, S179).
+//
+// poly's own bounds, as in every std conversation: one send is in flight at a time; at most two messages wait for an
+// answer, and a third is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
+module std.channels.sms
+
+enum Keyword { Plain, OptOut, OptIn, Help }
+
+machine Peer {
+  state {
+  }
+
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "opted-out", "busy" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    consent : bool = true
+    waiting : 0..2 = 0
+    sending : bool = false
+    pending : 0..3 = 0
+    app     : Ref<Peer> = none
+  }
+
+  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+
+  action Open(app: Ref<Peer>)
+  action Inbound(from: string check { "sms-1", "sms-2" }, body: Content, keyword: Keyword)
+  action Reply(body: Content)
+  action Template(body: Content)
+  action Sent()
+  action SendFailed()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+
+  // A keyword reaches the application too: the provider answers the keyword itself, and the application learns of the
+  // opt-out from the message and from the refusal of its next send. A keyword changes consent even when two messages
+  // already wait, so the backlog can never keep an opt-out from taking effect; only the message to the application is
+  // then dropped. A plain message is refused "backlog".
+  on Inbound(from, body, keyword) {
+    if keyword is OptOut {
+      consent' = false
+      if waiting < 2 {
+        waiting' = waiting + 1
+        pending' = pending + 1
+        send app <- Message(body: body)
+      }
+    } else {
+      if keyword is OptIn {
+        consent' = true
+        if waiting < 2 {
+          waiting' = waiting + 1
+          pending' = pending + 1
+          send app <- Message(body: body)
+        }
+      } else {
+        require waiting < 2 else reject "backlog"
+        waiting' = waiting + 1
+        pending' = pending + 1
+        send app <- Message(body: body)
+      }
+    }
+  }
+
+  on Reply(body) {
+    if !consent {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "opted-out")
+    } else {
+      if sending {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "busy")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body)
+      }
+    }
+  }
+
+  // SMS has no template of its own: a template is a message the application started, under the same rules.
+  on Template(body) {
+    if !consent {
+      if waiting > 0 {
+        waiting' = waiting - 1
+        pending' = pending - 1
+      }
+      send app <- Rejected(reason: "opted-out")
+    } else {
+      if sending {
+        if waiting > 0 {
+          waiting' = waiting - 1
+          pending' = pending - 1
+        }
+        send app <- Rejected(reason: "busy")
+      } else {
+        if waiting > 0 {
+          waiting' = waiting - 1
+        } else {
+          pending' = pending + 1
+        }
+        sending' = true
+        emit send(body: body)
+      }
+    }
+  }
+
+  on Sent {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    send app <- Delivered()
+  }
+
+  on SendFailed {
+    require sending else reject "idle"
+    sending' = false
+    pending' = pending - 1
+    send app <- Failed()
+  }
+
+  effect send(body: Content) {
+    kind "channel.send"
+    labels { egress:external }
+    class irreversible
+    ok -> Sent()
+    failed -> SendFailed()
+    exhausted -> SendFailed()
+  }
+
+  step property consent-changes-only-by-keyword: pre.consent == post.consent || action == Inbound
+
+  reject property opt-keyword-never-refused: (action == Inbound && (keyword is OptOut || keyword is OptIn)) implies !rejected("backlog")
+
+  never no-send-after-opt-out: emit send while !consent
+  never one-send-at-a-time: emit send while sending
+}
