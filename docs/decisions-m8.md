@@ -225,7 +225,7 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 
 ## check-memory under load: an existing failure, counted
 
-**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 13 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, four of plan step 8, three of plan step 9, two of plan step 10).
+**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 14 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, four of plan step 8, three of plan step 9, three of plan step 10).
 
 ## Plan step 8: choices for the owner's notice
 
@@ -297,6 +297,41 @@ Step 9 (cbcd4ab) is accepted. Two fixes come before plan step 10.
 - **The address in the journal** (from fix 1). Brought to the coordinator with a proposal: ingress replaces each thread field by its keyed digest, so instance ids, step data and records hold digests, and the store alone maps a digest to the address a send needs.
 - **AC15's witness from `poly check`.** The generated configuration's inputs (PS15.5) do not include the conversation's timers, so the WhatsApp window never closes in a check and no variant can be shown to send after it. Proposal: PS15.5's inputs also include the completions of the conversation's own timers. AC15's static test is a todo naming this until it is ruled.
 - **Sender claims as an enum.** A claims field is an enum, a range or a Principal (S103), so the adapter's `verified` true or false is the claims value `Verified` or `Unverified`.
+
+## Step 10 not accepted yet: two items (the Cowork coordinator, for the owner, 2026-10-06)
+
+Step 10 (182b9f5) is not accepted yet. The adapter certification and `PL6408`, the claims as `Verified` and `Unverified`, and the E13 todos listed as not run are reviewed and hold.
+
+1. **AC15's static witness is part of the gate.** It is missing because of a gap in checking: if the window's timer never fires in the generated configuration, every rule guarded by a closed window is proved over states the configuration never reaches. Semantics first: the PS15.5 change that makes a conversation's armed timers inputs of its generated configuration (the environment may fire any armed timer) goes to the coordinator for a ruling, with a vacuity report: for every `never` of the five std conversations and of the concierge, in each configuration that checks it, whether the state its `while` names is reachable; a never whose `while` is unreachable there is reported vacuous, not proved. No code before the ruling.
+2. **Free of deadlock.** As step 7 did for the std conversations, the concierge's machines are checked read without `service`, and the result reported per machine and per configuration, beside the quiescence checks.
+3. **The address in the journal is a limit of M8**, not a fix now: an open issue for M9 (S191, below), named in the M8 record and in the certificate's limits.
+
+After item 1 is ruled, built and committed, and item 2 is reported, step 10 is accepted and step 11 is ruled. Step 11 does not start before.
+
+**S191 (open, for M9). Addresses out of the journal.** A channel's thread key is the provider's address (a phone number, an email address), so the address is in instance ids (`<channel>:<address>`), in the conversation's `Inbound` step data, and in the ingress records. In M9 addresses move to the erasable content store, and thread keys, step data and ingress records carry only the address's keyed digest (the store's key of the step 9 fix); the send handler reads the address from the content store by its digest. Until then, the M8 limit: *a channel's journal holds its correspondents' addresses.*
+
+**Item 2, reported (2026-10-06).** The concierge read without `service` (its three applications and the three conversations, the latter through a copy of `std/` under the test-only std option): every machine's PS5.6 deadlock check ran and is CLEAN (`Desk`, `Texts`, `Staff`: 8 states each; `support.Conversation` 342, `text.Conversation` 342, `staff.Conversation` 522), and each configuration is CLEAN with its quiescence check (PS13.6): `support` 3,068 global states, `text` 14,483, `staff` 19,070. No quiescent state exists in them, since a customer's `Inbound` is always an input the conversation accepts until its backlog is full, and a full backlog is drained by the application's answers. With `service`, as committed, the same configurations are CLEAN and the per-machine check is exempt (PS1.7).
+
+**Item 1, the vacuity report (2026-10-06).** Measured on the committed tree with a script over poly-ref's graphs (not committed; rerun after polywatch with every evaluation error raised, not read as false, and each machine checked alone evaluated with its own machine, with the same 43 rows): for each never, whether its `while` holds in some reachable state, and whether the rule is *tested*: some reachable accepted step of the conversation takes an action that can emit the never's effect from a state where the `while` holds.
+
+- *Each std conversation checked alone:* every `while` is reachable and every rule is tested (by `Reply`, `Template` or `Ack`).
+- *The concierge:* `support` (WhatsApp): `free-form-outside-window` **not tested**; its `while` (window `Closed`) is reachable only as the initial state, before any message, and after the first message the window never closes. `one-send-at-a-time` tested. `text` (SMS) and `staff` (Slack): every never tested.
+- *The std tests' one-ticket application on each kind:* `free-form-outside-window` not tested (WhatsApp); `one-send-at-a-time` not tested on every kind (one reply per thread); `no-delivery-while-disabled` (webhook) not tested and its `while` unreachable (three failed deliveries need three sends). The rest tested.
+- *The std tests' answering application on each kind:* `free-form-outside-window` not tested; every other never tested.
+
+The full suite with the S191 limit: 1,744 tests (1,743 and the one after the M3 runs), 1,731 pass, no failure, 1 skipped and 12 waiting; `check-memory` passed; the 147 measured files are identical.
+
+So the gap the ruling names is real and is the only one that matters for a rule: a closed WhatsApp window is never reached after a message in any generated configuration. The literal measure of the ruling (is the `while` state reachable) misses it, since the window is `Closed` in the initial state; the measure that finds it is whether the rule is tested.
+
+**Does poly check report it?** No. A machine checked alone reports a never vacuous when its `while` holds in no reachable state (S113: `INCONCLUSIVE`, reason `vacuous`; measured on a probe whose `while` is never true). A configuration judges vacuity only for its own declared properties; the nevers it checks on its instances (PS5.2a) are listed as violated or not, and never as vacuous. In every configuration above the result is CLEAN.
+
+**Proposal (for the ruling, with the PS text).** In a configuration, a never of an instance is *tested* when some reachable accepted global step of that instance takes an action whose handler can emit the never's effect, from a pre-state where its `while` holds (and its field filter is satisfiable). An untested never is listed under the configuration's `vacuous`, naming the never, the instance and the reason (`while` unreachable, or reachable but never acted on), and the configuration is at best `INCONCLUSIVE` (PT12.3, S113), never `CLEAN`. The same measure replaces the machine-level one for nevers, which today counts the initial state.
+
+**Proposed PS15.5 text (for the ruling).** The sentence on inputs, *"the inputs `A`'s `starts`, the conversation's `Inbound`, and the completions the conversation's provider effect is wired to (the provider's receipts)"*, becomes:
+
+> the inputs `A`'s `starts`, the conversation's `Inbound`, the completions the conversation's provider effect is wired to (the provider's receipts), and the completion of each of the conversation's timers (`after d -> X() as k`): the provider's clock, which may fire an armed timer at any time. The global state records which of the conversation's timers are armed: an `after` arms its key, a `cancel` or the timer's firing disarms it, and the environment offers `X` only while `k` is armed, at most once per arming. Durations are not compared: any armed timer may fire before or after any other step (PS4.4).
+
+Option B, for the record: offer each timer's target in every state, without tracking armed timers. It needs no change to the global state, but it offers firings a running program cannot have (a target with no armed timer), which a handler's guard must reject; std's handlers do (`require window is Open`, `require cooling`), but a finding could then name a firing that cannot happen. The text above (option A) is proposed.
 
 ## Engine changes
 

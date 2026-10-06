@@ -42,3 +42,12 @@ test('S182: load refuses a build admitted with another adapter package', { timeo
   writeFileSync(a.certificate, JSON.stringify(cert));
   await assert.rejects(load(a.build, { certificate: a.certificate, trust: a.trust }), /admitted with @poly\/io .* sha256:0{64}; this runtime has/);
 });
+
+// Ruled on step 10 (S191): the address in the journal is a limit of M8, named in the certificate of a build with
+// channels, and only there.
+test('S191: the certificate of a build with channels names the limit that its journal holds the correspondents\' addresses', { timeout: 300_000 }, async () => {
+  const a = await admitted('pin-limit', SOURCE);
+  assert.ok(a.cert.poly.limits.some((l) => /S191/.test(l) && /addresses/.test(l)), JSON.stringify(a.cert.poly.limits));
+  const plain = await admitted('pin-limit-none', ['conformance/m1/effects.poly']);
+  assert.ok(!plain.cert.poly.limits.some((l) => /S191/.test(l)));
+});
