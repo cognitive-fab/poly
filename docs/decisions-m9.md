@@ -110,6 +110,13 @@ PT12.5's text came first (d1c9bf4). A scope's `policy` record, by a key of the c
 - **`poly bench gate`**, a measurement of AC4's program in a folder outside the repository, admits a policy too, so it now signs it with a person key generated for the run and held in memory, its ring anchored in the run's folder and read as a test anchor in that process only, restored after its admission. A choice the plan did not foresee, settled by its rules (the bench never touches the owner's project or anchors), recorded here.
 - **Checked.** The 159 measured files are identical to M8's close. The first full suite had 12 failures, each a test that admits a policy without a signature (and the error-source test, which now exempts `PL6409`); with the scopes signed, the second: 1,819 tests and one after the M3 runs, 1,807 pass, no failure, 1 skipped and 11 waiting.
 
+## Step 2: the housekeeping carried from M8, done
+
+- **The certificate test on a smaller application.** The three adapter certificate faults, and review D-F5's read-back test, now admit `test/fixtures/m9/text-desk.poly`, one SMS channel answering every message (checked CLEAN in 20 s), with `text-desk.policy.poly` for the wrong-engine fault, in place of the concierge. The same faults are caught. Measured alone: the certificate faults test took 76 s and D-F5 75 s, where M8b's gate had `certificate` at 424 s and `review-m8b-d` at 406 s.
+- **`frozenCommit`** (`test/m4f-recheck.test.mjs`) now takes the commit that added `experiments/m3/FROZEN` on main (1c8d155), not the first hex token of its text, which was 4c630d2, the approval commit FROZEN names first; any git error but "not a git repository" fails the test instead of making it a todo. Its test failed first. The M3 references re-check at 1c8d155 passes, as it did at 4c630d2.
+- **`agent.mjs`** stays as frozen M3 evidence; its finding is the first entry of `docs/m3/known-defects.md`, a new list of defects found in the frozen files after the freeze.
+- **Checked.** The full suite: 1,822 tests and one after the M3 runs, 1,810 pass, no failure, 1 skipped and 11 waiting, in 14 min 20 s for the suite and 93 s after. No package source changed in this step, so the measured files were not run again.
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.

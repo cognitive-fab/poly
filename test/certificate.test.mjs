@@ -83,7 +83,7 @@ test('each broken certificate writer is caught by the read-back, and nothing is 
   for (const fault of CERTIFICATE_FAULTS) {
     // A policy fault acts on a lowered policy, which needs the gate engine to admit (S145): not run without it.
     if (POLICY_CERTIFICATE_FAULTS.includes(fault) && !polyaxionPeer().ok) continue;
-    const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ADAPTER_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m8/concierge/concierge.poly'] : ['conformance/m1/effects.poly'], key);
+    const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ADAPTER_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/text-desk.poly'] : ['conformance/m1/effects.poly'], key);
     if (PACKAGE_CERTIFICATE_FAULTS.includes(fault)) withPackage(dir);
     // S194, Q8: a policy is admitted only signed by a person, so each policy fault acts on a signed scope.
     if (POLICY_CERTIFICATE_FAULTS.includes(fault)) await signPolicies(dir);

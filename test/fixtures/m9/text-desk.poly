@@ -1,0 +1,45 @@
+// M9 (plan-m9, carried items): a one-channel application for the certificate's adapter faults, in place of the
+// concierge, whose three configurations each fault admission explored. It answers every SMS on one channel.
+module desk
+
+enum Last { Nothing, Sent, Refused, Lost }
+
+channel text: sms {
+  adapter "sms"
+  thread "{from}"
+  starts Agent.Start on inbound
+  Message -> Agent.Got
+  Delivered -> Agent.Delivered
+  Rejected -> Agent.SendRejected
+  Failed -> Agent.SendFailed
+}
+
+service machine Agent {
+  state {
+    started : bool = false
+    last    : Last = Nothing
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "opted-out" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    emit text.reply(body: body)
+  }
+  on Delivered {
+    last' = Sent
+  }
+  on SendRejected(reason) {
+    last' = Refused
+  }
+  on SendFailed {
+    last' = Lost
+  }
+}

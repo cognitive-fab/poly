@@ -57,17 +57,19 @@ test('every conformance and example source under PL1207 and vacuity equals the r
   }
 });
 
-// FROZEN is written on main when the M3 set is frozen (M3-5); it names the commit the freeze was taken from.
+// FROZEN is written on main when the M3 set is frozen (M3-5).
+// Polywatch on step 10, fixed in M9: the FROZEN commit is the commit that added experiments/m3/FROZEN on main (its
+// text names other commits first). Only a checkout with no history, where git is not a repository, makes the re-check
+// a todo; any other git error fails, so the re-check is never skipped by accident.
 function frozenCommit() {
+  let added;
   try {
-    const text = execFileSync('git', ['show', 'main:experiments/m3/FROZEN'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    const m = /\b([0-9a-f]{7,40})\b/.exec(text);
-    if (!m) throw new Error('experiments/m3/FROZEN names no commit');
-    return m[1];
+    added = execFileSync('git', ['log', '--diff-filter=A', '--format=%h', 'main', '--', 'experiments/m3/FROZEN'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   } catch (err) {
-    if (/names no commit/.test(err.message)) throw err;
-    return null;
+    if (/not a git repository/.test(String(err.stderr ?? ''))) return null;
+    throw err;
   }
+  return added ? added.split('\n').pop() : null;
 }
 
 const commit = frozenCommit();
@@ -95,3 +97,10 @@ test("M3's references at the FROZEN commit, under PL1207 and vacuity (S136)",
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+// Polywatch on step 10, out of scope then and fixed in M9 (plan-m9, carried items): the FROZEN commit is the commit
+// that added experiments/m3/FROZEN on main, never the first hex token of its text, which names other commits first.
+test('the FROZEN commit is the commit that added experiments/m3/FROZEN on main', { skip: commit ? false : 'not run: experiments/m3/FROZEN is not on main' }, () => {
+  const added = execFileSync('git', ['log', '--diff-filter=A', '--format=%h', 'main', '--', 'experiments/m3/FROZEN'], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop();
+  assert.equal(commit, added);
+});

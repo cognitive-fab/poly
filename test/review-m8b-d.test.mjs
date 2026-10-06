@@ -46,7 +46,7 @@ test('D-F4: rt.inbound takes no claims from its caller: claims come only from a 
 });
 
 test('D-F5: the read-back catches a swapped adapter kind, a left-out adapter binding and a wrong policy engine', { skip: SKIP, timeout: 600_000 }, async () => {
-  for (const [fault, sources] of [['swap-adapter-kind', ['conformance/m8/concierge/concierge.poly']], ['omit-adapters', ['conformance/m8/concierge/concierge.poly']], ['wrong-policy-engine', ['conformance/m8/concierge/concierge.poly', 'conformance/m8/concierge/concierge.policy.poly']]]) {
+  for (const [fault, sources] of [['swap-adapter-kind', ['test/fixtures/m9/text-desk.poly']], ['omit-adapters', ['test/fixtures/m9/text-desk.poly']], ['wrong-policy-engine', ['test/fixtures/m9/text-desk.poly', 'test/fixtures/m9/text-desk.policy.poly']]]) {
     const key = makeKey(`d5-${fault}`);
     const dir = project(`d5-${fault}`, sources, key, 'test-review-m8b-d');
     if (hasPolicies(sources)) await signPolicies(dir);

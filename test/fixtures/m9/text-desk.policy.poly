@@ -1,0 +1,11 @@
+// The one-channel application's policy, for the certificate's policy fault on a channel build (review M8b, D-F5).
+module desk_policy
+
+policy texts {
+  scope "desk.text"
+  obligation person-reviews-texts "A text to an external recipient waits for a person." rule {
+    when proposal.kind == "effect" && effect.channel.name == "text" && effect.channel.recipientClass == "external"
+    require false else escalate
+    on unknown escalate
+  }
+}
