@@ -279,7 +279,7 @@ test('fix 1, seeded control: with the unkeyed hash (fault unkeyed-recipient), th
 // pinned (tracked) file differs from the pinned commit, naming it; an untracked file is ignored. Tested on a copy of
 // the pinned files, so the sibling checkout is never changed. ──
 function pinnedCopy(name) {
-  const text = readFileSync(join(ROOT, 'peers', 'polyaxion', 'PROVENANCE.md'), 'utf8');
+  const text = readFileSync(join(ROOT, 'vendor', 'polyaxion', 'PROVENANCE.md'), 'utf8');
   const files = [...text.matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \|$/gm)].map((m) => m[1]);
   const dir = join(ROOT, '.poly', 'test-policy-channel', name);
   rmSync(dir, { recursive: true, force: true });

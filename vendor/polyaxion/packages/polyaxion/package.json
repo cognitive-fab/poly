@@ -1,0 +1,53 @@
+{
+  "name": "@cognitive-fab/polyaxion",
+  "version": "0.1.0",
+  "description": "The constraint plane for AI agents: obligations declared as predicates and state machines outside the context window, enforced by a deterministic guarded merge before any effect executes.",
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./core": "./src/core/index.mjs",
+    "./engine": "./src/engine.mjs",
+    "./mcp": "./src/mcp/server.mjs",
+    "./claude-code": "./src/mounts/claude-code/index.mjs",
+    "./package.json": "./package.json",
+    "./core/step": "./src/core/step.mjs"
+  },
+  "bin": {
+    "polyaxion": "bin/polyaxion.mjs"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "files": [
+    "bin",
+    "src",
+    "policies",
+    "spec",
+    "README.md",
+    "LICENSE",
+    "LICENSING.md",
+    "NOTICE"
+  ],
+  "scripts": {
+    "test": "node --no-warnings --test test/*.test.mjs",
+    "bench": "node --no-warnings bench/gate.bench.mjs",
+    "self": "node bin/polyaxion.mjs lint policies",
+    "test:install": "node scripts/install-test.mjs"
+  },
+  "keywords": [
+    "ai-agents",
+    "governance",
+    "constraints",
+    "state-machine",
+    "mcp",
+    "claude-code",
+    "deterministic"
+  ],
+  "author": "Cognitive Fab LLC",
+  "license": "BUSL-1.1",
+  "dependencies": {
+    "@cognitive-fab/polyman": "^0.1.0",
+    "@cognitive-fab/polysec-core": "^0.1.0"
+  }
+}

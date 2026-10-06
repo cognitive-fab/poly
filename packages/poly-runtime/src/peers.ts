@@ -1,9 +1,10 @@
-// The engines poly runs as optional peers (S145, S161). Polyaxion, polyman and polysec-core (BUSL-1.1), and
-// polycheck, are not vendored: each is resolved from a sibling checkout (`../polyaxion` or `../polycheck` beside the
-// repository, or the directory `POLY_POLYAXION_DIR` or `POLY_POLYCHECK_DIR` names), and every file poly runs is
-// pinned by SHA-256 in peers/<name>/PROVENANCE.md. A peer is used only when every pinned file matches; otherwise it
-// is reported with its reason, and each check that needs it is listed as not run (no silent clean). Nothing here is
-// on the step path: the pins are checked once per process.
+// The engines poly runs beside the vendored ones (S145, S161). Polyaxion, polyman and polysec-core (BUSL-1.1) are
+// vendored in vendor/polyaxion at their pin, by the owner's instruction of 2026-10-06, so a sibling checkout that
+// moves on no longer changes what poly runs; the directory `POLY_POLYAXION_DIR` names, used by a test, replaces it.
+// polycheck is still resolved from a sibling checkout (`../polycheck`, or `POLY_POLYCHECK_DIR`). Every file poly runs
+// is pinned by SHA-256 (vendor/polyaxion/PROVENANCE.md, peers/polycheck/PROVENANCE.md). An engine is used only when
+// every pinned file matches; otherwise it is reported with its reason, and each check that needs it is listed as not
+// run (no silent clean). Nothing here is on the step path: the pins are checked once per process.
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -11,14 +12,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** The repository root: this file is packages/poly-runtime/dist/src/peers.js. */
 export const REPO_ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', '..');
-export const PEER_PROVENANCE = join(REPO_ROOT, 'peers', 'polyaxion', 'PROVENANCE.md');
+export const PEER_PROVENANCE = join(REPO_ROOT, 'vendor', 'polyaxion', 'PROVENANCE.md');
 
 export type PeerStatus = { ok: true; dir: string; commit: string; files: number } | { ok: false; dir: string; reason: string };
 
 type PeerName = 'polyaxion' | 'polycheck';
-const PEERS: Record<PeerName, { env: string; probe: string; ruling: string }> = {
-  polyaxion: { env: 'POLY_POLYAXION_DIR', probe: 'packages', ruling: 'S145' },
-  polycheck: { env: 'POLY_POLYCHECK_DIR', probe: 'src', ruling: 'S161' },
+const PEERS: Record<PeerName, { env: string; probe: string; ruling: string; home: string; pins: string }> = {
+  polyaxion: { env: 'POLY_POLYAXION_DIR', probe: 'packages', ruling: 'S145', home: join(REPO_ROOT, 'vendor', 'polyaxion'), pins: PEER_PROVENANCE },
+  polycheck: { env: 'POLY_POLYCHECK_DIR', probe: 'src', ruling: 'S161', home: join(REPO_ROOT, '..', 'polycheck'), pins: join(REPO_ROOT, 'peers', 'polycheck', 'PROVENANCE.md') },
 };
 const cached = new Map<PeerName, PeerStatus>();
 
@@ -26,7 +27,7 @@ const cached = new Map<PeerName, PeerStatus>();
 export const pinDigest = (b: Buffer): string => createHash('sha256').update(Buffer.from(b.toString('latin1').split('\r\n').join('\n'), 'latin1')).digest('hex');
 
 function pins(name: PeerName): { commit: string; rows: { file: string; sha: string }[] } {
-  const text = readFileSync(join(REPO_ROOT, 'peers', name, 'PROVENANCE.md'), 'utf8');
+  const text = readFileSync(PEERS[name].pins, 'utf8');
   const commit = /commit `([0-9a-f]+)`/.exec(text)?.[1] ?? 'unknown';
   return { commit, rows: [...text.matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \|$/gm)].map((m) => ({ file: m[1], sha: m[2] })) };
 }
@@ -36,7 +37,7 @@ export function peer(name: PeerName, opts: { dir?: string; fresh?: boolean } = {
   const c = cached.get(name);
   if (c && !opts.fresh && !opts.dir) return c;
   const p = PEERS[name];
-  const dir = resolve(opts.dir ?? process.env[p.env] ?? join(REPO_ROOT, '..', name));
+  const dir = resolve(opts.dir ?? process.env[p.env] ?? p.home);
   let status: PeerStatus;
   if (!existsSync(join(dir, p.probe))) status = { ok: false, dir, reason: `absent: no ${name} checkout at ${dir} (not run, ${p.ruling})` };
   else {

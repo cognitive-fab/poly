@@ -1,0 +1,35 @@
+{
+  "name": "@cognitive-fab/polysec-core",
+  "version": "0.1.0",
+  "description": "The pieces of polysec the polyaxion runtime installs: the engine seam, harden, canonicalisation, the notary, the signed label catalogue and its labeler.",
+  "type": "module",
+  "private": true,
+  "//private": "kept private until the single licence text lands (CLAUDE.md, 2026-09-09); npm pack works, npm publish is refused",
+  "exports": {
+    "./lib": "./src/polysec-lib.mjs",
+    "./harden": "./src/polysec-harden.mjs",
+    "./canon": "./src/polysec-canon.mjs",
+    "./notary": "./src/polysec-notary.mjs",
+    "./catalogue": "./src/polysec-catalogue.mjs",
+    "./tool-labels": "./src/polysec-tool-labels.mjs",
+    "./labels/catalogue.json": "./labels/catalogue.json",
+    "./labels/catalogue.meta.json": "./labels/catalogue.meta.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "labels",
+    "README.md",
+    "LICENSE",
+    "LICENSING.md",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {
+    "@cognitive-fab/polygraph": "^8.2.0"
+  },
+  "author": "Cognitive Fab LLC",
+  "license": "BUSL-1.1"
+}

@@ -15,6 +15,8 @@ const VENDORED = [
   { dir: 'polygraph', source: 'C:/Users/jjdub/code/polygraph', commit: '4949de4' },
   { dir: 'sam-pattern', source: 'C:/Users/jjdub/code/sam/sam-lib', commit: '3047024' },
   { dir: 'polyflow', source: 'C:/Users/jjdub/code/polyflow', commit: '5170add' },
+  // The owner's instruction of 2026-10-06: Polyaxion vendored at its pin, taken from history, nothing written for poly.
+  { dir: 'polyaxion', source: 'C:/Users/jjdub/code/polyaxion', commit: 'c37c60e', writes: false },
 ];
 
 const table = (dir) => {
@@ -41,7 +43,7 @@ for (const v of VENDORED) {
   // added file, or a package.json pointing the engine's name at one, cannot pass.
   test(`vendor/${v.dir}: the files written for poly match their hashes, and every file is pinned`, () => {
     const mine = written(v.dir);
-    assert.ok(mine.some((r) => r.file === 'package.json'));
+    if (v.writes !== false) assert.ok(mine.some((r) => r.file === 'package.json'));
     for (const { file, sha } of mine) assert.equal(createHash('sha256').update(readFileSync(join(ROOT, 'vendor', v.dir, file))).digest('hex'), sha, file);
     const pinned = new Set([...table(v.dir).map((r) => r.file), ...mine.map((r) => r.file), 'PROVENANCE.md']);
     const base = join(ROOT, 'vendor', v.dir);
@@ -77,30 +79,25 @@ test('every vendored file is tracked by git, and none is ignored', () => {
   }
 });
 
-// S145: Polyaxion, polyman and polysec-core are an optional peer, pinned like a vendored engine but not copied in.
-// Where the sibling checkout is absent, the checks are listed as not run, never passed.
-const PEER = { table: join(ROOT, 'peers', 'polyaxion', 'PROVENANCE.md'), commit: 'c37c60e' };
+// Polyaxion, polyman and polysec-core, vendored at their pin (the owner's instruction of 2026-10-06, replacing S145's
+// sibling checkout): the runtime and the engine-pin check use the vendored copy.
+const PEER = { table: join(ROOT, 'vendor', 'polyaxion', 'PROVENANCE.md'), commit: 'c37c60e' };
 const peerRows = () => [...readFileSync(PEER.table, 'utf8').matchAll(/^\| `([^`]+)` \| `([0-9a-f]{64})` \|$/gm)].map((m) => ({ file: m[1], sha: m[2] }));
 
-test('peers/polyaxion: the pins name the commit and cover the three packages', () => {
+test('vendor/polyaxion: the pins name the commit and cover the three packages', () => {
   const text = readFileSync(PEER.table, 'utf8');
   assert.match(text, new RegExp(`commit \`${PEER.commit}\``));
   const rows = peerRows();
   for (const pkg of ['packages/polyaxion/src/engine.mjs', 'packages/polysec-core/src/polysec-harden.mjs', 'packages/polysec/polyman/src/kernel.ts']) assert.ok(rows.some((r) => r.file === pkg), pkg);
-  const tracked = execFileSync('git', ['-C', ROOT, 'ls-files', '--', 'peers/polyaxion/PROVENANCE.md'], { encoding: 'utf8' }).trim();
-  assert.equal(tracked, 'peers/polyaxion/PROVENANCE.md');
 });
 
-// Review A5: an absent checkout is skipped, listed with its reason; a checkout that is present and differs fails.
-test('peers/polyaxion: the checkout matches every pin, and each pin is the file at the commit', async (t) => {
-  const { polyaxionPeer, pinDigest } = await import('@poly/runtime');
-  const peer = polyaxionPeer();
-  if (!peer.ok) { if (/^absent/.test(peer.reason)) { t.skip(peer.reason); return; } assert.fail(peer.reason); }
-  for (const { file, sha } of peerRows()) {
-    // A Windows checkout may hold CRLF where the commit holds LF: the pin reads CRLF as LF (peers.ts pinDigest).
-    assert.equal(pinDigest(readFileSync(join(peer.dir, file))), sha, file);
-    assert.equal(pinDigest(execFileSync('git', ['-C', peer.dir, 'show', `${PEER.commit}:${file}`], { maxBuffer: 1 << 26 })), sha, file);
-  }
+test('vendor/polyaxion: the runtime resolves the engine to the vendored copy, and it is the pinned engine', async () => {
+  const { polyaxionPeer } = await import('@poly/runtime');
+  const peer = polyaxionPeer({ fresh: true });
+  assert.ok(peer.ok, peer.ok ? '' : peer.reason);
+  assert.equal(peer.dir.split('\\').join('/'), join(ROOT, 'vendor', 'polyaxion').split('\\').join('/'));
+  assert.equal(peer.commit, PEER.commit);
+  assert.equal(peer.files, peerRows().length);
 });
 
 // Review A2: Polyaxion loads polysec-core package first, so an installed copy beside the checkout would run instead

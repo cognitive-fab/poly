@@ -1,0 +1,909 @@
+{
+  "//": "THE CATALOGUE, AS DATA. What a tool DOES — the one thing no configuration file ever states. Generated from the module it replaced; edit this file, not code. A new integration must cost a DATA ROW, never a release: that cost curve is the difference between a product and a consulting business.",
+  "aliases": {
+    "db-read": "db-query",
+    "drive-read-file": "read-file-content",
+    "gdrive-read-file": "read-file-content",
+    "gdrive-search": "search-files",
+    "get-issue": "issue-read",
+    "gmail-create-draft": "create-draft",
+    "gmail-search": "search-threads",
+    "gmail-send": "send-email",
+    "jira-create": "jira-create-issue",
+    "post-message": "conversations-add-message",
+    "read-file": "get-file-contents",
+    "read-notes": "read-file-content",
+    "slack-list-channels": "channels-list",
+    "slack-list-users": "users-list",
+    "slack-post": "conversations-add-message",
+    "slack-read-channel": "conversations-history",
+    "sql-query": "db-query",
+    "read": "claude-code:read",
+    "write": "claude-code:write",
+    "edit": "claude-code:edit",
+    "bash": "claude-code:bash",
+    "glob": "claude-code:glob",
+    "grep": "claude-code:grep",
+    "task": "claude-code:task",
+    "websearch": "claude-code:web-search",
+    "web-search": "claude-code:web-search",
+    "todowrite": "claude-code:todo-write",
+    "todo-write": "claude-code:todo-write",
+    "notebookedit": "claude-code:notebook-edit",
+    "notebook-edit": "claude-code:notebook-edit",
+    "bashoutput": "claude-code:bash-output",
+    "bash-output": "claude-code:bash-output",
+    "killshell": "claude-code:kill-shell",
+    "kill-shell": "claude-code:kill-shell",
+    "slashcommand": "claude-code:slash-command",
+    "slash-command": "claude-code:slash-command",
+    "askuserquestion": "claude-code:ask-user-question",
+    "ask-user-question": "claude-code:ask-user-question",
+    "toolsearch": "claude-code:tool-search",
+    "tool-search": "claude-code:tool-search"
+  },
+  "effectClasses": [
+    "read:repo",
+    "read:private",
+    "read:store",
+    "write:store",
+    "write:repo",
+    "egress:public",
+    "egress:external",
+    "exec",
+    "admin",
+    "read:web",
+    "write:workspace"
+  ],
+  "reversibilityClasses": [
+    "reversible",
+    "compensable",
+    "irreversible"
+  ],
+  "tools": {
+    "add-collaborator": {
+      "effects": [
+        "admin"
+      ],
+      "note": "access granted is access that may already have been used",
+      "reversibility": "compensable"
+    },
+    "add-comment": {
+      "effects": [
+        "egress:public"
+      ],
+      "note": "posts where anyone can read; deleting does not un-disclose",
+      "reversibility": "irreversible"
+    },
+    "add-issue-comment": {
+      "effects": [
+        "egress:public"
+      ],
+      "note": "posts where anyone can read; deleting does not un-disclose",
+      "reversibility": "irreversible"
+    },
+    "analyze-datadog-logs": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "aggregate log analysis over the same content",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "apply-sensitive-message-label": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "marks sensitivity; changes no access",
+      "reversibility": "reversible"
+    },
+    "channels-list": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "channel inventory, including private ones the token joined untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "confluence-get-page": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "wiki content written by colleagues and, on public spaces, by anyone",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "confluence-publish": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "published pages are read before they are unpublished",
+      "reversibility": "irreversible"
+    },
+    "conversations-add-message": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "delete removes the message, not the reading of it",
+      "reversibility": "irreversible"
+    },
+    "conversations-history": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "channel messages: written by anyone in the channel, so untrusted inbound",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "conversations-mark": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "moves a read cursor; no disclosure",
+      "reversibility": "reversible"
+    },
+    "conversations-replies": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "thread replies, authored by anyone with channel access",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "conversations-search-messages": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "searches everything the token can see, including DMs and private channels",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "conversations-unreads": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "unread summary",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "copy-file": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "duplicates content, possibly across an access boundary",
+      "reversibility": "compensable"
+    },
+    "create-branch": {
+      "effects": [
+        "write:repo"
+      ],
+      "note": "a branch is cheap and removable",
+      "reversibility": "reversible"
+    },
+    "create-draft": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "a draft is NOT a send — deliberately a different class",
+      "reversibility": "reversible"
+    },
+    "create-event": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "an invite reaches attendees outside the organisation",
+      "reversibility": "compensable"
+    },
+    "create-file": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "a new document in a shared corpus: a session you never see may read it",
+      "reversibility": "compensable"
+    },
+    "create-issue": {
+      "effects": [
+        "egress:public"
+      ],
+      "note": "opens a world-readable issue",
+      "reversibility": "irreversible"
+    },
+    "create-or-update-file": {
+      "effects": [
+        "write:repo",
+        "egress:public"
+      ],
+      "note": "a commit can be reverted; the object stays in history",
+      "reversibility": "compensable"
+    },
+    "create-pull-request": {
+      "effects": [
+        "egress:public"
+      ],
+      "note": "publishes a diff; the diff is the disclosure",
+      "reversibility": "irreversible"
+    },
+    "create-repository": {
+      "effects": [
+        "admin",
+        "egress:public"
+      ],
+      "note": "a new repository, public unless told otherwise",
+      "reversibility": "compensable"
+    },
+    "db-execute": {
+      "effects": [
+        "write:store",
+        "exec"
+      ],
+      "note": "arbitrary statements — the effect is unbounded",
+      "reversibility": "irreversible"
+    },
+    "db-query": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "reads a database untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "delete-event": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "attendees were already notified",
+      "reversibility": "compensable"
+    },
+    "delete-file": {
+      "effects": [
+        "write:repo"
+      ],
+      "note": "revertable, and visible in history",
+      "reversibility": "compensable"
+    },
+    "download-file-content": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "the document as bytes, from a corpus somebody else writes to",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "drive-share": {
+      "effects": [
+        "admin",
+        "egress:external"
+      ],
+      "note": "unsharing does not un-copy",
+      "reversibility": "compensable"
+    },
+    "execute-code": {
+      "effects": [
+        "exec"
+      ],
+      "note": "an interpreter: below this line nothing is modeled",
+      "reversibility": "irreversible"
+    },
+    "fork-repository": {
+      "effects": [
+        "egress:public"
+      ],
+      "note": "copies the content somewhere you no longer control",
+      "reversibility": "irreversible"
+    },
+    "get-commit": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "a commit and its diff",
+      "reversibility": "reversible",
+      "sensitive": true
+    },
+    "get-file-contents": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "reads a file; private when the token reaches private repositories",
+      "reversibility": "reversible",
+      "sensitive": true
+    },
+    "get-file-metadata": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "metadata only, and titles leak more than people expect untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "get-file-permissions": {
+      "effects": [
+        "read:store",
+        "admin"
+      ],
+      "note": "who can see what — a map of the access boundary untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "get-message": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "an inbound message is attacker-authored by definition",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "get-thread": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "a whole conversation, most of it written by people outside your control",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "http-request": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "an arbitrary outbound call is an exfiltration channel by construction",
+      "reversibility": "irreversible"
+    },
+    "issue-read": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "issue text is written by anyone who can open one",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "issue-write": {
+      "effects": [
+        "egress:public",
+        "write:repo"
+      ],
+      "note": "creates or edits an issue",
+      "reversibility": "irreversible"
+    },
+    "jira-create-issue": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "visible to the project, deletable, but seen",
+      "reversibility": "compensable"
+    },
+    "jira-search": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "ticket text is attacker-authorable on public projects",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "label-message": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "organisational only",
+      "reversibility": "reversible"
+    },
+    "list-commits": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "commit history, including messages other people wrote",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "list-datadog-skills": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "enumerates configured skills; no content disclosure untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "list-events": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "who meets whom is sensitive even when titles are not untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "list-recent-files": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "recency is itself a signal about what matters untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "list-repositories": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "enumerates repositories, including private ones",
+      "reversibility": "reversible",
+      "sensitive": true
+    },
+    "load-datadog-skill": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "loads a skill definition into the session",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "memory-read": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "another session wrote this — untrusted inbound",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "memory-write": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "a session you will never observe reads it later",
+      "reversibility": "irreversible"
+    },
+    "merge-pull-request": {
+      "effects": [
+        "write:repo"
+      ],
+      "note": "a merge cannot be un-merged — reverting adds a commit rather than removing one, and whatever the merge triggered has already run",
+      "reversibility": "irreversible"
+    },
+    "microsoft-docs-fetch": {
+      "effects": [
+        "read:web"
+      ],
+      "note": "fetches a public documentation page",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "microsoft-docs-search": {
+      "effects": [
+        "read:web"
+      ],
+      "note": "searches public documentation; content is not ours and not private",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "notion-create-page": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "a page others will read",
+      "reversibility": "compensable"
+    },
+    "notion-search": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "workspace search across everything the integration was granted",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "post-webhook": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "an arbitrary POST to a caller-chosen URL — an exfiltration channel by construction, and the egress tool policy authors forget because it is not named 'send'",
+      "reversibility": "irreversible"
+    },
+    "pull-request-read": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "PR bodies and diffs from outside contributors",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "push-files": {
+      "effects": [
+        "write:repo",
+        "egress:public"
+      ],
+      "note": "a force-push rewrites the ref, not the objects others already fetched",
+      "reversibility": "compensable"
+    },
+    "read-file-content": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "a document somebody else wrote, from a private corpus",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "read-secret": {
+      "effects": [
+        "read:private"
+      ],
+      "note": "credential material by definition: the content is sensitive whoever asks",
+      "reversibility": "reversible",
+      "sensitive": true
+    },
+    "run-command": {
+      "effects": [
+        "exec"
+      ],
+      "note": "a shell is not a tool surface; nothing below this is modeled",
+      "reversibility": "irreversible"
+    },
+    "run-secret-scanning": {
+      "effects": [
+        "read:repo",
+        "read:private"
+      ],
+      "note": "returns SECRETS as findings — the result is more sensitive than the input",
+      "reversibility": "reversible",
+      "sensitive": true
+    },
+    "search-code": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "searches repository content across everything the token can see",
+      "reversibility": "reversible",
+      "sensitive": true
+    },
+    "search-datadog-logs": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "log search; log lines can carry text an attacker caused to be logged",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "search-events": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "calendar search across everything the token was granted untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "search-files": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "searches the corpus the token can reach",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "search-issues": {
+      "effects": [
+        "read:repo"
+      ],
+      "note": "same: the corpus is attacker-authorable",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "search-threads": {
+      "effects": [
+        "read:store",
+        "read:private"
+      ],
+      "note": "the mailbox: private, and written by strangers",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "send-email": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "the canonical unrecallable act",
+      "reversibility": "irreversible"
+    },
+    "slack-add-reaction": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "a reaction is removable and discloses almost nothing",
+      "reversibility": "reversible"
+    },
+    "slack-get-channel-history": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "the archived official server name for reading channel messages",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "slack-get-thread-replies": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "reads a thread, including private channels the token joined",
+      "reversibility": "reversible",
+      "sensitive": true,
+      "untrusted": true
+    },
+    "slack-post-message": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "the archived official server name for the same act",
+      "reversibility": "irreversible"
+    },
+    "slack-upload-file": {
+      "effects": [
+        "egress:external"
+      ],
+      "note": "downloadable the moment it lands",
+      "reversibility": "irreversible"
+    },
+    "tavily-extract": {
+      "effects": [
+        "read:web"
+      ],
+      "note": "fetches and extracts a page — arbitrary web content in",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "tavily-search": {
+      "effects": [
+        "read:web"
+      ],
+      "note": "web search — attacker-influenceable content entering the session",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "tavily-search-news": {
+      "effects": [
+        "read:web"
+      ],
+      "note": "news search; same untrusted inbound channel",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "update-draft": {
+      "effects": [
+        "write:store"
+      ],
+      "note": "edits a draft; still nothing has been delivered",
+      "reversibility": "reversible"
+    },
+    "update-pull-request": {
+      "effects": [
+        "egress:public",
+        "write:repo"
+      ],
+      "note": "edits a PR in place",
+      "reversibility": "compensable"
+    },
+    "users-list": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "directory enumeration untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "users-search": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "directory lookup untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "web-fetch": {
+      "effects": [
+        "read:store"
+      ],
+      "note": "arbitrary web content entering the session",
+      "reversibility": "reversible",
+      "untrusted": true
+    },
+    "claude-code:read": {
+      "effects": [
+        "read:repo"
+      ],
+      "reversibility": "reversible",
+      "sensitive": true,
+      "note": "reads any file the process can reach; sensitive because the working tree may hold secrets and the tool takes an arbitrary absolute path"
+    },
+    "claude-code:write": {
+      "effects": [
+        "write:workspace"
+      ],
+      "reversibility": "compensable",
+      "note": "creates or overwrites a file; compensable in a repo with history, not otherwise"
+    },
+    "claude-code:edit": {
+      "effects": [
+        "write:workspace"
+      ],
+      "reversibility": "compensable",
+      "note": "in-place edit of an existing file"
+    },
+    "claude-code:notebook-edit": {
+      "effects": [
+        "write:workspace"
+      ],
+      "reversibility": "compensable",
+      "note": "edits a Jupyter notebook cell"
+    },
+    "claude-code:bash": {
+      "effects": [
+        "exec"
+      ],
+      "reversibility": "irreversible",
+      "unbounded": true,
+      "note": "an arbitrary shell. UNBOUNDED: the effect set is whatever the host can do, so no effect list can be complete and any workflow granting it is ungradeable by construction"
+    },
+    "claude-code:bash-output": {
+      "effects": [
+        "read:store"
+      ],
+      "reversibility": "reversible",
+      "note": "reads buffered output from a background shell; the shell itself is the unbounded thing, not this untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "untrusted": true
+    },
+    "claude-code:kill-shell": {
+      "effects": [
+        "exec"
+      ],
+      "reversibility": "irreversible",
+      "note": "terminates a background shell"
+    },
+    "claude-code:glob": {
+      "effects": [
+        "read:repo"
+      ],
+      "reversibility": "reversible",
+      "note": "lists file paths by pattern; reveals STRUCTURE, not contents. `sensitive: false` is an explicit curator opt-out from the read:repo default — a path can still leak, but this tool never returns file contents",
+      "sensitive": false
+    },
+    "claude-code:grep": {
+      "effects": [
+        "read:repo"
+      ],
+      "reversibility": "reversible",
+      "sensitive": true,
+      "note": "searches file CONTENTS across the tree, so it reads what it matches"
+    },
+    "claude-code:web-search": {
+      "effects": [
+        "read:web",
+        "egress:external"
+      ],
+      "reversibility": "reversible",
+      "untrusted": true,
+      "note": "issues a search query to an external engine — the query itself leaves, and the results are attacker-influenceable"
+    },
+    "claude-code:task": {
+      "effects": [
+        "exec"
+      ],
+      "reversibility": "irreversible",
+      "unbounded": true,
+      "note": "launches a SUBAGENT. UNBOUNDED: the subagent has its own tool surface and, per the SDK docs, inherits the parent permission mode — bypassPermissions/acceptEdits/auto cannot be overridden per subagent. Its effects are the join, not this row"
+    },
+    "claude-code:todo-write": {
+      "effects": [
+        "write:workspace"
+      ],
+      "reversibility": "reversible",
+      "note": "maintains an in-session task list; no effect outside the run"
+    },
+    "claude-code:slash-command": {
+      "effects": [
+        "exec"
+      ],
+      "reversibility": "irreversible",
+      "unbounded": true,
+      "note": "invokes a user- or plugin-defined command whose body we cannot read from the tool name. UNBOUNDED for the same reason a shell is"
+    },
+    "claude-code:ask-user-question": {
+      "effects": [
+        "read:store"
+      ],
+      "reversibility": "reversible",
+      "note": "prompts the operator and reads the answer; always reaches the approval path per the SDK permission pipeline untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "untrusted": true
+    },
+    "claude-code:tool-search": {
+      "effects": [
+        "read:store"
+      ],
+      "reversibility": "reversible",
+      "note": "loads deferred tool SCHEMAS into context so they become callable. Its own effect is a read; its consequence is that the reachable tool surface WIDENS. That is safe to label bounded only because every tool it unlocks still passes the gate on its own row — the widening is mediated, not waved through. Discovered the hard way: the runtime gate denied it as undeclared on its first live run, which is the scope seal working untrusted: what a store returns was written by someone or something else — a persistent-store read is attacker-influenceable content (polyaxion 02 §4.1, decided 2026-09-02)",
+      "untrusted": true
+    },
+    "retail_tools.get_customer_by_email": {
+      "effects": [
+        "read:private"
+      ],
+      "reversibility": "reversible",
+      "sensitive": true,
+      "note": "NVIDIA NeMo retail example: returns a Customer record incl. past_orders and total_spent — customer PII, the sensitive leg"
+    },
+    "retail_tools.get_customer_by_id": {
+      "effects": [
+        "read:private"
+      ],
+      "reversibility": "reversible",
+      "sensitive": true,
+      "note": "NVIDIA NeMo retail example: same Customer PII lookup by id"
+    },
+    "retail_tools.get_product_info": {
+      "effects": [
+        "read:store"
+      ],
+      "reversibility": "reversible",
+      "untrusted": true,
+      "note": "NVIDIA NeMo retail example: returns a Product carrying reviews[] — customer-written text, attacker-authorable, the untrusted leg"
+    },
+    "retail_tools.get_all_products": {
+      "effects": [
+        "read:store"
+      ],
+      "reversibility": "reversible",
+      "untrusted": true,
+      "note": "NVIDIA NeMo retail example: returns ProductSummary with review_texts[] — same untrusted customer-authored content"
+    },
+    "retail_tools.write_review": {
+      "effects": [
+        "egress:external"
+      ],
+      "reversibility": "irreversible",
+      "note": "NVIDIA NeMo retail example: posts a review others read — a second egress leg; a published review is read before it can be removed"
+    },
+    "retail_tools.send_email": {
+      "effects": [
+        "egress:external"
+      ],
+      "reversibility": "irreversible",
+      "note": "NVIDIA NeMo retail example: the canonical unrecallable act — same class as send-email; the outbound leg of the trifecta"
+    },
+    "retail_tools.update_customer_info": {
+      "effects": [
+        "write:store"
+      ],
+      "reversibility": "compensable",
+      "note": "NVIDIA NeMo retail example: writes customer data to the store — a mutation, not a disclosure"
+    }
+  }
+}

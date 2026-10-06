@@ -1,0 +1,87 @@
+{
+  "name": "@cognitive-fab/polyman",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "polyman \u2014 a taint-tracking tool gate for AI agents whose policy is proven unbreakable at design time. The man-in-the-middle for the PolySec family. No API key on the decision path.",
+  "keywords": [
+    "ai-agents",
+    "security",
+    "prompt-injection",
+    "mcp",
+    "tool-calling",
+    "reference-monitor",
+    "lethal-trifecta",
+    "vercel-ai-sdk",
+    "polysec",
+    "sam"
+  ],
+  "license": "BUSL-1.1",
+  "author": "Cognitive Fab LLC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jdubray/polysec.git",
+    "directory": "polyman"
+  },
+  "homepage": "https://github.com/jdubray/polysec/tree/main/polyman#readme",
+  "bugs": "https://github.com/jdubray/polysec/issues",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./vercel": {
+      "types": "./dist/vercel.d.ts",
+      "import": "./dist/vercel.js",
+      "require": "./dist/vercel.cjs"
+    },
+    "./mcp": {
+      "types": "./dist/mcp.d.ts",
+      "import": "./dist/mcp.js",
+      "require": "./dist/mcp.cjs"
+    },
+    "./policy/*": "./policy/*"
+  },
+  "peerDependencies": {
+    "ai": ">=7 <8"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "policy",
+    "vendor",
+    "README.md",
+    "LICENSE",
+    "LICENSING.md",
+    "NOTICE"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "//scripts": "verify is a dev/CI coherence gate (reaches the sibling PolySec/Polygraph engines); not shipped as a bin.",
+  "scripts": {
+    "build": "tsup",
+    "verify": "node bin/polyman.mjs verify",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "ai": "^7.0.34",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  },
+  "private": true,
+  "//private": "kept private until the single licence text lands (CLAUDE.md, 2026-09-09); npm pack works, npm publish is refused"
+}

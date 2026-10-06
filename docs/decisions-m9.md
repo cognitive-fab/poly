@@ -74,6 +74,33 @@ PT12.5's text came first (c2599a8). A change to the `people` or `agents` ring is
 4. **Plan ahead.** M10 and M11 are planned while M9 is built (`handoff-m10.md`, `handoff-m11.md`), and their spec issues are ruled before M9 closes.
 5. **M10 and M11 in parallel, after M9 closes.** Each in its own worktree and session. To keep the merge clean, M10 numbers its spec issues S300 to S349 and takes new codes from PL6833 to PL6839; M11 numbers S350 to S399 and takes new codes from PL6843 to PL6849. A change either needs to `04-semantics.md` or to a shared package is listed in its plan, and the two plans are ruled together so they do not collide. They merge before the v1 gate.
 
+## Step 3, first part: the anchor hardened, as ruled, and four polywatch findings
+
+**Built, as ruled.** The anchor's location is read from the owner's per-user configuration, `.poly/anchors.json` under the home directory the operating system gives the account (`os.userInfo`, which reads no environment variable), mapping each project's name to `file:PATH` with an absolute path. `poly.json` cannot name it: `keys.anchor` is refused. `poly anchor keyrings --out PATH` writes the anchor and names it in that configuration. PT12.5 was rewritten first.
+
+**Polywatch on the keyring change (review `mux14g12`).**
+
+| Finding | Verdict | What was done |
+|---|---|---|
+| 1. An anchor that is a folder or unreadable threw a bare error out of the chain | real | read inside the chain's refusal: `PL6410` |
+| 2. A malformed record in the history could throw past the chain | false: `verifyRecord` returns a refusal for a non-object, a missing field or a bad signature, and never throws | the history's shape is checked anyway, and the test of three malformed records stays as a regression test |
+| 3. `poly sign keyrings`, with the history deleted, started a history from certified rings that were not the anchored first rings | real | it refuses unless the certified rings have the anchor's digest |
+| 4. The test anchor, an `admit` option, let any caller bypass the owner's anchor | real | the test anchor is now a folder a test process names with `useTestAnchors(dir)`; a certificate admitted that way records `source: "test"`, and `load` refuses it unless the process called `acceptTestAnchors()`, as a witness certificate needs `allowWitness` (S139). A production runtime never calls it. |
+
+The ruling allowed a test anchor as an API option for tests only; finding 4 showed nothing enforced "for tests only", and the load refusal is what enforces it, within the ruling (no new spec issue). Test child processes (the command line, `poly run --mcp`, the stand-in store holder) preload `test/fixtures/accept-test-anchors.mjs` with `node --import`; the command line has no flag for it.
+
+**Tests.** `test/keyrings.test.mjs`, nine tests. The tests for findings 1, 3 and 4 were written with their fixes; each was confirmed by putting its defect back (the bare read, the missing anchor check, the missing load refusal): three of nine failed, each the finding's own, and all nine pass with the fixes.
+
+**Polywatch, second round (review `mux44s5z`).** Both findings were real, and each test failed before its fix. (1) `poly sign keyrings` extended an existing history without checking it against the anchor: it now verifies the whole history first, and writes nothing on a refusal. (2) An anchor named `..anchor` inside a project was taken for one outside it (its relative path starts with `..`): only the parent itself, or a path through it, is outside now. `test/keyrings.test.mjs` has eleven tests.
+
+## Polyaxion vendored at its pin (the owner's instruction, 2026-10-06)
+
+The sibling checkout `C:/Users/jjdub/code/polyaxion` moved off the pin (to b9f17a0, with uncommitted edits that delete `packages/polysec-core` and change `packages/polysec/polyman`), so the engine-pin check failed and 77 tests that need the engine were listed as not run. By the owner's instruction, the 65 files poly runs of Polyaxion, polyman and polysec-core are now copied unchanged into `vendor/polyaxion`, out of the repository's history with `git show c37c60e:<file>` (`scripts/vendor-polyaxion.mjs`, which replaces `scripts/pin-peers.mjs`): neither the checkout nor its uncommitted edits were read or changed. `vendor/polyaxion/PROVENANCE.md` pins each by hash and commit, and its table is the old `peers/polyaxion` table, row for row; `peers/polyaxion` is removed. The runtime and the engine-pin check resolve the engine to the vendored copy (`peers.ts`); `POLY_POLYAXION_DIR`, used by one test to make the engine absent, still replaces it. `test/vendor.test.mjs` covers the copy as it covers the other vendored engines (hashes, no unpinned file, each file equal to the commit, tracked by git) and checks that the runtime resolves to it.
+
+- **This replaces S145's sibling checkout.** S145 kept the three BUSL-1.1 packages out of the repository; vendoring them is the owner's decision of this day, recorded in the copy's `PROVENANCE.md`. poly's own licence stays the owner's open decision.
+- **One difference from the peer.** polysec-core's `harden`, which runs at policy admission only, imports `@cognitive-fab/polygraph`; it now resolves to poly's vendored polygraph 8.3.2, where the checkout's own install held 8.3.0. The certificate's engine pin is unchanged (`polyaxion`, `c37c60e`), so no certificate changes.
+- **Checked.** The 159 measured files are identical to M8's close. The full suite, after the keyring hardening, both polywatch rounds and the vendoring: 1,813 tests and one after the M3 runs, 1,801 pass, no failure, 1 skipped and 11 waiting (E1, E2, E5 and the seven of E13). The 77 tests the moved checkout had set aside all ran.
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.

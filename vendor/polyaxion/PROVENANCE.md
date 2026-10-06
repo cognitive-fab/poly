@@ -1,15 +1,15 @@
-# Polyaxion, polyman and polysec-core, an optional peer dependency
+# Polyaxion, polyman and polysec-core, vendored
 
-The gate engine poly-runtime hosts in process (PT9, S146), and the admission engine poly-check runs over policies (PT8.4). The three packages are BUSL-1.1, so they are **not vendored** into this repository (S145): they are resolved from a sibling checkout, `../polyaxion` beside the repository or the directory `POLY_POLYAXION_DIR` names. Each file poly runs is pinned here by the SHA-256 of its bytes at the pinned commit, exactly as a vendored engine is pinned. A checkout may hold CRLF where the commit holds LF, so a pin reads CRLF as LF (`pinDigest` in `poly-runtime/src/peers.ts`).
+The gate engine poly-runtime hosts in process (PT9, S146), and the admission engine poly-check runs over policies (PT8.4). Until 2026-10-06 they were an optional peer resolved from a sibling checkout (S145); by the owner's instruction that day they are vendored here, the files poly runs copied unchanged out of the repository's history at the pinned commit, so a checkout that moves on, or holds uncommitted edits, no longer changes what poly runs.
 
 - Source: `C:/Users/jjdub/code/polyaxion`, commit `c37c60e` (`c37c60e0adef7116f3dd2d27c57787927a4ea788`, "docs/architecture: re-rendered at 64bffcb — the licence box says BUSL 1.1, polygraph 8.3.0, and the install is 7 packages and 3.1 MB").
+- Taken with `git show c37c60e:<file>` for each file (`scripts/vendor-polyaxion.mjs`): neither the checkout nor its working tree was read.
 - Selection: the runtime files of the three packages: `src`, `package.json` and `LICENSE` of each, with polysec-core's `labels` and polyman's `vendor` (its copy of sam-pattern). polyman is loaded from its TypeScript source, as Polyaxion's own resolver prefers in a checkout.
-- Licence: BUSL-1.1, in each `LICENSE`. poly's own licence is the owner's open decision (S145).
-- Not pinned: polysec-core's `harden` imports `@cognitive-fab/polygraph` from the checkout's own install (8.3.0). It runs at policy admission only, never on the step path.
-- Polyaxion loads polysec-core package first (`runtime/deps.mjs`). The peer is refused unless the first `node_modules/@cognitive-fab/polysec-core` Node finds from the engine is the pinned `packages/polysec-core` itself, or there is none (review A2).
-- Where the checkout is absent, or a file differs from its pin, every check that needs the engine is listed as not run, and `load` refuses a build with policies (no gate is assumed).
+- Licence: BUSL-1.1, in each `LICENSE`, unchanged. Vendoring BUSL-1.1 files is the owner's decision of 2026-10-06; poly's own licence remains the owner's open decision (S145).
+- Not pinned: polysec-core's `harden` imports `@cognitive-fab/polygraph`, which now resolves to poly's vendored polygraph (`vendor/polygraph`, 8.3.2) where the checkout's own install held 8.3.0. It runs at policy admission only, never on the step path.
+- Polyaxion loads polysec-core package first (`runtime/deps.mjs`). The engine is refused unless the first `node_modules/@cognitive-fab/polysec-core` Node finds from it is the pinned `packages/polysec-core` itself, or there is none (review A2).
 
-`test/vendor.test.mjs` re-hashes every file against this table, and compares each with the commit.
+`test/vendor.test.mjs` re-hashes every file against this table, checks that no file in this folder is outside it, and compares each with the commit where the source repository exists.
 
 | File | sha256 |
 |---|---|
@@ -81,4 +81,4 @@ The gate engine poly-runtime hosts in process (PT9, S146), and the admission eng
 
 ## Conclusion
 
-These are the files of the three packages at c37c60e, by hash. To move the pin, run `node scripts/pin-peers.mjs <checkout> <commit>` and commit the new table with the change that needs it.
+These are the files of the three packages at c37c60e, byte for byte. To move the pin, run `node scripts/vendor-polyaxion.mjs <repository> <commit>` and commit the new copy and table with the change that needs it.
