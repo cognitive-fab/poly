@@ -4,9 +4,10 @@
 // a template in or outside it. A send the rules forbid is accepted, and the application is told why (Q1, S179).
 //
 // poly's own bounds: one slot holds a send, then its receipt, until the application's Ack (PS15.3); a reply or a
-// template while the slot is held is refused "busy". At most two customer messages wait for an answer, and a third
-// is refused "backlog". pending counts both, so its bound 3 is the transit bound of the configuration the channel
-// generates (PS15.5): two waiting messages and one receipt.
+// template while the slot is held is refused "busy". At most two customer messages wait for an answer; a third opens
+// a closed window and is not passed to the application, and is refused "backlog" while the window is open. pending
+// counts both, so its bound 3 is the transit bound of the configuration the channel generates (PS15.5): two waiting
+// messages and one receipt.
 module std.channels.whatsapp
 
 enum Window { Closed, Open }
@@ -64,15 +65,24 @@ service machine Conversation {
   }
 
   // The window starts on a customer's message and resets to 24 hours on the next one: the old timer is cancelled
-  // before the new one is set (polyrun cancels before it inserts).
+  // before the new one is set (polyrun cancels before it inserts). A message the backlog has no room for still opens
+  // a closed window (review B-F3), and only its message to the application is dropped. An open window it leaves as
+  // it is, refused "backlog": a step that only re-armed the timer would change nothing else (PL4002). The module's
+  // window then closes no later than the provider's, so the cost is a free-form reply refused that the provider
+  // would have taken.
   on Inbound(from, body) by sender: Sender {
-    require waiting + queued < 2 else reject "backlog"
-    waiting' = waiting + 1
-    pending' = pending + 1
-    window' = Open
-    cancel w
-    after 24h -> WindowExpired() as w
-    send app <- Message(body: body)
+    if waiting + queued < 2 {
+      waiting' = waiting + 1
+      pending' = pending + 1
+      window' = Open
+      cancel w
+      after 24h -> WindowExpired() as w
+      send app <- Message(body: body)
+    } else {
+      require window is Closed else reject "backlog"
+      window' = Open
+      after 24h -> WindowExpired() as w
+    }
   }
 
   on WindowExpired {
@@ -164,6 +174,13 @@ service machine Conversation {
   }
 
   step property window-opens-on-inbound: (pre.window is Closed && post.window is Open) implies action == Inbound
+
+  reject property message-always-opens-window: (action == Inbound && pre.window is Closed) implies !rejected("backlog")
+
+  // poly's own (review B-F4, M8b): the queue keeps the order the replies were given in.
+  step property queue-shifts-in-order: !(pre.queued > post.queued) || post.queue1 == pre.queue2 && post.queue2 == none
+  step property queue-appends-first: !(action == Reply && pre.queued == 0 && post.queued == 1 && post.queue1 != body)
+  step property queue-appends-second: !(action == Reply && pre.queued == 1 && post.queued == 2 && (post.queue2 != body || post.queue1 != pre.queue1))
 
   never free-form-outside-window: emit send(kind: FreeForm) while window is Closed
   never one-send-at-a-time: emit send while slot is Sending

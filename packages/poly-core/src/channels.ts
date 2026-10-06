@@ -50,8 +50,8 @@ function typeKey(t: A.TypeExpr, mod: A.Module): string {
     case 'TConf': return 'Conf';
   }
 }
-/** A check domain as its values, with no node ids. */
-const domainKey = (c: A.CheckClause): string => (c.domain.kind === 'DomainRange' ? `${c.domain.lo}..${c.domain.hi}` : JSON.stringify(c.domain.values.map((v) => (v.kind === 'Name' ? v.name : v.value)))) + (c.mode ? `:${c.mode}` : '');
+/** A check domain as its values, with no node ids. Review A-F4 (M8b): a set of values, so their order is not compared. */
+const domainKey = (c: A.CheckClause): string => (c.domain.kind === 'DomainRange' ? `${c.domain.lo}..${c.domain.hi}` : JSON.stringify(c.domain.values.map((v) => JSON.stringify(v.kind === 'Name' ? v.name : v.value)).sort())) + (c.mode ? `:${c.mode}` : '');
 const paramKey = (p: A.Param, mod: A.Module) => `${p.name}:${typeKey(p.type, mod)}${p.check ? `:${domainKey(p.check)}` : ''}`;
 
 /** Each statement of a body, nested blocks included, for a visit that may rewrite it in place. */
@@ -87,7 +87,12 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
     const peer = lib?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === 'Peer');
     const pending = conv?.fields.find((f) => f.name === 'pending');
     if (!lib || !conv || !peer) { err('PL6811', c, `channel ${c.name}: no channel kind ${c.channelKind}; ${lib ? `${libName} declares no ${conv ? 'Peer' : 'Conversation'} machine` : `no module ${libName}`} (PT21.1a)`); continue; }
-    if (pending?.type.kind !== 'TRange') { err('PL6811', c, `channel ${c.name}: ${libName}.Conversation declares no field pending: 0..N, whose N bounds the messages in transit (PS15.5)`); continue; }
+    if (pending?.type.kind !== 'TRange' || pending.type.lo !== 0) { err('PL6811', c, `channel ${c.name}: ${libName}.Conversation declares no field pending: 0..N, whose N bounds the messages in transit (PS15.5)`); continue; }
+    // Review A-F5 (M8b): PS15.0's interface of a conversation, each part of which the expansion or the runtime uses:
+    // Open(app) for the spawn, Inbound for ingress, Reply and Template for the rewritten emits, and the effect send.
+    const lacks = ['Open', 'Inbound', 'Reply', 'Template'].filter((a) => !conv.items.some((i) => i.kind === 'Action' && i.name === a) || !conv.items.some((i) => i.kind === 'Handler' && i.action === a));
+    if (!conv.items.some((i) => i.kind === 'EffectDecl' && i.name === 'send')) lacks.push('the effect send');
+    if (lacks.length) { err('PL6811', c, `channel ${c.name}: ${libName}.Conversation declares no ${lacks.join(', ')} with a handler; a conversation has each (PS15.0)`); continue; }
     const ack = conv.items.find((i): i is A.Action => i.kind === 'Action' && i.name === 'Ack');
     if (!ack || ack.params.length || !conv.items.some((i) => i.kind === 'Handler' && i.action === 'Ack')) { err('PL6811', c, `channel ${c.name}: ${libName}.Conversation declares no action Ack() with a handler, with which the application acknowledges a receipt (PS15.0, PS15.3)`); continue; }
     // The application: the one machine every binding and starts names.
@@ -132,7 +137,12 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
     if (!startsHandler) { err('PL1201', c, `channel ${c.name}: ${appName}.${c.starts.action} has no handler to spawn the conversation from (PS15.2)`); continue; }
     const keyUsed: string[] = [];
     if (app.fields.some((f) => f.name === c.name)) keyUsed.push('a field');
-    for (const h of app.items) if (h.kind === 'Handler') eachStmt(h.body, (s) => { if (s.kind === 'Intent' && s.as === c.name) keyUsed.push(`the key of ${s.op} in on ${h.action}`); });
+    // Review A-F3 (M8b): in a handler, c names the conversation; a parameter or a let of that name would hide it.
+    for (const a of app.items) if (a.kind === 'Action' && a.params.some((p) => p.name === c.name)) keyUsed.push(`a parameter of ${a.name}`);
+    for (const h of app.items) if (h.kind === 'Handler') eachStmt(h.body, (s) => {
+      if (s.kind === 'Intent' && s.as === c.name) keyUsed.push(`the key of ${s.op} in on ${h.action}`);
+      if (s.kind === 'Let' && s.name === c.name) keyUsed.push(`a let in on ${h.action}`);
+    });
     if (keyUsed.length) { err('PL1002', c, `channel ${c.name}: ${appName} already uses ${c.name} as ${keyUsed.join(' and ')}; the conversation's child key is the channel's name (PS15.2)`); continue; }
     if (bad) continue;
 
@@ -172,7 +182,8 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
     });
     const send = inst.items.find((i): i is A.EffectDecl => i.kind === 'EffectDecl' && i.name === 'send');
     const effectKind = `channel.${c.name}.send`;
-    for (const it of send?.items ?? []) if (it.kind === 'EffKind') it.value = effectKind;
+    // Review D-F8 (M8b): marked as the expansion's, the one place the reserved kind channel.<c>.send may come from.
+    for (const it of send?.items ?? []) if (it.kind === 'EffKind') Object.assign(it, { value: effectKind, generated: 'channel' });
     const types = lib.decls.filter((d) => d.kind === 'EnumDecl' || d.kind === 'TypeDecl' || d.kind === 'RecordDecl').map((d) => structuredClone(d));
     extra.push({ kind: 'Module', id: `${c.id}:module`, name: synth, decls: [{ kind: 'Use', id: `${c.id}:module:use`, path: appRef } as A.UseDecl, ...types, inst] } as A.Module);
     // PS15.5: the configuration c.
@@ -182,20 +193,24 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
     const N = pending.type.hi;
     const input = (instance: string, index: '*' | null, action: string, id: string): A.InputRef => ({ kind: 'InputRef', id, instance, index, action } as A.InputRef);
     if (out.decls.some((d) => d.kind === 'Configuration' && d.name === c.name)) { err('PL1002', c, `configuration ${c.name} is declared, and channel ${c.name} generates one of that name (PS15.5)`); continue; }
-    // Declared configurations that include A get its conversation.
+    // Declared configurations that include A get its conversation. Review A-F2 (M8b): another channel's generated
+    // configuration is not a declared one; it holds only its own conversation, as PS15.5 makes it.
     for (const d of out.decls) {
-      if (d.kind !== 'Configuration') continue;
+      if (d.kind !== 'Configuration' || d.generated) continue;
       const mine = d.instances.filter((i) => i.machine.join('.') === appName || i.machine.join('.') === `${module.name}.${appName}`);
       if (!mine.length) continue;
       const count = mine.reduce((k, i) => k + (i.count ?? 1), 0);
       for (const a of convInputs) if (!d.inputs.some((r) => r.instance === group && r.action === a)) d.inputs.push(input(group, '*', a, `${d.id}:channel:${c.name}:${a}`));
       if (d.bounds) d.bounds.instances = (d.bounds.instances ?? d.instances.reduce((k, i) => k + (i.count ?? 1), 0)) + count;
     }
+    const bound = channels.filter((x) => new Set([...x.maps.map((m) => m.machine), ...(x.starts ? [x.starts.machine] : [])]).has(appName)).length;
     out.decls.push({
       kind: 'Configuration', id: `${c.id}:configuration`, span: c.span, name: c.name, generated: 'channel',
       instances: [{ kind: 'ConfigInstance', id: `${c.id}:configuration:app`, name: 'app', count: null, machine: [appName], init: [] } as A.ConfigInstance],
       inputs: [input('app', null, c.starts.action, `${c.id}:in:starts`), ...convInputs.map((a) => input(group, '*', a, `${c.id}:in:${a}`))],
-      bounds: { kind: 'ConfigBounds', id: `${c.id}:bounds`, transit: N, instances: 2 } as A.ConfigBounds,
+      // PS15.5, ruled on the review of M8b (A-F2): the application and the conversation of each channel bound to it; each
+      // other conversation gets no inputs, so it holds at most its creation Open(app) in transit beside this one's N.
+      bounds: { kind: 'ConfigBounds', id: `${c.id}:bounds`, transit: N + bound - 1, instances: 1 + bound } as A.ConfigBounds,
       properties: [],
     } as A.Configuration);
     plans.push({ name: c.name, kind: c.channelKind, library: libName, adapter: c.adapter, thread: { template: c.thread, fields }, application: appName, starts: { action: c.starts.action, onInbound: c.starts.onInbound }, module: synth, peer: binding, effectKind, pending: N });

@@ -27,9 +27,11 @@ export interface Vacuous {
 
 /**
  * Deliberately broken checks, for one test each (ruled on M8 plan step 10): a channel's configuration that offers no
- * timer firing, one that fires a disarmed timer, and the vacuity of a never judged by the weak measure.
+ * timer firing, one that fires a disarmed timer, and the vacuity of a never judged by the weak measure. Ruled on the
+ * review of M8b (A-F2): a channel's configuration with the instance bound two, or the transit bound N, whatever the
+ * application's channels.
  */
-export const REF_FAULTS = ['no-timer-firing', 'fire-disarmed', 'weak-vacuity'] as const;
+export const REF_FAULTS = ['no-timer-firing', 'fire-disarmed', 'weak-vacuity', 'instance-bound-two', 'transit-bound-n'] as const;
 export type RefFault = (typeof REF_FAULTS)[number];
 
 /** PS5.2a: a never's `while` (null without one) and its effect, read back from the step property it lowers to. */

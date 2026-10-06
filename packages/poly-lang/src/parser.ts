@@ -227,10 +227,14 @@ class Parser {
     let thread = '';
     let starts: A.Channel['starts'] = null;
     const maps: A.ChannelMap[] = [];
+    const seen = new Set<string>();
     while (!this.atPunct('}')) {
-      if (this.at('adapter')) { this.next(); adapter = this.str('an adapter name'); continue; }
-      if (this.at('thread')) { this.next(); thread = this.str('a thread template'); continue; }
+      // Review A-F6 (M8b): each clause is written once; a second would silently replace the first.
+      if (this.at('adapter')) { if (seen.has('adapter')) this.fail('a channel names its adapter once'); seen.add('adapter'); this.next(); adapter = this.str('an adapter name'); continue; }
+      if (this.at('thread')) { if (seen.has('thread')) this.fail('a channel names its thread key once'); seen.add('thread'); this.next(); thread = this.str('a thread template'); continue; }
       if (this.at('starts')) {
+        if (seen.has('starts')) this.fail('a channel names the action that starts a thread once');
+        seen.add('starts');
         this.next();
         const machine = this.ident('the application machine');
         this.expect('.');

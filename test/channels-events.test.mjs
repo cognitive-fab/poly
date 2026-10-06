@@ -88,7 +88,7 @@ test('slack: chat.postMessage answered is_archived is the provider event Archive
   const { rt, conv, app } = await thread('ev-slack', 'slack', 'channel', '"channel-archived", "rate-limited"', 'C-1');
   try {
     const sent = [];
-    rt.connectChannel('line', slack({ signingSecret: secret(), botToken: `xoxb-${secret()}` }), { http: { async request(r) { sent.push(r); return { status: 200, headers: {}, body: recorded('slack/post-archived.json') }; } } });
+    rt.connectChannel('line', slack({ signingSecret: secret(), botToken: `xoxb-${secret()}`, teamId: 'T123ABC456' }), { http: { async request(r) { sent.push(r); return { status: 200, headers: {}, body: recorded('slack/post-archived.json') }; } } });
     await rt.dispatch(conv, 'Reply', { body: await rt.putContent('On it.') });
     await rt.advance();
     assert.equal(sent.length, 1);
@@ -230,20 +230,21 @@ test('connectChannel: two channels may not send as one sender, so a provider\'s 
   } finally { await rt.close(); }
 });
 
-test('claimNonce: nonces older than their window are pruned, on every channel, so the table stays bounded', { timeout: 300_000 }, async () => {
+test('claimNonce: expired nonces are pruned, on every channel, so the table stays bounded', { timeout: 300_000 }, async () => {
   const { rt } = await thread('ev-prune', 'email', 'from', '"unsubscribed", "suppressed"', 'mail-1');
   try {
     const count = () => rt.store.db.prepare('SELECT COUNT(*) AS n FROM poly_ingress_nonce').get().n;
     const t0 = 1_790_000_000_000;
-    for (let i = 0; i < 50; i++) assert.equal(await rt.claimNonce('line', `n${i}`, t0 + i, 300_000), true);
-    assert.equal(await rt.claimNonce('elsewhere', 'e0', t0, 300_000), true);
+    // Review D-F6 (M8b): each nonce is kept until its own expiry, here 300 s after t0 + i.
+    for (let i = 0; i < 50; i++) assert.equal(await rt.claimNonce('line', `n${i}`, t0 + i + 300_000, t0 + i), true);
+    assert.equal(await rt.claimNonce('elsewhere', 'e0', t0 + 300_000, t0), true);
     assert.equal(count(), 51);
-    assert.equal(await rt.claimNonce('line', 'n7', t0 + 100, 300_000), false, 'within the window, a nonce is taken once');
-    // A claim after the window has passed leaves only the nonces still within it.
-    assert.equal(await rt.claimNonce('line', 'late', t0 + 300_000 + 25, 300_000), true);
-    // Nonces 0 to 24, and the other channel's, are older than the window; 25 to 49 are not.
+    assert.equal(await rt.claimNonce('line', 'n7', t0 + 100 + 300_000, t0 + 100), false, 'before its expiry, a nonce is taken once');
+    // A claim after some have expired leaves only the nonces still unexpired.
+    assert.equal(await rt.claimNonce('line', 'late', t0 + 600_025, t0 + 300_025), true);
+    // Nonces 0 to 24, and the other channel's, have expired; 25 to 49 have not.
     assert.equal(count(), 1 + 25);
-    assert.equal(await rt.claimNonce('line', 'later', t0 + 10 * 300_000, 300_000), true);
+    assert.equal(await rt.claimNonce('line', 'later', t0 + 11 * 300_000, t0 + 10 * 300_000), true);
     assert.equal(count(), 1);
   } finally { await rt.close(); }
 });

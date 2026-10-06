@@ -4,7 +4,7 @@
 // outside the tolerance is refused. One configured source is one thread: its secret, its name, its endpoint.
 import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { fresh, hmac, noAnswer, signatureMatches, made, type AdapterFault } from '../util.js';
+import { fresh, hmac, noAnswer, signatureMatches, made, need, type AdapterFault } from '../util.js';
 
 export interface WebhookConfig {
   /** whsec_ followed by the base64 key. */
@@ -19,14 +19,23 @@ export interface WebhookConfig {
   fault?: AdapterFault;
 }
 
+/**
+ * Review C-F6 (M8b): the key is strict base64 of 24 to 64 bytes, as the specification gives it. Node decodes any text
+ * as base64, skipping what is not, so an empty or garbled secret would otherwise be a short key anyone could guess.
+ */
 function keyOf(secret: string): Buffer {
-  if (!secret.startsWith('whsec_')) throw new Error('a Standard Webhooks secret starts with whsec_');
-  return Buffer.from(secret.slice('whsec_'.length), 'base64');
+  if (!secret.startsWith('whsec_')) throw new Error('webhook: a Standard Webhooks secret starts with whsec_');
+  const text = secret.slice('whsec_'.length);
+  const key = Buffer.from(text, 'base64');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(text) || text.length % 4 !== 0 || key.toString('base64') !== text) throw new Error('webhook: the secret after whsec_ is not base64');
+  if (key.length < 24 || key.length > 64) throw new Error(`webhook: the secret is ${key.length} bytes, and the specification gives a key of 24 to 64 bytes`);
+  return key;
 }
 
 const sign = (key: Buffer, id: string, ts: string, body: string) => `v1,${hmac('sha256', key, `${id}.${ts}.${body}`).toString('base64')}`;
 
 export function webhook(c: WebhookConfig): ChannelAdapter {
+  need('webhook', { source: c.source, endpoint: c.endpoint });
   const key = keyOf(c.secret);
   const tolerance = c.toleranceSeconds ?? 300;
   return made({

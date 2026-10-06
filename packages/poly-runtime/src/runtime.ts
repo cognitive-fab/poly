@@ -11,7 +11,7 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, type Verifier } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
-import type { ChannelAdapter, ChannelTransports } from './adapters.js';
+import type { ChannelAdapter, ChannelTransports, IngressAnswer, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -107,6 +107,14 @@ export function adapterPackagePin(): { package: string; version: string; digest:
   return { package: pkg.name, version: pkg.version, digest: `sha256:${h.digest('hex')}` };
 }
 
+/** What rt.inbound and rt.receive did with one message (PT21.4). */
+export interface InboundResult {
+  outcome: 'delivered' | 'refused';
+  reason?: 'unknown-thread' | 'thread-not-started' | 'creation-unavailable' | 'claims-unverified' | 'outside-type';
+  application: string;
+  conversation: string;
+}
+
 /** K11, PT21.4: the claims the runtime itself supplies for an Inbound (the adapter's verified output), never a caller. */
 const SUPPLIED_CLAIMS = Symbol('supplied claims');
 
@@ -136,9 +144,18 @@ export class RefusedDispatch extends Error {
 }
 
 export class PolyRuntime {
-  readonly handlers = new Map<string, Handler>();
-  /** S182: the certified adapter package, as this runtime loaded it (set at load when the certificate binds adapters). */
-  ioPackage: { madeHere(a: unknown): boolean } | null = null;
+  /**
+   * The handlers by kind. Review D-F2 (M8b): private to the runtime, so a handler is added only by rt.handle, by
+   * rt.provide or by rt.connectChannel, each with its own checks.
+   */
+  readonly #handlers = new Map<string, Handler>();
+  /**
+   * S182: the certified adapter package, as this runtime loaded it (given at load when the certificate binds
+   * adapters). Review D-F2 (M8b): private and set once, so no host can put in a package that calls a look-alike its own.
+   */
+  readonly #ioPackage: { madeHere(a: unknown): boolean } | null;
+  /** Review D-F4 (M8b): each channel's connected adapter, with which rt.receive verifies the channel's webhooks. */
+  readonly #adapters = new Map<string, ChannelAdapter>();
   private readonly channelSenders = new Map<string, { kind: string; sender: string }>();
   /** Review A-F2: approvals entries refused or applied but not movable, journaled once and passed over since. */
   private readonly unmovable = new Set<string>();
@@ -163,8 +180,9 @@ export class PolyRuntime {
   /** PD5.1.4: the verifier adapter. */
   private readonly verifier: Verifier;
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null } = {}) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: { madeHere(a: unknown): boolean } | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
+    this.#ioPackage = opts.ioPackage ?? null;
     this.verifier = opts.verifier ?? personKeyVerifier(verified.certificate.poly.keyrings ?? { people: [], agents: [] });
     this.certified = opts.certified ?? new Map();
     this.certifiedFunctions = new Set([...this.certified.values()].flatMap((ns) => Object.values(ns).filter((v) => typeof v === 'function')));
@@ -177,7 +195,7 @@ export class PolyRuntime {
     }
     const builtins: Record<string, EffectHandler> = {};
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
-    this.worker = new EffectWorker(kernel, store, this.handlers, {
+    this.worker = new EffectWorker(kernel, store, this.#handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
       // S180: an effect's completion is marked like a dispatch when its Content names no body.
@@ -201,8 +219,12 @@ export class PolyRuntime {
         const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
         const d = m && verified.channels.find((c) => c.channel === m[1]);
         if (!m || !d) return null;
+        // Review D-F8 (M8b): only the channel's conversation sends on it; the compiler refuses an author's effect of
+        // this kind (PL1208), and an instance of another machine is never proposed as the channel's.
+        const machine = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(row.instance_id)?.machine_id;
         const suffix = `/${m[1]}`;
-        const key = row.instance_id.startsWith(`${m[1]}:`) && row.instance_id.endsWith(suffix) ? row.instance_id.slice(m[1].length + 1, -suffix.length) : row.instance_id;
+        if (machine !== d.conversation || !row.instance_id.startsWith(`${m[1]}:`) || !row.instance_id.endsWith(suffix)) return null;
+        const key = row.instance_id.slice(m[1].length + 1, -suffix.length);
         const p = (row.payload ?? {}) as { kind?: unknown };
         // Ruled on step 9: keyed by the store's key, so the journaled proposal cannot be inverted to the address.
         const recipient = opts.fault === 'unkeyed-recipient' ? `sha256:${createHash('sha256').update(`${d.kind}:${key}`).digest('hex')}` : store.recipientDigest(`${d.kind}:${key}`);
@@ -349,20 +371,60 @@ export class PolyRuntime {
     return maj > 8 || (maj === 8 && min >= 4);
   }
 
-  async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string; claims?: { verified: boolean } }): Promise<{ outcome: 'delivered' | 'refused'; reason?: 'unknown-thread' | 'thread-not-started' | 'creation-unavailable'; application: string; conversation: string }> {
+  async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<InboundResult> {
+    // Review D-F4 (M8b): a caller supplies no claims. An Inbound that declares claims takes them only from a certified
+    // adapter's verify, through rt.receive; here it is refused claims-unverified.
+    return this.#deliver(channel, fields, opts.messageId, null);
+  }
+
+  /**
+   * PT21.4, review D-F4 (M8b): the whole of ingress for one webhook, with a certified adapter of the channel (the one
+   * given, else the one connected): its verify, its nonce taken once in the store, the refusal or the receipts and
+   * claims journaled on runtime:ingress, and each message delivered with the claims that adapter verified. An adapter
+   * the certified package did not make, or of another kind, is refused as rt.connectChannel refuses it (PL6408).
+   */
+  async receive(channel: string, w: Webhook, given?: ChannelAdapter): Promise<IngressAnswer> {
+    const adapter = given ?? this.#adapters.get(channel);
+    if (!adapter) return { status: 404, contentType: 'text/plain', body: 'no adapter is connected to this channel' };
+    this.#certify(channel, adapter);
+    const now = this.now();
+    let v: Verified | { refused: string };
+    // A body the adapter cannot read is a refusal like any other, never an exception out of ingress.
+    try { v = adapter.verify(w, now); } catch (e) { v = { refused: `malformed: ${e instanceof Error ? e.message : String(e)}` }; }
+    if (!('refused' in v) && v.nonce && !(await this.claimNonce(channel, v.nonce.key, v.nonce.until, now))) v = { refused: 'token-replayed' };
+    if ('refused' in v) {
+      await this.ingressRecord(channel, { stage: 'verify', outcome: 'refused', provider: adapter.provider, reason: v.refused });
+      return { status: 401, contentType: 'text/plain', body: 'refused' };
+    }
+    for (const r of v.receipts) await this.ingressRecord(channel, { stage: 'receipt', outcome: 'recorded', provider: adapter.provider, providerId: r.providerId, status: r.status, ...(r.error ? { reason: r.error } : {}) });
+    for (const m of v.messages) {
+      const content = await this.putContent(m.body);
+      await this.ingressRecord(channel, { stage: 'claims', outcome: m.claims.verified ? 'verified' : 'unverified', provider: adapter.provider, messageId: m.providerMessageId, claims: m.claims });
+      // K11, PT21.4: the adapter's claims, typed as std's Sender (verified is Verified or Unverified).
+      await this.#deliver(channel, { ...m.fields, body: content }, m.providerMessageId, { verified: m.claims.verified ? 'Verified' : 'Unverified' });
+    }
+    return v.answer ?? { status: 200, contentType: 'text/plain', body: 'ok' };
+  }
+
+  async #deliver(channel: string, fields: Record<string, unknown>, messageId: string, claims: Record<string, unknown> | null): Promise<InboundResult> {
     const d = this.verified.channels.find((c) => c.channel === channel);
     if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
     if (d.inbound.to !== 'conversation') throw new Error(`channel ${channel}: its descriptor routes inbound to ${d.inbound.to}, and PS15.4 routes it to the conversation`);
-    // The thread key is a checked string, used only as a key: each field the template reads is a string the
-    // conversation's Inbound declares; the delivery below refuses one outside its domain (S140).
-    const key = d.thread.template.replace(/\{([^}]*)\}/g, (_, f: string) => { const v = fields[f]; if (typeof v !== 'string') throw new RefusedDispatch(`channel ${channel}: the thread field ${f} is not a string (PT21.1b)`, 'S140'); return v; });
-    const application = `${channel}:${key}`;
-    const conversation = `${application}/${channel}`;
-    const refuse = async (reason: 'unknown-thread' | 'thread-not-started' | 'creation-unavailable') => {
+    let application = '';
+    let conversation = '';
+    const refuse = async (reason: NonNullable<InboundResult['reason']>) => {
       this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
-      await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId: opts.messageId, outcome: 'refused', reason }, this.now()); });
+      await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application || null, messageId, outcome: 'refused', reason }, this.now()); });
       return { outcome: 'refused' as const, reason, application, conversation };
     };
+    // Review D-F7 (M8b): fields outside the conversation's Inbound type are refused here, journaled like every other
+    // refusal of ingress, before the thread key is read from them (S140).
+    if (this.outsideType('', d.inbound.action, fields, d.conversation)) return refuse('outside-type');
+    // The thread key is a checked string, used only as a key: each field the template reads is a string the
+    // conversation's Inbound declares, and its value is in its domain (checked above).
+    const key = d.thread.template.replace(/\{([^}]*)\}/g, (_, f: string) => String(fields[f]));
+    application = `${channel}:${key}`;
+    conversation = `${application}/${channel}`;
     if (!(await this.store.getInstance(application))) {
       if (!d.starts.onInbound) return refuse('unknown-thread');
       // Until E13 the kernel cannot spawn the conversation, so a creation is refused before it reaches the kernel.
@@ -373,12 +435,11 @@ export class PolyRuntime {
     }
     // A thread whose starts was rejected has no conversation, so its later messages are refused the same way.
     if (!(await this.store.getInstance(conversation))) return refuse('thread-not-started');
-    // K11, PT21.4: the adapter's sender claims are the Inbound step's, typed as std's Sender (verified is Verified or
-    // Unverified); with none, the claims are missing and the step is rejected claims-unverified.
-    const claims = opts.claims ? { verified: opts.claims.verified ? 'Verified' : 'Unverified' } : undefined;
-    await this.dispatch(conversation, d.inbound.action, fields, { actionId: `${channel}:${opts.messageId}`, ...(claims ? { [SUPPLIED_CLAIMS]: claims } : {}) });
+    // K11, PT21.4: an Inbound that declares claims takes the ones its adapter verified, and only those.
+    if (!claims && this.claimed(d.conversation, d.inbound.action)) return refuse('claims-unverified');
+    await this.dispatch(conversation, d.inbound.action, fields, { actionId: `${channel}:${messageId}`, ...(claims ? { [SUPPLIED_CLAIMS]: claims } : {}) });
     this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
-    await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId: opts.messageId, outcome: 'delivered' }, this.now()); });
+    await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId, outcome: 'delivered' }, this.now()); });
     return { outcome: 'delivered', application, conversation };
   }
 
@@ -394,15 +455,16 @@ export class PolyRuntime {
   }
 
   /**
-   * PT21.4: takes a provider's nonce once (Mailgun's token). The store keeps it, so a replay after a restart is refused;
-   * a nonce older than its time to live is forgotten, on every channel, since the provider's timestamp check refuses it.
+   * PT21.4: takes a provider's nonce once (Mailgun's token). The store keeps it until `until`, the time after which the
+   * adapter refuses its signature as stale, so a replay after a restart is refused too. Review D-F6 (M8b): each nonce
+   * keeps its own expiry, computed from the provider's timestamp, so a provider clock ahead of ours cannot outlive it.
    */
-  async claimNonce(channel: string, key: string, at: number, ttlMs: number): Promise<boolean> {
+  async claimNonce(channel: string, key: string, until: number, now: number): Promise<boolean> {
     let taken = false;
     await this.store.txn(() => {
-      // Every channel's nonces older than the window are pruned, so the table holds at most a window's worth.
-      this.store.db.prepare('DELETE FROM poly_ingress_nonce WHERE at < ?').run(at - ttlMs);
-      taken = this.store.db.prepare('INSERT OR IGNORE INTO poly_ingress_nonce (channel, nonce, at) VALUES (?, ?, ?)').run(channel, key, at).changes === 1;
+      // Every channel's expired nonces are pruned, so the table holds at most a window's worth.
+      this.store.db.prepare('DELETE FROM poly_ingress_nonce WHERE until < ?').run(now);
+      taken = this.store.db.prepare('INSERT OR IGNORE INTO poly_ingress_nonce (channel, nonce, until) VALUES (?, ?, ?)').run(channel, key, until).changes === 1;
     });
     return taken;
   }
@@ -413,18 +475,24 @@ export class PolyRuntime {
    * events delivers each to the conversation as an Inbound, before the send's failure completes. The adapter is runtime
    * configuration, like a decision's provider; its certification by digest is plan step 10's.
    */
+  /** S182, plan step 10: only an adapter the certified package made, of the adapter the channel declares (PL6408). */
+  #certify(channel: string, adapter: ChannelAdapter): void {
+    if (!this.verified.channels.some((c) => c.channel === channel)) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
+    const pin = this.certificate.poly.adapters?.find((x) => x.channel === channel);
+    if (!pin) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the certificate binds no adapter to channel ${channel} (S182)`);
+    if (!this.#ioPackage?.madeHere(adapter)) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the adapter for ${channel} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S182)`);
+    if (adapter.kind !== pin.adapter) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: channel ${channel} declares adapter ${pin.adapter}, and this is a ${adapter.kind} adapter (S182)`);
+  }
+
   connectChannel(channel: string, adapter: ChannelAdapter, transports: ChannelTransports): void {
     const d = this.verified.channels.find((c) => c.channel === channel);
     if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
-    // S182, plan step 10: only an adapter the certified package made, of the adapter the channel declares.
-    const pin = this.certificate.poly.adapters?.find((x) => x.channel === channel);
-    if (!pin) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the certificate binds no adapter to channel ${channel} (S182)`);
-    if (!this.ioPackage?.madeHere(adapter)) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the adapter for ${channel} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S182)`);
-    if (adapter.kind !== pin.adapter) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: channel ${channel} declares adapter ${pin.adapter}, and this is a ${adapter.kind} adapter (S182)`);
+    this.#certify(channel, adapter);
     // What a provider ties to an address (an SMS opt-out, an email bounce) it ties to its sender and the address; a
     // thread is one address of one channel, so two channels may not send as one sender (std PROVENANCE.md).
     for (const [other, s] of this.channelSenders) if (other !== channel && s.kind === adapter.kind && s.sender === adapter.sender) throw new Error(`channel ${other} already sends as ${adapter.kind} sender ${adapter.sender}; two channels that send as one sender would keep the provider's per-address state on two threads`);
     this.channelSenders.set(channel, { kind: adapter.kind, sender: adapter.sender });
+    this.#adapters.set(channel, adapter);
     const kind = `channel.${channel}.send`;
     const handler: EffectHandler = async (payload, _caps, ctx) => {
       // The conversation is <channel>:<key>/<channel>, and its thread's recipient is the key (PS15.4).
@@ -444,7 +512,7 @@ export class PolyRuntime {
       }
       throw Object.assign(new Error(r.error), { permanent: r.permanent });
     };
-    this.handlers.set(kind, handler);
+    this.#handlers.set(kind, handler);
   }
 
   async takeApprovals(dir: string): Promise<{ file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[]> {
@@ -518,13 +586,15 @@ export class PolyRuntime {
     // Review B2: a decision's handler is the provider host's, which keeps the record its completion commits with.
     if (kind.startsWith('decision.')) throw new Error(`${kind} is a decision: register its provider with rt.provide, never rt.handle (PD2.2, K10)`);
     if (kind.startsWith('outcome.')) throw new Error(`${kind} is an adjudication's outcome, handled by the runtime itself (PD2.4)`);
+    // Review D-F3 (M8b): a channel's send runs only through its certified adapter (S182).
+    if (/^channel\.[^.]+\.send$/.test(kind)) throw new Error(`${kind} is a channel's send: connect its certified adapter with rt.connectChannel, never rt.handle (PT21.5, S182)`);
     // S142: only an export of a certified handler file, as this runtime loaded it, by identity. The same file imported
     // by the host is another module instance, and a closure is no file at all: neither is what the lint read.
     if (!this.certifiedFunctions.has(handler)) {
       const files = [...this.certified.keys()];
       throw new Error(`PL6404 HANDLER_NOT_CERTIFIED: the handler for ${kind} is not an export of a certified handler file as the runtime loaded it${files.length ? ` (take it from rt.handlerExports(${files.map((f) => JSON.stringify(f)).join(' | ')}))` : '; the certificate binds no handler file'} (S142)`);
     }
-    this.handlers.set(kind, handler);
+    this.#handlers.set(kind, handler);
   }
 
   /**
@@ -834,7 +904,7 @@ export class PolyRuntime {
         if (c.points[i][1] < c.points[i - 1][1]) throw new Error(`the calibration map for ${decision} is not non-decreasing at point ${i}: ${c.points[i - 1][1]} then ${c.points[i][1]}`);
       }
     }
-    this.handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records));
+    this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records));
   }
 
   /**
@@ -1203,7 +1273,5 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (other) { await kernel.close(); throw new LoadError(`refused at load: the build was admitted with ${other.package} ${other.version} ${other.digest}; this runtime has ${now.package} ${now.version} ${now.digest} (S182)`); }
     ioPackage = (await import(pathToFileURL(realpathSync(createRequire(import.meta.url).resolve('@poly/io'))).href)) as { madeHere(a: unknown): boolean };
   }
-  const rt = new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault });
-  rt.ioPackage = ioPackage;
-  return rt;
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault, ioPackage });
 }

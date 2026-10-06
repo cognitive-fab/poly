@@ -1,7 +1,25 @@
 // PS15, read by poly-ref on its own: what a channel means. poly-ref is given the source as written and never the
 // compiler's expansion; it writes the expanded program from PS15's text, and translation validation compares the
 // lowering with it. Only what PS15 says is written here; a channel the checker refuses never reaches poly-ref.
+import { createHash } from 'node:crypto';
 import type * as A from '@poly/core';
+
+/**
+ * PT1.4, written here from its text: a module's digest is the SHA-256 of the RFC 8785 canonical JSON of its AST with
+ * each node's id and span left out. RFC 8785 serialises strings and numbers as ECMAScript does and sorts an object's
+ * keys by UTF-16 code units; a key whose value is undefined is not a member.
+ */
+function canonical(x: unknown): string {
+  if (x === null) return 'null';
+  if (Array.isArray(x)) return `[${x.map(canonical).join(',')}]`;
+  if (typeof x === 'object') {
+    const o = x as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => k !== 'id' && k !== 'span' && o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
+  }
+  if (typeof x === 'number' && !Number.isFinite(x)) throw new TypeError('RFC 8785 has no non-finite number');
+  return JSON.stringify(x);
+}
+const moduleDigest = (m: A.Module): string => `sha256:${createHash('sha256').update(canonical(m), 'utf8').digest('hex')}`;
 
 /** PS15: the module as a channel means it, the modules m.c of its conversations, and the program they are read in. */
 export interface ChannelReading {
@@ -9,7 +27,7 @@ export interface ChannelReading {
   conversations: A.Module[];
   program: A.Module[];
   /** Per channel, what the runtime's descriptor must say (PS15.4): read back against the lowered one. */
-  descriptors: Map<string, { application: string; conversation: string; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string }; peer: Record<string, string>; effectKind: string; pending: number; library: string }>;
+  descriptors: Map<string, { application: string; conversation: string; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string }; peer: Record<string, string>; effectKind: string; pending: number; library: string; libraryDigest: string; kind: string; adapter: string | null; thread: { template: string; fields: string[] } }>;
 }
 
 const readings = new WeakMap<A.Module, { libraries: A.Module[]; reading: ChannelReading }>();
@@ -74,21 +92,26 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
     const receipts = (effect?.items ?? []).filter((i): i is A.EffOutcomeItem => i.kind === 'EffOutcome').map((i) => i.action);
     const inputsOfConv = ['Inbound', ...receipts.filter((r, i) => r !== 'Inbound' && receipts.indexOf(r) === i)];
     const pending = conv.fields.find((f) => f.name === 'pending')!.type as A.TRange;
+    // Review A-F2 (M8b): only the declared configurations; another channel's generated one holds its own conversation.
     for (const d of decls) {
-      if (d.kind !== 'Configuration') continue;
+      if (d.kind !== 'Configuration' || d.generated) continue;
       const ofA = d.instances.filter((i) => [appName, `${module.name}.${appName}`].includes(i.machine.join('.')));
       if (!ofA.length) continue;
       for (const a of inputsOfConv) if (!d.inputs.some((r) => r.instance === convName && r.action === a)) d.inputs.push({ kind: 'InputRef', id: `ref:${d.id}:${ch.name}:${a}`, instance: convName, index: '*', action: a } as A.InputRef);
       if (d.bounds) d.bounds = { ...d.bounds, instances: (d.bounds.instances ?? d.instances.reduce((k, i) => k + (i.count ?? 1), 0)) + ofA.reduce((k, i) => k + (i.count ?? 1), 0) };
     }
+    // PS15.5, ruled on the review of M8b (A-F2): the application and every conversation its starts handler spawns,
+    // one per channel bound to it, counted here from the source as written.
+    const bound = channels.filter((x) => (x.maps[0]?.machine ?? x.starts!.machine) === appName).length;
     decls.push({
       kind: 'Configuration', id: `ref:${ch.id}:configuration`, name: ch.name, generated: 'channel',
       instances: [{ kind: 'ConfigInstance', id: `ref:${ch.id}:app`, name: 'app', count: null, machine: [appName], init: [] } as A.ConfigInstance],
       inputs: [{ kind: 'InputRef', id: `ref:${ch.id}:in`, instance: 'app', index: null, action: ch.starts!.action } as A.InputRef, ...inputsOfConv.map((a) => ({ kind: 'InputRef', id: `ref:${ch.id}:in:${a}`, instance: convName, index: '*', action: a } as A.InputRef))],
-      bounds: { kind: 'ConfigBounds', id: `ref:${ch.id}:bounds`, transit: pending.hi, instances: 2 } as A.ConfigBounds,
+      // Each other conversation gets no inputs, so it holds at most its creation Open(app) in transit (A-F2, as ruled).
+      bounds: { kind: 'ConfigBounds', id: `ref:${ch.id}:bounds`, transit: pending.hi + bound - 1, instances: 1 + bound } as A.ConfigBounds,
       properties: [],
     } as A.Configuration);
-    descriptors.set(ch.name, { application: `${module.name}.${appName}`, conversation: convName, starts: { action: ch.starts!.action, onInbound: ch.starts!.onInbound }, inbound: { to: 'conversation', action: 'Inbound' }, peer, effectKind: `channel.${ch.name}.send`, pending: pending.hi, library: library.name });
+    descriptors.set(ch.name, { application: `${module.name}.${appName}`, conversation: convName, starts: { action: ch.starts!.action, onInbound: ch.starts!.onInbound }, inbound: { to: 'conversation', action: 'Inbound' }, peer, effectKind: `channel.${ch.name}.send`, pending: pending.hi, library: library.name, libraryDigest: moduleDigest(library), kind: ch.channelKind, adapter: ch.adapter, thread: { template: ch.thread, fields: [...ch.thread.matchAll(/\{([^}]*)\}/g)].map((x) => x[1]) } });
   }
   const expanded: A.Module = { ...module, decls };
   const reading: ChannelReading = { module: expanded, conversations, program: [...program.filter((x) => x.name !== module.name), expanded, ...conversations], descriptors };

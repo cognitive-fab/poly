@@ -38,6 +38,10 @@ const KINDS = {
       'free-form-outside-window': ['Reply', 'if window is Closed {', 'if window is Open && window is Closed {'],
       'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
       'window-opens-on-inbound': ['Template', "slot' = Sending\n", "slot' = Sending\n    window' = Open\n"],
+      'message-always-opens-window': ['Inbound', 'if waiting + queued < 2 {', 'require waiting + queued < 2 else reject "backlog"\n    if waiting + queued < 2 {'],
+      'queue-shifts-in-order': ['Ack', "queue1' = queue2", "queue1' = queue1"],
+      'queue-appends-first': ['Reply', "queue1' = body", "queue2' = body"],
+      'queue-appends-second': ['Reply', "queue2' = body", "queue2' = queue1"],
     },
   },
   sms: {
@@ -50,6 +54,9 @@ const KINDS = {
       'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
       'consent-changes-only-by-keyword': ['SendFailed', "slot' = Receipt\n", "slot' = Receipt\n    consent' = true\n"],
       'opt-keyword-never-refused': ['Inbound', 'if keyword is OptOut {', 'require waiting < 2 else reject "backlog"\n    if keyword is OptOut {'],
+      'queue-shifts-in-order': ['Ack', "queue1' = queue2", "queue1' = queue1"],
+      'queue-appends-first': ['Reply', "queue1' = body", "queue2' = body"],
+      'queue-appends-second': ['Reply', "queue2' = body", "queue2' = queue1"],
     },
   },
   email: {
@@ -62,6 +69,10 @@ const KINDS = {
       'no-send-to-suppressed': ['Reply', 'if bounces == 2 {', 'if bounces == 2 && bounces == 1 {'],
       'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
       'unsubscribe-holds': ['Inbound', "waiting' = waiting + 1\n", "waiting' = waiting + 1\n      subscribed' = true\n"],
+      'bounces-only-from-the-recipient': ['SendFailed', "slot' = Receipt\n", "slot' = Receipt\n    if bounces < 2 {\n      bounces' = bounces + 1\n    }\n"],
+      'queue-shifts-in-order': ['Ack', "queue1' = queue2", "queue1' = queue1"],
+      'queue-appends-first': ['Reply', "queue1' = body", "queue2' = body"],
+      'queue-appends-second': ['Reply', "queue2' = body", "queue2' = queue1"],
     },
   },
   slack: {
@@ -72,6 +83,10 @@ const KINDS = {
     rules: {
       'no-post-to-archived': ['Reply', 'if archived {', 'if archived && !archived {'],
       'one-message-per-second': ['Template', 'if cooling {', 'if cooling && !cooling {'],
+      'queued-reply-waits-for-the-clock': ['Ack', 'if cooling {', 'if cooling && !cooling {'],
+      'queue-shifts-in-order': ['Ack', "queue1' = queue2", "queue1' = queue1"],
+      'queue-appends-first': ['Reply', "queue1' = body", "queue2' = body"],
+      'queue-appends-second': ['Reply', "queue2' = body", "queue2' = queue1"],
       'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
     },
   },
@@ -84,6 +99,9 @@ const KINDS = {
       'no-delivery-while-disabled': ['Reply', 'if !enabled {', 'if enabled && !enabled {'],
       'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
       'disabled-only-after-failures': ['Undelivered', 'if failures < 2 {', 'if failures < 0 {'],
+      'queue-shifts-in-order': ['Ack', "queue1' = queue2", "queue1' = queue1"],
+      'queue-appends-first': ['Reply', "queue1' = body", "queue2' = body"],
+      'queue-appends-second': ['Reply', "queue2' = body", "queue2' = queue1"],
     },
   },
 };

@@ -3,7 +3,7 @@
 // X-Hub-Signature-256 as sha256=<hex>; the endpoint's verification is a GET answered with hub.challenge when
 // hub.verify_token matches. Messages arrive in entry[].changes[].value.messages, receipts in .statuses.
 import type { ChannelAdapter, InboundMessage, ProviderReceipt, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { hmac, httpFailure, json, noAnswer, sameText, signatureMatches, made, type AdapterFault } from '../util.js';
+import { hmac, httpFailure, json, noAnswer, sameText, signatureMatches, made, need, type AdapterFault } from '../util.js';
 
 export interface WhatsAppConfig {
   appSecret: string;
@@ -22,6 +22,7 @@ interface WaMessage { from?: unknown; id?: unknown; type?: unknown; text?: { bod
 interface WaStatus { id?: unknown; status?: unknown; errors?: { code?: unknown; title?: unknown }[] }
 
 export function whatsapp(c: WhatsAppConfig): ChannelAdapter {
+  need('whatsapp', { appSecret: c.appSecret, accessToken: c.accessToken, phoneNumberId: c.phoneNumberId, verifyToken: c.verifyToken, apiVersion: c.apiVersion });
   return made({
     kind: 'whatsapp',
     provider: 'whatsapp-cloud-api',
@@ -36,11 +37,14 @@ export function whatsapp(c: WhatsAppConfig): ChannelAdapter {
       const sig = w.headers['x-hub-signature-256'];
       if (!sig) return { refused: 'signature-missing' };
       if (!signatureMatches(sig, `sha256=${hmac('sha256', c.appSecret, w.body).toString('hex')}`, c.fault)) return { refused: 'signature-invalid' };
-      const doc = json(w.body) as { object?: unknown; entry?: { changes?: { value?: { messages?: WaMessage[]; statuses?: WaStatus[] } }[] }[] };
+      const doc = json(w.body) as { object?: unknown; entry?: { changes?: { value?: { metadata?: { phone_number_id?: unknown }; messages?: WaMessage[]; statuses?: WaStatus[] } }[] }[] };
       if (doc.object !== 'whatsapp_business_account') return { refused: 'not-a-whatsapp-notification' };
       const messages: InboundMessage[] = [];
       const receipts: ProviderReceipt[] = [];
       for (const e of doc.entry ?? []) for (const ch of e.changes ?? []) {
+        // Review C-F5 (M8b): one app secret signs the notifications of every phone number of the app, so a change for
+        // another number is that number's, not this channel's.
+        if (ch.value?.metadata?.phone_number_id !== c.phoneNumberId) continue;
         for (const m of ch.value?.messages ?? []) {
           if (typeof m.from !== 'string' || typeof m.id !== 'string') return { refused: 'message-malformed' };
           // A text message's body is its text; any other type's is its own object, kept whole.

@@ -23,7 +23,7 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -348,6 +348,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     const p = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
     if (!p.ok || !/^[0-9a-f]{7,40}$/.test(p.commit)) throw new AdmitError(`not admitted: the build has policies, and the gate engine's commit is unknown (${p.ok ? p.commit : p.reason})`);
     policyEngine = { name: 'polyaxion', commit: p.commit };
+    if (opts.fault === 'wrong-policy-engine') policyEngine = { name: 'polyaxion', commit: '0000000' };
   }
   // The workflow descriptors are artefacts poly-runtime reads, certified with the policies (PT10, S164, S173).
   const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor)];
@@ -413,17 +414,22 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   if (opts.fault === 'omit-package-file' && packagePaths.length) delete certifiedHandlers.packageFiles[packagePaths[packagePaths.length - 1]];
   // S182, plan step 10: each channel's runtime adapter, bound by package name, version and digest. A channel whose
   // declared adapter the adapter package does not make (the tests' `test` kind) is bound to none, and cannot connect.
-  const adapters: NonNullable<Certificate['poly']['adapters']> = [];
+  let adapters: NonNullable<Certificate['poly']['adapters']> = [];
   let adapterPin: { package: string; version: string; digest: string } | null = null;
+  const { adapterPackagePin, IO_ADAPTERS } = await import('@poly/runtime');
+  /** Each channel's declared adapter, from its descriptor on disk, for one the adapter package makes. */
+  const declaredAdapters = () => [...channels].sort((x, y) => (x.name < y.name ? -1 : 1)).flatMap((ch) => {
+    const d = JSON.parse(readFileSync(join(dir, ch.descriptor), 'utf8')) as { adapter?: string };
+    return d.adapter && IO_ADAPTERS.includes(d.adapter) ? [{ channel: ch.name, adapter: d.adapter }] : [];
+  });
   if (channels.length) {
-    const { adapterPackagePin, IO_ADAPTERS } = await import('@poly/runtime');
-    for (const ch of [...channels].sort((x, y) => (x.name < y.name ? -1 : 1))) {
-      const d = JSON.parse(readFileSync(join(dir, ch.descriptor), 'utf8')) as { adapter?: string };
-      if (!d.adapter || !IO_ADAPTERS.includes(d.adapter)) continue;
+    for (const x of declaredAdapters()) {
       adapterPin ??= adapterPackagePin();
-      adapters.push({ channel: ch.name, adapter: d.adapter, ...adapterPin });
+      adapters.push({ ...x, ...adapterPin });
     }
     if (opts.fault === 'stale-adapter-digest' && adapters.length) adapters[0] = { ...adapters[0], digest: `sha256:${'0'.repeat(64)}` };
+    if (opts.fault === 'swap-adapter-kind' && adapters.length) adapters[0] = { ...adapters[0], adapter: IO_ADAPTERS.find((k) => k !== adapters[0].adapter)! };
+    if (opts.fault === 'omit-adapters') adapters = [];
   }
   const toolchain = { ...(report.files[0]?.engines ?? {}) };
   const body: Omit<Certificate, 'digest' | 'signatures'> = {
@@ -455,6 +461,16 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   for (const p of handlerProblems()) problems.push({ name: 'handlers', problem: p });
   // S182: the adapters read back are the installed adapter package as it is now.
   for (const x of back.poly.adapters ?? []) if (!adapterPin || x.package !== adapterPin.package || x.version !== adapterPin.version || x.digest !== adapterPin.digest) problems.push({ name: 'adapters', problem: `channel ${x.channel}'s adapter is bound to ${x.package} ${x.version} ${x.digest}, and the installed package is not that` });
+  // Review D-F5 (M8b): and the binding is every channel's declared adapter, read again from its descriptor, so a
+  // binding of another kind, or none at all, is caught here rather than at connect.
+  const bound = JSON.stringify((back.poly.adapters ?? []).map((x) => ({ channel: x.channel, adapter: x.adapter })));
+  if (bound !== JSON.stringify(declaredAdapters())) problems.push({ name: 'adapters', problem: `the certificate binds ${bound}, and the channels' descriptors declare ${JSON.stringify(declaredAdapters())}` });
+  // Review D-F5 (M8b): the gate engine certified is the pinned engine, resolved again.
+  if (policyReports.length) {
+    const { polyaxionPeer } = await import('@poly/runtime');
+    const p = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
+    if (!p.ok || back.poly.policyEngine?.name !== 'polyaxion' || back.poly.policyEngine.commit !== p.commit) problems.push({ name: 'policyEngine', problem: `the certificate names ${JSON.stringify(back.poly.policyEngine ?? null)}, and the pinned engine is ${p.ok ? p.commit : `unknown (${p.reason})`}` });
+  } else if (back.poly.policyEngine) problems.push({ name: 'policyEngine', problem: 'a gate engine is certified for a build with no policies' });
   // S150: the keyrings read back are the ones the manifest names now.
   if (!sameKeyrings(back.poly.keyrings, existsSync(join(dir, 'poly.json')) ? keyringsOf(dir, loadProject(dir).manifest) : EMPTY_KEYRINGS)) problems.push({ name: 'keyrings', problem: 'the keyrings changed while the program was admitted' });
   // S142: the handlers read back are the closure of the roots as it is on disk now, file for file.

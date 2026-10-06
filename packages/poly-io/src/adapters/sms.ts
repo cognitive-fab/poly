@@ -4,7 +4,7 @@
 // sorted by name, each name followed by its value. An inbound message carries MessageSid, From, To and Body; a status
 // callback carries MessageSid and MessageStatus. The adapter classifies the body's keyword for std.channels.sms.
 import type { ChannelAdapter, ProviderReceipt, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { encodeForm, formPairs, hmac, httpFailure, noAnswer, signatureMatches, made, type AdapterFault } from '../util.js';
+import { encodeForm, formPairs, hmac, httpFailure, noAnswer, signatureMatches, made, need, type AdapterFault } from '../util.js';
 
 export interface TwilioConfig {
   accountSid: string;
@@ -38,6 +38,7 @@ export function twilioSignature(authToken: string, url: string, body: string): s
 }
 
 export function sms(c: TwilioConfig): ChannelAdapter {
+  need('sms', { accountSid: c.accountSid, authToken: c.authToken, from: c.from });
   return made({
     kind: 'sms',
     provider: 'twilio',
@@ -74,8 +75,9 @@ export function sms(c: TwilioConfig): ChannelAdapter {
       try { doc = JSON.parse(r.body) as typeof doc; } catch { /* judged by its status */ }
       if ((r.status === 200 || r.status === 201) && typeof doc.sid === 'string') return { ok: true, providerId: doc.sid };
       // 21610: the recipient has opted out of this sender, perhaps by a keyword poly never saw; a retry fails the same
-      // way, and it is the provider event Reported, which std.channels.sms's consent reads (PS15.4).
-      if (doc.code === 21610) return { ok: false, permanent: true, error: `${r.status} 21610 ${doc.message ?? ''}`.trim(), events: [{ providerId: `21610:${out.to}`, fields: { from: out.to, keyword: 'Reported' } }] };
+      // way, and it is the provider event Reported, which std.channels.sms's consent reads (PS15.4). Review D-F9 (M8b):
+      // its id is the send's, so a second opt-out reported after an opt-in is a step of its own, not a duplicate.
+      if (doc.code === 21610) return { ok: false, permanent: true, error: `${r.status} 21610 ${doc.message ?? ''}`.trim(), events: [{ providerId: `21610:${out.idempotencyKey}`, fields: { from: out.to, keyword: 'Reported' } }] };
       return httpFailure(r, `${r.status} ${doc.code ?? ''} ${doc.message ?? ''}`.trim());
     },
   });

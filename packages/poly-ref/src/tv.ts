@@ -291,6 +291,12 @@ export async function translationValidate(module: Module, machineName: string, b
       if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) mismatch(`channels/${name}.json ${k}: the artefact has ${JSON.stringify(got[k])}, PS15 gives ${JSON.stringify(want[k])}`, []);
     }
     if ((got.library as { module?: string } | undefined)?.module !== want.library) mismatch(`channels/${name}.json library: the artefact names ${JSON.stringify(got.library)}, PS15 gives ${want.library}`, []);
+    // Review A-F1 (M8b): the runtime routes by the thread key and binds the adapter by kind, so each is read back too,
+    // with the digest of the library the conversation was instantiated from (PT1.4).
+    if ((got.library as { digest?: string } | undefined)?.digest !== want.libraryDigest) mismatch(`channels/${name}.json library digest: the artefact has ${JSON.stringify((got.library as { digest?: string } | undefined)?.digest)}, the library ${want.library} is ${want.libraryDigest}`, []);
+    for (const k of ['kind', 'adapter', 'thread'] as const) {
+      if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) mismatch(`channels/${name}.json ${k}: the artefact has ${JSON.stringify(got[k])}, the source gives ${JSON.stringify(want[k])}`, []);
+    }
   }
   // Review D-F1, S152: under isolation, a machine with effects must have its sandbox policy.
   if (opts.isolation === 'openshell' && M.effects.size && !existsSync(join(buildDir, 'openshell.policies.yaml'))) mismatch('openshell.policies.yaml is missing, and isolation is asked for (S152)', []);

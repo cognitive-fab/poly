@@ -21,7 +21,7 @@ export interface LowerOptions {
   channels?: ChannelPlan[];
 }
 
-export type Fault = 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
 
 export interface Lowered {
   machine: string;
@@ -269,7 +269,9 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     if (p.application !== m.name) continue;
     const lib = (opts.program ?? []).find((x) => x.name === p.library);
     const inbound = opts.fault === 'channel-inbound-to-app' ? { to: 'application', action: p.peer.Message ?? Object.values(p.peer)[0] } : { to: 'conversation', action: 'Inbound' };
-    files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread: p.thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending }, null, 2) + '\n';
+    // Review A-F1 (M8b): the fault channel-thread writes a thread key that reads one field fewer.
+    const thread = opts.fault === 'channel-thread' ? { template: p.thread.fields.length > 1 ? `{${p.thread.fields[0]}}` : 'fixed', fields: p.thread.fields.slice(0, -1) } : p.thread;
+    files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending }, null, 2) + '\n';
   }
   // S74: each liveness property's goal (and, for leads to, its start) as a state predicate, for exported witness
   // tests. Its own module, so no engine can take it for an invariant; it is read back like every artefact.

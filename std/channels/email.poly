@@ -55,7 +55,6 @@ service machine Conversation {
   action Reply(body: Content)
   action Template(body: Content)
   action Sent()
-  action Bounced()
   action SendFailed()
   action Ack()
 
@@ -141,16 +140,6 @@ service machine Conversation {
     send app <- Delivered()
   }
 
-  // A hard bounce is the provider's permanent failure of a send.
-  on Bounced {
-    require slot is Sending else reject "idle"
-    slot' = Receipt
-    if bounces < 2 {
-      bounces' = bounces + 1
-    }
-    send app <- Failed()
-  }
-
   on SendFailed {
     require slot is Sending else reject "idle"
     slot' = Receipt
@@ -184,11 +173,17 @@ service machine Conversation {
     labels { egress:external }
     class irreversible
     ok -> Sent()
-    failed -> Bounced()
+    failed -> SendFailed()
     exhausted -> SendFailed()
   }
 
   step property unsubscribe-holds: pre.subscribed || !post.subscribed
+  // A bounce is the recipient's: the provider event Bounce, never a send's own failure (review B-F5).
+  step property bounces-only-from-the-recipient: pre.bounces == post.bounces || action == Inbound && event is Bounce
+  // poly's own (review B-F4, M8b): the queue keeps the order the replies were given in.
+  step property queue-shifts-in-order: !(pre.queued > post.queued) || post.queue1 == pre.queue2 && post.queue2 == none
+  step property queue-appends-first: !(action == Reply && pre.queued == 0 && post.queued == 1 && post.queue1 != body)
+  step property queue-appends-second: !(action == Reply && pre.queued == 1 && post.queued == 2 && (post.queue2 != body || post.queue1 != pre.queue1))
 
   never no-bulk-after-unsubscribe: emit send(kind: Bulk) while !subscribed
   never no-send-to-suppressed: emit send while bounces == 2

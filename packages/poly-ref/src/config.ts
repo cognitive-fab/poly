@@ -76,7 +76,7 @@ const timerKey = (t: ArmedTimer) => `${t.instance}:${t.key}`;
 const sortTimers = (ts: ArmedTimer[]) => [...ts].sort((a, b) => (timerKey(a) < timerKey(b) ? -1 : timerKey(a) > timerKey(b) ? 1 : 0));
 
 /** PS15.5: the roles a channel gives the machines of a configuration. */
-export interface ChannelRoles { application: string; conversation: string; receipts: Set<string> }
+export interface ChannelRoles { name: string; application: string; conversation: string; receipts: Set<string> }
 
 export interface ConfigInstance {
   /** Its address: `inv`, or `order[0]` for a member of the group `order`. */
@@ -136,18 +136,25 @@ export interface ConfigReport {
   vacuous: Vacuous[];
   /** PS5.2a (S178): each instance's never statements, checked on its global steps, and whether one was violated. */
   nevers: { instance: string; machine: string; property: string; violated: boolean }[];
+  /** PS15.5 (A-F2, as ruled): the instances whose never statements were checked here, and those left to their own channel's configuration. */
+  neverInstances: { checked: string[]; elsewhere: { instance: string; configuration: string }[] };
 }
 
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
-export function buildConfiguration(source: Module, name: string, opts: { program?: Module[] } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[]; channels: ChannelRoles[] } {
+export function buildConfiguration(source: Module, name: string, opts: { program?: Module[]; fault?: RefFault } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[]; channels: ChannelRoles[] } {
   // PS15: a module with channels means its expansion, with the configuration of each channel.
   const reading = readChannels(source, opts.program ?? []);
   const module = reading.module;
   opts = { ...opts, program: reading.program };
-  const decl = module.decls.find((d): d is A.Configuration => d.kind === 'Configuration' && d.name === name);
-  if (!decl) throw new Error(`poly-ref: no configuration ${name} in module ${module.name}`);
+  const found = module.decls.find((d): d is A.Configuration => d.kind === 'Configuration' && d.name === name);
+  if (!found) throw new Error(`poly-ref: no configuration ${name} in module ${module.name}`);
+  // The fault instance-bound-two (ruled on the review of M8b, A-F2): the bound before the ruling, for its control test.
+  // The fault transit-bound-n: the transit bound before the second ruling, the conversation's pending bound alone.
+  const pendingOf = () => readChannels(source, opts.program ?? []).descriptors.get(found.name)?.pending ?? found.bounds?.transit;
+  const decl: A.Configuration = found.generated === 'channel' && found.bounds && opts.fault === 'instance-bound-two' ? { ...found, bounds: { ...found.bounds, instances: 2 } }
+    : found.generated === 'channel' && found.bounds && opts.fault === 'transit-bound-n' ? { ...found, bounds: { ...found.bounds, transit: pendingOf()! } } : found;
   const machines = new Map<string, RMachine>();
   // PS1.0 (S176): an instance may be of a used module's machine, spelled m.M; it is built with this module as its view,
   // so every machine name in the configuration is spelled one way.
@@ -209,7 +216,7 @@ export function buildConfiguration(source: Module, name: string, opts: { program
     }
   }
   // PS15.0, PS15.5: per channel, its application, its conversation, and the application's actions bound to a receipt.
-  const channels: ChannelRoles[] = [...reading.descriptors.values()].map((d) => ({ application: d.application, conversation: d.conversation, receipts: new Set(['Delivered', 'Rejected', 'Failed'].map((r) => d.peer[r]).filter((x): x is string => typeof x === 'string')) }));
+  const channels: ChannelRoles[] = [...reading.descriptors.entries()].map(([name, d]) => ({ name, application: d.application, conversation: d.conversation, receipts: new Set(['Delivered', 'Rejected', 'Failed'].map((r) => d.peer[r]).filter((x): x is string => typeof x === 'string')) }));
   return { decl, instances, groups, channels };
 }
 
@@ -371,9 +378,13 @@ function timerTargets(M: RMachine): string[] {
 
 /** Explores a configuration and checks it (PS13.5, PS13.6). */
 export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[]; fault?: RefFault } = {}): ConfigReport {
-  const { decl, instances, groups: spawnedGroups, channels } = buildConfiguration(module, name, { program: opts.program });
+  const { decl, instances, groups: spawnedGroups, channels } = buildConfiguration(module, name, { program: opts.program, ...(opts.fault ? { fault: opts.fault } : {}) });
+  // PS15.5, ruled on the review of M8b (A-F2): another channel's conversation in a channel's configuration has its never
+  // statements checked in its own channel's configuration, not here.
+  const elsewhere = (inst: ConfigInstance) => decl.generated === 'channel' && channels.some((c) => c.name !== decl.name && c.conversation === inst.machine.id);
   // PS15.5: a channel's generated configuration keeps its conversation's armed timers; a declared one does not (S61).
-  const timed = new Set<number>(decl.generated === 'channel' ? instances.map((x, k) => (channels.some((c) => c.conversation === x.machine.id) ? k : -1)).filter((k) => k >= 0) : []);
+  // Review A-F2 (M8b): only this channel's conversation; another channel's, spawned beside it, keeps no timers here.
+  const timed = new Set<number>(decl.generated === 'channel' ? instances.map((x, k) => (channels.some((c) => c.name === decl.name && c.conversation === x.machine.id) ? k : -1)).filter((k) => k >= 0) : []);
   const sys = configurationSystem(decl, instances, { timed, fault: opts.fault });
   const absent = (err: unknown) => err instanceof AbsentInstance;
   const g = explore(sys, opts.maxStates);
@@ -452,6 +463,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   // confirmed or ruled out by the configurations that include the machine.
   const nevers: ConfigReport['nevers'] = [];
   instances.forEach((inst, k) => {
+    if (elsewhere(inst)) return;
     for (const p of inst.machine.stepProperties) {
       if (!inst.machine.nevers.has(p.name)) continue;
       const e = g.edges.find((x) => {
@@ -471,6 +483,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   // asks only that its while hold in some reachable state).
   const neverVacuous: Vacuous[] = [];
   instances.forEach((inst, k) => {
+    if (elsewhere(inst)) return;
     for (const p of inst.machine.stepProperties) {
       if (!inst.machine.nevers.has(p.name) || nevers.some((x) => x.instance === inst.name && x.property === p.name && x.violated)) continue;
       const pre = g.states.map((s) => s.sigma[k]).filter((x): x is State => x !== null);
@@ -553,6 +566,10 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   return {
     vacuous,
     nevers,
+    neverInstances: {
+      checked: instances.filter((i) => !elsewhere(i)).map((i) => i.name),
+      elsewhere: instances.filter(elsewhere).map((i) => ({ instance: i.name, configuration: channels.find((c) => c.conversation === i.machine.id)!.name })),
+    },
     configuration: decl.name,
     states: g.states.length,
     transitions: g.edges.length,

@@ -9,7 +9,9 @@
 //    compiler erases under verbatimModuleSyntax. Nothing from @poly/lang,
 //    @poly/lower, @poly/embed or @poly/check, ever.
 // 5. Network code lives in poly-io alone (S182). poly-io imports node builtins, its own files, and the runtime adapter
-//    interface (@poly/runtime/adapters) as types only; no check package imports poly-io, in any form.
+//    interface (@poly/runtime/adapters) as types only; no check package imports poly-io, in any form. Outside it, no
+//    package imports an npm package but poly's own, the vendored engines and typescript, uses a socket global, or
+//    names a network module in a string (review C-F8, M8b).
 // 2. No language-model call on a check or decision path. No package may import
 //    a model SDK, and no check package may call fetch or open a socket.
 // 3. A host-neutral core with thin host adapters (S167, M6). No package names a host or imports a host's SDK
@@ -21,11 +23,21 @@
 //
 // A file that cannot be read is an error, never a pass (no silent clean).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MODEL_SDKS = [/^@anthropic-ai\//, /^openai$/, /^@openai\//, /^@google\/genai$/, /^@google\/generative-ai$/, /^cohere-ai$/, /^@mistralai\//, /^ollama$/, /^langchain/, /^@langchain\//];
-const NETWORK_MODULES = ['node:http', 'node:https', 'node:http2', 'node:net', 'node:tls', 'node:dgram', 'http', 'https', 'http2', 'net', 'tls', 'dgram'];
+// Review C-F8 (M8b): node:dns resolves names over the network, so it is a network module too.
+const NETWORK_MODULES = ['node:http', 'node:https', 'node:http2', 'node:net', 'node:tls', 'node:dgram', 'node:dns', 'node:dns/promises', 'http', 'https', 'http2', 'net', 'tls', 'dgram', 'dns', 'dns/promises'];
+// Review C-F8 (M8b): a network module named in a string is a way to load it without an import statement
+// (createRequire(…)('node:net')). Only the handler lint, which lists them to refuse them, names them.
+const NETWORK_STRINGS = /['"`](node:)?(http|https|http2|net|tls|dgram|dns|dns\/promises)['"`]/;
+const NAMES_NETWORK_TO_REFUSE = ['packages/poly-check/src/lint.ts'];
+// Review C-F8 (M8b): outside poly-io a package imports node builtins, its own files, poly's packages, the vendored
+// engines and the TypeScript compiler; any other npm package could carry a socket (undici, ws).
+const NPM_ALLOWED = [/^typescript$/, /^@poly\//, /^@cognitive-fab\//];
+// Review C-F8 (M8b): the browser-style sockets Node offers as globals, used as values (not named in a string).
+const SOCKET_GLOBALS = /(?<!['"`\w])(WebSocket|EventSource)(?!['"`\w])/;
 // S182: the packages on a check path, which never import poly-io.
 const CHECK_PACKAGES = ['poly-core', 'poly-lang', 'poly-lower', 'poly-ref', 'poly-embed', 'poly-check', 'poly-agent'];
 const PROCESS_MODULES = ['node:child_process', 'child_process', 'node:worker_threads', 'worker_threads'];
@@ -51,6 +63,7 @@ const ADAPTER_LAUNCHES = [
 const IMPORT_RE = /(^|[\n;])\s*(import|export)\s+(type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
 const BARE_IMPORT_RE = /(^|[\n;])\s*import\s+['"]([^'"]+)['"]/g;
 const DYNAMIC_RE = /\b(import|require)\s*\(\s*['"`]([^'"`$]+)['"`]\s*\)/g;
+const CALLED_REQUIRE_RE = /\bcreateRequire\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*\(\s*['"`]([^'"`$]+)['"`]\s*\)/g;
 
 /** Imports of one source text: [{ spec, typeOnly, line }]. */
 export function importsOf(text) {
@@ -65,6 +78,8 @@ export function importsOf(text) {
   }
   for (const m of text.matchAll(BARE_IMPORT_RE)) out.push({ spec: m[2], typeOnly: false, line: lineAt(m.index + m[1].length) });
   for (const m of text.matchAll(DYNAMIC_RE)) out.push({ spec: m[2], typeOnly: false, line: lineAt(m.index) });
+  // Review C-F8 (M8b): a require made by createRequire and called at once is an import too.
+  for (const m of text.matchAll(CALLED_REQUIRE_RE)) out.push({ spec: m[1], typeOnly: false, line: lineAt(m.index) });
   return out;
 }
 
@@ -76,10 +91,13 @@ export function violationsOf(pkg, file, text) {
     if (NETWORK_MODULES.includes(imp.spec) && pkg !== 'poly-io') v.push(`${file}:${imp.line} imports network module '${imp.spec}' (network code lives in poly-io alone, S182)`);
     if (pkg === 'poly-io') {
       const relativeSpec = imp.spec.startsWith('./') || imp.spec.startsWith('../');
-      if (relativeSpec) { if (/(^|\/)poly-[a-z]+(\/|$)/.test(imp.spec)) v.push(`${file}:${imp.line} reaches into another package by relative path '${imp.spec}' (S182)`); }
+      // Review C-F8 (M8b): a relative path stays inside poly-io's own source, so it reaches no other package and no
+      // package under node_modules by its path.
+      if (relativeSpec) { if (!posix.normalize(posix.join(file.startsWith('packages/') ? posix.dirname(file) : posix.join('packages/poly-io/src', posix.dirname(file)), imp.spec)).startsWith('packages/poly-io/src/')) v.push(`${file}:${imp.line} reaches outside packages/poly-io/src by relative path '${imp.spec}' (S182)`); }
       else if (imp.spec === '@poly/runtime/adapters') { if (!imp.typeOnly) v.push(`${file}:${imp.line} imports a value from @poly/runtime/adapters; poly-io imports the adapter interface as types only (S182)`); }
       else if (!/^node:/.test(imp.spec)) v.push(`${file}:${imp.line} poly-io imports '${imp.spec}'; it imports node builtins and the runtime adapter interface only (S182)`);
     }
+    if (pkg !== 'poly-io' && !imp.spec.startsWith('.') && !imp.spec.startsWith('node:') && !imp.spec.startsWith('${') && !NETWORK_MODULES.includes(imp.spec) && !NPM_ALLOWED.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} imports the npm package '${imp.spec}'; outside poly-io a package imports node builtins, poly's packages, the vendored engines and typescript only (S182)`);
     if (CHECK_PACKAGES.includes(pkg) && (imp.spec === '@poly/io' || imp.spec.startsWith('@poly/io/') || /(^|\/)poly-io(\/|$)/.test(imp.spec))) v.push(`${file}:${imp.line} a check package imports poly-io, the package with network code (S182)`);
     if (pkg === 'poly-ref') {
       const relativeSpec = imp.spec.startsWith('./') || imp.spec.startsWith('../');
@@ -109,6 +127,8 @@ export function violationsOf(pkg, file, text) {
   // poly-new starts the host's command line (S169), so it alone may name the host.
   if (pkg !== 'poly-new' && HOST_NAMES.test(text)) { const m = HOST_NAMES.exec(text); v.push(`${file} names a host (${m[1] ?? m[0]}); a host's name belongs in adapters/, never in the core (S167)`); }
   if (/\bfetch\s*\(/.test(text)) v.push(`${file} calls fetch (no network or model call on a check path)`);
+  if (pkg !== 'poly-io' && SOCKET_GLOBALS.test(text)) v.push(`${file} uses ${SOCKET_GLOBALS.exec(text)[1]}, a socket; network code lives in poly-io alone (S182)`);
+  if (pkg !== 'poly-io' && !NAMES_NETWORK_TO_REFUSE.includes(file) && NETWORK_STRINGS.test(text)) v.push(`${file} names the network module ${NETWORK_STRINGS.exec(text)[0]} in a string, a way to load it without an import; network code lives in poly-io alone (S182)`);
   // Review finding P8: indirect routes. A subprocess or a computed global can reach the network, and a
   // require made at run time, a template literal or a concatenated name can reach the compiler.
   for (const imp of importsOf(text)) {

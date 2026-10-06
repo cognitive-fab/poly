@@ -4,7 +4,7 @@
 // rule that reads it (PS8.2: unknown, then `on unknown` decides; deny or escalate, never allow).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { admit, checkFile, checkProject } from '@poly/check';
@@ -15,6 +15,13 @@ import { polyaxionPeer, loadPolyaxion, policyEngine, load } from '@poly/runtime'
 import { whatsapp } from '@poly/io';
 import { ROOT } from './helpers.mjs';
 import { loaded, makeKey, project } from './runtime-helpers.mjs';
+
+// Review D-F4 (M8b): a message reaches a conversation whose Inbound declares claims only through its connected,
+// certified adapter, so these tests post a WhatsApp notification signed with the app secret to rt.receive.
+const waMessage = (from, id, text) => {
+  const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1', changes: [{ field: 'messages', value: { metadata: { phone_number_id: '106540352242922' }, messages: [{ from, id, type: 'text', text: { body: text } }] } }] }] });
+  return { method: 'POST', url: 'https://hooks.example.com/channels/support', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'a').update(body).digest('hex')}` }, body };
+};
 
 const peer = polyaxionPeer();
 const skip = peer.ok ? false : `not run: ${peer.reason}`;
@@ -178,7 +185,7 @@ test('PT25.1, AC17 in part: a channel send carries the field `channel`, and a po
     await rt.create('desk.Agent', { id: 'support:wa-1' });
     await rt.create('desk.support.Conversation', { id: 'support:wa-1/support', creation: { action: 'Open', data: { app: 'support:wa-1' } } });
     // A customer's message opens the window; the agent's free-form answer is proposed with its channel, and denied.
-    await rt.inbound('support', { from: 'wa-1', body: await rt.putContent('Hello') }, { messageId: 'm-hello', claims: { verified: true, sender: 'wa-1' } });
+    await rt.receive('support', waMessage('wa-1', 'm-hello', 'Hello'));
     await rt.advance();
     const verdicts = (await rt.chain('support:wa-1/support')).filter((e) => e.kind === 'verdict').map((e) => e.body);
     const denied = verdicts.find((b) => b.outcome === 'denied');
@@ -233,7 +240,7 @@ async function denials(a, r, extra = {}, times = 1) {
   await rt.create('desk.Agent', { id: 'support:wa-1' });
   await rt.create('desk.support.Conversation', { id: 'support:wa-1/support', creation: { action: 'Open', data: { app: 'support:wa-1' } } });
   for (let i = 0; i < times; i++) {
-    await rt.inbound('support', { from: 'wa-1', body: await rt.putContent(`Hello ${i}`) }, { messageId: `m-${i}`, claims: { verified: true, sender: 'wa-1' } });
+    await rt.receive('support', waMessage('wa-1', `m-${i}`, `Hello ${i}`));
     await rt.advance();
   }
   const denied = (await rt.chain('support:wa-1/support')).filter((e) => e.kind === 'verdict' && e.body.outcome === 'denied').map((e) => e.body);

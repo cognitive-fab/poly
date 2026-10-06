@@ -1,8 +1,8 @@
 // The Slack conversation (PS15), written from Slack's documentation of chat.postMessage and of the channel_archive
 // and channel_unarchive events. Each rule, its source and the date it was read are in slack/PROVENANCE.md. A thread is
 // one Slack channel. Nothing is posted to an archived channel, and at most one message is posted per second: after a
-// post, the next waits until a one-second timer has fired. A send the rules forbid is accepted, and the application
-// is told why (Q1, S179).
+// post, the next waits until a one-second timer has fired. A reply queued behind a post waits for the timer and is
+// posted when it fires (review B-F2). A send the rules forbid is accepted, and the application is told why (Q1, S179).
 //
 // poly's own bounds, as in every std conversation: one slot holds a send, then its receipt, until the application's
 // Ack (PS15.3), and a reply while it is held is refused "busy"; at most two messages wait for an answer, and a third
@@ -11,7 +11,8 @@ module std.channels.slack
 
 enum Event { Posted, Archived, Unarchived }
 
-enum Slot { Free, Sending, Receipt }
+// Waiting: the receipt is acknowledged, and the first queued reply waits for the one-second timer.
+enum Slot { Free, Sending, Receipt, Waiting }
 
 // K11, PT21.4: the sender claims the adapter verified, which travel in the Inbound step's label and, by lineage,
 // in every step it causes. An adapter's verified true is Verified; a provider event carries the provider's own
@@ -143,9 +144,23 @@ service machine Conversation {
     send app <- Delivered()
   }
 
+  // The timer has fired: a reply that waited for it is posted now (review B-F2).
   on Cooled {
     require cooling else reject "idle"
     cooling' = false
+    if slot is Waiting {
+      queued' = queued - 1
+      queue1' = queue2
+      queue2' = none
+      pending' = pending - 1
+      if archived {
+        slot' = Receipt
+        send app <- Rejected(reason: "channel-archived")
+      } else {
+        slot' = Sending
+        emit send(body: queue1)
+      }
+    }
   }
 
   // is_archived, not_in_channel, channel_not_found and rate_limited after its retries are a failed send.
@@ -162,18 +177,18 @@ service machine Conversation {
       slot' = Free
       pending' = pending - 1
     } else {
-      // The first queued reply takes the slot, under the rules as they stand now.
-      queued' = queued - 1
-      queue1' = queue2
-      queue2' = none
-      pending' = pending - 1
-      if archived {
-        slot' = Receipt
-        send app <- Rejected(reason: "channel-archived")
+      if cooling {
+        // The first queued reply waits for the timer, and Cooled posts it (review B-F2).
+        slot' = Waiting
       } else {
-        if cooling {
+        // The first queued reply takes the slot, under the rules as they stand now.
+        queued' = queued - 1
+        queue1' = queue2
+        queue2' = none
+        pending' = pending - 1
+        if archived {
           slot' = Receipt
-          send app <- Rejected(reason: "rate-limited")
+          send app <- Rejected(reason: "channel-archived")
         } else {
           slot' = Sending
           emit send(body: queue1)
@@ -191,7 +206,14 @@ service machine Conversation {
     exhausted -> SendFailed()
   }
 
+  // Only the timer's own step posts while it runs: the reply that waited for it (review B-F2).
+  step property one-message-per-second: !(pre.cooling && action != Cooled && emits(send))
+  step property queued-reply-waits-for-the-clock: !(action == Ack && pre.cooling && pre.queued > 0 && post.queued < pre.queued)
+  // poly's own (review B-F4, M8b): the queue keeps the order the replies were given in.
+  step property queue-shifts-in-order: !(pre.queued > post.queued) || post.queue1 == pre.queue2 && post.queue2 == none
+  step property queue-appends-first: !(action == Reply && pre.queued == 0 && post.queued == 1 && post.queue1 != body)
+  step property queue-appends-second: !(action == Reply && pre.queued == 1 && post.queued == 2 && (post.queue2 != body || post.queue1 != pre.queue1))
+
   never no-post-to-archived: emit send while archived
-  never one-message-per-second: emit send while cooling
   never one-send-at-a-time: emit send while slot is Sending
 }

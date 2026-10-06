@@ -31,7 +31,7 @@ export async function concierge(name) {
   const cfg = {
     wa: { appSecret: secret(), accessToken: secret(), phoneNumberId: '106540352242922', verifyToken: secret(), apiVersion: 'v23.0' },
     tw: { accountSid: 'ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', authToken: secret(), from: '+15557122661' },
-    sl: { signingSecret: secret(), botToken: `xoxb-${secret()}` },
+    sl: { signingSecret: secret(), botToken: `xoxb-${secret()}`, teamId: 'T123ABC456' },
   };
   const sent = { support: [], text: [], staff: [] };
   const answering = (list, response) => ({ http: { async request(r) { list.push(r); return response(); } } });

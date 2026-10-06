@@ -28,7 +28,24 @@ export function fresh(timestamp: string, now: number, tolerance: number, fault?:
  * a look-alike object. The set is this module instance's: an adapter made by another copy of the package is not in it.
  */
 const MADE = new WeakSet<object>();
-export function made<T extends object>(adapter: T): T { MADE.add(adapter); return adapter; }
+// Review D-F1 (M8b): an adapter is frozen when it is made, so no holder can swap its send or verify, or its kind,
+// after the runtime certified it by identity.
+export function made<T extends object>(adapter: T): T { Object.freeze(adapter); MADE.add(adapter); return adapter; }
+
+/**
+ * Review C-F6 (M8b): an adapter is not made with an empty secret, token or name: a signature under an empty secret
+ * proves nothing, and a verify token that is empty matches an empty query.
+ */
+export function need(adapter: string, fields: Record<string, unknown>): void {
+  for (const [name, value] of Object.entries(fields)) {
+    if (typeof value !== 'string' || value === '') throw new Error(`${adapter}: ${name} is empty, and an adapter made with an empty secret or name would accept what anyone signs`);
+  }
+}
+
+/** Review C-F1 (M8b): no configured value that goes into a header or a command holds CR or LF. */
+export function oneLine(adapter: string, fields: Record<string, string>): void {
+  for (const [name, value] of Object.entries(fields)) if (/[\r\n]/.test(value)) throw new Error(`${adapter}: ${name} holds CR or LF, and it goes into a header or a command line`);
+}
 export function madeHere(adapter: unknown): boolean { return typeof adapter === 'object' && adapter !== null && MADE.has(adapter); }
 
 /** Constant-time comparison of two encoded signatures; a length difference is a mismatch, never an exception. */

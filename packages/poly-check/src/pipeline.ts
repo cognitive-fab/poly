@@ -109,6 +109,8 @@ export interface ConfigCheck {
   configuration: string;
   /** PS5.2a (S178): the never statements of each instance's machine, checked on its global steps. */
   nevers?: { instance: string; machine: string; property: string; violated: boolean }[];
+  /** PS15.5 (A-F2, as ruled): whose never statements this configuration checked, and whose it left to their own. */
+  neverInstances?: { checked: string[]; elsewhere: { instance: string; configuration: string }[] };
   stages: StageRecord[];
   /** Liveness properties, listed as not run (M1-2). */
   notRun: { property: string; reason: string }[];
@@ -763,6 +765,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   cc.diagnostics.push(...r.findings);
   cc.vacuous = vacuousRecords(r.vacuous);
   cc.nevers = r.nevers;
+  cc.neverInstances = r.neverInstances;
   const groups = new Map<string, { machine: string; n: number }>();
   for (const i of r.instances) {
     const key = i.group ?? i.name;
@@ -998,7 +1001,10 @@ function finish(report: CheckReport, module?: Module): CheckReport {
     }
   }
   // A property not run keeps the verdict from CLEAN: INCONCLUSIVE at best, FINDINGS if a safety check failed (M1-2).
-  for (const m of [...report.machines, ...report.configurations]) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length || m.vacuous.length ? ['INCONCLUSIVE' as Verdict] : [])]);
+  for (const m of report.machines) m.verdict = fold([verdictOf(m.diagnostics), ...m.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(m.notRun.length || m.vacuous.length ? ['INCONCLUSIVE' as Verdict] : [])]);
+  // Review A-F7 (M8b): a configuration whose check did not run (the program refused at stage 0) is INCONCLUSIVE, as
+  // a policy scope is; its one stage carries no verdict, so the fold above would read CLEAN.
+  for (const c of report.configurations) c.verdict = fold([verdictOf(c.diagnostics), ...c.stages.filter((s) => s.verdict).map((s) => s.verdict!), ...(c.notRun.length || c.vacuous.length || c.stages.some((s) => s.status === 'not-run') ? ['INCONCLUSIVE' as Verdict] : [])]);
   // PT8: a policy scope folds like a machine: its diagnostics, its stages, and anything not run or vacuous.
   for (const p of report.policies) {
     if (p.verdict === 'INCONCLUSIVE' && p.stages.every((s) => s.status === 'not-run')) continue;

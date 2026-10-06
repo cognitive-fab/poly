@@ -182,9 +182,14 @@ service machine Conversation {
     exhausted -> SendFailed()
   }
 
-  step property consent-changes-only-by-keyword: pre.consent == post.consent || action == Inbound
+  step property consent-changes-only-by-keyword: pre.consent == post.consent || action == Inbound && !(keyword is Plain) && !(keyword is Help)
 
   reject property opt-keyword-never-refused: (action == Inbound && (keyword is OptOut || keyword is OptIn || keyword is Reported)) implies !rejected("backlog")
+
+  // poly's own (review B-F4, M8b): the queue keeps the order the replies were given in.
+  step property queue-shifts-in-order: !(pre.queued > post.queued) || post.queue1 == pre.queue2 && post.queue2 == none
+  step property queue-appends-first: !(action == Reply && pre.queued == 0 && post.queued == 1 && post.queue1 != body)
+  step property queue-appends-second: !(action == Reply && pre.queued == 1 && post.queued == 2 && (post.queue2 != body || post.queue1 != pre.queue1))
 
   never no-send-after-opt-out: emit send while !consent
   never one-send-at-a-time: emit send while slot is Sending

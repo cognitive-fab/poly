@@ -127,7 +127,7 @@ test('sms: a status callback is a receipt; a send posts the documented form; 216
   const r = await a.send({ to: '+15558675310', body: 'x', idempotencyKey: 'k2', now: NOW }, transport(answer(400, recorded('twilio/error-21610.json'))));
   assert.deepEqual([r.ok, r.permanent, /21610/.test(r.error)], [false, true, true]);
   // PS15.4: 21610 is an opt-out std.channels.sms's consent reads: the provider event Reported for the number.
-  assert.deepEqual(r.events, [{ providerId: '21610:+15558675310', fields: { from: '+15558675310', keyword: 'Reported' } }]);
+  assert.deepEqual(r.events, [{ providerId: '21610:k2', fields: { from: '+15558675310', keyword: 'Reported' } }]);
 });
 
 // ── Email: Mailgun inbound routes, RFC 8058 one-click unsubscribe, SMTP submission ──
@@ -142,7 +142,7 @@ function mgSigned(c, form, timestamp = String(NOW / 1000)) {
 test('email: a recorded inbound message, signed by Mailgun, gives from and the event Mail, the plain body, and an unverified claim', () => {
   const c = mailConfig();
   const v = email(c).verify(mgSigned(c, recorded('mailgun/inbound.form')), NOW);
-  assert.deepEqual(v.messages, [{ providerMessageId: '<20261005103000.1234@mail.example.org>', fields: { from: 'bob@example.org', event: 'Mail' }, body: 'Hello, where is my order?\r\n', claims: { verified: false, sender: 'bob@example.org' } }]);
+  assert.deepEqual(v.messages, [{ providerMessageId: 'mail:<20261005103000.1234@mail.example.org>', fields: { from: 'bob@example.org', event: 'Mail' }, body: 'Hello, where is my order?\r\n', claims: { verified: false, sender: 'bob@example.org' } }]);
 });
 
 test('email: a forged or stale webhook is refused: another key, a body changed, a timestamp older than the tolerance', () => {
@@ -156,7 +156,7 @@ test('email: a forged or stale webhook is refused: another key, a body changed, 
   // webhook's nonce, which ingress claims in the store (the cache Mailgun's documentation recommends).
   const w = mgSigned(c, form);
   const token = new URLSearchParams(w.body).get('token');
-  assert.deepEqual(a.verify(w, NOW).nonce, { key: `mailgun:${token}`, at: NOW, ttlMs: 300_000 });
+  assert.deepEqual(a.verify(w, NOW).nonce, { key: `mailgun:${token}`, until: NOW + 300_000 });
 });
 
 test('email: Mailgun\'s event webhooks: a permanent failure is the provider event Bounce for its recipient; a delivery is a receipt, recorded only', () => {
@@ -184,10 +184,10 @@ test('email: Mailgun\'s event webhooks: a permanent failure is the provider even
 test('email: a one-click unsubscribe (RFC 8058) is the event Unsubscribe, only with the token the adapter issued and the documented body', () => {
   const c = mailConfig();
   const a = email(c);
-  const url = unsubscribeUrl(c, 'bob@example.org');
+  const url = unsubscribeUrl(c, 'bob@example.org', NOW);
   const post = (u, body = 'List-Unsubscribe=One-Click') => ({ method: 'POST', url: u, headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
-  assert.deepEqual(a.verify(post(url), NOW).messages, [{ providerMessageId: 'unsubscribe:bob@example.org', fields: { from: 'bob@example.org', event: 'Unsubscribe' }, body: '', claims: { verified: true, sender: 'bob@example.org' } }]);
-  assert.deepEqual(a.verify(post(unsubscribeUrl({ ...c, unsubscribeKey: secret() }, 'bob@example.org')), NOW), { refused: 'unsubscribe-token-invalid' });
+  assert.deepEqual(a.verify(post(url), NOW).messages, [{ providerMessageId: `unsubscribe:bob@example.org:${NOW}`, fields: { from: 'bob@example.org', event: 'Unsubscribe' }, body: '', claims: { verified: true, sender: 'bob@example.org' } }]);
+  assert.deepEqual(a.verify(post(unsubscribeUrl({ ...c, unsubscribeKey: secret() }, 'bob@example.org', NOW)), NOW), { refused: 'unsubscribe-token-invalid' });
   assert.deepEqual(a.verify(post(url.replace('Ym9i', 'ZXZl')), NOW), { refused: 'unsubscribe-token-invalid' });
   assert.deepEqual(a.verify(post(url, 'List-Unsubscribe=Maybe'), NOW), { refused: 'unsubscribe-body-invalid' });
 });
@@ -230,7 +230,7 @@ test('email: a 5yz reply is a permanent failure (a bounce), a 4yz one is not', a
 });
 
 // ── Slack Events API and chat.postMessage ──
-const slConfig = () => ({ signingSecret: secret(), botToken: `xoxb-${secret()}` });
+const slConfig = () => ({ signingSecret: secret(), botToken: `xoxb-${secret()}`, teamId: 'T123ABC456' });
 const slSigned = (c, body, ts = String(NOW / 1000)) => ({ method: 'POST', url: 'https://hooks.example.com/channels/slack', headers: { 'content-type': 'application/json', 'x-slack-request-timestamp': ts, 'x-slack-signature': `v0=${hex('sha256', c.signingSecret, `v0:${ts}:${body}`)}` }, body });
 
 test('slack: a recorded message event gives channel and the event Posted, the text, and a verified claim; archive and unarchive are events', () => {
@@ -271,7 +271,7 @@ test('slack: a send is chat.postMessage; is_archived is permanent, rate_limited 
   const limited = await a.send({ to: 'C1', body: 'x', idempotencyKey: 'k3', now: NOW }, transport(answer(429, recorded('slack/post-rate-limited.json'))));
   assert.deepEqual([limited.ok, limited.permanent], [false, false]);
   // PS15.4: is_archived is a report std.channels.slack's rule reads, so it carries the provider event Archived.
-  assert.deepEqual(archived.events, [{ providerId: 'is_archived:C1', fields: { channel: 'C1', event: 'Archived' } }]);
+  assert.deepEqual(archived.events, [{ providerId: 'is_archived:k2', fields: { channel: 'C1', event: 'Archived' } }]);
   assert.equal(limited.events, undefined);
 });
 
@@ -331,7 +331,7 @@ function fakeHost() {
     async inbound(channel, fields, opts) { calls.push(['inbound', channel, fields, opts]); return { outcome: 'delivered' }; },
     async ingressRecord(channel, record) { calls.push(['record', channel, record]); },
     nonces: new Set(),
-    async claimNonce(channel, key) { calls.push(['nonce', channel, key]); if (this.nonces.has(`${channel}:${key}`)) return false; this.nonces.add(`${channel}:${key}`); return true; },
+    async claimNonce(channel, key, until, now) { calls.push(['nonce', channel, key]); if (this.nonces.has(`${channel}:${key}`)) return false; this.nonces.add(`${channel}:${key}`); return true; },
   };
 }
 

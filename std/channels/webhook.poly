@@ -175,6 +175,10 @@ service machine Conversation {
   }
 
   step property disabled-only-after-failures: !(pre.enabled && !post.enabled) || pre.failures == 2
+  // poly's own (review B-F4, M8b): the queue keeps the order the replies were given in.
+  step property queue-shifts-in-order: !(pre.queued > post.queued) || post.queue1 == pre.queue2 && post.queue2 == none
+  step property queue-appends-first: !(action == Reply && pre.queued == 0 && post.queued == 1 && post.queue1 != body)
+  step property queue-appends-second: !(action == Reply && pre.queued == 1 && post.queued == 2 && (post.queue2 != body || post.queue1 != pre.queue1))
 
   never no-delivery-while-disabled: emit send while !enabled
   never one-send-at-a-time: emit send while slot is Sending

@@ -249,8 +249,9 @@ test('review B2: a decision handler can only come from the provider host, and a 
   const { rt, clock } = await loaded(a);
   try {
     assert.throws(() => rt.handle('decision.route', () => ({ answer: 'Refund', conf: 900, margin: 900 })), /provide/);
-    // Around the API, a handler that keeps no record: the completion's commit is refused, and no refund is issued.
-    rt.handlers.set('decision.route', () => ({ answer: 'Refund', conf: 900, margin: 900 }));
+    // Around the API (the worker's own map, since the runtime's is private), a handler that keeps no record: the
+    // completion's commit is refused, and no refund is issued.
+    rt.worker.handlers.set('decision.route', () => ({ answer: 'Refund', conf: 900, margin: 900 }));
     await rt.create('support.Ticket', { id: 'b2' });
     await rt.dispatch('b2', 'Received', TEXT);
     await rt.worker.tick();

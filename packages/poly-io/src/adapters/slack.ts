@@ -5,11 +5,16 @@
 // the conversation's Inbound; the event id is the provider's message id, so Slack's retries are one step.
 import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { fresh, hmac, httpFailure, json, noAnswer, signatureMatches, made, type AdapterFault } from '../util.js';
+import { fresh, hmac, httpFailure, json, noAnswer, signatureMatches, made, need, type AdapterFault } from '../util.js';
 
 export interface SlackConfig {
   signingSecret: string;
   botToken: string;
+  /**
+   * The workspace the bot is installed in (the team id). Review C-F5 (M8b): an app installed in several workspaces
+   * signs every workspace's events with its one signing secret, so an event of another workspace is refused.
+   */
+  teamId: string;
   /** A seeded mutant, for the tests only (ADAPTER_FAULTS). */
   fault?: AdapterFault;
 }
@@ -20,6 +25,7 @@ const EVENTS: Record<string, string> = { message: 'Posted', channel_archive: 'Ar
 interface SlackEvent { type?: unknown; channel?: unknown; user?: unknown; text?: unknown; subtype?: unknown; bot_id?: unknown }
 
 export function slack(c: SlackConfig): ChannelAdapter {
+  need('slack', { signingSecret: c.signingSecret, botToken: c.botToken, teamId: c.teamId });
   return made({
     kind: 'slack',
     provider: 'slack-events-api',
@@ -31,9 +37,10 @@ export function slack(c: SlackConfig): ChannelAdapter {
       if (!ts || !sig) return { refused: 'signature-missing' };
       if (!fresh(ts, now, REPLAY_SECONDS, c.fault)) return { refused: 'timestamp-stale' };
       if (!signatureMatches(sig, `v0=${hmac('sha256', c.signingSecret, `v0:${ts}:${w.body}`).toString('hex')}`, c.fault)) return { refused: 'signature-invalid' };
-      const doc = json(w.body) as { type?: unknown; challenge?: unknown; event_id?: unknown; event?: SlackEvent };
+      const doc = json(w.body) as { type?: unknown; challenge?: unknown; team_id?: unknown; event_id?: unknown; event?: SlackEvent };
       if (doc.type === 'url_verification') return { messages: [], receipts: [], answer: { status: 200, contentType: 'text/plain', body: String(doc.challenge ?? '') } };
       if (doc.type !== 'event_callback' || typeof doc.event_id !== 'string' || !doc.event) return { messages: [], receipts: [] };
+      if (doc.team_id !== c.teamId) return { refused: 'team-mismatch' };
       const e = doc.event;
       const event = typeof e.type === 'string' ? EVENTS[e.type] : undefined;
       // A bot's message, the app's own post among them, and an edit or a deletion (a subtype) are not inbound messages.
@@ -54,8 +61,9 @@ export function slack(c: SlackConfig): ChannelAdapter {
       // Slack answers an error with 200 and ok false; rate_limited (with 429) and an internal error may pass on retry.
       const error = typeof doc.error === 'string' ? doc.error : String(r.status);
       // PS15.4: is_archived is a report std.channels.slack's rule no-post-to-archived reads, so it is the provider event
-      // Archived for the channel's conversation.
-      if (r.status === 200 && error === 'is_archived') return { ok: false, permanent: true, error, events: [{ providerId: `is_archived:${out.to}`, fields: { channel: out.to, event: 'Archived' } }] };
+      // Archived for the channel's conversation. Review D-F9 (M8b): its id is the send's, so an archive reported again
+      // after an unarchive is a step of its own.
+      if (r.status === 200 && error === 'is_archived') return { ok: false, permanent: true, error, events: [{ providerId: `is_archived:${out.idempotencyKey}`, fields: { channel: out.to, event: 'Archived' } }] };
       if (r.status === 200) return { ok: false, permanent: !['rate_limited', 'ratelimited', 'internal_error', 'fatal_error', 'service_unavailable', 'request_timeout'].includes(error), error };
       return httpFailure(r, error);
     },

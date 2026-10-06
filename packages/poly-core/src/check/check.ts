@@ -836,6 +836,10 @@ class Checker {
     for (const e of facts.effects.values()) {
       const k = effectKind(e);
       if (k.startsWith('decision.') || k.startsWith('outcome.')) this.err('PL1208', e, `effect ${e.name} has kind "${k}": the prefixes decision. and outcome. are reserved for the kinds the toolchain generates (PD1.7, PD2.4)`);
+      // Review D-F8 (M8b): channel.<c>.send is a channel's send, which the runtime runs through the channel's certified
+      // adapter to the thread's address; only the expansion writes it, on the conversation's effect send (PS15.1).
+      const generated = e.items.some((it) => it.kind === 'EffKind' && (it as { generated?: string }).generated === 'channel');
+      if (/^channel\.[^.]+\.send$/.test(k) && !generated) this.err('PL1208', e, `effect ${e.name} has kind "${k}": channel.<c>.send is reserved for a channel's conversation, which the expansion writes (PS15.1, S182)`);
     }
     // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
     // Keys are declared by their use (PT6.3, PT6.4); an indexed key k[i] declares the family k (S49).

@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS poly_content (
 CREATE TABLE IF NOT EXISTS poly_ingress_nonce (
   channel TEXT NOT NULL,
   nonce   TEXT NOT NULL,
-  at      INTEGER NOT NULL,
+  until   INTEGER NOT NULL,
   PRIMARY KEY (channel, nonce)
 );
 CREATE TABLE IF NOT EXISTS poly_store_key (
