@@ -6,7 +6,7 @@ export { evaluate, type Env, type Verdict, type GlobalView } from './eval.js';
 export { transition, runHandler, initialState, isTerminal, type Step, type Intent } from './step.js';
 export { explore, machineSystem, pathTo, type System, type Graph, type Edge, type Label, type Outcome } from './explore.js';
 export { checkMachine, pathViolation, instanceOf, alphabetSize, machineVacuity, ENGINE, type MachineReport, type InstanceLine } from './check.js';
-export { antecedents, conjunction, judge, type Antecedent, type Vacuous } from './vacuity.js';
+export { antecedents, conjunction, judge, REF_FAULTS, type RefFault, type Antecedent, type Vacuous } from './vacuity.js';
 export { keyOf, stateKey, statePlain, toPlain, type Value, type State, type UnionValue, type MapValue } from './values.js';
 export { alpha, alphaData, flatten, flattenData, flatValue } from './alpha.js';
 export { translationValidate, type TvResult } from './tv.js';

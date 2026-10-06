@@ -42,7 +42,11 @@ test('D-F3, PS4.4: a timer cancelled before it fires asks for nothing, so a witn
   const f = checkMachine(parse(src).module, 'Alarm').findings.find((d) => d.code === 'PL3002');
   assert.equal(f?.witness.environment, 'unconstrained', JSON.stringify(f?.witness.trace.map((s) => s.action)));
   const r = await run('f3', src);
-  assert.equal(r.verdict, 'CLEAN', JSON.stringify(r.machines.flatMap((m) => m.diagnostics.map((d) => d.message))));
+  // PS5.2a, ruled on M8 plan step 10: the declared configuration offers no timer (S61), so the never is untested there:
+  // vacuous, and the verdict INCONCLUSIVE, with no finding.
+  assert.equal(r.verdict, 'INCONCLUSIVE', JSON.stringify(r.machines.flatMap((m) => m.diagnostics.map((d) => d.message))));
+  assert.deepEqual(r.machines.flatMap((m) => m.diagnostics.filter((d) => d.code === 'PL3002')), []);
+  assert.deepEqual(r.configurations.flatMap((c) => c.vacuous.map((v) => v.property)), ['alarm.no-bell-when-disarmed']);
 });
 
 test('D-F4, PS4.4: a completion that an effect and a timer both deliver is asked for by the emitted effect', { timeout: 180_000 }, async () => {
@@ -56,7 +60,8 @@ test('D-F4, PS4.4: a completion that an effect and a timer both deliver is asked
 
 test('D-F5, PS4.4: a message sent through a let-bound address is a message too', { timeout: 180_000 }, async () => {
   const r = await run('f5', swap(CHAT, '    send chat <- Reply()\n', '    let c = chat\n    send c <- Reply()\n'));
-  assert.equal(r.verdict, 'CLEAN', JSON.stringify(r.machines.flatMap((m) => m.diagnostics.map((d) => d.message))));
+  // PS5.2a, ruled on M8 plan step 10: ruled out, and untested in the declared configuration (no timer, S61).
+  assert.equal(r.verdict, 'INCONCLUSIVE', JSON.stringify(r.machines.flatMap((m) => m.diagnostics.map((d) => d.message))));
   assert.deepEqual(r.machines.find((m) => m.machine === 'Chat').ruledOut.map((x) => x.property), ['free-when-closed']);
 });
 
@@ -75,6 +80,7 @@ test('D-F7, PS5.2a: two never findings ruled out leave the model-check stage CLE
   const chat = r.machines.find((m) => m.machine === 'Chat');
   assert.deepEqual(chat.ruledOut.map((x) => x.property).sort(), ['any-when-closed', 'free-when-closed']);
   assert.equal(chat.stages.find((s) => s.stage === 'model-check').verdict, 'CLEAN');
-  assert.equal(r.verdict, 'CLEAN');
-  assert.equal(r.exit, 0);
+  // PS5.2a, ruled on M8 plan step 10: both untested in the declared configuration (no timer, S61): INCONCLUSIVE.
+  assert.equal(r.verdict, 'INCONCLUSIVE');
+  assert.deepEqual(r.configurations[0].vacuous.map((v) => v.property).sort(), ['chat.any-when-closed', 'chat.free-when-closed']);
 });

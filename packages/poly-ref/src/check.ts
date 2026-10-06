@@ -14,7 +14,7 @@ import { machineHome } from './channels.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
-import { antecedents, judge, type Members, type Vacuous } from './vacuity.js';
+import { antecedents, emittingActions, judge, neverParts, type Members, type RefFault, type Vacuous } from './vacuity.js';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
 const CODE = {
@@ -70,6 +70,8 @@ export interface CheckOptions {
   contents?: number;
   /** PS1.0 (S176): the modules the machine's module uses, for a send to or a spawn of a machine named m.M. */
   program?: Module[];
+  /** For one test each (ruled on M8 plan step 10): a deliberately broken check. */
+  fault?: RefFault;
 }
 
 /**
@@ -320,7 +322,7 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
     });
   }
 
-  const vacuous = machineVacuity(M, g);
+  const vacuous = machineVacuity(M, g, opts.fault);
 
   return {
     vacuous,
@@ -484,7 +486,21 @@ export const familyMembers: Members = (env, group) => {
 };
 
 /** PT12.3, S128: each property of the machine whose antecedent is never true where the property is judged. */
-export function machineVacuity(M: RMachine, g: Graph<State>): Vacuous[] {
+/**
+ * PS5.2a: why a never is not tested over the given steps and states, or null when it is: its while holds in no state,
+ * or it holds and no action that can emit its effect is taken from such a state.
+ */
+export function untested(M: RMachine, p: { name: string; expr: Expr }, steps: { action: string; pre: State }[], states: State[]): string | null {
+  const { cond, effect } = neverParts(p);
+  const holds = (s: State) => cond === null || evaluate(cond, { M, state: s, data: {}, locals: new Map() }) === true;
+  const acts = emittingActions(M.handlers, effect);
+  if (steps.some((x) => acts.has(x.action) && holds(x.pre))) return null;
+  return states.some(holds)
+    ? `never ${p.name}: its while holds, and no action that can emit ${effect} (${[...acts].join(', ') || 'none'}) is taken from such a state`
+    : `never ${p.name}: its while holds in no reachable state`;
+}
+
+export function machineVacuity(M: RMachine, g: Graph<State>, fault?: RefFault): Vacuous[] {
   const out: Vacuous[] = [];
   const states = () => g.states.map((s) => ({ M, state: s, data: {}, locals: new Map() }));
   const accepted = () => g.edges.filter((x) => x.label.verdict.kind === 'accepted').map((x) => ({
@@ -500,7 +516,16 @@ export function machineVacuity(M: RMachine, g: Graph<State>): Vacuous[] {
     }
   };
   for (const p of M.invariants) judgeAll(p.name, p.id, p.expr, states);
-  for (const p of M.stepProperties) judgeAll(p.name, p.id, p.expr, accepted);
+  for (const p of M.stepProperties) {
+    // PS5.2a, ruled on step 10: a never is tested where an action that can emit its effect is taken from a state where
+    // its while holds; the weak measure (its while true on some accepted step) is the fault weak-vacuity.
+    if (M.nevers.has(p.name) && fault !== 'weak-vacuity') {
+      const why = untested(M, p, g.edges.filter((x) => x.label.verdict.kind === 'accepted').map((x) => ({ action: x.label.action, pre: g.states[x.from] })), g.states);
+      if (why) out.push({ property: p.name, id: p.id, parts: [], text: why });
+      continue;
+    }
+    judgeAll(p.name, p.id, p.expr, accepted);
+  }
   for (const p of M.rejectProperties) judgeAll(p.name, p.id, p.expr, every);
   for (const p of M.liveness) {
     if (!p.from || p.quant) continue; // a quantified liveness is refused in a machine (S56)

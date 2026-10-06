@@ -14,8 +14,31 @@ import { SKIP, E13, concierge, thread, recorded, whatsappWebhook, smsWebhook, WA
 const DAY = 24 * 3_600_000;
 const rejections = async (rt, app) => (await accepted(rt, app, 'SendRejected')).map((j) => j.data.reason);
 
-test('AC15, poly check: a concierge variant that sends a free-form reply after the window has closed gets a witness', { todo: 'waiting on a ruling: the conversation\'s timers as inputs of the generated configuration (PS15.5); without them the window never closes in a check' }, async () => {
-  assert.fail('the variant and its witness are written once the ruling is made');
+// AC15's variant: the concierge on a std.channels.whatsapp whose Reply sends free-form whatever the window (its window
+// check taken out), under the test-only std option. The generated configuration fires the window's timer (PS15.5), so
+// poly check finds the reply after the window closed, with a witness through WindowExpired.
+async function variant(name, opts = {}) {
+  const dir = join(ROOT, '.poly', `test-${name}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'concierge.poly'), CONCIERGE);
+  const std = join(dir, 'std');
+  cpSync(join(ROOT, 'std'), std, { recursive: true });
+  const wa = readFileSync(join(std, 'channels', 'whatsapp.poly'), 'utf8');
+  const at = wa.indexOf('  on Reply(body) {');
+  writeFileSync(join(std, 'channels', 'whatsapp.poly'), wa.slice(0, at) + wa.slice(at).replace('if window is Closed {', 'if window is Open && window is Closed {'));
+  return checkFile(join(dir, 'concierge.poly'), { root: dir, std, ...opts });
+}
+const configWitness = (r) => r.configurations.find((c) => c.configuration === 'support')?.diagnostics.find((d) => d.code === 'PL3002' && /free-form-outside-window/.test(d.message));
+
+test('AC15, poly check: the concierge variant that sends a free-form reply after the window has closed gets a witness in its configuration', { timeout: 600_000 }, async () => {
+  const f = configWitness(await variant('ac15-variant'));
+  assert.ok(f && f.witness.length > 0, 'a witness in the support configuration');
+  assert.ok(f.witness.trace.some((s) => s.action === 'WindowExpired'), 'through the window\'s timer');
+});
+
+test('AC15, seeded control: a generated configuration that offers no timer firing finds no reply after the window', { timeout: 600_000 }, async () => {
+  assert.equal(configWitness(await variant('ac15-no-timers', { refFault: 'no-timer-firing' })), undefined);
 });
 
 test('AC15: with the clock past the window, the free-form reply is refused, and the application receives Rejected("window-closed"); nothing is sent', { skip: SKIP, timeout: 300_000 }, async () => {
@@ -52,6 +75,8 @@ test('AC16, poly check: in the concierge, no send after an opt-out is reachable 
   const r = await checkFile(join(dir, 'concierge.poly'), { root: dir });
   assert.equal(r.verdict, 'CLEAN');
   const text = r.configurations.find((c) => c.configuration === 'text');
+  // PS5.2a: tested, not vacuous, in every configuration of the concierge, the window's rule included (PS15.5).
+  for (const c of r.configurations) assert.deepEqual(c.vacuous, [], c.configuration);
   assert.deepEqual(text.nevers.filter((x) => x.property === 'no-send-after-opt-out').map((x) => x.violated), [false]);
   // The mutant: std.channels.sms with its Reply's consent check taken out, under the test-only std option.
   const std = join(dir, 'std');

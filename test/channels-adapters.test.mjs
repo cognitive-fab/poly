@@ -424,11 +424,12 @@ channel support: whatsapp {
   Failed -> Ticket.SendFailed
 }
 
-machine Ticket {
+// It answers every message and takes every receipt, so each rule of the conversation is tested (PS5.2a) and no
+// receipt is rejected (PL5406).
+service machine Ticket {
   state {
     status : Status = New
   }
-  terminal status is Closed
 
   action Start()
   action Got(body: Content)
@@ -441,19 +442,15 @@ machine Ticket {
     status' = Open
   }
   on Got(body) {
-    require status is Open else reject "closed"
-    status' = Closed
+    emit support.reply(body: body)
   }
   on Delivered {
-    require status is Open else reject "closed"
     status' = Closed
   }
   on SendRejected(reason) {
-    require status is Open else reject "closed"
     status' = Closed
   }
   on SendFailed {
-    require status is Open else reject "closed"
     status' = Closed
   }
 }

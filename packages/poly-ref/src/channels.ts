@@ -82,7 +82,7 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
       if (d.bounds) d.bounds = { ...d.bounds, instances: (d.bounds.instances ?? d.instances.reduce((k, i) => k + (i.count ?? 1), 0)) + ofA.reduce((k, i) => k + (i.count ?? 1), 0) };
     }
     decls.push({
-      kind: 'Configuration', id: `ref:${ch.id}:configuration`, name: ch.name,
+      kind: 'Configuration', id: `ref:${ch.id}:configuration`, name: ch.name, generated: 'channel',
       instances: [{ kind: 'ConfigInstance', id: `ref:${ch.id}:app`, name: 'app', count: null, machine: [appName], init: [] } as A.ConfigInstance],
       inputs: [{ kind: 'InputRef', id: `ref:${ch.id}:in`, instance: 'app', index: null, action: ch.starts!.action } as A.InputRef, ...inputsOfConv.map((a) => ({ kind: 'InputRef', id: `ref:${ch.id}:in:${a}`, instance: convName, index: '*', action: a } as A.InputRef))],
       bounds: { kind: 'ConfigBounds', id: `ref:${ch.id}:bounds`, transit: pending.hi, instances: 2 } as A.ConfigBounds,

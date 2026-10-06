@@ -87,7 +87,7 @@ function stepModule(mod: SamModule, rt: RuntimeFacts, pre: Record<string, unknow
 
 const verdictText = (v: Verdict) => (v.kind === 'rejected' ? `rejected(${v.reason})` : v.kind);
 
-export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number; principals?: number; isolation?: 'openshell'; program?: Module[] } = {}): Promise<TvResult> {
+export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number; principals?: number; isolation?: 'openshell'; program?: Module[]; fault?: import('./vacuity.js').RefFault } = {}): Promise<TvResult> {
   const report = checkMachine(module, machineName, opts);
   const { graph: g, model: M } = report;
   // Finding 5: sam-pattern resolves from poly's own install, wherever the build directory is.

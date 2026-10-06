@@ -201,24 +201,18 @@ for (const [kind, spec] of Object.entries(KINDS)) {
     for (const [, c] of source(kind).matchAll(/\b(\d+(?:ms|s|m|h))\b/g)) assert.ok(prov.includes(`\`${c}\``), `${c}: not in PROVENANCE.md`);
   });
 
-  test(`std.channels.${kind}: an application bound through a channel checks CLEAN in the generated configuration`, { timeout: 300_000 }, async () => {
-    const r = await check('desk.poly', application(kind, spec));
-    assert.equal(r.verdict, 'CLEAN', text(r));
-    assert.deepEqual(r.machines.map((m) => m.machine).sort(), ['Ticket', 'line.Conversation']);
-    const cfg = r.configurations.find((c) => c.configuration === 'line');
-    assert.ok(cfg && cfg.verdict === 'CLEAN', text(r));
-  });
 
   // The real std, with no test option: admission certifies the channel, whose descriptor records the library's digest,
   // and the runtime loads it. Until E13 a new thread is refused creation-unavailable (PS15.4).
   test(`std.channels.${kind}: an application on it is admitted and loaded from std/, and its descriptor records the library`, { timeout: 300_000 }, async () => {
     const key = makeKey(`std-${kind}`);
     const dir = project(`std-${kind}`, [], key, 'test-std-channels-rt');
-    writeFileSync(join(dir, 'src', 'desk.poly'), application(kind, spec));
+    // The application that answers every message: one that answers once tests no rule of one send at a time (PS5.2a).
+    writeFileSync(join(dir, 'src', 'desk.poly'), answering(kind, spec));
     const a = await admit(dir, {});
     assert.equal(a.verdict, 'CLEAN', JSON.stringify(a.error ?? a));
     const cert = JSON.parse(readFileSync(a.certificatePath, 'utf8'));
-    assert.deepEqual(cert.poly.channels.map((c) => [c.name, c.application]), [['line', 'desk.Ticket']]);
+    assert.deepEqual(cert.poly.channels.map((c) => [c.name, c.application]), [['line', 'desk.Agent']]);
     const descriptor = JSON.parse(readFileSync(join(dir, '.poly', 'build', 'channels', 'line.json'), 'utf8'));
     assert.equal(descriptor.library.module, `std.channels.${kind}`);
     assert.match(descriptor.library.digest, /^sha256:[0-9a-f]{64}$/);
@@ -315,4 +309,24 @@ test('std.channels.whatsapp, PS15.5: an application whose receipt handler can be
   const r = await check('desk.poly', src);
   const f = all(r).find((d) => d.code === 'PL5406');
   assert.ok(f && /Delivered/.test(f.message) && f.witness.length > 0, text(r));
+});
+
+// PS5.2a, as ruled on step 10: a never is tested in a configuration only where an action that can emit its effect is
+// taken from a state where its while holds. The one-ticket application answers once, so in its configuration
+// one-send-at-a-time is never tested: it is vacuous there, and the configuration is INCONCLUSIVE, not CLEAN. This is
+// the control of the new measure; with the vacuity check reverted to the weak one (fault weak-vacuity) it is CLEAN.
+test('PS5.2a, the tested measure: the one-ticket application is INCONCLUSIVE for one-send-at-a-time, which it never tests; the weak measure called it CLEAN', { timeout: 300_000 }, async () => {
+  const r = await check('desk.poly', application('whatsapp', KINDS.whatsapp));
+  const cfg = r.configurations.find((c) => c.configuration === 'line');
+  assert.equal(cfg.verdict, 'INCONCLUSIVE', text(r));
+  const v = cfg.vacuous.find((x) => x.property === 'line.Conversation.one-send-at-a-time' || /one-send-at-a-time/.test(x.property));
+  assert.ok(v && /is taken from such a state|holds in no reachable state/.test(v.antecedent), JSON.stringify(cfg.vacuous));
+  // The rule the window keeps is tested now that the window's timer fires (PS15.5).
+  assert.ok(!cfg.vacuous.some((x) => /free-form-outside-window/.test(x.property)), JSON.stringify(cfg.vacuous));
+  const d = join(OUT, `case-${n++}`);
+  rmSync(d, { recursive: true, force: true });
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, 'desk.poly'), application('whatsapp', KINDS.whatsapp));
+  const weak = await checkFile(join(d, 'desk.poly'), { root: d, refFault: 'weak-vacuity' });
+  assert.equal(weak.configurations.find((c) => c.configuration === 'line').verdict, 'CLEAN', 'the seeded control: the weak measure');
 });

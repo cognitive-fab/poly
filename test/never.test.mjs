@@ -109,7 +109,10 @@ test('PS5.2a, PS4.4: alone, a witness that needs a message nothing sent is marke
 
 test('PS5.2a: a configuration that cannot reach the violation rules the unconstrained witness out, and it is not counted', { timeout: 180_000 }, async () => {
   const r = await checkFile(join(DIR, 'chat-ruled-out.poly'), { root: join(OUT, 'ruled-out') });
-  assert.equal(r.verdict, 'CLEAN', messages(r));
+  // PS5.2a, ruled on M8 plan step 10: the declared configuration pair offers no timer (S61), so it never takes Reply
+  // from a closed window: the never is untested there, listed vacuous, and the verdict is INCONCLUSIVE, not CLEAN.
+  assert.equal(r.verdict, 'INCONCLUSIVE', messages(r));
+  assert.deepEqual(r.configurations[0].vacuous.map((v) => v.property), ['chat.free-when-closed']);
   const chat = r.machines.find((m) => m.machine === 'Chat');
   assert.deepEqual(chat.diagnostics.filter((d) => d.code === 'PL3002'), []);
   assert.deepEqual(chat.ruledOut?.map((x) => [x.property, x.configurations]), [['free-when-closed', ['pair']]]);

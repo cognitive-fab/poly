@@ -17,6 +17,8 @@ const VACUOUS = {
   'conformance/m2/embed/orders.ts': { Order: [{ property: 'cancel-is-final', antecedent: 'pre.status == Cancelled' }] },
   'examples/orders/orders.poly': { Order: [{ property: 'cancel-is-final', antecedent: 'pre.status == Cancelled' }] },
   'examples/field-studies/raft/raft.poly': { Node: [{ property: 'shutdown-is-a-true-terminal-state', antecedent: 'pre.role == Shutdown' }] },
+  // PS5.2a, ruled on M8 plan step 10: the declared configuration pair offers no timer (S61, S192), so its never is untested.
+  'conformance/m8/never/chat-ruled-out.poly': { pair: [{ property: 'chat.free-when-closed', antecedent: 'never free-when-closed: its while holds, and no action that can emit send (Reply) is taken from such a state' }] },
 };
 
 function sources() {

@@ -79,5 +79,6 @@ service machine Conversation {
     exhausted -> SendFailed()
   }
 
-  never free-when-closed: emit send while window is Closed
+  // No never here: the test kind's window never closes, so a rule over a closed window would be vacuous in every
+  // configuration (PS5.2a, ruled on M8 plan step 10). The std kinds carry the rules, each tested.
 }

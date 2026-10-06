@@ -4,7 +4,7 @@
 // The antecedent of an implication is the conjunction of the left sides along its right spine (`a implies b
 // implies c` has `a && b`). A conjunction is judged conjunct by conjunct. A quantifier at the top is judged per
 // member: `forall` for every member, `exists` for some. An implication under any other operator is not judged.
-import type { Expr, Binary } from '@poly/core';
+import type { Expr, Binary, Stmt } from '@poly/core';
 import { evaluate, type Env } from './eval.js';
 
 export interface Antecedent {
@@ -23,6 +23,30 @@ export interface Vacuous {
   /** For a path property clause, what was never seen, in words. */
   text?: string;
   member?: number;
+}
+
+/**
+ * Deliberately broken checks, for one test each (ruled on M8 plan step 10): a channel's configuration that offers no
+ * timer firing, one that fires a disarmed timer, and the vacuity of a never judged by the weak measure.
+ */
+export const REF_FAULTS = ['no-timer-firing', 'fire-disarmed', 'weak-vacuity'] as const;
+export type RefFault = (typeof REF_FAULTS)[number];
+
+/** PS5.2a: a never's `while` (null without one) and its effect, read back from the step property it lowers to. */
+export function neverParts(p: { expr: Expr }): { cond: Expr | null; effect: string } {
+  const e = p.expr;
+  if (e.kind === 'Binary' && e.op === 'implies') return { cond: e.left, effect: ((e.right as { arg: { effect: string } }).arg).effect };
+  return { cond: null, effect: ((e as unknown as { arg: { effect: string } }).arg).effect };
+}
+
+/** PS5.2a: the actions whose handler can emit the effect: an `emit` of it on some path of the body. */
+export function emittingActions(handlers: Map<string, { body: Stmt[] }>, effect: string): Set<string> {
+  const has = (body: Stmt[]): boolean => body.some((s) =>
+    (s.kind === 'Intent' && s.op === 'emit' && s.target === effect)
+    || (s.kind === 'If' && (has(s.then) || has(s.else ?? [])))
+    || (s.kind === 'Match' && s.arms.some((a) => has(a.body)))
+    || (s.kind === 'For' && has(s.body)));
+  return new Set([...handlers].filter(([, h]) => has(h.body)).map(([a]) => a));
 }
 
 export function antecedents(e: Expr): Antecedent[] {

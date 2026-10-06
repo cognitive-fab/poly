@@ -26,7 +26,7 @@ import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
 import { handlerClosure } from './handlers.js';
 import { policyReports, type PolicyReport } from './policies.js';
-import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, conjunction, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type Vacuous } from '@poly/ref';
+import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, conjunction, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type RefFault, type Vacuous } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
@@ -166,6 +166,8 @@ export interface CheckOptions {
   refModule?: Module;
   /** PS15, set by checkFile: the program as written, which poly-ref reads with refModule. */
   refProgram?: Module[];
+  /** For one test each (ruled on M8 plan step 10): a deliberately broken check of poly-ref's (REF_FAULTS). */
+  refFault?: RefFault;
   /** PS15, set by checkFile: the machine as poly-ref names it (c.Conversation for a channel's conversation). */
   refMachine?: string;
   /** PS15, set by checkFile: each channel's expansion, for its descriptor. */
@@ -326,7 +328,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     if (report.verdict === 'CLEAN') { report.verdict = 'INCONCLUSIVE'; report.exit = EXIT_CODES.INCONCLUSIVE; }
     return report;
   }
-  const configs = configurationReports(module, refused, opts.uses, original, uses.program);
+  const configs = configurationReports(module, refused, opts.uses, original, uses.program, opts.refFault);
   report.configurations.push(...configs.configurations);
   ruleOut(report, module);
   // ── stage 5: policies (PT8) ─────────────────────────────────────────────
@@ -454,7 +456,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   t0 = performance.now();
   // PS15: poly-ref is given the source as written (and c.Conversation for a channel's conversation), never the expansion.
   const refProgram = opts.refProgram ?? opts.uses;
-  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram });
+  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, ...(opts.refFault ? { fault: opts.refFault } : {}) });
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {
@@ -749,7 +751,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  * engine checks configurations, so the stage is poly-ref's alone (PA0.1). Liveness is listed as not run (M1-2).
  * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
  */
-function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program): ConfigCheck {
+function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault): ConfigCheck {
   const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
@@ -757,7 +759,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   }
   const t0 = performance.now();
   // PS15: poly-ref reads the source as written, and generates a channel's configuration on its own.
-  const r = checkConfiguration(original, decl.name, { program: refProgram });
+  const r = checkConfiguration(original, decl.name, { program: refProgram, ...(fault ? { fault } : {}) });
   cc.diagnostics.push(...r.findings);
   cc.vacuous = vacuousRecords(r.vacuous);
   cc.nevers = r.nevers;
@@ -810,12 +812,12 @@ function ruleOut(report: CheckReport, module: Module): void {
 }
 
 /** Stage 4b for every configuration of a module; the first explorer throw stops the stage and is reported. */
-export function configurationReports(module: Module, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program): { configurations: ConfigCheck[]; error?: string } {
+export function configurationReports(module: Module, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault): { configurations: ConfigCheck[]; error?: string } {
   const configurations: ConfigCheck[] = [];
   for (const d of module.decls) {
     if (d.kind !== 'Configuration') continue;
     try {
-      configurations.push(configurationStage(module, d, refused, program, original, refProgram));
+      configurations.push(configurationStage(module, d, refused, program, original, refProgram, fault));
     } catch (e) {
       return { configurations, error: `configuration ${d.name}: ${(e as Error).message}` };
     }

@@ -30,12 +30,12 @@ import type { Diagnostic, Module, Witness, WitnessStep } from '@poly/core';
 import { createHash } from 'node:crypto';
 import { buildMachine, inCheckDomain, inType, valuesOf, type RMachine } from './model.js';
 import { fairCycles, type FairGroup } from './liveness.js';
-import { antecedents, judge, type Members, type Vacuous } from './vacuity.js';
+import { antecedents, judge, neverParts, type Members, type RefFault, type Vacuous } from './vacuity.js';
 import { transition, initialState, isTerminal } from './step.js';
 import { AbsentInstance, evaluate, evaluateAt, type GlobalView } from './eval.js';
 import { explore, pathTo, type Edge, type Graph, type Label, type Outcome, type System } from './explore.js';
 import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
-import { ENGINE } from './check.js';
+import { ENGINE, untested } from './check.js';
 import { readChannels } from './channels.js';
 
 /** A message in transit: its target instance, action and data (PS13.2). */
@@ -64,7 +64,16 @@ export interface GlobalState {
   sigma: (State | null)[];
   /** The multiset μ, sorted by the messages' keys (PS13.2a). */
   mu: Message[];
+  /**
+   * PS15.5 (ruled on step 10): in a channel's generated configuration, the conversation's armed timers, by instance
+   * and key, with the action and data each will deliver; one per key. Absent elsewhere.
+   */
+  timers?: ArmedTimer[];
 }
+
+export interface ArmedTimer { instance: number; key: string; action: string; data: Record<string, Value> }
+const timerKey = (t: ArmedTimer) => `${t.instance}:${t.key}`;
+const sortTimers = (ts: ArmedTimer[]) => [...ts].sort((a, b) => (timerKey(a) < timerKey(b) ? -1 : timerKey(a) > timerKey(b) ? 1 : 0));
 
 /** PS15.5: the roles a channel gives the machines of a configuration. */
 export interface ChannelRoles { application: string; conversation: string; receipts: Set<string> }
@@ -230,7 +239,8 @@ export function globalView(instances: ConfigInstance[], sigma: (State | null)[],
 }
 
 /** The configuration as a System over global states (PS13.2, PS13.3). */
-export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[]): System<GlobalState> {
+export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[], opts: { timed?: Set<number>; fault?: RefFault } = {}): System<GlobalState> {
+  const timed = opts.timed ?? new Set<number>();
   const B = decl.bounds?.transit ?? Infinity;
   const index = new Map(instances.map((x, k) => [x.name, k]));
   const N = decl.bounds?.instances ?? Infinity;
@@ -247,7 +257,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       inputs.push({ instance: k, action: r.action, data: dataOf(instances[k].machine, r.action) });
     }
   }
-  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin']): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
+  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin'], firing?: string): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
     const inst = instances[k];
     // PD5.2.2a: an input with claims starts a chain whose origin class is its claims and its intent; a delivered message's
     // step inherits the message's origin class.
@@ -285,7 +295,14 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       next.push({ ...(inst.scope !== instances[t].scope ? { target: t, action: x.action, data: x.data, gate: 'pending' as const, from: k } : { target: t, action: x.action, data: x.data }), ...(origin ? { origin } : {}) });
     }
     const label: GlobalLabel = { action, data, verdict: st.verdict, effects: st.effects, via, instance: k, toNone, ...(absent ? { absent } : {}), ...(creation ? { creation } : {}) };
-    const g: GlobalState = { sigma, mu: sortMu(next) };
+    // PS15.5: a firing disarms its key first; then, in statement order, a cancel disarms a key and an after arms it,
+    // replacing a timer the key already has (one pending firing per key).
+    let timers = (s.timers ?? []).filter((t) => !(firing !== undefined && t.instance === k && t.key === firing));
+    if (timed.has(k)) for (const x of st.effects) {
+      if (x.type === 'cancel') timers = timers.filter((t) => !(t.instance === k && t.key === x.key));
+      if (x.type === 'timer') timers = [...timers.filter((t) => !(t.instance === k && t.key === x.key)), { instance: k, key: x.key, action: x.action, data: x.data }];
+    }
+    const g: GlobalState = { sigma, mu: sortMu(next), ...(timed.size ? { timers: sortTimers(timers) } : {}) };
     if (collision) return { label, outcome: { kind: 'collision', state: g, field: collision.address, value: collision.key } };
     if (over) return { label, outcome: { kind: 'bound', state: g, field: 'instances', value: N + 1 } };
     // PS13.5: a step that would exceed B messages in transit is not explored.
@@ -300,8 +317,8 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     return { label, outcome: { kind: 'state', state: g } };
   };
   return {
-    initial: () => ({ sigma: instances.map((x) => (x.spawned ? null : x.init)), mu: [] }),
-    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}`,
+    initial: () => ({ sigma: instances.map((x) => (x.spawned ? null : x.init)), mu: [], ...(timed.size ? { timers: [] } : {}) }),
+    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}${s.timers?.length ? `||${s.timers.map((t) => `${timerKey(t)}>${t.action}(${Object.keys(t.data).sort().map((f) => `${f}=${keyOf(t.data[f])}`).join(',')})`).join(';')}` : ''}`,
     successors: (s) => {
       const out: { label: GlobalLabel; outcome: Outcome<GlobalState> }[] = [];
       // S60: a spawned child takes its creation action first, so no input reaches it while that waits (review C3).
@@ -309,6 +326,15 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       for (const inp of inputs) {
         if (s.sigma[inp.instance] === null || creating.has(inp.instance)) continue;
         for (const d of inp.data) if (refsExist(instances[inp.instance].machine, inp.action, d, s)) out.push(step(s, inp.instance, inp.action, d, s.mu, 'input'));
+      }
+      // PS15.5: the provider's clock may fire any armed timer of a channel's conversation (the fault no-timer-firing
+      // offers none; the fault fire-disarmed offers each timer's target whether or not it is armed).
+      if (opts.fault !== 'no-timer-firing') {
+        for (const t of s.timers ?? []) if (s.sigma[t.instance] !== null && !creating.has(t.instance)) out.push(step(s, t.instance, t.action, t.data, s.mu, 'input', false, undefined, t.key));
+        if (opts.fault === 'fire-disarmed') for (const k of timed) {
+          if (s.sigma[k] === null || creating.has(k)) continue;
+          for (const a of timerTargets(instances[k].machine)) for (const d of dataOf(instances[k].machine, a)) out.push(step(s, k, a, d, s.mu, 'input'));
+        }
       }
       // PS13.3, PS13.4: any one message in transit may be delivered next; copies of one value are one choice.
       // S60: a child's creation message comes first, so nothing else is delivered to it while that one waits.
@@ -325,7 +351,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
           // ordinary message; escalate holds the message, which is then approved (delivered) or timed out (denied).
           const reason = m.gate === 'held' ? 'escalation-timeout' : 'denied';
           const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason }, ...(m.origin ? { origin: m.origin } : {}) };
-          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu) } }) as Outcome<GlobalState> });
+          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}) } }) as Outcome<GlobalState> });
           out.push(gateStep('deny', [...rest, denied]));
           if (m.gate === 'pending') out.push(gateStep('escalate', [...rest, { ...m, gate: 'held' }]));
         }
@@ -335,10 +361,20 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
   };
 }
 
+/** PS15.5: the actions a machine's timers deliver (`after d -> X() as k`), for the fault fire-disarmed only. */
+function timerTargets(M: RMachine): string[] {
+  const out = new Set<string>();
+  const walk = (body: A.Stmt[]): void => { for (const s of body) { if (s.kind === 'Intent' && s.op === 'after') out.add(s.target); if (s.kind === 'If') { walk(s.then); walk(s.else ?? []); } if (s.kind === 'Match') for (const a of s.arms) walk(a.body); if (s.kind === 'For') walk(s.body); } };
+  for (const h of M.handlers.values()) walk(h.body);
+  return [...out];
+}
+
 /** Explores a configuration and checks it (PS13.5, PS13.6). */
-export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[] } = {}): ConfigReport {
+export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[]; fault?: RefFault } = {}): ConfigReport {
   const { decl, instances, groups: spawnedGroups, channels } = buildConfiguration(module, name, { program: opts.program });
-  const sys = configurationSystem(decl, instances);
+  // PS15.5: a channel's generated configuration keeps its conversation's armed timers; a declared one does not (S61).
+  const timed = new Set<number>(decl.generated === 'channel' ? instances.map((x, k) => (channels.some((c) => c.conversation === x.machine.id) ? k : -1)).filter((k) => k >= 0) : []);
+  const sys = configurationSystem(decl, instances, { timed, fault: opts.fault });
   const absent = (err: unknown) => err instanceof AbsentInstance;
   const g = explore(sys, opts.maxStates);
   const findings: Diagnostic[] = [];
@@ -430,6 +466,22 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
       if (e) findings.push(finding('PL3002', p.id, `${inst.name}: never ${p.name} is violated by ${e.label.action}`, [...pathTo(g, e.from), e], { property: `${inst.name}.${p.name}`, state: g.states[e.from] }));
     }
   });
+  // PS5.2a (ruled on step 10): a never that is not violated is tested only where an action of its instance that can
+  // emit its effect is taken from a state where its while holds; otherwise it is vacuous here (the fault weak-vacuity
+  // asks only that its while hold in some reachable state).
+  const neverVacuous: Vacuous[] = [];
+  instances.forEach((inst, k) => {
+    for (const p of inst.machine.stepProperties) {
+      if (!inst.machine.nevers.has(p.name) || nevers.some((x) => x.instance === inst.name && x.property === p.name && x.violated)) continue;
+      const pre = g.states.map((s) => s.sigma[k]).filter((x): x is State => x !== null);
+      const steps = g.edges.filter((e) => (e.label as GlobalLabel).instance === k && (e.label as GlobalLabel).via !== 'gate' && e.label.verdict.kind === 'accepted' && g.states[e.from].sigma[k] !== null).map((e) => ({ action: e.label.action, pre: g.states[e.from].sigma[k]! }));
+      const { cond } = neverParts(p);
+      const why = opts.fault === 'weak-vacuity'
+        ? (cond === null || pre.some((s) => evaluate(cond, { M: inst.machine, state: s, data: {}, locals: new Map(), self: inst.name }) === true) ? null : `never ${p.name}: its while holds in no reachable state`)
+        : untested(inst.machine, p, steps, pre);
+      if (why) neverVacuous.push({ property: `${inst.name}.${p.name}`, id: p.id, parts: [], text: why });
+    }
+  });
   // S29: a send to none, one finding per instance's action, at its first step in BFS order.
   const none = new Set<string>();
   for (const e of g.edges) {
@@ -488,7 +540,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   // member of its group that exists (S60).
   const groupMembers: Members = (env, group) => env.global?.groups.get(group) ?? [];
   const states = () => g.states.map(envOf);
-  const vacuous: Vacuous[] = [];
+  const vacuous: Vacuous[] = [...neverVacuous];
   for (const p of decl.properties) {
     const list = p.kind === 'Liveness'
       ? (p.from ? [{ parts: [p.from], quant: p.quant }] : [])
