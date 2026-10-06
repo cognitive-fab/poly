@@ -218,3 +218,21 @@ test('PS15.4: a thread whose starts never ran has no conversation and stays dead
     assert.deepEqual(await ingress(rt), [['refused', 'thread-not-started'], ['refused', 'thread-not-started']]);
   } finally { await rt.close(); }
 });
+
+// PS15.5, as ruled on step 8: a receipt the application can reject, and a reply the conversation can refuse, are
+// findings of the generated configuration, with their witnesses.
+test('PS15.5: an application handler bound to a receipt that can be rejected in a reachable state is PL5406, with a witness', { timeout: 180_000 }, async () => {
+  const r = await check(swap(SRC, '  on Delivered {\n    require status is Open else reject "closed"', '  on Delivered {\n    require status is New else reject "too-late"'));
+  const f = all(r).find((d) => d.code === 'PL5406');
+  assert.ok(f && /Delivered/.test(f.message) && f.witness.length > 0, text(r));
+  assert.equal(r.configurations.find((c) => c.configuration === 'support').verdict, 'FINDINGS');
+});
+
+test('PS15.5: a Reply or Template the conversation can still refuse is PL5407, with a witness; the concierge has neither finding', { timeout: 180_000 }, async () => {
+  // A template sent with the reply finds the conversation's one slot held, and is refused.
+  const r = await check(swap(SRC, '    emit support.reply(body: body)\n', '    emit support.reply(body: body)\n    emit support.template()\n'));
+  const f = all(r).find((d) => d.code === 'PL5407');
+  assert.ok(f && /Template/.test(f.message) && f.witness.length > 0, text(r));
+  const clean = await check(SRC);
+  assert.deepEqual(all(clean).filter((d) => d.code === 'PL5406' || d.code === 'PL5407'), []);
+});

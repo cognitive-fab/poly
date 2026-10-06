@@ -66,6 +66,9 @@ export interface GlobalState {
   mu: Message[];
 }
 
+/** PS15.5: the roles a channel gives the machines of a configuration. */
+export interface ChannelRoles { application: string; conversation: string; receipts: Set<string> }
+
 export interface ConfigInstance {
   /** Its address: `inv`, or `order[0]` for a member of the group `order`. */
   name: string;
@@ -103,6 +106,8 @@ const CODE = {
   PL5401: ['CONFIGURATION_INVARIANT', 'finding'],
   PL5402: ['STUCK', 'finding'],
   PL5404: ['SEND_TO_NONE', 'finding'],
+  PL5406: ['RECEIPT_REJECTED', 'finding'],
+  PL5407: ['REPLY_REFUSED', 'finding'],
   PL3301: ['LIVENESS_LASSO', 'finding'],
 } as const;
 
@@ -127,7 +132,7 @@ export interface ConfigReport {
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
-export function buildConfiguration(source: Module, name: string, opts: { program?: Module[] } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[] } {
+export function buildConfiguration(source: Module, name: string, opts: { program?: Module[] } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[]; channels: ChannelRoles[] } {
   // PS15: a module with channels means its expansion, with the configuration of each channel.
   const reading = readChannels(source, opts.program ?? []);
   const module = reading.module;
@@ -194,7 +199,9 @@ export function buildConfiguration(source: Module, name: string, opts: { program
       inst.init = s;
     }
   }
-  return { decl, instances, groups };
+  // PS15.0, PS15.5: per channel, its application, its conversation, and the application's actions bound to a receipt.
+  const channels: ChannelRoles[] = [...reading.descriptors.values()].map((d) => ({ application: d.application, conversation: d.conversation, receipts: new Set(['Delivered', 'Rejected', 'Failed'].map((r) => d.peer[r]).filter((x): x is string => typeof x === 'string')) }));
+  return { decl, instances, groups, channels };
 }
 
 function addressOf(e: A.Expr): Value {
@@ -330,7 +337,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
 
 /** Explores a configuration and checks it (PS13.5, PS13.6). */
 export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[] } = {}): ConfigReport {
-  const { decl, instances, groups: spawnedGroups } = buildConfiguration(module, name, { program: opts.program });
+  const { decl, instances, groups: spawnedGroups, channels } = buildConfiguration(module, name, { program: opts.program });
   const sys = configurationSystem(decl, instances);
   const absent = (err: unknown) => err instanceof AbsentInstance;
   const g = explore(sys, opts.maxStates);
@@ -432,6 +439,26 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     if (none.has(key)) continue;
     none.add(key);
     findings.push(finding('PL5404', instances[l.instance].machine.handlers.get(l.action)?.id, l.absent ? `${instances[l.instance].name} sends to ${l.absent} on ${l.action}, an address that names no instance (a channel's conversation is spawned by starts, PS15.2); the message goes nowhere, and at run time it is dead-lettered (S89)` : `${instances[l.instance].name} sends to none on ${l.action}; the message goes nowhere (S29)`, [...pathTo(g, e.from), e], { property: key }));
+  }
+  // PS15.5 (ruled on step 8): a receipt the application rejects, which leaves the conversation's slot held (PL5406), and a
+  // Reply or Template the conversation rejects, which the application is never told of (PL5407); one finding per
+  // machine's action, at its first delivery in BFS order.
+  const roleFindings = new Set<string>();
+  for (const e of g.edges) {
+    const l = e.label as GlobalLabel;
+    if (l.via !== 'deliver' || l.verdict.kind !== 'rejected') continue;
+    const inst = instances[l.instance];
+    const reason = l.verdict.reason;
+    for (const ch of channels) {
+      const code = inst.machine.id === ch.application && ch.receipts.has(l.action) ? 'PL5406' : inst.machine.id === ch.conversation && (l.action === 'Reply' || l.action === 'Template') ? 'PL5407' : null;
+      if (!code) continue;
+      const key = `${inst.machine.name}.${l.action}`;
+      if (roleFindings.has(`${code}:${key}`)) continue;
+      roleFindings.add(`${code}:${key}`);
+      findings.push(finding(code, inst.machine.handlers.get(l.action)?.id, code === 'PL5406'
+        ? `${inst.name} rejects the receipt ${l.action} (${reason}); a rejected step sends no Ack, so its conversation's slot is never freed (PS15.5)`
+        : `${inst.name} refuses ${l.action} from its application (${reason}); the application is not told, and the message is lost (PS15.5)`, [...pathTo(g, e.from), e], { property: key }));
+    }
   }
   // PS13.6: a quiescent state (μ empty, no declared input accepted) where a non-service instance is not terminal.
   const stuck = g.states.findIndex((s, i) => s.mu.length === 0

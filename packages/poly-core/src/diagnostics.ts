@@ -114,6 +114,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL5403: { name: 'UNQUANTIFIED_GROUP', stage: 'types', severity: 'error' },
   // S29: a step inside a configuration sends to none.
   PL5404: { name: 'SEND_TO_NONE', stage: 'configuration', severity: 'finding' },
+  PL5406: { name: 'RECEIPT_REJECTED', stage: 'configuration', severity: 'finding' },
+  PL5407: { name: 'REPLY_REFUSED', stage: 'configuration', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   PL6401: { name: 'AMBIENT_EFFECT_IN_HANDLER', stage: 'lint', severity: 'error' },
   // S142: an import of a handler file that the certificate cannot name (no such file, outside the project, a URL).

@@ -4,7 +4,7 @@
 // outside the tolerance is refused. One configured source is one thread: its secret, its name, its endpoint.
 import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { hmac, noAnswer, sameText, skewSeconds } from '../util.js';
+import { fresh, hmac, noAnswer, signatureMatches, type AdapterFault } from '../util.js';
 
 export interface WebhookConfig {
   /** whsec_ followed by the base64 key. */
@@ -15,6 +15,8 @@ export interface WebhookConfig {
   endpoint: string;
   /** How far a timestamp may be from now, in seconds (300 when not given). */
   toleranceSeconds?: number;
+  /** A seeded mutant, for the tests only (ADAPTER_FAULTS). */
+  fault?: AdapterFault;
 }
 
 function keyOf(secret: string): Buffer {
@@ -35,10 +37,10 @@ export function webhook(c: WebhookConfig): ChannelAdapter {
       const ts = w.headers['webhook-timestamp'];
       const sigs = w.headers['webhook-signature'];
       if (!id || !ts || !sigs) return { refused: 'signature-missing' };
-      if (!(skewSeconds(ts, now) <= tolerance)) return { refused: 'timestamp-stale' };
+      if (!fresh(ts, now, tolerance, c.fault)) return { refused: 'timestamp-stale' };
       const expected = sign(key, id, ts, w.body);
       // Several signatures may be listed while a key rotates; one that matches is enough.
-      if (!sigs.split(' ').some((s) => sameText(s, expected))) return { refused: 'signature-invalid' };
+      if (!sigs.split(' ').some((s) => signatureMatches(s, expected, c.fault))) return { refused: 'signature-invalid' };
       // The signature is the source's own, so the claim is verified (K11).
       return { messages: [{ providerMessageId: id, fields: { source: c.source }, body: w.body, claims: { verified: true, sender: c.source } }], receipts: [] };
     },

@@ -1,12 +1,13 @@
-// The email adapter (S183): inbound mail by Mailgun's route webhook, one-click unsubscribe by RFC 8058, and sends by
-// SMTP submission, from the documentation read on 2026-10-05 (packages/poly-io/PROVENANCE.md). Mailgun signs a route
-// POST with HMAC-SHA256 under the webhook signing key over the timestamp and the token, hex, in the fields timestamp,
-// token and signature; the body is not signed, so a token is taken once (the cache Mailgun recommends). A one-click
-// unsubscribe is a POST of List-Unsubscribe=One-Click to the URL the adapter put in the bulk mail's List-Unsubscribe
-// header, which carries the recipient and a token only the adapter can make.
+// The email adapter (S183): inbound mail by Mailgun's route webhook, delivery reports by Mailgun's event webhooks,
+// one-click unsubscribe by RFC 8058, and sends by SMTP submission, from the documentation read on 2026-10-05
+// (packages/poly-io/PROVENANCE.md). Mailgun signs a webhook with HMAC-SHA256 under the webhook signing key over the
+// timestamp and the token, hex: in the fields timestamp, token and signature of a route POST, and in the object
+// signature of an event webhook. The body is not signed, so the token is the webhook's nonce, taken once in the store
+// (the cache Mailgun recommends). A one-click unsubscribe is a POST of List-Unsubscribe=One-Click to the URL the
+// adapter put in the bulk mail's List-Unsubscribe header, which carries the recipient and a token only it can make.
 import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { form, hmac, sameText, skewSeconds } from '../util.js';
+import { form, fresh, hmac, json, sameText, signatureMatches, type AdapterFault } from '../util.js';
 import { submit } from '../smtp.js';
 
 export interface EmailConfig {
@@ -24,6 +25,8 @@ export interface EmailConfig {
   subject: string;
   /** How far a webhook's timestamp may be from now, in seconds (300 when not given). */
   toleranceSeconds?: number;
+  /** A seeded mutant, for the tests only (ADAPTER_FAULTS). */
+  fault?: AdapterFault;
 }
 
 const tokenOf = (c: Pick<EmailConfig, 'unsubscribeKey'>, recipient: string) => hmac('sha256', c.unsubscribeKey, `unsubscribe:${recipient}`).toString('hex');
@@ -36,10 +39,17 @@ export function unsubscribeUrl(c: Pick<EmailConfig, 'unsubscribeKey' | 'unsubscr
   return u.toString();
 }
 
+interface MailgunEvent { event?: unknown; id?: unknown; severity?: unknown; recipient?: unknown; reason?: unknown; message?: { headers?: Record<string, unknown> }; 'delivery-status'?: { code?: unknown; message?: unknown } }
+
 export function email(c: EmailConfig): ChannelAdapter {
   const tolerance = c.toleranceSeconds ?? 300;
-  // Tokens taken within the tolerance; an older one is refused by its timestamp, so it can be forgotten.
-  const taken = new Map<string, number>();
+  /** Mailgun's signature over timestamp and token, checked; the token is the nonce. */
+  const signed = (timestamp: unknown, token: unknown, signature: unknown, now: number): Refusal | { nonce: Verified['nonce'] } => {
+    if (typeof timestamp !== 'string' || typeof token !== 'string' || typeof signature !== 'string' || !timestamp || !token || !signature) return { refused: 'signature-missing' };
+    if (!fresh(timestamp, now, tolerance, c.fault)) return { refused: 'timestamp-stale' };
+    if (!signatureMatches(signature, hmac('sha256', c.signingKey, timestamp + token).toString('hex'), c.fault)) return { refused: 'signature-invalid' };
+    return { nonce: { key: `mailgun:${token}`, at: now, ttlMs: tolerance * 1000 } };
+  };
   return {
     kind: 'email',
     provider: 'mailgun-routes+smtp',
@@ -56,18 +66,31 @@ export function email(c: EmailConfig): ChannelAdapter {
         // The token proves the request came from a holder of the mail sent to this recipient.
         return { messages: [{ providerMessageId: `unsubscribe:${recipient}`, fields: { from: recipient, event: 'Unsubscribe' }, body: '', claims: { verified: true, sender: recipient } }], receipts: [] };
       }
+      if ((w.headers['content-type'] ?? '').startsWith('application/json')) {
+        // An event webhook: { signature: { timestamp, token, signature }, event-data: { … } }.
+        const doc = json(w.body) as { signature?: { timestamp?: unknown; token?: unknown; signature?: unknown }; 'event-data'?: MailgunEvent };
+        const s = signed(doc.signature?.timestamp, doc.signature?.token, doc.signature?.signature, now);
+        if ('refused' in s) return s;
+        const e = doc['event-data'];
+        if (!e || typeof e.id !== 'string' || typeof e.recipient !== 'string') return { refused: 'event-malformed' };
+        // PS15.4: a permanent failure is a bounce, which std.channels.email's suppression reads: the provider event Bounce
+        // on the recipient's thread. Any other report is a receipt, recorded only.
+        if (e.event === 'failed' && e.severity === 'permanent') {
+          return { messages: [{ providerMessageId: `mailgun-event:${e.id}`, fields: { from: e.recipient, event: 'Bounce' }, body: '', claims: { verified: true, sender: 'mailgun' } }], receipts: [], nonce: s.nonce };
+        }
+        const id = e.message?.headers?.['message-id'];
+        const status = e.event === 'delivered' ? 'delivered' : e.event === 'failed' ? 'failed' : null;
+        if (typeof id !== 'string' || !status) return { messages: [], receipts: [], nonce: s.nonce };
+        return { messages: [], receipts: [{ providerId: id.startsWith('<') ? id : `<${id}>`, status }], nonce: s.nonce };
+      }
       const p = form(w.body);
-      if (!p.signature || !p.token || !p.timestamp) return { refused: 'signature-missing' };
-      if (!(skewSeconds(p.timestamp, now) <= tolerance)) return { refused: 'timestamp-stale' };
-      if (!sameText(p.signature, hmac('sha256', c.signingKey, p.timestamp + p.token).toString('hex'))) return { refused: 'signature-invalid' };
-      for (const [k, at] of taken) if (now - at > tolerance * 1000) taken.delete(k);
-      if (taken.has(p.token)) return { refused: 'token-replayed' };
-      taken.set(p.token, now);
+      const s = signed(p.timestamp, p.token, p.signature, now);
+      if ('refused' in s) return s;
       const sender = p.sender;
       const id = p['Message-Id'];
       if (!sender || !id || p['body-plain'] === undefined) return { refused: 'message-malformed' };
       // An email address is not authenticated by the route webhook, so the claim is unverified (K11).
-      return { messages: [{ providerMessageId: id, fields: { from: sender, event: 'Mail' }, body: p['body-plain'], claims: { verified: false, sender } }], receipts: [] };
+      return { messages: [{ providerMessageId: id, fields: { from: sender, event: 'Mail' }, body: p['body-plain'], claims: { verified: false, sender } }], receipts: [], nonce: s.nonce };
     },
     async send(out, t): Promise<SendResult> {
       if (!t.smtp) return { ok: false, permanent: true, error: 'no smtp transport' };

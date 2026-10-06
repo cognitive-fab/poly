@@ -1,0 +1,24 @@
+{
+  "signature": {
+    "timestamp": "",
+    "token": "",
+    "signature": ""
+  },
+  "event-data": {
+    "event": "failed",
+    "id": "2kFItcrLQuKTdp-Ia2Xr7w",
+    "timestamp": 1770918175.5923693,
+    "severity": "permanent",
+    "reason": "bounce",
+    "recipient": "badrecipient@sample.mailgun.com",
+    "message": {
+      "headers": {
+        "message-id": "20260212174255.58bbb7ce85a423e5@mailgun.com"
+      }
+    },
+    "delivery-status": {
+      "code": 550,
+      "message": "5.5.0 Requested action not taken: mailbox unavailable"
+    }
+  }
+}

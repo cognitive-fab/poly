@@ -28,12 +28,16 @@ service machine Conversation {
     enabled  : bool = true
     failures : 0..3 = 0
     waiting  : 0..2 = 0
+    queued   : 0..2 = 0
+    queue1   : Content = none
+    queue2   : Content = none
     slot     : Slot = Free
     pending  : 0..3 = 0
     app      : Ref<Peer> = none
   }
 
-  invariant obligations: (slot is Free implies pending == waiting) && (!(slot is Free) implies pending == waiting + 1)
+  invariant obligations: (slot is Free implies pending == waiting + queued) && (!(slot is Free) implies pending == waiting + queued + 1)
+  invariant queue-while-held: queued == 0 || !(slot is Free)
   invariant disabled-at-three: enabled == failures < 3
 
   action Open(app: Ref<Peer>)
@@ -51,26 +55,37 @@ service machine Conversation {
   }
 
   on Inbound(source, body) {
-    require waiting < 2 else reject "backlog"
+    require waiting + queued < 2 else reject "backlog"
     waiting' = waiting + 1
     pending' = pending + 1
     send app <- Message(body: body)
   }
 
-  // An answer, sent or refused, settles one waiting message and takes the slot.
+  // An answer, sent or refused, settles one waiting message and takes the slot, or waits for it in the queue.
   on Reply(body) {
-    require slot is Free else reject "busy"
-    if waiting > 0 {
+    if slot is Free {
+      if waiting > 0 {
+        waiting' = waiting - 1
+      } else {
+        pending' = pending + 1
+      }
+      if !enabled {
+        slot' = Receipt
+        send app <- Rejected(reason: "endpoint-disabled")
+      } else {
+        slot' = Sending
+        emit send(body: body)
+      }
+    } else {
+      // A reply that answers a waiting message waits for the slot, in order (at most two, within pending).
+      require waiting > 0 else reject "busy"
       waiting' = waiting - 1
-    } else {
-      pending' = pending + 1
-    }
-    if !enabled {
-      slot' = Receipt
-      send app <- Rejected(reason: "endpoint-disabled")
-    } else {
-      slot' = Sending
-      emit send(body: body)
+      queued' = queued + 1
+      if queued == 0 {
+        queue1' = body
+      } else {
+        queue2' = body
+      }
     }
   }
 
@@ -118,11 +133,26 @@ service machine Conversation {
     failures' = 0
   }
 
-  // The application has consumed the receipt: the slot is free.
+  // The application has consumed the receipt: the slot is free, or the next queued reply takes it.
   on Ack {
     require slot is Receipt else reject "no-receipt"
-    slot' = Free
-    pending' = pending - 1
+    if queued == 0 {
+      slot' = Free
+      pending' = pending - 1
+    } else {
+      // The first queued reply takes the slot, under the rules as they stand now.
+      queued' = queued - 1
+      queue1' = queue2
+      queue2' = none
+      pending' = pending - 1
+      if !enabled {
+        slot' = Receipt
+        send app <- Rejected(reason: "endpoint-disabled")
+      } else {
+        slot' = Sending
+        emit send(body: queue1)
+      }
+    }
   }
 
   effect send(body: Content) {
@@ -138,5 +168,5 @@ service machine Conversation {
   step property disabled-only-after-failures: !(pre.enabled && !post.enabled) || pre.failures == 2
 
   never no-delivery-while-disabled: emit send while !enabled
-  never one-send-at-a-time: emit send while !(slot is Free)
+  never one-send-at-a-time: emit send while slot is Sending
 }

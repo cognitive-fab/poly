@@ -8,7 +8,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { admit } from '@poly/check';
-import { whatsapp, sms, email, slack, webhook, ingress, keywordOf, twilioSignature, unsubscribeUrl, submit, publicUrl } from '@poly/io';
+import { whatsapp, sms, email, slack, webhook, ingress, keywordOf, twilioSignature, unsubscribeUrl, submit, publicUrl, ADAPTER_FAULTS } from '@poly/io';
 import { ROOT } from './helpers.mjs';
 import { loaded, makeKey, project } from './runtime-helpers.mjs';
 
@@ -150,12 +150,33 @@ test('email: a forged or stale webhook is refused: another key, a body changed, 
   assert.deepEqual(a.verify(mgSigned({ signingKey: secret() }, form), NOW), { refused: 'signature-invalid' });
   assert.deepEqual(a.verify(mgSigned(c, form, String(NOW / 1000 - 3600)), NOW), { refused: 'timestamp-stale' });
   assert.deepEqual(a.verify({ ...mgSigned(c, form), body: form }, NOW), { refused: 'signature-missing' });
-  // Mailgun signs the timestamp and the token, not the body, so a token is taken once: a second use of it, with the
-  // body changed or not, is refused (the token cache Mailgun's documentation recommends).
+  // Mailgun signs the timestamp and the token, not the body, so a token is taken once: the adapter names it as the
+  // webhook's nonce, which ingress claims in the store (the cache Mailgun's documentation recommends).
   const w = mgSigned(c, form);
-  assert.equal(a.verify(w, NOW).messages.length, 1);
-  assert.deepEqual(a.verify({ ...w, body: w.body.replace('bob%40example.org', 'eve%40example.org') }, NOW), { refused: 'token-replayed' });
-  assert.deepEqual(a.verify(w, NOW), { refused: 'token-replayed' });
+  const token = new URLSearchParams(w.body).get('token');
+  assert.deepEqual(a.verify(w, NOW).nonce, { key: `mailgun:${token}`, at: NOW, ttlMs: 300_000 });
+});
+
+test('email: Mailgun\'s event webhooks: a permanent failure is the provider event Bounce for its recipient; a delivery is a receipt, recorded only', () => {
+  const c = mailConfig();
+  const a = email(c);
+  const signed = (file) => {
+    const doc = JSON.parse(recorded(file));
+    const timestamp = String(NOW / 1000);
+    const token = randomBytes(25).toString('hex');
+    doc.signature = { timestamp, token, signature: hex('sha256', c.signingKey, timestamp + token) };
+    return { method: 'POST', url: MAIL_URL, headers: { 'content-type': 'application/json' }, body: JSON.stringify(doc) };
+  };
+  const bounce = a.verify(signed('mailgun/event-failed-permanent.json'), NOW);
+  assert.deepEqual([bounce.messages, bounce.receipts], [[{ providerMessageId: 'mailgun-event:2kFItcrLQuKTdp-Ia2Xr7w', fields: { from: 'badrecipient@sample.mailgun.com', event: 'Bounce' }, body: '', claims: { verified: true, sender: 'mailgun' } }], []]);
+  const delivered = a.verify(signed('mailgun/event-delivered.json'), NOW);
+  assert.deepEqual([delivered.messages, delivered.receipts], [[], [{ providerId: '<20260203192030.53383e583ab41f62@sample.mailgun.com>', status: 'delivered' }]]);
+  const forged = signed('mailgun/event-failed-permanent.json');
+  assert.deepEqual(a.verify({ ...forged, body: forged.body.replace('badrecipient', 'other') }, NOW).messages[0].fields.from, 'other@sample.mailgun.com');
+  const w = signed('mailgun/event-failed-permanent.json');
+  const doc = JSON.parse(w.body);
+  doc.signature.signature = hex('sha256', secret(), doc.signature.timestamp + doc.signature.token);
+  assert.deepEqual(a.verify({ ...w, body: JSON.stringify(doc) }, NOW), { refused: 'signature-invalid' });
 });
 
 test('email: a one-click unsubscribe (RFC 8058) is the event Unsubscribe, only with the token the adapter issued and the documented body', () => {
@@ -247,6 +268,9 @@ test('slack: a send is chat.postMessage; is_archived is permanent, rate_limited 
   assert.deepEqual([archived.ok, archived.permanent, archived.error], [false, true, 'is_archived']);
   const limited = await a.send({ to: 'C1', body: 'x', idempotencyKey: 'k3', now: NOW }, transport(answer(429, recorded('slack/post-rate-limited.json'))));
   assert.deepEqual([limited.ok, limited.permanent], [false, false]);
+  // PS15.4: is_archived is a report std.channels.slack's rule reads, so it carries the provider event Archived.
+  assert.deepEqual(archived.events, [{ providerId: 'is_archived:C1', fields: { channel: 'C1', event: 'Archived' } }]);
+  assert.equal(limited.events, undefined);
 });
 
 // ── Standard Webhooks ──
@@ -304,8 +328,49 @@ function fakeHost() {
     async putContent(body) { calls.push(['putContent', body]); return `sha256:${createHash('sha256').update(body).digest('hex')}`; },
     async inbound(channel, fields, opts) { calls.push(['inbound', channel, fields, opts]); return { outcome: 'delivered' }; },
     async ingressRecord(channel, record) { calls.push(['record', channel, record]); },
+    nonces: new Set(),
+    async claimNonce(channel, key) { calls.push(['nonce', channel, key]); if (this.nonces.has(`${channel}:${key}`)) return false; this.nonces.add(`${channel}:${key}`); return true; },
   };
 }
+
+test('ingress: a webhook whose nonce was claimed before is refused token-replayed, and nothing is dispatched', async () => {
+  const c = mailConfig();
+  const host = fakeHost();
+  const handle = ingress(host, { mail: email(c) }, () => NOW);
+  const w = mgSigned(c, recorded('mailgun/inbound.form'));
+  assert.equal((await handle('mail', w)).status, 200);
+  const before = host.calls.filter((x) => x[0] === 'inbound').length;
+  assert.equal((await handle('mail', { ...w, body: w.body.replace('bob%40example.org', 'eve%40example.org') })).status, 401);
+  assert.equal(host.calls.filter((x) => x[0] === 'inbound').length, before);
+  assert.deepEqual(host.calls.at(-1), ['record', 'mail', { stage: 'verify', outcome: 'refused', provider: 'mailgun-routes+smtp', reason: 'token-replayed' }]);
+});
+
+// The adapter tests are confirmation tests, so each has a seeded mutant that must fail them: the signature check that
+// always matches, and the timestamp check that never refuses (ADAPTER_FAULTS).
+test('seeded mutants: with the signature check that always matches, every adapter takes a forged webhook', () => {
+  assert.deepEqual([...ADAPTER_FAULTS].sort(), ['signature-always-matches', 'timestamp-never-stale']);
+  const fault = 'signature-always-matches';
+  const wa = waConfig();
+  assert.equal(whatsapp({ ...wa, fault }).verify(waSigned({ appSecret: secret() }, recorded('whatsapp/message.json')), NOW).messages.length, 1);
+  const tw = twConfig();
+  assert.equal(sms({ ...tw, fault }).verify(twSigned({ authToken: secret() }, recorded('twilio/inbound.form')), NOW).messages.length, 1);
+  const mg = mailConfig();
+  assert.equal(email({ ...mg, fault }).verify(mgSigned({ signingKey: secret() }, recorded('mailgun/inbound.form')), NOW).messages.length, 1);
+  const sl = slConfig();
+  assert.equal(slack({ ...sl, fault }).verify(slSigned({ signingSecret: secret() }, recorded('slack/message.json')), NOW).messages.length, 1);
+  const wh = whConfig();
+  assert.equal(webhook({ ...wh, fault }).verify(whSigned(whConfig(), recorded('standard-webhooks/event.json')), NOW).messages.length, 1);
+});
+
+test('seeded mutants: with the timestamp check that never refuses, the adapters that read a timestamp take a stale webhook', () => {
+  const fault = 'timestamp-never-stale';
+  const mg = mailConfig();
+  assert.equal(email({ ...mg, fault }).verify(mgSigned(mg, recorded('mailgun/inbound.form'), String(NOW / 1000 - 3600)), NOW).messages.length, 1);
+  const sl = slConfig();
+  assert.equal(slack({ ...sl, fault }).verify(slSigned(sl, recorded('slack/message.json'), String(NOW / 1000 - 301)), NOW).messages.length, 1);
+  const wh = whConfig();
+  assert.equal(webhook({ ...wh, fault }).verify(whSigned(wh, recorded('standard-webhooks/event.json'), { ts: String(NOW / 1000 - 301) }), NOW).messages.length, 1);
+});
 
 test('ingress: a refused webhook is recorded with the provider and the reason, and nothing is stored or dispatched', async () => {
   const c = waConfig();

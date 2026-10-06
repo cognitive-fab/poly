@@ -38,11 +38,15 @@ export interface ProviderReceipt {
   error?: string;
 }
 
-/** What a verified webhook carries. `answer` is the reply a handshake expects (a challenge), when there is one. */
+/**
+ * What a verified webhook carries. `answer` is the reply a handshake expects (a challenge), when there is one. `nonce`
+ * is a value the provider signs that may be taken once, within ttlMs of `at`; ingress claims it in the store.
+ */
 export interface Verified {
   messages: InboundMessage[];
   receipts: ProviderReceipt[];
   answer?: { status: number; contentType: string; body: string };
+  nonce?: { key: string; at: number; ttlMs: number };
 }
 
 /** A webhook the adapter refuses: nothing in it is dispatched (PT21.4). */
@@ -62,8 +66,14 @@ export interface OutboundSend {
   now: number;
 }
 
-/** A send's result: the provider's id, or a failure, permanent when a retry would fail the same way. */
-export type SendResult = { ok: true; providerId: string } | { ok: false; permanent: boolean; error: string };
+/** PS15.4: a provider event a send's failure reports, for the conversation: its Inbound fields other than the body. */
+export interface ProviderEvent { providerId: string; fields: Record<string, string> }
+
+/**
+ * A send's result: the provider's id, or a failure, permanent when a retry would fail the same way, with the provider
+ * events it reports that a rule of the conversation reads (PS15.4).
+ */
+export type SendResult = { ok: true; providerId: string } | { ok: false; permanent: boolean; error: string; events?: ProviderEvent[] };
 
 /** An HTTP exchange, given to an adapter so that a test replays recorded traffic and only poly-io opens a socket. */
 export interface HttpRequest { method: string; url: string; headers: Record<string, string>; body: string }
@@ -88,5 +98,7 @@ export interface ChannelAdapter {
 export interface IngressHost {
   putContent(body: string): Promise<string>;
   inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<{ outcome: 'delivered' | 'refused'; reason?: string }>;
+  /** Takes a nonce once: true the first time, false for a nonce taken before, across restarts (the store keeps it). */
+  claimNonce(channel: string, key: string, at: number, ttlMs: number): Promise<boolean>;
   ingressRecord(channel: string, record: { stage: 'verify' | 'receipt' | 'claims'; outcome: string; provider: string; reason?: string; providerId?: string; status?: string; claims?: SenderClaims; messageId?: string }): Promise<void>;
 }

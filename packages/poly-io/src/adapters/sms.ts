@@ -4,7 +4,7 @@
 // sorted by name, each name followed by its value. An inbound message carries MessageSid, From, To and Body; a status
 // callback carries MessageSid and MessageStatus. The adapter classifies the body's keyword for std.channels.sms.
 import type { ChannelAdapter, ProviderReceipt, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { encodeForm, formPairs, hmac, httpFailure, noAnswer, sameText } from '../util.js';
+import { encodeForm, formPairs, hmac, httpFailure, noAnswer, signatureMatches, type AdapterFault } from '../util.js';
 
 export interface TwilioConfig {
   accountSid: string;
@@ -13,6 +13,8 @@ export interface TwilioConfig {
   from: string;
   /** Where Twilio posts the status of a send, when receipts are wanted. */
   statusCallback?: string;
+  /** A seeded mutant, for the tests only (ADAPTER_FAULTS). */
+  fault?: AdapterFault;
 }
 
 // The keywords Twilio documents, matched without regard to case: opt-out, opt-in, and help.
@@ -44,7 +46,7 @@ export function sms(c: TwilioConfig): ChannelAdapter {
       const sig = w.headers['x-twilio-signature'];
       if (!sig) return { refused: 'signature-missing' };
       if (!(w.headers['content-type'] ?? '').startsWith('application/x-www-form-urlencoded')) return { refused: 'content-type-unsupported' };
-      if (!sameText(sig, twilioSignature(c.authToken, w.url, w.body))) return { refused: 'signature-invalid' };
+      if (!signatureMatches(sig, twilioSignature(c.authToken, w.url, w.body), c.fault)) return { refused: 'signature-invalid' };
       const p = Object.fromEntries(formPairs(w.body));
       if (p.AccountSid !== c.accountSid) return { refused: 'account-mismatch' };
       if (typeof p.MessageSid !== 'string' || !p.MessageSid) return { refused: 'message-malformed' };

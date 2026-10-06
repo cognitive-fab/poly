@@ -3,7 +3,7 @@
 // X-Hub-Signature-256 as sha256=<hex>; the endpoint's verification is a GET answered with hub.challenge when
 // hub.verify_token matches. Messages arrive in entry[].changes[].value.messages, receipts in .statuses.
 import type { ChannelAdapter, InboundMessage, ProviderReceipt, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { hmac, httpFailure, json, noAnswer, sameText } from '../util.js';
+import { hmac, httpFailure, json, noAnswer, sameText, signatureMatches, type AdapterFault } from '../util.js';
 
 export interface WhatsAppConfig {
   appSecret: string;
@@ -12,6 +12,8 @@ export interface WhatsAppConfig {
   verifyToken: string;
   /** The Graph API version, as Meta names it (v23.0, say). */
   apiVersion: string;
+  /** A seeded mutant, for the tests only (ADAPTER_FAULTS). */
+  fault?: AdapterFault;
 }
 
 const STATUSES = new Set(['sent', 'delivered', 'read', 'failed']);
@@ -32,7 +34,7 @@ export function whatsapp(c: WhatsAppConfig): ChannelAdapter {
       }
       const sig = w.headers['x-hub-signature-256'];
       if (!sig) return { refused: 'signature-missing' };
-      if (!sameText(sig, `sha256=${hmac('sha256', c.appSecret, w.body).toString('hex')}`)) return { refused: 'signature-invalid' };
+      if (!signatureMatches(sig, `sha256=${hmac('sha256', c.appSecret, w.body).toString('hex')}`, c.fault)) return { refused: 'signature-invalid' };
       const doc = json(w.body) as { object?: unknown; entry?: { changes?: { value?: { messages?: WaMessage[]; statuses?: WaStatus[] } }[] }[] };
       if (doc.object !== 'whatsapp_business_account') return { refused: 'not-a-whatsapp-notification' };
       const messages: InboundMessage[] = [];

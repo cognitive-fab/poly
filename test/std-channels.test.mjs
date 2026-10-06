@@ -60,7 +60,7 @@ const KINDS = {
     rules: {
       'no-bulk-after-unsubscribe': ['Template', 'if !subscribed {', 'if subscribed && !subscribed {'],
       'no-send-to-suppressed': ['Reply', 'if bounces == 2 {', 'if bounces == 2 && bounces == 1 {'],
-      'one-send-at-a-time': ['Reply', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
+      'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
       'unsubscribe-holds': ['Inbound', "waiting' = waiting + 1\n", "waiting' = waiting + 1\n      subscribed' = true\n"],
     },
   },
@@ -72,7 +72,7 @@ const KINDS = {
     rules: {
       'no-post-to-archived': ['Reply', 'if archived {', 'if archived && !archived {'],
       'one-message-per-second': ['Template', 'if cooling {', 'if cooling && !cooling {'],
-      'one-send-at-a-time': ['Reply', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
+      'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
     },
   },
   webhook: {
@@ -288,3 +288,31 @@ for (const [kind, spec] of Object.entries(KINDS)) {
     assert.ok(!all(r).some((d) => d.code === 'PL5301'), text(r));
   });
 }
+
+// As ruled on step 8: a reply that answers a waiting message is queued while the slot is held (at most two, within
+// pending), so an application that answers every message is never refused busy (above). With the queue taken out of a
+// module, the same application gets PL5407 in its generated configuration, for every kind.
+async function checkWith(stdModule, kind, src) {
+  const d = join(OUT, `case-${n++}`);
+  rmSync(d, { recursive: true, force: true });
+  mkdirSync(join(d, 'std', 'channels'), { recursive: true });
+  writeFileSync(join(d, 'std', 'channels', `${kind}.poly`), stdModule);
+  writeFileSync(join(d, 'desk.poly'), src);
+  return checkFile(join(d, 'desk.poly'), { root: d, std: join(d, 'std') });
+}
+
+for (const [kind, spec] of Object.entries(KINDS)) {
+  test(`std.channels.${kind}: without its reply queue, an application that answers every message is refused busy, PL5407 with a witness`, { timeout: 300_000 }, async () => {
+    const unqueued = mutate(source(kind), 'Reply', 'require waiting > 0 else reject "busy"', 'require waiting > 2 else reject "busy"');
+    const r = await checkWith(unqueued, kind, answering(kind, spec));
+    const f = all(r).find((d) => d.code === 'PL5407');
+    assert.ok(f && /Reply/.test(f.message) && f.witness.length > 0, text(r));
+  });
+}
+
+test('std.channels.whatsapp, PS15.5: an application whose receipt handler can be rejected gets PL5406 with a witness', { timeout: 300_000 }, async () => {
+  const src = application('whatsapp', KINDS.whatsapp).replace('  on Delivered {\n    require status is Open else reject "closed"', '  on Delivered {\n    require status is New else reject "too-late"');
+  const r = await check('desk.poly', src);
+  const f = all(r).find((d) => d.code === 'PL5406');
+  assert.ok(f && /Delivered/.test(f.message) && f.witness.length > 0, text(r));
+});

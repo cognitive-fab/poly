@@ -11,6 +11,7 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, type Verifier } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
+import type { ChannelAdapter, ChannelTransports } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -342,6 +343,49 @@ export class PolyRuntime {
     if (!this.verified.channels.some((c) => c.channel === channel)) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
     this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
     await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { channel, ...record }, this.now()); });
+  }
+
+  /**
+   * PT21.4: takes a provider's nonce once (Mailgun's token). The store keeps it, so a replay after a restart is refused;
+   * a nonce older than its time to live is forgotten, since the provider's timestamp check refuses it anyway.
+   */
+  async claimNonce(channel: string, key: string, at: number, ttlMs: number): Promise<boolean> {
+    let taken = false;
+    await this.store.txn(() => {
+      this.store.db.prepare('DELETE FROM poly_ingress_nonce WHERE channel = ? AND at < ?').run(channel, at - ttlMs);
+      taken = this.store.db.prepare('INSERT OR IGNORE INTO poly_ingress_nonce (channel, nonce, at) VALUES (?, ?, ?)').run(channel, key, at).changes === 1;
+    });
+    return taken;
+  }
+
+  /**
+   * PT21.5, PS15.4: the channel's adapter sends for its conversations. A send of channel.<c>.send runs from the outbox
+   * worker, after the gate allows, to the thread's recipient (its key); a failure the adapter reports with provider
+   * events delivers each to the conversation as an Inbound, before the send's failure completes. The adapter is runtime
+   * configuration, like a decision's provider; its certification by digest is plan step 10's.
+   */
+  connectChannel(channel: string, adapter: ChannelAdapter, transports: ChannelTransports): void {
+    const d = this.verified.channels.find((c) => c.channel === channel);
+    if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
+    const kind = `channel.${channel}.send`;
+    const handler: EffectHandler = async (payload, _caps, ctx) => {
+      // The conversation is <channel>:<key>/<channel>, and its thread's recipient is the key (PS15.4).
+      const suffix = `/${channel}`;
+      if (!ctx.instanceId.startsWith(`${channel}:`) || !ctx.instanceId.endsWith(suffix)) throw Object.assign(new Error(`${ctx.instanceId} is no conversation of channel ${channel}`), { permanent: true });
+      const to = ctx.instanceId.slice(channel.length + 1, -suffix.length);
+      const p = (payload ?? {}) as { body?: unknown; kind?: unknown };
+      const body = typeof p.body === 'string' ? await this.contentBody(p.body) : '';
+      if (body === null) throw Object.assign(new Error(`the body ${String(p.body)} is not in the content store`), { permanent: true });
+      const r = await adapter.send({ to, body, ...(typeof p.kind === 'string' ? { kind: p.kind } : {}), idempotencyKey: ctx.idempotencyKey, now: this.now() }, transports);
+      if (r.ok) return { providerId: r.providerId };
+      for (const e of r.events ?? []) {
+        const content = await this.putContent('');
+        await this.dispatch(ctx.instanceId, d.inbound.action, { ...e.fields, body: content }, { actionId: `${channel}:${e.providerId}` });
+        await this.ingressRecord(channel, { stage: 'receipt', outcome: 'delivered', provider: adapter.provider, providerId: e.providerId, reason: r.error });
+      }
+      throw Object.assign(new Error(r.error), { permanent: r.permanent });
+    };
+    this.handlers.set(kind, handler);
   }
 
   async takeApprovals(dir: string): Promise<{ file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[]> {

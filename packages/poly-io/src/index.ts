@@ -6,4 +6,5 @@ export { slack, type SlackConfig } from './adapters/slack.js';
 export { webhook, type WebhookConfig } from './adapters/webhook.js';
 export { submit, dotStuff, type Submission } from './smtp.js';
 export { ingress, type IngressAnswer } from './ingress.js';
+export { ADAPTER_FAULTS, type AdapterFault } from './util.js';
 export { httpsTransport, smtpsTransport, serveIngress, publicUrl } from './net.js';

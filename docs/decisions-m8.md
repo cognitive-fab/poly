@@ -221,23 +221,28 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 
 **Reading of the ruling.** "Ack on Peer" is read as the peer's acknowledgement: `Ack` is an action of the conversation, which the application (the peer) sends, since `send c <- Ack` addresses the conversation. `Peer` keeps only the messages the conversation sends.
 
-**What the slot changes.** A reply or a template that arrives while the slot holds a send or its receipt is a rejected step, `busy`, journaled on the conversation; it no longer becomes `Rejected("busy")`, which was itself a receipt that needed a slot. The reasons `Rejected` carries are now the providers' rules only.
-
-**Limits added.**
-- *A rejected receipt step sends no `Ack`* (PS3.2): the receipt stays unacknowledged, the slot stays held, and every later reply on the thread is refused `busy`. An application that may reject a receipt keeps its thread from sending.
-- *A reply refused `busy` is not reported to the application*: it is journaled on the conversation only.
+**What the slot changes.** A message refused while the slot is held is a rejected step, `busy`, journaled on the conversation; it no longer becomes `Rejected("busy")`, which was itself a receipt that needed a slot. The reasons `Rejected` carries are now the providers' rules only. The two limits recorded here at first (a rejected receipt holds the slot; a reply refused `busy` is not reported) are findings since the ruling on step 8, below.
 
 ## check-memory under load: an existing failure, counted
 
-**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 6 full runs** (the run before 1d2108d failed; the two runs of step 7, the run of its follow-up and the two runs of plan step 8 passed).
+**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 7 full runs** (the run before 1d2108d failed; every run since has passed: two of step 7, one of its follow-up, three of plan step 8).
 
 ## Plan step 8: choices for the owner's notice
 
 - **Mailgun for inbound mail.** S183 names an inbound-mail webhook. Mailgun's route webhook is used because it is signed. Its signature covers the timestamp and a token, not the body, so the adapter takes each token once (the cache Mailgun recommends) and refuses an old timestamp.
-- **Receipts through `verify`.** A provider's receipt is a webhook, so `verify` returns receipts beside messages. Ingress records each receipt on `runtime:ingress`; it is not delivered to the conversation. The send's effect completes on the provider's acceptance (`ok`) or refusal (`failed`). A later `failed` or `undelivered` status is recorded and changes no state.
+- **Receipts through `verify`.** A provider's receipt is a webhook, so `verify` returns receipts beside messages. Ingress records each receipt on `runtime:ingress`. A status a rule reads is a provider event since the ruling below; any other (WhatsApp's and Twilio's statuses, a Mailgun delivery) is recorded only.
 - **Sender claims (K11).** WhatsApp, Slack and a signed webhook source give a verified claim; an SMS number and an email address give an unverified one. Ingress records the claims of every message. Carrying them in the step label, so that a program reads `verified` (AC14), is plan step 10.
-- **Sends are not yet wired to the outbox.** `send` is built and tested against recorded traffic; registering it as the handler of `channel.<c>.send` under the gate is plan step 10, with AC17.
-- **Seeded controls.** The adapter tests are confirmation tests, so each was run against two broken builds: the signature comparison that always matches fails 9 of the 23 tests, and the timestamp check that never refuses fails 3. Both were restored; the measurement is recorded here and not committed as code.
+- **Sends through the outbox.** `rt.connectChannel(channel, adapter, transports)` makes the adapter the handler of `channel.<c>.send`, run by the outbox worker after the gate allows. The adapter is runtime configuration, as a decision's provider is; certifying it by digest, and AC17, are plan step 10's.
+
+## Step 8 not accepted until its item 3: the rulings, and what was built
+
+**Ruled (2026-10-05).** The reading of "Ack on Peer" is accepted. Step 8 waits for these:
+
+- **A receipt handler that can be rejected** is a finding: in a configuration with a channel, a reachable delivery of a receipt that the application rejects is `PL5406 RECEIPT_REJECTED`, with its witness (PS15.5, d2e41d3).
+- **Replies refused `busy`.** A reply that answers a waiting message is queued in the conversation (at most two, within `pending`); a reply or a template that can still be refused `busy` is `PL5407 REPLY_REFUSED` in the configuration, with its witness (PS15.5). The five modules hold the queue (`queued`, `queue1`, `queue2`, the invariant `queue-while-held`); `Ack` gives the slot to the first queued reply under the rules as they stand then. `one-send-at-a-time` now reads `while slot is Sending`: a queued reply leaves on the step that acknowledges the previous receipt.
+- **Provider events** (PS15.4). A status a rule reads reaches the conversation: Mailgun's permanent failure is the event `Bounce` on the recipient's thread (a new `Event` of `std.channels.email`); Slack's `is_archived` answer to a post is the event `Archived`, delivered by the runtime before the send's failure completes; a failed webhook delivery is the send's `Undelivered` completion. Each rule has an end-to-end test from recorded traffic to the refused send (`test/channels-events.test.mjs`). Until E13 those tests create the conversation beside its application, as the spawn of `starts` would.
+- **Mailgun's token cache** is in the store: the adapter names the token as the webhook's nonce, ingress claims it with `rt.claimNonce` (table `poly_ingress_nonce`), and a replay after a restart is refused `token-replayed`.
+- **The seeded controls are permanent**: `ADAPTER_FAULTS` (`signature-always-matches`, `timestamp-never-stale`), taken by an adapter from its configuration, and two tests that show each lets a forged or stale webhook through every adapter that checks it.
 
 ## Engine changes
 

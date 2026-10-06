@@ -6,6 +6,23 @@ export function hmac(alg: 'sha1' | 'sha256', key: string | Buffer, data: string)
   return createHmac(alg, key).update(data, 'utf8').digest();
 }
 
+/**
+ * The seeded mutants of the adapter tests: a signature check that always matches, and a timestamp check that never
+ * refuses. An adapter takes one only from its configuration, and only a test gives one.
+ */
+export const ADAPTER_FAULTS = ['signature-always-matches', 'timestamp-never-stale'] as const;
+export type AdapterFault = (typeof ADAPTER_FAULTS)[number];
+
+/** A signature as received against the one expected, in constant time. */
+export function signatureMatches(received: string, expected: string, fault?: AdapterFault): boolean {
+  return fault === 'signature-always-matches' || sameText(received, expected);
+}
+
+/** Whether a provider's timestamp is within tolerance seconds of now (ms). */
+export function fresh(timestamp: string, now: number, tolerance: number, fault?: AdapterFault): boolean {
+  return fault === 'timestamp-never-stale' || skewSeconds(timestamp, now) <= tolerance;
+}
+
 /** Constant-time comparison of two encoded signatures; a length difference is a mismatch, never an exception. */
 export function sameText(a: string, b: string): boolean {
   const x = Buffer.from(a, 'utf8');

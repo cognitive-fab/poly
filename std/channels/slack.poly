@@ -28,12 +28,16 @@ service machine Conversation {
     archived : bool = false
     cooling  : bool = false
     waiting  : 0..2 = 0
+    queued   : 0..2 = 0
+    queue1   : Content = none
+    queue2   : Content = none
     slot     : Slot = Free
     pending  : 0..3 = 0
     app      : Ref<Peer> = none
   }
 
-  invariant obligations: (slot is Free implies pending == waiting) && (!(slot is Free) implies pending == waiting + 1)
+  invariant obligations: (slot is Free implies pending == waiting + queued) && (!(slot is Free) implies pending == waiting + queued + 1)
+  invariant queue-while-held: queued == 0 || !(slot is Free)
 
   action Open(app: Ref<Peer>)
   action Inbound(channel: string check { "C-1", "C-2" }, body: Content, event: Event)
@@ -59,7 +63,7 @@ service machine Conversation {
         require archived else reject "not-archived"
         archived' = false
       } else {
-        require waiting < 2 else reject "backlog"
+        require waiting + queued < 2 else reject "backlog"
         waiting' = waiting + 1
         pending' = pending + 1
         send app <- Message(body: body)
@@ -67,24 +71,35 @@ service machine Conversation {
     }
   }
 
-  // An answer, sent or refused, settles one waiting message and takes the slot.
+  // An answer, sent or refused, settles one waiting message and takes the slot, or waits for it in the queue.
   on Reply(body) {
-    require slot is Free else reject "busy"
-    if waiting > 0 {
-      waiting' = waiting - 1
-    } else {
-      pending' = pending + 1
-    }
-    if archived {
-      slot' = Receipt
-      send app <- Rejected(reason: "channel-archived")
-    } else {
-      if cooling {
-        slot' = Receipt
-        send app <- Rejected(reason: "rate-limited")
+    if slot is Free {
+      if waiting > 0 {
+        waiting' = waiting - 1
       } else {
-        slot' = Sending
-        emit send(body: body)
+        pending' = pending + 1
+      }
+      if archived {
+        slot' = Receipt
+        send app <- Rejected(reason: "channel-archived")
+      } else {
+        if cooling {
+          slot' = Receipt
+          send app <- Rejected(reason: "rate-limited")
+        } else {
+          slot' = Sending
+          emit send(body: body)
+        }
+      }
+    } else {
+      // A reply that answers a waiting message waits for the slot, in order (at most two, within pending).
+      require waiting > 0 else reject "busy"
+      waiting' = waiting - 1
+      queued' = queued + 1
+      if queued == 0 {
+        queue1' = body
+      } else {
+        queue2' = body
       }
     }
   }
@@ -131,11 +146,31 @@ service machine Conversation {
     send app <- Failed()
   }
 
-  // The application has consumed the receipt: the slot is free.
+  // The application has consumed the receipt: the slot is free, or the next queued reply takes it.
   on Ack {
     require slot is Receipt else reject "no-receipt"
-    slot' = Free
-    pending' = pending - 1
+    if queued == 0 {
+      slot' = Free
+      pending' = pending - 1
+    } else {
+      // The first queued reply takes the slot, under the rules as they stand now.
+      queued' = queued - 1
+      queue1' = queue2
+      queue2' = none
+      pending' = pending - 1
+      if archived {
+        slot' = Receipt
+        send app <- Rejected(reason: "channel-archived")
+      } else {
+        if cooling {
+          slot' = Receipt
+          send app <- Rejected(reason: "rate-limited")
+        } else {
+          slot' = Sending
+          emit send(body: queue1)
+        }
+      }
+    }
   }
 
   effect send(body: Content) {
@@ -149,5 +184,5 @@ service machine Conversation {
 
   never no-post-to-archived: emit send while archived
   never one-message-per-second: emit send while cooling
-  never one-send-at-a-time: emit send while !(slot is Free)
+  never one-send-at-a-time: emit send while slot is Sending
 }

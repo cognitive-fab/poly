@@ -13,6 +13,8 @@ export function ingress(host: IngressHost, channels: Record<string, ChannelAdapt
     let v: Verified | { refused: string };
     // A body the adapter cannot read is a refusal like any other, never an exception out of ingress.
     try { v = adapter.verify(w, clock()); } catch (e) { v = { refused: `malformed: ${e instanceof Error ? e.message : String(e)}` }; }
+    // A nonce is taken once, in the store, so a replay is refused after a restart too.
+    if (!('refused' in v) && v.nonce && !(await host.claimNonce(channel, v.nonce.key, v.nonce.at, v.nonce.ttlMs))) v = { refused: 'token-replayed' };
     if ('refused' in v) {
       await host.ingressRecord(channel, { stage: 'verify', outcome: 'refused', provider: adapter.provider, reason: v.refused });
       return { status: 401, contentType: 'text/plain', body: 'refused' };

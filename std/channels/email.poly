@@ -9,7 +9,7 @@
 // is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
 module std.channels.email
 
-enum Event { Mail, Unsubscribe }
+enum Event { Mail, Unsubscribe, Bounce }
 
 enum Kind { Direct, Bulk }
 
@@ -30,12 +30,16 @@ service machine Conversation {
     subscribed : bool = true
     bounces    : 0..2 = 0
     waiting    : 0..2 = 0
+    queued     : 0..2 = 0
+    queue1     : Content = none
+    queue2     : Content = none
     slot       : Slot = Free
     pending    : 0..3 = 0
     app        : Ref<Peer> = none
   }
 
-  invariant obligations: (slot is Free implies pending == waiting) && (!(slot is Free) implies pending == waiting + 1)
+  invariant obligations: (slot is Free implies pending == waiting + queued) && (!(slot is Free) implies pending == waiting + queued + 1)
+  invariant queue-while-held: queued == 0 || !(slot is Free)
 
   action Open(app: Ref<Peer>)
   action Inbound(from: string check { "mail-1", "mail-2" }, body: Content, event: Event)
@@ -51,35 +55,52 @@ service machine Conversation {
     app' = app
   }
 
-  // The adapter turns a verified one-click POST (List-Unsubscribe=One-Click) into the event Unsubscribe. It carries
-  // no message for the application.
+  // The adapter turns a verified one-click POST (List-Unsubscribe=One-Click) into the event Unsubscribe, and the
+  // provider's report of a permanent failure after the send was accepted into the provider event Bounce (PS15.4).
+  // Neither carries a message for the application.
   on Inbound(from, body, event) {
     if event is Unsubscribe {
       require subscribed else reject "unsubscribed"
       subscribed' = false
     } else {
-      require waiting < 2 else reject "backlog"
-      waiting' = waiting + 1
-      pending' = pending + 1
-      send app <- Message(body: body)
+      if event is Bounce {
+        require bounces < 2 else reject "suppressed"
+        bounces' = bounces + 1
+      } else {
+        require waiting + queued < 2 else reject "backlog"
+        waiting' = waiting + 1
+        pending' = pending + 1
+        send app <- Message(body: body)
+      }
     }
   }
 
   // A reply answers the correspondent's own message, so an unsubscribe does not stop it; suppression does. An answer,
-  // sent or refused, settles one waiting message and takes the slot.
+  // sent or refused, settles one waiting message and takes the slot, or waits for it in the queue.
   on Reply(body) {
-    require slot is Free else reject "busy"
-    if waiting > 0 {
+    if slot is Free {
+      if waiting > 0 {
+        waiting' = waiting - 1
+      } else {
+        pending' = pending + 1
+      }
+      if bounces == 2 {
+        slot' = Receipt
+        send app <- Rejected(reason: "suppressed")
+      } else {
+        slot' = Sending
+        emit send(body: body, kind: Direct)
+      }
+    } else {
+      // A reply that answers a waiting message waits for the slot, in order (at most two, within pending).
+      require waiting > 0 else reject "busy"
       waiting' = waiting - 1
-    } else {
-      pending' = pending + 1
-    }
-    if bounces == 2 {
-      slot' = Receipt
-      send app <- Rejected(reason: "suppressed")
-    } else {
-      slot' = Sending
-      emit send(body: body, kind: Direct)
+      queued' = queued + 1
+      if queued == 0 {
+        queue1' = body
+      } else {
+        queue2' = body
+      }
     }
   }
 
@@ -127,11 +148,26 @@ service machine Conversation {
     send app <- Failed()
   }
 
-  // The application has consumed the receipt: the slot is free.
+  // The application has consumed the receipt: the slot is free, or the next queued reply takes it.
   on Ack {
     require slot is Receipt else reject "no-receipt"
-    slot' = Free
-    pending' = pending - 1
+    if queued == 0 {
+      slot' = Free
+      pending' = pending - 1
+    } else {
+      // The first queued reply takes the slot, under the rules as they stand now.
+      queued' = queued - 1
+      queue1' = queue2
+      queue2' = none
+      pending' = pending - 1
+      if bounces == 2 {
+        slot' = Receipt
+        send app <- Rejected(reason: "suppressed")
+      } else {
+        slot' = Sending
+        emit send(body: queue1, kind: Direct)
+      }
+    }
   }
 
   effect send(body: Content, kind: Kind) {
@@ -147,5 +183,5 @@ service machine Conversation {
 
   never no-bulk-after-unsubscribe: emit send(kind: Bulk) while !subscribed
   never no-send-to-suppressed: emit send while bounces == 2
-  never one-send-at-a-time: emit send while !(slot is Free)
+  never one-send-at-a-time: emit send while slot is Sending
 }

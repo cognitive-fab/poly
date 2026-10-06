@@ -4,11 +4,13 @@
 // refused. url_verification is answered with its challenge. A message, an archive and an unarchive of the channel are
 // the conversation's Inbound; the event id is the provider's message id, so Slack's retries are one step.
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { hmac, httpFailure, json, noAnswer, sameText, skewSeconds } from '../util.js';
+import { fresh, hmac, httpFailure, json, noAnswer, signatureMatches, type AdapterFault } from '../util.js';
 
 export interface SlackConfig {
   signingSecret: string;
   botToken: string;
+  /** A seeded mutant, for the tests only (ADAPTER_FAULTS). */
+  fault?: AdapterFault;
 }
 
 const REPLAY_SECONDS = 300;
@@ -24,8 +26,8 @@ export function slack(c: SlackConfig): ChannelAdapter {
       const ts = w.headers['x-slack-request-timestamp'];
       const sig = w.headers['x-slack-signature'];
       if (!ts || !sig) return { refused: 'signature-missing' };
-      if (!(skewSeconds(ts, now) <= REPLAY_SECONDS)) return { refused: 'timestamp-stale' };
-      if (!sameText(sig, `v0=${hmac('sha256', c.signingSecret, `v0:${ts}:${w.body}`).toString('hex')}`)) return { refused: 'signature-invalid' };
+      if (!fresh(ts, now, REPLAY_SECONDS, c.fault)) return { refused: 'timestamp-stale' };
+      if (!signatureMatches(sig, `v0=${hmac('sha256', c.signingSecret, `v0:${ts}:${w.body}`).toString('hex')}`, c.fault)) return { refused: 'signature-invalid' };
       const doc = json(w.body) as { type?: unknown; challenge?: unknown; event_id?: unknown; event?: SlackEvent };
       if (doc.type === 'url_verification') return { messages: [], receipts: [], answer: { status: 200, contentType: 'text/plain', body: String(doc.challenge ?? '') } };
       if (doc.type !== 'event_callback' || typeof doc.event_id !== 'string' || !doc.event) return { messages: [], receipts: [] };
@@ -48,6 +50,9 @@ export function slack(c: SlackConfig): ChannelAdapter {
       if (r.status === 200 && doc.ok === true && typeof doc.ts === 'string') return { ok: true, providerId: `${typeof doc.channel === 'string' ? doc.channel : out.to}:${doc.ts}` };
       // Slack answers an error with 200 and ok false; rate_limited (with 429) and an internal error may pass on retry.
       const error = typeof doc.error === 'string' ? doc.error : String(r.status);
+      // PS15.4: is_archived is a report std.channels.slack's rule no-post-to-archived reads, so it is the provider event
+      // Archived for the channel's conversation.
+      if (r.status === 200 && error === 'is_archived') return { ok: false, permanent: true, error, events: [{ providerId: `is_archived:${out.to}`, fields: { channel: out.to, event: 'Archived' } }] };
       if (r.status === 200) return { ok: false, permanent: !['rate_limited', 'ratelimited', 'internal_error', 'fatal_error', 'service_unavailable', 'request_timeout'].includes(error), error };
       return httpFailure(r, error);
     },

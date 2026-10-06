@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS poly_content (
   digest TEXT PRIMARY KEY,
   body   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS poly_ingress_nonce (
+  channel TEXT NOT NULL,
+  nonce   TEXT NOT NULL,
+  at      INTEGER NOT NULL,
+  PRIMARY KEY (channel, nonce)
+);
 CREATE TABLE IF NOT EXISTS poly_gate_session (
   session TEXT PRIMARY KEY,
   sseq    INTEGER NOT NULL
