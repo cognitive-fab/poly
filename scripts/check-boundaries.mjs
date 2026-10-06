@@ -8,6 +8,8 @@
 //    From @poly/core it may import types only (`import type`), which the
 //    compiler erases under verbatimModuleSyntax. Nothing from @poly/lang,
 //    @poly/lower, @poly/embed or @poly/check, ever.
+// 5. Network code lives in poly-io alone (S182). poly-io imports node builtins, its own files, and the runtime adapter
+//    interface (@poly/runtime/adapters) as types only; no check package imports poly-io, in any form.
 // 2. No language-model call on a check or decision path. No package may import
 //    a model SDK, and no check package may call fetch or open a socket.
 // 3. A host-neutral core with thin host adapters (S167, M6). No package names a host or imports a host's SDK
@@ -23,7 +25,9 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MODEL_SDKS = [/^@anthropic-ai\//, /^openai$/, /^@openai\//, /^@google\/genai$/, /^@google\/generative-ai$/, /^cohere-ai$/, /^@mistralai\//, /^ollama$/, /^langchain/, /^@langchain\//];
-const NETWORK_MODULES = ['node:http', 'node:https', 'node:net', 'node:tls', 'node:dgram', 'http', 'https', 'net', 'tls', 'dgram'];
+const NETWORK_MODULES = ['node:http', 'node:https', 'node:http2', 'node:net', 'node:tls', 'node:dgram', 'http', 'https', 'http2', 'net', 'tls', 'dgram'];
+// S182: the packages on a check path, which never import poly-io.
+const CHECK_PACKAGES = ['poly-core', 'poly-lang', 'poly-lower', 'poly-ref', 'poly-embed', 'poly-check', 'poly-agent'];
 const PROCESS_MODULES = ['node:child_process', 'child_process', 'node:worker_threads', 'worker_threads'];
 const REF_ALLOWED = [/^node:/, /^@cognitive-fab\/sam-pattern$/];
 // Rule 3: host SDKs, and the names of the hosts an adapter serves.
@@ -69,7 +73,14 @@ export function violationsOf(pkg, file, text) {
   const v = [];
   for (const imp of importsOf(text)) {
     if (MODEL_SDKS.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} imports model SDK '${imp.spec}' (no model call on a check path)`);
-    if (NETWORK_MODULES.includes(imp.spec)) v.push(`${file}:${imp.line} imports network module '${imp.spec}' (no model call on a check path)`);
+    if (NETWORK_MODULES.includes(imp.spec) && pkg !== 'poly-io') v.push(`${file}:${imp.line} imports network module '${imp.spec}' (network code lives in poly-io alone, S182)`);
+    if (pkg === 'poly-io') {
+      const relativeSpec = imp.spec.startsWith('./') || imp.spec.startsWith('../');
+      if (relativeSpec) { if (/(^|\/)poly-[a-z]+(\/|$)/.test(imp.spec)) v.push(`${file}:${imp.line} reaches into another package by relative path '${imp.spec}' (S182)`); }
+      else if (imp.spec === '@poly/runtime/adapters') { if (!imp.typeOnly) v.push(`${file}:${imp.line} imports a value from @poly/runtime/adapters; poly-io imports the adapter interface as types only (S182)`); }
+      else if (!/^node:/.test(imp.spec)) v.push(`${file}:${imp.line} poly-io imports '${imp.spec}'; it imports node builtins and the runtime adapter interface only (S182)`);
+    }
+    if (CHECK_PACKAGES.includes(pkg) && (imp.spec === '@poly/io' || imp.spec.startsWith('@poly/io/') || /(^|\/)poly-io(\/|$)/.test(imp.spec))) v.push(`${file}:${imp.line} a check package imports poly-io, the package with network code (S182)`);
     if (pkg === 'poly-ref') {
       const relativeSpec = imp.spec.startsWith('./') || imp.spec.startsWith('../');
       if (relativeSpec) {

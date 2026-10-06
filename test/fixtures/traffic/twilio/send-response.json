@@ -1,0 +1,20 @@
+{
+  "account_sid": "ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "api_version": "2010-04-01",
+  "body": "Your order shipped.",
+  "date_created": "Thu, 24 Aug 2023 05:01:45 +0000",
+  "date_sent": null,
+  "date_updated": "Thu, 24 Aug 2023 05:01:45 +0000",
+  "direction": "outbound-api",
+  "error_code": null,
+  "error_message": null,
+  "from": "+15557122661",
+  "num_media": "0",
+  "num_segments": "1",
+  "price": null,
+  "price_unit": null,
+  "messaging_service_sid": null,
+  "sid": "SMaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "queued",
+  "to": "+15558675310"
+}

@@ -52,3 +52,28 @@ test('P8: indirect routes across the boundary are violations too', () => {
   }
   assert.deepEqual(violationsOf('poly-ref', 'a.ts', "import type { Machine } from '@poly/core'\nimport { createRequire } from 'node:module'\n"), []);
 });
+
+// S182: network code lives in poly-io alone, and poly-io and the check packages never import each other.
+test('S182: poly-io alone may open a socket; it imports only node builtins and the runtime adapter interface, as types', () => {
+  assert.deepEqual(violationsOf('poly-io', 'a.ts', "import { request } from 'node:https'\nimport { connect } from 'node:tls'\nimport { createServer } from 'node:http'\n"), []);
+  assert.deepEqual(violationsOf('poly-io', 'a.ts', "import type { ChannelAdapter } from '@poly/runtime/adapters'\nimport { hmac } from './util.js'\n"), []);
+  for (const src of [
+    "import { ChannelAdapter } from '@poly/runtime/adapters'\n",
+    "import type { PolyRuntime } from '@poly/runtime'\n",
+    "import { checkFile } from '@poly/check'\n",
+    "import type { Module } from '@poly/core'\n",
+    "const m = await import('@poly/lower')\n",
+    "import { x } from '../../poly-check/src/index.js'\n",
+    "import got from 'got'\n",
+  ]) assert.ok(violationsOf('poly-io', 'a.ts', src).length >= 1, src);
+  for (const pkg of ['poly-core', 'poly-lang', 'poly-lower', 'poly-ref', 'poly-embed', 'poly-check', 'poly-agent']) {
+    assert.ok(violationsOf(pkg, 'a.ts', "import { ingress } from '@poly/io'\n").length >= 1, pkg);
+    assert.ok(violationsOf(pkg, 'a.ts', "import type { X } from '@poly/io'\n").length >= 1, pkg);
+  }
+  assert.ok(violationsOf('poly-runtime', 'a.ts', "import https from 'node:https'\n").length >= 1);
+});
+
+test('S182, polywatch on step 8: HTTP/2 is a network module too', () => {
+  for (const spec of ['node:http2', 'http2']) assert.ok(violationsOf('poly-check', 'a.ts', `import x from '${spec}'\n`).length >= 1, spec);
+  assert.deepEqual(violationsOf('poly-io', 'a.ts', "import { connect } from 'node:http2'\n"), []);
+});

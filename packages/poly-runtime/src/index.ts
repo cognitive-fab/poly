@@ -18,3 +18,4 @@ export { capabilitiesFor, withinPrefix, CapabilityRefused, MAX_REDIRECTS, type T
 export { policyEngine, actionOf, decisionOfReject, type EngineDecision } from './policy-engine.js';
 export { deriveKey, keyFields, runIdOf, keyOfRun, WorkflowError } from './workflows.js';
 export { loadRun, runConfigOf, RunConfigError, STORE_RUN, type LoadedRun } from './run.js';
+export type { Webhook, SenderClaims, InboundMessage, ProviderReceipt, Verified, Refusal, OutboundSend, SendResult, HttpRequest, HttpResponse, HttpTransport, SmtpSession, SmtpTransport, ChannelTransports, ChannelAdapter, IngressHost } from './adapters.js';

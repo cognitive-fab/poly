@@ -27,6 +27,9 @@
     },
     {
       "path": "packages/poly-new"
+    },
+    {
+      "path": "packages/poly-io"
     }
   ]
 }

@@ -10,6 +10,10 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
+    "./adapters": {
+      "types": "./dist/src/adapters.d.ts",
+      "default": "./dist/src/adapters.js"
+    },
     "./model": {
       "types": "./dist/src/model.d.ts",
       "default": "./dist/src/model.js"

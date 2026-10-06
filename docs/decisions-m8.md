@@ -229,7 +229,15 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 
 ## check-memory under load: an existing failure, counted
 
-**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 4 full runs** (the run before 1d2108d failed; the two runs of step 7 and the run of its follow-up passed).
+**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 6 full runs** (the run before 1d2108d failed; the two runs of step 7, the run of its follow-up and the two runs of plan step 8 passed).
+
+## Plan step 8: choices for the owner's notice
+
+- **Mailgun for inbound mail.** S183 names an inbound-mail webhook. Mailgun's route webhook is used because it is signed. Its signature covers the timestamp and a token, not the body, so the adapter takes each token once (the cache Mailgun recommends) and refuses an old timestamp.
+- **Receipts through `verify`.** A provider's receipt is a webhook, so `verify` returns receipts beside messages. Ingress records each receipt on `runtime:ingress`; it is not delivered to the conversation. The send's effect completes on the provider's acceptance (`ok`) or refusal (`failed`). A later `failed` or `undelivered` status is recorded and changes no state.
+- **Sender claims (K11).** WhatsApp, Slack and a signed webhook source give a verified claim; an SMS number and an email address give an unverified one. Ingress records the claims of every message. Carrying them in the step label, so that a program reads `verified` (AC14), is plan step 10.
+- **Sends are not yet wired to the outbox.** `send` is built and tested against recorded traffic; registering it as the handler of `channel.<c>.send` under the gate is plan step 10, with AC17.
+- **Seeded controls.** The adapter tests are confirmation tests, so each was run against two broken builds: the signature comparison that always matches fails 9 of the 23 tests, and the timestamp check that never refuses fails 3. Both were restored; the measurement is recorded here and not committed as code.
 
 ## Engine changes
 

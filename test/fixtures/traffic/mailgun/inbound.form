@@ -1,0 +1,1 @@
+recipient=support%40example.com&sender=bob%40example.org&from=Bob+%3Cbob%40example.org%3E&subject=Order+42&body-plain=Hello%2C+where+is+my+order%3F%0D%0A&stripped-text=Hello%2C+where+is+my+order%3F&Message-Id=%3C20261005103000.1234%40mail.example.org%3E&message-headers=%5B%5B%22Subject%22%2C+%22Order+42%22%5D%5D

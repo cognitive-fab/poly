@@ -1,0 +1,6 @@
+{
+  "code": 21610,
+  "message": "Attempt to send to unsubscribed recipient",
+  "more_info": "https://www.twilio.com/docs/errors/21610",
+  "status": 400
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@poly/io",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "poly's ingress and runtime channel adapters, the one package allowed a network module (PT20.2, PT21.4, S182)",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "dependencies": {
+    "@poly/runtime": "0.0.0"
+  }
+}

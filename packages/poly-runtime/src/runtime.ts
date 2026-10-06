@@ -333,6 +333,17 @@ export class PolyRuntime {
     return { outcome: 'delivered', application, conversation };
   }
 
+  /**
+   * PT21.4, S182: what ingress records on runtime:ingress besides a delivery: a webhook its adapter refused (nothing
+   * is dispatched), a provider's receipt for an earlier send, and the sender claims of a message (K11). The channel
+   * must be one the certificate names.
+   */
+  async ingressRecord(channel: string, record: { stage: 'verify' | 'receipt' | 'claims'; outcome: string; provider: string; reason?: string; providerId?: string; status?: string; claims?: { verified: boolean; sender: string }; messageId?: string }): Promise<void> {
+    if (!this.verified.channels.some((c) => c.channel === channel)) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
+    this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+    await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { channel, ...record }, this.now()); });
+  }
+
   async takeApprovals(dir: string): Promise<{ file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[]> {
     const out: { file: string; outcome: 'applied' | 'refused'; reason?: ApprovalRefusal }[] = [];
     let names: string[];

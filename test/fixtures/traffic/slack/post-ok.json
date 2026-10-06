@@ -1,0 +1,6 @@
+{
+  "ok": true,
+  "channel": "C123ABC456",
+  "ts": "1503435956.000247",
+  "message": { "text": "Here's a message for you", "username": "ecto1", "bot_id": "B123ABC456", "type": "message", "subtype": "bot_message", "ts": "1503435956.000247" }
+}
