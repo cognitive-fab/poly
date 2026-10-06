@@ -1010,7 +1010,7 @@ The certificate lists each workflow as `{ runtime: "poly-runtime", gated: true }
 
 ## PT10a. Channels, as built (M8b step 1, PS15)
 
-**The std kinds (M8b step 2).** `std/channels` holds `whatsapp`, `sms`, `email`, `slack` and `webhook`, each written from its provider's documentation and recorded in its `PROVENANCE.md` with the date it was read. A conversation is a `service`, accepts a forbidden send and sends `Rejected(reason)`, keeps one send in flight and at most two unanswered messages (`backlog` refuses a third), and declares `pending: 0..3`. Each states its provider's rules as `never` statements and step properties, and each rule has a seeded mutant in `test/std-channels.test.mjs`.
+**The std kinds (M8b step 2).** `std/channels` holds `whatsapp`, `sms`, `email`, `slack` and `webhook`, each written from its provider's documentation and recorded in its `PROVENANCE.md` with the date it was read. A conversation is a `service`, accepts a forbidden send and sends `Rejected(reason)`, holds one slot for a send and then its receipt until the application's `Ack()` (a reply meanwhile is refused `busy`), keeps at most two unanswered messages (`backlog` refuses a third), and declares `pending: 0..3`. The expansion appends `send c <- Ack()` to each handler of the application bound to a receipt (PS15.3); an author never writes or binds it, and a kind without `Ack()` is `PL6811`. Each states its provider's rules as `never` statements and step properties, and each rule has a seeded mutant in `test/std-channels.test.mjs`.
 
 A channel is the top-level declaration of PT21.1 with a binding per Peer action:
 

@@ -5,7 +5,7 @@
 import type * as A from '@poly/core';
 import type { Fault } from './lower.js';
 
-export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal', 'outcome-entry', 'widen-target', 'skip-claims', 'widen-sandbox', 'drop-timer-target', 'workflow-tool', 'workflow-key', 'skip-content', 'content-before-unhandled', 'drop-never', 'invert-never-while', 'drop-never-filter', 'never-post-state', 'content-row-on-none', 'foreign-enum-member', 'channel-drop-spawn', 'channel-swap-rename', 'channel-inbound-to-app'];
+export const FAULTS: Fault[] = ['drop-frame', 'swap-reason', 'off-by-one', 'invert-require', 'skip-guard', 'skip-terminal', 'drop-property', 'drop-auto-invariant', 'drop-effect', 'reorder-effects', 'unnamed-reject', 'poison-step', 'manifest-data', 'drop-terminal-state', 'contract-domain', 'contract-init', 'path-invariant', 'compose-invariant', 'liveness-goal', 'outcome-entry', 'widen-target', 'skip-claims', 'widen-sandbox', 'drop-timer-target', 'workflow-tool', 'workflow-key', 'skip-content', 'content-before-unhandled', 'drop-never', 'invert-never-while', 'drop-never-filter', 'never-post-state', 'content-row-on-none', 'foreign-enum-member', 'channel-drop-spawn', 'channel-swap-rename', 'channel-inbound-to-app', 'channel-drop-ack'];
 
 /** The machine as the broken lowering sees it. drop-frame, skip-terminal, the property faults and the effect faults act in the emitter instead. */
 export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {
@@ -23,10 +23,11 @@ export function applyFault(m: A.Machine, fault: Fault | undefined): A.Machine {
       if (s.kind === 'For') visitStmts(s.body);
     }
   };
-  // PS15: the channel's expansion broken: the spawn in starts dropped, or two renamed sends of the conversation swapped
-  // (two whose arguments are the same, so the lowering still compiles them).
-  if (fault === 'channel-drop-spawn') {
-    const drop = (body: A.Stmt[]): A.Stmt[] => body.filter((s) => !(s.kind === 'Intent' && s.generated === 'channel')).map((s) => (s.kind === 'If' ? { ...s, then: drop(s.then), else: s.else ? drop(s.else) : s.else } : s));
+  // PS15: the channel's expansion broken: the spawn in starts dropped, the acknowledgement of a receipt dropped, or two
+  // renamed sends of the conversation swapped (two whose arguments are the same, so the lowering still compiles them).
+  if (fault === 'channel-drop-spawn' || fault === 'channel-drop-ack') {
+    const op = fault === 'channel-drop-spawn' ? 'spawn' : 'send';
+    const drop = (body: A.Stmt[]): A.Stmt[] => body.filter((s) => !(s.kind === 'Intent' && s.generated === 'channel' && s.op === op)).map((s) => (s.kind === 'If' ? { ...s, then: drop(s.then), else: s.else ? drop(s.else) : s.else } : s));
     for (const it of copy.items) if (it.kind === 'Handler') it.body = drop(it.body);
     return copy;
   }

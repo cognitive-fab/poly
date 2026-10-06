@@ -64,6 +64,9 @@ function eachStmt(body: A.Stmt[], visit: (s: A.Stmt) => void): void {
   }
 }
 
+/** PS15.0: the Peer actions that are the conversation's receipts, each acknowledged by the application (PS15.3). */
+export const RECEIPTS = ['Delivered', 'Rejected', 'Failed'];
+
 /** PS15: expands every channel of a module, or reports why one cannot be. A module with none is returned as it is. */
 export function expandChannels(module: A.Module, program: A.Module[]): ChannelExpansion {
   const channels = module.decls.filter((d): d is A.Channel => d.kind === 'Channel');
@@ -85,6 +88,8 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
     const pending = conv?.fields.find((f) => f.name === 'pending');
     if (!lib || !conv || !peer) { err('PL6811', c, `channel ${c.name}: no channel kind ${c.channelKind}; ${lib ? `${libName} declares no ${conv ? 'Peer' : 'Conversation'} machine` : `no module ${libName}`} (PT21.1a)`); continue; }
     if (pending?.type.kind !== 'TRange') { err('PL6811', c, `channel ${c.name}: ${libName}.Conversation declares no field pending: 0..N, whose N bounds the messages in transit (PS15.5)`); continue; }
+    const ack = conv.items.find((i): i is A.Action => i.kind === 'Action' && i.name === 'Ack');
+    if (!ack || ack.params.length || !conv.items.some((i) => i.kind === 'Handler' && i.action === 'Ack')) { err('PL6811', c, `channel ${c.name}: ${libName}.Conversation declares no action Ack() with a handler, with which the application acknowledges a receipt (PS15.0, PS15.3)`); continue; }
     // The application: the one machine every binding and starts names.
     const apps = new Set([...c.maps.map((m) => m.machine), ...(c.starts ? [c.starts.machine] : [])]);
     if (apps.size !== 1) { err('PL1201', c, `channel ${c.name} binds ${apps.size ? [...apps].join(' and ') : 'no machine'}; a channel binds one application machine (PS15.1)`); continue; }
@@ -142,6 +147,11 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
       if (what !== 'reply' && what !== 'template') return;
       Object.assign(s, { op: 'send', target: what === 'reply' ? 'Reply' : 'Template', to: { kind: 'Name', name: c.name, id: `${s.id}:to` } });
     });
+    // PS15.3: each handler of A bound to a receipt ends by acknowledging it. Ack is the expansion's: never bound.
+    for (const r of RECEIPTS) {
+      const h = binding[r] && app.items.find((i): i is A.Handler => i.kind === 'Handler' && i.action === binding[r]);
+      if (h) h.body.push({ kind: 'Intent', id: `${h.id}:channel:${c.name}:ack`, span: c.span, op: 'send', target: 'Ack', args: [], to: { kind: 'Name', name: c.name, id: `${h.id}:channel:${c.name}:ack:to` }, modifier: null, as: null, index: null, generated: 'channel' } as unknown as A.IntentStmt);
+    }
     // PS15.3: c names the address p/c of the conversation in every handler of A.
     app.channelKeys = [...(app.channelKeys ?? []), { key: c.name, machine: convId }];
     // The module names m.c.Conversation.

@@ -8,7 +8,7 @@ The rules of `std/channels/slack.poly` were taken from Slack's documentation of 
 |---|---|---|
 | `no-post-to-archived` (never) | https://docs.slack.dev/reference/methods/chat.postMessage | The error `is_archived`: the channel has been archived and cannot receive new messages. |
 | `Inbound` with `Archived` and `Unarchived` | https://docs.slack.dev/reference/events/channel_archive and https://docs.slack.dev/reference/events/channel_unarchive | "A channel was archived"; "A channel was unarchived". Each is sent to the workspace's connections. |
-| `one-message-per-second` (never) | https://docs.slack.dev/reference/methods/chat.postMessage | "It will generally allow an app to post 1 message per second to a specific channel." The error `rate_limited` carries a `Retry-After` header. |
+| `one-message-per-second` (never) | https://docs.slack.dev/reference/methods/chat.postMessage | "It will generally allow an app to post 1 message per second to a specific channel." The error `rate_limited` carries a `Retry-After` header. The module refuses a post asked for while its timer runs with `Rejected("rate-limited")`, before the provider would. |
 
 ## Constants
 
@@ -20,9 +20,10 @@ The rules of `std/channels/slack.poly` were taken from Slack's documentation of 
 
 | Rule in the module | Why |
 |---|---|
-| `one-send-at-a-time` (never) | One send in flight, so a receipt names the send it settles. |
+| `one-send-at-a-time` (never) | Nothing is sent while the slot holds a send or its receipt, so a receipt names the send it settles. |
+| `Ack` and the slot (ruled after step 7) | One slot holds a send, then its receipt (`Delivered`, `Rejected` or `Failed`), until the application acknowledges the receipt with `Ack`, which the channel's expansion appends to every handler bound to a receipt (PS15.3). A reply or a template while the slot is held is a rejected step, `busy`, journaled. With the receipt counted, every message between the application and its conversation stays within `pending`'s bound. |
 | `waiting: 0..2`, refusal `backlog` | At most two messages wait for an answer. A third is a rejected step, journaled. |
-| `pending: 0..3`, invariant `obligations` | The waiting messages and the send in flight; its bound is the transit bound of the configuration the channel generates (PS15.5). |
+| `pending: 0..3`, invariant `obligations` | The waiting messages and the held slot (a send or its unacknowledged receipt); its bound is the transit bound of the configuration the channel generates (PS15.5). |
 | The errors `not_in_channel`, `channel_not_found` and `rate_limited` after its retries | A failed send, reported to the application as `Failed`. |
 
 ## Not checked

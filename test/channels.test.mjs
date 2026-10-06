@@ -41,6 +41,29 @@ test('PS15: a channel expands into the application, its conversation and a confi
   assert.match(readFileSync(join(build, 'concierge.support.Conversation', 'effects.manifest.json'), 'utf8'), /channel\.support\.send/);
 });
 
+test('PS15.3: each handler bound to a receipt ends by acknowledging it, send support <- Ack(); a kind with no Ack is PL6811', { timeout: 180_000 }, async () => {
+  const r = await check(SRC);
+  assert.equal(r.verdict, 'CLEAN', text(r));
+  // Delivered, SendRejected and SendFailed are bound to the receipts; Got (Message) and Start are not.
+  const effects = readFileSync(join(OUT, `case-${n - 1}`, '.poly', 'build', 'concierge.Ticket', 'effects.cjs'), 'utf8');
+  assert.equal(effects.match(/kind: "sendTo"[^\n]*action: "Ack"/g)?.length, 3, effects);
+  // An author does not bind Ack: it is not a Peer action, so a binding of it names no Peer action.
+  const bound = await check(swap(SRC, '  Failed -> Ticket.SendFailed\n', '  Failed -> Ticket.SendFailed\n  Ack -> Ticket.Got\n'));
+  assert.notEqual(bound.verdict, 'CLEAN', text(bound));
+  // A kind whose conversation declares no Ack cannot be expanded.
+  const std = join(OUT, 'std-no-ack');
+  rmSync(std, { recursive: true, force: true });
+  mkdirSync(std, { recursive: true });
+  const kind = readFileSync(join(STD, 'channels-test.poly'), 'utf8');
+  writeFileSync(join(std, 'channels-test.poly'), swap(swap(kind, '  action Ack()\n', ''), "  on Ack {\n    require receipt else reject \"no-receipt\"\n    receipt' = false\n    pending' = 0\n  }\n", ''));
+  const d = join(OUT, `case-${n++}`);
+  rmSync(d, { recursive: true, force: true });
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, 'concierge.poly'), SRC);
+  const none = await checkFile(join(d, 'concierge.poly'), { root: d, std });
+  assert.ok(codes(none).includes('PL6811') && /Ack/.test(text(none)), text(none));
+});
+
 test('PS15.1: the binding is total (PL6813), one-to-one (PL6814) and typed (PL6815)', { timeout: 180_000 }, async () => {
   let r = await check(swap(SRC, '  Failed -> Ticket.SendFailed\n', ''));
   assert.ok(codes(r).includes('PL6813'), text(r));

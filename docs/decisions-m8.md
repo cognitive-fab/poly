@@ -210,6 +210,27 @@ poly-ref expands the channel itself from the PS15 text and is not given the comp
 - *A provider rule a module does not encode is not checked.* Each `PROVENANCE.md` lists what is, and what is not.
 - *A thread holds at most two unanswered messages*; a third is refused `backlog`.
 
+## Step 7 accepted: receipts are acknowledged
+
+**Ruled (2026-10-05).** Step 7 is accepted. The unacknowledged receipts are settled by option (b), with the acknowledgement generated:
+
+- Each std conversation gains the action `Ack()` and holds its slot until `Ack` arrives, so `pending` counts the receipt as well. The five modules and their `PROVENANCE.md` files list it as poly's own rule.
+- PS15.3 is extended (72d4bda, before the code): the expansion appends `send c <- Ack()` to every handler of the application bound to a receipt (`Delivered`, `Rejected`, `Failed`). Authors never write or bind `Ack`, and it is outside `PL6813` to `PL6815`. poly-ref appends it from the PS text on its own.
+- A kind whose conversation declares no `Ack()` with a handler is `PL6811`.
+- The seeded fault `channel-drop-ack` drops the acknowledgement from the lowered application, and translation validation catches it (`PL2501`).
+
+**Reading of the ruling.** "Ack on Peer" is read as the peer's acknowledgement: `Ack` is an action of the conversation, which the application (the peer) sends, since `send c <- Ack` addresses the conversation. `Peer` keeps only the messages the conversation sends.
+
+**What the slot changes.** A reply or a template that arrives while the slot holds a send or its receipt is a rejected step, `busy`, journaled on the conversation; it no longer becomes `Rejected("busy")`, which was itself a receipt that needed a slot. The reasons `Rejected` carries are now the providers' rules only.
+
+**Limits added.**
+- *A rejected receipt step sends no `Ack`* (PS3.2): the receipt stays unacknowledged, the slot stays held, and every later reply on the thread is refused `busy`. An application that may reject a receipt keeps its thread from sending.
+- *A reply refused `busy` is not reported to the application*: it is journaled on the conversation only.
+
+## check-memory under load: an existing failure, counted
+
+**Ruled (2026-10-05).** `test/check-memory.test.mjs` failing under the parallel load of a full run is an existing failure. It is not fixed in M8b's step 2 follow-up. Measured before the ruling: the collected heap grew 0.4 MB over checks 10 to 60 in one full run (its bound is 0.3 MB), and the same growth (about 97 `UncompiledData` objects per check) is in the d923503 tree, where the test alone grows 0.2 to 0.3 MB; it is not a regression of M8. From now on each full run reports it with its own count, beside the suite's totals. **The count so far: 1 failure in 4 full runs** (the run before 1d2108d failed; the two runs of step 7 and the run of its follow-up passed).
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.

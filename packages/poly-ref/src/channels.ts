@@ -47,6 +47,11 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
       return s;
     });
     for (const h of app.items) if (h.kind === 'Handler') h.body = rewrite(h.body);
+    // PS15.3: a handler bound to a receipt (Delivered, Rejected or Failed, PS15.0) gains send c <- Ack() last.
+    for (const receipt of ['Delivered', 'Rejected', 'Failed']) {
+      const h = peer[receipt] && app.items.find((i): i is A.Handler => i.kind === 'Handler' && i.action === peer[receipt]);
+      if (h) h.body = [...h.body, { kind: 'Intent', id: `ref:${h.id}:ack`, op: 'send', target: 'Ack', args: [], to: { kind: 'Name', id: `ref:${h.id}:ack:to`, name: ch.name }, modifier: null, as: null, index: null } as unknown as A.IntentStmt];
+    }
     // PS15.3: in A's handlers, c is the address p/c of the child spawned under the key c.
     app.channelKeys = [...(app.channelKeys ?? []), { key: ch.name, machine: convName }];
     decls.unshift({ kind: 'Use', id: `ref:${ch.id}:use`, path: convName.split('.') } as A.UseDecl);

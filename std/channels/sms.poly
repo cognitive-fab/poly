@@ -4,11 +4,14 @@
 // a message's keyword, matching the provider's lists without regard to case; the conversation reads only the class.
 // A send the rules forbid is accepted, and the application is told why (Q1, S179).
 //
-// poly's own bounds, as in every std conversation: one send is in flight at a time; at most two messages wait for an
-// answer, and a third is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
+// poly's own bounds, as in every std conversation: one slot holds a send, then its receipt, until the application's
+// Ack (PS15.3), and a reply while it is held is refused "busy"; at most two messages wait for an answer, and a third
+// is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
 module std.channels.sms
 
 enum Keyword { Plain, OptOut, OptIn, Help }
+
+enum Slot { Free, Sending, Receipt }
 
 machine Peer {
   state {
@@ -16,7 +19,7 @@ machine Peer {
 
   action Message(body: Content)
   action Delivered()
-  action Rejected(reason: string check { "opted-out", "busy" })
+  action Rejected(reason: string check { "opted-out" })
   action Failed()
 }
 
@@ -24,12 +27,12 @@ service machine Conversation {
   state {
     consent : bool = true
     waiting : 0..2 = 0
-    sending : bool = false
+    slot    : Slot = Free
     pending : 0..3 = 0
     app     : Ref<Peer> = none
   }
 
-  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+  invariant obligations: (slot is Free implies pending == waiting) && (!(slot is Free) implies pending == waiting + 1)
 
   action Open(app: Ref<Peer>)
   action Inbound(from: string check { "sms-1", "sms-2" }, body: Content, keyword: Keyword)
@@ -37,6 +40,7 @@ service machine Conversation {
   action Template(body: Content)
   action Sent()
   action SendFailed()
+  action Ack()
 
   on Open(app) {
     require app != none else reject "no-app"
@@ -72,71 +76,57 @@ service machine Conversation {
     }
   }
 
+  // An answer, sent or refused, settles one waiting message and takes the slot.
   on Reply(body) {
+    require slot is Free else reject "busy"
+    if waiting > 0 {
+      waiting' = waiting - 1
+    } else {
+      pending' = pending + 1
+    }
     if !consent {
-      if waiting > 0 {
-        waiting' = waiting - 1
-        pending' = pending - 1
-      }
+      slot' = Receipt
       send app <- Rejected(reason: "opted-out")
     } else {
-      if sending {
-        if waiting > 0 {
-          waiting' = waiting - 1
-          pending' = pending - 1
-        }
-        send app <- Rejected(reason: "busy")
-      } else {
-        if waiting > 0 {
-          waiting' = waiting - 1
-        } else {
-          pending' = pending + 1
-        }
-        sending' = true
-        emit send(body: body)
-      }
+      slot' = Sending
+      emit send(body: body)
     }
   }
 
   // SMS has no template of its own: a template is a message the application started, under the same rules.
   on Template(body) {
+    require slot is Free else reject "busy"
+    if waiting > 0 {
+      waiting' = waiting - 1
+    } else {
+      pending' = pending + 1
+    }
     if !consent {
-      if waiting > 0 {
-        waiting' = waiting - 1
-        pending' = pending - 1
-      }
+      slot' = Receipt
       send app <- Rejected(reason: "opted-out")
     } else {
-      if sending {
-        if waiting > 0 {
-          waiting' = waiting - 1
-          pending' = pending - 1
-        }
-        send app <- Rejected(reason: "busy")
-      } else {
-        if waiting > 0 {
-          waiting' = waiting - 1
-        } else {
-          pending' = pending + 1
-        }
-        sending' = true
-        emit send(body: body)
-      }
+      slot' = Sending
+      emit send(body: body)
     }
   }
 
   on Sent {
-    require sending else reject "idle"
-    sending' = false
-    pending' = pending - 1
+    require slot is Sending else reject "idle"
+    slot' = Receipt
     send app <- Delivered()
   }
 
   on SendFailed {
-    require sending else reject "idle"
-    sending' = false
-    pending' = pending - 1
+    require slot is Sending else reject "idle"
+    slot' = Receipt
     send app <- Failed()
+  }
+
+  // The application has consumed the receipt: the slot is free.
+  on Ack {
+    require slot is Receipt else reject "no-receipt"
+    slot' = Free
+    pending' = pending - 1
   }
 
   effect send(body: Content) {
@@ -153,5 +143,5 @@ service machine Conversation {
   reject property opt-keyword-never-refused: (action == Inbound && (keyword is OptOut || keyword is OptIn)) implies !rejected("backlog")
 
   never no-send-after-opt-out: emit send while !consent
-  never one-send-at-a-time: emit send while sending
+  never one-send-at-a-time: emit send while !(slot is Free)
 }

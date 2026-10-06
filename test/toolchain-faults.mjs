@@ -45,6 +45,8 @@ export const FAULT_SOURCES = {
   'channel-drop-spawn': ['test/fixtures/channels/concierge.poly'],
   'channel-swap-rename': ['test/fixtures/channels/concierge.poly'],
   'channel-inbound-to-app': ['test/fixtures/channels/concierge.poly'],
+  // PS15.3, as ruled after step 7: the acknowledgement of a receipt dropped from the application's handler.
+  'channel-drop-ack': ['test/fixtures/channels/concierge.poly'],
   // PS5.2a, S178: a machine's never statement, lowered to a step property over the step's intents.
   'drop-never': ['conformance/m8/never/window.poly'],
   'invert-never-while': ['conformance/m8/never/window.poly'],

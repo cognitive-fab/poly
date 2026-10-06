@@ -4,13 +4,16 @@
 // Two bounced messages suppress the address, and nothing is sent to it again. A send the rules forbid is accepted,
 // and the application is told why (Q1, S179).
 //
-// poly's own bounds, as in every std conversation: one send is in flight at a time; at most two messages wait for an
-// answer, and a third is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
+// poly's own bounds, as in every std conversation: one slot holds a send, then its receipt, until the application's
+// Ack (PS15.3), and a reply while it is held is refused "busy"; at most two messages wait for an answer, and a third
+// is refused "backlog"; pending counts both, so its bound 3 is the transit bound (PS15.5).
 module std.channels.email
 
 enum Event { Mail, Unsubscribe }
 
 enum Kind { Direct, Bulk }
+
+enum Slot { Free, Sending, Receipt }
 
 machine Peer {
   state {
@@ -18,7 +21,7 @@ machine Peer {
 
   action Message(body: Content)
   action Delivered()
-  action Rejected(reason: string check { "unsubscribed", "suppressed", "busy" })
+  action Rejected(reason: string check { "unsubscribed", "suppressed" })
   action Failed()
 }
 
@@ -27,12 +30,12 @@ service machine Conversation {
     subscribed : bool = true
     bounces    : 0..2 = 0
     waiting    : 0..2 = 0
-    sending    : bool = false
+    slot       : Slot = Free
     pending    : 0..3 = 0
     app        : Ref<Peer> = none
   }
 
-  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+  invariant obligations: (slot is Free implies pending == waiting) && (!(slot is Free) implies pending == waiting + 1)
 
   action Open(app: Ref<Peer>)
   action Inbound(from: string check { "mail-1", "mail-2" }, body: Content, event: Event)
@@ -41,6 +44,7 @@ service machine Conversation {
   action Sent()
   action Bounced()
   action SendFailed()
+  action Ack()
 
   on Open(app) {
     require app != none else reject "no-app"
@@ -61,80 +65,56 @@ service machine Conversation {
     }
   }
 
-  // A reply answers the correspondent's own message, so an unsubscribe does not stop it; suppression does.
+  // A reply answers the correspondent's own message, so an unsubscribe does not stop it; suppression does. An answer,
+  // sent or refused, settles one waiting message and takes the slot.
   on Reply(body) {
+    require slot is Free else reject "busy"
+    if waiting > 0 {
+      waiting' = waiting - 1
+    } else {
+      pending' = pending + 1
+    }
     if bounces == 2 {
-      if waiting > 0 {
-        waiting' = waiting - 1
-        pending' = pending - 1
-      }
+      slot' = Receipt
       send app <- Rejected(reason: "suppressed")
     } else {
-      if sending {
-        if waiting > 0 {
-          waiting' = waiting - 1
-          pending' = pending - 1
-        }
-        send app <- Rejected(reason: "busy")
-      } else {
-        if waiting > 0 {
-          waiting' = waiting - 1
-        } else {
-          pending' = pending + 1
-        }
-        sending' = true
-        emit send(body: body, kind: Direct)
-      }
+      slot' = Sending
+      emit send(body: body, kind: Direct)
     }
   }
 
   // A template is bulk mail: it needs a subscribed, unsuppressed address, and goes out with the one-click headers.
   on Template(body) {
+    require slot is Free else reject "busy"
+    if waiting > 0 {
+      waiting' = waiting - 1
+    } else {
+      pending' = pending + 1
+    }
     if bounces == 2 {
-      if waiting > 0 {
-        waiting' = waiting - 1
-        pending' = pending - 1
-      }
+      slot' = Receipt
       send app <- Rejected(reason: "suppressed")
     } else {
       if !subscribed {
-        if waiting > 0 {
-          waiting' = waiting - 1
-          pending' = pending - 1
-        }
+        slot' = Receipt
         send app <- Rejected(reason: "unsubscribed")
       } else {
-        if sending {
-          if waiting > 0 {
-            waiting' = waiting - 1
-            pending' = pending - 1
-          }
-          send app <- Rejected(reason: "busy")
-        } else {
-          if waiting > 0 {
-            waiting' = waiting - 1
-          } else {
-            pending' = pending + 1
-          }
-          sending' = true
-          emit send(body: body, kind: Bulk)
-        }
+        slot' = Sending
+        emit send(body: body, kind: Bulk)
       }
     }
   }
 
   on Sent {
-    require sending else reject "idle"
-    sending' = false
-    pending' = pending - 1
+    require slot is Sending else reject "idle"
+    slot' = Receipt
     send app <- Delivered()
   }
 
   // A hard bounce is the provider's permanent failure of a send.
   on Bounced {
-    require sending else reject "idle"
-    sending' = false
-    pending' = pending - 1
+    require slot is Sending else reject "idle"
+    slot' = Receipt
     if bounces < 2 {
       bounces' = bounces + 1
     }
@@ -142,10 +122,16 @@ service machine Conversation {
   }
 
   on SendFailed {
-    require sending else reject "idle"
-    sending' = false
-    pending' = pending - 1
+    require slot is Sending else reject "idle"
+    slot' = Receipt
     send app <- Failed()
+  }
+
+  // The application has consumed the receipt: the slot is free.
+  on Ack {
+    require slot is Receipt else reject "no-receipt"
+    slot' = Free
+    pending' = pending - 1
   }
 
   effect send(body: Content, kind: Kind) {
@@ -161,5 +147,5 @@ service machine Conversation {
 
   never no-bulk-after-unsubscribe: emit send(kind: Bulk) while !subscribed
   never no-send-to-suppressed: emit send while bounces == 2
-  never one-send-at-a-time: emit send while sending
+  never one-send-at-a-time: emit send while !(slot is Free)
 }

@@ -3,14 +3,17 @@
 // customer service window for 24 hours, and a later one resets it; a free-form reply goes out only inside the window,
 // a template in or outside it. A send the rules forbid is accepted, and the application is told why (Q1, S179).
 //
-// poly's own bounds: one send is in flight at a time, so a receipt names the send it settles; at most two customer
-// messages wait for an answer, and a third is refused "backlog". pending counts both, so its bound 3 is the transit
-// bound of the configuration the channel generates (PS15.5): two waiting messages and one receipt.
+// poly's own bounds: one slot holds a send, then its receipt, until the application's Ack (PS15.3); a reply or a
+// template while the slot is held is refused "busy". At most two customer messages wait for an answer, and a third
+// is refused "backlog". pending counts both, so its bound 3 is the transit bound of the configuration the channel
+// generates (PS15.5): two waiting messages and one receipt.
 module std.channels.whatsapp
 
 enum Window { Closed, Open }
 
 enum Kind { FreeForm, Templated }
+
+enum Slot { Free, Sending, Receipt }
 
 machine Peer {
   state {
@@ -18,7 +21,7 @@ machine Peer {
 
   action Message(body: Content)
   action Delivered()
-  action Rejected(reason: string check { "window-closed", "busy" })
+  action Rejected(reason: string check { "window-closed" })
   action Failed()
 }
 
@@ -26,12 +29,12 @@ service machine Conversation {
   state {
     window  : Window = Closed
     waiting : 0..2 = 0
-    sending : bool = false
+    slot    : Slot = Free
     pending : 0..3 = 0
     app     : Ref<Peer> = none
   }
 
-  invariant obligations: (sending implies pending == waiting + 1) && (!sending implies pending == waiting)
+  invariant obligations: (slot is Free implies pending == waiting) && (!(slot is Free) implies pending == waiting + 1)
 
   action Open(app: Ref<Peer>)
   action Inbound(from: string check { "wa-1", "wa-2" }, body: Content)
@@ -40,6 +43,7 @@ service machine Conversation {
   action Template(body: Content)
   action Sent()
   action SendFailed()
+  action Ack()
 
   on Open(app) {
     require app != none else reject "no-app"
@@ -63,64 +67,52 @@ service machine Conversation {
     window' = Closed
   }
 
-  // An answer, sent or refused, settles one waiting message.
+  // An answer, sent or refused, settles one waiting message and takes the slot.
   on Reply(body) {
-    if sending {
-      if waiting > 0 {
-        waiting' = waiting - 1
-        pending' = pending - 1
-      }
-      send app <- Rejected(reason: "busy")
+    require slot is Free else reject "busy"
+    if waiting > 0 {
+      waiting' = waiting - 1
     } else {
-      if window is Closed {
-        if waiting > 0 {
-          waiting' = waiting - 1
-          pending' = pending - 1
-        }
-        send app <- Rejected(reason: "window-closed")
-      } else {
-        if waiting > 0 {
-          waiting' = waiting - 1
-        } else {
-          pending' = pending + 1
-        }
-        sending' = true
-        emit send(body: body, kind: FreeForm)
-      }
+      pending' = pending + 1
+    }
+    if window is Closed {
+      slot' = Receipt
+      send app <- Rejected(reason: "window-closed")
+    } else {
+      slot' = Sending
+      emit send(body: body, kind: FreeForm)
     }
   }
 
   // A template is the one message allowed outside the window. Its body names the approved template and its values.
   on Template(body) {
-    if sending {
-      if waiting > 0 {
-        waiting' = waiting - 1
-        pending' = pending - 1
-      }
-      send app <- Rejected(reason: "busy")
+    require slot is Free else reject "busy"
+    if waiting > 0 {
+      waiting' = waiting - 1
     } else {
-      if waiting > 0 {
-        waiting' = waiting - 1
-      } else {
-        pending' = pending + 1
-      }
-      sending' = true
-      emit send(body: body, kind: Templated)
+      pending' = pending + 1
     }
+    slot' = Sending
+    emit send(body: body, kind: Templated)
   }
 
   on Sent {
-    require sending else reject "idle"
-    sending' = false
-    pending' = pending - 1
+    require slot is Sending else reject "idle"
+    slot' = Receipt
     send app <- Delivered()
   }
 
   on SendFailed {
-    require sending else reject "idle"
-    sending' = false
-    pending' = pending - 1
+    require slot is Sending else reject "idle"
+    slot' = Receipt
     send app <- Failed()
+  }
+
+  // The application has consumed the receipt: the slot is free.
+  on Ack {
+    require slot is Receipt else reject "no-receipt"
+    slot' = Free
+    pending' = pending - 1
   }
 
   effect send(body: Content, kind: Kind) {
@@ -135,5 +127,5 @@ service machine Conversation {
   step property window-opens-on-inbound: (pre.window is Closed && post.window is Open) implies action == Inbound
 
   never free-form-outside-window: emit send(kind: FreeForm) while window is Closed
-  never one-send-at-a-time: emit send while sending
+  never one-send-at-a-time: emit send while !(slot is Free)
 }

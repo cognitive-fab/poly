@@ -25,29 +25,30 @@ async function check(file, src) {
 }
 
 // Each kind: its thread field, the reasons its Peer may refuse with, and one seeded mutant per rule. A rule is a
-// never statement or a step property of the conversation; its mutant breaks the handler that keeps it, as
-// [handler, text, replacement], the text unique within that handler.
+// never statement, a step property or a reject property of the conversation; its mutant breaks the handler that keeps
+// it, as [handler, text, replacement], the text unique within that handler. one-send-at-a-time's mutant lets a send
+// out while the slot is held by a send in flight.
 const KINDS = {
   whatsapp: {
     sample: 'wa-1',
     extra: {},
     thread: 'from',
-    reasons: '"window-closed", "busy"',
+    reasons: '"window-closed"',
     rules: {
       'free-form-outside-window': ['Reply', 'if window is Closed {', 'if window is Open && window is Closed {'],
-      'one-send-at-a-time': ['Template', 'if sending {', 'if sending && !sending {'],
-      'window-opens-on-inbound': ['Template', "sending' = true\n", "sending' = true\n      window' = Open\n"],
+      'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
+      'window-opens-on-inbound': ['Template', "slot' = Sending\n", "slot' = Sending\n    window' = Open\n"],
     },
   },
   sms: {
     sample: 'sms-1',
     extra: { keyword: 'Plain' },
     thread: 'from',
-    reasons: '"opted-out", "busy"',
+    reasons: '"opted-out"',
     rules: {
       'no-send-after-opt-out': ['Reply', 'if !consent {', 'if consent && !consent {'],
-      'one-send-at-a-time': ['Template', 'if sending {', 'if sending && !sending {'],
-      'consent-changes-only-by-keyword': ['SendFailed', "sending' = false\n", "sending' = false\n    consent' = true\n"],
+      'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
+      'consent-changes-only-by-keyword': ['SendFailed', "slot' = Receipt\n", "slot' = Receipt\n    consent' = true\n"],
       'opt-keyword-never-refused': ['Inbound', 'if keyword is OptOut {', 'require waiting < 2 else reject "backlog"\n    if keyword is OptOut {'],
     },
   },
@@ -55,11 +56,11 @@ const KINDS = {
     sample: 'mail-1',
     extra: { event: 'Mail' },
     thread: 'from',
-    reasons: '"unsubscribed", "suppressed", "busy"',
+    reasons: '"unsubscribed", "suppressed"',
     rules: {
       'no-bulk-after-unsubscribe': ['Template', 'if !subscribed {', 'if subscribed && !subscribed {'],
       'no-send-to-suppressed': ['Reply', 'if bounces == 2 {', 'if bounces == 2 && bounces == 1 {'],
-      'one-send-at-a-time': ['Reply', 'if sending {', 'if sending && !sending {'],
+      'one-send-at-a-time': ['Reply', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
       'unsubscribe-holds': ['Inbound', "waiting' = waiting + 1\n", "waiting' = waiting + 1\n      subscribed' = true\n"],
     },
   },
@@ -67,21 +68,21 @@ const KINDS = {
     sample: 'C-1',
     extra: { event: 'Posted' },
     thread: 'channel',
-    reasons: '"channel-archived", "busy"',
+    reasons: '"channel-archived", "rate-limited"',
     rules: {
       'no-post-to-archived': ['Reply', 'if archived {', 'if archived && !archived {'],
-      'one-message-per-second': ['Template', 'if sending || cooling {', 'if sending {'],
-      'one-send-at-a-time': ['Reply', 'if sending || cooling {', 'if cooling {'],
+      'one-message-per-second': ['Template', 'if cooling {', 'if cooling && !cooling {'],
+      'one-send-at-a-time': ['Reply', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
     },
   },
   webhook: {
     sample: 'hook-1',
     extra: {},
     thread: 'source',
-    reasons: '"endpoint-disabled", "busy"',
+    reasons: '"endpoint-disabled"',
     rules: {
       'no-delivery-while-disabled': ['Reply', 'if !enabled {', 'if enabled && !enabled {'],
-      'one-send-at-a-time': ['Template', 'if sending {', 'if sending && !sending {'],
+      'one-send-at-a-time': ['Template', 'require slot is Free else reject "busy"', 'require !(slot is Receipt) else reject "busy"'],
       'disabled-only-after-failures': ['Undelivered', 'if failures < 2 {', 'if failures < 0 {'],
     },
   },
@@ -230,15 +231,16 @@ for (const [kind, spec] of Object.entries(KINDS)) {
   });
 }
 
-// A limit, recorded for the owner: the receipts a conversation sends its application are never acknowledged, so an
-// application that answers every message can leave receipts in transit without bound. Its generated configuration
-// reaches the transit bound and is INCONCLUSIVE with PL5301 and its witness, never CLEAN (PS13.5).
-test('PS15.5, PS13.5: an application that answers every message reaches the transit bound, INCONCLUSIVE with PL5301', { timeout: 300_000 }, async () => {
-  const src = `module desk
+// PS15.3, as ruled after step 7: each receipt is acknowledged by the expansion, so an application that answers every
+// message keeps every message between it and its conversation within pending's bound. Its generated configuration is
+// CLEAN for every kind (it was INCONCLUSIVE with PL5301 before the acknowledgement).
+const answering = (kind, spec) => `module desk
 
-channel line: whatsapp {
-  adapter "whatsapp"
-  thread "{from}"
+enum Last { Nothing, Sent, Refused, Lost }
+
+channel line: ${kind} {
+  adapter "${kind}"
+  thread "{${spec.thread}}"
   starts Agent.Start on inbound
   Message -> Agent.Got
   Delivered -> Agent.Delivered
@@ -249,13 +251,13 @@ channel line: whatsapp {
 service machine Agent {
   state {
     started : bool = false
-    receipts : 0..1 = 0
+    last    : Last = Nothing
   }
 
   action Start()
   action Got(body: Content)
   action Delivered()
-  action SendRejected(reason: string check { "window-closed", "busy" })
+  action SendRejected(reason: string check { ${spec.reasons} })
   action SendFailed()
 
   on Start {
@@ -266,19 +268,23 @@ service machine Agent {
     emit line.reply(body: body)
   }
   on Delivered {
-    receipts' = 1 - receipts
+    last' = Sent
   }
   on SendRejected(reason) {
-    receipts' = 1 - receipts
+    last' = Refused
   }
   on SendFailed {
-    receipts' = 1 - receipts
+    last' = Lost
   }
 }
 `;
-  const r = await check('desk.poly', src);
-  const cfg = r.configurations.find((c) => c.configuration === 'line');
-  assert.equal(cfg?.verdict, 'INCONCLUSIVE', text(r));
-  const hit = cfg.diagnostics.find((d) => d.code === 'PL5301');
-  assert.ok(hit && hit.witness?.length > 0, text(r));
-});
+
+for (const [kind, spec] of Object.entries(KINDS)) {
+  test(`std.channels.${kind}, PS15.3: an application that answers every message is CLEAN in its generated configuration`, { timeout: 300_000 }, async () => {
+    const r = await check('desk.poly', answering(kind, spec));
+    assert.equal(r.verdict, 'CLEAN', text(r));
+    const cfg = r.configurations.find((c) => c.configuration === 'line');
+    assert.equal(cfg?.verdict, 'CLEAN', text(r));
+    assert.ok(!all(r).some((d) => d.code === 'PL5301'), text(r));
+  });
+}

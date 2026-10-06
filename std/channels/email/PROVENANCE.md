@@ -22,9 +22,10 @@ The rules of `std/channels/email.poly` were taken from RFC 8058 and from Gmail's
 | Rule in the module | Why |
 |---|---|
 | A reply is allowed after an unsubscribe | A reply answers the correspondent's own message, and is not list mail. Suppression still stops it. |
-| `one-send-at-a-time` (never) | One send in flight, so a receipt names the send it settles. |
+| `one-send-at-a-time` (never) | Nothing is sent while the slot holds a send or its receipt, so a receipt names the send it settles. |
+| `Ack` and the slot (ruled after step 7) | One slot holds a send, then its receipt (`Delivered`, `Rejected` or `Failed`), until the application acknowledges the receipt with `Ack`, which the channel's expansion appends to every handler bound to a receipt (PS15.3). A reply or a template while the slot is held is a rejected step, `busy`, journaled. With the receipt counted, every message between the application and its conversation stays within `pending`'s bound. |
 | `waiting: 0..2`, refusal `backlog` | At most two messages wait for an answer. A third is a rejected step, journaled. |
-| `pending: 0..3`, invariant `obligations` | The waiting messages and the send in flight; its bound is the transit bound of the configuration the channel generates (PS15.5). |
+| `pending: 0..3`, invariant `obligations` | The waiting messages and the held slot (a send or its unacknowledged receipt); its bound is the transit bound of the configuration the channel generates (PS15.5). |
 
 ## Not checked
 
