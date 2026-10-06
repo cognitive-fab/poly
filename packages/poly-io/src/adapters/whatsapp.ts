@@ -3,7 +3,7 @@
 // X-Hub-Signature-256 as sha256=<hex>; the endpoint's verification is a GET answered with hub.challenge when
 // hub.verify_token matches. Messages arrive in entry[].changes[].value.messages, receipts in .statuses.
 import type { ChannelAdapter, InboundMessage, ProviderReceipt, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { hmac, httpFailure, json, noAnswer, sameText, signatureMatches, type AdapterFault } from '../util.js';
+import { hmac, httpFailure, json, noAnswer, sameText, signatureMatches, made, type AdapterFault } from '../util.js';
 
 export interface WhatsAppConfig {
   appSecret: string;
@@ -22,7 +22,7 @@ interface WaMessage { from?: unknown; id?: unknown; type?: unknown; text?: { bod
 interface WaStatus { id?: unknown; status?: unknown; errors?: { code?: unknown; title?: unknown }[] }
 
 export function whatsapp(c: WhatsAppConfig): ChannelAdapter {
-  return {
+  return made({
     kind: 'whatsapp',
     provider: 'whatsapp-cloud-api',
     sender: c.phoneNumberId,
@@ -78,5 +78,5 @@ export function whatsapp(c: WhatsAppConfig): ChannelAdapter {
       if (r.status === 200 && typeof id === 'string') return { ok: true, providerId: id };
       return httpFailure(r, `${r.status} ${doc.error?.code ?? ''} ${doc.error?.message ?? ''}`.trim());
     },
-  };
+  });
 }

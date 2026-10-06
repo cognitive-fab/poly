@@ -23,6 +23,14 @@ export function fresh(timestamp: string, now: number, tolerance: number, fault?:
   return fault === 'timestamp-never-stale' || skewSeconds(timestamp, now) <= tolerance;
 }
 
+/**
+ * S182, plan step 10: every adapter this package makes, so the runtime can tell one made by the certified package from
+ * a look-alike object. The set is this module instance's: an adapter made by another copy of the package is not in it.
+ */
+const MADE = new WeakSet<object>();
+export function made<T extends object>(adapter: T): T { MADE.add(adapter); return adapter; }
+export function madeHere(adapter: unknown): boolean { return typeof adapter === 'object' && adapter !== null && MADE.has(adapter); }
+
 /** Constant-time comparison of two encoded signatures; a length difference is a mismatch, never an exception. */
 export function sameText(a: string, b: string): boolean {
   const x = Buffer.from(a, 'utf8');

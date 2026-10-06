@@ -5,7 +5,7 @@
 // the conversation's Inbound; the event id is the provider's message id, so Slack's retries are one step.
 import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { fresh, hmac, httpFailure, json, noAnswer, signatureMatches, type AdapterFault } from '../util.js';
+import { fresh, hmac, httpFailure, json, noAnswer, signatureMatches, made, type AdapterFault } from '../util.js';
 
 export interface SlackConfig {
   signingSecret: string;
@@ -20,7 +20,7 @@ const EVENTS: Record<string, string> = { message: 'Posted', channel_archive: 'Ar
 interface SlackEvent { type?: unknown; channel?: unknown; user?: unknown; text?: unknown; subtype?: unknown; bot_id?: unknown }
 
 export function slack(c: SlackConfig): ChannelAdapter {
-  return {
+  return made({
     kind: 'slack',
     provider: 'slack-events-api',
     // The bot's token names the workspace and app it posts as; its digest stands for it.
@@ -59,5 +59,5 @@ export function slack(c: SlackConfig): ChannelAdapter {
       if (r.status === 200) return { ok: false, permanent: !['rate_limited', 'ratelimited', 'internal_error', 'fatal_error', 'service_unavailable', 'request_timeout'].includes(error), error };
       return httpFailure(r, error);
     },
-  };
+  });
 }

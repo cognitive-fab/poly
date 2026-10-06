@@ -82,6 +82,8 @@ export interface Certificate {
     channels?: { name: string; application: string; descriptor: string }[];
     /** Plan step 9: the gate engine that decides this build's policies, pinned by commit (Polyaxion is a peer, S145). */
     policyEngine?: { name: 'polyaxion'; commit: string };
+    /** S182, plan step 10: each channel's runtime adapter, bound by package name, version and digest. */
+    adapters?: { channel: string; adapter: string; package: string; version: string; digest: string }[];
     /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */
     keyrings: { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] };
   };

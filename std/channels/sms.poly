@@ -13,6 +13,15 @@ enum Keyword { Plain, OptOut, OptIn, Help, Reported }
 
 enum Slot { Free, Sending, Receipt }
 
+// K11, PT21.4: the sender claims the adapter verified, which travel in the Inbound step's label and, by lineage,
+// in every step it causes. An adapter's verified true is Verified; a provider event carries the provider's own
+// (Verified).
+enum Verification { Unverified, Verified }
+
+claims Sender {
+  verified: Verification
+}
+
 machine Peer {
   state {
   }
@@ -55,7 +64,7 @@ service machine Conversation {
   // opt-out from the message and from the refusal of its next send. A keyword changes consent even when two messages
   // already wait, so the backlog can never keep an opt-out from taking effect; only the message to the application is
   // then dropped. A plain message is refused "backlog".
-  on Inbound(from, body, keyword) {
+  on Inbound(from, body, keyword) by sender: Sender {
     if keyword is Reported {
       // The provider refused a send because the number opted out (Twilio 21610): a provider event, no message.
       consent' = false

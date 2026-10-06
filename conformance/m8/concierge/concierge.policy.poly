@@ -1,0 +1,12 @@
+// M8 plan step 10, AC17: a free-form WhatsApp reply to an external recipient waits for a person. The guard
+// proposal.kind == "effect" keeps the rule off the sends between the concierge's scopes, where effect is unknown.
+module concierge_policy
+
+policy replies {
+  scope "concierge.support"
+  obligation person-reviews-free-form "A free-form WhatsApp reply to an external recipient is sent only after a person approves it." rule {
+    when proposal.kind == "effect" && effect.channel.name == "support" && effect.channel.recipientClass == "external" && effect.channel.messageKind == "FreeForm"
+    require false else escalate
+    on unknown escalate
+  }
+}

@@ -99,7 +99,7 @@ export interface ChannelAdapter {
 /** What ingress needs of the runtime (PT21.4): the content store, inbound dispatch, and its journal. */
 export interface IngressHost {
   putContent(body: string): Promise<string>;
-  inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<{ outcome: 'delivered' | 'refused'; reason?: string }>;
+  inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string; claims?: SenderClaims }): Promise<{ outcome: 'delivered' | 'refused'; reason?: string }>;
   /** Takes a nonce once: true the first time, false for a nonce taken before, across restarts (the store keeps it). */
   claimNonce(channel: string, key: string, at: number, ttlMs: number): Promise<boolean>;
   ingressRecord(channel: string, record: { stage: 'verify' | 'receipt' | 'claims'; outcome: string; provider: string; reason?: string; providerId?: string; status?: string; claims?: SenderClaims; messageId?: string }): Promise<void>;

@@ -25,7 +25,7 @@ export function ingress(host: IngressHost, channels: Record<string, ChannelAdapt
     for (const m of v.messages) {
       const content = await host.putContent(m.body);
       await host.ingressRecord(channel, { stage: 'claims', outcome: m.claims.verified ? 'verified' : 'unverified', provider: adapter.provider, messageId: m.providerMessageId, claims: m.claims });
-      await host.inbound(channel, { ...m.fields, body: content }, { messageId: m.providerMessageId });
+      await host.inbound(channel, { ...m.fields, body: content }, { messageId: m.providerMessageId, claims: m.claims });
     }
     return v.answer ?? { status: 200, contentType: 'text/plain', body: 'ok' };
   };

@@ -398,7 +398,7 @@ test('ingress: a message is stored, its claims recorded, then dispatched with it
   assert.deepEqual(host.calls, [
     ['putContent', 'Does it come in another color?'],
     ['record', 'support', { stage: 'claims', outcome: 'verified', provider: 'whatsapp-cloud-api', messageId: 'wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=', claims: { verified: true, sender: '16505551234' } }],
-    ['inbound', 'support', { from: '16505551234', body: digest }, { messageId: 'wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=' }],
+    ['inbound', 'support', { from: '16505551234', body: digest }, { messageId: 'wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRBNjU5OUFFRTAzODEwMTQ0RgA=', claims: { verified: true, sender: '16505551234' } }],
   ]);
   host.calls.length = 0;
   await handle('support', waSigned(c, recorded('whatsapp/status-delivered.json')));

@@ -23,7 +23,7 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -408,6 +408,20 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   if (opts.fault === 'omit-handler-file' && handlerPaths.length) delete certifiedHandlers.files[handlerPaths[handlerPaths.length - 1]];
   const packagePaths = Object.keys(certifiedHandlers.packageFiles);
   if (opts.fault === 'omit-package-file' && packagePaths.length) delete certifiedHandlers.packageFiles[packagePaths[packagePaths.length - 1]];
+  // S182, plan step 10: each channel's runtime adapter, bound by package name, version and digest. A channel whose
+  // declared adapter the adapter package does not make (the tests' `test` kind) is bound to none, and cannot connect.
+  const adapters: NonNullable<Certificate['poly']['adapters']> = [];
+  let adapterPin: { package: string; version: string; digest: string } | null = null;
+  if (channels.length) {
+    const { adapterPackagePin, IO_ADAPTERS } = await import('@poly/runtime');
+    for (const ch of [...channels].sort((x, y) => (x.name < y.name ? -1 : 1))) {
+      const d = JSON.parse(readFileSync(join(dir, ch.descriptor), 'utf8')) as { adapter?: string };
+      if (!d.adapter || !IO_ADAPTERS.includes(d.adapter)) continue;
+      adapterPin ??= adapterPackagePin();
+      adapters.push({ channel: ch.name, adapter: d.adapter, ...adapterPin });
+    }
+    if (opts.fault === 'stale-adapter-digest' && adapters.length) adapters[0] = { ...adapters[0], digest: `sha256:${'0'.repeat(64)}` };
+  }
   const toolchain = { ...(report.files[0]?.engines ?? {}) };
   const body: Omit<Certificate, 'digest' | 'signatures'> = {
     v: 1,
@@ -421,7 +435,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(policyEngine ? { policyEngine } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -436,6 +450,8 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const sourcesNow = Object.fromEntries(files.map((f) => [rel(dir, f), sha256OfBytes(readFileSync(f))]));
   if (JSON.stringify(back.poly.sources) !== JSON.stringify(sourcesNow)) problems.push({ name: 'sources', problem: 'the sources changed while the program was admitted' });
   for (const p of handlerProblems()) problems.push({ name: 'handlers', problem: p });
+  // S182: the adapters read back are the installed adapter package as it is now.
+  for (const x of back.poly.adapters ?? []) if (!adapterPin || x.package !== adapterPin.package || x.version !== adapterPin.version || x.digest !== adapterPin.digest) problems.push({ name: 'adapters', problem: `channel ${x.channel}'s adapter is bound to ${x.package} ${x.version} ${x.digest}, and the installed package is not that` });
   // S150: the keyrings read back are the ones the manifest names now.
   if (!sameKeyrings(back.poly.keyrings, existsSync(join(dir, 'poly.json')) ? keyringsOf(dir, loadProject(dir).manifest) : EMPTY_KEYRINGS)) problems.push({ name: 'keyrings', problem: 'the keyrings changed while the program was admitted' });
   // S142: the handlers read back are the closure of the roots as it is on disk now, file for file.

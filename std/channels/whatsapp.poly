@@ -15,6 +15,15 @@ enum Kind { FreeForm, Templated }
 
 enum Slot { Free, Sending, Receipt }
 
+// K11, PT21.4: the sender claims the adapter verified, which travel in the Inbound step's label and, by lineage,
+// in every step it causes. An adapter's verified true is Verified; a provider event carries the provider's own
+// (Verified).
+enum Verification { Unverified, Verified }
+
+claims Sender {
+  verified: Verification
+}
+
 machine Peer {
   state {
   }
@@ -56,7 +65,7 @@ service machine Conversation {
 
   // The window starts on a customer's message and resets to 24 hours on the next one: the old timer is cancelled
   // before the new one is set (polyrun cancels before it inserts).
-  on Inbound(from, body) {
+  on Inbound(from, body) by sender: Sender {
     require waiting + queued < 2 else reject "backlog"
     waiting' = waiting + 1
     pending' = pending + 1

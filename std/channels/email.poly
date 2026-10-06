@@ -15,6 +15,15 @@ enum Kind { Direct, Bulk }
 
 enum Slot { Free, Sending, Receipt }
 
+// K11, PT21.4: the sender claims the adapter verified, which travel in the Inbound step's label and, by lineage,
+// in every step it causes. An adapter's verified true is Verified; a provider event carries the provider's own
+// (Verified).
+enum Verification { Unverified, Verified }
+
+claims Sender {
+  verified: Verification
+}
+
 machine Peer {
   state {
   }
@@ -58,7 +67,7 @@ service machine Conversation {
   // The adapter turns a verified one-click POST (List-Unsubscribe=One-Click) into the event Unsubscribe, and the
   // provider's report of a permanent failure after the send was accepted into the provider event Bounce (PS15.4).
   // Neither carries a message for the application.
-  on Inbound(from, body, event) {
+  on Inbound(from, body, event) by sender: Sender {
     if event is Unsubscribe {
       require subscribed else reject "unsubscribed"
       subscribed' = false

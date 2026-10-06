@@ -4,7 +4,7 @@
 // sorted by name, each name followed by its value. An inbound message carries MessageSid, From, To and Body; a status
 // callback carries MessageSid and MessageStatus. The adapter classifies the body's keyword for std.channels.sms.
 import type { ChannelAdapter, ProviderReceipt, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { encodeForm, formPairs, hmac, httpFailure, noAnswer, signatureMatches, type AdapterFault } from '../util.js';
+import { encodeForm, formPairs, hmac, httpFailure, noAnswer, signatureMatches, made, type AdapterFault } from '../util.js';
 
 export interface TwilioConfig {
   accountSid: string;
@@ -38,7 +38,7 @@ export function twilioSignature(authToken: string, url: string, body: string): s
 }
 
 export function sms(c: TwilioConfig): ChannelAdapter {
-  return {
+  return made({
     kind: 'sms',
     provider: 'twilio',
     sender: c.from,
@@ -78,5 +78,5 @@ export function sms(c: TwilioConfig): ChannelAdapter {
       if (doc.code === 21610) return { ok: false, permanent: true, error: `${r.status} 21610 ${doc.message ?? ''}`.trim(), events: [{ providerId: `21610:${out.to}`, fields: { from: out.to, keyword: 'Reported' } }] };
       return httpFailure(r, `${r.status} ${doc.code ?? ''} ${doc.message ?? ''}`.trim());
     },
-  };
+  });
 }

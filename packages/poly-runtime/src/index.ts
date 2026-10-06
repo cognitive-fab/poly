@@ -1,6 +1,6 @@
 export { EffectWorker, ALLOW_ALL, RuntimeFault, WORKER_DRIFTS, type Gate, type GateDecision, type Proposal, type EffectHandler, type WorkerDrift, type ReportOutcome, orderIdOf, parseOrderId } from './worker.js';
 export { calibrate, mapDigest, answerProbability, decisionHandler, type Provider, type ProviderAnswer, type ProviderConfig, type CalibrationMap, type DecisionRecord } from './provider.js';
-export { load, PolyRuntime, RUNTIME_FAULTS, RefusedDispatch, ApprovalRefused, OutcomeWithoutDecision, LoadError, APPROVALS_RUN, type LoadOptions, type Handler, type WorkOrder, type ApprovalRefusal } from './runtime.js';
+export { load, PolyRuntime, RUNTIME_FAULTS, IO_ADAPTERS, adapterPackagePin, RefusedDispatch, ApprovalRefused, OutcomeWithoutDecision, LoadError, APPROVALS_RUN, type LoadOptions, type Handler, type WorkOrder, type ApprovalRefusal } from './runtime.js';
 export { LedgerStore, openLedgerStore, type StepEvents } from './ledger-store.js';
 export { countersignHeads, countersignaturesOf, verifyCountersignatures, type CountersignAdapter, type Countersignature } from './journal.js';
 export { readerOf, ledgerProblems, type JournalReader, signHeads, headsOf, publishAnchor, verifyAnchor, verifyRun, merkleRoot, anchorMessage, type LedgerSigner, type SignedHead, type Anchor, type RunVerification, type RunVerdict } from './journal.js';

@@ -1,0 +1,130 @@
+// M8 plan step 10: the concierge of AC14 to AC17, written with the channel surface only. A customer writes on WhatsApp
+// (support) or by SMS (text); staff talk on Slack (staff). Each application answers every message; the conversations
+// keep the providers' rules, and the policy in concierge.policy.poly sends a free-form WhatsApp reply only after a
+// person approves it.
+module concierge
+
+enum Last { Nothing, Sent, Refused, Lost }
+
+channel support: whatsapp {
+  adapter "whatsapp"
+  thread "{from}"
+  starts Desk.Start on inbound
+  Message -> Desk.Got
+  Delivered -> Desk.Delivered
+  Rejected -> Desk.SendRejected
+  Failed -> Desk.SendFailed
+}
+
+channel text: sms {
+  adapter "sms"
+  thread "{from}"
+  starts Texts.Start on inbound
+  Message -> Texts.Got
+  Delivered -> Texts.Delivered
+  Rejected -> Texts.SendRejected
+  Failed -> Texts.SendFailed
+}
+
+channel staff: slack {
+  adapter "slack"
+  thread "{channel}"
+  starts Staff.Start on inbound
+  Message -> Staff.Got
+  Delivered -> Staff.Delivered
+  Rejected -> Staff.SendRejected
+  Failed -> Staff.SendFailed
+}
+
+// Desk: answers every message on its channel, and keeps the last receipt it was sent.
+service machine Desk {
+  state {
+    started : bool = false
+    last    : Last = Nothing
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    emit support.reply(body: body)
+  }
+  on Delivered {
+    last' = Sent
+  }
+  on SendRejected(reason) {
+    last' = Refused
+  }
+  on SendFailed {
+    last' = Lost
+  }
+}
+
+// Texts: answers every message on its channel, and keeps the last receipt it was sent.
+service machine Texts {
+  state {
+    started : bool = false
+    last    : Last = Nothing
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "opted-out" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    emit text.reply(body: body)
+  }
+  on Delivered {
+    last' = Sent
+  }
+  on SendRejected(reason) {
+    last' = Refused
+  }
+  on SendFailed {
+    last' = Lost
+  }
+}
+
+// Staff: answers every message on its channel, and keeps the last receipt it was sent.
+service machine Staff {
+  state {
+    started : bool = false
+    last    : Last = Nothing
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "channel-archived", "rate-limited" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    emit staff.reply(body: body)
+  }
+  on Delivered {
+    last' = Sent
+  }
+  on SendRejected(reason) {
+    last' = Refused
+  }
+  on SendFailed {
+    last' = Lost
+  }
+}

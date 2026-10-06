@@ -12,9 +12,9 @@ import { personKeyVerifier, type Verifier } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
 import type { ChannelAdapter, ChannelTransports } from './adapters.js';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
@@ -88,6 +88,28 @@ function polygraphVersion(): string {
 /** PS15.4: the runtime's own run, on which every inbound message's delivery or refusal is journaled. */
 export const INGRESS_RUN = 'runtime:ingress';
 
+/** S182, plan step 10: the adapters @poly/io makes, by the name a channel declares (`adapter "whatsapp"`). */
+export const IO_ADAPTERS = ['whatsapp', 'sms', 'email', 'slack', 'webhook'];
+
+/**
+ * S182, PT20.2: the installed runtime adapter package, pinned by name, version and digest: SHA-256 over each of its
+ * files the runtime loads (its package.json and every module under dist/src), path and digest, in path order.
+ */
+export function adapterPackagePin(): { package: string; version: string; digest: string } {
+  const entry = realpathSync(createRequire(import.meta.url).resolve('@poly/io'));
+  const root = dirname(dirname(dirname(entry)));
+  const files: string[] = [];
+  const walk = (d: string): void => { for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.js')) files.push(p); } };
+  walk(join(root, 'dist', 'src'));
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { name: string; version: string };
+  const h = createHash('sha256');
+  for (const f of [join(root, 'package.json'), ...files]) h.update(`${relative(root, f).split(sep).join('/')} ${createHash('sha256').update(readFileSync(f)).digest('hex')}\n`);
+  return { package: pkg.name, version: pkg.version, digest: `sha256:${h.digest('hex')}` };
+}
+
+/** K11, PT21.4: the claims the runtime itself supplies for an Inbound (the adapter's verified output), never a caller. */
+const SUPPLIED_CLAIMS = Symbol('supplied claims');
+
 /** Deliberately broken runtimes, for one test each: the recipient digest without the store's key (ruled on step 9). */
 export const RUNTIME_FAULTS = ['unkeyed-recipient'] as const;
 
@@ -115,6 +137,8 @@ export class RefusedDispatch extends Error {
 
 export class PolyRuntime {
   readonly handlers = new Map<string, Handler>();
+  /** S182: the certified adapter package, as this runtime loaded it (set at load when the certificate binds adapters). */
+  ioPackage: { madeHere(a: unknown): boolean } | null = null;
   private readonly channelSenders = new Map<string, { kind: string; sender: string }>();
   /** Review A-F2: approvals entries refused or applied but not movable, journaled once and passed over since. */
   private readonly unmovable = new Set<string>();
@@ -325,7 +349,7 @@ export class PolyRuntime {
     return maj > 8 || (maj === 8 && min >= 4);
   }
 
-  async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<{ outcome: 'delivered' | 'refused'; reason?: 'unknown-thread' | 'thread-not-started' | 'creation-unavailable'; application: string; conversation: string }> {
+  async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string; claims?: { verified: boolean } }): Promise<{ outcome: 'delivered' | 'refused'; reason?: 'unknown-thread' | 'thread-not-started' | 'creation-unavailable'; application: string; conversation: string }> {
     const d = this.verified.channels.find((c) => c.channel === channel);
     if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
     if (d.inbound.to !== 'conversation') throw new Error(`channel ${channel}: its descriptor routes inbound to ${d.inbound.to}, and PS15.4 routes it to the conversation`);
@@ -349,7 +373,10 @@ export class PolyRuntime {
     }
     // A thread whose starts was rejected has no conversation, so its later messages are refused the same way.
     if (!(await this.store.getInstance(conversation))) return refuse('thread-not-started');
-    await this.dispatch(conversation, d.inbound.action, fields, { actionId: `${channel}:${opts.messageId}` });
+    // K11, PT21.4: the adapter's sender claims are the Inbound step's, typed as std's Sender (verified is Verified or
+    // Unverified); with none, the claims are missing and the step is rejected claims-unverified.
+    const claims = opts.claims ? { verified: opts.claims.verified ? 'Verified' : 'Unverified' } : undefined;
+    await this.dispatch(conversation, d.inbound.action, fields, { actionId: `${channel}:${opts.messageId}`, ...(claims ? { [SUPPLIED_CLAIMS]: claims } : {}) });
     this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
     await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId: opts.messageId, outcome: 'delivered' }, this.now()); });
     return { outcome: 'delivered', application, conversation };
@@ -389,6 +416,11 @@ export class PolyRuntime {
   connectChannel(channel: string, adapter: ChannelAdapter, transports: ChannelTransports): void {
     const d = this.verified.channels.find((c) => c.channel === channel);
     if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
+    // S182, plan step 10: only an adapter the certified package made, of the adapter the channel declares.
+    const pin = this.certificate.poly.adapters?.find((x) => x.channel === channel);
+    if (!pin) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the certificate binds no adapter to channel ${channel} (S182)`);
+    if (!this.ioPackage?.madeHere(adapter)) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the adapter for ${channel} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S182)`);
+    if (adapter.kind !== pin.adapter) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: channel ${channel} declares adapter ${pin.adapter}, and this is a ${adapter.kind} adapter (S182)`);
     // What a provider ties to an address (an SMS opt-out, an email bounce) it ties to its sender and the address; a
     // thread is one address of one channel, so two channels may not send as one sender (std PROVENANCE.md).
     for (const [other, s] of this.channelSenders) if (other !== channel && s.kind === adapter.kind && s.sender === adapter.sender) throw new Error(`channel ${other} already sends as ${adapter.kind} sender ${adapter.sender}; two channels that send as one sender would keep the provider's per-address state on two threads`);
@@ -406,7 +438,8 @@ export class PolyRuntime {
       if (r.ok) return { providerId: r.providerId };
       for (const e of r.events ?? []) {
         const content = await this.putContent('');
-        await this.dispatch(ctx.instanceId, d.inbound.action, { ...e.fields, body: content }, { actionId: `${channel}:${e.providerId}` });
+        // A provider event is the provider's own report: its claim is verified.
+        await this.dispatch(ctx.instanceId, d.inbound.action, { ...e.fields, body: content }, { actionId: `${channel}:${e.providerId}`, [SUPPLIED_CLAIMS]: { verified: 'Verified' } });
         await this.ingressRecord(channel, { stage: 'receipt', outcome: 'delivered', provider: adapter.provider, providerId: e.providerId, reason: r.error });
       }
       throw Object.assign(new Error(r.error), { permanent: r.permanent });
@@ -535,7 +568,7 @@ export class PolyRuntime {
    * completion (K10, S130), since only the worker delivers it with its decision event, and an input outside its
    * action's type (S140). Each comes before any step, with an audit row and no journal row.
    */
-  async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string; credentials?: unknown } = {}): Promise<DispatchResult> {
+  async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string; credentials?: unknown; [SUPPLIED_CLAIMS]?: Record<string, unknown> } = {}): Promise<DispatchResult> {
     const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
     const inst = await this.store.getInstance(instanceId);
     // S155: $claims and $lineage are the runtime's; a dispatch that supplies either is refused before any step.
@@ -580,8 +613,8 @@ export class PolyRuntime {
     // rejects missing or bad ones (PS3.2's claims row). A verifier that throws is no answer: no claims (O10).
     let payload = inst ? this.markContent(inst.machine_id, action, data) : data;
     if (inst && this.claimed(inst.machine_id, action)) {
-      let claims: Record<string, unknown> | null = null;
-      if (opts.credentials !== undefined) {
+      let claims: Record<string, unknown> | null = opts[SUPPLIED_CLAIMS] ?? null;
+      if (!claims && opts.credentials !== undefined) {
         try { claims = await this.verifier(opts.credentials, { instance: instanceId, action, data: data ?? {}, actionId }); } catch { claims = null; }
       }
       payload = { ...((payload ?? {}) as object), $claims: claims ?? null };
@@ -1161,5 +1194,16 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
       throw new LoadError(`refused at load: the policy gate did not open: ${(e as Error).message}`);
     }
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault });
+  // S182, plan step 10: the adapters are the ones admitted. The installed package is pinned again and compared.
+  let ioPackage: { madeHere(a: unknown): boolean } | null = null;
+  const adapters = verified.certificate.poly.adapters ?? [];
+  if (adapters.length) {
+    const now = adapterPackagePin();
+    const other = adapters.find((x) => x.package !== now.package || x.version !== now.version || x.digest !== now.digest);
+    if (other) { await kernel.close(); throw new LoadError(`refused at load: the build was admitted with ${other.package} ${other.version} ${other.digest}; this runtime has ${now.package} ${now.version} ${now.digest} (S182)`); }
+    ioPackage = (await import(pathToFileURL(realpathSync(createRequire(import.meta.url).resolve('@poly/io'))).href)) as { madeHere(a: unknown): boolean };
+  }
+  const rt = new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault });
+  rt.ioPackage = ioPackage;
+  return rt;
 }

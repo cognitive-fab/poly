@@ -4,7 +4,7 @@
 // outside the tolerance is refused. One configured source is one thread: its secret, its name, its endpoint.
 import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { fresh, hmac, noAnswer, signatureMatches, type AdapterFault } from '../util.js';
+import { fresh, hmac, noAnswer, signatureMatches, made, type AdapterFault } from '../util.js';
 
 export interface WebhookConfig {
   /** whsec_ followed by the base64 key. */
@@ -29,7 +29,7 @@ const sign = (key: Buffer, id: string, ts: string, body: string) => `v1,${hmac('
 export function webhook(c: WebhookConfig): ChannelAdapter {
   const key = keyOf(c.secret);
   const tolerance = c.toleranceSeconds ?? 300;
-  return {
+  return made({
     kind: 'webhook',
     provider: 'standard-webhooks',
     sender: c.endpoint,
@@ -60,5 +60,5 @@ export function webhook(c: WebhookConfig): ChannelAdapter {
       // Success is a 2xx answer, and any other answer a failure, retried by the outbox.
       return r.status >= 200 && r.status < 300 ? { ok: true, providerId: id } : { ok: false, permanent: false, error: String(r.status) };
     },
-  };
+  });
 }

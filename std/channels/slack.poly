@@ -13,6 +13,15 @@ enum Event { Posted, Archived, Unarchived }
 
 enum Slot { Free, Sending, Receipt }
 
+// K11, PT21.4: the sender claims the adapter verified, which travel in the Inbound step's label and, by lineage,
+// in every step it causes. An adapter's verified true is Verified; a provider event carries the provider's own
+// (Verified).
+enum Verification { Unverified, Verified }
+
+claims Sender {
+  verified: Verification
+}
+
 machine Peer {
   state {
   }
@@ -54,7 +63,7 @@ service machine Conversation {
   }
 
   // The Events API reports an archive and an unarchive of the channel; only a posted message reaches the application.
-  on Inbound(channel, body, event) {
+  on Inbound(channel, body, event) by sender: Sender {
     if event is Archived {
       require !archived else reject "already-archived"
       archived' = true

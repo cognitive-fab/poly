@@ -178,7 +178,7 @@ test('PT25.1, AC17 in part: a channel send carries the field `channel`, and a po
     await rt.create('desk.Agent', { id: 'support:wa-1' });
     await rt.create('desk.support.Conversation', { id: 'support:wa-1/support', creation: { action: 'Open', data: { app: 'support:wa-1' } } });
     // A customer's message opens the window; the agent's free-form answer is proposed with its channel, and denied.
-    await rt.dispatch('support:wa-1/support', 'Inbound', { from: 'wa-1', body: await rt.putContent('Hello') });
+    await rt.inbound('support', { from: 'wa-1', body: await rt.putContent('Hello') }, { messageId: 'm-hello', claims: { verified: true, sender: 'wa-1' } });
     await rt.advance();
     const verdicts = (await rt.chain('support:wa-1/support')).filter((e) => e.kind === 'verdict').map((e) => e.body);
     const denied = verdicts.find((b) => b.outcome === 'denied');
@@ -233,7 +233,7 @@ async function denials(a, r, extra = {}, times = 1) {
   await rt.create('desk.Agent', { id: 'support:wa-1' });
   await rt.create('desk.support.Conversation', { id: 'support:wa-1/support', creation: { action: 'Open', data: { app: 'support:wa-1' } } });
   for (let i = 0; i < times; i++) {
-    await rt.dispatch('support:wa-1/support', 'Inbound', { from: 'wa-1', body: await rt.putContent(`Hello ${i}`) });
+    await rt.inbound('support', { from: 'wa-1', body: await rt.putContent(`Hello ${i}`) }, { messageId: `m-${i}`, claims: { verified: true, sender: 'wa-1' } });
     await rt.advance();
   }
   const denied = (await rt.chain('support:wa-1/support')).filter((e) => e.kind === 'verdict' && e.body.outcome === 'denied').map((e) => e.body);

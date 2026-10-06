@@ -7,7 +7,7 @@
 // adapter put in the bulk mail's List-Unsubscribe header, which carries the recipient and a token only it can make.
 import { createHash } from 'node:crypto';
 import type { ChannelAdapter, Refusal, SendResult, Verified } from '@poly/runtime/adapters';
-import { form, fresh, hmac, json, sameText, signatureMatches, type AdapterFault } from '../util.js';
+import { form, fresh, hmac, json, sameText, signatureMatches, made, type AdapterFault } from '../util.js';
 import { submit } from '../smtp.js';
 
 export interface EmailConfig {
@@ -50,7 +50,7 @@ export function email(c: EmailConfig): ChannelAdapter {
     if (!signatureMatches(signature, hmac('sha256', c.signingKey, timestamp + token).toString('hex'), c.fault)) return { refused: 'signature-invalid' };
     return { nonce: { key: `mailgun:${token}`, at: now, ttlMs: tolerance * 1000 } };
   };
-  return {
+  return made({
     kind: 'email',
     provider: 'mailgun-routes+smtp',
     // Mailgun keeps bounces and unsubscribes per sending domain.
@@ -115,5 +115,5 @@ export function email(c: EmailConfig): ChannelAdapter {
       const r = await submit(t.smtp, { from: c.from, to: out.to, heloName: c.heloName, username: c.username, password: c.password, message: `${headers.join('\r\n')}\r\n\r\n${body}` });
       return r.ok ? { ok: true, providerId: messageId } : r;
     },
-  };
+  });
 }
