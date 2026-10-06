@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the signature written"
+    },
+    "subject": {
+      "type": "string",
+      "description": "what was signed"
+    }
+  },
+  "required": [
+    "path",
+    "subject"
+  ]
+}

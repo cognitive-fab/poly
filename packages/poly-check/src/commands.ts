@@ -19,6 +19,7 @@ import { exportWitness, lookupWitness } from './witness.js';
 import { applyFixById } from './fix.js';
 import { admit, admitWitness, personKey, witnessKey } from './admit.js';
 import { signKeyrings, writeAnchor } from './keyrings.js';
+import { signPolicy } from './policy-sign.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
 import { journalCommand } from './journal.js';
 import { benchGate } from './bench.js';
@@ -247,6 +248,17 @@ export const COMMANDS: Command[] = [
       const certified = existsSync(cert) ? (JSON.parse(readFileSync(cert, 'utf8')) as Certificate).poly.keyrings : undefined;
       const r = signKeyrings(dir, loadProject(dir).manifest, need(input, 'by'), personKey(need(input, 'key')), new Date().toISOString(), certified);
       return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.head}\n  appended to ${r.path}; admission checks it against the anchor (S194)\n` };
+    },
+  },
+  {
+    name: 'sign-policy', mcp: null, lsp: false,
+    summary: 'Signs a policy scope with a person key given by file: checks the module that declares it, and signs its lowered document, its source and the engine pin, in policies/<scope>.sig.json (PT12.5, S194, Q8). The owner\'s command; never over MCP.',
+    input: obj({ scope: str('the policy scope'), by: str('the key id'), key: str('the private key file'), project: str('the project directory (default: the working directory)') }, ['scope', 'by', 'key']),
+    output: obj({ path: str('the signature written'), subject: str('what was signed') }, ['path', 'subject']),
+    async run(input) {
+      const dir = resolve(opt(input, 'project') ?? process.cwd());
+      const r = await signPolicy(dir, need(input, 'scope'), need(input, 'by'), personKey(need(input, 'key')), new Date().toISOString());
+      return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.subject}\n  written to ${r.path}; admission and load verify it (S194)\n` };
     },
   },
   {

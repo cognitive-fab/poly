@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { admit, AdmitError } from '@poly/check';
 import { sms } from '@poly/io';
 import { SKIP, concierge, thread, recorded, smsWebhook, SMS_FROM, accepted } from './concierge-helpers.mjs';
-import { makeKey, project } from './runtime-helpers.mjs';
+import { hasPolicies, makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
 const settle = async (rt) => { for (let i = 0; i < 8; i++) await rt.advance(); };
 
@@ -49,6 +49,7 @@ test('D-F5: the read-back catches a swapped adapter kind, a left-out adapter bin
   for (const [fault, sources] of [['swap-adapter-kind', ['conformance/m8/concierge/concierge.poly']], ['omit-adapters', ['conformance/m8/concierge/concierge.poly']], ['wrong-policy-engine', ['conformance/m8/concierge/concierge.poly', 'conformance/m8/concierge/concierge.policy.poly']]]) {
     const key = makeKey(`d5-${fault}`);
     const dir = project(`d5-${fault}`, sources, key, 'test-review-m8b-d');
+    if (hasPolicies(sources)) await signPolicies(dir);
     await assert.rejects(admit(dir, { fault }), (e) => e instanceof AdmitError && /read-back/.test(e.message), fault);
   }
 });

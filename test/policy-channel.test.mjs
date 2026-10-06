@@ -8,13 +8,13 @@ import { createHash, createHmac } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { admit, checkFile, checkProject } from '@poly/check';
-import { certificateDigest, signDigest } from '@poly/core';
+import { certificateDigest, policySubject, sha256OfBytes, signDigest, signRecord } from '@poly/core';
 import { parse } from '@poly/lang';
 import { lowerPolicyScope } from '@poly/lower';
 import { polyaxionPeer, loadPolyaxion, policyEngine, load } from '@poly/runtime';
 import { whatsapp } from '@poly/io';
 import { ROOT } from './helpers.mjs';
-import { loaded, makeKey, project } from './runtime-helpers.mjs';
+import { PERSON, loaded, makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
 // Review D-F4 (M8b): a message reaches a conversation whose Inbound declares claims only through its connected,
 // certified adapter, so these tests post a WhatsApp notification signed with the app secret to rt.receive.
@@ -155,7 +155,8 @@ async function admittedWith(name, policy) {
   const dir = project(name, [], key, 'test-policy-channel');
   writeFileSync(join(dir, 'src', 'desk.poly'), APP);
   writeFileSync(join(dir, 'src', 'desk.policy.poly'), policy);
-  return { key, dir, run: (opts = {}) => admit(dir, opts) };
+  // S194, Q8: each admission signs the scope as the person of the test keyring, over the policy as written.
+  return { key, dir, run: async (opts = {}) => { await signPolicies(dir); return admit(dir, opts); } };
 }
 
 test('S185: the policy front end types effect.channel.{name, kind, recipient, recipientClass, messageKind}; another field, or a channel the program has not, is refused', { skip, timeout: 300_000 }, async () => {
@@ -206,6 +207,16 @@ test('the engine is pinned: the certificate names the Polyaxion commit that deci
   cert.digest = certificateDigest(cert);
   cert.signatures = [signDigest(cert.digest, a.key.id, readFileSync(a.key.file, 'utf8'))];
   writeFileSync(r.certificatePath, JSON.stringify(cert));
+  // S194: the person signed the policy with the engine as pinned, so another engine in the certificate is refused first
+  // as a policy whose signature does not cover it (PL6409), before the engine itself is compared.
+  await assert.rejects(load(join(a.dir, '.poly', 'build'), { certificate: r.certificatePath, trust: { [a.key.id]: a.key.publicKey } }), /PL6409 POLICY_NOT_SIGNED: scope desk/);
+  // With the signature's subject over that engine (re-signed by the person), the engine pin refuses it.
+  const signed = JSON.parse(readFileSync(r.certificatePath, 'utf8'));
+  const scope = signed.poly.policies[0];
+  scope.signature = signRecord({ kind: 'policy', subject: policySubject({ scope: scope.scope, document: sha256OfBytes(readFileSync(join(a.dir, scope.path))), sources: { [scope.source]: signed.poly.sources[scope.source] }, engine: signed.poly.policyEngine }), by: PERSON.keyId, at: '2026-10-06T00:00:00.000Z' }, PERSON.privateKeyPem);
+  signed.digest = certificateDigest(signed);
+  signed.signatures = [signDigest(signed.digest, a.key.id, readFileSync(a.key.file, 'utf8'))];
+  writeFileSync(r.certificatePath, JSON.stringify(signed));
   await assert.rejects(load(join(a.dir, '.poly', 'build'), { certificate: r.certificatePath, trust: { [a.key.id]: a.key.publicKey } }), /admitted with Polyaxion 0000000.*this runtime has/);
 });
 

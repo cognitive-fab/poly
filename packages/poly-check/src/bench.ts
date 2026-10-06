@@ -16,7 +16,10 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { cpus, platform, arch, totalmem, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { keyringDigest } from '@poly/core';
 import { admit } from './admit.js';
+import { useTestAnchors } from './keyrings.js';
+import { signPolicy } from './policy-sign.js';
 
 export const BENCH_SIZES = [1, 8, 64] as const;
 const SOURCES = ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'];
@@ -47,10 +50,26 @@ async function project(root: string, name: string, sources: string[], repo: stri
   mkdirSync(join(dir, 'src'), { recursive: true });
   for (const s of sources) copyFileSync(join(repo, s), join(dir, 'src', s.split('/').pop()!));
   writeFileSync(join(dir, 'src', 'handlers.ts'), 'export async function handle(): Promise<unknown> { return {}; }\n');
-  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'] }, null, 2));
+  // S194, Q8: the policies are signed by a person, here a key generated for the run and held in memory, whose ring is
+  // anchored in the run's own folder, read as a test anchor in this process only: the bench measures AC4's program in
+  // a folder outside the repository, never the owner's project, and its certificate loads only in this process.
+  const person = generateKeyPairSync('ed25519');
+  const people = sources.length > 1 ? [{ name: 'bench', keyId: 'bench-person', publicKey: person.publicKey.export({ type: 'spki', format: 'pem' }).toString() }] : [];
+  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], ...(people.length ? { people } : {}) }, null, 2));
+  if (people.length) {
+    writeFileSync(join(root, `${name}.anchor`), `${keyringDigest({ people, agents: [] })}\n`);
+    writeFileSync(join(root, 'anchors.json'), JSON.stringify({ anchors: { [name]: `file:${join(root, `${name}.anchor`)}` } }));
+    (await import('@poly/runtime')).acceptTestAnchors();
+  }
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const id = `bench-${name}`;
-  const r = await admit(dir, { key: { id, privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() } });
+  // The run's anchor folder is read for this signature and admission only, then the process's setting is restored.
+  const prev = people.length ? useTestAnchors(root) : null;
+  let r;
+  try {
+    if (people.length) await signPolicy(dir, 'orders', 'bench-person', person.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), new Date().toISOString());
+    r = await admit(dir, { key: { id, privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() } });
+  } finally { if (people.length) useTestAnchors(prev); }
   return { build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() } };
 }
 

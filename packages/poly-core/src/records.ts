@@ -11,7 +11,8 @@ import { canonicalize } from './jcs.js';
 
 /** `invocation` (PD5.1.4, S107): a person's signature on one dispatch, which the person-key adapter turns into claims. */
 /** `keyring` (S194, M9): a person's signature on a change of the people or agents ring, over { parent, rings }. */
-export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring';
+/** `policy` (S194, Q8, M9): a person's signature on a policy scope, over its document, source and engine. */
+export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy';
 
 export interface SignedRecord {
   v: 1;
@@ -74,6 +75,21 @@ export function verifyRecord(record: unknown, keyrings: Keyrings, expect: { kind
 export function keyringDigest(k: Keyrings): string {
   const norm = (l: KeyHolder[]) => [...l].map((p) => ({ name: p.name, keyId: p.keyId, publicKey: createPublicKey(p.publicKey).export({ type: 'spki', format: 'pem' }).toString().trim() })).sort((x, y) => (x.keyId < y.keyId ? -1 : x.keyId > y.keyId ? 1 : 0));
   return 'sha256:' + createHash('sha256').update(canonicalize({ people: norm(k.people), agents: norm(k.agents) }), 'utf8').digest('hex');
+}
+
+/** S194, Q8: what a person signs for a policy scope. */
+export interface PolicySubjectParts {
+  scope: string;
+  /** The digest of the scope's lowered document, the bytes the engine runs. */
+  document: string;
+  /** The digest of each source file that declares a policy of the scope, by its path in the project. */
+  sources: Record<string, string>;
+  engine: { name: string; commit: string };
+}
+
+/** S194, Q8: the subject of a policy record. */
+export function policySubject(p: PolicySubjectParts): string {
+  return 'sha256:' + createHash('sha256').update(canonicalize({ scope: p.scope, document: p.document, sources: p.sources, engine: { name: p.engine.name, commit: p.engine.commit } }), 'utf8').digest('hex');
 }
 
 /** S194: the subject of a keyring record, binding the rings it admits to the rings it replaces. */

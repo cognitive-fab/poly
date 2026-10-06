@@ -10,7 +10,7 @@ import { certificateProblems, certificateDigest, publicKeyOf } from '@poly/core'
 import { ROOT } from './helpers.mjs';
 import { ADAPTER_CERTIFICATE_FAULTS, CERTIFICATE_FAULT_LIST, PACKAGE_CERTIFICATE_FAULTS, POLICY_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
 import { polyaxionPeer } from '@poly/runtime';
-import { makeKey, project } from './runtime-helpers.mjs';
+import { makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
 const key = makeKey();
 
@@ -85,6 +85,8 @@ test('each broken certificate writer is caught by the read-back, and nothing is 
     if (POLICY_CERTIFICATE_FAULTS.includes(fault) && !polyaxionPeer().ok) continue;
     const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ADAPTER_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m8/concierge/concierge.poly'] : ['conformance/m1/effects.poly'], key);
     if (PACKAGE_CERTIFICATE_FAULTS.includes(fault)) withPackage(dir);
+    // S194, Q8: a policy is admitted only signed by a person, so each policy fault acts on a signed scope.
+    if (POLICY_CERTIFICATE_FAULTS.includes(fault)) await signPolicies(dir);
     await assert.rejects(admit(dir, { fault }), (e) => e instanceof AdmitError && /read-back/.test(e.message), fault);
     assert.throws(() => readFileSync(join(dir, '.poly', 'certificate.json')), fault);
   }

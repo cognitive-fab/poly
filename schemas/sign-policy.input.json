@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "string",
+      "description": "the policy scope"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project directory (default: the working directory)"
+    }
+  },
+  "required": [
+    "scope",
+    "by",
+    "key"
+  ]
+}

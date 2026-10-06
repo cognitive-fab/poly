@@ -3,8 +3,8 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { admit, useTestAnchors } from '@poly/check';
+import { dirname, join } from 'node:path';
+import { admit, policySubjects, policySignaturePath, useTestAnchors } from '@poly/check';
 import { acceptTestAnchors, load } from '@poly/runtime';
 import { keyringDigest, signRecord } from '@poly/core';
 import { ROOT } from './helpers.mjs';
@@ -85,9 +85,25 @@ export function project(name, sources, key, base = 'test-cert') {
   return dir;
 }
 
-/** Admits the sources as a project and returns what `load` needs. */
+/**
+ * S194, Q8: signs each policy scope of a project with a person's key, held in memory, as `poly sign policy` does: over
+ * the document its declaring module lowers to, its source and the pinned engine.
+ */
+export async function signPolicies(dir, who = PERSON) {
+  for (const s of await policySubjects(dir)) {
+    const path = policySignaturePath(dir, s.scope);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(signRecord({ kind: 'policy', subject: s.subject, by: who.keyId, at: '2026-10-06T00:00:00.000Z' }, who.privateKeyPem), null, 2));
+  }
+}
+
+/** Whether any of the sources declares a policy, so its project needs a person's signature before admission. */
+export const hasPolicies = (sources) => sources.some((s) => /^\s*policy\s+[A-Za-z_][\w-]*\s*\{/m.test(readFileSync(join(ROOT, s), 'utf8')));
+
+/** Admits the sources as a project and returns what `load` needs. Its policies are signed by PERSON (S194). */
 export async function admitted(name, sources, key = makeKey(name)) {
   const dir = project(name, sources, key, 'test-runtime');
+  if (hasPolicies(sources)) await signPolicies(dir);
   const r = await admit(dir);
   return { dir, key, build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey }, cert: r.certificate };
 }

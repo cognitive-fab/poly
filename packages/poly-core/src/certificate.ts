@@ -72,7 +72,8 @@ export interface Certificate {
       lockfile: { path: string; digest: string } | null;
     };
     /** PT8, S146: each trust scope's lowered policy document (its digest is under `artefacts`), and the machines it reads. */
-    policies: { scope: string; policies: string[]; path: string; reads: string[] }[];
+    /** S194: each scope's `policy` record, by a person, over its document, source and engine. */
+    policies: { scope: string; policies: string[]; path: string; reads: string[]; source?: string; signature?: { v: 1; kind: string; subject: string; by: string; at: string; sig: string } }[];
     /**
      * PT10, S164, S175: each workflow, run on poly-runtime with every work order through the gate (S173). Its
      * descriptor's digest is under `artefacts`. Absent in a certificate with no workflow.

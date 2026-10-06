@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync, existsSync, renameSync, rmSync, mkdirSync,
 import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import {
   CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, buildIdOf, signDigest, publicKeyOf, certificateProblems,
-  loadProject, keyringsOf, verifyRecord, sameKeyrings, EMPTY_KEYRINGS, type Certificate, type CertifiedMachine, type Keyrings,
+  loadProject, keyringsOf, verifyRecord, sameKeyrings, EMPTY_KEYRINGS, policySubject, type Certificate, type CertifiedMachine, type Keyrings, type PolicySubjectParts, type SignedRecord,
 } from '@poly/core';
 import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
@@ -18,13 +18,14 @@ import { checkFile, checkProject, type ProjectReport } from './pipeline.js';
 import { STD } from './uses.js';
 import { LINT_VERSION, handlerClosure } from './handlers.js';
 import { KeyringError, keyringChain } from './keyrings.js';
+import { policySignaturePath } from './policy-sign.js';
 
 export class AdmitError extends Error {
   constructor(message: string) { super(message); this.name = 'AdmitError'; }
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -360,8 +361,25 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     const p = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
     if (!p.ok || !/^[0-9a-f]{7,40}$/.test(p.commit)) throw new AdmitError(`not admitted: the build has policies, and the gate engine's commit is unknown (${p.ok ? p.commit : p.reason})`);
     policyEngine = { name: 'polyaxion', commit: p.commit };
-    if (opts.fault === 'wrong-policy-engine') policyEngine = { name: 'polyaxion', commit: '0000000' };
   }
+  // S194, Q8: a person signs every policy scope, over its document, its source and the engine as pinned.
+  const policyFile = new Map(report.files.flatMap((r) => (r.policies ?? []).map((p) => [p.scope, rel(dir, r.file)] as const)));
+  const policyParts = (scope: string, document: string, srcs: Record<string, string>, engine: { name: string; commit: string }): PolicySubjectParts => {
+    const file = policyFile.get(scope)!;
+    return { scope, document, sources: { [file]: srcs[file] }, engine: { name: engine.name, commit: engine.commit } };
+  };
+  const signatures = new Map<string, SignedRecord>();
+  for (const p of policyReports) {
+    const path = policySignaturePath(dir, p.scope);
+    const refuse = (why: string): never => { throw new AdmitError(`not admitted: PL6409 POLICY_NOT_SIGNED: scope ${p.scope}: ${why}; a person signs it with poly sign policy (S194)`); };
+    if (!existsSync(path)) refuse(`no signature at ${rel(dir, path)}`);
+    let record: unknown;
+    try { record = JSON.parse(readFileSync(path, 'utf8')); } catch (e) { refuse(`the signature does not parse (${(e as Error).message})`); }
+    const v = verifyRecord(record, c.keyrings, { kind: 'policy', subject: policySubject(policyParts(p.scope, p.artefact!.digest, sources, policyEngine!)) });
+    if (!v.ok) refuse(`the signature is refused: ${v.problem}`);
+    signatures.set(p.scope, record as SignedRecord);
+  }
+  if (policyEngine && opts.fault === 'wrong-policy-engine') policyEngine = { name: 'polyaxion', commit: '0000000' };
   // The workflow descriptors are artefacts poly-runtime reads, certified with the policies (PT10, S164, S173).
   const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor)];
   const artefacts = artefactsOf(dir, machines, opts.fault, policyPaths);
@@ -456,7 +474,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(channels.length ? [CHANNEL_ADDRESS_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(channels.length ? [CHANNEL_ADDRESS_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: policyFile.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -483,6 +501,12 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     const p = polyaxionPeer({ fresh: true, ...(opts.policyEngine ? { dir: opts.policyEngine } : {}) });
     if (!p.ok || back.poly.policyEngine?.name !== 'polyaxion' || back.poly.policyEngine.commit !== p.commit) problems.push({ name: 'policyEngine', problem: `the certificate names ${JSON.stringify(back.poly.policyEngine ?? null)}, and the pinned engine is ${p.ok ? p.commit : `unknown (${p.reason})`}` });
   } else if (back.poly.policyEngine) problems.push({ name: 'policyEngine', problem: 'a gate engine is certified for a build with no policies' });
+  // S194, Q8: each scope's signature read back verifies over the document on disk, the certified source and engine.
+  for (const q of back.poly.policies) {
+    const engine = back.poly.policyEngine;
+    const ok = q.signature && engine && policyFile.has(q.scope) && verifyRecord(q.signature, back.poly.keyrings, { kind: 'policy', subject: policySubject(policyParts(q.scope, sha256OfBytes(readFileSync(join(dir, q.path))), back.poly.sources, engine)) }).ok;
+    if (!ok) problems.push({ name: 'policies', problem: `scope ${q.scope}'s signature does not verify over its document, source and engine` });
+  }
   // S194: the chain read back is the one on disk now, anchor and head.
   if (JSON.stringify(back.poly.keyringChain ?? null) !== JSON.stringify(chainOf(projectDir))) problems.push({ name: 'keyrings', problem: 'the certified keyring chain is not the chain on disk' });
   // S150: the keyrings read back are the ones the manifest names now.

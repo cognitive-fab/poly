@@ -15,7 +15,7 @@ import { admit } from '@poly/check';
 import { parseManifest, RUN_SCHEMA } from '@poly/core';
 import { loadRun, RunConfigError, polyaxionPeer } from '@poly/runtime';
 import { ACCEPT_TEST_ANCHORS, ROOT } from './helpers.mjs';
-import { makeKey, project, PERSON } from './runtime-helpers.mjs';
+import { hasPolicies, makeKey, project, PERSON, signPolicies } from './runtime-helpers.mjs';
 import { mcpClient } from './mcp-client.mjs';
 import { schemaProblems as validate } from './json-schema.mjs';
 
@@ -40,6 +40,7 @@ async function runProject(name, sources, run = {}) {
   const manifest = JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8'));
   manifest.run = { trust: { [key.id]: 'file:admission.pub.pem' }, ...run };
   writeFileSync(join(dir, 'poly.json'), JSON.stringify(manifest, null, 2));
+  if (hasPolicies(sources)) await signPolicies(dir);
   await admit(dir);
   return { dir, key };
 }

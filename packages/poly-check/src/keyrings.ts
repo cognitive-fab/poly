@@ -27,7 +27,7 @@ let testConfig: string | null = null;
  * certificate admitted that way records `source: "test"`, and load refuses it unless the loading process accepts test
  * anchors, which a production runtime never does.
  */
-export function useTestAnchors(dir: string): void { testConfig = resolve(dir); }
+export function useTestAnchors(dir: string | null): string | null { const prev = testConfig; testConfig = dir === null ? null : resolve(dir); return prev; }
 
 function configFile(): { file: string; source: 'user' | 'test' } {
   if (testConfig) return { file: join(testConfig, 'anchors.json'), source: 'test' };

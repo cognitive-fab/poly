@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 /** S190: the repository's std/, where a certificate's `std:` paths are read. */
 const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
 import { actionTypes, type TypeNode } from './types.js';
-import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, parseManifest, keyringsOf, sameKeyrings, EMPTY_KEYRINGS, type Certificate, type CertificateProblem } from '@poly/core';
+import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, parseManifest, keyringsOf, sameKeyrings, EMPTY_KEYRINGS, policySubject, verifyRecord, type Certificate, type CertificateProblem } from '@poly/core';
 
 export class LoadError extends Error {
   constructor(message: string, readonly problems: CertificateProblem[] = []) { super(message); this.name = 'LoadError'; }
@@ -192,6 +192,15 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
       ...(bytes.has(`${m.dir}/effects.cjs`) && manifestBytes ? { effects: { mapper: join(dir, 'effects.cjs'), manifest: join(dir, 'effects.manifest.json') } } : {}),
       manifest,
     });
+  }
+  // S194, Q8: each scope's policy record, by a person of the certified ring, over the document as read, its certified
+  // source and the engine the certificate pins; the engine as loaded is checked against that pin at the gate's opening.
+  for (const p of certificate.poly?.policies ?? []) {
+    const engine = certificate.poly.policyEngine;
+    const doc = bytes.get(p.path);
+    const subject = doc && engine && p.source ? policySubject({ scope: p.scope, document: sha256OfBytes(doc), sources: { [p.source]: certificate.poly.sources[p.source] }, engine }) : null;
+    const v = subject && p.signature ? verifyRecord(p.signature, certificate.poly.keyrings, { kind: 'policy', subject }) : { ok: false as const, problem: 'the certificate binds no signature for it' };
+    if (!v.ok) throw new LoadError(`refused at load: PL6409 POLICY_NOT_SIGNED: scope ${p.scope}: ${v.problem} (S194)`);
   }
   const policies = (certificate.poly?.policies ?? []).map((p) => ({ scope: p.scope, policies: p.policies, reads: p.reads, doc: JSON.parse(bytes.get(p.path)!.toString('utf8')) as Record<string, unknown> }));
   // S173: a workflow's mapped kinds become work orders, so each must be an effect of its machine, as certified.
