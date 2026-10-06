@@ -45,6 +45,14 @@ export function projectRootOf(buildDir: string): string {
   return basename(abs) === 'build' && basename(dirname(abs)) === '.poly' ? dirname(dirname(abs)) : abs;
 }
 
+/**
+ * S194, ruled on the keyring change: whether this process loads a certificate whose keyring anchor a test supplied.
+ * Tests call acceptTestAnchors(); a production runtime never does, so a certificate admitted around the owner's anchor
+ * never runs.
+ */
+let testAnchorsAccepted = false;
+export function acceptTestAnchors(): void { testAnchorsAccepted = true; }
+
 export function verifyBuild(buildDir: string, certificatePath: string, trust: Record<string, string>, opts: { allowWitness?: boolean; std?: string } = {}): VerifiedBuild {
   const root = projectRootOf(buildDir);
   if (!existsSync(certificatePath)) throw new LoadError(`no certificate at ${certificatePath}: the runtime loads only admitted programs (PF8.1)`);
@@ -55,6 +63,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   if (opts.allowWitness && process.env.NODE_ENV === 'production') throw new LoadError('allowWitness is refused in production: a witness certificate admits a program with findings (S139)');
   if (certificate.purpose === 'witness' && !opts.allowWitness) throw new LoadError(`refused at load: ${certificatePath} is a witness certificate, for a program with ${certificate.findings?.length ?? 0} finding(s); only an exported witness test loads it, with allowWitness (S139)`);
   if (certificate.purpose !== undefined && certificate.purpose !== 'witness') throw new LoadError(`refused at load: unknown certificate purpose ${JSON.stringify(certificate.purpose)}`);
+  if (certificate.poly?.keyringChain?.source === 'test' && !testAnchorsAccepted) throw new LoadError(`refused at load: PL6410 KEYRING_NOT_SIGNED: ${certificatePath} was admitted with a test keyring anchor, which only a test process accepts (S194)`);
 
   // Read once: these bytes are hashed, compared, and copied; nothing is read from the build again.
   const bytes = new Map<string, Buffer>();

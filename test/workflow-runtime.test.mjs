@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openJournal, polyaxionPeer } from '@poly/runtime';
-import { ROOT } from './helpers.mjs';
+import { ACCEPT_TEST_ANCHORS, ROOT } from './helpers.mjs';
 import { mcpClient } from './mcp-client.mjs';
 import { admitted } from './runtime-helpers.mjs';
 
@@ -39,7 +39,7 @@ function polyRun(a) {
   const trust = join(dir, 'admission.pub.pem');
   writeFileSync(trust, a.trust[a.key.id]);
   const db = join(dir, 'store.sqlite');
-  const c = mcpClient(process.execPath, [SERVER, a.build, a.certificate, a.key.id, trust, db], { cwd: dir });
+  const c = mcpClient(process.execPath, [...ACCEPT_TEST_ANCHORS, SERVER, a.build, a.certificate, a.key.id, trust, db], { cwd: dir });
   return { c, dir, db };
 }
 

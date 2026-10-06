@@ -6,12 +6,12 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { load } from '@poly/runtime';
-import { ROOT } from './helpers.mjs';
+import { ACCEPT_TEST_ANCHORS, ROOT } from './helpers.mjs';
 import { admitted, makeKey, handleWith } from './runtime-helpers.mjs';
 
 const CLI = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
 const poly = (...args) => {
-  try { return { code: 0, out: execFileSync(process.execPath, [CLI, ...args], { encoding: 'utf8' }) }; } catch (e) { return { code: e.status, out: `${e.stdout}${e.stderr}` }; }
+  try { return { code: 0, out: execFileSync(process.execPath, [...ACCEPT_TEST_ANCHORS, CLI, ...args], { encoding: 'utf8' }) }; } catch (e) { return { code: e.status, out: `${e.stdout}${e.stderr}` }; }
 };
 
 const a = await admitted('journal-cli', ['conformance/m1/children.poly', 'conformance/m1/records.poly']);

@@ -51,8 +51,6 @@ export interface AdmitOptions {
   std?: string;
   /** Ruled on step 9, for tests only: the Polyaxion checkout to check against its pin, instead of the sibling one. */
   policyEngine?: string;
-  /** S194, for tests only: the digest of the first rings, in place of the anchor file poly.json names. */
-  trustAnchor?: string;
 }
 
 export interface AdmitResult {
@@ -181,7 +179,7 @@ export async function admit(target: string, opts: AdmitOptions & { root?: string
   const out = join(projectDir ?? resolve(opts.root ?? dirname(abs)), '.poly', 'certificate.json');
   rmSync(out, { force: true });
   // S194: the rings are anchored, and every change to them signed by a person already trusted, before any check runs.
-  chainOf(projectDir, opts.trustAnchor);
+  chainOf(projectDir);
   const c = await checkTarget(abs, opts.root, opts.std);
   opts.afterCheck?.();
   // Ruled on step 9: a build with policies is admitted only with the gate engine as pinned, its files read now.
@@ -266,16 +264,16 @@ export async function admitWitness(target: string, opts: { root?: string; key: {
 }
 
 /** S194: the keyring chain of a project as it is on disk now, or null for a module admitted alone or a project with no rings. */
-function chainOf(projectDir: string | null, trustAnchor?: string): { anchor: string; head: string } | null {
+function chainOf(projectDir: string | null): { anchor: string; head: string; source: 'user' | 'test' } | null {
   if (!projectDir) return null;
   const { manifest } = loadProject(projectDir);
-  try { return keyringChain(projectDir, manifest, keyringsOf(projectDir, manifest), trustAnchor); } catch (e) { if (e instanceof KeyringError) throw new AdmitError(e.message); throw e; }
+  try { return keyringChain(projectDir, manifest, keyringsOf(projectDir, manifest)); } catch (e) { if (e instanceof KeyringError) throw new AdmitError(e.message); throw e; }
 }
 
 async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out: string, opts: AdmitOptions, witness?: { purpose: 'witness'; findings: NonNullable<Certificate['findings']> }, accepted: Certificate['boundAccepted'] = null): Promise<AdmitResult> {
   const { dir, files, report } = c;
   const projectDir = existsSync(join(c.dir, 'poly.json')) ? c.dir : null;
-  const chain = chainOf(projectDir, opts.trustAnchor);
+  const chain = chainOf(projectDir);
   const machines: CertifiedMachine[] = [];
   const instances: Record<string, unknown> = {};
   const domains: Record<string, string[]> = {};
@@ -486,7 +484,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     if (!p.ok || back.poly.policyEngine?.name !== 'polyaxion' || back.poly.policyEngine.commit !== p.commit) problems.push({ name: 'policyEngine', problem: `the certificate names ${JSON.stringify(back.poly.policyEngine ?? null)}, and the pinned engine is ${p.ok ? p.commit : `unknown (${p.reason})`}` });
   } else if (back.poly.policyEngine) problems.push({ name: 'policyEngine', problem: 'a gate engine is certified for a build with no policies' });
   // S194: the chain read back is the one on disk now, anchor and head.
-  if (JSON.stringify(back.poly.keyringChain ?? null) !== JSON.stringify(chainOf(projectDir, opts.trustAnchor))) problems.push({ name: 'keyrings', problem: 'the certified keyring chain is not the chain on disk' });
+  if (JSON.stringify(back.poly.keyringChain ?? null) !== JSON.stringify(chainOf(projectDir))) problems.push({ name: 'keyrings', problem: 'the certified keyring chain is not the chain on disk' });
   // S150: the keyrings read back are the ones the manifest names now.
   if (!sameKeyrings(back.poly.keyrings, existsSync(join(dir, 'poly.json')) ? keyringsOf(dir, loadProject(dir).manifest) : EMPTY_KEYRINGS)) problems.push({ name: 'keyrings', problem: 'the keyrings changed while the program was admitted' });
   // S142: the handlers read back are the closure of the roots as it is on disk now, file for file.

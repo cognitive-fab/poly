@@ -61,7 +61,7 @@ test('AC6: poly journal replay prints each session replayed in sseq order', { sk
   const { spawnSync } = await import('node:child_process');
   const { join } = await import('node:path');
   const { writeFileSync, rmSync } = await import('node:fs');
-  const { ROOT } = await import('./helpers.mjs');
+  const { ACCEPT_TEST_ANCHORS, ROOT } = await import('./helpers.mjs');
   const { load } = await import('@poly/runtime');
   const a = await admitted('session-replay-cli', ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly']);
   const db = join(a.dir, 'run.db');
@@ -73,7 +73,7 @@ test('AC6: poly journal replay prints each session replayed in sseq order', { sk
   await rt.close();
   const adm = join(a.dir, 'admission.pub');
   writeFileSync(adm, a.key.publicKey);
-  const r = spawnSync(process.execPath, [join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js'), 'journal', 'replay', '--db', db, '--build', a.build, '--certificate', a.certificate, '--trust', `${a.key.id}=${adm}`], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [...ACCEPT_TEST_ANCHORS, join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js'), 'journal', 'replay', '--db', db, '--build', a.build, '--certificate', a.certificate, '--trust', `${a.key.id}=${adm}`], { encoding: 'utf8' });
   assert.match(r.stdout, /session scope:orders: 3 decision\(s\) and 2 settle\(s\) replayed in sseq order, every decision and Σ digest reproduced/, r.stdout + r.stderr);
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });

@@ -1,15 +1,33 @@
 // Shared by the M4 tests: admission keys generated at test time, outside the repository (S126), project
 // directories under .poly, and an admitted build loaded into poly-runtime.
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { admit } from '@poly/check';
-import { load } from '@poly/runtime';
+import { admit, useTestAnchors } from '@poly/check';
+import { acceptTestAnchors, load } from '@poly/runtime';
 import { keyringDigest, signRecord } from '@poly/core';
 import { ROOT } from './helpers.mjs';
 
 const KEYS = mkdtempSync(join(tmpdir(), 'poly-keys-'));
+
+// S194, as ruled: a test process reads its keyring anchors from a folder of its own, never the owner's per-user
+// configuration, and its certificates (source "test") load only in a process that accepts test anchors.
+export const ANCHORS = join(KEYS, 'anchors');
+mkdirSync(ANCHORS, { recursive: true });
+useTestAnchors(ANCHORS);
+acceptTestAnchors();
+
+/** Anchors a project's first rings: the digest in a file outside the repository, named in the test anchor folder. */
+export function anchorProject(name, rings) {
+  const file = join(KEYS, `${name}.anchor`);
+  writeFileSync(file, `${keyringDigest(rings)}\n`);
+  const config = join(ANCHORS, 'anchors.json');
+  const doc = existsSync(config) ? JSON.parse(readFileSync(config, 'utf8')) : { anchors: {} };
+  doc.anchors[name] = `file:${file}`;
+  writeFileSync(config, JSON.stringify(doc, null, 2));
+  return file;
+}
 
 export function makeKey(name = 'admission') {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
@@ -61,10 +79,9 @@ export function project(name, sources, key, base = 'test-cert') {
   mkdirSync(join(dir, 'src'), { recursive: true });
   for (const s of sources) copyFileSync(join(ROOT, s), join(dir, 'src', s.split('/').pop()));
   writeFileSync(join(dir, 'src', 'handlers.ts'), HANDLERS_TS);
-  // S194: the first rings are anchored by a file outside the project, which only the test writes, holding their digest.
-  const anchor = join(KEYS, `${base}-${name}.anchor`);
-  writeFileSync(anchor, `${keyringDigest({ people: [PERSON], agents: [AGENT] })}\n`);
-  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` }, anchor: `file:${anchor}` }, people: [{ name: PERSON.name, keyId: PERSON.keyId, publicKey: PERSON.publicKey }], agents: [{ name: AGENT.name, keyId: AGENT.keyId, publicKey: AGENT.publicKey }] }, null, 2));
+  // S194: the first rings are anchored by a file outside the project, named in this process's test anchor folder.
+  anchorProject(name, { people: [PERSON], agents: [AGENT] });
+  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], keys: { admission: { id: key.id, location: `file:${key.file}` } }, people: [{ name: PERSON.name, keyId: PERSON.keyId, publicKey: PERSON.publicKey }], agents: [{ name: AGENT.name, keyId: AGENT.keyId, publicKey: AGENT.publicKey }] }, null, 2));
   return dir;
 }
 

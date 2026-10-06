@@ -14,7 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { admit } from '@poly/check';
 import { parseManifest, RUN_SCHEMA } from '@poly/core';
 import { loadRun, RunConfigError, polyaxionPeer } from '@poly/runtime';
-import { ROOT } from './helpers.mjs';
+import { ACCEPT_TEST_ANCHORS, ROOT } from './helpers.mjs';
 import { makeKey, project, PERSON } from './runtime-helpers.mjs';
 import { mcpClient } from './mcp-client.mjs';
 import { schemaProblems as validate } from './json-schema.mjs';
@@ -107,7 +107,7 @@ test('S174: one process owns a store at a time; a second is refused until the fi
 /** A child process that owns the project's store, ready when it prints its id. */
 async function holder(dir) {
   const { spawn } = await import('node:child_process');
-  const child = spawn(process.execPath, [join(ROOT, 'test', 'fixtures', 'hold-store.mjs'), dir], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [...ACCEPT_TEST_ANCHORS, join(ROOT, 'test', 'fixtures', 'hold-store.mjs'), dir], { stdio: ['pipe', 'pipe', 'pipe'] });
   let err = '';
   child.stderr.on('data', (b) => { err += b; });
   await new Promise((resolve, reject) => {
@@ -192,7 +192,7 @@ test('S174, polywatch: a load that fails after finding a stale lock keeps the st
 test('S174, S188: poly run --mcp serves the workflow tools from poly.json, with a ledger signer outside the project', { timeout: 300_000 }, async () => {
   const signer = signerAt(join(OUTSIDE, 'run-cli', 'ledger.pem'));
   const { dir } = await runProject('run-cli', [BRIEF], { ledger: { keyId: 'ops-ledger', signer: `file:${signer}` } });
-  const c = mcpClient(process.execPath, [CLI, 'run', '--mcp'], { cwd: dir });
+  const c = mcpClient(process.execPath, [...ACCEPT_TEST_ANCHORS, CLI, 'run', '--mcp'], { cwd: dir });
   let out = '';
   try {
     await c.initialize();
@@ -218,7 +218,7 @@ test('S189: a person\'s approval dropped in the approvals folder reaches a runni
   const { dir } = await runProject('run-cli-approve', [BRIEF, 'conformance/m8/brief-escalate.policy.poly']);
   const person = join(OUTSIDE, 'person.pem');
   writeFileSync(person, PERSON.privateKeyPem);
-  const c = mcpClient(process.execPath, [CLI, 'run', '--mcp'], { cwd: dir });
+  const c = mcpClient(process.execPath, [...ACCEPT_TEST_ANCHORS, CLI, 'run', '--mcp'], { cwd: dir });
   try {
     await c.initialize();
     let v = await c.call('workflow_start', { workflow: 'customer-brief', input: { date: '2026-10-04' } });
@@ -229,7 +229,7 @@ test('S189: a person\'s approval dropped in the approvals folder reaches a runni
     const db = new DatabaseSync(store, { readOnly: true });
     const intent = db.prepare("SELECT intent_id FROM pr_outbox WHERE kind = 'post_brief'").get().intent_id;
     db.close();
-    const r = spawnSync(process.execPath, [CLI, 'approve', intent, '--by', PERSON.keyId, '--key', person, '--db', store, '--out', join(dir, 'approvals', '001.json')], { cwd: dir, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [...ACCEPT_TEST_ANCHORS, CLI, 'approve', intent, '--by', PERSON.keyId, '--key', person, '--db', store, '--out', join(dir, 'approvals', '001.json')], { cwd: dir, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     let next = [];
     for (let k = 0; k < 40 && !next.length; k++) {

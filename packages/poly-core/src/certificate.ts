@@ -87,7 +87,7 @@ export interface Certificate {
     /** PT12.5, S150: the keys that may sign approvals and acceptances (people), and those that never may (agents). */
     keyrings: { people: { name: string; keyId: string; publicKey: string }[]; agents: { name: string; keyId: string; publicKey: string }[] };
     /** S194: the anchor's digest and the digest of the last rings of the signed history; absent when no ring is kept. */
-    keyringChain?: { anchor: string; head: string };
+    keyringChain?: { anchor: string; head: string; source: 'user' | 'test' };
   };
   signatures: CertificateSignature[];
   digest: string;

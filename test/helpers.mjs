@@ -23,6 +23,8 @@ export function polyFiles(dir) {
 
 /** S190, PS15: the tests' own std, with the test channel kind; it never ships in std/. */
 export const TEST_STD = join(ROOT, 'test', 'fixtures', 'std');
+/** S194: the node arguments of a child process that loads certificates admitted with a test keyring anchor. */
+export const ACCEPT_TEST_ANCHORS = ['--import', new URL('./fixtures/accept-test-anchors.mjs', import.meta.url).href];
 
 /** Parse and check a source; any diagnostic is an error for the gate tests that build from it. */
 export function load(file) {

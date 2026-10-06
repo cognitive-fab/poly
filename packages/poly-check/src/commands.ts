@@ -227,13 +227,13 @@ export const COMMANDS: Command[] = [
   },
   {
     name: 'anchor-keyrings', mcp: null, lsp: false,
-    summary: 'Writes the digest of the people and agents rings in poly.json to the keyring anchor, a file outside the project (PT12.5, S194). The owner\'s command; never over MCP.',
+    summary: 'Writes the digest of the people and agents rings in poly.json to the keyring anchor, a file outside the project, and names it in the owner\'s per-user configuration (PT12.5, S194). The owner\'s command; never over MCP.',
     input: obj({ out: str('the anchor file, outside the project'), project: str('the project directory (default: the working directory)') }, ['out']),
-    output: obj({ path: str('the anchor written'), digest: str('the digest of the rings') }, ['path', 'digest']),
+    output: obj({ path: str('the anchor written'), digest: str('the digest of the rings'), config: str('the per-user configuration that names it') }, ['path', 'digest', 'config']),
     async run(input) {
       const dir = resolve(opt(input, 'project') ?? process.cwd());
-      const r = writeAnchor(dir, loadProject(dir).manifest, `file:${resolve(need(input, 'out'))}`);
-      return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.digest}\n  written to ${r.path}; name it in poly.json as keys.anchor (S194)\n` };
+      const r = writeAnchor(dir, loadProject(dir).manifest, need(input, 'out'));
+      return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.digest}\n  written to ${r.path}, and named for this project in ${r.config} (S194)\n` };
     },
   },
   {

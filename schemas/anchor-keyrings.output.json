@@ -8,10 +8,15 @@
     "digest": {
       "type": "string",
       "description": "the digest of the rings"
+    },
+    "config": {
+      "type": "string",
+      "description": "the per-user configuration that names it"
     }
   },
   "required": [
     "path",
-    "digest"
+    "digest",
+    "config"
   ]
 }
