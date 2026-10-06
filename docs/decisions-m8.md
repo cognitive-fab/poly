@@ -427,6 +427,18 @@ The proposal is accepted. In the generated configuration of channel `c` of an ap
 - **The concierge** binds one channel per application, so its counts must not change. The 147 measured files must not change either; any difference comes to the owner before the commit.
 - The change belongs to the review fixes commit of plan step 11, and is listed in the review table as fixed.
 
+## S193 ruled: a reply on another channel (owner, 2026-10-06)
+
+An application that answers a message from one channel on another gets `PL5407` in the first channel's generated configuration. There the other conversation is present but gets no inputs, so its receipts never arrive, its slot is never freed, and the next reply to it is refused `busy`. At run time the receipts arrive. The finding comes from how the configuration is built, not from the program. It is on the safe side (nothing unsafe is admitted), but it refuses a legitimate application.
+
+- **In M8: a limit, not a change.** The gate is not reopened. The concierge and every measured file bind one channel per application, so nothing is affected. The test that pins the finding stays. The limit is listed with S191 and S192, and the certificate of a build whose application sends on more than one channel names it.
+- **For M9: one joint configuration.** An application bound to `n` channels gets one generated configuration in which every conversation is live: its `Inbound`, its provider's completions and receipts, and its timers. That is the model of the run. The per-channel generated configuration stays for an application bound to one channel. The instance bound stays `1 + n`. The transit bound is derived again in the PS text for the joint case, and the state space is measured on the cross-channel application before the change is accepted.
+- The PS15.5 text is written first in M9, as usual, then the compiler and poly-ref.
+
+## M8 closes (owner, 2026-10-06)
+
+The M8b closing gate (286dc34, recorded in b303a74) is accepted, and M8 closes. E13 is carried over: polyrun's `createInstance` must be vendored, with its seven waiting tests passing, before any channel is used outside tests and before M9's gate. The question on replies across channels (PL5407 in the first channel's configuration) stays open.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.
