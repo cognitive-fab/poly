@@ -333,6 +333,15 @@ So the gap the ruling names is real and is the only one that matters for a rule:
 
 Option B, for the record: offer each timer's target in every state, without tracking armed timers. It needs no change to the global state, but it offers firings a running program cannot have (a target with no armed timer), which a handler's guard must reject; std's handlers do (`require window is Open`, `require cooling`), but a finding could then name a firing that cannot happen. The text above (option A) is proposed.
 
+## Step 10, items 1 to 3 ruled (the Cowork coordinator, for the owner, 2026-10-06)
+
+- **Item 1a. PS15.5, option A, accepted as written**, with two additions: an `after` on a key that is already armed re-arms it (one pending firing per key, as at run time), and the change covers the generated configuration of a channel only. A configuration a user declares that treats timers differently is reported and raised as an issue, not changed in M8.
+- **Item 1b. Vacuity by the tested measure, accepted.** A `never` is tested in a configuration when some reachable accepted global step of its instance takes an action whose handler can emit the effect from a pre-state where the `while` holds. An untested `never` is listed as vacuous with the `never`, the instance and the reason, and the configuration is at best `INCONCLUSIVE`. The same measure replaces the machine-level one. The semantics (PS5.2a, and PS15.5 for the configuration) is written and committed with 1a before any code.
+- **Conditions on the code.** Tests first: AC15's static test (the concierge variant that sends a free-form reply after the window gives a witness from `poly check`), and the support configuration's `free-form-outside-window` becomes tested. Seeded controls, each caught: a generated configuration that offers no timer firing (the AC15 test catches it), one that fires a disarmed timer (a test that a cancelled timer never fires in a witness), and the vacuity check reverted to the weak measure. The one-ticket test applications: a test meant to prove a rule moves to the answering application, and one test asserts that the one-ticket application is `INCONCLUSIVE` for `one-send-at-a-time`, as a control of the new measure. Regression: the 147 files measured; any verdict that changes is listed file by file with its untested `never` and the reason; the state and transition counts of the three concierge configurations before and after the timers.
+- **Item 2, deadlock: accepted as reported.**
+- **Item 3, S191: accepted.** The certificate line in admission stays; it states a limit and is tested.
+- Then the full suite with the check-memory count, a commit on m4, no push, a report. Step 10 is accepted on that report if it holds. Step 11 waits for its ruling.
+
 ## Engine changes
 
 - **E10** (polyaxion) is on the engine list, in M8 for the `channel` proposal field only; per-value taint waits for M10 (S181). If polyaxion cannot take it, PT27.2's fallback applies, and the certificate lists the check as poly's, not the gate's.
