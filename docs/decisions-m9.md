@@ -129,6 +129,17 @@ PS8.8, PS8.9 and K12 were written into the semantics first (876b4d9), as S195 to
 
 **For a ruling: the refresh of stale claims (PS8.8, S198).** PS8.8 has an escalation over an age ask for a fresh presentation, and the intent proposed again under a new `sseq`, within its own bound. An escalated intent leaves `Escalated` today only by `Approve` (a person's signed approval, whose re-proposal is allowed or denied, never escalated again) or by `EscalationTimeout`. A refresh is a third way out, so it needs a transition of the `OutboxIntent` model (PT9.7), with a counter for its bound. That model is `conformance/m4/outbox.poly`, a measured file, and the runtime pins its digests per bound (`RUNTIME_MODEL_DIGESTS`). So its state counts change, which the ruling on how M9 runs brings to the owner before the change. **Proposal:** a transition `Refresh` from `Escalated` to `Proposed`, taken only by `rt.refreshClaims(intent, credentials)` when the verifier gives fresh evidence, with a counter `refreshes: 0..R` (R the `staleClaims` bound, by default `Recheck`'s, 2) and `Denied` with reason `stale-claims` when it is spent; the model rechecked (invariants, deadlock freedom, `settles` under its fairness) and its digests pinned again. **Alternative:** no refresh in the runtime: a stale presentation is denied (as the fixture's rule does), and the host dispatches the action again with fresh credentials, a new step and a new intent, so the bound is the host's. Until it is ruled, PD6 is built without the refresh, and `test/pd6.test.mjs` says so.
 
+## Stale claims: denied, not refreshed (owner, 2026-10-06)
+
+The alternative is ruled: **no refresh in the runtime.** A presentation whose claims are older than the policy allows is denied with the reason `stale-claims`, journaled, and never escalated on its age. The host dispatches the action again with a fresh presentation; that is a new intent with its own id (`<intent>#<attempt>`, S173), checked by the gate like any other.
+
+- **Why.** It is fail closed, adds no transition to `OutboxIntent`, keeps `conformance/m4/outbox.poly` and its pinned digests unchanged, and needs no new runtime call that takes credentials. A refresh inside the runtime would be a third way out of `Escalated` and a new path that handles credentials, for a gain the host already has.
+- **Text first.** PS8.8 and S198 are amended to say so before the code: an escalation may still be raised on other grounds, but age alone denies. The retry bound for a refresh is removed; a host that re-dispatches is bounded by its own logic, and each attempt is journaled.
+- **Tests.** A stale presentation is denied `stale-claims` and journaled; the same action dispatched again with fresh claims is allowed; a stale presentation is never escalated. The measured files must stay identical.
+- **PD6 is accepted as built**, with this ruling.
+
+**`poly bench gate`'s run key is accepted as recorded:** its key is generated for the run, held in memory, anchored as a test anchor in that process only, so its certificate cannot be loaded outside it.
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.
