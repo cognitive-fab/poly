@@ -16,6 +16,8 @@ const ERROR_LINES = 40;
 
 async function run(label) {
   assertNotExperimentTree(ROOT);
+  // Polywatch: the label names the log file only, so it is a plain word and never a path.
+  if (label !== undefined && !/^[A-Za-z0-9_-]+$/.test(label)) throw new Error(`a label is letters, digits, _ and - only: ${JSON.stringify(label)}`);
   const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim() || 'nocommit';
   const time = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = join(ROOT, '.poly', 'logs');
