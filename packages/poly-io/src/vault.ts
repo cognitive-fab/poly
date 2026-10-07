@@ -115,7 +115,7 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
   const clientAuth = (): Record<string, string> => (stripe ? { authorization: `Bearer ${client.clientSecret}` } : client.clientSecret ? { authorization: `Basic ${Buffer.from(`${encodeURIComponent(client.clientId)}:${encodeURIComponent(client.clientSecret)}`).toString('base64')}` } : {});
   const post = (url: string, fields: Record<string, string>) => http().request({ method: 'POST', url, headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', ...clientAuth() }, body: form(fields) });
   const pending = (state: string) => `pending:${state}`;
-  /** The states this adapter has taken; the store's removal and the host's nonce keep them taken across restarts. */
+  /** The states being read now; once read, the store's removal and the host's nonce keep them taken, across restarts too. */
   const taken = new Set<string>();
   const grant = (id: string) => `grant:${id}`;
   // Review C3 (M9): a grant's operations run one at a time, in the order they were asked, so a revocation never reads
@@ -157,6 +157,9 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
       // Review C7 (M9): a state the store never held is not remembered, so made-up states cannot fill the set.
       if (!p) { taken.delete(state); return { refused: 'unknown state' }; }
       await st.remove(pending(state));
+      // Polywatch: once the pending record is gone, the store refuses the state on its own, so the set lets it go and
+      // holds only the states being read.
+      taken.delete(state);
       const grantId = String(p.grantId);
       if (q.get('error')) return { refused: `the provider answered ${q.get('error')}`, grantId };
       if (now > Number(p.until)) return { refused: 'expired state', grantId };
