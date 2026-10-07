@@ -1,0 +1,90 @@
+// M9 step 11 (AC18 to AC21): a concierge whose ticket refunds the merchant through the merchant's delegated
+// credential. A member of staff asks for the refund, with claims and, for an agent, a mandate (PD6). The channel kind
+// test and the provider test-oauth are the tests' own, under the test-only std. A refund is taken on any ticket not
+// closed, so a test can ask for one before E13, when no inbound message can start the ticket.
+module refunds
+
+enum Status { New, Open, Closed }
+
+enum Role { Agent, Lead }
+
+claims Staff {
+  role: Role
+  principal: Principal
+}
+
+credential payments: oauth2 {
+  provider "test-oauth"
+  grant authorization_code pkce
+  scopes { refunds.write, charges.read }
+  holder Principal
+}
+
+channel support: test {
+  adapter "test"
+  thread "{from}"
+  starts Ticket.Start on inbound
+  Message -> Ticket.Got
+  Delivered -> Ticket.Delivered
+  Rejected -> Ticket.SendRejected
+  Failed -> Ticket.SendFailed
+}
+
+machine Ticket {
+  state {
+    status  : Status = New
+    replies : 0..1 = 0
+    refunds : 0..10 = 0
+  }
+
+  terminal status is Closed
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+  action Refund(merchant: Principal, amount: 0..500)
+
+  on Start {
+    require status is New else reject "started"
+    status' = Open
+  }
+
+  on Got(body) {
+    require status is Open else reject "closed"
+    require replies == 0 else reject "replied"
+    replies' = 1
+    emit support.reply(body: body)
+  }
+
+  on Delivered {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+
+  on SendRejected(reason) {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+
+  on SendFailed {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+
+  on Refund(merchant, amount) by s: Staff {
+    require !(status is Closed) else reject "closed"
+    require refunds < 10 else reject "refund-limit"
+    refunds' = refunds + 1
+    emit refund(merchant: merchant, amount: amount)
+  }
+
+  effect refund(merchant: Principal, amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.test-oauth.example/v1/refunds" }
+    uses payments { refunds.write } for merchant
+    class irreversible
+  }
+}
