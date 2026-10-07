@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { admit, AdmitError, commandNamed } from '@poly/check';
-import { keyringDigest, keyringSubject, keyringsOf, signRecord } from '@poly/core';
+import { keyringDigest, keyringSubject, keyringsOf, signRecord, writeAnchorFile } from '@poly/core';
 import { load, LoadError } from '@poly/runtime';
 import { AGENT, ANCHORS, PERSON, makeKey, makePerson, project } from './runtime-helpers.mjs';
 
@@ -30,8 +30,11 @@ function setAnchorLocation(name, location) {
   if (location === undefined) delete doc.anchors[name]; else doc.anchors[name] = location;
   writeFileSync(CONFIG, JSON.stringify(doc, null, 2));
 }
-/** A history entry for `next`, after `prev`, signed by `signer`. */
-const entry = (prev, next, signer) => ({ rings: next, record: signRecord({ kind: 'keyring', subject: keyringSubject(keyringDigest(prev), keyringDigest(next)), by: signer.keyId, at: '2026-10-06T00:00:00.000Z' }, signer.privateKeyPem) });
+/** The anchor of a project, as this test process names it. */
+const anchorFileOf = (name) => readJson(CONFIG).anchors[name].slice('file:'.length);
+const anchorOf = (name) => readJson(anchorFileOf(name));
+/** A history entry for `next`, after `prev`, signed by `signer` for project `name` (S210, D3: by its anchor's id). */
+const entry = (name, prev, next, signer) => ({ rings: next, record: signRecord({ kind: 'keyring', subject: keyringSubject(anchorOf(name).id, keyringDigest(prev), keyringDigest(next)), by: signer.keyId, at: '2026-10-06T00:00:00.000Z' }, signer.privateKeyPem) });
 const refusedKeyring = (e) => e instanceof AdmitError && /PL6410/.test(e.message);
 /** Runs a command with a person key written, outside the repository, for the command only. */
 async function withKeyFile(name, who, run) {
@@ -53,8 +56,11 @@ test('S194: rings with no anchor, an anchor of other rings, an anchor that is a 
   setAnchorLocation('kr-no-anchor', undefined);
   await assert.rejects(admit(dir), refusedKeyring, 'no anchor');
   setAnchorLocation('kr-no-anchor', `file:${file}`);
-  writeFileSync(file, `${keyringDigest(rings([makePerson('other')]))}\n`);
+  writeAnchorFile(file, { ...readJson(file), first: keyringDigest(rings([makePerson('other')])) });
   await assert.rejects(admit(dir), refusedKeyring, 'another anchor');
+  // S210: an anchor of the form before it, a bare digest, is refused until the owner anchors again.
+  writeFileSync(file, `${keyringDigest(rings([PERSON]))}\n`);
+  await assert.rejects(admit(dir), (e) => refusedKeyring(e) && /form before S210/.test(e.message), 'a bare digest');
   // Polywatch: a folder in place of the anchor file is a refusal, not a bare EISDIR.
   setAnchorLocation('kr-no-anchor', `file:${dirname(file)}`);
   await assert.rejects(admit(dir), refusedKeyring, 'a folder');
@@ -69,9 +75,9 @@ test('S194: an agent key added to people without a keyring record is refused, an
   const widened = rings([PERSON, intruder]);
   setRings(dir, widened);
   await assert.rejects(admit(dir), refusedKeyring, 'no record');
-  writeHistory(dir, [{ rings: first }, entry(first, widened, intruder)]);
+  writeHistory(dir, [{ rings: first }, entry('kr-added', first, widened, intruder)]);
   await assert.rejects(admit(dir), refusedKeyring, 'signed by the new key');
-  writeHistory(dir, [{ rings: first }, { rings: widened, record: entry(first, rings([PERSON, makePerson('x')]), PERSON).record }]);
+  writeHistory(dir, [{ rings: first }, { rings: widened, record: entry('kr-added', first, rings([PERSON, makePerson('x')]), PERSON).record }]);
   await assert.rejects(admit(dir), refusedKeyring, 'another subject');
   // Polywatch: a record that is not an object, or lacks its fields, is a refusal like any other.
   for (const record of [null, 'signed', { kind: 'keyring' }]) {
@@ -85,7 +91,7 @@ test('S194: a change signed by a person of the previous ring is admitted, and th
   const first = rings([PERSON]);
   const next = rings([PERSON, makePerson('second')]);
   setRings(dir, next);
-  writeHistory(dir, [{ rings: first }, entry(first, next, PERSON)]);
+  writeHistory(dir, [{ rings: first }, entry('kr-signed', first, next, PERSON)]);
   const r = await admit(dir);
   assert.deepEqual(r.certificate.poly.keyringChain, { anchor: keyringDigest(first), head: keyringDigest(next), source: 'test' });
   assert.equal(keyringDigest(r.certificate.poly.keyrings), keyringDigest(keyringsOf(dir, readJson(join(dir, 'poly.json')))));
@@ -147,7 +153,7 @@ test('S194, polywatch: with the history deleted, poly sign keyrings refuses cert
   const first = rings([PERSON]);
   const second = rings([PERSON, makePerson('second')]);
   setRings(dir, second);
-  writeHistory(dir, [{ rings: first }, entry(first, second, PERSON)]);
+  writeHistory(dir, [{ rings: first }, entry('kr-lost', first, second, PERSON)]);
   await admit(dir);
   rmSync(join(dir, 'keyrings'), { recursive: true });
   setRings(dir, rings([PERSON, makePerson('third')]));

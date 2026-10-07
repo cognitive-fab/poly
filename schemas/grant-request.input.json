@@ -9,6 +9,14 @@
       "type": "string",
       "description": "the holder, a principal; omitted for the service's own credential"
     },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
     "out": {
       "type": "string",
       "description": "the request file to write, in the approvals folder"
@@ -16,6 +24,8 @@
   },
   "required": [
     "credential",
+    "by",
+    "key",
     "out"
   ]
 }

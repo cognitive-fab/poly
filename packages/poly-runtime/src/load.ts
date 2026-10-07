@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 /** S190: the repository's std/, where a certificate's `std:` paths are read. */
 const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
 import { actionTypes, type TypeNode } from './types.js';
-import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, parseManifest, keyringsOf, sameKeyrings, EMPTY_KEYRINGS, policySubject, verifyRecord, type Certificate, type CertificateProblem } from '@poly/core';
+import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, parseManifest, keyringsOf, sameKeyrings, EMPTY_KEYRINGS, policySubject, verifyRecord, verifyChain, KeyringError, type Anchor, type Certificate, type CertificateProblem } from '@poly/core';
 
 export class LoadError extends Error {
   constructor(message: string, readonly problems: CertificateProblem[] = []) { super(message); this.name = 'LoadError'; }
@@ -33,6 +33,8 @@ export interface VerifiedBuild {
   channels: VerifiedChannel[];
   /** PT10e, review D4 (M9): each certified credential, from the verified bytes of its descriptor, read once here. */
   credentials: VerifiedCredential[];
+  /** PT12.5, S210 (D9): whether the project's keyring anchor says it is production. */
+  production: boolean;
 }
 
 /** PS16.1, PT10e: what the runtime needs of a credential: its Grant machine, provider, scopes and whether it has a holder. */
@@ -154,6 +156,12 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
 
   // S150: the keyrings that sign approvals and acceptances are the certified ones; a change needs re-admission.
   const ring = certificate.poly?.keyrings;
+  // S210, D1: the certified rings are verified from the project's anchor, as admission verifies them, so the admission
+  // key alone cannot widen the people ring; and the chain must extend the head the anchor keeps (D2).
+  let anchor: Anchor | null = null;
+  if (ring && Array.isArray(ring.people) && Array.isArray(ring.agents)) {
+    try { anchor = verifyChain(root, certificate.subject.project, ring, certificate.poly?.keyringChain?.source === 'test' ? 'test' : 'user')?.anchor ?? null; } catch (e) { if (e instanceof KeyringError) throw new LoadError(`refused at load: ${e.message}`); throw e; }
+  }
   if (!ring || !Array.isArray(ring.people) || !Array.isArray(ring.agents)) throw new LoadError('refused at load: PL6405 KEYRING_CHANGED: the certificate binds no keyrings; it predates S150, so admit the program again');
   const manifestPath = join(root, 'poly.json');
   let current;
@@ -208,9 +216,13 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   for (const p of certificate.poly?.policies ?? []) {
     const engine = certificate.poly.policyEngine;
     const doc = bytes.get(p.path);
-    const subject = doc && engine && p.source ? policySubject({ scope: p.scope, document: sha256OfBytes(doc), sources: { [p.source]: certificate.poly.sources[p.source] }, engine }) : null;
-    const v = subject && p.signature ? verifyRecord(p.signature, certificate.poly.keyrings, { kind: 'policy', subject }) : { ok: false as const, problem: 'the certificate binds no signature for it' };
+    const sequence = p.sequence;
+    const subject = doc && engine && p.source && Number.isSafeInteger(sequence) ? policySubject({ scope: p.scope, sequence: sequence!, document: sha256OfBytes(doc), sources: { [p.source]: certificate.poly.sources[p.source] }, engine }) : null;
+    const v = subject && p.signature ? verifyRecord(p.signature, certificate.poly.keyrings, { kind: 'policy', subject }) : { ok: false as const, problem: 'the certificate binds no signature for it, or none with its sequence (S210)' };
     if (!v.ok) throw new LoadError(`refused at load: PL6409 POLICY_NOT_SIGNED: scope ${p.scope}: ${v.problem} (S194)`);
+    // S210, D7: a policy older than the one the anchor keeps for its scope is never loaded again.
+    const kept = anchor?.policies[p.scope];
+    if (kept !== undefined && sequence! < kept) throw new LoadError(`refused at load: PL6409 POLICY_NOT_SIGNED: scope ${p.scope}: its sequence ${sequence} is lower than the ${kept} the anchor keeps (S210)`);
   }
   const policies = (certificate.poly?.policies ?? []).map((p) => ({ scope: p.scope, policies: p.policies, reads: p.reads, doc: JSON.parse(bytes.get(p.path)!.toString('utf8')) as Record<string, unknown> }));
   // S173: a workflow's mapped kinds become work orders, so each must be an effect of its machine, as certified.
@@ -246,7 +258,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (typeof d.provider !== 'string' || !Array.isArray(d.scopes) || typeof d.holder !== 'boolean') throw new LoadError(`refused at load: the descriptor of credential ${c.name} is not a credential's (PT10e)`);
     credentials.push({ name: c.name, machine: m.id, provider: d.provider, scopes: d.scopes as string[], holder: d.holder });
   }
-  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials };
+  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true };
 }
 
 /**

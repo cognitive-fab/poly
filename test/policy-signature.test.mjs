@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { admit, AdmitError, commandNamed, policySubjects } from '@poly/check';
 import { certificateDigest, keyringDigest, keyringSubject, policySubject, signDigest, signRecord, verifyRecord } from '@poly/core';
 import { load, LoadError, polyaxionPeer } from '@poly/runtime';
-import { AGENT, PERSON, makeKey, makePerson, project, signPolicies } from './runtime-helpers.mjs';
+import { AGENT, ANCHORS, PERSON, makeKey, makePerson, project, signPolicies } from './runtime-helpers.mjs';
 
 const SOURCES = ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'];
 const skip = polyaxionPeer().ok ? false : `not run: ${polyaxionPeer().reason}`;
@@ -24,7 +24,9 @@ test('S194: a policy signed by a person over its document, source and engine is 
   const scope = r.certificate.poly.policies.find((p) => p.scope === 'orders');
   const [s] = await policySubjects(dir);
   assert.equal(s.scope, 'orders');
-  assert.deepEqual(verifyRecord(scope.signature, r.certificate.poly.keyrings, { kind: 'policy', subject: s.subject }).ok, true);
+  // S210, D7: the certificate binds the sequence signed, the first; the next signature would take the second.
+  assert.deepEqual([scope.sequence, s.parts.sequence], [1, 2]);
+  assert.deepEqual(verifyRecord(scope.signature, r.certificate.poly.keyrings, { kind: 'policy', subject: policySubject({ ...s.parts, sequence: 1 }) }).ok, true);
   const { rt } = { rt: await load(join(dir, '.poly', 'build'), { certificate: r.certificatePath, trust: { [key.id]: key.publicKey } }) };
   await rt.close();
 });
@@ -37,7 +39,7 @@ test('S194: an unsigned scope, one signed by an agent key, and one signed over a
   const [s] = await policySubjects(dir);
   // Over the same document and source with another engine: the engine is part of what is signed.
   const other = policySubject({ ...s.parts, engine: { name: 'polyaxion', commit: '0000000' } });
-  writeFileSync(sigFile(dir), JSON.stringify(signRecord({ kind: 'policy', subject: other, by: PERSON.keyId, at: '2026-10-06T00:00:00.000Z' }, PERSON.privateKeyPem)));
+  writeFileSync(sigFile(dir), JSON.stringify({ v: 2, sequence: s.parts.sequence, record: signRecord({ kind: 'policy', subject: other, by: PERSON.keyId, at: '2026-10-06T00:00:00.000Z' }, PERSON.privateKeyPem) }));
   await assert.rejects(admit(dir), notSigned, 'another engine');
 });
 
@@ -63,7 +65,7 @@ test('S194, as ruled: a policy signed by a key added to people without a keyring
   const first = { people: [PERSON], agents: [AGENT] };
   const widened = { people: [PERSON, intruder], agents: [AGENT] };
   mkdirSync(join(dir, 'keyrings'), { recursive: true });
-  writeFileSync(join(dir, 'keyrings', 'history.json'), JSON.stringify([{ rings: first }, { rings: widened, record: signRecord({ kind: 'keyring', subject: keyringSubject(keyringDigest(first), keyringDigest(widened)), by: intruder.keyId, at: '2026-10-06T00:00:00.000Z' }, intruder.privateKeyPem) }]));
+  writeFileSync(join(dir, 'keyrings', 'history.json'), JSON.stringify([{ rings: first }, { rings: widened, record: signRecord({ kind: 'keyring', subject: keyringSubject(readJson(readJson(join(ANCHORS, 'anchors.json')).anchors['ps-added-key'].slice(5)).id, keyringDigest(first), keyringDigest(widened)), by: intruder.keyId, at: '2026-10-06T00:00:00.000Z' }, intruder.privateKeyPem) }]));
   await assert.rejects(admit(dir), (e) => e instanceof AdmitError && /PL6410/.test(e.message));
 });
 
@@ -89,6 +91,7 @@ test('S194: poly sign policy is the owner\'s command, never over MCP, and its si
   writeFileSync(personFile, PERSON.privateKeyPem);
   const { rmSync } = await import('node:fs');
   try { await commandNamed('sign-policy').run({ scope: 'orders', by: PERSON.keyId, key: personFile, project: dir }); } finally { rmSync(personFile); }
-  assert.equal(readJson(sigFile(dir)).kind, 'policy');
+  const sig = readJson(sigFile(dir));
+  assert.deepEqual([sig.v, sig.sequence, sig.record.kind], [2, 1, 'policy']);
   await admit(dir);
 });

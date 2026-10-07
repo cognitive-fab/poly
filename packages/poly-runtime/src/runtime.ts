@@ -18,7 +18,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import { RESERVED_MODULE, revocationSubject, verifyRecord, type Certificate } from '@poly/core';
+import { RESERVED_MODULE, grantRequestSubject, recordDigest, revocationSubject, verifyRecord, type Certificate, type SignedRecord } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { contentValues, dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type VerifiedWorkflow, type WorkOrderTool } from './load.js';
@@ -579,6 +579,23 @@ export class PolyRuntime {
     await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'revocation', credential: hit.credential, grant: hit.instance, source: 'person' }, this.now()); });
   }
 
+  /**
+   * S210, B3 and D6 (PT10g): a grant request is a person's signed record of the kind grant-request over { credential,
+   * holder }, taken once: unsigned it is not-a-record, by an agent's or an unknown key or over another subject it is
+   * wrong-key, and taken before it is replayed. So writing to the approvals folder alone cannot push a grant back to
+   * Requested.
+   */
+  async #takeGrantRequest(credential: string, holder: string | null, record: unknown): Promise<void> {
+    const r = record as Partial<SignedRecord> | null;
+    if (!r || typeof r !== 'object' || typeof r.sig !== 'string') throw new ApprovalRefused('a grant request is signed by a person (S210)', 'not-a-record');
+    const v = verifyRecord(r, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind: 'grant-request', subject: grantRequestSubject(credential, holder) });
+    if (!v.ok) throw new ApprovalRefused(`the grant request is refused: ${v.problem} (S210)`, v.problem.startsWith('not a signed record') ? 'not-a-record' : 'wrong-key');
+    const d = recordDigest(r as SignedRecord);
+    let fresh = false;
+    await this.store.txn(() => { fresh = this.store.db.prepare('INSERT OR IGNORE INTO poly_used_record (digest, at) VALUES (?, ?)').run(d, this.now()).changes === 1; });
+    if (!fresh) throw new ApprovalRefused('the grant request was taken before (S210)', 'replayed');
+  }
+
   /** PS16.4: what a person signs to revoke the current grant of a credential and holder. */
   revocationSubject(c: string, holder: string | null): string {
     const g = this.grantOf(c, holder);
@@ -681,6 +698,8 @@ export class PolyRuntime {
     if (!pin) throw new Error(`no credential ${credential}; the certificate binds ${(this.certificate.poly.vaults ?? []).map((v) => v.credential).join(', ') || 'none'} (PT10f)`);
     if (!this.#ioPackage?.madeHere(adapter) || adapter.kind !== 'vault') throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the vault for ${credential} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S200)`);
     if (adapter.store !== pin.store) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: credential ${credential} is certified with the ${pin.store} store, and this vault keeps its tokens in the ${adapter.store} store (S200)`);
+    // S210, D9: the anchor says production, whatever the certificate's store; the development keychain never runs there.
+    if (this.verified.production && adapter.store === 'dev-keychain') throw new Error(`PL6826 VAULT_NOT_FOR_PRODUCTION: credential ${credential}'s vault keeps its tokens in the development keychain, and this project's anchor says it is production (S200, S210)`);
     const cred = this.#credential(credential);
     if (!cred || adapter.provider !== cred.provider) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: credential ${credential} is certified for provider ${cred?.provider ?? 'none'}, and this vault is for ${adapter.provider} (PT10f)`);
     this.#vaults.set(credential, adapter);
@@ -759,8 +778,9 @@ export class PolyRuntime {
       if (!reason && (kind === 'grant-request' || kind === 'revocation')) {
         try {
           if (kind === 'grant-request') {
-            const r = record as { credential?: unknown; holder?: unknown };
+            const r = record as { credential?: unknown; holder?: unknown; record?: unknown };
             if (typeof r.credential !== 'string' || (r.holder !== null && typeof r.holder !== 'string')) throw new ApprovalRefused('a grant request names a credential and a holder or null', 'not-a-record');
+            await this.#takeGrantRequest(r.credential, r.holder as string | null, r.record);
             this.#authorizations.push({ credential: r.credential, url: await this.requestGrant(r.credential, r.holder as string | null) });
           } else await this.revokeBySubject(record);
         } catch (e) { reason = e instanceof ApprovalRefused ? e.reason : 'unmatched'; message = (e as Error).message; }
@@ -1469,6 +1489,8 @@ export class PolyRuntime {
 
 export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRuntime> {
   const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust, { allowWitness: opts.allowWitness, ...(opts.std ? { std: opts.std } : {}) });
+  // S210, as ruled: no test hook is reachable in a project whose anchor says it is production.
+  if (opts.fault !== undefined && verified.production) throw new LoadError(`refused at load: LoadOptions.fault (${String(opts.fault)}) is a test hook, and this project's anchor says it is production (S210)`);
   const dbPath = opts.store?.sqlite ?? ':memory:';
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true });
   // S143: runtime.* and runtime<m>.* are the runtime's own ids, whatever this build or store needs. The checker refuses

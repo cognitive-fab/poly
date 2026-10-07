@@ -2,15 +2,27 @@
 // digest of the document its policies lower to (the bytes the engine runs), the digest of the source file that
 // declares them (a scope's policies live in one module, PT8.2) and the engine pin. This file computes the subjects as
 // admission does, from the same check of the declaring module, and writes a signature for `poly sign policy`.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { loadProject, policySubject, sha256OfBytes, signRecord, type Module, type PolicySubjectParts } from '@poly/core';
+import { loadProject, policySubject, readAnchor, sha256OfBytes, signRecord, type Module, type PolicySubjectParts } from '@poly/core';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { checkFile } from './pipeline.js';
 import { policySlug } from './policies.js';
 
 export interface PolicyScopeSubject { scope: string; slug: string; file: string; parts: PolicySubjectParts; subject: string }
+
+/**
+ * S210, D7: the sequence the next signature of a scope takes: one more than both the signature file's and the one the
+ * project's anchor keeps for the scope, so a new signature is never older than one admitted.
+ */
+function nextSequence(dir: string, project: string, scope: string): number {
+  const path = policySignaturePath(dir, scope);
+  let held = 0;
+  if (existsSync(path)) { try { const f = JSON.parse(readFileSync(path, 'utf8')) as { v?: unknown; sequence?: unknown }; if (f.v === 2 && Number.isSafeInteger(f.sequence)) held = f.sequence as number; } catch { /* signed again from the anchor's */ } }
+  const kept = readAnchor(dir, project)?.anchor.policies[scope] ?? 0;
+  return Math.max(held, kept) + 1;
+}
 
 /** Where a scope's signature is kept in the project. */
 export const policySignaturePath = (dir: string, scope: string): string => join(dir, 'policies', `${policySlug(scope)}.sig.json`);
@@ -20,7 +32,7 @@ export const policySignaturePath = (dir: string, scope: string): string => join(
  * does (the project's program given), so the document is the one admission certifies. The engine is the pinned one.
  */
 export async function policySubjects(dir: string, opts: { std?: string } = {}): Promise<PolicyScopeSubject[]> {
-  const { files } = loadProject(dir);
+  const { files, manifest } = loadProject(dir);
   const program: Module[] = [];
   const programFiles: { file: string; module: Module }[] = [];
   for (const f of files) {
@@ -38,7 +50,7 @@ export async function policySubjects(dir: string, opts: { std?: string } = {}): 
     const rel = relative(dir, pf.file).split(sep).join('/');
     for (const p of r.policies ?? []) {
       if (!p.artefact) throw new Error(`the policies of scope ${p.scope} were not lowered (${p.verdict}); fix them before signing`);
-      const parts: PolicySubjectParts = { scope: p.scope, document: p.artefact.digest, sources: { [rel]: r.sourceDigest ?? sha256OfBytes(readFileSync(pf.file)) }, engine: { name: 'polyaxion', commit: peer.commit } };
+      const parts: PolicySubjectParts = { scope: p.scope, sequence: nextSequence(dir, manifest.name, p.scope), document: p.artefact.digest, sources: { [rel]: r.sourceDigest ?? sha256OfBytes(readFileSync(pf.file)) }, engine: { name: 'polyaxion', commit: peer.commit } };
       out.push({ scope: p.scope, slug: policySlug(p.scope), file: rel, parts, subject: policySubject(parts) });
     }
   }
@@ -51,6 +63,6 @@ export async function signPolicy(dir: string, scope: string, by: string, private
   if (!s) throw new Error(`the project declares no policy of scope ${scope}`);
   const path = policySignaturePath(dir, scope);
   mkdirSync(join(dir, 'policies'), { recursive: true });
-  writeFileSync(path, JSON.stringify(signRecord({ kind: 'policy', subject: s.subject, by, at }, privateKeyPem), null, 2) + '\n');
+  writeFileSync(path, JSON.stringify({ v: 2, sequence: s.parts.sequence, record: signRecord({ kind: 'policy', subject: s.subject, by, at }, privateKeyPem) }, null, 2) + '\n');
   return { path, subject: s.subject };
 }

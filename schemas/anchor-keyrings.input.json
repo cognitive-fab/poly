@@ -5,6 +5,10 @@
       "type": "string",
       "description": "the anchor file, outside the project"
     },
+    "production": {
+      "type": "boolean",
+      "description": "whether the project is a production project (S210)"
+    },
     "project": {
       "type": "string",
       "description": "the project directory (default: the working directory)"

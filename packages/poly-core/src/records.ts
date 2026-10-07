@@ -12,7 +12,8 @@ import { canonicalize } from './jcs.js';
 /** `invocation` (PD5.1.4, S107): a person's signature on one dispatch, which the person-key adapter turns into claims. */
 /** `keyring` (S194, M9): a person's signature on a change of the people or agents ring, over { parent, rings }. */
 /** `policy` (S194, Q8, M9): a person's signature on a policy scope, over its document, source and engine. */
-export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation';
+/** `grant-request` (S210, B3, D6): a person's signature on asking a holder for a grant, over { credential, holder }. */
+export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation' | 'grant-request';
 
 export interface SignedRecord {
   v: 1;
@@ -80,6 +81,8 @@ export function keyringDigest(k: Keyrings): string {
 /** S194, Q8: what a person signs for a policy scope. */
 export interface PolicySubjectParts {
   scope: string;
+  /** S210, D7: the scope's signature sequence, which the anchor keeps the highest admitted of, so no older one returns. */
+  sequence: number;
   /** The digest of the scope's lowered document, the bytes the engine runs. */
   document: string;
   /** The digest of each source file that declares a policy of the scope, by its path in the project. */
@@ -89,12 +92,15 @@ export interface PolicySubjectParts {
 
 /** S194, Q8: the subject of a policy record. */
 export function policySubject(p: PolicySubjectParts): string {
-  return 'sha256:' + createHash('sha256').update(canonicalize({ scope: p.scope, document: p.document, sources: p.sources, engine: { name: p.engine.name, commit: p.engine.commit } }), 'utf8').digest('hex');
+  return 'sha256:' + createHash('sha256').update(canonicalize({ scope: p.scope, sequence: p.sequence, document: p.document, sources: p.sources, engine: { name: p.engine.name, commit: p.engine.commit } }), 'utf8').digest('hex');
 }
 
-/** S194: the subject of a keyring record, binding the rings it admits to the rings it replaces. */
-export function keyringSubject(parent: string, rings: string): string {
-  return 'sha256:' + createHash('sha256').update(canonicalize({ parent, rings }), 'utf8').digest('hex');
+/**
+ * S194: the subject of a keyring record, binding the rings it admits to the rings it replaces; S210, D3: and to its
+ * project, by the id of the project's anchor.
+ */
+export function keyringSubject(anchor: string, parent: string, rings: string): string {
+  return 'sha256:' + createHash('sha256').update(canonicalize({ anchor, parent, rings }), 'utf8').digest('hex');
 }
 
 /** Keyrings compared as admission certifies them: the same holders, ids and public keys, in any order. */
@@ -109,4 +115,9 @@ export function sameKeyrings(a: Keyrings, b: Keyrings): boolean {
 /** PS16.4: what a person's revocation of a grant signs: the grant's instance id, whose holder part is a keyed digest. */
 export function revocationSubject(grantId: string): string {
   return `sha256:${createHash('sha256').update(canonicalize({ grant: grantId }), 'utf8').digest('hex')}`;
+}
+
+/** S210, B3, D6: what a person signs to ask a holder for a grant of a credential (holder null for the service's own). */
+export function grantRequestSubject(credential: string, holder: string | null): string {
+  return `sha256:${createHash('sha256').update(canonicalize({ credential, holder }), 'utf8').digest('hex')}`;
 }

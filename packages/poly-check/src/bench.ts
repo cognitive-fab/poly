@@ -16,7 +16,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { cpus, platform, arch, totalmem, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { keyringDigest } from '@poly/core';
+import { keyringDigest, newAnchor, writeAnchorFile } from '@poly/core';
 import { admit } from './admit.js';
 import { useTestAnchors } from './keyrings.js';
 import { signPolicy } from './policy-sign.js';
@@ -57,19 +57,17 @@ async function project(root: string, name: string, sources: string[], repo: stri
   const people = sources.length > 1 ? [{ name: 'bench', keyId: 'bench-person', publicKey: person.publicKey.export({ type: 'spki', format: 'pem' }).toString() }] : [];
   writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], ...(people.length ? { people } : {}) }, null, 2));
   if (people.length) {
-    writeFileSync(join(root, `${name}.anchor`), `${keyringDigest({ people, agents: [] })}\n`);
+    writeAnchorFile(join(root, `${name}.anchor`), newAnchor(name, keyringDigest({ people, agents: [] }), false));
     writeFileSync(join(root, 'anchors.json'), JSON.stringify({ anchors: { [name]: `file:${join(root, `${name}.anchor`)}` } }));
     (await import('@poly/runtime')).acceptTestAnchors();
   }
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const id = `bench-${name}`;
-  // The run's anchor folder is read for this signature and admission only, then the process's setting is restored.
-  const prev = people.length ? useTestAnchors(root) : null;
-  let r;
-  try {
-    if (people.length) await signPolicy(dir, 'orders', 'bench-person', person.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), new Date().toISOString());
-    r = await admit(dir, { key: { id, privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() } });
-  } finally { if (people.length) useTestAnchors(prev); }
+  // The run's anchor folder is the process's for the run (benchGate restores the setting): S210, load verifies the chain
+  // from it as admission does.
+  if (people.length) useTestAnchors(root);
+  if (people.length) await signPolicy(dir, 'orders', 'bench-person', person.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), new Date().toISOString());
+  const r = await admit(dir, { key: { id, privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() } });
   return { build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() } };
 }
 
@@ -117,6 +115,9 @@ export async function benchGate(opts: { repo: string; sizes?: readonly number[];
   const { polyaxionPeer } = await import('@poly/runtime');
   const peer = polyaxionPeer();
   const root = mkdtempSync(join(tmpdir(), 'poly-bench-'));
+  // The process's anchor setting, read here and restored after the run.
+  const prev = useTestAnchors(null);
+  useTestAnchors(prev);
   try {
     const plain = await project(root, 'bench-runtime', [SOURCES[0]], opts.repo);
     const runtime: Throughput[] = [];
@@ -145,5 +146,5 @@ export async function benchGate(opts: { repo: string; sizes?: readonly number[];
     };
     if (opts.out) writeFileSync(opts.out, JSON.stringify(result, null, 2) + '\n');
     return result;
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { useTestAnchors(prev); rmSync(root, { recursive: true, force: true }); }
 }

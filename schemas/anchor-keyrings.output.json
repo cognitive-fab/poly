@@ -9,6 +9,10 @@
       "type": "string",
       "description": "the digest of the rings"
     },
+    "id": {
+      "type": "string",
+      "description": "the anchor's id"
+    },
     "config": {
       "type": "string",
       "description": "the per-user configuration that names it"
@@ -17,6 +21,7 @@
   "required": [
     "path",
     "digest",
+    "id",
     "config"
   ]
 }

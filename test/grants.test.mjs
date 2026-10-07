@@ -168,7 +168,11 @@ test('PT10g: poly grant-request and grant-revoke are the owner\'s commands, neve
   try {
     const approvals = join(dir, 'approvals');
     mkdirSync(approvals, { recursive: true });
-    await request.run({ credential: 'payments', for: 'm-1', out: join(approvals, 'request.json') });
+    // The person's key is written outside the repository for the commands, which read a file, and deleted (as ruled).
+    const keyFile = join(tmp, 'person.pem');
+    writeFileSync(keyFile, PERSON.privateKeyPem);
+    // S210: the request is signed by a person, as the revocation is.
+    await request.run({ credential: 'payments', for: 'm-1', by: PERSON.keyId, key: keyFile, out: join(approvals, 'request.json') });
     assert.deepEqual((await rt.takeApprovals(approvals)).map((x) => x.outcome), ['applied']);
     const [auth] = rt.takeAuthorizations();
     assert.equal(auth.credential, 'payments');
@@ -176,9 +180,6 @@ test('PT10g: poly grant-request and grant-revoke are the owner\'s commands, neve
     // The request named its holder; the journal does not.
     const journal = JSON.stringify((await rt.chain('runtime:approvals')).map((e) => e.body));
     assert.ok(!journal.includes('m-1'), journal);
-    // The person's key is written outside the repository for the command, which reads a file, and deleted (as ruled).
-    const keyFile = join(tmp, 'person.pem');
-    writeFileSync(keyFile, PERSON.privateKeyPem);
     const grantId = rt.grantOf('payments', 'm-1');
     await revoke.run({ grant: grantId, by: PERSON.keyId, key: keyFile, out: join(approvals, 'revoke.json') });
     answers.push(() => ({ status: 200, headers: {}, body: '' }));

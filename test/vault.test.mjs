@@ -227,7 +227,7 @@ test('S202: the callback route takes the state once, records the outcome, and ha
 
 // ── PT10f, S200: the certificate names each credential's vault; production refuses the development keychain ──
 import { admit } from '@poly/check';
-import { makeKey, project, loaded } from './runtime-helpers.mjs';
+import { makeKey, project, loaded, anchorProject, PERSON, AGENT } from './runtime-helpers.mjs';
 
 async function vaultProject(name, poly) {
   const key = makeKey(name);
@@ -261,7 +261,10 @@ test('S200: admission binds each credential\'s vault in the certificate, by stor
 });
 
 test('S200, PL6826: a production build refuses the development keychain, and a credential with no store is refused', { timeout: 300_000 }, async () => {
-  await assert.rejects((await vaultProject('vault-prod', { production: true, credentials: { payments: { store: 'dev-keychain' } } })).run(), /PL6826/);
+  // S210, D9: production is the anchor's.
+  const prod = await vaultProject('vault-prod', { credentials: { payments: { store: 'dev-keychain' } } });
+  anchorProject('vault-prod', { people: [PERSON], agents: [AGENT] }, { production: true });
+  await assert.rejects(prod.run(), /PL6826/);
   assert.equal((await (await vaultProject('vault-dev', { credentials: { payments: { store: 'dev-keychain' } } })).run()).verdict, 'CLEAN');
   await assert.rejects((await vaultProject('vault-none', {})).run(), /credential payments names no store/);
   await assert.rejects((await vaultProject('vault-bad', { credentials: { payments: { store: 'keychain' } } })).run(), /dev-keychain/);

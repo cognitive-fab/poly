@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS poly_content (
   digest TEXT PRIMARY KEY,
   body   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS poly_used_record (
+  digest TEXT PRIMARY KEY,
+  at     INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS poly_kept (
   digest TEXT PRIMARY KEY,
   body   TEXT NOT NULL

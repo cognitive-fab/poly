@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync, existsSync, renameSync, rmSync, mkdirSync,
 import { basename, dirname, join, relative, resolve, sep, isAbsolute } from 'node:path';
 import {
   CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, buildIdOf, signDigest, publicKeyOf, certificateProblems,
-  loadProject, keyringsOf, verifyRecord, sameKeyrings, EMPTY_KEYRINGS, policySubject, type Certificate, type CertifiedMachine, type Keyrings, type PolicySubjectParts, type SignedRecord,
+  loadProject, keyringsOf, verifyRecord, sameKeyrings, EMPTY_KEYRINGS, policySubject, advanceAnchor, type Certificate, type CertifiedMachine, type Keyrings, type PolicySubjectParts, type SignedRecord,
 } from '@poly/core';
 import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
@@ -150,14 +150,14 @@ function moduleOf(file: string): A.Module | null {
 }
 
 /** What a certificate is issued from: the root its paths are relative to, the checked reports, the source files, the keyrings. */
-interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell'; credentials?: Record<string, { store: 'dev-keychain' | 'kms' }>; production?: boolean }
+interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell'; credentials?: Record<string, { store: 'dev-keychain' | 'kms' }> }
 
 /** A project directory, or one module file checked alone (its handler lint is then not run, S72). */
 async function checkTarget(target: string, root?: string, std?: string): Promise<Checked> {
   const abs = resolve(target);
   if (existsSync(join(abs, 'poly.json'))) {
     const { manifest, files } = loadProject(abs);
-    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs, ...(std ? { std } : {}) }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(manifest.credentials ? { credentials: manifest.credentials } : {}), ...(manifest.production ? { production: true } : {}) };
+    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs, ...(std ? { std } : {}) }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(manifest.credentials ? { credentials: manifest.credentials } : {}) };
   }
   const dir = resolve(root ?? dirname(abs));
   const r = await checkFile(abs, { root: dir, ...(std ? { std } : {}) });
@@ -267,17 +267,28 @@ export async function admitWitness(target: string, opts: { root?: string; key: {
   return issue(c, opts.key, resolve(opts.out), { now: opts.now }, { purpose: 'witness', findings });
 }
 
-/** S194: the keyring chain of a project as it is on disk now, or null for a module admitted alone or a project with no rings. */
-function chainOf(projectDir: string | null): { anchor: string; head: string; source: 'user' | 'test' } | null {
+/**
+ * S194, S210: the keyring chain of a project as it is on disk now, verified from its anchor, or null for a module
+ * admitted alone or a project with no rings and no anchor.
+ */
+function verifiedChain(projectDir: string | null) {
   if (!projectDir) return null;
   const { manifest } = loadProject(projectDir);
   try { return keyringChain(projectDir, manifest, keyringsOf(projectDir, manifest)); } catch (e) { if (e instanceof KeyringError) throw new AdmitError(e.message); throw e; }
 }
+/** What the certificate binds of the chain: the anchor's first rings, the head and where the anchor came from. */
+const chainOf = (projectDir: string | null): { anchor: string; head: string; source: 'user' | 'test' } | null => {
+  const ch = verifiedChain(projectDir);
+  return ch ? { anchor: ch.anchor.first, head: ch.head, source: ch.source } : null;
+};
 
 async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out: string, opts: AdmitOptions, witness?: { purpose: 'witness'; findings: NonNullable<Certificate['findings']> }, accepted: Certificate['boundAccepted'] = null): Promise<AdmitResult> {
   const { dir, files, report } = c;
   const projectDir = existsSync(join(c.dir, 'poly.json')) ? c.dir : null;
-  const chain = chainOf(projectDir);
+  const verified = verifiedChain(projectDir);
+  const chain = verified ? { anchor: verified.anchor.first, head: verified.head, source: verified.source } : null;
+  // S210, D9: production is the anchor's, never poly.json's.
+  const production = verified?.anchor.production === true;
   const machines: CertifiedMachine[] = [];
   const instances: Record<string, unknown> = {};
   const domains: Record<string, string[]> = {};
@@ -376,20 +387,27 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   }
   // S194, Q8: a person signs every policy scope, over its document, its source and the engine as pinned.
   const policyFile = new Map(report.files.flatMap((r) => (r.policies ?? []).map((p) => [p.scope, rel(dir, r.file)] as const)));
-  const policyParts = (scope: string, document: string, srcs: Record<string, string>, engine: { name: string; commit: string }): PolicySubjectParts => {
+  const policyParts = (scope: string, sequence: number, document: string, srcs: Record<string, string>, engine: { name: string; commit: string }): PolicySubjectParts => {
     const file = policyFile.get(scope)!;
-    return { scope, document, sources: { [file]: srcs[file] }, engine: { name: engine.name, commit: engine.commit } };
+    return { scope, sequence, document, sources: { [file]: srcs[file] }, engine: { name: engine.name, commit: engine.commit } };
   };
   const signatures = new Map<string, SignedRecord>();
+  // S210, D7: each scope's signature sequence, never lower than the anchor's for it.
+  const sequences = new Map<string, number>();
   for (const p of policyReports) {
     const path = policySignaturePath(dir, p.scope);
     const refuse = (why: string): never => { throw new AdmitError(`not admitted: PL6409 POLICY_NOT_SIGNED: scope ${p.scope}: ${why}; a person signs it with poly sign policy (S194)`); };
     if (!existsSync(path)) refuse(`no signature at ${rel(dir, path)}`);
-    let record: unknown;
-    try { record = JSON.parse(readFileSync(path, 'utf8')); } catch (e) { refuse(`the signature does not parse (${(e as Error).message})`); }
-    const v = verifyRecord(record, c.keyrings, { kind: 'policy', subject: policySubject(policyParts(p.scope, p.artefact!.digest, sources, policyEngine!)) });
+    let file: { v?: unknown; sequence?: unknown; record?: unknown } | null = null;
+    try { file = JSON.parse(readFileSync(path, 'utf8')); } catch (e) { refuse(`the signature does not parse (${(e as Error).message})`); }
+    if (!file || file.v !== 2 || !Number.isSafeInteger(file.sequence) || (file.sequence as number) < 1) refuse('the signature file is not { v: 2, sequence, record }, the form since S210; it is signed again');
+    const sequence = file!.sequence as number;
+    const kept = verified?.anchor.policies[p.scope];
+    if (kept !== undefined && sequence < kept) refuse(`its sequence ${sequence} is lower than the ${kept} the anchor keeps; an older policy never returns (S210)`);
+    const v = verifyRecord(file!.record, c.keyrings, { kind: 'policy', subject: policySubject(policyParts(p.scope, sequence, p.artefact!.digest, sources, policyEngine!)) });
     if (!v.ok) refuse(`the signature is refused: ${v.problem}`);
-    signatures.set(p.scope, record as SignedRecord);
+    signatures.set(p.scope, file!.record as SignedRecord);
+    sequences.set(p.scope, sequence);
   }
   if (policyEngine && opts.fault === 'wrong-policy-engine') policyEngine = { name: 'polyaxion', commit: '0000000' };
   // The workflow descriptors are artefacts poly-runtime reads, certified with the policies (PT10, S164, S173).
@@ -491,7 +509,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   for (const cr of credentials) {
     const named = c.credentials?.[cr.name]?.store;
     if (!named) throw new AdmitError(`not admitted: credential ${cr.name} names no store in poly.json's "credentials" (dev-keychain or kms, PT10f)`);
-    if (named === 'dev-keychain' && c.production) throw new AdmitError(`not admitted: PL6826 VAULT_NOT_FOR_PRODUCTION: credential ${cr.name} keeps its tokens in the development keychain, and this build is for production (S200)`);
+    if (named === 'dev-keychain' && production) throw new AdmitError(`not admitted: PL6826 VAULT_NOT_FOR_PRODUCTION: credential ${cr.name} keeps its tokens in the development keychain, and the project's anchor says it is production (S200, S210)`);
     adapterPin ??= adapterPackagePin();
     vaults.push({ credential: cr.name, store: named, ...adapterPin });
   }
@@ -511,7 +529,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -549,7 +567,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // S194, Q8: each scope's signature read back verifies over the document on disk, the certified source and engine.
   for (const q of back.poly.policies) {
     const engine = back.poly.policyEngine;
-    const ok = q.signature && engine && policyFile.has(q.scope) && verifyRecord(q.signature, back.poly.keyrings, { kind: 'policy', subject: policySubject(policyParts(q.scope, sha256OfBytes(readFileSync(join(dir, q.path))), back.poly.sources, engine)) }).ok;
+    const ok = q.signature && engine && policyFile.has(q.scope) && verifyRecord(q.signature, back.poly.keyrings, { kind: 'policy', subject: policySubject(policyParts(q.scope, q.sequence ?? 0, sha256OfBytes(readFileSync(join(dir, q.path))), back.poly.sources, engine)) }).ok;
     if (!ok) problems.push({ name: 'policies', problem: `scope ${q.scope}'s signature does not verify over its document, source and engine` });
   }
   // S194: the chain read back is the one on disk now, anchor and head.
@@ -567,6 +585,8 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     rmSync(tmp, { force: true });
     throw new AdmitError(`certificate read-back failed (a toolchain fault): ${problems.map((p) => `${p.name}: ${p.problem}`).join('; ')}`);
   }
+  // S210, D2, D7: the anchor moves forward to what was admitted: the chain's last rings and each scope's sequence.
+  if (verified && !witness) advanceAnchor(verified.file, verified.anchor.project, verified.chain, Object.fromEntries(sequences));
   rmSync(out, { force: true });
   renameSync(tmp, out);
   return { verdict: 'CLEAN', certificatePath: out, certificate: back, artefacts: artefactsOnDisk(dir, machines, policyPaths), report };

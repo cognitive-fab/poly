@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { admit, policySubjects, policySignaturePath, useTestAnchors } from '@poly/check';
 import { acceptTestAnchors, load } from '@poly/runtime';
-import { keyringDigest, signRecord } from '@poly/core';
-import { ROOT } from './helpers.mjs';
+import { keyringDigest, newAnchor, signRecord, writeAnchorFile } from '@poly/core';
+import { ACCEPT_TEST_ANCHORS, ROOT } from './helpers.mjs';
 
 const KEYS = mkdtempSync(join(tmpdir(), 'poly-keys-'));
 
@@ -17,11 +17,16 @@ export const ANCHORS = join(KEYS, 'anchors');
 mkdirSync(ANCHORS, { recursive: true });
 useTestAnchors(ANCHORS);
 acceptTestAnchors();
+// S210: a child process verifies the chain from this process's anchors, so its preload names the folder.
+ACCEPT_TEST_ANCHORS[1] = `${ACCEPT_TEST_ANCHORS[1].split('?')[0]}?anchors=${encodeURIComponent(ANCHORS)}`;
 
-/** Anchors a project's first rings: the digest in a file outside the repository, named in the test anchor folder. */
-export function anchorProject(name, rings) {
+/**
+ * Anchors a project's first rings: the anchor (PT12.5, S210) in a file outside the repository, named in the test anchor
+ * folder. `production` is the anchor's (S210, D9).
+ */
+export function anchorProject(name, rings, { production = false } = {}) {
   const file = join(KEYS, `${name}.anchor`);
-  writeFileSync(file, `${keyringDigest(rings)}\n`);
+  writeAnchorFile(file, newAnchor(name, keyringDigest(rings), production));
   const config = join(ANCHORS, 'anchors.json');
   const doc = existsSync(config) ? JSON.parse(readFileSync(config, 'utf8')) : { anchors: {} };
   doc.anchors[name] = `file:${file}`;
@@ -93,7 +98,8 @@ export async function signPolicies(dir, who = PERSON) {
   for (const s of await policySubjects(dir)) {
     const path = policySignaturePath(dir, s.scope);
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(signRecord({ kind: 'policy', subject: s.subject, by: who.keyId, at: '2026-10-06T00:00:00.000Z' }, who.privateKeyPem), null, 2));
+    // S210, D7: the signature file carries the scope's sequence beside the record.
+    writeFileSync(path, JSON.stringify({ v: 2, sequence: s.parts.sequence, record: signRecord({ kind: 'policy', subject: s.subject, by: who.keyId, at: '2026-10-06T00:00:00.000Z' }, who.privateKeyPem) }, null, 2));
   }
 }
 

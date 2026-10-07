@@ -30,7 +30,8 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly admit --witness <file | project dir> --key <private key file> [--root <dir>] [--out <file>]
        poly approve <intent> --by <keyId> --key <private key file> --db <store> [--out <file>]
        poly accept <witness id> --by <keyId> --key <private key file> [--root <dir>]
-       poly anchor keyrings --out <file outside the project> [--project <dir>]
+       poly anchor keyrings --out <file outside the project> [--production] [--project <dir>]
+       poly anchor production on|off [--project <dir>]
        poly sign keyrings --by <keyId> --key <private key file> [--project <dir>]
        poly sign policy <scope> --by <keyId> --key <private key file> [--project <dir>]
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
@@ -108,8 +109,10 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
   if (cmd === 'anchor' && a === 'keyrings' && positional.length === 2) {
     const o = option(args, '--out');
     if (!o) throw new UsageError('anchor keyrings needs --out <file outside the project>');
-    return { name: 'anchor-keyrings', input: { out: o, project: option(args, '--project') ?? undefined } };
+    return { name: 'anchor-keyrings', input: { out: o, production: args.includes('--production'), project: option(args, '--project') ?? undefined } };
   }
+  // S210, D9: production is the anchor's, set by the owner.
+  if (cmd === 'anchor' && a === 'production' && positional.length === 3 && (b === 'on' || b === 'off')) return { name: 'anchor-production', input: { on: b === 'on', project: option(args, '--project') ?? undefined } };
   if (cmd === 'sign' && a === 'policy' && positional.length === 3) {
     const by = option(args, '--by');
     const key = option(args, '--key');

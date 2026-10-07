@@ -214,7 +214,7 @@ test('the engine is pinned: the certificate names the Polyaxion commit that deci
   // With the signature's subject over that engine (re-signed by the person), the engine pin refuses it.
   const signed = JSON.parse(readFileSync(r.certificatePath, 'utf8'));
   const scope = signed.poly.policies[0];
-  scope.signature = signRecord({ kind: 'policy', subject: policySubject({ scope: scope.scope, document: sha256OfBytes(readFileSync(join(a.dir, scope.path))), sources: { [scope.source]: signed.poly.sources[scope.source] }, engine: signed.poly.policyEngine }), by: PERSON.keyId, at: '2026-10-06T00:00:00.000Z' }, PERSON.privateKeyPem);
+  scope.signature = signRecord({ kind: 'policy', subject: policySubject({ scope: scope.scope, sequence: scope.sequence, document: sha256OfBytes(readFileSync(join(a.dir, scope.path))), sources: { [scope.source]: signed.poly.sources[scope.source] }, engine: signed.poly.policyEngine }), by: PERSON.keyId, at: '2026-10-06T00:00:00.000Z' }, PERSON.privateKeyPem);
   signed.digest = certificateDigest(signed);
   signed.signatures = [signDigest(signed.digest, a.key.id, readFileSync(a.key.file, 'utf8'))];
   writeFileSync(r.certificatePath, JSON.stringify(signed));

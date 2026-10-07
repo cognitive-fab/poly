@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXIT_CODES, digest, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
+import { EXIT_CODES, digest, grantRequestSubject, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
@@ -18,7 +18,7 @@ import { render } from './render.js';
 import { exportWitness, lookupWitness } from './witness.js';
 import { applyFixById } from './fix.js';
 import { admit, admitWitness, personKey, witnessKey } from './admit.js';
-import { signKeyrings, writeAnchor } from './keyrings.js';
+import { setProduction, signKeyrings, writeAnchor } from './keyrings.js';
 import { signPolicy } from './policy-sign.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
 import { journalCommand } from './journal.js';
@@ -228,13 +228,24 @@ export const COMMANDS: Command[] = [
   },
   {
     name: 'anchor-keyrings', mcp: null, lsp: false,
-    summary: 'Writes the digest of the people and agents rings in poly.json to the keyring anchor, a file outside the project, and names it in the owner\'s per-user configuration (PT12.5, S194). The owner\'s command; never over MCP.',
-    input: obj({ out: str('the anchor file, outside the project'), project: str('the project directory (default: the working directory)') }, ['out']),
-    output: obj({ path: str('the anchor written'), digest: str('the digest of the rings'), config: str('the per-user configuration that names it') }, ['path', 'digest', 'config']),
+    summary: 'Writes the keyring anchor of the people and agents rings in poly.json, a file outside the project with its id, first rings, head, policy sequences and production flag, and names it in the owner\'s per-user configuration (PT12.5, S194, S210). The owner\'s command; never over MCP.',
+    input: obj({ out: str('the anchor file, outside the project'), production: { type: 'boolean', description: 'whether the project is a production project (S210)' }, project: str('the project directory (default: the working directory)') }, ['out']),
+    output: obj({ path: str('the anchor written'), digest: str('the digest of the rings'), id: str('the anchor\'s id'), config: str('the per-user configuration that names it') }, ['path', 'digest', 'id', 'config']),
     async run(input) {
       const dir = resolve(opt(input, 'project') ?? process.cwd());
-      const r = writeAnchor(dir, loadProject(dir).manifest, need(input, 'out'));
-      return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.digest}\n  written to ${r.path}, and named for this project in ${r.config} (S194)\n` };
+      const r = writeAnchor(dir, loadProject(dir).manifest, need(input, 'out'), input.production === true);
+      return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.digest}\n  anchor ${r.id} written to ${r.path}, and named for this project in ${r.config} (S194, S210)\n` };
+    },
+  },
+  {
+    name: 'anchor-production', mcp: null, lsp: false,
+    summary: 'Sets or clears production on the project\'s keyring anchor, which poly.json can neither set nor clear (PT12.5, S210). The owner\'s command; never over MCP.',
+    input: obj({ on: { type: 'boolean', description: 'true for a production project, false otherwise' }, project: str('the project directory (default: the working directory)') }, ['on']),
+    output: obj({ path: str('the anchor written'), production: { type: 'boolean', description: 'the flag as written' } }, ['path', 'production']),
+    async run(input) {
+      const dir = resolve(opt(input, 'project') ?? process.cwd());
+      const r = setProduction(dir, loadProject(dir).manifest, input.on === true);
+      return { exit: EXIT_CODES.CLEAN, result: r, text: `production ${r.production ? 'on' : 'off'}\n  written to ${r.path} (S210)\n` };
     },
   },
   {
@@ -263,13 +274,15 @@ export const COMMANDS: Command[] = [
   },
   {
     name: 'grant-request', mcp: null, lsp: false,
-    summary: 'Asks a holder for a grant of a credential: writes the request to the runtime\'s approvals folder, which rt.takeApprovals takes, and the runtime hands the authorization URL to the host to deliver (PT22.3, PT10g). An agent cannot start a grant for a person; never over MCP.',
-    input: obj({ credential: str('the credential'), for: str('the holder, a principal; omitted for the service\'s own credential'), out: str('the request file to write, in the approvals folder') }, ['credential', 'out']),
+    summary: 'Asks a holder for a grant of a credential: signs the request with a person key given by file, a record of the kind grant-request, and writes it to the runtime\'s approvals folder, which rt.takeApprovals takes once; the runtime hands the authorization URL to the host to deliver (PT22.3, PT10g, S210). An agent cannot start a grant for a person; never over MCP.',
+    input: obj({ credential: str('the credential'), for: str('the holder, a principal; omitted for the service\'s own credential'), by: str('the key id'), key: str('the private key file'), out: str('the request file to write, in the approvals folder') }, ['credential', 'by', 'key', 'out']),
     output: obj({ path: str('where the request was written') }, ['path']),
     async run(input) {
       const out = need(input, 'out');
-      const holder = opt(input, 'for');
-      writeFileSync(out, JSON.stringify({ kind: 'grant-request', credential: need(input, 'credential'), holder: holder ?? null }, null, 2) + '\n');
+      const holder = opt(input, 'for') ?? null;
+      const credential = need(input, 'credential');
+      const record = signRecord({ kind: 'grant-request', subject: grantRequestSubject(credential, holder), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
+      writeFileSync(out, JSON.stringify({ kind: 'grant-request', credential, holder, record }, null, 2) + '\n');
       return { exit: EXIT_CODES.CLEAN, result: { path: out }, text: `${out}\n  the runtime takes it from its approvals folder (PT10g)\n` };
     },
   },
