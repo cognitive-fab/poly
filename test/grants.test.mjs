@@ -246,3 +246,17 @@ test('S199, E11: a policy over effect.credential allows the granted refund on th
     assert.ok(denied?.[0] === 'denied' && /granted-credential/.test(denied[1]), JSON.stringify(await verdicts(rt, 'd-2')));
   } finally { await rt.close(); }
 });
+
+// As ruled (2026-10-07): PL6825 covers every file the certificate binds. An adapter's configuration is host code the
+// handlers import, certified with them, and it holds no secret value; the adapter takes its secrets at run time.
+test('PL6825: admission refuses a token-shaped string in an adapter configuration file the handlers import, naming the file and never the value', { timeout: 300_000 }, async () => {
+  const key = makeKey('grant-adapter-secret');
+  const dir = project('grant-adapter-secret', ['conformance/m1/effects.poly'], key, 'test-grants');
+  const shaped = `xoxb-${randomBytes(12).toString('hex')}`;
+  writeFileSync(join(dir, 'src', 'adapter-config.ts'), `export const slackConfig = { botToken: '${shaped}', teamId: 'T123ABC456' };\n`);
+  writeFileSync(join(dir, 'src', 'handlers.ts'), `import { slackConfig } from './adapter-config.ts';\nexport const team = slackConfig.teamId;\n${readFileSync(join(dir, 'src', 'handlers.ts'), 'utf8')}`);
+  await assert.rejects(admit(dir), (e) => /PL6825/.test(e.message) && /adapter-config\.ts/.test(e.message) && /Slack token/.test(e.message) && !e.message.includes(shaped));
+  // The control: the same configuration naming its secret by reference is admitted.
+  writeFileSync(join(dir, 'src', 'adapter-config.ts'), "export const slackConfig = { botToken: 'vault:slack-bot', teamId: 'T123ABC456' };\n");
+  assert.equal((await admit(dir)).verdict, 'CLEAN');
+});

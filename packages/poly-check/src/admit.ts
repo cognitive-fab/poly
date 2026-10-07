@@ -450,6 +450,15 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   };
   const changed = handlerProblems();
   if (changed.length) throw new AdmitError(`not admitted: ${changed.join('; ')} (S142)`);
+  // PT10g, PL6825, as ruled (2026-10-07): no secret value lives in a project file. Every file the certificate binds is
+  // scanned, adapter configuration among them; the message names the file and the kind of string, never the value.
+  const boundFiles = [...Object.keys(sources), ...Object.keys(handlers.files), ...Object.keys(handlers.packageFiles), ...(handlers.lockfile ? [handlers.lockfile.path] : []), ...Object.keys(artefacts)];
+  for (const p of [...new Set(boundFiles)]) {
+    const f = isAbsolute(p) ? p : join(dir, p);
+    if (!existsSync(f)) continue;
+    const found = secretShapes(readFileSync(f, 'latin1'));
+    if (found.length) throw new AdmitError(`not admitted: PL6825 SECRET_IN_CONFIG: ${p}, a file the certificate binds, holds a string with the shape of ${found.join(' and ')}; an adapter or a handler receives its secrets from the vault or the environment at run time, and no project file holds one (PT10g)`);
+  }
   // S142, the standing rule on artefacts: the broken variants a read-back must catch.
   const certifiedHandlers: Certificate['poly']['handlers'] = { ...handlers, files: { ...handlers.files }, packageFiles: { ...handlers.packageFiles } };
   const handlerPaths = Object.keys(certifiedHandlers.files);

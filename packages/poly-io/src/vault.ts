@@ -107,6 +107,8 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
   const clientAuth = (): Record<string, string> => (stripe ? { authorization: `Bearer ${client.clientSecret}` } : client.clientSecret ? { authorization: `Basic ${Buffer.from(`${encodeURIComponent(client.clientId)}:${encodeURIComponent(client.clientSecret)}`).toString('base64')}` } : {});
   const post = (url: string, fields: Record<string, string>) => http().request({ method: 'POST', url, headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', ...clientAuth() }, body: form(fields) });
   const pending = (state: string) => `pending:${state}`;
+  /** The states this adapter has taken; the store's removal and the host's nonce keep them taken across restarts. */
+  const taken = new Set<string>();
   const grant = (id: string) => `grant:${id}`;
 
   return made({
@@ -119,7 +121,8 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
       const verifier = b64url(randomBytes(32));
       const until = now + STATE_MS;
       await st.put(pending(state), { grantId, scopes, verifier, until });
-      const q = new URLSearchParams({ response_type: 'code', client_id: client.clientId, redirect_uri: client.redirectUri, scope: scopes.map(wire).join(' '), state, ...(profile.authParams ?? {}) });
+      // Polywatch: the profile's fixed parameters come first, so none can replace a parameter the grant depends on.
+      const q = new URLSearchParams({ ...(profile.authParams ?? {}), response_type: 'code', client_id: client.clientId, redirect_uri: client.redirectUri, scope: scopes.map(wire).join(' '), state });
       if (profile.pkce) { q.set('code_challenge', b64url(createHash('sha256').update(verifier).digest())); q.set('code_challenge_method', 'S256'); }
       return { url: `${profile.authorization}?${q.toString()}`, state, until };
     },
@@ -128,9 +131,12 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
       let q: URLSearchParams;
       try { q = new URL(w.url).searchParams; } catch { return { refused: 'malformed: the redirect URL does not parse' }; }
       const state = q.get('state') ?? '';
-      const p = state ? await st.get(pending(state)) : null;
+      // S202, polywatch: the state is taken before the first await, so two redirects with one state cannot both read
+      // the pending record and both exchange the code; the second is refused here, whatever follows.
+      if (!state || taken.has(state)) return { refused: 'unknown state' };
+      taken.add(state);
+      const p = await st.get(pending(state));
       if (!p) return { refused: 'unknown state' };
-      // The state is used once, whatever follows (S202).
       await st.remove(pending(state));
       const grantId = String(p.grantId);
       if (q.get('error')) return { refused: `the provider answered ${q.get('error')}`, grantId };
@@ -174,9 +180,13 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
     },
 
     async withToken(grantId: string, request: HttpRequest) {
-      let url: string;
-      try { url = new URL(request.url).href; } catch { throw new Error(`${request.url} is not a URL`); }
-      if (!profile.bases.some((b) => url.startsWith(b))) throw new Error(`${url} lies outside the provider's base addresses (PT22.5)`);
+      let u: URL;
+      try { u = new URL(request.url); } catch { throw new Error(`${request.url} is not a URL`); }
+      const url = u.href;
+      // Polywatch: compared as parsed, by origin and path, never as text, so a host that merely begins with a base's host
+      // (or a user part before another host) is not under it.
+      const under = (b: string) => { const base = new URL(b); const path = base.pathname.endsWith('/') ? base.pathname : `${base.pathname}/`; return !u.username && !u.password && u.origin === base.origin && (u.pathname === base.pathname || u.pathname.startsWith(path)); };
+      if (!profile.bases.some(under)) throw new Error(`${url} lies outside the provider's base addresses (PT22.5)`);
       const own = Object.keys(request.headers).map((h) => h.toLowerCase());
       for (const h of ['authorization', 'proxy-authorization', 'stripe-account']) if (own.includes(h)) throw new Error(`a request through the vault carries no ${h} header of its own; the vault attaches the credential (PT22.5)`);
       const g = await st.get(grant(grantId));

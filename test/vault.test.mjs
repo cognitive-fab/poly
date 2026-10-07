@@ -85,9 +85,8 @@ test('RFC 6749 section 4.1.3: the callback exchanges the code with the PKCE veri
   // The verifier sent is the one whose S256 is the challenge in the authorization URL.
   const challenge = new URL(a.url).searchParams.get('code_challenge');
   assert.equal(b64url(createHash('sha256').update(body.code_verifier).digest()), challenge);
-  // The store holds a record, and no blob it keeps holds a token in the clear.
+  // The store holds a record (the ciphertext of a KMS store is checked in the stores' test below).
   assert.ok(await store.get('grant:g-1'));
-  assert.ok(!JSON.stringify(store.blobs ? [...store.blobs.values()].map((b) => Buffer.from(b).toString('latin1')) : []).includes(tokens.access));
 });
 
 test('RFC 6749 section 5.1: with no scope in the token response, the scopes granted are those requested', async () => {
@@ -106,6 +105,13 @@ test('S202: an unknown or expired state, an error redirect and a token endpoint 
   assert.match((await v.verify(callback(a.state), 1)).refused, /unknown state/);
   const late = await v.authorize({ grantId: 'g-3', scopes: ['refunds.write'], now: 0 });
   assert.match((await v.verify(callback(late.state), late.until + 1)).refused, /expired/);
+  // Polywatch: two redirects with one state at once: only one reaches the token endpoint.
+  const once = transport(ok({ ...recorded('oauth/token-response.json'), access_token: secret(), refresh_token: secret() }));
+  const w = oauthVault(GENERIC, client(), kmsStore(memoryWrap()), { http: once.http });
+  const both = await w.authorize({ grantId: 'g-4', scopes: ['refunds.write'], now: 0 });
+  const twice = await Promise.all([w.verify(callback(both.state), 1), w.verify(callback(both.state), 1)]);
+  assert.equal(twice.filter((x) => /unknown state/.test(x.refused ?? '')).length, 1);
+  assert.equal(once.sent.length, 1);
   const b = await v.authorize({ grantId: 'g-2', scopes: ['refunds.write'], now: 0 });
   assert.match((await v.verify(callback(b.state), 1)).refused, /invalid_grant/);
 });
@@ -147,6 +153,8 @@ test('PT22.5: withToken attaches the credential inside the adapter, only under t
   assert.equal(t.sent[1].headers.authorization, `Bearer ${tokens.access}`);
   assert.deepEqual(res, { status: 200, headers: { 'content-type': 'application/json' }, body: '{"id":"re_1"}' });
   await assert.rejects(v.withToken('g-1', { method: 'GET', url: 'https://evil.example/v1/refunds', headers: {}, body: '' }), /outside/);
+  // Polywatch: a host that begins with the provider's, a user part before another host, and a sibling path are outside.
+  for (const url of ['https://api.test-oauth.example.evil.com/v1/refunds', 'https://api.test-oauth.example@evil.com/v1/refunds', 'https://api.test-oauth.example/v1-evil/refunds']) await assert.rejects(v.withToken('g-1', { method: 'GET', url, headers: {}, body: '' }), /outside/, url);
   await assert.rejects(v.withToken('g-1', { method: 'GET', url: 'https://api.test-oauth.example/v1/x', headers: { authorization: 'Bearer mine' }, body: '' }), /authorization/);
   // Stripe: the platform's key and the connected account's header (S208).
   const c = client();
@@ -159,14 +167,18 @@ test('PT22.5: withToken attaches the credential inside the adapter, only under t
 });
 
 test('S200: the KMS store keeps ciphertext only, and the development keychain encrypts under a key read from an absolute file: path', async () => {
-  const kms = kmsStore(memoryWrap());
   const at = secret('at-');
-  await kms.put('g', { access: at });
-  assert.deepEqual(await kms.get('g'), { access: at });
-  await kms.remove('g');
-  assert.equal(await kms.get('g'), null);
   const tmp = mkdtempSync(join(tmpdir(), 'poly-vault-'));
   try {
+    // Polywatch: the KMS store's blobs, on disk, hold no token in the clear.
+    const kmsDir = join(tmp, 'kms');
+    const kms = kmsStore(memoryWrap(), { dir: `file:${kmsDir}` });
+    await kms.put('g', { access: at });
+    assert.deepEqual(await kms.get('g'), { access: at });
+    assert.ok(readdirSync(kmsDir).length === 1);
+    for (const f of readdirSync(kmsDir)) assert.ok(!readFileSync(join(kmsDir, f), 'latin1').includes(at), 'a KMS blob holds the token in the clear');
+    await kms.remove('g');
+    assert.equal(await kms.get('g'), null);
     const keyFile = join(tmp, 'vault.key');
     writeFileSync(keyFile, randomBytes(32).toString('hex'));
     const dir = join(tmp, 'blobs');
@@ -261,5 +273,6 @@ test('PT10f: std\'s Google and Stripe profiles are well formed, and a malformed 
   assert.equal(profileProblem(STRIPE, 'stripe-connect'), null);
   assert.match(profileProblem({ ...GOOGLE, scopeValues: { 'gmail.delete': 'x' } }, 'google'), /scope values/);
   assert.match(profileProblem({ ...GOOGLE, attach: 'cookie' }, 'google'), /attaches/);
+  assert.match(profileProblem({ ...GOOGLE, authParams: { state: 'fixed' } }, 'google'), /grant sets itself/);
   assert.match(profileProblem({ ...STRIPE, revocationStyle: 'none' }, 'stripe-connect'), /revokes/);
 });

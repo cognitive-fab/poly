@@ -292,6 +292,17 @@ PS16.3, PS16.4 and PT10g were written first (001d0c3).
 
 M9's steps 1 to 11 are built. Step 1 (E13) and step 12 (the record, the code review and the gate) wait on the owner's polyrun change.
 
+## PL6825 over every file the certificate binds, as ruled (owner, 2026-10-07)
+
+Steps 1 to 11 were accepted, with one fix before step 12: no secret value lives in a project file, since adapters receive their secrets from the vault or the environment at run time.
+
+- **Built.** PT10g was amended first (97a0cf3). Admission scans `poly.json` first, as before, and then every file the certificate binds: the sources, the handler files and the installed package files they import, the lockfile, and every certified artefact (adapter configuration, which the handlers import, among them). A token-shaped string refuses admission with `PL6825 SECRET_IN_CONFIG`, naming the file and the kind of string, never the value.
+- **The seeded test** (`test/grants.test.mjs`): a Slack-shaped bot token in `src/adapter-config.ts`, which the handlers import, is refused, the message names the file and the kind and does not repeat the token; the same file naming its secret by reference (`vault:slack-bot`) is admitted. It failed before the code, when that project was admitted.
+- **Polywatch on step 11's vault, four findings, each real and fixed with a test.** A profile's fixed authorization parameters now come first, so none can replace `state`, `redirect_uri` or another the grant sets, and a profile that names one is refused. The adapter takes a callback's state before its first await, so two redirects with one state reach the token endpoint once. `withToken` compares a URL with a base address as parsed, by origin and path, so `https://api.test-oauth.example.evil.com/`, a user part before another host, and a sibling path are refused. The KMS store's test now reads its ciphertext on disk; it read nothing before.
+- **Checked.** The 159 measured files are identical to the measured verdicts as of S206. The full suite: 1,907 tests and one after the M3 runs, 1,895 pass, no failure, 1 skipped and 11 waiting; check-memory passed (`.poly/logs/97a0cf3-2026-10-07T08-42-30-238Z-pl6825.log`).
+
+M9 now waits for E13: step 1 (re-vendor polyrun, the seven waiting tests) and step 12 (the record, the code review and the gate).
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.

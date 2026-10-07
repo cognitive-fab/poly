@@ -52,6 +52,8 @@ export function profileProblem(p: unknown, name: string): string | null {
   // PT10f: the optional fields of the vault adapter.
   if (o.scopeValues !== undefined && (!o.scopeValues || typeof o.scopeValues !== 'object' || Array.isArray(o.scopeValues) || !Object.entries(o.scopeValues).every(([k, v]) => (o.scopes as string[]).includes(k) && typeof v === 'string' && v !== ''))) return 'has scope values for a scope it does not define, or an empty one';
   if (o.authParams !== undefined && (!o.authParams || typeof o.authParams !== 'object' || Array.isArray(o.authParams) || !Object.values(o.authParams).every((v) => typeof v === 'string'))) return 'has authorization parameters that are not strings';
+  // Polywatch: a fixed parameter never names one the grant sets itself.
+  if (o.authParams && Object.keys(o.authParams).some((k) => ['response_type', 'client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method'].includes(k))) return 'has an authorization parameter the grant sets itself';
   if (o.attach !== undefined && o.attach !== 'bearer' && o.attach !== 'stripe-account') return 'attaches its credential neither as bearer nor as stripe-account';
   if (o.revocationStyle !== undefined && o.revocationStyle !== 'rfc7009' && o.revocationStyle !== 'stripe-deauthorize') return 'revokes neither by RFC 7009 nor by stripe-deauthorize';
   if (typeof o.source !== 'string' || !o.source || typeof o.read !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(o.read)) return 'does not name its source and the date it was read';
