@@ -19,7 +19,7 @@ import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
-import { expandChannels, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
+import { expandChannels, expandCredentials, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
@@ -236,6 +236,10 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // as written, and expands it on its own. The modules m.c of the conversations join the program.
   const expansion = expandChannels(original, uses.program);
   report.diagnostics.push(...expansion.diagnostics);
+  // PS16: each credential's Grant, the module m.c, checked like a channel's conversation.
+  const credentials = expandCredentials(original, uses.program);
+  report.diagnostics.push(...credentials.diagnostics);
+  expansion.extra.push(...credentials.extra);
   const module = expansion.module;
   const program = [...uses.program.filter((m) => m !== original), module, ...expansion.extra];
   // PT10e: the profiles of the providers the program's credentials name, under the same std as its modules.

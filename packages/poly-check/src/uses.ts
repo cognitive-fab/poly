@@ -56,7 +56,10 @@ export function resolveUses(module: Module, file: string, project?: { file: stri
   };
   // PS15: a channel of kind k uses std.channels.k, whose Peer and Conversation its expansion reads.
   const asUse = (c: A.Channel): A.UseDecl => ({ kind: 'Use', id: c.id, span: c.span, path: ['std', 'channels', c.channelKind] });
-  const queue: { from: Module; decl: A.UseDecl }[] = [...module.decls.filter((d): d is A.UseDecl => d.kind === 'Use'), ...module.decls.filter((d): d is A.Channel => d.kind === 'Channel').map(asUse)].map((decl) => ({ from: module, decl }));
+  // PS16.0: a module with a credential uses std.credentials, whose Grant each credential instantiates.
+  const firstCredential = module.decls.find((d): d is A.Credential => d.kind === 'Credential');
+  const credentialUse: A.UseDecl[] = firstCredential ? [{ kind: 'Use', id: firstCredential.id, span: firstCredential.span, path: ['std', 'credentials'] }] : [];
+  const queue: { from: Module; decl: A.UseDecl }[] = [...module.decls.filter((d): d is A.UseDecl => d.kind === 'Use'), ...module.decls.filter((d): d is A.Channel => d.kind === 'Channel').map(asUse), ...credentialUse].map((decl) => ({ from: module, decl }));
   const asked = new Set<string>();
   while (queue.length) {
     const { from, decl } = queue.shift()!;

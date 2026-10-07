@@ -32,10 +32,40 @@ export interface ChannelReading {
 
 const readings = new WeakMap<A.Module, { libraries: A.Module[]; reading: ChannelReading }>();
 
+/**
+ * PS16.0, PS16.1, read from their text: each credential c of the module is the module m.c, std.credentials with
+ * ScopeSet's fields replaced by one bool per scope c declares (each . written _), and every record literal of
+ * ScopeSet's fields read with the new fields, each false.
+ */
+function credentialModules(module: A.Module, program: A.Module[]): A.Module[] {
+  const lib = program.find((x) => x.name === 'std.credentials');
+  if (!lib) return [];
+  const scopeSet = lib.decls.find((d): d is A.RecordDecl => d.kind === 'RecordDecl' && d.name === 'ScopeSet')!;
+  const old = scopeSet.fields.map((f) => f.name).sort().join(',');
+  return module.decls.filter((d): d is A.Credential => d.kind === 'Credential').map((c) => {
+    const fields = c.scopes.map((s) => s.replace(/\./g, '_'));
+    const read = (x: unknown): unknown => {
+      if (Array.isArray(x)) return x.map(read);
+      if (!x || typeof x !== 'object') return x;
+      const n = x as Record<string, unknown>;
+      if (n.kind === 'RecordDecl' && n.name === 'ScopeSet') return { ...n, fields: fields.map((f, i) => ({ kind: 'PayloadField', id: `ref:${c.id}:f${i}`, name: f, type: { kind: 'TBool', id: `ref:${c.id}:f${i}:t` } })) };
+      const entries = n.kind === 'MapLit' ? (n.entries as { key: { kind: string; name?: string } }[]) : null;
+      if (entries && entries.every((e) => e.key.kind === 'Name') && entries.map((e) => e.key.name).sort().join(',') === old) {
+        return { ...n, entries: fields.map((f, i) => ({ key: { kind: 'Name', id: `ref:${c.id}:k${i}`, name: f }, value: { kind: 'Bool', id: `ref:${c.id}:v${i}`, value: false } })) };
+      }
+      return Object.fromEntries(Object.entries(n).map(([k, v]) => [k, read(v)]));
+    };
+    return { ...(read(lib) as A.Module), name: `${module.name}.${c.name}` };
+  });
+}
+
 /** PS15.0: a module with no channel means itself. */
 export function readChannels(module: A.Module, program: A.Module[]): ChannelReading {
   const channels = module.decls.filter((d): d is A.Channel => d.kind === 'Channel');
-  if (!channels.length) return { module, conversations: [], program, descriptors: new Map() };
+  if (!channels.length) {
+    const grants = credentialModules(module, program);
+    return { module, conversations: grants, program: [...program, ...grants], descriptors: new Map() };
+  }
   // Polywatch: a reading is the module's with the libraries it was read against; another program is read again.
   const libraries = channels.map((ch) => program.find((x) => x.name === `std.channels.${ch.channelKind}`)!);
   const known = readings.get(module);
@@ -136,6 +166,7 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
     } as A.Configuration);
   }
   const expanded: A.Module = { ...module, decls };
+  conversations.push(...credentialModules(module, program));
   const reading: ChannelReading = { module: expanded, conversations, program: [...program.filter((x) => x.name !== module.name), expanded, ...conversations], descriptors };
   readings.set(module, { libraries, reading });
   return reading;
