@@ -175,6 +175,11 @@ export interface CheckOptions {
   refMachine?: string;
   /** PS15, set by checkFile: each channel's expansion, for its descriptor. */
   channels?: ChannelPlan[];
+  /**
+   * S206 and S207, behind switches that are off until the owner rules on their measured changes (decisions-m9.md): the
+   * provider's clock in every configuration, and one joint configuration for an application bound to several channels.
+   */
+  switches?: { s206?: boolean; s207?: boolean };
   /** PT10e, set by checkFile: the provider profiles the program's credentials name. */
   providers?: Record<string, import('@poly/core').ProviderEntry>;
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
@@ -234,7 +239,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   report.diagnostics.push(...uses.diagnostics);
   // PS15: each channel is expanded, and the program is checked and lowered as expanded; poly-ref is given the source
   // as written, and expands it on its own. The modules m.c of the conversations join the program.
-  const expansion = expandChannels(original, uses.program);
+  const expansion = expandChannels(original, uses.program, { joint: !!opts.switches?.s207 });
   report.diagnostics.push(...expansion.diagnostics);
   const module = expansion.module;
   const program = [...uses.program.filter((m) => m !== original), module, ...expansion.extra];
@@ -335,7 +340,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
     if (report.verdict === 'CLEAN') { report.verdict = 'INCONCLUSIVE'; report.exit = EXIT_CODES.INCONCLUSIVE; }
     return report;
   }
-  const configs = configurationReports(module, refused, opts.uses, original, uses.program, opts.refFault);
+  const configs = configurationReports(module, refused, opts.uses, original, uses.program, opts.refFault, opts.switches);
   report.configurations.push(...configs.configurations);
   ruleOut(report, module);
   // ── stage 5: policies (PT8) ─────────────────────────────────────────────
@@ -759,7 +764,7 @@ async function effectsStage(module: Module, machine: string, mc: MachineCheck, d
  * engine checks configurations, so the stage is poly-ref's alone (PA0.1). Liveness is listed as not run (M1-2).
  * A bound hit is INCONCLUSIVE, never CLEAN (PS13.5).
  */
-function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault): ConfigCheck {
+function configurationStage(module: Module, decl: A.Configuration, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault, switches: CheckOptions['switches'] = {}): ConfigCheck {
   const cc: ConfigCheck = { configuration: decl.name, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
   if (refused) {
     cc.stages.push({ stage: 'configuration', status: 'not-run', engine: '', reason: 'the program was refused at stage 0' });
@@ -767,7 +772,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   }
   const t0 = performance.now();
   // PS15: poly-ref reads the source as written, and generates a channel's configuration on its own.
-  const r = checkConfiguration(original, decl.name, { program: refProgram, ...(fault ? { fault } : {}) });
+  const r = checkConfiguration(original, decl.name, { program: refProgram, ...(fault ? { fault } : {}), ...(switches.s206 ? { s206: true } : {}), ...(switches.s207 ? { s207: true } : {}) });
   cc.diagnostics.push(...r.findings);
   cc.vacuous = vacuousRecords(r.vacuous);
   cc.nevers = r.nevers;
@@ -821,12 +826,12 @@ function ruleOut(report: CheckReport, module: Module): void {
 }
 
 /** Stage 4b for every configuration of a module; the first explorer throw stops the stage and is reported. */
-export function configurationReports(module: Module, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault): { configurations: ConfigCheck[]; error?: string } {
+export function configurationReports(module: Module, refused: boolean, program?: Module[], original: Module = module, refProgram: Module[] | undefined = program, fault?: RefFault, switches: CheckOptions['switches'] = {}): { configurations: ConfigCheck[]; error?: string } {
   const configurations: ConfigCheck[] = [];
   for (const d of module.decls) {
     if (d.kind !== 'Configuration') continue;
     try {
-      configurations.push(configurationStage(module, d, refused, program, original, refProgram, fault));
+      configurations.push(configurationStage(module, d, refused, program, original, refProgram, fault, switches));
     } catch (e) {
       return { configurations, error: `configuration ${d.name}: ${(e as Error).message}` };
     }

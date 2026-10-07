@@ -184,6 +184,39 @@ Steps 6, 7, 8 and 11 wait on S208 and S209, so step 9 came next. PS3.2 and PS15.
 - **check-memory.** It failed alone on this step, three runs in three. Measured by checking `conformance/m5/refund.poly` repeatedly in one process: the collected heap is 37.3 MB at check 10, 37.7 at 20, 37.6 at 60 and 37.9 at 160, so the warm-up now ends after check 10, and the growth after it is about 1.4 KB per check, against the 23 KB per check of the M5 finding. Before step 5 the same measure gave 37.3 at 10 and 37.5 at 60; step 5's checker code moved the end of the warm-up, which the test's 0.3 MB margin over checks 10 to 60 could no longer absorb. The test's window now starts at check 20, with the same margin; it passes alone twice. Recorded for the owner: the failure count before this change was 4 in 23 full runs.
 - **Checked.** The 159 measured files are identical to M8's close. The full suite: 1,853 tests and one after the M3 runs, 1,841 pass, no failure, 1 skipped and 11 waiting; check-memory passed (`.poly/logs/5fb38fd-2026-10-07T01-22-32-511Z-step9b.log`). The first run's one failure was check-memory, which led to the measurement above.
 
+## Step 10: S206 and S207 built behind switches that are off, measured, for a ruling
+
+As ruled ("S206 (S192) and S207 (S193): measure first, then rule"), both are built behind switches that are off: a check option, `switches: { s206, s207 }`, with no command-line flag, no `poly.json` field, and nothing read from the environment. With both off, nothing changes: the 159 measured files are identical. `scripts/measure-verdicts.mjs --switch s206|s207` measures with one on. PS15.5's text is not changed, since the semantics stays as it is until the ruling; the proposed text is below.
+
+- **S206 (the provider's clock in every configuration).** poly-ref keeps every instance's armed timers in every configuration's global state, and the environment fires one only while it is armed, as PS15.5 already does for a channel's own conversation. Tests: a lamp whose `Start` arms a timer is stuck in its declared configuration with the switch off (`PL5402`, its `Tick` never offered) and CLEAN with it on (`test/switches-s206-s207.test.mjs`).
+- **S207 (one joint configuration).** For an application bound to `n > 1` channels, the compiler's expansion and poly-ref's own reading replace the `n` generated configurations by one named after the application, every conversation's inputs offered and its timers kept, the instance bound `1 + n` and the transit bound the sum of the conversations' `pending` bounds. Tests: off, the two per-channel configurations in both readings; on, one configuration `Agent` with both channels, `instances 3` and `transit` the sum.
+
+**The measurement, for the owner.**
+
+| Switch | Measured files | Changed | The changes |
+|---|---|---|---|
+| S206 on | 159 | 2 | `conformance/m8/never/chat-ruled-out.poly`: the configuration `pair` goes from INCONCLUSIVE (4 global states, 6 steps) to FINDINGS (15 states, 36 steps), and the file from INCONCLUSIVE to FINDINGS: the window's timer now fires in `pair`, so the never's witness that the configuration used to rule out (`PL3002` twice) is reachable there and is counted, with `PL5301` at the transit bound. `conformance/m8/never/chat-confirmed.poly`: `pair` stays FINDINGS, 15 states and 44 steps to 22 and 79. |
+| S207 on | 159 | 0 | No measured file binds an application to more than one channel. The concierge is unchanged (one channel per application). |
+
+The concierge with S206 on is unchanged too (its configurations are generated, and only its conversations arm timers, which PS15.5 already fires).
+
+**The cross-channel application** (`review-m8b-a`'s `Agent` on `sms` and `email`; "both" answers each channel on its own, "cross" answers an SMS by email):
+
+| Application | Off | S206 on | S207 on |
+|---|---|---|---|
+| both | `text` CLEAN, 28,965 states, 2,483,041 steps; `mail` CLEAN, 50,679 states, 2,719,892 steps | the same | `Agent`: does not fit. At a cap of 60,000 global states it holds 7,935,642 steps (about 132 a state) and 6.3 GB of heap; uncapped it exceeded 4 GB, then 24 GB, and was stopped |
+| cross | `text` FINDINGS (`PL5407`), 651 states, 54,944 steps; `mail` CLEAN, 50,679 states, 2,719,892 steps | the same | `Agent`: does not fit. At the cap of 60,000 states, 8,042,239 steps and 11.8 GB, with `PL5407` already found |
+
+**What the numbers say.** S206 changes two verdicts, both toward the run's behaviour: a timer the configuration never fired was hiding a reachable never violation. S207's joint state space is the product of two conversations with a transit bound of their sum, and does not fit poly-ref's explicit exploration, which keeps every step in memory. And on the cross application, the joint configuration still finds `PL5407` within the first 60,000 states: the email conversation refuses, `busy`, a reply that answers no waiting message while its slot is held, which is what the cross application sends. So that finding is the program's, not only the configuration's construction, as S193 had supposed.
+
+**For a ruling: S206.** Proposal: turn it on, with PS15.5's last paragraph changed from "This covers the generated configuration of a channel only; a configuration a user declares completes timers through its declared inputs alone (S61)" to "Every configuration keeps every instance's armed timers, and the environment may fire one while it is armed; a declared input on a timer's target stays an input like any other." `chat-ruled-out.poly`'s comment and expected verdict change with it.
+
+**For a ruling: S207.** Proposal: keep the per-channel configurations (the plan's alternative), and add the joint one only for an application that sends on a channel other than the one it is answering, with its exploration bounded by a state cap that makes the verdict INCONCLUSIVE (`PL3901`) when hit, never CLEAN; and record the cross application's `PL5407` as a finding of the program (the email conversation's queue takes only replies to waiting messages). The alternative is to make poly-ref's configuration exploration keep states and not steps, which is a change to poly-ref of its own, measured first.
+
+- **Checked.** With both switches off the 159 measured files are identical to M8's close. The full suite: 1,857 tests and one after the M3 runs, 1,845 pass, no failure, 1 skipped and 11 waiting; check-memory passed (`.poly/logs/1e3fd79-2026-10-07T02-31-20-367Z-step10.log`).
+
+M9 stops here for the rulings it needs: S208 and S209 (from step 5), on which steps 6, 7, 8 and 11 wait, and S206 and S207. Step 12 waits on all of them and on E13.
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.

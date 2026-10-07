@@ -31,14 +31,17 @@ export interface ChannelReading {
 }
 
 const readings = new WeakMap<A.Module, { libraries: A.Module[]; reading: ChannelReading }>();
+/** S207's readings, kept apart: the switch changes only the configurations. */
+const jointReadings = new WeakMap<A.Module, { libraries: A.Module[]; reading: ChannelReading }>();
 
 /** PS15.0: a module with no channel means itself. */
-export function readChannels(module: A.Module, program: A.Module[]): ChannelReading {
+export function readChannels(module: A.Module, program: A.Module[], opts: { joint?: boolean } = {}): ChannelReading {
   const channels = module.decls.filter((d): d is A.Channel => d.kind === 'Channel');
   if (!channels.length) return { module, conversations: [], program, descriptors: new Map() };
   // Polywatch: a reading is the module's with the libraries it was read against; another program is read again.
   const libraries = channels.map((ch) => program.find((x) => x.name === `std.channels.${ch.channelKind}`)!);
-  const known = readings.get(module);
+  const cache = opts.joint ? jointReadings : readings;
+  const known = cache.get(module);
   if (known && known.libraries.every((l, i) => l === libraries[i])) return known.reading;
   const decls: A.Decl[] = structuredClone(module.decls.filter((d) => d.kind !== 'Channel'));
   const conversations: A.Module[] = [];
@@ -113,9 +116,26 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
     } as A.Configuration);
     descriptors.set(ch.name, { application: `${module.name}.${appName}`, conversation: convName, starts: { action: ch.starts!.action, onInbound: ch.starts!.onInbound }, inbound: { to: 'conversation', action: 'Inbound' }, peer, effectKind: `channel.${ch.name}.send`, pending: pending.hi, library: library.name, libraryDigest: moduleDigest(library), kind: ch.channelKind, adapter: ch.adapter, thread: { template: ch.thread, fields: [...ch.thread.matchAll(/\{([^}]*)\}/g)].map((x) => x[1]) } });
   }
+  // S207, behind a switch that is off until ruled, read from the proposal's text: an application bound to n > 1
+  // channels has one configuration named after it, every conversation live, instances 1 + n, transit the sum of pending.
+  if (opts.joint) {
+    for (const appName of new Set(channels.map((ch) => ch.maps[0]?.machine ?? ch.starts!.machine))) {
+      const mine = channels.filter((ch) => (ch.maps[0]?.machine ?? ch.starts!.machine) === appName);
+      if (mine.length < 2) continue;
+      const per = mine.map((ch) => decls.find((d): d is A.Configuration => d.kind === 'Configuration' && d.generated === 'channel' && d.name === ch.name)!);
+      for (let k = decls.length - 1; k >= 0; k--) if (per.includes(decls[k] as A.Configuration)) decls.splice(k, 1);
+      decls.push({
+        kind: 'Configuration', id: `ref:${per[0].id}:joint`, name: appName, generated: 'channel', joint: mine.map((ch) => ch.name),
+        instances: per[0].instances,
+        inputs: [per[0].inputs[0], ...per.flatMap((c) => c.inputs.slice(1))],
+        bounds: { kind: 'ConfigBounds', id: `ref:${per[0].id}:joint:bounds`, transit: mine.reduce((k, ch) => k + descriptors.get(ch.name)!.pending, 0), instances: 1 + mine.length } as A.ConfigBounds,
+        properties: [],
+      } as A.Configuration);
+    }
+  }
   const expanded: A.Module = { ...module, decls };
   const reading: ChannelReading = { module: expanded, conversations, program: [...program.filter((x) => x.name !== module.name), expanded, ...conversations], descriptors };
-  readings.set(module, { libraries, reading });
+  cache.set(module, { libraries, reading });
   return reading;
 }
 

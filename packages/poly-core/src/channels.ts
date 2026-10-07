@@ -68,7 +68,7 @@ function eachStmt(body: A.Stmt[], visit: (s: A.Stmt) => void): void {
 export const RECEIPTS = ['Delivered', 'Rejected', 'Failed'];
 
 /** PS15: expands every channel of a module, or reports why one cannot be. A module with none is returned as it is. */
-export function expandChannels(module: A.Module, program: A.Module[]): ChannelExpansion {
+export function expandChannels(module: A.Module, program: A.Module[], opts: { joint?: boolean } = {}): ChannelExpansion {
   const channels = module.decls.filter((d): d is A.Channel => d.kind === 'Channel');
   if (!channels.length) return { module, extra: [], plans: [], diagnostics: [] };
   const diagnostics: Diagnostic[] = [];
@@ -214,6 +214,26 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
       properties: [],
     } as A.Configuration);
     plans.push({ name: c.name, kind: c.channelKind, library: libName, adapter: c.adapter, thread: { template: c.thread, fields }, application: appName, starts: { action: c.starts.action, onInbound: c.starts.onInbound }, module: synth, peer: binding, effectKind, pending: N });
+  }
+  // S207, behind a switch that is off until ruled: an application bound to several channels gets one configuration,
+  // named after it, in place of one per channel: every conversation live, the instance bound 1 + n and the transit bound
+  // the sum of the conversations' pending bounds.
+  if (opts.joint) {
+    for (const appName of new Set(plans.map((p) => p.application))) {
+      const mine = plans.filter((p) => p.application === appName);
+      if (mine.length < 2) continue;
+      const generated = out.decls.filter((d): d is A.Configuration => d.kind === 'Configuration' && d.generated === 'channel' && mine.some((p) => p.name === d.name));
+      if (out.decls.some((d) => d.kind === 'Configuration' && !d.generated && d.name === appName)) { err('PL1002', generated[0] ?? module, `configuration ${appName} is declared, and the channels of ${appName} generate one of that name (S207)`); continue; }
+      out.decls = out.decls.filter((d) => !generated.includes(d as A.Configuration));
+      const first = generated[0];
+      out.decls.push({
+        kind: 'Configuration', id: `${first.id}:joint`, span: first.span, name: appName, generated: 'channel', joint: mine.map((p) => p.name),
+        instances: first.instances,
+        inputs: [first.inputs[0], ...generated.flatMap((g) => g.inputs.slice(1))],
+        bounds: { kind: 'ConfigBounds', id: `${first.id}:joint:bounds`, transit: mine.reduce((k, p) => k + p.pending, 0), instances: 1 + mine.length } as A.ConfigBounds,
+        properties: [],
+      } as A.Configuration);
+    }
   }
   return { module: out, extra, plans, diagnostics };
 }

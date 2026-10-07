@@ -3,8 +3,9 @@
 // process of its own, written to one JSON file, so the toolchain before and after a change can be compared file by
 // file. The evidence scripts are compared by their own test (test/evidence.test.mjs), which reproduces their numbers.
 //
-// Usage: node scripts/measure-verdicts.mjs <out.json> [--jobs 6]
-//        node scripts/measure-verdicts.mjs --one <file> <root>     (one file; prints its record as JSON)
+// Usage: node scripts/measure-verdicts.mjs <out.json> [--jobs 6] [--switch s206,s207]
+//        node scripts/measure-verdicts.mjs --one <file> <root> [s206,s207]     (one file; prints its record as JSON)
+// M9 step 10: --switch turns on S206 or S207, built behind switches that are off until the owner rules on what they change.
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,11 +17,12 @@ const rel = (p) => relative(ROOT, p).split(sep).join('/');
 
 if (process.argv[2] === '--one') {
   const { checkFile } = await import('@poly/check');
-  const [file, root] = process.argv.slice(3);
+  const [file, root, sw] = process.argv.slice(3);
+  const switches = Object.fromEntries((sw ?? '').split(',').filter(Boolean).map((s) => [s, true]));
   const t0 = Date.now();
   let rec;
   try {
-    const r = await checkFile(file, { root });
+    const r = await checkFile(file, { root, switches });
     rec = {
       verdict: r.verdict,
       error: r.error ?? null,
@@ -40,6 +42,7 @@ if (process.argv[2] === '--one') {
 assertNotExperimentTree(ROOT);
 const out = process.argv[2];
 const jobs = Number(process.argv[process.argv.indexOf('--jobs') + 1]) || 6;
+const sw = process.argv.includes('--switch') ? process.argv[process.argv.indexOf('--switch') + 1] : '';
 const walk = (d) => readdirSync(d).flatMap((e) => (statSync(join(d, e)).isDirectory() ? (e === 'node_modules' || e === '.poly' ? [] : walk(join(d, e))) : [join(d, e)]));
 const files = ['conformance', 'examples'].flatMap((d) => walk(join(ROOT, d))).filter((f) => f.endsWith('.poly') || (f.endsWith('.ts') && /from ['"]@poly\/embed['"]|^import \{\s*$\s*module,/m.test(readFileSync(f, 'utf8')))).sort();
 const scratch = join(ROOT, '.poly', 'measure-verdicts');
@@ -55,7 +58,7 @@ async function worker() {
     mkdirSync(root, { recursive: true });
     const text = await new Promise((res) => {
       let s = '';
-      const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--one', f, root], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] });
+      const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--one', f, root, ...(sw ? [sw] : [])], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] });
       c.stdout.on('data', (b) => { s += b; });
       c.on('exit', () => res(s));
     });

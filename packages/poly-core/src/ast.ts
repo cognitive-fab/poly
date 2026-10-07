@@ -160,6 +160,11 @@ export interface Configuration extends NodeBase {
   properties: (Property | Liveness)[];
   /** PS15.5: the configuration a channel generates, named after it. */
   generated?: 'channel';
+  /**
+   * S207, behind a switch that is off until ruled: the one configuration of an application bound to several channels,
+   * named after the application, with every one of these channels' conversations live.
+   */
+  joint?: string[];
 }
 
 /** `x : M { f: e, … }`, or a group `g[n] : M { … }` of n instances g[0] … g[n-1] (PS13.1). */
