@@ -40,6 +40,10 @@ export interface Manifest {
    * signed approvals, outside `.poly/` by default.
    */
   run?: RunConfig;
+  /** PT10f, S200: the vault store each credential keeps its tokens in. */
+  credentials?: Record<string, { store: 'dev-keychain' | 'kms' }>;
+  /** PT10f, S200: a build for production, which refuses the development keychain at admission (PL6826). */
+  production?: boolean;
 }
 
 export interface RunConfig {
@@ -70,7 +74,7 @@ export const RUN_SCHEMA = {
 
 export class ManifestError extends Error {}
 
-const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation', 'run']);
+const KNOWN = new Set(['poly', 'name', 'modules', 'host', 'require', 'engines', 'handlers', 'keys', 'people', 'agents', 'isolation', 'run', 'credentials', 'production']);
 const RUN_FIELDS = new Set(Object.keys(RUN_SCHEMA.properties));
 
 /** S188: poly.json's `run` field, held to RUN_SCHEMA. */
@@ -97,7 +101,7 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
   try { raw = JSON.parse(text); } catch (e) { throw new ManifestError(`${where}: not JSON (${(e as Error).message})`); }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new ManifestError(`${where}: expected an object`);
   const m = raw as Record<string, unknown>;
-  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation, run)`);
+  for (const k of Object.keys(m)) if (!KNOWN.has(k)) throw new ManifestError(`${where}: unknown field "${k}" (PT1.2 lists poly, name, modules, host, require, engines, handlers, keys, people, agents, isolation, run, credentials, production)`);
   if (m.run !== undefined) checkRun(m.run, where);
   if (m.poly !== '1') throw new ManifestError(`${where}: "poly" must be "1"`);
   if (typeof m.name !== 'string' || !m.name) throw new ManifestError(`${where}: "name" must be a non-empty string`);
@@ -119,6 +123,12 @@ export function parseManifest(text: string, where = 'poly.json'): Manifest {
     if (e === null || typeof e !== 'object' || Array.isArray(e) || !Object.values(e).every((v) => typeof v === 'string')) {
       throw new ManifestError(`${where}: "engines" must map engine names to version ranges`);
     }
+  }
+  if (m.production !== undefined && typeof m.production !== 'boolean') throw new ManifestError(`${where}: "production" is true or false (PT10f)`);
+  if (m.credentials !== undefined) {
+    const c = m.credentials as Record<string, unknown>;
+    const ok = c && typeof c === 'object' && !Array.isArray(c) && Object.values(c).every((v) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).join(',') === 'store' && ((v as { store: unknown }).store === 'dev-keychain' || (v as { store: unknown }).store === 'kms'));
+    if (!ok) throw new ManifestError(`${where}: "credentials" maps each credential to { "store": "dev-keychain" | "kms" } (PT10f)`);
   }
   if (m.isolation !== undefined && m.isolation !== 'openshell') throw new ManifestError(`${where}: "isolation" is "openshell" or absent (PT6.5, S152)`);
   if (m.keys !== undefined) {

@@ -85,7 +85,9 @@ export function toolchainFaults(diagnostics) {
 
 // S126 and the standing rule: the certificate is an artefact the runtime reads, so each broken certificate writer
 // is listed here and must be caught by poly admit's read-back (test/certificate.test.mjs).
-export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature'];
+export const CERTIFICATE_FAULT_LIST = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store'];
+// PT10f: the faults that need a project with a credential and its vault to act on.
+export const VAULT_CERTIFICATE_FAULTS = ['omit-vaults', 'swap-vault-store'];
 // M8 plan step 10 (S182): the faults that need a project with a channel to act on.
 export const ADAPTER_CERTIFICATE_FAULTS = ['stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters'];
 // The faults that need a project with policies to act on (PT8).

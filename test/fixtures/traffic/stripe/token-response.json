@@ -1,0 +1,6 @@
+{
+  "token_type": "bearer",
+  "scope": "read_write",
+  "livemode": false,
+  "stripe_user_id": "{{CONNECTED_ACCOUNT_ID}}"
+}

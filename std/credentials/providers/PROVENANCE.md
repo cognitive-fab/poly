@@ -16,15 +16,34 @@ Read on 2026-10-06 from Stripe's Connect OAuth reference, https://docs.stripe.co
 | `scopes` | `read_write`, `read_only` | "read_write or read_only, depending on the level of access you need. Defaults to read_only. Note read_only can only be specified for extensions." |
 | `bases` | `https://api.stripe.com/` | The API host that calls on behalf of a connected account are made to. |
 
-## What the source says that the profile does not yet model
+## Stripe: the platform's key and the account (S208, as ruled)
 
-- **Tokens are deprecated.** The token response's `access_token`, `refresh_token` and `stripe_publishable_key` are marked "(Deprecated)". The reference says to use the `Stripe-Account` header with the platform's secret key instead, which can make requests on behalf of the connected account. A credential of this profile is then the platform's key and the account id, not a token per account. This is brought to the owner (S208, `decisions-m9.md`) before the vault adapter is built.
-- **Revocation** is Stripe's `deauthorize`, by account id, for Standard accounts only.
+| Field | Value | What the source says |
+|---|---|---|
+| `attach` | `stripe-account` | The token response's `access_token` is "(Deprecated)": "Use the `Stripe-Account` header with your platform's secret key (that can make requests on behalf of this Stripe account)" (https://docs.stripe.com/connect/oauth-reference). The token endpoint's documented answer holds `token_type`, `scope`, `livemode` and `stripe_user_id`, and no token (https://docs.stripe.com/connect/oauth-standard-accounts, read 2026-10-06). The vault keeps the account id for the grant; the platform's key is the client's secret, given at load. |
+| `revocationStyle` | `stripe-deauthorize` | "POST your `client_id` and the connected account's ID to `connect.stripe.com/oauth/deauthorize`" (https://docs.stripe.com/connect/oauth-standard-accounts). It is not RFC 7009. A user's own disconnection arrives as the event `account.application.deauthorized` (the same page), a provider's revocation. |
+
+## google.json
+
+Read on 2026-10-06 from https://developers.google.com/identity/protocols/oauth2/web-server and https://developers.google.com/identity/protocols/oauth2/native-app.
+
+| Field | Value | What the source says |
+|---|---|---|
+| `authorization` | `https://accounts.google.com/o/oauth2/v2/auth` | The authorization endpoint; "This endpoint is accessible only over HTTPS." |
+| `token` | `https://oauth2.googleapis.com/token` | Codes are exchanged, and tokens refreshed (`grant_type` "must be set to `refresh_token`"), here. |
+| `revocation` | `https://oauth2.googleapis.com/revoke` | "your application makes a request to `https://oauth2.googleapis.com/revoke` and includes the token as a parameter"; an access or a refresh token. `revocationStyle` is `rfc7009`. |
+| `pkce` | `true` | "The only supported values for this parameter are `S256` or `plain`"; the vault sends `S256`. |
+| `authParams` | `access_type=offline` | Set "`access_type=offline` to receive refresh tokens". |
+| `scopes`, `scopeValues` | `gmail.readonly`, `gmail.compose`, `gmail.send`, sent as `https://www.googleapis.com/auth/gmail.readonly` and the like | Google's scopes are URLs; the profile names each by its last segment, as the inbox assistant (`proposals/example-inbox.md`) uses them. |
+| `bases` | `https://gmail.googleapis.com/` | The Gmail API's host. |
+| `attach` | `bearer` | "Include the access token ... in an `Authorization` HTTP header `Bearer` value. When possible, the HTTP header is preferable." |
+
+An invalid or revoked refresh token is answered `invalid_grant`, which the vault reads as `{ valid: false }`.
 
 ## The test provider
 
-`test/fixtures/std/credentials/providers/test-oauth.json` is the tests' own profile, written from RFC 6749, RFC 7636 (PKCE) and RFC 7009 (revocation). It never ships in `std/`.
+`test/fixtures/std/credentials/providers/test-oauth.json` is the tests' own profile, written from RFC 6749, RFC 7636 (PKCE) and RFC 7009 (revocation): the generic provider the vault is built and tested against (S208, as ruled). It never ships in `std/`.
 
 ## Conclusion
 
-The profile records Stripe Connect's OAuth as documented on the date read. Two of the documented facts, deprecated tokens and a revocation that is not RFC 7009's, are outside what the profile models and are listed for a ruling.
+Each profile records its provider's OAuth as documented on the date read. Stripe's deprecated per-account tokens are not used: as ruled (S208), the vault attaches the platform's key with the connected account, and revokes by Stripe's own deauthorization.

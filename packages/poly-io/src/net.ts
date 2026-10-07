@@ -65,7 +65,7 @@ export function publicUrl(publicBase: string, path: string): string {
  * The ingress endpoint: a POST or GET to /channels/<name> becomes a Webhook with the public URL the provider called
  * (publicBase and the request's path), and handle's answer is sent back. Bodies over limit bytes are refused.
  */
-export function serveIngress(handle: (channel: string, w: Webhook) => Promise<IngressAnswer>, opts: { port: number; publicBase: string; limit?: number }): Server {
+export function serveIngress(handle: (channel: string, w: Webhook) => Promise<IngressAnswer>, opts: { port: number; publicBase: string; limit?: number; credentials?: (credential: string, w: Webhook) => Promise<IngressAnswer> }): Server {
   const limit = opts.limit ?? 1_000_000;
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -73,10 +73,12 @@ export function serveIngress(handle: (channel: string, w: Webhook) => Promise<In
     req.on('data', (c: Buffer) => { size += c.length; if (size > limit) { res.writeHead(413).end(); req.destroy(); } else chunks.push(c); });
     req.on('end', () => {
       const path = req.url ?? '/';
-      const m = /^\/channels\/([A-Za-z_][A-Za-z0-9_]*)(?:[/?]|$)/.exec(path);
-      if (!m) { res.writeHead(404).end(); return; }
+      // PT10f, S202: a provider's OAuth redirect comes to /credentials/<name>, a channel's webhook to /channels/<name>.
+      const m = /^\/(channels|credentials)\/([A-Za-z_][A-Za-z0-9_]*)(?:[/?]|$)/.exec(path);
+      const route = m?.[1] === 'credentials' ? opts.credentials : m ? handle : undefined;
+      if (!m || !route) { res.writeHead(404).end(); return; }
       const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k.toLowerCase(), Array.isArray(v) ? v.join(', ') : String(v ?? '')]));
-      handle(m[1], { method: req.method ?? 'POST', url: publicUrl(opts.publicBase, path), headers, body: Buffer.concat(chunks).toString('utf8') })
+      route(m[2], { method: req.method ?? 'POST', url: publicUrl(opts.publicBase, path), headers, body: Buffer.concat(chunks).toString('utf8') })
         .then((a) => res.writeHead(a.status, { 'content-type': a.contentType }).end(a.body))
         .catch(() => res.writeHead(500).end());
     });

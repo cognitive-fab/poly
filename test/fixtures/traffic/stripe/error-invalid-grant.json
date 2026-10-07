@@ -1,0 +1,4 @@
+{
+  "error": "invalid_grant",
+  "error_description": "Authorization code does not exist: {AUTHORIZATION_CODE}"
+}

@@ -25,7 +25,7 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -149,14 +149,14 @@ function moduleOf(file: string): A.Module | null {
 }
 
 /** What a certificate is issued from: the root its paths are relative to, the checked reports, the source files, the keyrings. */
-interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell' }
+interface Checked { dir: string; name: string; files: string[]; report: ProjectReport; keyrings: Keyrings; isolation?: 'openshell'; credentials?: Record<string, { store: 'dev-keychain' | 'kms' }>; production?: boolean }
 
 /** A project directory, or one module file checked alone (its handler lint is then not run, S72). */
 async function checkTarget(target: string, root?: string, std?: string): Promise<Checked> {
   const abs = resolve(target);
   if (existsSync(join(abs, 'poly.json'))) {
     const { manifest, files } = loadProject(abs);
-    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs, ...(std ? { std } : {}) }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}) };
+    return { dir: abs, name: manifest.name, files, report: await checkProject(abs, { root: abs, ...(std ? { std } : {}) }), keyrings: keyringsOf(abs, manifest), ...(manifest.isolation ? { isolation: manifest.isolation } : {}), ...(manifest.credentials ? { credentials: manifest.credentials } : {}), ...(manifest.production ? { production: true } : {}) };
   }
   const dir = resolve(root ?? dirname(abs));
   const r = await checkFile(abs, { root: dir, ...(std ? { std } : {}) });
@@ -471,6 +471,19 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     if (opts.fault === 'swap-adapter-kind' && adapters.length) adapters[0] = { ...adapters[0], adapter: IO_ADAPTERS.find((k) => k !== adapters[0].adapter)! };
     if (opts.fault === 'omit-adapters') adapters = [];
   }
+  // PT10f, S200: each credential's vault, by its store and the adapter package; the development keychain is refused in a
+  // build for production, and a credential whose store poly.json does not name is refused (fail closed).
+  const vaults: NonNullable<Certificate['poly']['vaults']> = [];
+  for (const cr of credentials) {
+    const named = c.credentials?.[cr.name]?.store;
+    if (!named) throw new AdmitError(`not admitted: credential ${cr.name} names no store in poly.json's "credentials" (dev-keychain or kms, PT10f)`);
+    if (named === 'dev-keychain' && c.production) throw new AdmitError(`not admitted: PL6826 VAULT_NOT_FOR_PRODUCTION: credential ${cr.name} keeps its tokens in the development keychain, and this build is for production (S200)`);
+    adapterPin ??= adapterPackagePin();
+    vaults.push({ credential: cr.name, store: named, ...adapterPin });
+  }
+  const certifiedVaults = JSON.stringify(vaults.map((v) => [v.credential, v.store]));
+  if (opts.fault === 'omit-vaults') vaults.length = 0;
+  if (opts.fault === 'swap-vault-store' && vaults.length) vaults[0] = { ...vaults[0], store: vaults[0].store === 'kms' ? 'dev-keychain' : 'kms' };
   const toolchain = { ...(report.files[0]?.engines ?? {}) };
   const body: Omit<Certificate, 'digest' | 'signatures'> = {
     v: 1,
@@ -484,7 +497,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: policyFile.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: policyFile.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -500,6 +513,9 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   if (JSON.stringify(back.poly.sources) !== JSON.stringify(sourcesNow)) problems.push({ name: 'sources', problem: 'the sources changed while the program was admitted' });
   for (const p of handlerProblems()) problems.push({ name: 'handlers', problem: p });
   // S182: the adapters read back are the installed adapter package as it is now.
+  // PT10f: and the vaults read back are each certified credential's, with the store poly.json names.
+  if (JSON.stringify((back.poly.vaults ?? []).map((v) => [v.credential, v.store])) !== certifiedVaults) problems.push({ name: 'vaults', problem: `the certificate binds ${JSON.stringify((back.poly.vaults ?? []).map((v) => [v.credential, v.store]))}, and the credentials' stores are ${certifiedVaults}` });
+  for (const x of back.poly.vaults ?? []) if (!adapterPin || x.package !== adapterPin.package || x.version !== adapterPin.version || x.digest !== adapterPin.digest) problems.push({ name: 'vaults', problem: `credential ${x.credential}'s vault is bound to ${x.package} ${x.version} ${x.digest}, and the installed package is not that` });
   for (const x of back.poly.adapters ?? []) if (!adapterPin || x.package !== adapterPin.package || x.version !== adapterPin.version || x.digest !== adapterPin.digest) problems.push({ name: 'adapters', problem: `channel ${x.channel}'s adapter is bound to ${x.package} ${x.version} ${x.digest}, and the installed package is not that` });
   // Review D-F5 (M8b): and the binding is every channel's declared adapter, read again from its descriptor, so a
   // binding of another kind, or none at all, is caught here rather than at connect.

@@ -70,6 +70,20 @@ Each runtime channel adapter (S182, S183) was written from its provider's docume
 - Twilio requests with a JSON body (`bodySHA256`).
 - A bounce mailed back as a DSN (Mailgun's event webhook reports it instead), and DKIM signing, which the relay does.
 
+## The vault adapter (`oauthVault`, M9 step 7)
+
+Written from the RFCs, and built and tested against the generic provider `test-oauth` with recorded traffic only (`test/fixtures/traffic/oauth`, `google`, `stripe`); the provider profiles' own sources are in `std/credentials/providers/PROVENANCE.md`.
+
+| What the adapter does | Source |
+|---|---|
+| Sends the authorization request with `response_type=code`, `client_id`, `redirect_uri`, `scope` and `state` | https://www.rfc-editor.org/rfc/rfc6749#section-4.1.1 |
+| Adds `code_challenge`, the base64url SHA-256 of a 32-byte random verifier, with `code_challenge_method=S256`, and sends the verifier with the code | https://www.rfc-editor.org/rfc/rfc7636#section-4.2 |
+| Exchanges the code with `grant_type=authorization_code`, `code` and `redirect_uri`, authenticating a confidential client with HTTP Basic | https://www.rfc-editor.org/rfc/rfc6749#section-4.1.3 and section 2.3.1 |
+| Reads `scope` from the token response, or takes the scopes requested when it has none | https://www.rfc-editor.org/rfc/rfc6749#section-5.1 |
+| Refreshes with `grant_type=refresh_token`; keeps the old refresh token when none is returned; reads `invalid_grant` as an expired grant | https://www.rfc-editor.org/rfc/rfc6749#section-6 and section 5.2 |
+| Revokes the refresh token with `token_type_hint=refresh_token` | https://www.rfc-editor.org/rfc/rfc7009#section-2.1 |
+| Uses the state once, and keeps it ten minutes (poly's own bound) | https://www.rfc-editor.org/rfc/rfc6749#section-10.12 (the state against cross-site request forgery) |
+
 ## Conclusion
 
 Every rule the adapters apply to a provider's traffic is listed here with its source, and the tests replay that traffic from the documented payloads, forged variants included. What is not listed is not handled.

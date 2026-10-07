@@ -6,12 +6,12 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkFile } from '@poly/check';
+import { admit, checkFile } from '@poly/check';
 import { parse, format } from '@poly/lang';
 import { digest } from '@poly/core';
 import { printModule, readEmbedded } from '@poly/embed';
 import { ROOT, TEST_STD } from './helpers.mjs';
-import { admitted, loaded } from './runtime-helpers.mjs';
+import { loaded, makeKey, project } from './runtime-helpers.mjs';
 
 const SRC = readFileSync(join(ROOT, 'test', 'fixtures', 'm9', 'credentials.poly'), 'utf8');
 const STRIPE = readFileSync(join(ROOT, 'test', 'fixtures', 'm9', 'stripe-refund.poly'), 'utf8');
@@ -132,7 +132,12 @@ test('PT10e: a holder that is not a Principal parameter, a holder on the service
 });
 
 test('PT10e: admission certifies each credential\'s descriptor, and load refuses one changed after admission', { timeout: 300_000 }, async () => {
-  const a = await admitted('credentials-stripe', ['test/fixtures/m9/stripe-refund.poly']);
+  // PT10f: a credential's store is named in poly.json, or admission refuses it.
+  const key = makeKey('credentials-stripe');
+  const dir = project('credentials-stripe', ['test/fixtures/m9/stripe-refund.poly'], key, 'test-runtime');
+  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8')), credentials: { payments: { store: 'kms' } } }, null, 2));
+  const r = await admit(dir);
+  const a = { dir, build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey }, cert: r.certificate };
   const descriptor = '.poly/build/credentials/payments.json';
   assert.deepEqual(a.cert.poly.credentials, [{ name: 'payments', descriptor }]);
   assert.equal(a.cert.artefacts[descriptor], sha(join(a.dir, descriptor)));

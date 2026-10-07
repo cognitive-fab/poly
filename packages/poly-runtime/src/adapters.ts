@@ -115,3 +115,54 @@ export interface IngressHost {
   /** The whole of ingress for one webhook, run by the host with the adapter given, which it checks is certified. */
   receive?(channel: string, webhook: Webhook, adapter: ChannelAdapter): Promise<IngressAnswer>;
 }
+
+// ── Vault adapters (PT10f, PT22.3, PT22.5, S200, S202) ──────────────────────────────────────────────────────────────
+
+/** The host's wrapping pair for the KMS-wrapped store (S200): a cloud KMS is the host's code, never poly's. */
+export interface WrapPair {
+  wrap(plain: Uint8Array): Promise<Uint8Array> | Uint8Array;
+  unwrap(blob: Uint8Array): Promise<Uint8Array> | Uint8Array;
+}
+
+/** A vault store: each grant's record kept encrypted by id, outside the project and the content store (S200). */
+export interface VaultStore {
+  readonly kind: 'dev-keychain' | 'kms';
+  put(id: string, record: Record<string, unknown>): Promise<void>;
+  get(id: string): Promise<Record<string, unknown> | null>;
+  remove(id: string): Promise<void>;
+}
+
+/** The host's OAuth client, given at load as runtime configuration; its secret is never journaled (PT10f). */
+export interface OAuthClient {
+  clientId: string;
+  redirectUri: string;
+  clientSecret?: string;
+}
+
+/** What a vault's verify of the provider's redirect gives: the grant, the scopes granted, and the state as a nonce. */
+export type VaultCallback = { grantId: string; scopes: string[]; nonce: { key: string; until: number } } | { refused: string; grantId?: string };
+
+/**
+ * PT22.3, PT22.5: a vault adapter. It holds the tokens of the grants it made, attaches them inside `withToken`, and never
+ * returns one: no method's result holds a token, and `withToken` removes the headers that could carry one back.
+ */
+export interface VaultAdapter {
+  readonly kind: 'vault';
+  readonly provider: string;
+  readonly store: VaultStore['kind'];
+  authorize(r: { grantId: string; scopes: string[]; now: number }): Promise<{ url: string; state: string; until: number }>;
+  verify(webhook: Webhook, now: number): Promise<VaultCallback>;
+  refresh(grantId: string): Promise<{ valid: boolean }>;
+  revoke(grantId: string): Promise<void>;
+  withToken(grantId: string, request: HttpRequest): Promise<HttpResponse>;
+}
+
+/** PT10f, S202: what the callback route of ingress needs of its host: the nonce store, its journal, and the grant. */
+export interface CredentialHost {
+  /** Takes the state once, as a channel's nonce is taken (the scope is `credential:<name>`). */
+  claimNonce(scope: string, key: string, until: number, now: number): Promise<boolean>;
+  /** Records the callback's refusal or acceptance on runtime:ingress; never a code, a state or a token. */
+  credentialRecord(credential: string, record: { stage: 'callback'; outcome: 'refused' | 'granted'; provider: string; reason?: string }): Promise<void>;
+  /** Dispatches Callback(scopes) to the grant's Grant instance (PT22.3, step 3). */
+  grantCallback(credential: string, grantId: string, scopes: string[]): Promise<void>;
+}

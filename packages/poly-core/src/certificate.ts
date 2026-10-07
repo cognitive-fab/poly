@@ -83,6 +83,8 @@ export interface Certificate {
     channels?: { name: string; application: string; descriptor: string }[];
     /** PT10e: each credential an effect uses, by name, and its descriptor, whose digest is under `artefacts`. */
     credentials?: { name: string; descriptor: string }[];
+    /** PT10f, S200: each credential's vault: its store, and the adapter package by name, version and digest. */
+    vaults?: { credential: string; store: 'dev-keychain' | 'kms'; package: string; version: string; digest: string }[];
     /** Plan step 9: the gate engine that decides this build's policies, pinned by commit (Polyaxion is a peer, S145). */
     policyEngine?: { name: 'polyaxion'; commit: string };
     /** S182, plan step 10: each channel's runtime adapter, bound by package name, version and digest. */

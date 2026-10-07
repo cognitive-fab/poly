@@ -16,6 +16,11 @@ export interface ProviderProfile {
   grants: ('authorization_code' | 'client_credentials')[];
   pkce: boolean;
   scopes: string[];
+  /** PT10f: the value each scope is sent as, the attachment of the credential, and the revocation's form. */
+  scopeValues?: Record<string, string>;
+  authParams?: Record<string, string>;
+  attach?: 'bearer' | 'stripe-account';
+  revocationStyle?: 'rfc7009' | 'stripe-deauthorize';
   source: string;
   read: string;
 }
@@ -44,6 +49,11 @@ export function profileProblem(p: unknown, name: string): string | null {
   if (!Array.isArray(o.grants) || !o.grants.length || !o.grants.every((g) => g === 'authorization_code' || g === 'client_credentials')) return 'names no grant, or one other than authorization_code and client_credentials';
   if (typeof o.pkce !== 'boolean') return 'does not say whether it supports PKCE';
   if (!Array.isArray(o.scopes) || !o.scopes.length || !o.scopes.every((s) => typeof s === 'string' && SCOPE.test(s))) return 'defines no scope, or one that is not an identifier or a dotted one';
+  // PT10f: the optional fields of the vault adapter.
+  if (o.scopeValues !== undefined && (!o.scopeValues || typeof o.scopeValues !== 'object' || Array.isArray(o.scopeValues) || !Object.entries(o.scopeValues).every(([k, v]) => (o.scopes as string[]).includes(k) && typeof v === 'string' && v !== ''))) return 'has scope values for a scope it does not define, or an empty one';
+  if (o.authParams !== undefined && (!o.authParams || typeof o.authParams !== 'object' || Array.isArray(o.authParams) || !Object.values(o.authParams).every((v) => typeof v === 'string'))) return 'has authorization parameters that are not strings';
+  if (o.attach !== undefined && o.attach !== 'bearer' && o.attach !== 'stripe-account') return 'attaches its credential neither as bearer nor as stripe-account';
+  if (o.revocationStyle !== undefined && o.revocationStyle !== 'rfc7009' && o.revocationStyle !== 'stripe-deauthorize') return 'revokes neither by RFC 7009 nor by stripe-deauthorize';
   if (typeof o.source !== 'string' || !o.source || typeof o.read !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(o.read)) return 'does not name its source and the date it was read';
   return null;
 }

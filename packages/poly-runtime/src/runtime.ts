@@ -11,7 +11,7 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type Transports } from './capabilities.js';
-import type { ChannelAdapter, ChannelTransports, IngressAnswer, Verified, Webhook } from './adapters.js';
+import type { ChannelAdapter, ChannelTransports, IngressAnswer, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -160,6 +160,8 @@ export class PolyRuntime {
   readonly #fault: LoadOptions['fault'];
   /** Review D-F4 (M8b): each channel's connected adapter, with which rt.receive verifies the channel's webhooks. */
   readonly #adapters = new Map<string, ChannelAdapter>();
+  /** PT10f: each credential's certified vault. */
+  readonly #vaults = new Map<string, VaultAdapter>();
   private readonly channelSenders = new Map<string, { kind: string; sender: string }>();
   /** Review A-F2: approvals entries refused or applied but not movable, journaled once and passed over since. */
   private readonly unmovable = new Set<string>();
@@ -534,6 +536,18 @@ export class PolyRuntime {
     if (!pin) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the certificate binds no adapter to channel ${channel} (S182)`);
     if (!this.#ioPackage?.madeHere(adapter)) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the adapter for ${channel} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S182)`);
     if (adapter.kind !== pin.adapter) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: channel ${channel} declares adapter ${pin.adapter}, and this is a ${adapter.kind} adapter (S182)`);
+  }
+
+  /**
+   * PT10f, S200: the vault of a credential the certificate names, made by the certified adapter package, of the store the
+   * certificate binds (PL6408 otherwise). The runtime holds it for the grant check and `api` (PT22.4, PT22.5).
+   */
+  connectVault(credential: string, adapter: VaultAdapter): void {
+    const pin = this.certificate.poly.vaults?.find((v) => v.credential === credential);
+    if (!pin) throw new Error(`no credential ${credential}; the certificate binds ${(this.certificate.poly.vaults ?? []).map((v) => v.credential).join(', ') || 'none'} (PT10f)`);
+    if (!this.#ioPackage?.madeHere(adapter) || adapter.kind !== 'vault') throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the vault for ${credential} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S200)`);
+    if (adapter.store !== pin.store) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: credential ${credential} is certified with the ${pin.store} store, and this vault keeps its tokens in the ${adapter.store} store (S200)`);
+    this.#vaults.set(credential, adapter);
   }
 
   connectChannel(channel: string, adapter: ChannelAdapter, transports: ChannelTransports): void {
@@ -1362,7 +1376,8 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   }
   // S182, plan step 10: the adapters are the ones admitted. The installed package is pinned again and compared.
   let ioPackage: { madeHere(a: unknown): boolean } | null = null;
-  const adapters = verified.certificate.poly.adapters ?? [];
+  // PT10f: a credential's vault is pinned the same way.
+  const adapters = [...(verified.certificate.poly.adapters ?? []), ...(verified.certificate.poly.vaults ?? [])];
   if (adapters.length) {
     const now = adapterPackagePin();
     const other = adapters.find((x) => x.package !== now.package || x.version !== now.version || x.digest !== now.digest);
