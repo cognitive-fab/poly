@@ -155,3 +155,34 @@ test('S210, B3, D6: a grant request is a person\'s signed record, taken once; an
     assert.equal(journal.length, 5);
   } finally { await rt.close(); }
 });
+
+test('S210, polywatch: poly sign keyrings refuses to extend a history cut back past the head last admitted, and writes nothing', async () => {
+  const dir = project('s210-sign-cut', SOURCES, makeKey('s210-sign-cut'), 'test-s210');
+  const first = rings([PERSON]);
+  const second = rings([PERSON, makePerson('second')]);
+  setRings(dir, second);
+  writeHistory(dir, [{ rings: first }, entry('s210-sign-cut', first, second, PERSON)]);
+  await admit(dir);
+  writeHistory(dir, [{ rings: first }]);
+  setRings(dir, rings([PERSON, makePerson('third')]));
+  const keyFile = join(mkdtempSync(join(tmpdir(), 'poly-s210-key-')), 'person.pem');
+  writeFileSync(keyFile, PERSON.privateKeyPem);
+  try {
+    await assert.rejects(commandNamed('sign-keyrings').run({ by: PERSON.keyId, key: keyFile, project: dir }), /never cut back/);
+  } finally { rmSync(keyFile); }
+  assert.deepEqual(readJson(join(dir, 'keyrings', 'history.json')), [{ rings: first }], 'nothing is written');
+});
+
+test('S210, polywatch: a change of the anchor waits for its lock, refuses one held by a live process, and takes over a dead one\'s', { timeout: 60_000 }, async () => {
+  const dir = project('s210-lock', SOURCES, makeKey('s210-lock'), 'test-s210');
+  const file = anchorFileOf('s210-lock');
+  const { utimesSync } = await import('node:fs');
+  writeFileSync(`${file}.lock`, '');
+  await assert.rejects(commandNamed('anchor-production').run({ on: true, project: dir }), /being changed by another process/);
+  assert.equal(readJson(file).production, false, 'nothing was written');
+  const old = new Date(Date.now() - 120_000);
+  utimesSync(`${file}.lock`, old, old);
+  await commandNamed('anchor-production').run({ on: true, project: dir });
+  assert.equal(readJson(file).production, true);
+  assert.throws(() => readFileSync(`${file}.lock`), 'the lock is released');
+});

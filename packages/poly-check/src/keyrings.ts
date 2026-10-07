@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  KeyringError as CoreKeyringError, anchorFile, keyringRecordOk, keyringSubject, keyringsOf, nameAnchor, newAnchor, readAnchor, readHistory, ringsDigest, signRecord, verifyChain, verifyHistory, writeAnchorFile,
+  KeyringError as CoreKeyringError, anchorFile, changeAnchor, keyringRecordOk, keyringSubject, keyringsOf, nameAnchor, newAnchor, readAnchor, readHistory, ringsDigest, signRecord, verifyChain, verifyHistory, writeAnchorFile,
   type Anchor, type Keyrings, type Manifest,
 } from '@poly/core';
 
@@ -47,7 +47,8 @@ export function setProduction(dir: string, manifest: Manifest, production: boole
   return admitting(() => {
     const found = readAnchor(dir, manifest.name);
     if (!found) throw new CoreKeyringError(`the owner's per-user configuration names no anchor for project ${manifest.name}`);
-    writeAnchorFile(found.file, { ...found.anchor, production });
+    // Polywatch: under the anchor's lock, read again, so an admission's head and sequences are never written back.
+    changeAnchor(found.file, manifest.name, (a) => ({ ...a, production }));
     return { path: found.file, production };
   });
 }
@@ -69,7 +70,8 @@ export function signKeyrings(dir: string, manifest: Manifest, by: string, privat
       if (ringsDigest(certified, 'the certified rings') !== found.anchor.first) throw new CoreKeyringError('keyrings/history.json is missing, and the certified rings are not the anchored first rings; restore the history');
       history = [{ rings: certified }];
     }
-    verifyHistory(history, found.anchor);
+    // Polywatch: a history that does not hold the head last admitted would never admit (S210, D2), so it is not extended.
+    if (!verifyHistory(history, found.anchor).includes(found.anchor.head)) throw new CoreKeyringError(`keyrings/history.json does not hold the rings last admitted (${found.anchor.head}); a history is never cut back (S210)`);
     mkdirSync(join(dir, 'keyrings'), { recursive: true });
     const prev = history[history.length - 1].rings;
     const parent = ringsDigest(prev, 'the last rings');

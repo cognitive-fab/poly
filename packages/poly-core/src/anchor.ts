@@ -8,7 +8,7 @@
 // (PT12.5): its first rings, the last rings admitted, the highest policy sequence admitted per scope, and whether the
 // project is production. Admission only moves `head` and `policies` forward (S210, D2, D7).
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { keyringDigest, keyringSubject, verifyRecord, type Keyrings, type SignedRecord } from './records.js';
@@ -112,6 +112,35 @@ export function writeAnchorFile(file: string, a: Anchor): void {
   renameSync(tmp, file);
 }
 
+/** How long a change of the anchor waits for another to finish, and when a lock is taken to be a dead process's. */
+const LOCK_WAIT_MS = 5_000;
+const LOCK_STALE_MS = 60_000;
+
+/**
+ * Polywatch on S210: every read, change and write of an anchor holds its lock (`<anchor>.lock`, created exclusively),
+ * so two admissions, or an admission and `poly anchor production`, never write back what the other moved forward. A
+ * lock held past the wait is refused (fail closed); one older than a minute is a dead process's, and taken over.
+ */
+export function changeAnchor(file: string, project: string, change: (a: Anchor) => Anchor): Anchor {
+  const lock = `${file}.lock`;
+  const until = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try { closeSync(openSync(lock, 'wx')); break; } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw new KeyringError(`the anchor's lock ${lock} cannot be taken (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`);
+      let age = 0;
+      try { age = Date.now() - statSync(lock).mtimeMs; } catch { continue; }
+      if (age > LOCK_STALE_MS) { rmSync(lock, { force: true }); continue; }
+      if (Date.now() > until) throw new KeyringError(`the anchor ${file} is being changed by another process (${lock}); nothing was written`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  try {
+    const next = change(parseAnchor(readFileSync(file, 'utf8'), file, project));
+    writeAnchorFile(file, next);
+    return next;
+  } finally { rmSync(lock, { force: true }); }
+}
+
 /** A new anchor for a project's first rings: `poly anchor keyrings`. */
 export function newAnchor(project: string, first: string, production: boolean): Anchor {
   return { v: 2, id: `anchor-${randomBytes(16).toString('hex')}`, project, first, head: first, policies: {}, production };
@@ -185,14 +214,15 @@ export function verifyChain(dir: string, project: string, current: Keyrings, sou
 
 /**
  * S210, D2, D7: moves the anchor forward after an admission: its head to the rings admitted, and each scope's policy
- * sequence to the one admitted when that is higher. Read again first, so two admissions never move it back.
+ * sequence to the one admitted when that is higher. Read again under the anchor's lock, so two admissions never move
+ * it back.
  */
 export function advanceAnchor(file: string, project: string, chain: string[], policies: Record<string, number>): Anchor {
-  const a = parseAnchor(readFileSync(file, 'utf8'), file, project);
-  // The head moves to this chain's last rings only when the kept head lies on this chain, behind or at them.
-  const at = chain.indexOf(a.head);
-  const next: Anchor = { ...a, head: at >= 0 ? chain[chain.length - 1] : a.head, policies: { ...a.policies } };
-  for (const [scope, n] of Object.entries(policies)) if (!(next.policies[scope] >= n)) next.policies[scope] = n;
-  writeAnchorFile(file, next);
-  return next;
+  return changeAnchor(file, project, (a) => {
+    // The head moves to this chain's last rings only when the kept head lies on this chain, behind or at them.
+    const at = chain.indexOf(a.head);
+    const next: Anchor = { ...a, head: at >= 0 ? chain[chain.length - 1] : a.head, policies: { ...a.policies } };
+    for (const [scope, n] of Object.entries(policies)) if (!(next.policies[scope] >= n)) next.policies[scope] = n;
+    return next;
+  });
 }
