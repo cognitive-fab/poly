@@ -1,0 +1,139 @@
+// Routes and budgets (PT24, PS18, S351, S352). A route r of a module m is the module m.r: this module with Route
+// instantiated for r's tiers and escalation condition (PS18.1), and Budget left out. A budget b is the module m.b: this
+// module with Route left out. Both machines are checked alone here, Route with two tiers and the condition below, and
+// Budget with small check domains that put a reservation below, at and above the remainder (PS18.4).
+module std.routing
+
+enum RouteState { Ready, Trying, Answered, Exhausted }
+
+enum BudgetState { Closed, Open, Spent }
+
+machine Route {
+  state {
+    r    : RouteState = Ready
+    tier : 0..1 = 0
+    left : 0..1 = 1
+  }
+
+  terminal r == Answered || r == Exhausted
+
+  action Start()
+  action Answer(conf: Conf, margin: Conf)
+  action Fail()
+
+  on Start {
+    require r == Ready else reject "started"
+    r' = Trying
+    emit call(0)
+  }
+
+  on Answer(conf, margin) {
+    require r == Trying else reject "not-trying"
+    if conf < 0.8 || margin < 0.1 {
+      if left > 0 {
+        tier' = tier + 1
+        left' = left - 1
+        emit call(tier + 1)
+      } else {
+        r' = Exhausted
+      }
+    } else {
+      r' = Answered
+    }
+  }
+
+  on Fail {
+    require r == Trying else reject "not-trying"
+    if left > 0 {
+      tier' = tier + 1
+      left' = left - 1
+      emit call(tier + 1)
+    } else {
+      r' = Exhausted
+    }
+  }
+
+  effect call(tier: 0..1) {
+    kind "route.call"
+    labels { egress:external }
+    retry { attempts 1, base 500ms, timeout 30s }
+    class none
+    ok(a) -> Answer(conf: a.conf, margin: a.margin)
+    failed -> Fail()
+    exhausted -> Fail()
+  }
+
+  invariant ready-at-the-first-tier: r == Ready implies tier == 0
+
+  step property one-tier-up: post.tier == pre.tier || post.tier == pre.tier + 1
+  step property calls-only-while-trying: emits(call) implies post.r == Trying
+  step property answered-meets-thresholds: (action == Answer && post.r == Answered) implies !(conf < 0.8 || margin < 0.1)
+  step property below-thresholds-escalates: (action == Answer && pre.r == Trying && (conf < 0.8 || margin < 0.1)) implies post.r != Answered
+  step property exhausted-after-the-last: (post.r == Exhausted && pre.r != Exhausted) implies pre.left == 0
+
+  liveness route-ends: r == Trying leads to r == Answered || r == Exhausted
+    under fair { Answer | Fail }
+}
+
+machine Budget {
+  state {
+    b        : BudgetState = Closed
+    cap      : int check 0..3 = 0
+    spent    : int check 0..18 = 0
+    reserved : int check 0..3 = 0
+    overrun  : int check 0..15 = 0
+  }
+
+  // A budget whose remainder is spent, with nothing reserved, takes no step: no reservation fits it (PS18.4).
+  terminal b == Spent
+
+  action Open(limit: int check 0..3)
+  action Reserve(r: int check 1..3)
+  action Settle(r: int check 1..3, actual: int check 0..6)
+  action Release(r: int check 1..3)
+
+  on Open(limit) {
+    require b == Closed else reject "open"
+    cap' = limit
+    if limit == 0 {
+      b' = Spent
+    } else {
+      b' = Open
+    }
+  }
+
+  on Reserve(r) {
+    require b == Open else reject "not-open"
+    require spent + reserved + r <= cap else reject "budget"
+    reserved' = reserved + r
+  }
+
+  on Settle(r, actual) {
+    require r <= reserved else reject "unreserved"
+    reserved' = reserved - r
+    spent' = spent + actual
+    if actual > r {
+      overrun' = overrun + actual - r
+    }
+    if reserved == r && spent + actual >= cap {
+      b' = Spent
+    }
+  }
+
+  on Release(r) {
+    require r <= reserved else reject "unreserved"
+    reserved' = reserved - r
+    if reserved == r && spent >= cap {
+      b' = Spent
+    }
+  }
+
+  invariant within-cap: spent + reserved <= cap + overrun
+  invariant spent-is-final: b == Spent implies (reserved == 0 && spent >= cap)
+
+  step property reserve-fits: (action == Reserve && post.reserved != pre.reserved) implies pre.spent + pre.reserved + r <= pre.cap
+  step property cap-fixed: pre.b != Closed implies post.cap == pre.cap
+  step property settle-charges-actual: (action == Settle && post.reserved != pre.reserved) implies post.spent == pre.spent + actual
+  step property overrun-recorded: (action == Settle && post.reserved != pre.reserved && actual > r) implies post.overrun == pre.overrun + actual - r
+  step property spent-only-by-settle: post.spent != pre.spent implies action == Settle
+}
