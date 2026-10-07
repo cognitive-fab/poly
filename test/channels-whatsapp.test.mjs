@@ -60,7 +60,7 @@ test('AC15, the real path: the first message creates the thread, and a reply aft
     await handle('support', whatsappWebhook(cfg.wa, recorded('whatsapp/message.json')));
     clock.advance(DAY + 60_000);
     await rt.advance();
-    assert.deepEqual(await rejections(rt, `support:${WA_FROM}`), ['window-closed']);
+    assert.deepEqual(await rejections(rt, await rt.threadId('support', WA_FROM)), ['window-closed']);
     assert.equal(sent.support.length, 0);
   } finally { await rt.close(); }
 });
@@ -110,7 +110,7 @@ test('AC16, the real path: a first STOP creates the thread, and the reply to it 
   try {
     await handle('text', smsWebhook(cfg.tw, 'STOP', 'SMstop'));
     await rt.advance();
-    assert.deepEqual(await rejections(rt, `text:${SMS_FROM}`), ['opted-out']);
+    assert.deepEqual(await rejections(rt, await rt.threadId('text', SMS_FROM)), ['opted-out']);
     assert.equal(sent.text.length, 0);
   } finally { await rt.close(); }
 });

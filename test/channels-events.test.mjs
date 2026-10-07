@@ -74,7 +74,7 @@ async function thread(name, kind, field, reasons, key, extra = {}) {
   assert.equal(a.verdict, 'CLEAN', JSON.stringify(a.error ?? a));
   const build = { build: join(dir, '.poly', 'build'), certificate: a.certificatePath, trust: { [k.id]: k.publicKey } };
   const { rt, clock } = await loaded(build, extra);
-  const app = `line:${key}`;
+  const app = await rt.threadId('line', key);
   const conv = `${app}/line`;
   await rt.create('desk.Agent', { id: app });
   await rt.create('desk.line.Conversation', { id: conv, creation: { action: 'Open', data: { app } } });
@@ -186,7 +186,7 @@ test('sms: a STOP in one message blocks the reply to a later message from the sa
     assert.equal((await handle('line', post('SMstop', 'STOP'))).status, 200);
     assert.equal((await handle('line', post('SMlater', 'Is my order shipped?'))).status, 200);
     const delivered = (await rt.chain('runtime:ingress')).map((e) => e.body).filter((b) => b.stage === 'inbound').map((b) => [b.thread, b.outcome]);
-    assert.deepEqual(delivered, [['line:sms-1', 'delivered'], ['line:sms-1', 'delivered']]);
+    assert.deepEqual(delivered, [[app, 'delivered'], [app, 'delivered']]);
     assert.equal((await state(rt, conv)).consent, false);
     await rt.advance();
     // The agent answers both messages; each answer is refused, opted-out, and nothing is sent.
@@ -246,5 +246,26 @@ test('claimNonce: expired nonces are pruned, on every channel, so the table stay
     assert.equal(count(), 1 + 25);
     assert.equal(await rt.claimNonce('line', 'later', t0 + 11 * 300_000, t0 + 10 * 300_000), true);
     assert.equal(count(), 1);
+  } finally { await rt.close(); }
+});
+
+// S191, S205 (PS15.4): the recipient is read from the erasable store by the thread's keyed digest. Once the address is
+// erased, a send fails permanently, journaled, and the application is told as of any failed send; nothing is sent.
+test('S205: a send to an erased address fails, and nothing reaches the provider', { timeout: 300_000 }, async () => {
+  const { rt, conv, app } = await thread('ev-sms-erased', 'sms', 'from', '"opted-out"', 'sms-1');
+  try {
+    const tw = { accountSid: 'ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', authToken: secret(), from: '+15557122661' };
+    const sent = [];
+    rt.connectChannel('line', sms(tw), { http: { async request(r) { sent.push(r); return { status: 201, headers: {}, body: recorded('twilio/send-response.json') }; } } });
+    await rt.dispatch(conv, 'Reply', { body: await rt.putContent('Your order shipped.') });
+    await rt.advance();
+    assert.equal(sent.length, 1);
+    assert.match(String(sent[0].body), /To=sms-1/);
+    await rt.dispatch(app, 'Delivered');
+    await rt.erase(app.slice('line:'.length));
+    await rt.dispatch(conv, 'Reply', { body: await rt.putContent('Hello?') });
+    await rt.advance();
+    assert.equal(sent.length, 1, 'nothing is sent to an erased address');
+    assert.equal((await state(rt, app)).last, 'Lost');
   } finally { await rt.close(); }
 });

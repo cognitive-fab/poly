@@ -87,6 +87,8 @@ function polygraphVersion(): string {
 
 /** PS15.4: the runtime's own run, on which every inbound message's delivery or refusal is journaled. */
 export const INGRESS_RUN = 'runtime:ingress';
+/** S205: the runtime's own run, on which every erasure of a body or an address is journaled. */
+export const CONTENT_RUN = 'runtime:content';
 
 /** S182, plan step 10: the adapters @poly/io makes, by the name a channel declares (`adapter "whatsapp"`). */
 export const IO_ADAPTERS = ['whatsapp', 'sms', 'email', 'slack', 'webhook'];
@@ -119,7 +121,7 @@ export interface InboundResult {
 const SUPPLIED_CLAIMS = Symbol('supplied claims');
 
 /** Deliberately broken runtimes, for one test each: the recipient digest without the store's key (ruled on step 9). */
-export const RUNTIME_FAULTS = ['unkeyed-recipient'] as const;
+export const RUNTIME_FAULTS = ['unkeyed-recipient', 'address-in-clear'] as const;
 
 /** A name under `dir` that no file has yet: `name`, else `name.2`, `name.3`, ... so a record is never overwritten. */
 function freeName(dir: string, name: string): string {
@@ -154,6 +156,8 @@ export class PolyRuntime {
    * adapters). Review D-F2 (M8b): private and set once, so no host can put in a package that calls a look-alike its own.
    */
   readonly #ioPackage: { madeHere(a: unknown): boolean } | null;
+  /** For one test each: a deliberately broken runtime (RUNTIME_FAULTS). */
+  readonly #fault: LoadOptions['fault'];
   /** Review D-F4 (M8b): each channel's connected adapter, with which rt.receive verifies the channel's webhooks. */
   readonly #adapters = new Map<string, ChannelAdapter>();
   private readonly channelSenders = new Map<string, { kind: string; sender: string }>();
@@ -183,6 +187,7 @@ export class PolyRuntime {
   constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: { madeHere(a: unknown): boolean } | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
     this.#ioPackage = opts.ioPackage ?? null;
+    this.#fault = opts.fault;
     this.verifier = opts.verifier ?? personKeyVerifier(verified.certificate.poly.keyrings ?? { people: [], agents: [] });
     this.certified = opts.certified ?? new Map();
     this.certifiedFunctions = new Set([...this.certified.values()].flatMap((ns) => Object.values(ns).filter((v) => typeof v === 'function')));
@@ -228,7 +233,8 @@ export class PolyRuntime {
         const key = row.instance_id.slice(m[1].length + 1, -suffix.length);
         const p = (row.payload ?? {}) as { kind?: unknown };
         // Ruled on step 9: keyed by the store's key, so the journaled proposal cannot be inverted to the address.
-        const recipient = opts.fault === 'unkeyed-recipient' ? `sha256:${createHash('sha256').update(`${d.kind}:${key}`).digest('hex')}` : store.recipientDigest(`${d.kind}:${key}`);
+        // The seeded control hashes the address itself, which the key is the keyed digest of (S191).
+        const recipient = opts.fault === 'unkeyed-recipient' ? `sha256:${createHash('sha256').update(`${d.kind}:${this.addressOf(key) ?? key}`).digest('hex')}` : store.recipientDigest(`${d.kind}:${key}`);
         return { name: m[1], kind: d.kind, recipient, recipientClass: 'external', ...(typeof p.kind === 'string' ? { messageKind: p.kind } : {}) };
       },
       workOrder: (row) => {
@@ -400,7 +406,10 @@ export class PolyRuntime {
     for (const r of v.receipts) await this.ingressRecord(channel, { stage: 'receipt', outcome: 'recorded', provider: adapter.provider, providerId: r.providerId, status: r.status, ...(r.error ? { reason: r.error } : {}) });
     for (const m of v.messages) {
       const content = await this.putContent(m.body);
-      await this.ingressRecord(channel, { stage: 'claims', outcome: m.claims.verified ? 'verified' : 'unverified', provider: adapter.provider, messageId: m.providerMessageId, claims: m.claims });
+      // S191: the sender the adapter verified is an address, journaled by its keyed digest.
+      let sender = m.claims.sender;
+      if (this.#fault !== 'address-in-clear') await this.store.txn(() => { sender = this.store.keepAddress(m.claims.sender); });
+      await this.ingressRecord(channel, { stage: 'claims', outcome: m.claims.verified ? 'verified' : 'unverified', provider: adapter.provider, messageId: m.providerMessageId, claims: { ...m.claims, sender } });
       // K11, PT21.4: the adapter's claims, typed as std's Sender (verified is Verified or Unverified).
       await this.#deliver(channel, { ...m.fields, body: content }, m.providerMessageId, { verified: m.claims.verified ? 'Verified' : 'Unverified' });
     }
@@ -424,7 +433,16 @@ export class PolyRuntime {
     // The thread key is a checked string, used only as a key: each field the template reads is a string the
     // conversation's Inbound declares, and its value is in its domain (checked above).
     const key = d.thread.template.replace(/\{([^}]*)\}/g, (_, f: string) => String(fields[f]));
-    application = `${channel}:${key}`;
+    // S191, S205 (PS15.4): the key and each field it reads are addresses, kept in the erasable store; the instance is
+    // named, and the message delivered, with their keyed digests. The fault address-in-clear is the scan's control.
+    if (this.#fault === 'address-in-clear') application = `${channel}:${key}`;
+    else {
+      application = await this.threadId(channel, key);
+      const read = new Set([...d.thread.template.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]));
+      const keyed: Record<string, unknown> = { ...fields };
+      await this.store.txn(() => { for (const f of read) keyed[f] = this.store.keepAddress(String(fields[f])); });
+      fields = keyed;
+    }
     conversation = `${application}/${channel}`;
     if (!(await this.store.getInstance(application))) {
       if (!d.starts.onInbound) return refuse('unknown-thread');
@@ -442,6 +460,39 @@ export class PolyRuntime {
     this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
     await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread: application, messageId, outcome: 'delivered' }, this.now()); });
     return { outcome: 'delivered', application, conversation };
+  }
+
+  /**
+   * S191, S205 (PS15.4): the application instance a thread key names, `<channel>:<keyed digest of the key>`, with the
+   * key kept in the erasable store. A host that creates a thread itself names it with this.
+   */
+  async threadId(channel: string, key: string): Promise<string> {
+    if (!this.verified.channels.some((c) => c.channel === channel)) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
+    let d = '';
+    await this.store.txn(() => { d = this.store.keepAddress(key); });
+    return `${channel}:${d}`;
+  }
+
+  /** S191: the address a keyed digest names in the erasable store, or null when it is unknown or erased. */
+  addressOf(d: string): string | null {
+    if (!d.startsWith('hmac-sha256:')) return null;
+    const r = this.store.db.prepare('SELECT body FROM poly_content WHERE digest = ?').get(d) as { body: string } | undefined;
+    return r ? (JSON.parse(r.body) as string) : null;
+  }
+
+  /**
+   * S205 (PS3.2): erases a body or an address: the body is deleted, its digest kept with an erasure record journaled on
+   * runtime:content, and it is never stored again. The records the journal and the ledger keep by digest are refused.
+   */
+  async erase(d: string): Promise<void> {
+    if (this.store.erased(d)) return;
+    if (!this.store.db.prepare('SELECT 1 FROM poly_erasable WHERE digest = ?').get(d)) throw new Error(`${d} is not erasable: only bodies and addresses are (S205)`);
+    this.store.ensureRun(CONTENT_RUN, 'runtime', 'content');
+    await this.store.txn(() => {
+      this.store.db.prepare('DELETE FROM poly_content WHERE digest = ?').run(d);
+      this.store.db.prepare('INSERT OR IGNORE INTO poly_erased (digest, at) VALUES (?, ?)').run(d, this.now());
+      this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'erasure', digest: d }, this.now());
+    });
   }
 
   /**
@@ -499,7 +550,10 @@ export class PolyRuntime {
       // The conversation is <channel>:<key>/<channel>, and its thread's recipient is the key (PS15.4).
       const suffix = `/${channel}`;
       if (!ctx.instanceId.startsWith(`${channel}:`) || !ctx.instanceId.endsWith(suffix)) throw Object.assign(new Error(`${ctx.instanceId} is no conversation of channel ${channel}`), { permanent: true });
-      const to = ctx.instanceId.slice(channel.length + 1, -suffix.length);
+      // S191: the recipient is read from the erasable store by the thread's keyed digest; an erased one is not sent to.
+      const key = ctx.instanceId.slice(channel.length + 1, -suffix.length);
+      const to = this.addressOf(key);
+      if (to === null) throw Object.assign(new Error(`the recipient of ${ctx.instanceId} is not in the content store: unknown or erased (S205)`), { permanent: true });
       const p = (payload ?? {}) as { body?: unknown; kind?: unknown };
       const body = typeof p.body === 'string' ? await this.contentBody(p.body) : '';
       if (body === null) throw Object.assign(new Error(`the body ${String(p.body)} is not in the content store`), { permanent: true });
@@ -762,7 +816,8 @@ export class PolyRuntime {
     // bytes of its own (each becomes U+FFFD), so two such bodies would share a digest; it is refused.
     if (typeof body !== 'string' || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(body)) throw new TypeError('putContent: a body is a well-formed string, with no lone surrogate (PS1.4a)');
     const d = `sha256:${createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex')}`;
-    await this.store.txn(() => { this.store.db.prepare('INSERT OR IGNORE INTO poly_content (digest, body) VALUES (?, ?)').run(d, JSON.stringify(body)); });
+    // S205: a body is erasable, and an erased one is not stored again.
+    await this.store.txn(() => { this.store.keepErasable(d, body); });
     return d;
   }
 

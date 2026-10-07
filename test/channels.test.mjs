@@ -117,14 +117,15 @@ test('PS15.4: inbound on an unknown thread creates the application, takes starts
   try {
     const body = await rt.putContent('where is my order');
     const r = await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-1' });
-    assert.deepEqual([r.outcome, r.application, r.conversation], ['delivered', 'support:alice', 'support:alice/support']);
-    assert.deepEqual((await rt.getJournal('support:alice')).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Start', 'accepted']]);
-    assert.deepEqual((await rt.getJournal('support:alice/support')).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Inbound', 'accepted']]);
+    const alice = await rt.threadId('support', 'alice');
+    assert.deepEqual([r.outcome, r.application, r.conversation], ['delivered', alice, `${alice}/support`]);
+    assert.deepEqual((await rt.getJournal(alice)).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Start', 'accepted']]);
+    assert.deepEqual((await rt.getJournal(`${alice}/support`)).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Inbound', 'accepted']]);
     // A redelivered message is one step (PF8.2).
     await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-1' });
-    assert.equal((await rt.getJournal('support:alice/support')).filter((j) => j.action === 'Inbound').length, 1);
+    assert.equal((await rt.getJournal(`${alice}/support`)).filter((j) => j.action === 'Inbound').length, 1);
     await rt.advance();
-    assert.ok((await rt.getJournal('support:alice')).some((j) => j.action === 'Got' && j.step_kind === 'accepted'));
+    assert.ok((await rt.getJournal(alice)).some((j) => j.action === 'Got' && j.step_kind === 'accepted'));
   } finally { await rt.close(); }
 });
 
@@ -135,7 +136,7 @@ test('PS15.4: without creation declared, an inbound message for an unknown threa
     const body = await rt.putContent('hello');
     const r = await rt.inbound('support', { from: 'bob', body }, { messageId: 'm-2' });
     assert.deepEqual([r.outcome, r.reason], ['refused', 'unknown-thread']);
-    assert.deepEqual(await rt.getJournal('support:bob'), []);
+    assert.deepEqual(await rt.getJournal(await rt.threadId('support', 'bob')), []);
     assert.deepEqual(await ingress(rt), [['refused', 'unknown-thread']]);
   } finally { await rt.close(); }
 });
@@ -157,9 +158,9 @@ test('PS15.4: a refused starts refuses the inbound message, thread-not-started',
     assert.deepEqual([r.outcome, r.reason], ['refused', 'thread-not-started']);
     assert.deepEqual(await ingress(rt), [['refused', 'thread-not-started']]);
     // The creation and its rejected starts step are journaled; a later message on the thread is refused the same way.
-    assert.deepEqual((await rt.getJournal('support:alice')).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Start', 'rejected']]);
+    assert.deepEqual((await rt.getJournal(await rt.threadId('support', 'alice'))).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Start', 'rejected']]);
     assert.equal((await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-4' })).reason, 'thread-not-started');
-    assert.equal((await rt.getJournal('support:alice/support')).filter((j) => j.action === 'Inbound').length, 0);
+    assert.equal((await rt.getJournal(`${await rt.threadId('support', 'alice')}/support`)).filter((j) => j.action === 'Inbound').length, 0);
   } finally { await rt.close(); }
 });
 
@@ -183,7 +184,7 @@ test('PS15.4, E13: until the kernel can create an instance, an inbound message t
     const body = await rt.putContent('hello');
     const r = await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-5' });
     assert.deepEqual([r.outcome, r.reason], ['refused', 'creation-unavailable']);
-    assert.deepEqual(await rt.getJournal('support:alice'), []);
+    assert.deepEqual(await rt.getJournal(await rt.threadId('support', 'alice')), []);
     assert.deepEqual(await ingress(rt), [['refused', 'creation-unavailable']]);
   } finally { await rt.close(); }
 });
@@ -212,7 +213,7 @@ test('PS15.4: a thread whose starts never ran has no conversation and stays dead
   const { rt } = await loaded(a, { std: STD });
   try {
     // The host creates the application with no creation action, so starts never runs and no conversation exists.
-    await rt.create('concierge.Ticket', { id: 'support:bob' });
+    await rt.create('concierge.Ticket', { id: await rt.threadId('support', 'bob') });
     const body = await rt.putContent('hello');
     for (const id of ['m-6', 'm-7']) assert.equal((await rt.inbound('support', { from: 'bob', body }, { messageId: id })).reason, 'thread-not-started');
     assert.deepEqual(await ingress(rt), [['refused', 'thread-not-started'], ['refused', 'thread-not-started']]);

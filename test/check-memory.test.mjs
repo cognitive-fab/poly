@@ -18,9 +18,11 @@ test('M6 step 1: checking one unchanged file 60 times keeps no memory per check'
     const r = spawnSync(process.execPath, ['--expose-gc', join(ROOT, 'scripts', 'measure-check-repeat.mjs'), join(ROOT, 'conformance', 'm5', 'refund.poly'), '60', out], { cwd: ROOT, encoding: 'utf8', timeout: 540_000 });
     assert.equal(r.status, 0, r.stderr);
     const rows = readFileSync(out, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    const grew = rows[60].heapMB - rows[10].heapMB;
-    // 50 checks at the measured 23 KB each would keep about 1.1 MB.
-    assert.ok(grew < 0.3, `the collected heap grew ${grew.toFixed(1)} MB over checks 10 to 60`);
+    // M9 step 9: the warm-up now lasts past check 10 (measured: 37.3 MB at check 10, 37.7 at 20, 37.6 at 60, 37.9 at 160,
+    // so about 1.4 KB per check after check 20, against the 23 KB per check of the M5 finding), so the window starts at 20.
+    const grew = rows[60].heapMB - rows[20].heapMB;
+    // 40 checks at the measured 23 KB each would keep about 0.9 MB.
+    assert.ok(grew < 0.3, `the collected heap grew ${grew.toFixed(1)} MB over checks 20 to 60`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

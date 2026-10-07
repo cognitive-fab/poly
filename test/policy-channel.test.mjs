@@ -183,12 +183,13 @@ test('PT25.1, AC17 in part: a channel send carries the field `channel`, and a po
     const sent = [];
     const cfg = { appSecret: 'a', accessToken: 'b', phoneNumberId: '106540352242922', verifyToken: 'c', apiVersion: 'v23.0' };
     rt.connectChannel('support', whatsapp(cfg), { http: { async request(q) { sent.push(q); return { status: 200, headers: {}, body: JSON.stringify({ messages: [{ id: 'wamid.1' }] }) }; } } });
-    await rt.create('desk.Agent', { id: 'support:wa-1' });
-    await rt.create('desk.support.Conversation', { id: 'support:wa-1/support', creation: { action: 'Open', data: { app: 'support:wa-1' } } });
+    const app = await rt.threadId('support', 'wa-1');
+    await rt.create('desk.Agent', { id: app });
+    await rt.create('desk.support.Conversation', { id: `${app}/support`, creation: { action: 'Open', data: { app } } });
     // A customer's message opens the window; the agent's free-form answer is proposed with its channel, and denied.
     await rt.receive('support', waMessage('wa-1', 'm-hello', 'Hello'));
     await rt.advance();
-    const verdicts = (await rt.chain('support:wa-1/support')).filter((e) => e.kind === 'verdict').map((e) => e.body);
+    const verdicts = (await rt.chain(`${app}/support`)).filter((e) => e.kind === 'verdict').map((e) => e.body);
     const denied = verdicts.find((b) => b.outcome === 'denied');
     assert.ok(denied && /no-free-form/.test(denied.reason), JSON.stringify(verdicts));
     assert.equal(sent.length, 0, 'the denied reply never reaches the provider');
@@ -248,13 +249,14 @@ async function denials(a, r, extra = {}, times = 1) {
   const { rt } = await loaded({ build: join(a.dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [a.key.id]: a.key.publicKey } }, extra);
   const cfg = { appSecret: 'a', accessToken: 'b', phoneNumberId: '106540352242922', verifyToken: 'c', apiVersion: 'v23.0' };
   rt.connectChannel('support', whatsapp(cfg), { http: { async request() { return { status: 200, headers: {}, body: JSON.stringify({ messages: [{ id: 'wamid.1' }] }) }; } } });
-  await rt.create('desk.Agent', { id: 'support:wa-1' });
-  await rt.create('desk.support.Conversation', { id: 'support:wa-1/support', creation: { action: 'Open', data: { app: 'support:wa-1' } } });
+  const app = await rt.threadId('support', 'wa-1');
+  await rt.create('desk.Agent', { id: app });
+  await rt.create('desk.support.Conversation', { id: `${app}/support`, creation: { action: 'Open', data: { app } } });
   for (let i = 0; i < times; i++) {
     await rt.receive('support', waMessage('wa-1', `m-${i}`, `Hello ${i}`));
     await rt.advance();
   }
-  const denied = (await rt.chain('support:wa-1/support')).filter((e) => e.kind === 'verdict' && e.body.outcome === 'denied').map((e) => e.body);
+  const denied = (await rt.chain(`${app}/support`)).filter((e) => e.kind === 'verdict' && e.body.outcome === 'denied').map((e) => e.body);
   const actions = await Promise.all(denied.map((b) => rt.store.body(b.action)));
   const ledger = rt.store.db.prepare('SELECT event FROM poly_ledger').all().map((x) => x.event).join('\n');
   const content = rt.store.db.prepare('SELECT body FROM poly_content').all().map((x) => x.body).join('\n');

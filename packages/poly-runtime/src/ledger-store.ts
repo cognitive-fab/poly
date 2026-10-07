@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS poly_ingress_nonce (
   until   INTEGER NOT NULL,
   PRIMARY KEY (channel, nonce)
 );
+CREATE TABLE IF NOT EXISTS poly_erasable (
+  digest TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS poly_erased (
+  digest TEXT PRIMARY KEY,
+  at     INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS poly_store_key (
   id  INTEGER PRIMARY KEY CHECK (id = 1),
   key BLOB NOT NULL
@@ -192,6 +199,27 @@ export class LedgerStore extends Store {
   recipientDigest(text: string): string {
     const k = this.db.prepare('SELECT key FROM poly_store_key WHERE id = 1').get() as { key: Uint8Array };
     return `hmac-sha256:${createHmac('sha256', Buffer.from(k.key)).update(text, 'utf8').digest('hex')}`;
+  }
+
+  /** S205: whether a body or an address was erased; an erased one is never stored again. */
+  erased(d: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM poly_erased WHERE digest = ?').get(d);
+  }
+
+  /** S205: a body or an address kept in the erasable store under its digest. Called inside a transaction. */
+  keepErasable(d: string, body: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO poly_erasable (digest) VALUES (?)').run(d);
+    if (!this.erased(d)) this.db.prepare('INSERT OR IGNORE INTO poly_content (digest, body) VALUES (?, ?)').run(d, JSON.stringify(body));
+  }
+
+  /**
+   * S191, S205 (PS15.4): an address, kept in the erasable store under its keyed digest, which is returned and is all the
+   * journal ever holds of it. Called inside a transaction.
+   */
+  keepAddress(text: string): string {
+    const d = this.recipientDigest(text);
+    this.keepErasable(d, text);
+    return d;
   }
 
   /** The digest of a body, stored in the content store under it. Called inside a transaction. */

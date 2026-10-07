@@ -49,7 +49,7 @@ test('AC17, the real path: a first WhatsApp message creates the thread, and its 
   try {
     await handle('support', whatsappWebhook(cfg.wa, recorded('whatsapp/message.json')));
     await rt.advance();
-    assert.equal((await escalated(rt, `support:${WA_FROM}/support`)).length, 1);
+    assert.equal((await escalated(rt, `${await rt.threadId('support', WA_FROM)}/support`)).length, 1);
     assert.equal(sent.support.length, 0);
   } finally { await rt.close(); }
 });

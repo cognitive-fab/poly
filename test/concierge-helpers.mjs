@@ -42,9 +42,12 @@ export async function concierge(name) {
   return { a, rt, clock, cfg, sent, handle };
 }
 
-/** As the spawn of starts would: the application at `<channel>:<key>`, its conversation at `<channel>:<key>/<channel>`. */
+/**
+ * As the spawn of starts would: the application at the thread's id, `<channel>:<keyed digest of the key>` (S191), its
+ * conversation at `<id>/<channel>`.
+ */
 export async function thread(rt, channel, machine, key) {
-  const app = `${channel}:${key}`;
+  const app = await rt.threadId(channel, key);
   await rt.create(`concierge.${machine}`, { id: app });
   await rt.create(`concierge.${channel}.Conversation`, { id: `${app}/${channel}`, creation: { action: 'Open', data: { app } } });
   return { app, conv: `${app}/${channel}` };

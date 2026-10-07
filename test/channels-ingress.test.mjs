@@ -51,7 +51,7 @@ test('AC14, the real path: a first WhatsApp message on an unknown thread, delive
     const w = whatsappWebhook(cfg.wa, recorded('whatsapp/message.json'));
     await handle('support', w);
     await handle('support', w);
-    assert.equal((await accepted(rt, `support:${WA_FROM}/support`, 'Inbound')).length, 1);
+    assert.equal((await accepted(rt, `${await rt.threadId('support', WA_FROM)}/support`, 'Inbound')).length, 1);
   } finally { await rt.close(); }
 });
 
@@ -60,7 +60,8 @@ test('AC14, the real path: a first SMS from an unverified sender creates the thr
   try {
     await handle('text', smsWebhook(cfg.tw, 'Hello'));
     await rt.advance();
-    const [got] = await accepted(rt, `text:${SMS_FROM}`, 'Got');
-    assert.deepEqual(rt.lineageOf(`text:${SMS_FROM}`, got.seq).origin, { verified: 'Unverified' });
+    const app = await rt.threadId('text', SMS_FROM);
+    const [got] = await accepted(rt, app, 'Got');
+    assert.deepEqual(rt.lineageOf(app, got.seq).origin, { verified: 'Unverified' });
   } finally { await rt.close(); }
 });
