@@ -43,6 +43,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly bench gate [--sizes 1,8,64] [--out <file>]
        poly journal eval --db <store> --decision <d> --candidate <provider module>
        poly journal fit --db <store> --decision <d> --model <id> [--version <n>] [--out <file>]
+       poly cost --db <store> [--run <id>] [--scope <module>] [--period YYYY-MM-DD | YYYY-MM] [--prices <file>]
 
   check    Parses, types and lowers each module; runs strict validate(), translation
            validation (poly-ref), polygraph's model check and poly-ref's deadlock, liveness,
@@ -98,6 +99,12 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
     return { name: 'witness', input: { id: a, kind: trace ? 'trace' : 'test', root, out } };
   }
   if (cmd === 'lint' && a === 'handlers' && positional.length <= 3) return { name: 'lint', input: { project: b } };
+  // PT24.4: poly cost --db <store> [--run r] [--scope s] [--period p] [--prices file].
+  if (cmd === 'cost' && positional.length === 1) {
+    const db = option(args, '--db');
+    if (!db) throw new UsageError('cost needs --db <store>');
+    return { name: 'cost', input: { db, ...Object.fromEntries(['run', 'scope', 'period', 'prices'].flatMap((k) => { const v = option(args, `--${k}`); return v ? [[k, v]] : []; })) } };
+  }
   if (cmd === 'journal' && positional.length >= 2) return { name: 'journal', input: { sub: a, args: args.slice(args.indexOf(a) + 1) } };
   if ((cmd === 'approve' || cmd === 'accept') && positional.length === 2) {
     const by = option(args, '--by');
@@ -174,7 +181,7 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();

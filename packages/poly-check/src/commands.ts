@@ -25,6 +25,7 @@ import { journalCommand } from './journal.js';
 import { benchGate } from './bench.js';
 import { checkHost, type HostCheck } from './host.js';
 import { editCheck } from './edit-check.js';
+import { costCalls, costReport, readPriceTable } from './cost.js';
 
 /** A JSON Schema, in the subset the published schemas use: type, properties, required, items, enum, description. */
 export type Schema = { type?: string | string[]; description?: string; properties?: Record<string, Schema>; required?: string[]; items?: Schema; enum?: unknown[]; additionalProperties?: boolean | Schema };
@@ -387,6 +388,24 @@ export const COMMANDS: Command[] = [
       const files = (t.files ?? []).map((f) => ({ path: fill(f.path), content: fill(JSON.stringify(f.json, null, 2)) + '\n' }));
       const notes = (t.notes ?? []).map(fill);
       return { exit: EXIT_CODES.CLEAN, result: { host, description: t.description ?? '', files, notes }, text: `${files.map((f) => `── ${f.path}\n${f.content}`).join('')}${notes.map((n) => `  ${n}\n`).join('')}` };
+    },
+  },
+  {
+    name: 'cost', mcp: 'poly_cost', lsp: false,
+    summary: 'Cost per run, per scope and per day, summed from the ledger alone with no provider call; with prices, the calls of that table\'s model priced again under it, by its digest (PT24.4, PS18.6).',
+    input: obj({ db: str('the store'), run: str('only this run'), scope: str('only this trust scope'), period: str('only this UTC day, YYYY-MM-DD, or month, YYYY-MM'), prices: str('a price table to price the calls of its model again under') }, ['db']),
+    output: obj({ calls: { type: 'integer' }, total: { type: 'object', description: 'micro-units per currency' }, byRun: { type: 'object' }, byScope: { type: 'object' }, byDay: { type: 'object' }, repriced: { type: 'object', description: 'the prices\' digest, the model, the calls priced again and their total' } }, ['calls', 'total', 'byRun', 'byScope', 'byDay']),
+    async run(input) {
+      // The runtime is loaded only here, as for the journal, so poly check runs without it.
+      const { openJournal } = await import('@poly/runtime');
+      const store = openJournal(need(input, 'db'));
+      try {
+        const calls = await costCalls(store, { run: opt(input, 'run'), scope: opt(input, 'scope'), period: opt(input, 'period') });
+        const prices = opt(input, 'prices');
+        const report = costReport(calls, prices ? readPriceTable(prices) : undefined);
+        const lines = [`${report.calls} call${report.calls === 1 ? '' : 's'}`, ...Object.entries(report.total).map(([c, v]) => `total ${(v / 1_000_000).toFixed(6)} ${c}`), ...(report.repriced ? Object.entries(report.repriced.total).map(([c, v]) => `priced again under ${report.repriced!.prices}: ${(v / 1_000_000).toFixed(6)} ${c} over ${report.repriced!.calls} call(s) of ${report.repriced!.model}`) : [])];
+        return { exit: EXIT_CODES.CLEAN, result: report as unknown as Record<string, unknown>, text: lines.join('\n') + '\n' };
+      } finally { await store.close(); }
     },
   },
   {

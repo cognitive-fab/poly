@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "properties": {
+    "calls": {
+      "type": "integer"
+    },
+    "total": {
+      "type": "object",
+      "description": "micro-units per currency"
+    },
+    "byRun": {
+      "type": "object"
+    },
+    "byScope": {
+      "type": "object"
+    },
+    "byDay": {
+      "type": "object"
+    },
+    "repriced": {
+      "type": "object",
+      "description": "the prices' digest, the model, the calls priced again and their total"
+    }
+  },
+  "required": [
+    "calls",
+    "total",
+    "byRun",
+    "byScope",
+    "byDay"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "db": {
+      "type": "string",
+      "description": "the store"
+    },
+    "run": {
+      "type": "string",
+      "description": "only this run"
+    },
+    "scope": {
+      "type": "string",
+      "description": "only this trust scope"
+    },
+    "period": {
+      "type": "string",
+      "description": "only this UTC day, YYYY-MM-DD, or month, YYYY-MM"
+    },
+    "prices": {
+      "type": "string",
+      "description": "a price table to price the calls of its model again under"
+    }
+  },
+  "required": [
+    "db"
+  ]
+}

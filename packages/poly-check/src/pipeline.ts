@@ -253,6 +253,10 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const routes = expandRoutes(original, uses.program);
   report.diagnostics.push(...routes.diagnostics);
   expansion.extra.push(...routes.extra);
+  // PS11.4, PS18.0: the std.routing a build's routes and budgets were made from, recorded with the build's type
+  // modules, so load binds its file and replay reads the module the build instantiated.
+  const routingLib = uses.program.find((m) => m.name === 'std.routing');
+  if (routes.extra.length && routingLib && uses.files.get('std.routing')) routingLibs.set(report, { file: uses.files.get('std.routing')!, digest: digest(routingLib) });
   const module = expansion.module;
   const program = [...uses.program.filter((m) => m !== original), module, ...expansion.extra];
   // PT10e: the profiles of the providers the program's credentials name, under the same std as its modules.
@@ -968,6 +972,8 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
 
 /** S190: the files of the modules a report's check used, so that finish can record those whose types a build used. */
 const usesFiles = new WeakMap<CheckReport, Map<string, string>>();
+/** PS18.0: the std.routing a report's routes and budgets were instantiated from. */
+const routingLibs = new WeakMap<CheckReport, { file: string; digest: string }>();
 
 function finish(report: CheckReport, module?: Module): CheckReport {
   // S190: the modules whose enums a machine's build uses, from each contract, with the file each was read from.
@@ -979,6 +985,8 @@ function finish(report: CheckReport, module?: Module): CheckReport {
       if (file) (report.typeModules ??= {})[mod] = { file, digest: d };
     }
   }
+  const lib = routingLibs.get(report);
+  if (lib && report.machines.some((m) => m.buildDir)) (report.typeModules ??= {})['std.routing'] = lib;
   // S69, S86: a witness id is the digest of { moduleDigest, subject, property, trace }, the subject being the
   // machine or configuration it is about, so the same trace in another version of the module, or in another
   // machine with the same defect, is another witness.

@@ -15,6 +15,7 @@ import type { PolyRuntime } from '@poly/runtime';
 import type * as A from '@poly/core';
 import { buildMachine, initialState, transition, flatten, alpha, alphaData, type State } from '@poly/ref';
 import { replaySpecResults } from '@cognitive-fab/polygraph/scripts/replay.mjs';
+import { STD as STD_ROOT } from './uses.js';
 
 export interface JournalRowLike {
   seq: number;
@@ -48,9 +49,10 @@ export interface RunReplay {
 const same = (a: unknown, b: unknown) => canonicalize(a) === canonicalize(b);
 const KERNEL_ROWS = new Set(['$create', '$undeliverable', '$migrate']);
 
-export function replayRun(module: A.Module, machineId: string, instanceId: string, rows: JournalRowLike[], opts: { modulePath?: string; snapshot?: Record<string, unknown> | null; gate?: GateDecisionLike[]; erased?: Map<string, string | null> } = {}): RunReplay {
+export function replayRun(module: A.Module, machineId: string, instanceId: string, rows: JournalRowLike[], opts: { modulePath?: string; snapshot?: Record<string, unknown> | null; gate?: GateDecisionLike[]; erased?: Map<string, string | null>; program?: A.Module[] } = {}): RunReplay {
   const machineName = machineId.slice(machineId.indexOf('.') + 1);
-  const M = buildMachine(module, machineName);
+  // PS18.0: a route's or a budget's machine is read by poly-ref from the source and the std module it instantiates.
+  const M = buildMachine(module, machineName, opts.program ? { program: opts.program } : {});
   const at = { module: module.name, machine: machineName };
   const out: Diagnostic[] = [];
   const diverge = (seq: number, message: string) => out.push(diag('PL9001', at, `run ${instanceId}, seq ${seq}: ${message}`));
@@ -138,6 +140,17 @@ export async function replaySessions(rt: PolyRuntime): Promise<{ session: string
 /** Every run a runtime's store holds, replayed: its journal, its snapshot, and the certified module it ran. */
 export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } = {}): Promise<RunReplay[]> {
   const modules = certifiedModules(rt.root, rt.certificate.poly.sources);
+  // PS18.0, S190: the std modules the build was made from, each read from std and checked against the certificate.
+  const std: A.Module[] = [];
+  for (const [name, x] of Object.entries(rt.certificate.poly.typeModules ?? {})) {
+    if (!name.startsWith('std.') || !x.path.startsWith('std:')) continue;
+    const file = join(STD_ROOT, x.path.slice(4));
+    const bytes = readFileSync(file);
+    if (sha256OfBytes(bytes) !== x.file) throw new Error(`${x.path}: the std module changed since certification (certified ${x.file}, found ${sha256OfBytes(bytes)})`);
+    const m = parse(bytes.toString('utf8')).module;
+    if (m) std.push(m);
+  }
+  const program = [...modules.values(), ...std];
   const instances = await rt.instances();
   const out: RunReplay[] = [];
   // Review B7: an archived run has no journal to fold; it is listed as not replayed, never skipped.
@@ -159,7 +172,7 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
     }
     const module = modules.get(inst.machineId.slice(0, inst.machineId.indexOf('.')));
     if (!module) throw new Error(`${inst.id}: machine ${inst.machineId} is not in the certified sources`);
-    const r = replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id), erased: rt.forgottenBodies() });
+    const r = replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id), erased: rt.forgottenBodies(), program });
     // PD5-A11: the claims and lineage digests each step event records are reproduced.
     for (const p of await rt.verifyAttribution(inst.id)) r.diagnostics.push(diag('PL9001', { machine: inst.machineId }, `run ${inst.id}: ${p}`));
     out.push(r);
