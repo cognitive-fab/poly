@@ -64,16 +64,12 @@ test('S191, S205: a channel\'s address is kept only in the erasable store, under
   const CANARY = 'canary-addr-7f3a9c41@example.test';
   try {
     const body = await rt.putContent('where is my order');
-    // An unknown thread, refused before the kernel (E13), journaled on runtime:ingress by its keyed digest.
-    const refused = await rt.inbound('support', { from: CANARY, body }, { messageId: 'm-1' });
+    // An unknown thread: since E13 the message creates the application at its keyed id, takes starts, spawns the
+    // conversation and is delivered (PS15.4), each step journaled with the keyed digest.
+    const r = await rt.inbound('support', { from: CANARY, body }, { messageId: 'm-1' });
     const app = await rt.threadId('support', CANARY);
     assert.match(app, /^support:hmac-sha256:[0-9a-f]{64}$/);
-    assert.equal(refused.application, app);
-    // As the spawn of starts would (until E13): the application and its conversation, at the thread's keyed id.
-    await rt.create('concierge.Ticket', { id: app });
-    await rt.create('concierge.support.Conversation', { id: `${app}/support`, creation: { action: 'Open', data: { app } } });
-    const r = await rt.inbound('support', { from: CANARY, body }, { messageId: 'm-2' });
-    assert.equal(r.outcome, 'delivered', JSON.stringify(r));
+    assert.deepEqual([r.outcome, r.application], ['delivered', app], JSON.stringify(r));
     const step = (await rt.getJournal(`${app}/support`)).find((j) => j.action === 'Inbound');
     assert.match(JSON.stringify(step), /hmac-sha256:/);
     const dataOf = typeof step.data === 'string' ? await rt.store.body(step.data) : step.data;

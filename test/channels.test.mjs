@@ -109,9 +109,9 @@ async function admitted(name, src) {
 }
 const ingress = async (rt) => (await rt.chain('runtime:ingress')).filter((e) => e.body?.stage === 'inbound').map((e) => [e.body.outcome, e.body.reason ?? null]);
 
-// E13: polyrun 8.3.2 has no createInstance intent, so a detached spawn does not run under the kernel; the conversation
-// cannot be created at run time until E13 is vendored. The path is written and waits, as E1's tests do.
-test('PS15.4: inbound on an unknown thread creates the application, takes starts with its spawn, then delivers to the conversation, each journaled', { timeout: 300_000, todo: 'waiting on E13 (polyrun createInstance): the kernel cannot spawn the conversation' }, async () => {
+// E13, vendored with polygraph 8.4.0: the kernel runs a detached spawn, so an inbound message on an unknown thread
+// creates the application, takes starts and spawns the conversation, in that order (PS15.4).
+test('PS15.4: inbound on an unknown thread creates the application, takes starts with its spawn, then delivers to the conversation, each journaled', { timeout: 300_000 }, async () => {
   const { a } = await admitted('channels-inbound', SRC);
   const { rt } = await loaded(a, { std: STD });
   try {
@@ -120,7 +120,8 @@ test('PS15.4: inbound on an unknown thread creates the application, takes starts
     const alice = await rt.threadId('support', 'alice');
     assert.deepEqual([r.outcome, r.application, r.conversation], ['delivered', alice, `${alice}/support`]);
     assert.deepEqual((await rt.getJournal(alice)).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Start', 'accepted']]);
-    assert.deepEqual((await rt.getJournal(`${alice}/support`)).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Inbound', 'accepted']]);
+    // The conversation's $create, then its creation action Open(app: self), then the message (plan-m8.md, E13 item 5).
+    assert.deepEqual((await rt.getJournal(`${alice}/support`)).map((j) => [j.action, j.step_kind]), [['$create', 'accepted'], ['Open', 'accepted'], ['Inbound', 'accepted']]);
     // A redelivered message is one step (PF8.2).
     await rt.inbound('support', { from: 'alice', body }, { messageId: 'm-1' });
     assert.equal((await rt.getJournal(`${alice}/support`)).filter((j) => j.action === 'Inbound').length, 1);
@@ -141,7 +142,7 @@ test('PS15.4: without creation declared, an inbound message for an unknown threa
   } finally { await rt.close(); }
 });
 
-test('PS15.4: a refused starts refuses the inbound message, thread-not-started', { timeout: 300_000, todo: 'waiting on E13 (polyrun createInstance): until then a creation is refused creation-unavailable before starts runs' }, async () => {
+test('PS15.4: a refused starts refuses the inbound message, thread-not-started', { timeout: 300_000 }, async () => {
   // Start is rejected until Enable has run, which an inbound message never does; Ticket is a service, so the check does
   // not call it stuck.
   let src = swap(SRC, 'machine Ticket {', 'service machine Ticket {');

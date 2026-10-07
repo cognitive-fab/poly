@@ -9,7 +9,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path';
 import { checkFile } from '@poly/check';
 import { ROOT } from './helpers.mjs';
-import { SKIP, E13, concierge, thread, recorded, whatsappWebhook, smsWebhook, WA_FROM, SMS_FROM, accepted } from './concierge-helpers.mjs';
+import { SKIP, concierge, thread, recorded, whatsappWebhook, smsWebhook, WA_FROM, SMS_FROM, accepted } from './concierge-helpers.mjs';
 
 const DAY = 24 * 3_600_000;
 const rejections = async (rt, app) => (await accepted(rt, app, 'SendRejected')).map((j) => j.data.reason);
@@ -54,7 +54,7 @@ test('AC15: with the clock past the window, the free-form reply is refused, and 
   } finally { await rt.close(); }
 });
 
-test('AC15, the real path: the first message creates the thread, and a reply after the window is refused, window-closed', { skip: SKIP, todo: E13, timeout: 300_000 }, async () => {
+test('AC15, the real path: the first message creates the thread, and a reply after the window is refused, window-closed', { skip: SKIP, timeout: 300_000 }, async () => {
   const { rt, clock, cfg, sent, handle } = await concierge('ac15-real');
   try {
     await handle('support', whatsappWebhook(cfg.wa, recorded('whatsapp/message.json')));
@@ -105,7 +105,7 @@ test('AC16: after a STOP, replies to the number are refused, opted-out, and none
   } finally { await rt.close(); }
 });
 
-test('AC16, the real path: a first STOP creates the thread, and the reply to it is refused, opted-out', { skip: SKIP, todo: E13, timeout: 300_000 }, async () => {
+test('AC16, the real path: a first STOP creates the thread, and the reply to it is refused, opted-out', { skip: SKIP, timeout: 300_000 }, async () => {
   const { rt, cfg, sent, handle } = await concierge('ac16-real');
   try {
     await handle('text', smsWebhook(cfg.tw, 'STOP', 'SMstop'));

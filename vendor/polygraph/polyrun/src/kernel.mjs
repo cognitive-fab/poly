@@ -31,8 +31,8 @@ import { resolveFireAt } from './duration.mjs';
 // constants.mjs (store-free) so check-product.mjs, simulate.mjs, and
 // polyvers can share them without importing the kernel's sqlite-backed
 // module graph; re-exported here for kernel consumers.
-export { CREATE_ACTION, UNDELIVERABLE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
-import { CREATE_ACTION, UNDELIVERABLE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
+export { CREATE_ACTION, UNDELIVERABLE_ACTION, UNCREATABLE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
+import { CREATE_ACTION, UNDELIVERABLE_ACTION, UNCREATABLE_ACTION, MAX_CASCADE_DEPTH, sanitizeReplacer, isAcceptedClassification } from './constants.mjs';
 
 function isSamV2Module(mod) {
   return !!mod
@@ -515,6 +515,7 @@ export class Runtime {
     const timerRows = [];
     const cancelTimerKeys = [];
     const spawns = [];
+    const creations = [];
     const signals = [];
     // S78: the mapper reads the post-state as the acceptor wrote it; the commit resolves its address markers,
     // in the persisted state and in every intent.
@@ -555,6 +556,10 @@ export class Runtime {
             onParentTerminal: intent.onParentTerminal ?? null,
             creation: intent.creation ?? null,
           });
+        } else if (intent.kind === 'createInstance') {
+          // poly E13 (S60, S78): a detached spawn. Validated at commit, below, where a creation that cannot be taken
+          // is refused and journaled on this run instead of poisoning either instance (S83).
+          creations.push({ position: intents.indexOf(intent), machineId: intent.machineId, childKey: intent.childKey, creation: intent.creation ?? null });
         } else if (intent.kind === 'signalChild') {
           // FR-8.2: the parent may dispatch declared actions into a child; a
           // child that rejects it is journaled, not forced.
@@ -626,6 +631,31 @@ export class Runtime {
         onParentTerminal: spawn.onParentTerminal, childOfSeq: seq,
       }, now, depth, events);
       this.metrics.childrenSpawned += 1;
+    }
+    // ---- poly E13: detached instances, atomic with the parent's step and after its row ----
+    // Each is created in its initial state, with no parent link, then takes its creation action (a rejected one is
+    // the new instance's rejected row, as create() gives). One that cannot be taken is a rejected $uncreatable row on
+    // this run, after this step, that changes nothing; its action id dedupes a repeat, as $undeliverable's does.
+    let refusals = 0;
+    for (const c of creations) {
+      const id = typeof c.childKey === 'string' && c.childKey ? `${instanceId}/${c.childKey}` : null;
+      const target = this.machines.get(c.machineId);
+      const reason = !id ? 'createInstance: childKey is required'
+        : !target ? `createInstance: machine '${c.machineId}' is not registered`
+        : c.creation && typeof target.mod.actions[c.creation.action] !== 'function' ? `createInstance: creation action '${c.creation.action}' is not in machine '${c.machineId}'`
+        : (await this.store.getInstanceForUpdate(id)) ? `instance '${id}' exists`
+        : null;
+      if (reason === null) {
+        await this._createInTxn(c.machineId, id, c.creation ?? undefined, null, now, depth, events);
+        this.metrics.childrenSpawned += 1;
+        continue;
+      }
+      refusals += 1;
+      const aid = `${instanceId}:${seq}:${c.position}:uncreatable`;
+      const state = stepKind === 'accepted' ? post : pre;
+      const row = { action: UNCREATABLE_ACTION, data: { machineId: c.machineId ?? null, childKey: c.childKey ?? null, ...(id ? { id } : {}) }, pre: state, post: state, stepKind: 'rejected', rejectReason: reason, actionId: aid };
+      await this.store.commitStep({ instanceId, machineVersion: machine.version, seq: seq + refusals, journal: row, outboxRows: [], timerRows: [], cancelTimerKeys: [], cancelAllTimers: false, now });
+      events.push({ instanceId, machineId: inst.machine_id, seq: seq + refusals, action: UNCREATABLE_ACTION, data: row.data, stepKind: 'rejected', rejectReason: reason, pre: state, post: state, at: now });
     }
     for (const signal of signals) {
       const child = await this.store.findChild(instanceId, signal.childKey);

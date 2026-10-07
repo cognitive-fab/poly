@@ -4,7 +4,7 @@
 // application's step; a forged signature is refused at ingress, logged, and nothing is dispatched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SKIP, E13, concierge, thread, recorded, whatsappWebhook, smsWebhook, WA_FROM, SMS_FROM, accepted } from './concierge-helpers.mjs';
+import { SKIP, concierge, thread, recorded, whatsappWebhook, smsWebhook, WA_FROM, SMS_FROM, accepted } from './concierge-helpers.mjs';
 
 test('AC14: a recorded WhatsApp webhook delivered twice with one provider message id makes one step', { skip: SKIP, timeout: 300_000 }, async () => {
   const { rt, cfg, handle } = await concierge('ac14-twice');
@@ -45,7 +45,7 @@ test('AC14: a forged signature is refused at ingress and logged, and nothing is 
 });
 
 // The real path: the first message of a thread creates the application, takes starts with its spawn, and delivers.
-test('AC14, the real path: a first WhatsApp message on an unknown thread, delivered twice, creates the thread once and makes one Inbound step', { skip: SKIP, todo: E13, timeout: 300_000 }, async () => {
+test('AC14, the real path: a first WhatsApp message on an unknown thread, delivered twice, creates the thread once and makes one Inbound step', { skip: SKIP, timeout: 300_000 }, async () => {
   const { rt, cfg, handle } = await concierge('ac14-real-twice');
   try {
     const w = whatsappWebhook(cfg.wa, recorded('whatsapp/message.json'));
@@ -55,7 +55,7 @@ test('AC14, the real path: a first WhatsApp message on an unknown thread, delive
   } finally { await rt.close(); }
 });
 
-test('AC14, the real path: a first SMS from an unverified sender creates the thread, and the application\'s step carries verified false', { skip: SKIP, todo: E13, timeout: 300_000 }, async () => {
+test('AC14, the real path: a first SMS from an unverified sender creates the thread, and the application\'s step carries verified false', { skip: SKIP, timeout: 300_000 }, async () => {
   const { rt, cfg, handle } = await concierge('ac14-real-unverified');
   try {
     await handle('text', smsWebhook(cfg.tw, 'Hello'));

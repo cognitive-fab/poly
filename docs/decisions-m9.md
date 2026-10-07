@@ -303,6 +303,15 @@ Steps 1 to 11 were accepted, with one fix before step 12: no secret value lives 
 
 M9 now waits for E13: step 1 (re-vendor polyrun, the seven waiting tests) and step 12 (the record, the code review and the gate).
 
+## Step 1: polygraph 8.4.0 (E13) vendored (owner's acceptance, 2026-10-07)
+
+E13 was accepted on polygraph's branch `e13-create-instance` at 755ac09 (8.4.0), cut from `m3-sendto` at 4949de4.
+
+- **Vendored.** Each file of `vendor/polygraph/PROVENANCE.md` was read with `git show 755ac09:<path>` from polygraph's object store, so neither checkout's working tree was touched. Five files changed: `polyrun/src/check-effects.mjs`, `check-product.mjs`, `constants.mjs`, `index.mjs` and `kernel.mjs`; the closure is the same. The pins moved with it: `test/vendor.test.mjs`, `CLAUDE.md`, the two packages' dependency and the lockfile.
+- **The compiler.** `createInstance` is no longer an intent polyrun lacks, so a configuration with a detached spawn no longer notes it, and the witness runtime's comment says why it drives each instance as written.
+- **The seven E13 tests run and pass.** The `todo` marks are gone from the channel, ingress, WhatsApp and escalation tests, and their helpers no longer fake the spawn of starts. Five tests that recorded the life before E13 now record the life after it: the conversation's journal begins with `$create`; an unknown thread's first message is delivered (erasure, the std channels); a detached configuration no longer notes polyrun's missing intent; and the send records name `polyrun@8.4.0`. The std conversation's message through `rt.inbound` is refused `claims-unverified`, as review D-F4 (M8b) ruled for an Inbound with claims, and its conversation is created first.
+- **Checked.** The 159 measured files are identical to the measured verdicts as of S206. The full suite: 1,909 tests and one after the M3 runs, 1,904 pass, no failure, 2 skipped and 4 waiting (E1's tombstones, and the M3 runs' own); check-memory passed (`.poly/logs/45ffb10-2026-10-07T11-07-09-970Z-e13b.log`).
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.

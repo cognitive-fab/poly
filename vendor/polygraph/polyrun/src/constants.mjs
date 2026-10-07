@@ -17,6 +17,11 @@ export const CREATE_ACTION = '$create';
 // sender's run as a rejected row, never an accepted step, so replay and trace export skip it.
 export const UNDELIVERABLE_ACTION = '$undeliverable';
 
+// The synthetic journal action for a createInstance the kernel refused (poly E13, S83): the instance exists, or its
+// machine or creation action is not there. Journaled on the creating step's run as a rejected row that changes
+// nothing, after that step; never an accepted step, so replay and trace export skip it.
+export const UNCREATABLE_ACTION = '$uncreatable';
+
 // Which step classifications are ACCEPTED steps: every one except 'rejected'
 // and 'unhandled' ('mutated', 'identity-by-mutation', and sam-pattern 2.3.0's
 // 'unchanged', an explicitly framed step that writes nothing but may emit).

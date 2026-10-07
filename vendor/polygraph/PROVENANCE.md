@@ -1,10 +1,10 @@
 # polygraph, vendored
 
-The files of `@cognitive-fab/polygraph` 8.3.2 that poly imports, and nothing else, copied unchanged. poly relies on the Poly stack conceptually, not physically: the engines are read here, and a change an engine needs is made in its own repository and then copied in again.
+The files of `@cognitive-fab/polygraph` 8.4.0 that poly imports, and nothing else, copied unchanged. poly relies on the Poly stack conceptually, not physically: the engines are read here, and a change an engine needs is made in its own repository and then copied in again.
 
-- Source: `C:/Users/jjdub/code/polygraph`, branch `m3-sendto` (cut from `583b82c`), commit `4949de4` ("polyrun: messages between instances, and the K9 refusal"), not published and not yet merged into polygraph's main (S87). The branch carries the polyrun change of M3-2: `sendTo` messages between instances and the K9 refusal.
+- Source: `C:/Users/jjdub/code/polygraph`, branch `e13-create-instance` (cut from `4949de4` on `m3-sendto`), commit `755ac09` ("package-lock.json: 8.4.0"), accepted by the owner on 2026-10-07, not published and not yet merged into polygraph's main. The branch carries E13 (8ad0bc2, 98caeb7): polyrun's `createInstance` intent, a detached instance created atomically with the parent's step, refused as a journaled `$uncreatable` row and never poisoned (`plan-m8.md`, "E13 in detail"). Under it, `m3-sendto`'s change of M3-2: `sendTo` and the K9 refusal (S87). Re-vendored from 4949de4: five files changed (`polyrun/src/check-effects.mjs`, `check-product.mjs`, `constants.mjs`, `index.mjs`, `kernel.mjs`); the closure is the same.
 - Selection: the relative-import closure of the five entry points poly uses (`scripts/check.mjs`, `scripts/replay.mjs`, `polyrun/src/check-effects.mjs`, `polyrun/src/check-product.mjs`, `polyrun/src/index.mjs`), with `scripts/sam-tv.mjs`, which `replay.mjs` runs as a child process. `store-pg.mjs` requires `pg` only when a Postgres store is asked for; poly never asks.
-- Each file is taken from the commit with `git show 4949de4:<path>`, so uncommitted work in that checkout is not included.
+- Each file is taken from the commit with `git show 755ac09:<path>`, read from the main checkout's object store, so neither that checkout's working tree nor its uncommitted work is touched or included.
 - Licence: Apache-2.0, in `LICENSE`.
 - `package.json` is written for poly (name, version, module type) and is not a copy.
 
@@ -13,12 +13,12 @@ The files of `@cognitive-fab/polygraph` 8.3.2 that poly imports, and nothing els
 | File | sha256 |
 |---|---|
 | `LICENSE` | `71436dfeb742f9358c98a81da67d39d6c64a02964bfeeafdd399ed52c2583634` |
-| `polyrun/src/check-effects.mjs` | `ebe42031d565284af684c34a4a549256149f6d774aec1416eb5c1b2e55b7dfa8` |
-| `polyrun/src/check-product.mjs` | `1352acea9bf5691c4bb94cebe8a881623d225086a3c8e052803bea355ab10e8e` |
-| `polyrun/src/constants.mjs` | `d28bbd5ace3438d39663245f53b7d58764c237a353cc9ef0cea71f419393325b` |
+| `polyrun/src/check-effects.mjs` | `37ac2b21f7ade230529d679ce21569526e9701217fb7a8269cda8694259bd6ed` |
+| `polyrun/src/check-product.mjs` | `1f780622c9f3597c020e7b2234217faf5e64a55651ec3dc278af8db2aca44f9b` |
+| `polyrun/src/constants.mjs` | `a5a6c4cdb0a1fff6d022e726cae2ae6cd266be61baf69a368ce6bd744b870969` |
 | `polyrun/src/duration.mjs` | `60a50c1dd2353ad6a96ef2bbf30ee93f751f604ffe509d505b178a00869757c4` |
-| `polyrun/src/index.mjs` | `ca610be9d4dc2ee619eda90bb0a5ba01474e3f977bdd29da68b5baa8275473cd` |
-| `polyrun/src/kernel.mjs` | `dc92916249a7e72616b29ca648bd5a78cd62d2cb9995352df1afc8f7e6e878ad` |
+| `polyrun/src/index.mjs` | `c6320fbe67ae30cb1ef68b099e31aa7286de1fcc7e8b82ba00422d9d5b9351ed` |
+| `polyrun/src/kernel.mjs` | `429437e82f19ff0218d75796b11dd250fe1117b861281e425aae2f73b58c5cd9` |
 | `polyrun/src/store-pg.mjs` | `e75f229537735415b710833d493d84cd9acff42a6f12403ca8ee96dd1f97fc07` |
 | `polyrun/src/store.mjs` | `4b9ee537505d120ea3dc81328d93c4f978f6767c90a93527120a34a77be75613` |
 | `polyrun/src/workers.mjs` | `742f2644eed061bc9531479a786a00ab708c52a8068e3ee6e9cdd17051179638` |
@@ -36,8 +36,8 @@ This file is poly's, not the engine's, and is pinned by hash all the same: an un
 
 | File | sha256 | Origin |
 |---|---|---|
-| `package.json` | `8fc4b5d29e6e0d3a61c0aaf689cbe99bd62ed3ed7d36bccfe9499f51b508db71` | written for poly |
+| `package.json` | `8b7547c0a8332e6f3bac56a186eca008bdbe40d232dff8588ba3a0dd4e63bf0f` | written for poly |
 
 ## Conclusion
 
-These files are polygraph at 4949de4, byte for byte. To take a newer polygraph, copy the same closure from the new commit and update this table in the same commit.
+These files are polygraph at 755ac09, byte for byte. To take a newer polygraph, copy the same closure from the new commit and update this table in the same commit.

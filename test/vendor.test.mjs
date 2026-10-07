@@ -12,7 +12,8 @@ import { createRequire } from 'node:module';
 import { ROOT } from './helpers.mjs';
 
 const VENDORED = [
-  { dir: 'polygraph', source: 'C:/Users/jjdub/code/polygraph', commit: '4949de4' },
+  // E13, accepted 2026-10-07: branch e13-create-instance, 8.4.0.
+  { dir: 'polygraph', source: 'C:/Users/jjdub/code/polygraph', commit: '755ac09' },
   { dir: 'sam-pattern', source: 'C:/Users/jjdub/code/sam/sam-lib', commit: '3047024' },
   { dir: 'polyflow', source: 'C:/Users/jjdub/code/polyflow', commit: '5170add' },
   // The owner's instruction of 2026-10-06: Polyaxion vendored at its pin, taken from history, nothing written for poly.

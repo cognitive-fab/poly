@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@poly/core": "0.0.0",
-    "@cognitive-fab/polygraph": "8.3.2",
+    "@cognitive-fab/polygraph": "8.4.0",
     "@cognitive-fab/polyflow-kernel": "0.1.0",
     "@cognitive-fab/polyflow-verify": "0.1.0",
     "@cognitive-fab/sam-pattern": "2.3.0"

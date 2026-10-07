@@ -91,6 +91,14 @@ function validateIntents(intents, manifest, violations, pathDescr) {
       } else {
         out.push({ kind: 'signalChild', payload: { childKey: intent.childKey, action: intent.action } });
       }
+    } else if (intent.kind === 'createInstance') {
+      // poly E13: a detached spawn, a kernel intent. The kernel journals one it cannot take as $uncreatable and poisons
+      // nothing, so a malformed one is a mapper defect to report, as a malformed spawnChild is.
+      if (typeof intent.childKey !== 'string' || !intent.childKey || typeof intent.machineId !== 'string' || !intent.machineId) {
+        violations.push({ invariant: 'mapper-defect:createInstance-shape', counterexample: pathDescr(), emitted: [], detail: JSON.stringify(intent) });
+      } else {
+        out.push({ kind: 'createInstance', payload: { machineId: intent.machineId, childKey: intent.childKey } });
+      }
     } else if (intent.kind === 'sendTo') {
       // poly PT7a, S89: a message to another instance, a kernel intent like signalChild. Its target is an instance
       // id, null (none: nothing is sent), or an address marker the kernel resolves at commit (S58, S78).

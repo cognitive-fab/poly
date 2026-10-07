@@ -92,7 +92,7 @@ test('M3-2: a machine that sends and has a path property runs polyrun\'s check-e
   const order = r.machines.find((m) => m.machine === 'Order');
   const stage = order.stages.find((s) => s.stage === 'effects');
   // S58 kept it poly-ref's alone while polyrun had no sendTo; polygraph 8.3.2 has one (S89).
-  assert.match(stage.engine, /polyrun@8\.3\.2/);
+  assert.match(stage.engine, /polyrun@8\.4\.0/);
   assert.doesNotMatch(stage.note ?? '', /sendTo/);
   assert.equal(order.instance.effectsByRefOnly, undefined);
   assert.equal(stage.verdict, 'CLEAN', render(r));

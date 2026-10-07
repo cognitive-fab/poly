@@ -15,8 +15,8 @@
 // way:
 // the SAM module (next.cjs), the effects mapper, and the property modules the engines read (invariants.mjs,
 // effect-invariants.mjs, liveness.mjs). A configuration's instances are walked by a small harness that
-// delivers the witness's messages between the lowered modules, without a store: polyrun has had sendTo since
-// 8.3.2 (M3-2), but no createInstance, which a detached child's witness needs (S60). Its properties, which
+// delivers the witness's messages between the lowered modules, without a store, so the witness drives each
+// instance as written (polyrun has sendTo since 8.3.2 and createInstance since 8.4.0, E13). Its properties, which
 // have no engine artefact, are evaluated by poly-ref over the instances' states.
 //
 // The rules, the same for every kind:

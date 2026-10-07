@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { checkFile } from '@poly/check';
 import { ROOT } from './helpers.mjs';
 import { approveAs } from './runtime-helpers.mjs';
-import { SKIP, E13, concierge, thread, recorded, whatsappWebhook, slackWebhook, WA_FROM } from './concierge-helpers.mjs';
+import { SKIP, concierge, thread, recorded, whatsappWebhook, slackWebhook, WA_FROM } from './concierge-helpers.mjs';
 
 const escalated = async (rt, conv) => (await rt.chain(conv)).filter((e) => e.kind === 'verdict' && e.body.outcome === 'escalated').map((e) => e.body);
 const intentOf = (rt, conv) => rt.store.db.prepare("SELECT intent_id FROM pr_outbox WHERE instance_id = ? AND kind = 'channel.support.send'").get(conv)?.intent_id;
@@ -44,7 +44,7 @@ test('AC17: a recorded Slack reply to the escalation notice does not approve it'
   } finally { await rt.close(); }
 });
 
-test('AC17, the real path: a first WhatsApp message creates the thread, and its reply waits for a person', { skip: SKIP, todo: E13, timeout: 300_000 }, async () => {
+test('AC17, the real path: a first WhatsApp message creates the thread, and its reply waits for a person', { skip: SKIP, timeout: 300_000 }, async () => {
   const { rt, cfg, sent, handle } = await concierge('ac17-real');
   try {
     await handle('support', whatsappWebhook(cfg.wa, recorded('whatsapp/message.json')));

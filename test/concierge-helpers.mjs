@@ -1,7 +1,7 @@
 // M8 plan step 10: the concierge of AC14 to AC17 (conformance/m8/concierge), admitted, loaded and driven through
-// ingress with recorded provider traffic. Until E13 is vendored a conversation cannot be spawned at run time, so
-// `thread` creates it beside its application, as the spawn of starts would (PS15.2); each AC's real path through
-// rt.inbound on an unknown thread is its own test, todo for E13.
+// ingress with recorded provider traffic. `thread` creates a conversation beside its application, as the spawn of
+// starts does (PS15.2), for the tests that start from an open thread; each AC's real path through rt.inbound on an
+// unknown thread is its own test, which runs since E13 (polygraph 8.4.0).
 import { createHmac, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +14,6 @@ export const SOURCES = ['conformance/m8/concierge/concierge.poly', 'conformance/
 const peer = polyaxionPeer();
 /** The concierge has a policy, so it runs only with the pinned gate engine; without it each test is listed as not run. */
 export const SKIP = peer.ok ? false : `not run: ${peer.reason}`;
-export const E13 = 'waiting on E13 (polyrun createInstance): rt.inbound on an unknown thread cannot spawn the conversation';
 
 const TRAFFIC = join(ROOT, 'test', 'fixtures', 'traffic');
 export const recorded = (p) => readFileSync(join(TRAFFIC, p), 'utf8').trim();

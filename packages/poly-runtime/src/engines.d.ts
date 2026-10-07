@@ -1,5 +1,5 @@
 // The engines ship no type declarations. These are the parts poly-runtime uses, read from the vendored sources:
-// polyrun's index, kernel, store and workers (vendor/polygraph, 4949de4) and the polyflow ledger and verifier
+// polyrun's index, kernel, store and workers (vendor/polygraph, 755ac09) and the polyflow ledger and verifier
 // (vendor/polyflow, 5170add).
 declare module '@cognitive-fab/polygraph/polyrun/src/index.mjs' {
   export interface JournalRow {

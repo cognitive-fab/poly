@@ -30,7 +30,7 @@ If you find yourself working around one of these rules, stop. The rule is the pr
 ## Engines and where they live
 
 - **SAM v2 strict profile:** `@cognitive-fab/sam-pattern` 2.3.0, vendored in `vendor/sam-pattern` from sam-lib 3047024. Local source: `C:\Users\jjdub\code\sam\sam-lib`.
-- **polygraph, polyrun, polyvers and polynv:** `@cognitive-fab/polygraph` 8.3.2; the files poly runs are vendored in `vendor/polygraph` from polygraph 4949de4 on branch `m3-sendto` (S87). Local source: `C:\Users\jjdub\code\polygraph`.
+- **polygraph, polyrun, polyvers and polynv:** `@cognitive-fab/polygraph` 8.4.0; the files poly runs are vendored in `vendor/polygraph` from polygraph 755ac09 on branch `e13-create-instance` (E13, cut from `m3-sendto`). Local source: `C:\Users\jjdub\code\polygraph`.
 - **Polyaxion, polyman and polysec-core:** vendored in `vendor/polyaxion` from polyaxion c37c60e, copied out of history with `scripts/vendor-polyaxion.mjs` (the owner's instruction of 2026-10-06). Local source: `C:\Users\jjdub\code\polyaxion`.
 - **Polytrion:** private and hosted. Not needed in v1 (worlds are deferred).
 

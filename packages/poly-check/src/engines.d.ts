@@ -25,7 +25,7 @@ declare module '@cognitive-fab/polygraph/scripts/check.mjs' {
   }): PolygraphResult;
 }
 
-// polyrun's product checker, read from polyrun/src/check-product.mjs of @cognitive-fab/polygraph 8.3.2.
+// polyrun's product checker, read from polyrun/src/check-product.mjs of @cognitive-fab/polygraph 8.4.0.
 declare module '@cognitive-fab/polygraph/polyrun/src/check-product.mjs' {
   export interface ProductStep {
     stimulus: { target: string; action: string; data: unknown } | null;
@@ -54,7 +54,7 @@ declare module '@cognitive-fab/polygraph/polyrun/src/check-product.mjs' {
   }): Promise<ProductResult>;
 }
 
-// polyrun's effect-emission checker, read from polyrun/src/check-effects.mjs of @cognitive-fab/polygraph 8.3.2.
+// polyrun's effect-emission checker, read from polyrun/src/check-effects.mjs of @cognitive-fab/polygraph 8.4.0.
 declare module '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs' {
   export interface EffectsViolation {
     invariant: string;
@@ -83,7 +83,7 @@ declare module '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs' {
   }): Promise<EffectsResult>;
 }
 
-// polygraph's replayer of a SAM v2 strict module over windows, read from scripts/replay.mjs of 8.3.2.
+// polygraph's replayer of a SAM v2 strict module over windows, read from scripts/replay.mjs of 8.4.0.
 declare module '@cognitive-fab/polygraph/scripts/replay.mjs' {
   export function replaySpecResults(specPath: string, windows: { action: string; data: unknown; pre: unknown; post: unknown }[]): { ok: boolean; error?: string; results: { status: string; rejectionReason?: string }[] };
 }

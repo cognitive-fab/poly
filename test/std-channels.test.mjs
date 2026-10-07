@@ -238,7 +238,12 @@ for (const [kind, spec] of Object.entries(KINDS)) {
     try {
       const body = await rt.putContent('hello');
       const r = await rt.inbound('line', { [spec.thread]: KINDS[kind].sample, body, ...KINDS[kind].extra }, { messageId: 'm-1' });
-      assert.deepEqual([r.outcome, r.reason], rt.kernelCreatesInstances ? ['delivered', undefined] : ['refused', 'creation-unavailable']);
+      // Since E13 the message creates the thread: the application, its starts step and the conversation. A std
+      // conversation's Inbound takes claims, which rt.inbound never supplies (review D-F4, M8b), so the message itself
+      // is refused claims-unverified; ingress through a certified adapter is the path that delivers it.
+      assert.equal(rt.kernelCreatesInstances, true);
+      assert.deepEqual([r.outcome, r.reason], ['refused', 'claims-unverified']);
+      assert.ok(await rt.store.getInstance(`${r.application}/line`), 'the conversation was created');
     } finally { await rt.close(); }
   });
 }

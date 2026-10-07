@@ -853,8 +853,8 @@ function kernelIntents(decl: A.Machine | undefined): string[] {
   for (const i of decl?.items ?? []) if (i.kind === 'Handler') walk(i.body);
   return [...found].sort().reverse();
 }
-/** Those polyrun does not have: createInstance (S60). sendTo is a kernel intent since polygraph 8.3.2 (M3-2, S89). */
-const missingIntents = (decl: A.Machine | undefined): string[] => kernelIntents(decl).filter((n) => n !== 'sendTo');
+/** Those polyrun does not have: none since polygraph 8.4.0, whose createInstance is E13 (S60); sendTo since 8.3.2 (M3-2, S89). */
+const missingIntents = (decl: A.Machine | undefined): string[] => kernelIntents(decl).filter((n) => n !== 'sendTo' && n !== 'createInstance');
 const missingText = (names: string[]) => `polyrun has no ${names.join(' or ')} intent yet (S60)`;
 
 function fromPolygraph(v: PolygraphViolation, at: { module: string; machine: string }, version: string, fieldOf: (flatKey: string) => string): Diagnostic {

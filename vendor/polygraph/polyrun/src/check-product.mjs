@@ -484,6 +484,9 @@ export function productStep(joint, stim, ctx) {
           // key simply cancels nothing) — claiming a poison here would report
           // a halt production never performs. check-effects covers the
           // mapper-hygiene side of a keyless cancelTimer.
+        } else if (intent.kind === 'createInstance') {
+          // Kernel parity (poly E13): a detached instance is not a child; it leaves the joint machine, and the kernel
+          // journals one it cannot create as $uncreatable without poisoning anything.
         } else if (intent.kind === 'sendTo') {
           // Kernel parity (poly S89): a message to another instance leaves the joint machine through the outbox, as
           // an effect does: validated, not executed. A malformed one poisons, as in the kernel.

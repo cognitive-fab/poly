@@ -42,7 +42,8 @@ test('S60: the conformance source checks clean at every stage, and the configura
   assert.deepEqual(d.stages.map((s) => `${s.stage}:${s.status}`), ['parse-type:ran', 'lower:ran', 'validate:ran', 'translation-validation:ran', 'model-check:ran', 'deadlock:ran', 'effects:ran']);
   const cfg = r.configurations[0];
   assert.equal(cfg.instance.states, 5);
-  assert.match(cfg.stages[0].notes.join(' '), /polyrun has no createInstance intent yet \(S60\)/);
+  // polygraph 8.4.0 runs createInstance (E13), so the configuration no longer notes that polyrun lacks it.
+  assert.doesNotMatch((cfg.stages[0].notes ?? []).join(' '), /createInstance/);
   assert.deepEqual(cfg.instance.instances, ['d: Dispatcher', 'Worker[0..0]: Worker']);
 });
 

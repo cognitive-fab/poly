@@ -1,6 +1,6 @@
 {
   "name": "@cognitive-fab/polygraph",
-  "version": "8.3.2",
+  "version": "8.4.0",
   "description": "The files of polygraph that poly uses, vendored unchanged; see PROVENANCE.md",
   "type": "module",
   "license": "Apache-2.0",
