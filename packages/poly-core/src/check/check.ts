@@ -415,6 +415,8 @@ class Checker {
     const names = new Set<string>();
     for (const d of this.module.decls) {
       if (d.kind !== 'Credential') continue;
+      // Review A2 (M9): the embedded form takes any string, and the name becomes a file of the build and a module.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(d.name)) { this.err('PL1201', d, `${JSON.stringify(d.name)} is not a credential name: a credential's name is an identifier (PT10e)`); continue; }
       if (names.has(d.name)) { this.err('PL1002', d, `credential ${d.name} is declared twice`); continue; }
       names.add(d.name);
       if (d.credKind !== 'oauth2') this.err('PL1001', d, `${d.credKind} is not a kind of credential; oauth2 is the one kind (PT10e)`);

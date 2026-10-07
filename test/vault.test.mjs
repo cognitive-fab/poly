@@ -211,7 +211,7 @@ test('S202: the callback route takes the state once, records the outcome, and ha
   const host = {
     async claimNonce(scope, key) { const k = `${scope}|${key}`; if (taken.has(k)) return false; taken.add(k); return true; },
     async credentialRecord(credential, r) { records.push([credential, r.outcome, r.reason ?? null]); },
-    async grantCallback(credential, grantId, scopes) { grants.push([credential, grantId, scopes]); },
+    async grantCallback(credential, grantId, scopes) { grants.push([credential, grantId, scopes]); return true; },
   };
   const handle = credentialIngress(host, { payments: v }, () => 5);
   const a = await v.authorize({ grantId: 'g-1', scopes: ['refunds.write'], now: 0 });

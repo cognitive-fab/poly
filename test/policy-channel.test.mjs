@@ -259,7 +259,8 @@ async function denials(a, r, extra = {}, times = 1) {
   const denied = (await rt.chain(`${app}/support`)).filter((e) => e.kind === 'verdict' && e.body.outcome === 'denied').map((e) => e.body);
   const actions = await Promise.all(denied.map((b) => rt.store.body(b.action)));
   const ledger = rt.store.db.prepare('SELECT event FROM poly_ledger').all().map((x) => x.event).join('\n');
-  const content = rt.store.db.prepare('SELECT body FROM poly_content').all().map((x) => x.body).join('\n');
+  // The content store and the journal's kept records, apart since review B5 (M9).
+  const content = rt.store.db.prepare('SELECT body FROM poly_content UNION ALL SELECT body FROM poly_kept').all().map((x) => x.body).join('\n');
   await rt.close();
   return { recipients: actions.map((p) => p.effect.channel.recipient), actions, ledger, content };
 }

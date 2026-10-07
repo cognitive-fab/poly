@@ -31,7 +31,12 @@ export interface VerifiedBuild {
   workflows: VerifiedWorkflow[];
   /** PS15: each certified channel, from the verified bytes of its descriptor. */
   channels: VerifiedChannel[];
+  /** PT10e, review D4 (M9): each certified credential, from the verified bytes of its descriptor, read once here. */
+  credentials: VerifiedCredential[];
 }
+
+/** PS16.1, PT10e: what the runtime needs of a credential: its Grant machine, provider, scopes and whether it has a holder. */
+export interface VerifiedCredential { name: string; machine: string; provider: string; scopes: string[]; holder: boolean }
 
 /** PS15.4: what the runtime needs to route a channel's inbound message. */
 export interface VerifiedChannel { channel: string; kind: string; application: string; conversation: string; thread: { template: string; fields: string[] }; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string } }
@@ -230,7 +235,18 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     for (const id of [d.application, d.conversation]) if (!machines.some((x) => x.id === id)) throw new LoadError(`refused at load: channel ${c.name} names ${id}, which the certificate does not name (PS15)`);
     channels.push({ channel: d.channel, kind: d.kind, application: d.application, conversation: d.conversation, thread: d.thread, starts: d.starts, inbound: d.inbound });
   }
-  return { certificate, root, runDir, machines, handlers, policies, workflows, channels };
+  // Review D4, D5 (M9): each credential's descriptor is the certificate entry's own, by name, and its Grant a machine
+  // the certificate names; the runtime keeps what was read here and never reads the file again.
+  const credentials: VerifiedCredential[] = [];
+  for (const c of certificate.poly?.credentials ?? []) {
+    const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as { credential?: unknown; provider?: unknown; scopes?: unknown; holder?: unknown };
+    if (d.credential !== c.name) throw new LoadError(`refused at load: the certificate's credential ${c.name} has the descriptor of credential ${String(d.credential)} (PT10e)`);
+    const m = machines.find((x) => x.id.endsWith(`.${c.name}.Grant`));
+    if (!m) throw new LoadError(`refused at load: credential ${c.name} has no Grant machine the certificate names (PS16.1)`);
+    if (typeof d.provider !== 'string' || !Array.isArray(d.scopes) || typeof d.holder !== 'boolean') throw new LoadError(`refused at load: the descriptor of credential ${c.name} is not a credential's (PT10e)`);
+    credentials.push({ name: c.name, machine: m.id, provider: d.provider, scopes: d.scopes as string[], holder: d.holder });
+  }
+  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials };
 }
 
 /**

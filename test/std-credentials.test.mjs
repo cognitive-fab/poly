@@ -33,7 +33,8 @@ const RULES = {
   'scopes-only-by-consent': ['TokenExpiring', "    attempt' = 1\n", "    attempt' = 1\n    scopes' = { first: true, second: false }\n"],
   'invalid-grant-expires': ['Refreshed', "    } else {\n      g' = Expired\n", "    } else {\n      g' = Granted\n"],
   'refresh-bounded': ['RefreshFailed', 'if attempt < 3 {', 'if attempt < 2 {'],
-  'revoke-revokes-tokens': ['Revoke', 'if g != Requested {', 'if g == Expired {'],
+  // Review C1 (M9): the mutant is the code the review found, which skipped the revocation from Requested.
+  'revoke-revokes-tokens': ['Revoke', '    emit revoke()\n', '    if g != Requested {\n      emit revoke()\n    }\n'],
   'refresh-ends': ['RefreshFailed', "attempt' = attempt + 1", "attempt' = attempt"],
 };
 function mutate(src, handler, from, to) {

@@ -119,6 +119,10 @@ export interface InboundResult {
 
 /** K11, PT21.4: the claims the runtime itself supplies for an Inbound (the adapter's verified output), never a caller. */
 const SUPPLIED_CLAIMS = Symbol('supplied claims');
+/** PS16.4, review B2 (M9): a dispatch the runtime makes to a grant, from its own sources. */
+const GRANT_STEP = Symbol('grant step');
+/** The Grant's actions only the runtime takes: from the vault's callback, rt.requestGrant, the refresh's completion, and PS16.4's sources. */
+const GRANT_ONLY = new Set(['Callback', 'Reauthorize', 'Refreshed', 'RefreshFailed', 'Revoke']);
 
 /** Deliberately broken runtimes, for one test each: the recipient digest without the store's key (ruled on step 9). */
 export const RUNTIME_FAULTS = ['unkeyed-recipient', 'address-in-clear'] as const;
@@ -541,13 +545,12 @@ export class PolyRuntime {
 
   // ── grants (PS16, PT10g) ──────────────────────────────────────────────────────────────────────────────────────
 
-  /** PS16.1: the certified credential's descriptor and the machine id of its Grant, or null for an unknown credential. */
-  #credential(c: string): { machine: string; scopes: string[]; holder: boolean } | null {
-    const entry = this.certificate.poly.credentials?.find((x) => x.name === c);
-    const m = this.verified.machines.find((x) => x.id.endsWith(`.${c}.Grant`));
-    if (!entry || !m) return null;
-    const d = JSON.parse(readFileSync(join(this.verified.root, entry.descriptor), 'utf8')) as { scopes: string[]; holder: boolean };
-    return { machine: m.id, scopes: d.scopes, holder: d.holder };
+  /**
+   * PS16.1: the certified credential, as load read its descriptor once with the certified bytes (review D4, B7, M9), or
+   * null for an unknown credential.
+   */
+  #credential(c: string): { machine: string; provider: string; scopes: string[]; holder: boolean } | null {
+    return this.verified.credentials.find((x) => x.name === c) ?? null;
   }
 
   /** PT10g: the keyed digest a holder is named by, never the holder itself (S191). */
@@ -571,7 +574,7 @@ export class PolyRuntime {
     if (!hit) throw new ApprovalRefused('the revocation names no grant of this store', 'unmatched');
     const v = verifyRecord(record, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind: 'revocation', subject: revocationSubject(hit.instance) });
     if (!v.ok) throw new ApprovalRefused(`the revocation is refused: ${v.problem} (PS16.4)`, 'wrong-key');
-    await this.dispatch(hit.instance, 'Revoke');
+    await this.dispatch(hit.instance, 'Revoke', {}, { [GRANT_STEP]: true });
     this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
     await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'revocation', credential: hit.credential, grant: hit.instance, source: 'person' }, this.now()); });
   }
@@ -602,16 +605,19 @@ export class PolyRuntime {
       await this.create(cred.machine, { id });
       const grantId = id;
       await this.store.txn(() => { this.store.db.prepare('INSERT INTO poly_grant (credential, holder, generation, instance) VALUES (?, ?, ?, ?)').run(c, key, generation, grantId); });
-    } else if (state?.g === 'Granted' || state?.g === 'Expired') await this.dispatch(id, 'Reauthorize');
+    } else if (state?.g === 'Granted' || state?.g === 'Expired') await this.dispatch(id, 'Reauthorize', {}, { [GRANT_STEP]: true });
     return (await vault.authorize({ grantId: id, scopes: cred.scopes, now: this.now() })).url;
   }
 
-  /** PT10f, S202 (CredentialHost): the holder's consent, from the provider's redirect, as Callback(granted). */
-  async grantCallback(c: string, grantId: string, scopes: string[]): Promise<void> {
+  /**
+   * PT10f, S202 (CredentialHost): the holder's consent, from the provider's redirect, as Callback(granted); true when
+   * the grant took it (review C2, M9). A grant id is the credential's by its own prefix only (review C8, M9).
+   */
+  async grantCallback(c: string, grantId: string, scopes: string[]): Promise<boolean> {
     const cred = this.#credential(c);
-    if (!cred || !grantId.startsWith(`grant:${c}`)) throw new Error(`grant ${grantId} is not one of credential ${c}`);
+    if (!cred || !(grantId.startsWith(`grant:${c}:`) || grantId.startsWith(`grant:${c}#`))) throw new Error(`grant ${grantId} is not one of credential ${c}`);
     const granted = Object.fromEntries(cred.scopes.map((s) => [s.split('.').join('_'), scopes.includes(s)]));
-    await this.dispatch(grantId, 'Callback', { granted });
+    return (await this.dispatch(grantId, 'Callback', { granted }, { [GRANT_STEP]: true })).stepKind === 'accepted';
   }
 
   /** PT10f (CredentialHost): a callback's outcome, on runtime:ingress; never a code, a state or a token. */
@@ -631,7 +637,7 @@ export class PolyRuntime {
       const v = verifyRecord(opts.record, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind: 'revocation', subject: revocationSubject(id) });
       if (!v.ok) throw new Error(`the revocation is refused: ${v.problem} (PS16.4)`);
     }
-    await this.dispatch(id, 'Revoke');
+    await this.dispatch(id, 'Revoke', {}, { [GRANT_STEP]: true });
     this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
     await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'revocation', credential: c, grant: id, source: opts.source }, this.now()); });
   }
@@ -675,6 +681,8 @@ export class PolyRuntime {
     if (!pin) throw new Error(`no credential ${credential}; the certificate binds ${(this.certificate.poly.vaults ?? []).map((v) => v.credential).join(', ') || 'none'} (PT10f)`);
     if (!this.#ioPackage?.madeHere(adapter) || adapter.kind !== 'vault') throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the vault for ${credential} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S200)`);
     if (adapter.store !== pin.store) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: credential ${credential} is certified with the ${pin.store} store, and this vault keeps its tokens in the ${adapter.store} store (S200)`);
+    const cred = this.#credential(credential);
+    if (!cred || adapter.provider !== cred.provider) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: credential ${credential} is certified for provider ${cred?.provider ?? 'none'}, and this vault is for ${adapter.provider} (PT10f)`);
     this.#vaults.set(credential, adapter);
     // PT10g: the Grant's effects, run by the vault: a refresh completes Refreshed(valid), a revoke forgets the tokens.
     const vaultOf = (instanceId: string) => {
@@ -710,13 +718,19 @@ export class PolyRuntime {
       if (body === null) throw Object.assign(new Error(`the body ${String(p.body)} is not in the content store`), { permanent: true });
       const r = await adapter.send({ to, body, ...(typeof p.kind === 'string' ? { kind: p.kind } : {}), idempotencyKey: ctx.idempotencyKey, now: this.now() }, transports);
       if (r.ok) return { providerId: r.providerId };
+      // S191, review B1 (M9): what the provider reports names addresses as ingress does, so each field the thread's
+      // template reads is replaced by its keyed digest, and the recipient by the thread's digest in the error text.
+      const error = r.error.split(to).join(key);
+      const read = new Set([...d.thread.template.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]));
       for (const e of r.events ?? []) {
         const content = await this.putContent('');
+        const fields: Record<string, unknown> = { ...e.fields };
+        await this.store.txn(() => { for (const f of read) if (f in fields) fields[f] = this.store.keepAddress(String(fields[f])); });
         // A provider event is the provider's own report: its claim is verified.
-        await this.dispatch(ctx.instanceId, d.inbound.action, { ...e.fields, body: content }, { actionId: `${channel}:${e.providerId}`, [SUPPLIED_CLAIMS]: { verified: 'Verified' } });
-        await this.ingressRecord(channel, { stage: 'receipt', outcome: 'delivered', provider: adapter.provider, providerId: e.providerId, reason: r.error });
+        await this.dispatch(ctx.instanceId, d.inbound.action, { ...fields, body: content }, { actionId: `${channel}:${e.providerId}`, [SUPPLIED_CLAIMS]: { verified: 'Verified' } });
+        await this.ingressRecord(channel, { stage: 'receipt', outcome: 'delivered', provider: adapter.provider, providerId: e.providerId, reason: error });
       }
-      throw Object.assign(new Error(r.error), { permanent: r.permanent });
+      throw Object.assign(new Error(error), { permanent: r.permanent });
     };
     this.#handlers.set(kind, handler);
   }
@@ -863,7 +877,7 @@ export class PolyRuntime {
    * completion (K10, S130), since only the worker delivers it with its decision event, and an input outside its
    * action's type (S140). Each comes before any step, with an audit row and no journal row.
    */
-  async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string; credentials?: unknown; [SUPPLIED_CLAIMS]?: Record<string, unknown> } = {}): Promise<DispatchResult> {
+  async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string; credentials?: unknown; [SUPPLIED_CLAIMS]?: Record<string, unknown>; [GRANT_STEP]?: true } = {}): Promise<DispatchResult> {
     const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
     const inst = await this.store.getInstance(instanceId);
     // S155: $claims and $lineage are the runtime's; a dispatch that supplies either is refused before any step.
@@ -878,6 +892,12 @@ export class PolyRuntime {
       const reason = `${action} on ${instanceId}: an OutboxIntent instance is internal to the runtime, and only its worker takes its transitions (S119)`;
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S119', reason });
       throw new RefusedDispatch(reason, 'S119');
+    }
+    // PS16.4, review B2 (M9): a grant's transitions are the runtime's, from their sources; the host keeps TokenExpiring.
+    if (inst && GRANT_ONLY.has(action) && !opts[GRANT_STEP] && this.verified.credentials.some((c) => c.machine === inst.machine_id)) {
+      const reason = `${action} on ${instanceId}: a grant takes ${action} only from the runtime (its callback, its request, its refresh's completion, or a revocation of PS16.4), never from an outside dispatch`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'PS16.4', reason });
+      throw new RefusedDispatch(reason, 'PS16.4');
     }
     const why = this.outsideType(instanceId, action, data, inst?.machine_id);
     if (why) {

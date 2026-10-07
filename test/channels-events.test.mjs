@@ -212,6 +212,31 @@ test('sms: an opt-out the provider reports on a send (Twilio 21610) is the provi
   } finally { await rt.close(); }
 });
 
+test('sms, review B1 (M9): a provider event and a provider\'s error text on a failed send leave no address in any table; the event still reaches the thread', { timeout: 300_000 }, async () => {
+  const ADDRESS = '+15550001234';
+  const { rt, conv } = await thread('ev-sms-keyed', 'sms', 'from', '"opted-out"', ADDRESS);
+  try {
+    const tw = { accountSid: 'ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', authToken: secret(), from: '+15557122661' };
+    // Twilio's error text names the number it refused (21211); 21610 is the opt-out, reported as a provider event.
+    const answers = [
+      { status: 400, headers: {}, body: JSON.stringify({ code: 21211, message: `The 'To' number ${ADDRESS} is not a valid phone number.`, status: 400 }) },
+      { status: 400, headers: {}, body: recorded('twilio/error-21610.json') },
+    ];
+    rt.connectChannel('line', sms(tw), { http: { async request() { return answers.shift(); } } });
+    await rt.dispatch(conv, 'Reply', { body: await rt.putContent('Your order shipped.') });
+    await rt.advance();
+    await rt.dispatch(conv, 'Reply', { body: await rt.putContent('Hello?') });
+    await rt.advance();
+    assert.equal((await state(rt, conv)).consent, false, 'the opt-out reached the thread');
+    const leaks = [];
+    for (const { name } of rt.store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()) {
+      if (name === 'poly_content') continue; // the erasable store, where the address is kept under its keyed digest
+      for (const row of rt.store.db.prepare(`SELECT * FROM "${name}"`).all()) { const s = JSON.stringify(row, (_, v) => (v instanceof Uint8Array ? Buffer.from(v).toString('latin1') : v)); if (s.includes(ADDRESS)) leaks.push(`${name}: ${s.slice(0, 200)}`); }
+    }
+    assert.deepEqual(leaks, []);
+  } finally { await rt.close(); }
+});
+
 test('connectChannel: two channels may not send as one sender, so a provider\'s per-address state is never split between threads', { timeout: 300_000 }, async () => {
   const k = makeKey('ev-two');
   const dir = project('ev-two', [], k, 'test-channels-events');

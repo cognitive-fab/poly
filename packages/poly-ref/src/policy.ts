@@ -17,7 +17,7 @@ export type V = string | number | boolean | null | string[];
 export type Decision = 'allow' | 'deny' | 'escalate';
 
 export interface PolicyFacts {
-  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[] }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
+  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[]; uses?: string }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
   decisions: Map<string, { answers: (string | number | boolean)[] | null }>;
   /** PT9.9: each send a machine's handlers make to an address of a known machine. */
   sends: { from: string; to: string; action: string }[];
@@ -55,12 +55,14 @@ export function policyFacts(modules: Module[]): PolicyFacts {
         return vs.every((v) => v !== undefined) ? (vs as (string | number | boolean)[]) : null;
       };
       for (const f of d.fields) fields.set(f.name, { values: values(f.type) ?? checked(f as never), conf: f.type.kind === 'TConf' });
-      const effects: { kind: string; class: string; labels: string[] }[] = [];
+      const effects: { kind: string; class: string; labels: string[]; uses?: string }[] = [];
       for (const it of d.items) {
         if (it.kind === 'EffectDecl') {
           const kind = it.items.find((x) => x.kind === 'EffKind') as { value: string } | undefined;
           const cls = it.items.find((x) => x.kind === 'EffClass') as { value: string } | undefined;
-          effects.push({ kind: kind?.value ?? it.name, class: cls?.value ?? 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])) });
+          // PS16.3: the credential an effect uses, whose grant the runtime checks before any policy.
+          const uses = it.items.find((x) => x.kind === 'EffUses') as { credential: string } | undefined;
+          effects.push({ kind: kind?.value ?? it.name, class: cls?.value ?? 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}) });
         }
         if (it.kind === 'Decision') {
           effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])) });
@@ -224,10 +226,10 @@ export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, an
 
 // ── The decision table (S149) ──────────────────────────────────────────────
 
-interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>>; claims: Set<string>; origin: Set<string>; intent: boolean; attribution: boolean; ages: Map<string, Set<number>> }
+interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>>; claims: Set<string>; origin: Set<string>; intent: boolean; attribution: boolean; ages: Map<string, Set<number>>; mandate: boolean }
 
 function readsOf(s: PolicyScope): Reads {
-  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map(), claims: new Set(), origin: new Set(), intent: false, attribution: s.policies.some((p) => p.requiresAttribution), ages: new Map() };
+  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map(), claims: new Set(), origin: new Set(), intent: false, attribution: s.policies.some((p) => p.requiresAttribution), ages: new Map(), mandate: false };
   const walk = (e: Expr | null | undefined): void => {
     if (!e) return;
     if (e.kind === 'Member' && e.object.kind === 'Call' && (e.object.callee === 'machine' || e.object.callee === 'decision')) {
@@ -241,6 +243,8 @@ function readsOf(s: PolicyScope): Reads {
     // Review C2: step.claims or lineage.origin read as a whole (unknown(step.claims), say) reads every field.
     if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'step' && e.prop === 'claims') reads.claims.add('*');
     if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'lineage' && e.prop === 'origin') reads.origin.add('*');
+    // PS8.9, review A1 (M9): step.mandate, read whole or by its delegate and delegator.
+    if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'step' && e.prop === 'mandate') reads.mandate = true;
     // PD5.2.2c: lineage.origin.f and lineage.intent.
     if (e.kind === 'Member' && e.object.kind === 'Member' && e.object.object.kind === 'Name' && e.object.object.name === 'lineage' && e.object.prop === 'origin') reads.origin.add(e.prop);
     if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'lineage' && e.prop === 'intent') reads.intent = true;
@@ -287,7 +291,9 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
   let capHit = false;
   // PT9.9: each send the program makes is a proposal too, from its sender machine.
   const proposals: { machine: string; row: (machines: Record<string, unknown>, decisions: Record<string, unknown>) => Record<string, any> }[] = [];
-  for (const [machine, m] of facts.machines) for (const eff of m.effects) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine }, effects: eff.labels, machines, decisions }) });
+  // PS16.3, review A1 (M9): the grant check precedes the policy, so a proposal of an effect that uses a credential
+  // reaches the policy only with its grant Granted.
+  for (const [machine, m] of facts.machines) for (const eff of m.effects) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine, ...(eff.uses ? { credential: { name: eff.uses, grantState: 'Granted' } } : {}) }, effects: eff.labels, machines, decisions }) });
   for (const s of facts.sends) proposals.push({ machine: s.from, row: (machines, decisions) => ({ proposal: 'send', send: { to: s.to, action: s.action, scope: s.to.slice(0, s.to.lastIndexOf('.')) }, machines, decisions }) });
   for (const { machine, row: build } of proposals) {
     const m = facts.machines.get(machine)!;
@@ -339,8 +345,20 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
       }
       // PS8.8: each age read, by the intervals its thresholds cut: 0, each threshold and the next millisecond, and unknown.
       const ageChoices = product([...reads.ages].map(([fn, ts]) => [null, ...[...new Set([0, ...[...ts].flatMap((t) => [t, t + 1])])].filter((x) => x >= 0).sort((a, b) => a - b)].map((v) => [fn, v] as [string, V | null])));
-      const stepChoices: ({ claims: Record<string, V> } & Record<string, V | Record<string, V>> | null)[] = [null];
+      const stepChoices: (Record<string, V | Record<string, V>> | null)[] = [null];
       for (const claims of claimChoices) for (const ages of ageChoices) stepChoices.push({ claims, ...Object.fromEntries(ages.filter(([, v]) => v !== null)) });
+      // PS8.9, review A1 (M9): a step with claims may carry a mandate (PT2.4f), whose delegate and delegator a policy
+      // tells apart only by the strings it names: each pair of distinct values among them and one more, since the agent
+      // is never the delegator. A machine whose actions take no claims carries none.
+      if (reads.mandate && (m.claims ?? []).length) {
+        const named = new Set<string>();
+        const lits = (x: unknown): void => { if (!x || typeof x !== 'object') return; if (Array.isArray(x)) { x.forEach(lits); return; } const n = x as { kind?: string; value?: unknown }; if (n.kind === 'String' && typeof n.value === 'string') named.add(n.value); for (const v of Object.values(n)) lits(v); };
+        for (const p of s.policies) lits(p.items);
+        const values = [...[...named].sort(), [...named].includes('p-other') ? 'p-other-2' : 'p-other'];
+        const mandates = values.flatMap((a) => values.filter((b) => b !== a).map((b) => ({ delegate: a, delegator: b })));
+        const bases = stepChoices.some((x) => x) ? stepChoices.filter((x): x is Record<string, V | Record<string, V>> => !!x) : [{}];
+        for (const b of bases) for (const mandate of mandates) stepChoices.push({ ...b, mandate });
+      }
       // PD5.2.2c, S156: the emitting step's lineage: an origin with no claims, or each value of the read origin fields;
       // and each intent of the program, when the policies read it.
       const originChoices: (Record<string, V> | null)[] = [null];

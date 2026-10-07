@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS poly_content (
   digest TEXT PRIMARY KEY,
   body   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS poly_kept (
+  digest TEXT PRIMARY KEY,
+  body   TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS poly_evidence (
   run  TEXT NOT NULL,
   seq  INTEGER NOT NULL,
@@ -229,10 +233,14 @@ export class LedgerStore extends Store {
     return d;
   }
 
-  /** The digest of a body, stored in the content store under it. Called inside a transaction. */
+  /**
+   * The digest of a record the journal keeps, stored under it. Called inside a transaction. Review B5 (M9): records
+   * are kept apart from the erasable bodies and addresses, since a body whose bytes are a record's canonical form
+   * (`{}`, say) has the same digest; each then reads back as what it is, and erasing the body keeps the record.
+   */
   keep(body: unknown): string {
     const d = digest(body ?? null);
-    this.db.prepare('INSERT OR IGNORE INTO poly_content (digest, body) VALUES (?, ?)').run(d, canonical(body ?? null));
+    this.db.prepare('INSERT OR IGNORE INTO poly_kept (digest, body) VALUES (?, ?)').run(d, canonical(body ?? null));
     return d;
   }
 
@@ -376,10 +384,13 @@ export class LedgerStore extends Store {
     return this.txn(() => this.db.prepare('SELECT run, ns, wf FROM poly_run ORDER BY run').all().map((r) => ({ ns: r.ns, wf: r.wf, run: r.run })));
   }
 
-  /** A body from the content store, or undefined when retention has removed it. */
+  /**
+   * A record the journal keeps, by its digest, or undefined when retention has removed it. A store written before
+   * review B5 (M9) kept its records in poly_content, where they are read when poly_kept has none.
+   */
   async body(d: string): Promise<unknown> {
     return this.txn(() => {
-      const r = this.db.prepare('SELECT body FROM poly_content WHERE digest = ?').get(d);
+      const r = this.db.prepare('SELECT body FROM poly_kept WHERE digest = ?').get(d) ?? this.db.prepare('SELECT body FROM poly_content WHERE digest = ? AND digest NOT IN (SELECT digest FROM poly_erasable)').get(d);
       return r ? JSON.parse(r.body) : undefined;
     });
   }

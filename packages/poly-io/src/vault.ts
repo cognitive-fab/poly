@@ -58,12 +58,20 @@ function filePath(location: string, what: string): string {
   return p;
 }
 
+// Review C5 (M9): each record is sealed with its id, and one read under another id is refused, so a blob copied over
+// another grant's never lends that grant its tokens.
 function store(kind: VaultStore['kind'], seal: (plain: Buffer) => Promise<Buffer>, open: (blob: Buffer) => Promise<Buffer>, dir: string | undefined): VaultStore {
   const b = blobs(dir);
   return made({
     kind,
-    async put(id: string, record: Record<string, unknown>) { b.write(id, await seal(Buffer.from(JSON.stringify(record), 'utf8'))); },
-    async get(id: string) { const blob = b.read(id); return blob ? (JSON.parse((await open(blob)).toString('utf8')) as Record<string, unknown>) : null; },
+    async put(id: string, record: Record<string, unknown>) { b.write(id, await seal(Buffer.from(JSON.stringify({ id, record }), 'utf8'))); },
+    async get(id: string) {
+      const blob = b.read(id);
+      if (!blob) return null;
+      const sealed = JSON.parse((await open(blob)).toString('utf8')) as { id?: unknown; record?: Record<string, unknown> };
+      if (sealed.id !== id || !sealed.record) throw new Error('the vault store holds, under this id, a record sealed for another (S200)');
+      return sealed.record;
+    },
     async remove(id: string) { b.remove(id); },
   });
 }
@@ -110,6 +118,16 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
   /** The states this adapter has taken; the store's removal and the host's nonce keep them taken across restarts. */
   const taken = new Set<string>();
   const grant = (id: string) => `grant:${id}`;
+  // Review C3 (M9): a grant's operations run one at a time, in the order they were asked, so a revocation never reads
+  // a token set that a refresh in flight is about to replace.
+  const queues = new Map<string, Promise<unknown>>();
+  const serial = <T>(id: string, op: () => Promise<T>): Promise<T> => {
+    const run = (queues.get(id) ?? Promise.resolve()).then(op, op);
+    const tail = run.catch(() => undefined);
+    queues.set(id, tail);
+    void tail.then(() => { if (queues.get(id) === tail) queues.delete(id); });
+    return run;
+  };
 
   return made({
     kind: 'vault' as const,
@@ -136,7 +154,8 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
       if (!state || taken.has(state)) return { refused: 'unknown state' };
       taken.add(state);
       const p = await st.get(pending(state));
-      if (!p) return { refused: 'unknown state' };
+      // Review C7 (M9): a state the store never held is not remembered, so made-up states cannot fill the set.
+      if (!p) { taken.delete(state); return { refused: 'unknown state' }; }
       await st.remove(pending(state));
       const grantId = String(p.grantId);
       if (q.get('error')) return { refused: `the provider answered ${q.get('error')}`, grantId };
@@ -150,11 +169,17 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
       // RFC 6749 section 5.1: with no scope in the response, the scopes granted are those requested.
       const scopes = typeof body.scope === 'string' ? body.scope.split(' ').filter(Boolean).flatMap((v) => (nameOf.has(v) ? [nameOf.get(v)!] : [])) : requested;
       if (stripe ? typeof body.stripe_user_id !== 'string' : typeof body.access_token !== 'string') return { refused: 'the token endpoint answered with no credential', grantId };
-      await st.put(grant(grantId), stripe ? { account: body.stripe_user_id } : { access: body.access_token, ...(typeof body.refresh_token === 'string' ? { refresh: body.refresh_token } : {}) });
+      // Review C4 (M9): an exchange with no refresh token (a provider asked again for consent often sends none) keeps
+      // the one the grant held, as a refresh does (RFC 6749 section 6).
+      await serial(grantId, async () => {
+        const held = stripe ? null : await st.get(grant(grantId));
+        const refresh = typeof body.refresh_token === 'string' ? body.refresh_token : typeof held?.refresh === 'string' ? held.refresh : undefined;
+        await st.put(grant(grantId), stripe ? { account: body.stripe_user_id } : { access: body.access_token, ...(refresh !== undefined ? { refresh } : {}) });
+      });
       return { grantId, scopes, nonce: { key: state, until: Number(p.until) } };
     },
 
-    async refresh(grantId: string) {
+    refresh(grantId: string) { return serial(grantId, async () => {
       const g = await st.get(grant(grantId));
       if (!g) return { valid: false };
       // Stripe: the platform's key is the credential, and nothing expires to refresh (S208).
@@ -167,17 +192,19 @@ export function oauthVault(profile: Profile, client: OAuthClient, st: VaultStore
       // RFC 6749 section 6: a new refresh token replaces the old; with none, the old one stays.
       await st.put(grant(grantId), { access: body.access_token, refresh: typeof body.refresh_token === 'string' ? body.refresh_token : g.refresh });
       return { valid: true };
-    },
+    }); },
 
-    async revoke(grantId: string) {
+    revoke(grantId: string) { return serial(grantId, async () => {
       const g = await st.get(grant(grantId));
       if (!g) return;
       const r = profile.revocationStyle === 'stripe-deauthorize'
         ? await post(profile.revocation, { client_id: client.clientId, stripe_user_id: String(g.account) })
         : await post(profile.revocation, typeof g.refresh === 'string' ? { token: g.refresh, token_type_hint: 'refresh_token' } : { token: String(g.access), token_type_hint: 'access_token' });
-      if (r.status < 200 || r.status >= 300) throw new Error(`the revocation endpoint answered ${r.status}`);
+      // Review C6 (M9): 400 invalid_token says the token is already invalid, which is what a revocation asks for.
+      const invalid = r.status === 400 && parse(r.body).error === 'invalid_token';
+      if (!invalid && (r.status < 200 || r.status >= 300)) throw new Error(`the revocation endpoint answered ${r.status}`);
       await st.remove(grant(grantId));
-    },
+    }); },
 
     async withToken(grantId: string, request: HttpRequest) {
       let u: URL;
@@ -218,7 +245,14 @@ export function credentialIngress(host: CredentialHost, vaults: Record<string, V
       await host.credentialRecord(credential, { stage: 'callback', outcome: 'refused', provider: v.provider, reason: r.refused });
       return { status: 401, contentType: 'text/plain', body: 'refused' };
     }
-    await host.grantCallback(credential, r.grantId, r.scopes);
+    // Review C2 (M9): a grant that does not take the callback (revoked, or not Requested) leaves the token set the
+    // vault just received unwanted: it is revoked at once, and the callback is refused. A revocation that fails
+    // leaves the set under a grant that is not Granted, which the grant check never lets an intent use.
+    if (!(await host.grantCallback(credential, r.grantId, r.scopes))) {
+      try { await v.revoke(r.grantId); } catch { /* recorded below as refused all the same */ }
+      await host.credentialRecord(credential, { stage: 'callback', outcome: 'refused', provider: v.provider, reason: 'not-accepted' });
+      return { status: 401, contentType: 'text/plain', body: 'refused' };
+    }
     await host.credentialRecord(credential, { stage: 'callback', outcome: 'granted', provider: v.provider });
     return { status: 200, contentType: 'text/plain', body: 'granted' };
   };

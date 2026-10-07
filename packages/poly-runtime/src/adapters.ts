@@ -163,6 +163,9 @@ export interface CredentialHost {
   claimNonce(scope: string, key: string, until: number, now: number): Promise<boolean>;
   /** Records the callback's refusal or acceptance on runtime:ingress; never a code, a state or a token. */
   credentialRecord(credential: string, record: { stage: 'callback'; outcome: 'refused' | 'granted'; provider: string; reason?: string }): Promise<void>;
-  /** Dispatches Callback(scopes) to the grant's Grant instance (PT22.3, step 3). */
-  grantCallback(credential: string, grantId: string, scopes: string[]): Promise<void>;
+  /**
+   * Dispatches Callback(scopes) to the grant's Grant instance (PT22.3, step 3), and answers whether the grant took it;
+   * one revoked, or not Requested, does not (review C2, M9), and the vault then revokes what it received.
+   */
+  grantCallback(credential: string, grantId: string, scopes: string[]): Promise<boolean>;
 }

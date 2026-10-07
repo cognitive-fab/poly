@@ -50,9 +50,38 @@ test('S205: an erased body stays erased: its digest is kept with an erasure reco
     assert.deepEqual((await rt.chain('runtime:content')).filter((e) => e.kind === 'verdict').map((e) => [e.body.stage, e.body.digest]), [['erasure', d]]);
     assert.deepEqual(found(everything(rt), 'a body to forget'), []);
     // The records the journal keeps by digest are not erasable.
-    const kept = rt.store.db.prepare('SELECT digest FROM poly_content WHERE digest != ?').get(d).digest;
+    const kept = rt.store.db.prepare('SELECT digest FROM poly_kept').get().digest;
     await assert.rejects(rt.erase(kept), /not erasable/);
     assert.notEqual(await rt.store.body(kept), null);
+  } finally { await rt.close(); }
+});
+
+test('S205, review B5 (M9): a body whose bytes are a record\'s canonical form shares its digest and stays another entry: each reads back as what it is, and erasing the body keeps the record', { timeout: 120_000 }, async () => {
+  const a = await admitted('erasure-kept', ['conformance/m8/content/notes.poly']);
+  const { rt } = await loaded(a);
+  const dataOf = async (id) => (await rt.chain(id)).find((e) => e.kind === 'step' && e.body.action === 'Write').body.data;
+  try {
+    // The record first: a step's data is kept by the digest of its canonical form, {"c":"sha256:…"}.
+    const d = await rt.putContent('a body');
+    await rt.create('notes.Note', { id: 'n-1' });
+    await rt.dispatch('n-1', 'Write', { c: d });
+    const kept = await dataOf('n-1');
+    const text = JSON.stringify({ c: d });
+    const body = await rt.putContent(text);
+    assert.equal(body, kept, 'the body and the record share a digest');
+    assert.equal(await rt.contentBody(body), text);
+    await rt.erase(body);
+    assert.equal(await rt.contentBody(body), null);
+    assert.deepEqual(await rt.store.body(kept), { c: d }, 'erasing the body keeps the record');
+    // The body first: the record kept after it still reads back as the record.
+    const d2 = await rt.putContent('another body');
+    const text2 = JSON.stringify({ c: d2 });
+    const body2 = await rt.putContent(text2);
+    await rt.create('notes.Note', { id: 'n-2' });
+    await rt.dispatch('n-2', 'Write', { c: d2 });
+    assert.equal(await dataOf('n-2'), body2);
+    assert.deepEqual(await rt.store.body(body2), { c: d2 });
+    assert.equal(await rt.contentBody(body2), text2);
   } finally { await rt.close(); }
 });
 
