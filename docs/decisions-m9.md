@@ -353,4 +353,4 @@ Until the ruling, the build does as the specs say, and none of the six is change
 
 ## Conclusion
 
-M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.
+M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled. Every step is now built as ruled, E13 is vendored, the review's findings that keep the security model are fixed, and the gate passed from a clean build (`plan-m9.md`, section 10). S210 asks the owner what admission and load should remember, so that a key holder in the project's own environment cannot widen the people ring, roll back a ring or a policy, or turn production off.

@@ -1296,7 +1296,7 @@ export class PolyRuntime {
 
   /**
    * Archives a terminal instance: its `closure` event, then polyrun's purge, in one transaction, then its head is
-   * signed (S122, S123). The chain outlives the purge; polyrun 8.3.2 drops the dedupe keys with the journal, which
+   * signed (S122, S123). The chain outlives the purge; polyrun 8.4.0 drops the dedupe keys with the journal, which
    * K4 forbids, until E1 (S124).
    */
   async archive(instanceId: string): Promise<LedgerEvent> {

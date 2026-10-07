@@ -135,11 +135,11 @@ for (const [name, drive] of Object.entries(TRACES)) {
   });
 }
 
-// K4 after an archive (S124): polyrun 8.3.2 deletes the dedupe keys with the journal, so a duplicate of M1 that
+// K4 after an archive (S124): polyrun 8.4.0 deletes the dedupe keys with the journal, so a duplicate of M1 that
 // arrives after the receiver is archived is dead-lettered and never acknowledged. Delivery has no action for
 // that, so the trace does not replay. It runs, and it waits on E1 (tombstones), which makes it pass.
 test('M4c across an archive: a late duplicate after the receiver is purged (K4)',
-  { todo: 'waiting on E1 (polyrun tombstones at archive, S124): polyrun 8.3.2 dead-letters the duplicate' },
+  { todo: 'waiting on E1 (polyrun tombstones at archive, S124): polyrun 8.4.0 dead-letters the duplicate' },
   async () => {
     const { rt, o, step } = await setup();
     try {

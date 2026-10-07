@@ -205,9 +205,47 @@ Numbered from S194. Each has a proposal and waits for the owner's ruling.
 4. **S206 and S207 change verdicts.** Every declared configuration with a timer may change, and a joint configuration may be large. Each is measured before its code is committed, and a change of verdict comes to the owner.
 5. **The canary scan's coverage.** The scan finds only the encodings it knows. Each encoding is listed, and a token in an unknown encoding is a limit stated in the record.
 
+## 10. Record of M9
+
+| Step | What | Commits |
+|---|---|---|
+| 0 | Rulings on the plan, S194 to S207 and Q9; the keyring closed (S194), its anchor read from the owner's configuration; Polyaxion vendored at its pin | f47654c, c2599a8, cc71c6b, 993169d, e372d0d |
+| 1 | E13: polygraph 8.4.0 vendored from the owner's accepted branch, the seven tests run | 38269f8 |
+| 2 | Housekeeping from M8: the certificate's adapter faults on a one-channel application, `frozenCommit`, the M3 known defects | 2205d30 |
+| 3 | Q8: a person signs every policy (S194) | d1c9bf4, ddbf013 |
+| 4 | PD6 (S195 to S198), stale claims denied as ruled | 876b4d9, 3968bb1, 6267af3, 8ae4e29 |
+| 5 | `credential` and `uses` on both surfaces (S203) | 0251017, 420bcb6, 4904dbd, fde7d8f |
+| 6 | `std.credentials` and one `Grant` per credential (S204, S209) | f820fb1, 8eaf2ce |
+| 7 | The vault adapters in poly-io, each credential's vault certified (S200, S202, S208) | 6c8cf29, c74fe1e |
+| 8 | The grant check before the policy, `api`, revocation from three sources (S199, S201) | 001d0c3, 59cad4b |
+| 9 | Addresses out of the journal, the erasable content store (S191, S205) | 5fb38fd, 1e3fd79 |
+| 10 | S206 and S207 measured behind switches, then built as ruled | 46c3378, 8a3099c, e7f8989 |
+| 11 | AC18 to AC21 end to end on a concierge with a refund through a delegated credential | 15c8f93 |
+| (ruled) | `PL6825` over every file the certificate binds; four vault findings | 97a0cf3, 81416c2 |
+| 12 | The review: 17 findings fixed, each with a test that failed first; six raised as S210; the record and the gate | 6a63cee, c0cfff1 |
+
+**The closing gate of M9, from a clean build.** It ran at c0cfff1 from 05:49:58 to 06:23:38 on 7 October 2026, after `npm run clean`, as `npm test` through `scripts/suite-summary.mjs` (build, boundary check, the suite, then `test/after/`). Before it started no test run and no simulation was on the machine: the process list held language servers (one of them, another project's, using one core throughout), MCP servers, an idle `polyx serve`, an idle `http-server`, a tracker and idle sessions. A watcher listed every minute, 34 times, each node or python process started after the gate began, by command line: apart from one Claude Code hook at the 31st listing, every one was the gate's own (the test runner, its test files, and the processes those tests start: the M3 frozen runner and its fake agent, its scorer and its `npm run adapter`, a sleeping fixture). The watch matched by command line, not by descent from the gate. The machine is a laptop with an Intel Core Ultra 7 155H (16 cores, 22 threads, of mixed kinds) and 64 GB, on mains power.
+
+| Gate | Commit | Tests (suite and `test/after/`) | Passed | Failed | Skipped | Waiting | Total |
+|---|---|---|---|---|---|---|---|
+| M8b closing, from a clean build | 286dc34 | 1,793 | 1,781 | 0 | 1 | 11 | 14 min 55 s |
+| **M9 closing, from a clean build** | c0cfff1 | 1,925 | 1,919 | 0 | 2 | 4 | 33 min 40 s |
+
+AC18 ran in `credentials-canary`, a standing test; AC19 in `credentials-scope`, `grants` and `review-m9`; AC20 in `std-credentials`; AC21 in `credentials-mandate`; Q8 in `policy-signature` and the twenty policy files; PD6 in `pd6`; the read-backs in `tv` and `certificate`, whose faults now include `omit-vaults`, `swap-vault-store`, `rename-credential` and `swap-policy-source`. All passed. The seven tests that waited on E13 ran and passed. **Not run, by name:** E1's one (M4c across an archive: a late duplicate after the receiver is purged), E2's one (polyflow's own verifier accepts poly's chains) and E5's two (S153's `rt.createFrom`, S160's cross-scope send between configuration instances), as before. The two skipped are S152's OpenShell enforcement (no gateway configured) and the test of `creation-unavailable`, which skips itself now that the vendored kernel creates instances (E13), as plan step 1 said it would. `check-memory` passed. Every file's time is in `docs/m9/gate-file-times.json`.
+
+**Compared with M8b's closing gate.** The suite took 1,837 s against 804 s, `test/after/` 163 s against 80 s, and the summed time of every file 19,427 s over 158 files against 7,911 s over 145. M8b's time per file is not in the repository, so the comparison file by file is made on the files its record names: `channels-whatsapp` 554 s to 1,348 s, `std-channels` 547 s to 1,169 s, `channels-adapter-pin` 488 s to 1,243 s, `channels-events` 470 s to 1,321 s, `review-m8b-a` 438 s to 1,019 s, `review-m8b-d` 406 s to 684 s, `certificate` 424 s to 486 s (four more faults), `standing` 374 s to 892 s and `m4f-recheck` 338 s to 808 s. The slowdown is not in the files. `channels-adapter-pin`, run alone after the gate on the same machine, took 240 s at 286dc34 (M8b's close), 235 s at 15c8f93 (step 11) and 251 s at c0cfff1; in the gate it took 1,243 s. The suite runs up to 21 files at once, and M9 adds heavy ones (`s206-s207` 469 s, the three AC files about 270 s each), so the files that admit a channel application share the cores with more work than in M8b, and this processor runs a full load at much lower clocks than one file. The full suites of this session, on nearly the same files, took from 798 s to 2,183 s. M9's own files are fast apart from those: `grants` 32 s, `review-m9` 20 s, `pd6` 38 s, `policy-signature` 29 s.
+
+**Limits M9 closes with.**
+- **S210.** Six findings of the review change what admission and load remember or what a record may hold: load does not verify the keyring chain (D1), the keyring history and a scope's policy can be rolled back (D2, D7), a keyring record is not bound to its project (D3), the production marker is a field of `poly.json` (D9), and a grant request is not signed (B3, D6). They wait for a ruling, and the build does as the specs say until then (`decisions-m9.md`).
+- **polygraph 8.4.0** is vendored from the branch `e13-create-instance`, not published and not merged into polygraph's main. E1's, E2's and E5's tests wait as before (one, one and two).
+- **Recorded OAuth traffic only.** Every vault test runs against the documented payloads of the tests' provider, Stripe and Google. A live consent on a real account is the owner's demonstration, not gated.
+- **The canary scan** finds a token plain, in base64, base64url or URL-encoded; another encoding is not found. **`PL6825`** finds the shapes it lists; a secret in another shape is not found (PT10g).
+- **A refused callback whose revocation fails** leaves its token set in the vault under a grant that is not `Granted`, which the grant check never lets an intent use (review C2).
+- **The gate's time** depends on the load the suite puts on this machine, as above.
+
 ## Conclusion
 
-M9 puts delegated authority under the gate, and it starts by ruling who may change the rules that authority obeys: a person signs every policy, over its lowered document and the engine that runs it. Credentials then follow PT22 with PD6's freshness and narrowing mandates, a checked `Grant` machine, vault adapters in poly-io that never hand a token to a handler, and a canary scan that proves no secret reaches any record. M8's carried items each have a named step, and E13, the owner's, must land before the gate.
+M9 puts delegated authority under the gate, and it starts by ruling who may change the rules that authority obeys: a person signs every policy, over its lowered document and the engine that runs it. Credentials then follow PT22 with PD6's freshness and narrowing mandates, a checked `Grant` machine, vault adapters in poly-io that never hand a token to a handler, and a canary scan that proves no secret reaches any record. M8's carried items each have a named step, and E13, the owner's, must land before the gate. As built, every step is done and the gate passed from a clean build with no failure; the review's six findings on what admission and load remember wait for the owner as S210, and M9 closes when the owner rules on them and on the gate report.
 
 ## Glossary
 
