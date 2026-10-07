@@ -1,0 +1,33 @@
+// M9 step 5 (PT10e): the example of PT10e, a refund through a merchant's Stripe Connect credential, checked against
+// the profile in std/credentials/providers.
+module stripe_refund
+
+credential payments: oauth2 {
+  provider "stripe-connect"
+  grant authorization_code
+  scopes { read_write }
+  holder Principal
+}
+
+machine Desk {
+  state {
+    n : 0..1 = 0
+  }
+  terminal n == 1
+
+  action Refund(merchant: Principal, amount: 0..2)
+
+  on Refund(merchant, amount) {
+    require n == 0 else reject "done"
+    n' = 1
+    emit refund(merchant: merchant, amount: amount)
+  }
+
+  effect refund(merchant: Principal, amount: 0..2) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    uses payments { read_write } for merchant
+    class irreversible
+  }
+}

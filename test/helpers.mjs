@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { parse } from '@poly/lang';
 import { checkModule, expandChannels } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { resolveUses } from '@poly/check';
+import { resolveUses, resolveProviders } from '@poly/check';
 
 export const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 export const BUILD = join(ROOT, '.poly', 'test-build');
@@ -35,18 +35,20 @@ export function load(file) {
   // PS15: each channel expanded, as poly check expands it; poly-ref is given the source and the program as written.
   const x = expandChannels(r.module, uses.program);
   const program = [...uses.program.filter((m) => m !== r.module), x.module, ...x.extra];
-  const check = checkModule(x.module, { program });
+  // PT10e: the provider profiles of its credentials, from the tests' own std.
+  const providers = resolveProviders(program, TEST_STD);
+  const check = checkModule(x.module, { program, providers });
   const errors = [...r.diagnostics, ...uses.diagnostics, ...x.diagnostics, ...check.diagnostics];
   if (errors.length) throw new Error(`${file}: ${errors.map((d) => `${d.code} ${d.message}`).join('; ')}`);
-  return { module: r.module, expanded: x.module, extra: x.extra, plans: x.plans, check, program, refProgram: uses.program.filter((m) => m !== r.module) };
+  return { module: r.module, expanded: x.module, extra: x.extra, plans: x.plans, check, program, providers, refProgram: uses.program.filter((m) => m !== r.module) };
 }
 
 /** Lower every machine of a source and write each to BUILD/<name>/<module>.<Machine>/. */
 export function build(file, name, opts = {}) {
-  const { module, expanded, extra, plans, check, program, refProgram } = load(file);
+  const { module, expanded, extra, plans, check, program, providers, refProgram } = load(file);
   const out = [];
   const lower = (mod, checked, machine, refMachine) => {
-    const { lowered, diagnostics } = lowerMachine(mod, checked, machine, { program, ...(plans.length ? { channels: plans } : {}), ...opts });
+    const { lowered, diagnostics } = lowerMachine(mod, checked, machine, { program, ...(plans.length ? { channels: plans } : {}), providers, ...opts });
     if (!lowered) throw new Error(`${file}: ${diagnostics.map((d) => `${d.code} ${d.message}`).join('; ')}`);
     // One directory per source file: several sources declare intents.OutboxIntent.
     const dir = join(BUILD, name, basename(file, '.poly'), `${mod.name}.${machine}`);

@@ -78,6 +78,10 @@ export declare function effect(name: string, params: { [param: string]: Type }, 
 export declare function kind(kind: string): EffItem;
 export declare function labels(labels: string[]): EffItem;
 export declare function cls(value: 'none' | 'reversible' | 'compensable' | 'irreversible'): EffItem;
+/** PT10e: `credential c: oauth2 { provider "p"  grant g [pkce]  scopes { … }  holder Principal }`. */
+export declare function credential(name: string, body: { kind: 'oauth2'; provider: string; grant: 'authorization_code' | 'client_credentials'; pkce?: true; scopes: string[]; holder?: string }): Decl;
+/** PT10e: `uses c { s, … } for p` in an effect. */
+export declare function uses(credential: string, scopes: string[], holder?: string): EffItem;
 /** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target. */
 export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: string[]][]): EffItem;
 export declare function retry(attempts: number, base: string, timeout: string): EffItem;

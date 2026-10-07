@@ -171,7 +171,7 @@ class Reader {
 
   // ── declarations ─────────────────────────────────────────────────────────
   private decl(node: ts.Expression): A.Decl {
-    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow', 'channel');
+    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow', 'channel', 'credential');
     switch (c.name) {
       case 'enumType': {
         const [name, members] = this.argsOf(c, 2, 2);
@@ -202,6 +202,19 @@ class Reader {
         const starts = st ? { machine: dotted(st)[0], action: dotted(st)[1], onInbound: !!onIn && this.unparen(onIn).kind === ts.SyntaxKind.TrueKeyword } : null;
         const maps = this.obj(o.get('peer')!).map(([peer, v, kn]) => { const [machine, action] = dotted(v); return this.mk<A.ChannelMap>(kn, { kind: 'ChannelMap', peer, machine, action }); });
         return this.mk<A.Channel>(c.node, { kind: 'Channel', name: this.str(name), channelKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, thread: this.str(o.get('thread')!), starts, maps });
+      }
+      case 'credential': {
+        // PT10e: credential(name, { kind, provider, grant, pkce?, scopes, holder? }).
+        const [name, body] = this.argsOf(c, 2, 2);
+        const o = this.opts(body, ['kind', 'provider', 'grant', 'pkce', 'scopes', 'holder']);
+        if (!o.has('kind') || !o.has('provider') || !o.has('grant') || !o.has('scopes')) this.fail(body, 'a credential names its kind, provider, grant and scopes (PT10e)');
+        const grant = this.str(o.get('grant')!);
+        if (grant !== 'authorization_code' && grant !== 'client_credentials') this.fail(o.get('grant')!, 'expected authorization_code or client_credentials');
+        const pk = o.get('pkce');
+        const pkce = !!pk && this.unparen(pk).kind === ts.SyntaxKind.TrueKeyword;
+        if (pk && !pkce) this.fail(pk, 'pkce is written true, or left out');
+        if (pkce && grant !== 'authorization_code') this.fail(pk!, 'pkce goes with authorization_code (PT10e)');
+        return this.mk<A.Credential>(c.node, { kind: 'Credential', name: this.str(name), credKind: this.str(o.get('kind')!), provider: this.str(o.get('provider')!), grant, pkce, scopes: this.arr(o.get('scopes')!).map((s) => this.str(s)), holder: o.has('holder') ? this.str(o.get('holder')!) : null });
       }
       default: return this.configuration(c);
     }
@@ -435,13 +448,18 @@ class Reader {
   }
 
   private effItem(node: ts.Expression): A.EffectItem {
-    const c = this.call(node, 'kind', 'labels', 'targets', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'kind', 'labels', 'targets', 'uses', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.EffectItem;
     switch (c.name) {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'labels': return mk({ kind: 'EffLabels', labels: this.arr(this.argsOf(c, 1, 1)[0]).map((l) => this.str(l)) });
       case 'cls': return mk({ kind: 'EffClass', value: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'targets': return mk({ kind: 'EffTargets', targets: this.arr(this.argsOf(c, 1, 1)[0]).map((p) => { const [k, v] = this.arr(p); return { key: this.str(k), values: this.arr(v).map((s) => this.str(s)) }; }) });
+      case 'uses': {
+        // PT10e: uses(credential, [scopes], holder?).
+        const [cred, scopes, holder] = this.argsOf(c, 2, 3);
+        return mk({ kind: 'EffUses', credential: this.str(cred), scopes: this.arr(scopes).map((s) => this.str(s)), holder: holder ? this.str(holder) : null });
+      }
       case 'retry': {
         const [n, base, timeout] = this.argsOf(c, 3, 3);
         return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });

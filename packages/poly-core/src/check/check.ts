@@ -10,6 +10,7 @@ import { diag, type Diagnostic, type NodeAt } from '../diagnostics.js';
 import { buildTypeEnv, cardinality, type TypeEnv, type UnionInfo } from '../types.js';
 import { digest } from '../digest.js';
 import { RESERVED_MODULE, RUNTIME_MODEL_DIGESTS } from '../reserved.js';
+import { profileProblem, underBase, type ProviderEntry, type ProviderProfile } from '../credentials.js';
 
 // ── semantic types ─────────────────────────────────────────────────────────
 
@@ -179,7 +180,12 @@ interface Scope {
  * module whose names the result is spelled in (the checked module itself, unless a configuration of another module is
  * reading this one's machines), so a machine of another module is always `m.M` and one of the view's is `M` (PS1.0).
  */
-export interface CheckOptions { program?: A.Module[]; view?: string }
+export interface CheckOptions {
+  program?: A.Module[];
+  view?: string;
+  /** PT10e: the provider profiles the module's credentials name, found by poly-check under std/credentials/providers. */
+  providers?: Readonly<Record<string, ProviderEntry>>;
+}
 
 export function checkModule(module: A.Module, opts: CheckOptions = {}): CheckResult {
   return new Checker(module, opts).run();
@@ -356,6 +362,7 @@ class Checker {
       for (const f of fields) if (hasConf(f.type)) this.err('PL1205', f, `${(d as { name: string }).name}.${f.name} holds a Conf, and a Conf is only a completion parameter bound from a reply (PD1.3b)`);
     }
     this.sharedCompletions(machines);
+    this.credentials();
     const configs = new Set<string>();
     for (const d of this.module.decls) {
       if (d.kind !== 'Configuration') continue;
@@ -395,6 +402,68 @@ class Checker {
       }
     }
     return { diagnostics: this.diags, env: this.env, machines };
+  }
+
+  // ── credentials (PT10e, S203) ──────────────────────────────────────────
+  /** A provider's profile when it is well formed, else null (a missing or malformed one is reported by credentials()). */
+  private profile(provider: string): ProviderProfile | null {
+    const entry = this.opts.providers?.[provider];
+    return entry && !profileProblem(entry.profile, provider) ? (entry.profile as ProviderProfile) : null;
+  }
+
+  private credentials(): void {
+    const names = new Set<string>();
+    for (const d of this.module.decls) {
+      if (d.kind !== 'Credential') continue;
+      if (names.has(d.name)) { this.err('PL1002', d, `credential ${d.name} is declared twice`); continue; }
+      names.add(d.name);
+      if (d.credKind !== 'oauth2') this.err('PL1001', d, `${d.credKind} is not a kind of credential; oauth2 is the one kind (PT10e)`);
+      const entry = this.opts.providers?.[d.provider];
+      const problem = entry ? profileProblem(entry.profile, d.provider) : null;
+      if (!entry) this.err('PL1001', d, `credential ${d.name}: provider "${d.provider}" has no profile under std/credentials/providers (PT10e)`);
+      else if (problem) this.err('PL1201', d, `credential ${d.name}: the profile of provider "${d.provider}" (${entry.file}) ${problem} (PT10e)`);
+      const profile = this.profile(d.provider);
+      if (!d.scopes.length) this.err('PL1201', d, `credential ${d.name} declares no scope`);
+      const seen = new Set<string>();
+      for (const s of d.scopes) {
+        if (seen.has(s)) this.err('PL1002', d, `credential ${d.name} declares the scope ${s} twice`);
+        seen.add(s);
+        if (profile && !profile.scopes.includes(s)) this.err('PL1001', d, `${s} is not a scope provider "${d.provider}" defines: ${profile.scopes.join(', ')} (PT10e)`);
+      }
+      if (profile && !profile.grants.includes(d.grant)) this.err('PL1201', d, `provider "${d.provider}" does not support the ${d.grant} grant; its profile names ${profile.grants.join(', ')} (PT10e)`);
+      if (profile && d.pkce && !profile.pkce) this.err('PL1201', d, `provider "${d.provider}" does not support PKCE, by its profile (PT10e)`);
+      // A person's grant is held by someone, a Principal; the service's own credential is held by no one (PT10e).
+      if (d.grant === 'authorization_code' && d.holder === null) this.err('PL1201', d, `credential ${d.name} is granted by a person (authorization_code) and names no holder: write holder Principal (PT10e)`);
+      if (d.grant === 'client_credentials' && d.holder !== null) this.err('PL1201', d, `credential ${d.name} is the service's own (client_credentials) and has no holder (PT10e)`);
+      else if (d.holder !== null && (d.holder !== 'Principal' || this.env.unions.has('Principal') || this.env.records.has('Principal'))) this.err('PL1201', d, `the holder of credential ${d.name} is ${d.holder}; a holder is a Principal (PT10e)`);
+    }
+  }
+
+  /** PT10e: `uses c { s, … } for p` against the credential c of this module and its provider's base addresses. */
+  private usesCredential(e: A.EffectDecl, u: A.EffUses, targets: A.EffTargets[]): void {
+    const c = this.module.decls.find((d): d is A.Credential => d.kind === 'Credential' && d.name === u.credential);
+    if (!c) { this.err('PL1001', u, `effect ${e.name} uses ${u.credential}, and the module declares no credential ${u.credential} (PT10e)`); return; }
+    if (!u.scopes.length) this.err('PL1201', u, `effect ${e.name} uses ${c.name} with no scope`);
+    const seen = new Set<string>();
+    for (const s of u.scopes) {
+      if (seen.has(s)) this.err('PL1002', u, `effect ${e.name} names the scope ${s} twice`);
+      seen.add(s);
+      // A credential with no scope is reported once, at its declaration.
+      if (c.scopes.length && !c.scopes.includes(s)) this.err('PL6821', u, `effect ${e.name} uses the scope ${s}, which credential ${c.name} does not declare: ${c.scopes.join(', ')} (PT10e)`);
+    }
+    if (c.grant === 'authorization_code') {
+      if (u.holder === null) this.err('PL6822', u, `effect ${e.name} uses ${c.name}, a person's grant, and names no holder: write for p, p a Principal parameter of the effect (PT10e)`);
+      else {
+        const p = e.params.find((x) => x.name === u.holder);
+        if (!p) this.err('PL1001', u, `effect ${e.name} has no parameter ${u.holder} to hold ${c.name}`);
+        else if (this.tyOf(p.type).k !== 'principal') this.err('PL1201', u, `the holder ${u.holder} of ${c.name} is ${tyToString(this.tyOf(p.type))}; a holder is a Principal parameter of the effect (PT10e)`);
+      }
+    } else if (u.holder !== null) this.err('PL1201', u, `credential ${c.name} is the service's own (client_credentials), so effect ${e.name} names no holder for it (PT10e)`);
+    const egress = targets.flatMap((t) => t.targets.filter((x) => x.key === 'egress').flatMap((x) => x.values));
+    if (!egress.length) { this.err('PL1201', u, `effect ${e.name} uses ${c.name} and declares no egress target; a credential is sent only to declared targets under its provider's base addresses (PT10e)`); return; }
+    const profile = this.profile(c.provider);
+    if (!profile) return;
+    for (const v of egress) if (!underBase(v, profile.bases)) this.err('PL6823', u, `effect ${e.name} uses ${c.name}, and its egress target ${JSON.stringify(v)} lies outside the base addresses of provider "${c.provider}": ${profile.bases.join(', ')} (PT10e)`);
   }
 
   // ── workflows (PT10, S166) ─────────────────────────────────────────────
@@ -983,6 +1052,7 @@ class Checker {
     const seen = new Set<string>();
     let labelled = false;
     const targets: (A.EffectItem & { kind: 'EffTargets' })[] = [];
+    const uses: A.EffUses[] = [];
     for (const it of e.items) {
       const key = it.kind === 'EffOutcome' ? it.outcome : it.kind.slice(3).toLowerCase();
       if (seen.has(key)) this.err('PL1002', it, `effect ${e.name} states ${key} twice`);
@@ -998,6 +1068,9 @@ class Checker {
         case 'EffTargets':
           targets.push(it);
           break;
+        case 'EffUses':
+          uses.push(it);
+          break;
         case 'EffRetry':
           if (it.attempts < 1) this.err('PL1201', it, 'retry needs at least one attempt');
           for (const d of [it.base, it.timeout]) if (durationMs(d) === null) this.err('PL1201', it, `${d} is not a duration`);
@@ -1012,6 +1085,7 @@ class Checker {
     if (!labelled) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
     const labels = new Set(e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])));
     for (const t of targets) this.targets(e, t, labels);
+    for (const u of uses) this.usesCredential(e, u, targets);
     // polyrun reads timer, cancelTimer, spawnChild and signalChild before its manifest, and PT7a adds sendTo (review finding L3).
     const kind = effectKind(e);
     if (KERNEL_KINDS.has(kind)) this.err('PL1201', e, `effect ${e.name} has kind "${kind}", which is the kernel's own intent kind; choose another (PT6.1)`);
@@ -2851,7 +2925,9 @@ export function effectSignature(e: A.EffectDecl): string {
     return Object.fromEntries(Object.entries(x).filter(([k]) => k !== 'id' && k !== 'span' && k !== 'comments').map(([k, v]) => [k, strip(v)]));
   };
   const outcomes = e.items.filter((i) => i.kind === 'EffOutcome').map(strip).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  return JSON.stringify({ params: e.params.map((p) => [p.name, strip(p.type)]), outcomes, cls: effectClass(e) });
+  // PT10e: the credential an effect uses is in its manifest entry, so effects that share a kind use the same one.
+  const uses = e.items.find((i) => i.kind === 'EffUses');
+  return JSON.stringify({ params: e.params.map((p) => [p.name, strip(p.type)]), outcomes, cls: effectClass(e), ...(uses ? { uses: strip(uses) } : {}) });
 }
 
 /** `before("k1", "k2")` (S37): the two kinds, in order. */

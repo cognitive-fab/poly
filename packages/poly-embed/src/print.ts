@@ -50,6 +50,8 @@ class Printer {
         const starts = d.starts ? `, starts: ${q(`${d.starts.machine}.${d.starts.action}`)}${d.starts.onInbound ? ', onInbound: true' : ''}` : '';
         return `${this.use('channel')}(${q(d.name)}, { kind: ${q(d.channelKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, thread: ${q(d.thread)}${starts}, peer: {\n${peer}${ind}} })`;
       }
+      // PT10e: credential(name, { kind, provider, grant, pkce?, scopes, holder? }).
+      case 'Credential': return `${this.use('credential')}(${q(d.name)}, { kind: ${q(d.credKind)}, provider: ${q(d.provider)}, grant: ${q(d.grant)}${d.pkce ? ', pkce: true' : ''}, scopes: [${d.scopes.map(q).join(', ')}]${d.holder === null ? '' : `, holder: ${q(d.holder)}`} })`;
       case 'Workflow': {
         const key = d.key ? `, key: { template: ${q(d.key.template)}${d.key.fields.length ? `, where: { ${d.key.fields.map((f) => `${this.key(f.name)}: ${q(f.pattern)}`).join(', ')} }` : ''} }` : '';
         const tools = d.tools.map((t) => `${ind}  ${q(t.effect)}: { tool: ${q(t.tool)}${t.target === null ? '' : `, target: ${q(t.target)}`}, why: ${q(t.why)} },\n`).join('');
@@ -164,6 +166,8 @@ class Printer {
       case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
       // PT6.5, S151: one entry per key, in source order.
       case 'EffTargets': return `${this.use('targets')}([${x.targets.map((t) => `[${q(t.key)}, [${t.values.map(q).join(', ')}]]`).join(', ')}])`;
+      // PT10e: uses(credential, [scopes], holder?).
+      case 'EffUses': return `${this.use('uses')}(${q(x.credential)}, [${x.scopes.map(q).join(', ')}]${x.holder === null ? '' : `, ${q(x.holder)}`})`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
       case 'EffOutcome': {
         const args = x.args.some((a) => readsName(a.value)) ? `(${this.p}) => (${this.args(x.args)})` : this.args(x.args);

@@ -81,6 +81,8 @@ export interface Certificate {
     workflows?: { name: string; machine: string; runtime: 'poly-runtime'; gated: true; descriptor: string }[];
     /** PS15: each channel, its application's machine id and its descriptor, whose digest is under `artefacts`. */
     channels?: { name: string; application: string; descriptor: string }[];
+    /** PT10e: each credential an effect uses, by name, and its descriptor, whose digest is under `artefacts`. */
+    credentials?: { name: string; descriptor: string }[];
     /** Plan step 9: the gate engine that decides this build's policies, pinned by commit (Polyaxion is a peer, S145). */
     policyEngine?: { name: 'polyaxion'; commit: string };
     /** S182, plan step 10: each channel's runtime adapter, bound by package name, version and digest. */

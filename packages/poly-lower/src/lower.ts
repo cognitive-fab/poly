@@ -4,7 +4,7 @@
 //                   schemas and domains, keyed acceptors, reject/next/unchanged
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
-import type { ChannelPlan } from '@poly/core';
+import type { ChannelPlan, ProviderEntry, ProviderProfile } from '@poly/core';
 import { boundPath, diag, digest, effectKind, effectClass, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { emitsCall } from './emit.js';
@@ -19,13 +19,15 @@ export interface LowerOptions {
   program?: A.Module[];
   /** PS15: the module's channels as expanded, for each one's descriptor, written with its application's build. */
   channels?: ChannelPlan[];
+  /** PT10e: the provider profiles of the module's credentials, which each credential's descriptor records. */
+  providers?: Readonly<Record<string, ProviderEntry>>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string; [credential: `../credentials/${string}.json`]: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -273,6 +275,22 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const thread = opts.fault === 'channel-thread' ? { template: p.thread.fields.length > 1 ? `{${p.thread.fields[0]}}` : 'fixed', fields: p.thread.fields.slice(0, -1) } : p.thread;
     files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending }, null, 2) + '\n';
   }
+  // PT10e: each credential an effect of this machine uses has its descriptor, which the vault adapter reads: what to ask
+  // the provider for, and the base addresses the credential may be sent to. The broken lowerings add a scope the source
+  // does not declare, and widen a base address to plain http.
+  const used = new Set([...facts.effects.values()].flatMap((e) => e.items.flatMap((i) => (i.kind === 'EffUses' ? [i.credential] : []))));
+  for (const c of module.decls) {
+    if (c.kind !== 'Credential' || !used.has(c.name)) continue;
+    const entry = opts.providers?.[c.provider];
+    if (!entry) throw new Error(`poly-lower: no profile for provider ${c.provider} of credential ${c.name}`);
+    const bases = (entry.profile as ProviderProfile).bases;
+    files[`../credentials/${c.name}.json`] = JSON.stringify({
+      v: 1, credential: c.name, kind: c.credKind, provider: c.provider, profile: entry.digest, grant: c.grant, pkce: c.pkce,
+      scopes: opts.fault === 'credential-scope-added' ? [...c.scopes, 'added.by.fault'] : c.scopes,
+      holder: c.holder !== null,
+      bases: opts.fault === 'credential-base-widened' ? [...bases, ...bases.map((b) => b.replace(/^https:/, 'http:'))] : bases,
+    }, null, 2) + '\n';
+  }
   // S74: each liveness property's goal (and, for leads to, its start) as a state predicate, for exported witness
   // tests. Its own module, so no engine can take it for an invariant; it is read back like every artefact.
   const live = mutated.items.filter((p): p is A.Liveness => p.kind === 'Liveness' && !p.quant);
@@ -426,6 +444,9 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
       if (it.kind === 'EffLabels') entry.labels = it.labels;
       // PT6.5, S151: the runtime binds the handler's capabilities to these; polyrun ignores the field.
       if (it.kind === 'EffTargets') entry.targets = Object.fromEntries(it.targets.map((t) => [t.key, t.values]));
+      // PT10e: the credential the runtime checks the grant of before the policy (S199), the scopes it needs and the
+      // payload field that names the holder. The broken lowering credential-holder-dropped loses the holder.
+      if (it.kind === 'EffUses') entry.uses = { credential: it.credential, scopes: it.scopes, holder: cx.fault === 'credential-holder-dropped' ? null : it.holder };
     }
     // S137: an effect with no retry clause declares polyrun's default bound, so every manifest entry has its maxAttempts (S120).
     if (!entry.retry) entry.retry = { ...DEFAULT_RETRY };

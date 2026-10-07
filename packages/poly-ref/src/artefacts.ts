@@ -10,8 +10,10 @@
 // Each is read back here and compared with what 04-semantics gives for the source, computed by
 // poly-ref's own model. The timer and child wiring is part of the mapper's intents, which tv.ts compares.
 import type * as A from '@poly/core';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { importArtefact } from './import-artefact.js';
 import { valuesOf, monitorStart, monitorStep, replyPath, type RMachine, type RPathProperty, type RType } from './model.js';
 import { initialState, durationMs } from './step.js';
@@ -26,8 +28,11 @@ const stable = (v: unknown): string => {
   return '{' + Object.keys(v as object).sort().map((k) => JSON.stringify(k) + ':' + stable((v as Record<string, unknown>)[k])).join(',') + '}';
 };
 
+/** The repository's std/, where the provider profiles of PT10e are, unless the caller names another. */
+const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
+
 /** The mismatches between the artefacts in `dir` and the source, one message each (PL2501 in tv.ts). */
-export async function readBack(module: A.Module, M: RMachine, dir: string, states: State[] = []): Promise<string[]> {
+export async function readBack(module: A.Module, M: RMachine, dir: string, states: State[] = [], std: string = STD): Promise<string[]> {
   const out: string[] = [];
   const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === M.name)!;
   const differ = (what: string, got: unknown, want: unknown) => { if (stable(got) !== stable(want)) out.push(`${what}: the artefact has ${stable(got)}, the source gives ${stable(want)}`); };
@@ -113,6 +118,9 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const targets = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
         differ(`effects.manifest.json ${kind}.targets`, entry.targets ?? null, targets ? Object.fromEntries(targets.targets.map((t) => [t.key, t.values])) : null);
         differ(`effects.manifest.json ${kind}.class`, entry.class, M.effects.get(e.name)!.cls);
+        // PT10e: the credential the runtime checks the grant of, its scopes, and the parameter naming its holder.
+        const uses = e.items.find((x): x is A.EffUses => x.kind === 'EffUses');
+        differ(`effects.manifest.json ${kind}.uses`, entry.uses ?? null, uses ? { credential: uses.credential, scopes: uses.scopes, holder: uses.holder } : null);
       }
       // PD1.7: a decision, tried once within its timeout, class none; a timeout is its failure.
       for (const d of decisions) {
@@ -182,6 +190,23 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         if (bad) out.push(`effect-invariants.mjs ${p.name} is ${bad.lowered} on the emissions ${stable(bad.kinds)}, and PS5.4 gives ${!bad.lowered}`);
       }
     }
+  }
+
+  // ── credentials/<c>.json (PT10e): each credential an effect of this machine uses, against its source and the
+  // provider profile it names, read here from the profile's file ──
+  for (const name of new Set(effects.flatMap((e) => e.items.flatMap((i) => (i.kind === 'EffUses' ? [i.credential] : []))))) {
+    const c = module.decls.find((d): d is A.Credential => d.kind === 'Credential' && d.name === name);
+    if (!c) { out.push(`an effect uses credential ${name}, which the source does not declare`); continue; }
+    const file = join(dir, '..', 'credentials', `${name}.json`);
+    if (!existsSync(file)) { out.push(`credentials/${name}.json is missing, and an effect of ${M.name} uses ${name} (PT10e)`); continue; }
+    let got: unknown;
+    try { got = JSON.parse(readFileSync(file, 'utf8')); } catch { out.push(`credentials/${name}.json is not JSON`); continue; }
+    const profileFile = join(std, 'credentials', 'providers', `${c.provider}.json`);
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(c.provider) || !existsSync(profileFile)) { out.push(`credentials/${name}.json: provider ${c.provider} has no profile to read back against`); continue; }
+    const bytes = readFileSync(profileFile);
+    let bases: unknown = null;
+    try { bases = (JSON.parse(bytes.toString('utf8')) as { bases?: unknown }).bases ?? null; } catch { bases = null; }
+    differ(`credentials/${name}.json`, got, { v: 1, credential: c.name, kind: c.credKind, provider: c.provider, profile: 'sha256:' + createHash('sha256').update(bytes).digest('hex'), grant: c.grant, pkce: c.pkce, scopes: c.scopes, holder: c.holder !== null, bases });
   }
 
   // ── polyflow.workflow.json (PT10, S165): each workflow that runs this machine, read back against its source ──

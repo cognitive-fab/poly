@@ -61,6 +61,11 @@ export const FAULT_SOURCES = {
   'workflow-key': ['conformance/m6/brief.poly'],
   // S152: the generated sandbox policy, an artefact the sandbox reads.
   'widen-sandbox': ['conformance/m5/capabilities.poly'],
+  // PT10e (M9): the credential's descriptor the vault adapter reads, and the manifest's uses entry the runtime checks
+  // the grant by. The provider test-oauth is the tests' own, under the test-only std.
+  'credential-scope-added': ['test/fixtures/m9/credentials.poly'],
+  'credential-holder-dropped': ['test/fixtures/m9/credentials.poly'],
+  'credential-base-widened': ['test/fixtures/m9/credentials.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

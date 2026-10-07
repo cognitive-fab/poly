@@ -7,7 +7,7 @@ import { join, basename } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { translationValidate } from '@poly/ref';
 import { DELIBERATELY_BROKEN_LOWERINGS, FAULT_SOURCES } from './toolchain-faults.mjs';
-import { ROOT, polyFiles, build } from './helpers.mjs';
+import { ROOT, TEST_STD, polyFiles, build } from './helpers.mjs';
 
 const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0')), ...polyFiles(join(ROOT, 'conformance', 'm1')), ...polyFiles(join(ROOT, 'conformance', 'm2'))];
 
@@ -39,9 +39,10 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
       for (const [k, b] of bad.entries()) {
         // The effects mapper is an artefact too (PS9.2): a fault that changes only it must be caught as well.
         const read = (dir, f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null);
-        const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs', 'contract.json', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'openshell.policies.yaml', ...Object.keys(b.lowered.files).filter((f) => f.startsWith('../workflows/') || f.startsWith('../channels/'))].some((f) => read(b.dir, f) !== read(good[k].dir, f));
+        const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs', 'contract.json', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'openshell.policies.yaml', ...Object.keys(b.lowered.files).filter((f) => f.startsWith('../workflows/') || f.startsWith('../channels/') || f.startsWith('../credentials/'))].some((f) => read(b.dir, f) !== read(good[k].dir, f));
         if (!changed) continue;
-        const r = await translationValidate(b.module, b.machine, b.dir, { program: b.program });
+        // PT10e: the sources are built with the tests' std (helpers.mjs), so the provider profiles are read back from it.
+        const r = await translationValidate(b.module, b.machine, b.dir, { program: b.program, std: TEST_STD });
         if (r.mismatches.length === 0) { equivalent.push(basename(file)); continue; }
         caught++;
         assert.ok(r.mismatches.every((d) => d.code === 'PL2501'));

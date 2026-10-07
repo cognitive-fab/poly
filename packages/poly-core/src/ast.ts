@@ -27,7 +27,25 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow | Channel;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow | Channel | Credential;
+
+// ── Credentials (PT10e, S203) ──────────────────────────────────────────────
+
+/**
+ * `credential c: oauth2 { provider "p"  grant authorization_code [pkce] | client_credentials  scopes { s, ... }  holder Principal }`:
+ * a credential the vault holds, named by reference only, whose provider profile is std/credentials/providers/p.json.
+ */
+export interface Credential extends NodeBase {
+  kind: 'Credential';
+  name: string;
+  credKind: string;
+  provider: string;
+  grant: 'authorization_code' | 'client_credentials';
+  pkce: boolean;
+  scopes: string[];
+  /** The holder's type, `Principal`, or null for a credential with no holder (the service's own). */
+  holder: string | null;
+}
 
 // ── Channels (PT21.1, PS15) ────────────────────────────────────────────────
 
@@ -382,7 +400,11 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffClass'; value: string })
   | (NodeBase & { kind: 'EffRetry'; attempts: number; base: string; timeout: string })
   | EffTargets
+  | EffUses
   | EffOutcomeItem;
+
+/** PT10e: `uses c { s, ... } for p`, the credential an effect runs with, the scopes it needs and its holder parameter. */
+export type EffUses = NodeBase & { kind: 'EffUses'; credential: string; scopes: string[]; holder: string | null };
 
 /** PT6.5, S151: `targets { egress: "<prefix>" | [ … ], secrets: [ … ], exec: [ … ], store: [ … ] }`, in source order. */
 export type EffTargets = NodeBase & { kind: 'EffTargets'; targets: { key: string; values: string[] }[] };

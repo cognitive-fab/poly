@@ -148,6 +148,10 @@ export const CODES: Record<string, CodeInfo> = {
   PL6813: { name: 'CHANNEL_BINDING_INCOMPLETE', stage: 'types', severity: 'error' },
   PL6814: { name: 'CHANNEL_BINDING_NOT_ONE_TO_ONE', stage: 'types', severity: 'error' },
   PL6815: { name: 'CHANNEL_BINDING_MISTYPED', stage: 'types', severity: 'error' },
+  // PT10e, S203 (M9): an effect's `uses` against its credential and the credential's provider profile.
+  PL6821: { name: 'SCOPE_NOT_DECLARED', stage: 'types', severity: 'error' },
+  PL6822: { name: 'HOLDER_NOT_NAMED', stage: 'types', severity: 'error' },
+  PL6823: { name: 'TARGET_OUTSIDE_PROVIDER', stage: 'types', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
   PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },

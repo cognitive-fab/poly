@@ -30,7 +30,8 @@ import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint,
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
-import { resolveUses } from './uses.js';
+import { resolveUses, STD } from './uses.js';
+import { resolveProviders } from './providers.js';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration';
 
@@ -174,6 +175,8 @@ export interface CheckOptions {
   refMachine?: string;
   /** PS15, set by checkFile: each channel's expansion, for its descriptor. */
   channels?: ChannelPlan[];
+  /** PT10e, set by checkFile: the provider profiles the program's credentials name. */
+  providers?: Record<string, import('@poly/core').ProviderEntry>;
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
   text?: string;
   /**
@@ -235,8 +238,10 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   report.diagnostics.push(...expansion.diagnostics);
   const module = expansion.module;
   const program = [...uses.program.filter((m) => m !== original), module, ...expansion.extra];
-  opts = { ...opts, uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans };
-  const checked = checkModule(module, { program });
+  // PT10e: the profiles of the providers the program's credentials name, under the same std as its modules.
+  const providers = resolveProviders(program, opts.std ?? STD);
+  opts = { ...opts, uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans, providers };
+  const checked = checkModule(module, { program, providers });
   report.diagnostics.push(...checked.diagnostics);
   // Review B-F1: a used module the checker refuses refuses this check too, with its own errors, each at its own line;
   // poly-ref would otherwise explore machines the compiler rejects, and a configuration over them could read CLEAN.
@@ -245,7 +250,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const useDecls = module.decls.filter((d): d is A.UseDecl => d.kind === 'Use');
   for (const m of program) {
     if (m === module) continue;
-    const errors = checkModule(m, { program }).diagnostics.filter((d) => d.severity === 'error');
+    const errors = checkModule(m, { program, providers }).diagnostics.filter((d) => d.severity === 'error');
     const use = useDecls.find((d) => d.path.join('.') === m.name || d.path.slice(0, -1).join('.') === m.name) ?? useDecls[0];
     const at = { module: module.name, ...(use ? { node: use.id, line: use.span?.line, col: use.span?.col } : {}) };
     report.diagnostics.push(...errors.map((d) => ({ ...d, at, message: `in module ${m.name}${d.at.line !== undefined ? `, line ${d.at.line}` : ''}, which this program uses: ${d.message}` })));
@@ -296,7 +301,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // PS15: each channel's conversation, the machine Conversation of the module m.c, reported as c.Conversation.
   for (const x of expansion.extra) {
     const channel = x.name.slice(module.name.length + 1);
-    const checkedX = checkModule(x, { program });
+    const checkedX = checkModule(x, { program, providers });
     for (const machine of checkedX.machines.keys()) {
       const mc: MachineCheck = { machine: `${channel}.${machine}`, stages: [], notRun: [], vacuous: [], diagnostics: [], verdict: 'CLEAN' };
       report.machines.push(mc);
@@ -394,7 +399,7 @@ function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
 async function checkMachineStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, opts: CheckOptions, engines: Record<string, string>): Promise<void> {
   // ── lower ─────────────────────────────────────────────────────────────
   let t0 = performance.now();
-  const { lowered, diagnostics } = lowerMachine(module, checked, machine, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses, ...(opts.channels?.length ? { channels: opts.channels } : {}) });
+  const { lowered, diagnostics } = lowerMachine(module, checked, machine, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses, ...(opts.channels?.length ? { channels: opts.channels } : {}), ...(opts.providers ? { providers: opts.providers } : {}) });
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
@@ -426,8 +431,9 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
       rmSync(wdir, { recursive: true, force: true });
       mkdirSync(wdir, { recursive: true });
     }
-    // PS15: a channel's descriptor sits in .poly/build/channels/, beside the machines' directories.
-    if (f.startsWith('../channels/')) mkdirSync(dirname(join(dir, f)), { recursive: true });
+    // PS15: a channel's descriptor sits in .poly/build/channels/, beside the machines' directories; PT10e: a
+    // credential's in .poly/build/credentials/.
+    if (f.startsWith('../channels/') || f.startsWith('../credentials/')) mkdirSync(dirname(join(dir, f)), { recursive: true });
     writeFileSync(join(dir, f), text);
   }
   mc.buildDir = dir;
@@ -458,7 +464,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   t0 = performance.now();
   // PS15: poly-ref is given the source as written (and c.Conversation for a channel's conversation), never the expansion.
   const refProgram = opts.refProgram ?? opts.uses;
-  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, ...(opts.refFault ? { fault: opts.refFault } : {}) });
+  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, std: opts.std ?? STD, ...(opts.refFault ? { fault: opts.refFault } : {}) });
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {

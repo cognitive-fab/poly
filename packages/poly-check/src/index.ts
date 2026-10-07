@@ -2,6 +2,7 @@ export { exportWitness, findWitness, lookupWitness, witnessSpec, WitnessExportEr
 export { checkFile, checkProject, configurationReports, projectKindConflicts, engineVersions, mergeFindings, type ProjectReport, type CheckReport, type CheckOptions, type MachineCheck, type ConfigCheck, type StageRecord, type InstanceRecord } from './pipeline.js';
 export { render, renderDiagnostic } from './render.js';
 export { resolveUses, type Uses } from './uses.js';
+export { resolveProviders } from './providers.js';
 export { applyFix, attachFixes, fixId, type FixOutcome } from './fixes.js';
 export { applyFixById, findFix, type FixResult } from './fix.js';
 export { lintHandlers, lintHandlerText } from './lint.js';

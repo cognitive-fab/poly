@@ -10,6 +10,8 @@
 import type * as A from '@poly/core';
 import type { Trivia } from './parser.js';
 
+/** PT10e: a set of scope names, `{}` when empty. */
+const scopeSet = (s: string[]): string => (s.length ? `{ ${s.join(', ')} }` : '{}');
 const INDENT = '  ';
 
 const PREC: Record<string, number> = {
@@ -56,6 +58,17 @@ class Printer {
     this.out.push(`${INDENT}thread ${q(c.thread)}`);
     if (c.starts) this.out.push(`${INDENT}starts ${c.starts.machine}.${c.starts.action}${c.starts.onInbound ? ' on inbound' : ''}`);
     for (const m of c.maps) this.emit(m, INDENT, [`${m.peer} -> ${m.machine}.${m.action}`]);
+    this.out.push(`}${this.trail(c)}`);
+  }
+
+  /** PT10e: one clause per line, in a fixed order. */
+  private credential(c: A.Credential): void {
+    this.lead(c, '');
+    this.out.push(`credential ${c.name}: ${c.credKind} {`);
+    this.out.push(`${INDENT}provider ${JSON.stringify(c.provider)}`);
+    this.out.push(`${INDENT}grant ${c.grant}${c.pkce ? ' pkce' : ''}`);
+    this.out.push(`${INDENT}scopes ${scopeSet(c.scopes)}`);
+    if (c.holder !== null) this.out.push(`${INDENT}holder ${c.holder}`);
     this.out.push(`}${this.trail(c)}`);
   }
 
@@ -116,6 +129,8 @@ class Printer {
         return this.workflow(d);
       case 'Channel':
         return this.channel(d);
+      case 'Credential':
+        return this.credential(d);
     }
   }
 
@@ -284,6 +299,7 @@ class Printer {
       case 'EffLabels': return `labels { ${e.labels.join(', ')} }`;
       case 'EffRetry': return `retry { attempts ${e.attempts}, base ${e.base}, timeout ${e.timeout} }`;
       case 'EffTargets': return `targets { ${e.targets.map((t) => `${t.key}: ${t.key === 'egress' && t.values.length === 1 ? JSON.stringify(t.values[0]) : `[${t.values.map((v) => JSON.stringify(v)).join(', ')}]`}`).join(', ')} }`;
+      case 'EffUses': return `uses ${e.credential} ${scopeSet(e.scopes)}${e.holder === null ? '' : ` for ${e.holder}`}`;
       case 'EffOutcome': return `${e.outcome}${e.bind !== undefined ? `(${e.bind})` : ''} -> ${e.action}(${this.args(e.args)})`;
     }
   }

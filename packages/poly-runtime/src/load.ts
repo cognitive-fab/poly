@@ -89,6 +89,11 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     const f = join(root, c.descriptor);
     if (existsSync(f)) bytes.set(c.descriptor, readFileSync(f));
   }
+  // PT10e: each credential's descriptor, read once like any artefact.
+  for (const c of certificate.poly?.credentials ?? []) {
+    const f = join(root, c.descriptor);
+    if (existsSync(f)) bytes.set(c.descriptor, readFileSync(f));
+  }
   const actual = Object.fromEntries([...bytes].map(([k, b]) => [k, sha256OfBytes(b)]));
   const problems = certificateProblems(certificate, actual, trust);
   if (problems.length) {

@@ -204,6 +204,7 @@ class Parser {
     if (this.at('policy') && this.peek(1).kind === 'ident') return this.policy();
     if (this.at('workflow') && this.peek(1).kind === 'ident') return this.workflow();
     if (this.at('channel') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.channel();
+    if (this.at('credential') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.credential();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -213,7 +214,53 @@ class Parser {
       this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
       return null;
     }
-    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, use)');
+    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, channel, credential, use)');
+  }
+
+  /** `credential c: oauth2 { provider "p"  grant authorization_code [pkce] | client_credentials  scopes { … }  holder T }` (PT10e). */
+  private credential(): A.Credential {
+    const start = this.next();
+    const name = this.ident('a credential name');
+    this.expect(':');
+    const credKind = this.ident('a credential kind');
+    this.expect('{');
+    let provider: string | null = null;
+    let grant: A.Credential['grant'] | null = null;
+    let pkce = false;
+    let scopes: string[] | null = null;
+    let holder: string | null = null;
+    const seen = new Set<string>();
+    while (!this.atPunct('}')) {
+      const is = this.peek();
+      const w = this.ident('provider, grant, scopes or holder');
+      // As for a channel's clauses: each is written once, since a second would silently replace the first.
+      if (seen.has(w)) this.fail(`a credential states its ${w} once`, is);
+      seen.add(w);
+      if (w === 'provider') provider = this.str('a provider name');
+      else if (w === 'grant') {
+        const g = this.ident('authorization_code or client_credentials');
+        if (g !== 'authorization_code' && g !== 'client_credentials') this.fail('expected authorization_code or client_credentials', is);
+        grant = g;
+        if (g === 'authorization_code' && this.at('pkce')) { this.next(); pkce = true; }
+      } else if (w === 'scopes') scopes = this.scopeSet();
+      else if (w === 'holder') holder = this.ident('the holder\'s type');
+      else this.fail('expected provider, grant, scopes or holder', is);
+    }
+    if (provider === null || grant === null || scopes === null) this.fail('a credential names its provider, grant and scopes (PT10e)');
+    this.next();
+    return this.node<A.Credential>(start, { kind: 'Credential', name, credKind, provider, grant, pkce, scopes, holder }, true);
+  }
+
+  /** `{ s, … }`: provider scope names, each an identifier or a dotted one (PT10e). */
+  private scopeSet(): string[] {
+    this.expect('{');
+    const out: string[] = [];
+    while (!this.atPunct('}')) {
+      out.push(this.qualName().join('.'));
+      if (!this.atPunct('}')) this.expect(',');
+    }
+    this.next();
+    return out;
   }
 
   /** `channel c: k { adapter "…"  thread "…"  starts A.S [on inbound]  P -> A.X … }` (PT21.1, PS15). */
@@ -948,9 +995,16 @@ class Parser {
         }
         this.next();
         items.push(this.effItem(is, { kind: 'EffTargets', targets }));
+      } else if (w === 'uses') {
+        // PT10e: `uses c { s, … } for p`, the holder optional here and required by the check for a person's grant.
+        const credential = this.ident('a credential');
+        const scopes = this.scopeSet();
+        let holder: string | null = null;
+        if (this.at('for')) { this.next(); holder = this.ident('the holder parameter'); }
+        items.push(this.effItem(is, { kind: 'EffUses', credential, scopes, holder }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
         items.push(this.outcome(is, w));
-      } else this.fail('expected kind, labels, targets, class, retry, ok, failed or exhausted', is);
+      } else this.fail('expected kind, labels, targets, uses, class, retry, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);
