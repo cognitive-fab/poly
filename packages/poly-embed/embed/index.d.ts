@@ -93,6 +93,12 @@ export declare function retrieve(source: string, body: { owner?: string; limit: 
 export declare function remember(source: string, provenance: 'observed' | 'derived' | 'verified', about: string): EffItem;
 /** PS17.3: `to p`, the payload field that names an effect's recipient. */
 export declare function to(param: string): EffItem;
+/** PT10r: `route r { tier t provider "p" prices "f" [calibration "f"] max tokens n …  escalate when …  budget b }`. */
+export declare function route(name: string, body: { tiers: { name: string; provider: string; prices: string; calibration?: string; maxTokens: number }[]; escalate: (['conf' | 'margin', number] | ['failed'])[]; budget?: string }): Decl;
+/** PT24.1c: `route r` in a decision, its tiers in place of a provider. */
+export declare function route(name: string): DecisionItem;
+/** PT10r: `budget b { cap <currency> <amount> per … }`, each amount a decimal as written. */
+export declare function budget(name: string, body: { caps: { currency: string; amount: number; per: 'run' | 'scope' | 'hour' | 'day' | 'month'; scope?: true }[]; onExhausted?: 'deny' | 'escalate' }): Decl;
 /** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target. */
 export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: string[]][]): EffItem;
 export declare function retry(attempts: number, base: string, timeout: string): EffItem;

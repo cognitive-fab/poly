@@ -1175,6 +1175,42 @@ ChannelItem  += "audience" Ident ;                                            (*
 - **`Ω` at run time (S326).** A retrieval with no owner predicate from an owned source keeps its item set, and gives each body a decision reads from it, the owners `Ω` for the flow rule (a mark the store writes as `\u0000Ω`, which no principal reads alone, and the proposal shows as `Ω`); its taint record keeps, as `kept`, the owners of the items it returned. A join keeps `Ω` and the union of the kept owners. A forget reads `kept` with the owners.
 - **The sender at ingress (S327).** `rt.receive` stores each message's body with the taint `(c, {s})`: `c` the channel's declared class, else `a1`, and `s` the keyed digest of the sender's verified address, the one the thread's fields are kept by. The thread records its sender; the recipient of `channel.c.send` from that thread's conversation has that principal, so the conversation may answer its sender with what the sender wrote. `rt.forget({ subject })` matches the subject as given and by its keyed digest, so a forget of an address erases what it sent.
 
+## PT10r. Routes and budgets, as built (M11, PT24, PS18)
+
+A route and a budget are top-level declarations, and a decision names its route:
+
+```poly
+route triage {
+  tier small provider "flash" prices "prices/flash.json" calibration "maps/flash.json" max tokens 4000
+  tier large provider "opus" prices "prices/opus.json" calibration "maps/opus.json" max tokens 8000
+  escalate when conf < 0.8 or margin < 0.1 or failed
+  budget support
+}
+
+budget support {
+  cap usd 0.5 per run
+  cap usd 20 per day per scope
+  on exhausted escalate
+}
+
+decision classify(text: string) -> Branch {
+  route triage
+  labels { egress:external, read:private }
+  timeout 800ms
+  ok(r) -> Classified(branch: r.answer, conf: r.conf, margin: r.margin)
+  failed -> Unclassified()
+}
+```
+
+- **Money (step 2, S350).** `@poly/core`'s `money.ts`: an amount is an integer of micro-units; `parseAmount` reads a decimal of at most six places exactly, and `formatAmount` writes one back. A price table is JSON: `{ v: 1, provider, model, currency, perMillionTokens: { <class>: <micro-units> }, source, readOn }`, the currency a lower-case ISO 4217 code and each class a lower-case name. One without an https `source` or a `readOn` date (`YYYY-MM-DD`) is `PL6843 PRICE_UNSOURCED`; any other fault in it is `PL1201`. `reservationOf(N, table)` and `costOf(usage, table)` are PS18.3's, in bigint arithmetic, a cost naming the classes it priced at the highest price as `unpriced`.
+- **`std.routing` (steps 3 and 4, S351, S352).** `std/routing/routing.poly` is `module std.routing`: the machine `Route` with the state `r` (`Ready`, `Trying`, `Answered`, `Exhausted`), `tier` and `left`, the actions `Start()`, `Answer(conf, margin)` and `Fail()`, and the effect `call(tier)`; and the machine `Budget` with the state `b` (`Closed`, `Open`, `Spent`), `cap`, `spent`, `reserved` and `overrun`, and the actions `Open(limit)`, `Reserve(r)`, `Settle(r, actual)` and `Release(r)`. A budget whose remainder is spent with nothing reserved is `Spent`, which is terminal, since no reservation can fit it. Both are CLEAN alone: `Route` with 6 states, its liveness `route-ends` holding under the fairness of `Answer` or `Fail`; `Budget` with 96 states over its check domains, `within-cap` (`spent + reserved <= cap + overrun`) holding in each. Every rule is poly's own, listed in `std/routing/PROVENANCE.md`, and each has a seeded mutant in `test/std-routing.test.mjs`; the one for `route-ends` calls a failed tier again, and loops. The tests' std holds the same file, byte for byte.
+- **The declarations (step 5).** `route r { … }`: one line per tier, `tier t provider "p" prices "f" [calibration "f"] max tokens N`, in this order; `escalate when e1 or … or ek`, each term `conf < c`, `margin < c` or `failed`, written once and required; `budget b`, at most once. `budget b { … }`: one line per cap, `cap <currency> <amount> per run`, `per scope`, or `per hour`, `day` or `month` with `per scope` after it or not; `on exhausted deny` (the default) or `escalate`. An amount is written with at most three decimal places, as the lexer reads a decimal, and lowered to micro-units exactly. `route r` in a decision names its route. Each route and budget means the module `m.r` or `m.b` of PS18.0, written by `expandRoutes` and reported as `r.Route` and `b.Budget`; a module with a route or a budget uses `std.routing`. A route, a budget, a channel and a credential of one module have different names (`PL1002`).
+- **The files a route names.** Each price table and map is a relative path under the source's directory, written with `/`, ending in `.json`, with no `.` or `..` segment (`PL1201` otherwise); poly-check reads it beside the source (`resolveRouting`) and gives it to the checker and the lowering with the digest of its bytes. A missing file is `PL1001`. A map is `poly journal fit`'s output, `{ decision, version, fittedFor, points, digest }`, its points ascending and its digest the digest of the rest (`PL1201` otherwise), fitted for the decision the route serves (`PL1201`).
+- **The checks.** A tier's provider is a plain name and its token limit at least 1 (`PL1201`); two tiers of a name are `PL1002`. A route's tiers are priced in one currency, and its budget's caps in that currency (`PL6844 BUDGET_CURRENCY_MISMATCH`). A tier whose reservation is above a cap of its route's budget is `PL6845 RESERVATION_ABOVE_CAP`. A condition that reads `conf` or `margin` with a tier that has no map is `PL6841 TIER_WITHOUT_CALIBRATION` (PT24.1b). A threshold is in `(0, 1]` (`PL1201`). A decision that names a route names no provider, does not return a record, and names a route of its module (`PL1201`, `PL1001`); a route is named by at most one decision (`PL1201`). A budget has a cap, each above zero in a currency code (`PL1201`), and one cap per address (`PL1002`). `route-exhausted` joins `PL1207`'s reserved reasons.
+- **Lowering.** A routed decision's manifest entry gains `decision.route`. Each route a decision of a machine names is written with that machine's build to `.poly/build/routes/<r>.json`: the route, its module, the machine `m.r.Route`, the kind `route.r.call`, the decision, and per tier its provider, the table's model, the token limit, the reservation, the table (path, digest, currency, prices) and the map (path, digest, decision, version, `fittedFor`, points and the map's own digest) or null, the condition's terms and the budget. The route's budget is written to `.poly/build/budgets/<b>.json`: its caps in micro-units with their addresses, and `onExhausted`. poly-ref reads both back from the source and the files beside it, on its own; `route-threshold-changed`, `route-tier-dropped`, `route-price-stale` and `budget-cap-raised` are in the explicit list of toolchain faults.
+- **Certified.** Admission certifies each descriptor as it certifies a credential's (`poly.routes` and `poly.budgets`, their digests under `artefacts`), and load reads each once. A routed decision's entry in the certificate's `decisions` names its route and each tier's provider, model and map digest, with `modelBound: true` (PT24.5), and `K15` joins the kernel assumptions.
+- **Both surfaces.** The embedded forms are `route(name, { tiers: [{ name, provider, prices, calibration?, maxTokens }], escalate: [['conf', 0.8], ['margin', 0.1], ['failed']], budget? })`, `budget(name, { caps: [{ currency, amount, per, scope? }], onExhausted? })`, the amount a decimal literal read by its text, and the decision item `route(name)`.
+
 ## PT11. Versions and migration
 
 ```poly

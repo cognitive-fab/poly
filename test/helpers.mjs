@@ -5,9 +5,9 @@ import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { parse } from '@poly/lang';
-import { checkModule, expandChannels } from '@poly/core';
+import { checkModule, expandChannels, expandRoutes } from '@poly/core';
 import { lowerMachine } from '@poly/lower';
-import { resolveUses, resolveProviders } from '@poly/check';
+import { resolveUses, resolveProviders, resolveRouting } from '@poly/check';
 
 export const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 export const BUILD = join(ROOT, '.poly', 'test-build');
@@ -34,27 +34,32 @@ export function load(file) {
   const uses = resolveUses(r.module, file, undefined, TEST_STD);
   // PS15: each channel expanded, as poly check expands it; poly-ref is given the source and the program as written.
   const x = expandChannels(r.module, uses.program);
+  // PS18: each route's and budget's module m.r and m.b, as poly check expands them.
+  const routes = expandRoutes(r.module, uses.program);
+  x.extra.push(...routes.extra);
   const program = [...uses.program.filter((m) => m !== r.module), x.module, ...x.extra];
   // PT10e: the provider profiles of its credentials, from the tests' own std.
   const providers = resolveProviders(program, TEST_STD);
-  const check = checkModule(x.module, { program, providers });
-  const errors = [...r.diagnostics, ...uses.diagnostics, ...x.diagnostics, ...check.diagnostics];
+  // PT10r: the price tables and calibration maps its routes name, beside the source.
+  const routing = resolveRouting(r.module, file);
+  const check = checkModule(x.module, { program, providers, routing });
+  const errors = [...r.diagnostics, ...uses.diagnostics, ...x.diagnostics, ...routes.diagnostics, ...check.diagnostics];
   if (errors.length) throw new Error(`${file}: ${errors.map((d) => `${d.code} ${d.message}`).join('; ')}`);
-  return { module: r.module, expanded: x.module, extra: x.extra, plans: x.plans, check, program, providers, refProgram: uses.program.filter((m) => m !== r.module) };
+  return { module: r.module, expanded: x.module, extra: x.extra, plans: x.plans, check, program, providers, routing, sourceDir: dirname(file), refProgram: uses.program.filter((m) => m !== r.module) };
 }
 
 /** Lower every machine of a source and write each to BUILD/<name>/<module>.<Machine>/. */
 export function build(file, name, opts = {}) {
-  const { module, expanded, extra, plans, check, program, providers, refProgram } = load(file);
+  const { module, expanded, extra, plans, check, program, providers, routing, sourceDir, refProgram } = load(file);
   const out = [];
   const lower = (mod, checked, machine, refMachine) => {
-    const { lowered, diagnostics } = lowerMachine(mod, checked, machine, { program, ...(plans.length ? { channels: plans } : {}), providers, ...opts });
+    const { lowered, diagnostics } = lowerMachine(mod, checked, machine, { program, ...(plans.length ? { channels: plans } : {}), providers, routing, ...opts });
     if (!lowered) throw new Error(`${file}: ${diagnostics.map((d) => `${d.code} ${d.message}`).join('; ')}`);
     // One directory per source file: several sources declare intents.OutboxIntent.
     const dir = join(BUILD, name, basename(file, '.poly'), `${mod.name}.${machine}`);
     mkdirSync(dir, { recursive: true });
     for (const [f, text] of Object.entries(lowered.files)) { mkdirSync(dirname(join(dir, f)), { recursive: true }); writeFileSync(join(dir, f), text); }
-    out.push({ machine: refMachine, dir, lowered, module, check: checked, program: refProgram });
+    out.push({ machine: refMachine, dir, lowered, module, check: checked, program: refProgram, sourceDir });
   };
   for (const machine of check.machines.keys()) lower(expanded, check, machine, machine);
   // PS15: each channel's conversation, the machine c.Conversation as poly-ref names it.

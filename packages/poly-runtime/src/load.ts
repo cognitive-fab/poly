@@ -106,8 +106,8 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     const f = join(root, d.descriptor);
     if (existsSync(f)) bytes.set(d.descriptor, readFileSync(f));
   }
-  // PT10e: each credential's descriptor, read once like any artefact.
-  for (const c of certificate.poly?.credentials ?? []) {
+  // PT10e: each credential's descriptor, read once like any artefact; PT10r: each route's and each budget's too.
+  for (const c of [...(certificate.poly?.credentials ?? []), ...(certificate.poly?.routes ?? []), ...(certificate.poly?.budgets ?? [])]) {
     const f = join(root, c.descriptor);
     if (existsSync(f)) bytes.set(c.descriptor, readFileSync(f));
   }

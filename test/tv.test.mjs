@@ -39,10 +39,10 @@ for (const fault of DELIBERATELY_BROKEN_LOWERINGS) {
       for (const [k, b] of bad.entries()) {
         // The effects mapper is an artefact too (PS9.2): a fault that changes only it must be caught as well.
         const read = (dir, f) => (existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null);
-        const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs', 'contract.json', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'openshell.policies.yaml', 'types.d.ts', ...Object.keys(b.lowered.files).filter((f) => f.startsWith('../workflows/') || f.startsWith('../channels/') || f.startsWith('../credentials/') || f.startsWith('../sources/') || f.startsWith('../flow/'))].some((f) => read(b.dir, f) !== read(good[k].dir, f));
+        const changed = ['next.cjs', 'invariants.mjs', 'effects.cjs', 'contract.json', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'openshell.policies.yaml', 'types.d.ts', ...Object.keys(b.lowered.files).filter((f) => f.startsWith('../workflows/') || f.startsWith('../channels/') || f.startsWith('../credentials/') || f.startsWith('../sources/') || f.startsWith('../flow/') || f.startsWith('../routes/') || f.startsWith('../budgets/'))].some((f) => read(b.dir, f) !== read(good[k].dir, f));
         if (!changed) continue;
         // PT10e: the sources are built with the tests' std (helpers.mjs), so the provider profiles are read back from it.
-        const r = await translationValidate(b.module, b.machine, b.dir, { program: b.program, std: TEST_STD });
+        const r = await translationValidate(b.module, b.machine, b.dir, { program: b.program, std: TEST_STD, sourceDir: b.sourceDir });
         if (r.mismatches.length === 0) { equivalent.push(basename(file)); continue; }
         caught++;
         assert.ok(r.mismatches.every((d) => d.code === 'PL2501'));

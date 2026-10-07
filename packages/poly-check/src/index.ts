@@ -3,6 +3,7 @@ export { checkFile, checkProject, configurationReports, projectKindConflicts, en
 export { render, renderDiagnostic } from './render.js';
 export { resolveUses, type Uses } from './uses.js';
 export { resolveProviders } from './providers.js';
+export { resolveRouting } from './routing.js';
 export { applyFix, attachFixes, fixId, type FixOutcome } from './fixes.js';
 export { applyFixById, findFix, type FixResult } from './fix.js';
 export { lintHandlers, lintHandlerText } from './lint.js';

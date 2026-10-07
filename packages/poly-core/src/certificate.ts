@@ -53,7 +53,11 @@ export interface Certificate {
     instances: Record<string, unknown>;
     kernelAssumptions: string[];
     /** PD3.2b: per decision, its domain and labels; the model is never bound, the calibration map is configuration. */
-    decisions: { machine: string; kind: string; provider: string; result: unknown; labels: string[]; modelBound: false; calibration: 'runtime configuration' }[];
+    /**
+     * PD3.2b: a decision with one provider binds no model. PT24.5, S355: a routed decision binds each tier's provider,
+     * model and calibration map digest, so a tier's model cannot change without its map.
+     */
+    decisions: ({ machine: string; kind: string; provider: string; result: unknown; labels: string[]; modelBound: false; calibration: 'runtime configuration' } | { machine: string; kind: string; provider: null; route: string; tiers: { name: string; provider: string; model: string; calibration: string | null }[]; result: unknown; labels: string[]; modelBound: true; calibration: 'certified per tier' })[];
     /** What this build's runtime does not do, printed with every verdict about it (S118, S134, S135). */
     limits: string[];
     /**
@@ -93,6 +97,9 @@ export interface Certificate {
     };
     /** PT10e: each credential an effect uses, by name, and its descriptor, whose digest is under `artefacts`. */
     credentials?: { name: string; descriptor: string }[];
+    /** PT10r: each route a decision names and each budget a route names, by name, and its descriptor, whose digest is under `artefacts`. */
+    routes?: { name: string; descriptor: string }[];
+    budgets?: { name: string; descriptor: string }[];
     /** PT10f, S200: each credential's vault: its store, and the adapter package by name, version and digest. */
     vaults?: { credential: string; store: 'dev-keychain' | 'kms'; package: string; version: string; digest: string }[];
     /** Plan step 9: the gate engine that decides this build's policies, pinned by commit (Polyaxion is a peer, S145). */

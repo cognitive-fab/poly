@@ -27,7 +27,7 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow | Channel | Credential | AudienceDecl | SourceDecl;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow | Channel | Credential | AudienceDecl | SourceDecl | Route | Budget;
 
 // ── Memory (PT23, PS17, M10) ───────────────────────────────────────────────
 
@@ -51,6 +51,53 @@ export interface SourceDecl extends NodeBase {
   owned: boolean;
   freshness: string | null;
   stale: 'escalate' | 'deny';
+}
+
+// ── Routes and budgets (PT24, PS18, M11) ───────────────────────────────────
+
+/**
+ * `route r { tier t provider "p" prices "f" [calibration "f"] max tokens n …  escalate when … or …  [budget b] }`
+ * (PS18.1): the module m.r, std.routing with Route instantiated for these tiers and this condition.
+ */
+export interface Route extends NodeBase {
+  kind: 'Route';
+  name: string;
+  tiers: RouteTier[];
+  /** The escalation condition's terms, in the order written (PS18.1). */
+  escalate: RouteTerm[];
+  budget: string | null;
+}
+export interface RouteTier extends NodeBase {
+  kind: 'RouteTier';
+  name: string;
+  provider: string;
+  /** The price table's path, relative to the source file's directory (PS18.3). */
+  prices: string;
+  /** The calibration map's path, or null for a tier with none (PL6841 when the condition reads conf or margin). */
+  calibration: string | null;
+  maxTokens: number;
+}
+/** `conf < c` or `margin < c`, `c` in thousandths (PD1.3a), or `failed`. */
+export type RouteTerm = { on: 'conf' | 'margin'; below: number } | { on: 'failed' };
+
+/**
+ * `budget b { cap <currency> <amount> per run | per scope | per <period> [per scope] …  [on exhausted deny | escalate] }`
+ * (PS18.4): the module m.b, std.routing's Budget, one instance per cap and address.
+ */
+export interface Budget extends NodeBase {
+  kind: 'Budget';
+  name: string;
+  caps: BudgetCap[];
+  onExhausted: 'deny' | 'escalate';
+}
+export interface BudgetCap extends NodeBase {
+  kind: 'BudgetCap';
+  currency: string;
+  /** The cap in micro-units (PS18.3). */
+  amount: number;
+  run: boolean;
+  period: 'hour' | 'day' | 'month' | null;
+  scope: boolean;
 }
 
 // ── Credentials (PT10e, S203) ──────────────────────────────────────────────
@@ -355,6 +402,8 @@ export type DecisionItem =
   | (NodeBase & { kind: 'DecBand'; lo: number; hi: number })
   /** PS17.6 (S304): `cites x`, an Items parameter the answer's citations are a subset of. */
   | (NodeBase & { kind: 'DecCites'; param: string })
+  /** `route r` (PT24.1c, PS18.2): the decision's tiers, in place of a provider. */
+  | (NodeBase & { kind: 'DecRoute'; route: string })
   | EffOutcomeItem;
 
 export interface Terminal extends NodeBase {

@@ -1,0 +1,59 @@
+// M11 (PT24, PS18): a support desk whose classification is routed through two tiers under a budget. The small tier
+// answers first; the route escalates to the large one when the calibrated answer is below its thresholds or the call
+// fails. The price tables and maps beside it are the tests' own, not a provider's.
+module desk
+
+enum Branch { Refund, Status, Other }
+
+enum TicketStatus { New, Classifying, Routed, NeedsHuman }
+
+machine Ticket {
+  state {
+    status : TicketStatus = New
+  }
+
+  terminal status in { Routed, NeedsHuman }
+
+  action Received(text: string check { "where is my refund" })
+  action Classified(branch: Branch, conf: Conf, margin: Conf)
+  action Unclassified()
+
+  on Received(text) {
+    require status == New else reject "not-new"
+    status' = Classifying
+    decide classify(text)
+  }
+
+  on Classified(branch, conf, margin) {
+    require status == Classifying else reject "not-classifying"
+    status' = Routed
+  }
+
+  on Unclassified {
+    require status == Classifying else reject "not-classifying"
+    status' = NeedsHuman
+  }
+
+  decision classify(text: string) -> Branch {
+    route triage
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Classified(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Unclassified()
+  }
+
+  path property one-classification: count("decision.classify") <= 1
+}
+
+route triage {
+  tier small provider "flash" prices "prices/flash.json" calibration "maps/flash.json" max tokens 4000
+  tier large provider "opus" prices "prices/opus.json" calibration "maps/opus.json" max tokens 8000
+  escalate when conf < 0.8 or margin < 0.1 or failed
+  budget support
+}
+
+budget support {
+  cap usd 0.5 per run
+  cap usd 20 per day per scope
+  on exhausted escalate
+}

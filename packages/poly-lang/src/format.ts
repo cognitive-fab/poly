@@ -84,6 +84,25 @@ class Printer {
     this.out.push(`}${this.trail(s)}`);
   }
 
+  /** PT10r: one tier per line, then the escalation and the budget. */
+  private route(r: A.Route): void {
+    this.lead(r, '');
+    this.out.push(`route ${r.name} {`);
+    for (const t of r.tiers) this.out.push(`${INDENT}tier ${t.name} provider ${JSON.stringify(t.provider)} prices ${JSON.stringify(t.prices)}${t.calibration === null ? '' : ` calibration ${JSON.stringify(t.calibration)}`} max tokens ${t.maxTokens}`);
+    this.out.push(`${INDENT}escalate when ${r.escalate.map((e) => (e.on === 'failed' ? 'failed' : `${e.on} < ${decimalText(e.below)}`)).join(' or ')}`);
+    if (r.budget !== null) this.out.push(`${INDENT}budget ${r.budget}`);
+    this.out.push(`}${this.trail(r)}`);
+  }
+
+  /** PT10r: one cap per line, then what an exhausted budget does when it is not the default. */
+  private budget(b: A.Budget): void {
+    this.lead(b, '');
+    this.out.push(`budget ${b.name} {`);
+    for (const c of b.caps) this.out.push(`${INDENT}cap ${c.currency} ${moneyText(c.amount)} per ${c.run ? 'run' : c.period === null ? 'scope' : `${c.period}${c.scope ? ' per scope' : ''}`}`);
+    if (b.onExhausted !== 'deny') this.out.push(`${INDENT}on exhausted ${b.onExhausted}`);
+    this.out.push(`}${this.trail(b)}`);
+  }
+
   private workflow(w: A.Workflow): void {
     const q = (s: string) => JSON.stringify(s);
     this.lead(w, '');
@@ -148,6 +167,10 @@ class Printer {
         return this.emit(d, '', [`audience { ${d.classes.join(' < ')} }`]);
       case 'Source':
         return this.source(d);
+      case 'Route':
+        return this.route(d);
+      case 'Budget':
+        return this.budget(d);
     }
   }
 
@@ -331,6 +354,7 @@ class Printer {
       case 'DecTimeout': return `timeout ${e.value}`;
       case 'DecBand': return `band ${decimalText(e.lo)}..${decimalText(e.hi)}`;
       case 'DecCites': return `cites ${e.param}`;
+      case 'DecRoute': return `route ${e.route}`;
       default: return this.effectItem(e);
     }
   }
@@ -483,6 +507,13 @@ class Printer {
 }
 
 /** A decimal literal (S76) from thousandths: 800 is 0.8, 1000 is 1.0, 50 is 0.05. */
+/** PS18.3: an amount of micro-units in decimal, `20` or `0.5`, which the lexer reads back to the same amount. */
+export function moneyText(micro: number): string {
+  const whole = Math.trunc(micro / 1_000_000);
+  const frac = String(micro % 1_000_000).padStart(6, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : String(whole);
+}
+
 export function decimalText(v: number): string {
   const whole = Math.trunc(v / 1000);
   const frac = String(v % 1000).padStart(3, '0').replace(/0+$/, '');

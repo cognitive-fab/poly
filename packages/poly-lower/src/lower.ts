@@ -4,8 +4,8 @@
 //                   schemas and domains, keyed acceptors, reject/next/unchanged
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
-import type { ChannelPlan, ProviderEntry, ProviderProfile } from '@poly/core';
-import { boundPath, diag, digest, effectKind, effectClass, effectLabels, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
+import type { ChannelPlan, ProviderEntry, ProviderProfile, RoutingFiles, PriceTable, CalibrationFile } from '@poly/core';
+import { boundPath, diag, digest, effectKind, effectClass, effectLabels, durationMs, countBound, beforeKinds, reservationOf, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { emitsCall } from './emit.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
@@ -22,13 +22,15 @@ export interface LowerOptions {
   channels?: ChannelPlan[];
   /** PT10e: the provider profiles of the module's credentials, which each credential's descriptor records. */
   providers?: Readonly<Record<string, ProviderEntry>>;
+  /** PT10r: the price tables and calibration maps of the module's routes, which each route's descriptor records. */
+  routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'flow-class-lowered' | 'flow-recipient-dropped';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; 'types.d.ts'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string; [credential: `../credentials/${string}.json`]: string; [source: `../sources/${string}.json`]: string; [flow: `../flow/${string}.json`]: string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; 'types.d.ts'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string; [credential: `../credentials/${string}.json`]: string; [source: `../sources/${string}.json`]: string; [flow: `../flow/${string}.json`]: string; [route: `../routes/${string}.json`]: string; [budget: `../budgets/${string}.json`]: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -278,6 +280,41 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const thread = opts.fault === 'channel-thread' ? { template: p.thread.fields.length > 1 ? `{${p.thread.fields[0]}}` : 'fixed', fields: p.thread.fields.slice(0, -1) } : p.thread;
     files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending, ...(p.audience ? { audience: p.audience } : {}) }, null, 2) + '\n';
   }
+  // PT10r: each route a decision of this machine names has its descriptor, and so has the route's budget: what the
+  // runtime reads to run the route's tiers, reserve, settle and record (PS18.2 to PS18.4). The broken lowerings change a
+  // threshold, drop the last tier, leave a price table's digest stale, and raise a cap.
+  for (const d of facts.decisions.values()) {
+    const named = d.items.find((i) => i.kind === 'DecRoute') as { route: string } | undefined;
+    const r = named ? module.decls.find((x): x is A.Route => x.kind === 'Route' && x.name === named.route) : undefined;
+    if (!r) continue;
+    const tiers = r.tiers.map((t) => {
+      const p = opts.routing?.prices[t.prices];
+      if (!p) throw new Error(`poly-lower: no price table ${t.prices} for tier ${t.name} of route ${r.name}`);
+      const table = p.table as PriceTable;
+      const mf = t.calibration === null ? null : opts.routing?.maps[t.calibration];
+      if (t.calibration !== null && !mf) throw new Error(`poly-lower: no calibration map ${t.calibration} for tier ${t.name} of route ${r.name}`);
+      const map = mf ? (mf.map as CalibrationFile) : null;
+      return {
+        name: t.name, provider: t.provider, model: table.model, maxTokens: t.maxTokens, reservation: reservationOf(t.maxTokens, table),
+        prices: { path: t.prices, digest: opts.fault === 'route-price-stale' ? `sha256:${'0'.repeat(64)}` : p.digest, currency: table.currency, perMillionTokens: table.perMillionTokens },
+        calibration: map && mf ? { path: t.calibration, digest: mf.digest, decision: map.decision, version: map.version, fittedFor: map.fittedFor, points: map.points, mapDigest: map.digest } : null,
+      };
+    });
+    const escalate = r.escalate.map((e) => (opts.fault === 'route-threshold-changed' && e.on !== 'failed' ? { ...e, below: e.below + 1 } : e));
+    files[`../routes/${r.name}.json`] = JSON.stringify({
+      v: 1, route: r.name, module: module.name, machine: `${module.name}.${r.name}.Route`, effectKind: `route.${r.name}.call`,
+      decision: { machine: `${module.name}.${m.name}`, name: d.name },
+      tiers: opts.fault === 'route-tier-dropped' ? tiers.slice(0, -1) : tiers, escalate, budget: r.budget,
+    }, null, 2) + '\n';
+    const b = r.budget === null ? undefined : module.decls.find((x): x is A.Budget => x.kind === 'Budget' && x.name === r.budget);
+    if (b) {
+      files[`../budgets/${b.name}.json`] = JSON.stringify({
+        v: 1, budget: b.name, module: module.name, machine: `${module.name}.${b.name}.Budget`,
+        caps: b.caps.map((c) => ({ currency: c.currency, amount: opts.fault === 'budget-cap-raised' ? c.amount * 2 : c.amount, run: c.run, period: c.period, scope: c.scope })),
+        onExhausted: b.onExhausted,
+      }, null, 2) + '\n';
+    }
+  }
   // PT10e: each credential an effect of this machine uses has its descriptor, which the vault adapter reads: what to ask
   // the provider for, and the base addresses the credential may be sent to. The broken lowerings add a scope the source
   // does not declare, and widen a base address to plain http.
@@ -504,7 +541,9 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
     const provider = d.items.find((i) => i.kind === 'DecProvider') as { value: string } | undefined;
     const band = d.items.find((i) => i.kind === 'DecBand') as { lo: number; hi: number } | undefined;
     const cites = d.items.find((i) => i.kind === 'DecCites') as { param: string } | undefined;
-    entry.decision = { provider: provider?.value ?? null, result: resultValues(tyOfTypeExpr(d.result, env), env, facts), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) };
+    // PS18.2: a routed decision names its route, whose tiers the runtime runs in place of one provider.
+    const route = d.items.find((i) => i.kind === 'DecRoute') as { route: string } | undefined;
+    entry.decision = { provider: provider?.value ?? null, ...(route ? { route: route.route } : {}), result: resultValues(tyOfTypeExpr(d.result, env), env, facts), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) };
     out.push([`decision.${d.name}`, entry]);
   }
   // PD2.4, S129: each adjudicated decision's outcome kind, class none, tried once, with no completion; its handler is

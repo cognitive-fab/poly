@@ -87,7 +87,7 @@ function stepModule(mod: SamModule, rt: RuntimeFacts, pre: Record<string, unknow
 
 const verdictText = (v: Verdict) => (v.kind === 'rejected' ? `rejected(${v.reason})` : v.kind);
 
-export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number; principals?: number; isolation?: 'openshell'; program?: Module[]; fault?: import('./vacuity.js').RefFault; std?: string } = {}): Promise<TvResult> {
+export async function translationValidate(module: Module, machineName: string, buildDir: string, opts: { maxStates?: number; principals?: number; isolation?: 'openshell'; program?: Module[]; fault?: import('./vacuity.js').RefFault; std?: string; sourceDir?: string } = {}): Promise<TvResult> {
   const report = checkMachine(module, machineName, opts);
   const { graph: g, model: M } = report;
   // Finding 5: sam-pattern resolves from poly's own install, wherever the build directory is.
@@ -282,7 +282,8 @@ export async function translationValidate(module: Module, machineName: string, b
   // PS15: the read-back reads the machine where the expansion puts it, and each channel's descriptor against PS15.
   const home = machineHome(module, opts.program ?? [], machineName);
   // PT10e: the provider profiles a credential's descriptor is read back against are under std, the repository's by default.
-  for (const message of await readBack(home.module, M, buildDir, g.states, ...(opts.std ? [opts.std] : []))) mismatch(message, []);
+  // PT10r: a route's price tables and maps are read back from beside the source.
+  for (const message of await readBack(home.module, M, buildDir, g.states, opts.std, opts.sourceDir)) mismatch(message, []);
   for (const [name, want] of home.reading.descriptors) {
     if (want.application !== `${module.name}.${M.name}` || home.module !== home.reading.module) continue;
     const file = join(buildDir, '..', 'channels', `${name}.json`);

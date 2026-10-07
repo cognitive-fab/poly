@@ -59,7 +59,10 @@ export function resolveUses(module: Module, file: string, project?: { file: stri
   // PS16.0: a module with a credential uses std.credentials, whose Grant each credential instantiates.
   const firstCredential = module.decls.find((d): d is A.Credential => d.kind === 'Credential');
   const credentialUse: A.UseDecl[] = firstCredential ? [{ kind: 'Use', id: firstCredential.id, span: firstCredential.span, path: ['std', 'credentials'] }] : [];
-  const queue: { from: Module; decl: A.UseDecl }[] = [...module.decls.filter((d): d is A.UseDecl => d.kind === 'Use'), ...module.decls.filter((d): d is A.Channel => d.kind === 'Channel').map(asUse), ...credentialUse].map((decl) => ({ from: module, decl }));
+  // PS18.0: a module with a route or a budget uses std.routing, whose Route and Budget they instantiate.
+  const firstRouting = module.decls.find((d) => d.kind === 'Route' || d.kind === 'Budget');
+  const routingUse: A.UseDecl[] = firstRouting ? [{ kind: 'Use', id: firstRouting.id, span: firstRouting.span, path: ['std', 'routing'] }] : [];
+  const queue: { from: Module; decl: A.UseDecl }[] = [...module.decls.filter((d): d is A.UseDecl => d.kind === 'Use'), ...module.decls.filter((d): d is A.Channel => d.kind === 'Channel').map(asUse), ...credentialUse, ...routingUse].map((decl) => ({ from: module, decl }));
   const asked = new Set<string>();
   while (queue.length) {
     const { from, decl } = queue.shift()!;

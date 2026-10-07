@@ -306,6 +306,9 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // PT10i: each source's and each module's flow descriptor, by its path and the digest the check wrote.
   const memorySources: { name: string; descriptor: string; want: string }[] = [];
   const memoryFlows: { module: string; descriptor: string; want: string }[] = [];
+  // PT10r: each route's and each budget's descriptor, which the runtime reads to run the tiers and hold the caps.
+  const routes: { name: string; descriptor: string; want: string }[] = [];
+  const budgets: { name: string; descriptor: string; want: string }[] = [];
   for (const r of report.files) {
     if (!r.module || !r.moduleDigest) throw new AdmitError(`${r.file}: no module digest`);
     moduleDigests[r.module] = r.moduleDigest;
@@ -336,6 +339,14 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
         if (k.startsWith('../sources/') && !memorySources.some((c) => c.descriptor === descriptor)) memorySources.push({ name: k.slice('../sources/'.length, -'.json'.length), descriptor, want });
         if (k.startsWith('../flow/') && !memoryFlows.some((c) => c.descriptor === descriptor)) memoryFlows.push({ module: k.slice('../flow/'.length, -'.json'.length), descriptor, want });
       }
+      for (const [k, want] of Object.entries(m.artefactDigests ?? {})) {
+        if (!m.buildDir) continue;
+        for (const [prefix, list] of [['../routes/', routes], ['../budgets/', budgets]] as const) {
+          if (!k.startsWith(prefix)) continue;
+          const descriptor = rel(dir, join(m.buildDir, k));
+          if (!list.some((c) => c.descriptor === descriptor)) list.push({ name: k.slice(prefix.length, -'.json'.length), descriptor, want });
+        }
+      }
     }
     for (const m of r.machines) {
       if (!m.buildDir || !m.instance) throw new AdmitError(`${r.module}.${m.machine}: checked without a build`);
@@ -363,7 +374,13 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
           const n = entry.retry?.maxAttempts;
           if (!Number.isInteger(n)) throw new AdmitError(`${id} ${kind}: no retry.maxAttempts; every entry declares its bound (S120)`);
           if (n > MAX_ATTEMPTS) throw new AdmitError(`${id} ${kind}: retry.maxAttempts ${n} is above the limit; at most ${MAX_ATTEMPTS} (S120, S137, PT19)`);
-          if (entry.decision) decisions.push({ machine: id, kind, provider: entry.decision.provider, result: entry.decision.result, labels: entry.labels ?? [], modelBound: false, calibration: 'runtime configuration' });
+          if (entry.decision && !entry.decision.route) decisions.push({ machine: id, kind, provider: entry.decision.provider, result: entry.decision.result, labels: entry.labels ?? [], modelBound: false, calibration: 'runtime configuration' });
+          // PT24.5, S355: a routed decision's tiers are certified, each with its provider, model and map digest.
+          if (entry.decision?.route) {
+            const route = JSON.parse(readFileSync(join(m.buildDir, '..', 'routes', `${entry.decision.route}.json`), 'utf8')) as { tiers: { name: string; provider: string; model: string; calibration: { mapDigest: string } | null }[] };
+            decisions.push({ machine: id, kind, provider: null, route: entry.decision.route, tiers: route.tiers.map((t) => ({ name: t.name, provider: t.provider, model: t.model, calibration: t.calibration?.mapDigest ?? null })), result: entry.decision.result, labels: entry.labels ?? [], modelBound: true, calibration: 'certified per tier' });
+            kernel.add('K15');
+          }
         }
       }
     }
@@ -420,7 +437,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   }
   if (policyEngine && opts.fault === 'wrong-policy-engine') policyEngine = { name: 'polyaxion', commit: '0000000' };
   // The workflow descriptors are artefacts poly-runtime reads, certified with the policies (PT10, S164, S173).
-  const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor), ...credentials.map((c) => c.descriptor), ...memorySources.map((c) => c.descriptor), ...memoryFlows.map((c) => c.descriptor)];
+  const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor), ...credentials.map((c) => c.descriptor), ...memorySources.map((c) => c.descriptor), ...memoryFlows.map((c) => c.descriptor), ...routes.map((c) => c.descriptor), ...budgets.map((c) => c.descriptor)];
   const artefacts = artefactsOf(dir, machines, opts.fault, policyPaths);
   for (const p of policyReports) {
     if (!opts.fault && artefacts[p.artefact!.path] !== p.artefact!.digest) throw new AdmitError(`not admitted: ${p.artefact!.path} on disk is not the policy the check checked (certified bytes must be the checked bytes)`);
@@ -434,7 +451,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   for (const c of [...memorySources, ...memoryFlows]) {
     if (!opts.fault && artefacts[c.descriptor] !== c.want) throw new AdmitError(`not admitted: ${c.descriptor} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
   }
-  for (const c of credentials) {
+  for (const c of [...credentials, ...routes, ...budgets]) {
     if (!opts.fault && artefacts[c.descriptor] !== c.want) throw new AdmitError(`not admitted: ${c.descriptor} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
   }
   for (const w of workflows) {
@@ -550,7 +567,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(routes.length ? { routes: routes.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(budgets.length ? { budgets: budgets.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);

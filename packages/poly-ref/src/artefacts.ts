@@ -32,7 +32,7 @@ const stable = (v: unknown): string => {
 const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
 
 /** The mismatches between the artefacts in `dir` and the source, one message each (PL2501 in tv.ts). */
-export async function readBack(module: A.Module, M: RMachine, dir: string, states: State[] = [], std: string = STD): Promise<string[]> {
+export async function readBack(module: A.Module, M: RMachine, dir: string, states: State[] = [], std: string = STD, sourceDir?: string): Promise<string[]> {
   const out: string[] = [];
   const decl = module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === M.name)!;
   const differ = (what: string, got: unknown, want: unknown) => { if (stable(got) !== stable(want)) out.push(`${what}: the artefact has ${stable(got)}, the source gives ${stable(want)}`); };
@@ -171,7 +171,9 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const answers = (t: RType): unknown => (t.k === 'content' ? 'content' : t.k === 'record' ? Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, answers(f.type)])) : valuesOf(t, M).map((v) => flatValue(v, t, M)));
         // PS17.6: the Items parameter an answer cites.
         const cites = d.items.find((x) => x.kind === 'DecCites') as { param: string } | undefined;
-        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) });
+        // PS18.2: a routed decision names its route, in place of a provider.
+        const route = d.items.find((x) => x.kind === 'DecRoute') as { route: string } | undefined;
+        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, ...(route ? { route: route.route } : {}), result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) });
       }
     }
   }
@@ -265,6 +267,55 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
       }
     }
     if (got !== undefined) differ(`flow/${module.name}.json`, got, { v: 1, module: module.name, audience: classes, sources: Object.fromEntries(sourceDecls.map((s) => [s.name, { class: cls(s.audience), owned: s.owned }])), claims: Object.fromEntries(claims.sort(([a], [b]) => (a < b ? -1 : 1))) });
+  }
+
+  // ── routes/<r>.json and budgets/<b>.json (PS18.1 to PS18.4, PT10r): each route a decision of this machine names, and
+  // its budget, against the source and the price tables and maps it names, read here from beside the source ──
+  for (const d of decisions) {
+    const named = d.items.find((x) => x.kind === 'DecRoute') as { route: string } | undefined;
+    if (!named) continue;
+    const r = module.decls.find((x): x is A.Route => x.kind === 'Route' && x.name === named.route);
+    if (!r) { out.push(`decision ${d.name} names route ${named.route}, which the source does not declare`); continue; }
+    const file = join(dir, '..', 'routes', `${r.name}.json`);
+    if (!existsSync(file)) { out.push(`routes/${r.name}.json is missing, and decision ${d.name} of ${M.name} names route ${r.name} (PT10r)`); continue; }
+    if (!sourceDir) { out.push(`routes/${r.name}.json: no source directory to read its price tables and maps from`); continue; }
+    let got: unknown;
+    try { got = JSON.parse(readFileSync(file, 'utf8')); } catch { out.push(`routes/${r.name}.json is not JSON`); continue; }
+    const fileOf = (p: string): { bytes: Buffer; json: Record<string, any> } | null => {
+      const f = join(sourceDir, ...p.split('/'));
+      if (!existsSync(f)) return null;
+      const bytes = readFileSync(f);
+      try { return { bytes, json: JSON.parse(bytes.toString('utf8')) }; } catch { return null; }
+    };
+    const sha = (b: Buffer) => 'sha256:' + createHash('sha256').update(b).digest('hex');
+    let missing: string | null = null;
+    const tiers = r.tiers.map((t) => {
+      const p = fileOf(t.prices);
+      if (!p) { missing = t.prices; return null; }
+      const prices = p.json.perMillionTokens as Record<string, number>;
+      // PS18.3: the reservation is ceil(N x P / 10^6), P the table's highest price.
+      const top = Math.max(0, ...Object.values(prices));
+      const reservation = Number((BigInt(t.maxTokens) * BigInt(top) + 999_999n) / 1_000_000n);
+      const c = t.calibration === null ? null : fileOf(t.calibration);
+      if (t.calibration !== null && !c) { missing = t.calibration; return null; }
+      return {
+        name: t.name, provider: t.provider, model: p.json.model, maxTokens: t.maxTokens, reservation,
+        prices: { path: t.prices, digest: sha(p.bytes), currency: p.json.currency, perMillionTokens: prices },
+        calibration: c ? { path: t.calibration, digest: sha(c.bytes), decision: c.json.decision, version: c.json.version, fittedFor: c.json.fittedFor, points: c.json.points, mapDigest: c.json.digest } : null,
+      };
+    });
+    if (missing !== null) { out.push(`routes/${r.name}.json: ${missing} cannot be read beside the source to read the route back against`); continue; }
+    differ(`routes/${r.name}.json`, got, {
+      v: 1, route: r.name, module: module.name, machine: `${module.name}.${r.name}.Route`, effectKind: `route.${r.name}.call`,
+      decision: { machine: `${module.name}.${M.name}`, name: d.name }, tiers, escalate: r.escalate, budget: r.budget,
+    });
+    const b = r.budget === null ? undefined : module.decls.find((x): x is A.Budget => x.kind === 'Budget' && x.name === r.budget);
+    if (!b) continue;
+    const bf = join(dir, '..', 'budgets', `${b.name}.json`);
+    if (!existsSync(bf)) { out.push(`budgets/${b.name}.json is missing, and route ${r.name} names budget ${b.name} (PT10r)`); continue; }
+    let gotB: unknown;
+    try { gotB = JSON.parse(readFileSync(bf, 'utf8')); } catch { out.push(`budgets/${b.name}.json is not JSON`); continue; }
+    differ(`budgets/${b.name}.json`, gotB, { v: 1, budget: b.name, module: module.name, machine: `${module.name}.${b.name}.Budget`, caps: b.caps.map((c) => ({ currency: c.currency, amount: c.amount, run: c.run, period: c.period, scope: c.scope })), onExhausted: b.onExhausted });
   }
 
   // ── polyflow.workflow.json (PT10, S165): each workflow that runs this machine, read back against its source ──

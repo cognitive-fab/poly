@@ -207,6 +207,8 @@ class Parser {
     if (this.at('credential') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.credential();
     if (this.at('audience') && this.atPunct('{', 1)) return this.audience();
     if (this.at('source') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.source();
+    if (this.at('route') && this.peek(1).kind === 'ident' && this.atPunct('{', 2)) return this.route();
+    if (this.at('budget') && this.peek(1).kind === 'ident' && this.atPunct('{', 2)) return this.budget();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -216,7 +218,7 @@ class Parser {
       this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
       return null;
     }
-    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, channel, credential, audience, source, use)');
+    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, channel, credential, audience, source, route, budget, use)');
   }
 
   /** `audience { a1 < a2 < … }` (PS1.4b, Q3): a total order of classes, the lowest first. */
@@ -262,6 +264,111 @@ class Parser {
     if (audience === null) this.fail('a source names its audience (PS17.0)');
     this.next();
     return this.node<A.SourceDecl>(start, { kind: 'Source', name, sourceKind, adapter, audience, owned, freshness, stale }, true);
+  }
+
+  /**
+   * `route r { tier t provider "p" prices "f" [calibration "f"] max tokens n …  escalate when e or …  [budget b] }`
+   * (PT10r, PS18.1). Each tier is one line of clauses in that order; the escalation clause and the budget are written once.
+   */
+  private route(): A.Route {
+    const start = this.next();
+    const name = this.ident('a route name');
+    this.expect('{');
+    const tiers: A.RouteTier[] = [];
+    let escalate: A.RouteTerm[] | null = null;
+    let budget: string | null = null;
+    let budgetSeen = false;
+    while (!this.atPunct('}')) {
+      const is = this.peek();
+      const w = this.ident('tier, escalate or budget');
+      if (w === 'tier') {
+        const tier = this.ident('a tier name');
+        this.word('provider');
+        const provider = this.str('a provider name');
+        this.word('prices');
+        const prices = this.str('a price table');
+        let calibration: string | null = null;
+        if (this.at('calibration')) { this.next(); calibration = this.str('a calibration map'); }
+        this.word('max');
+        this.word('tokens');
+        const maxTokens = this.int();
+        tiers.push(this.node<A.RouteTier>(is, { kind: 'RouteTier', name: tier, provider, prices, calibration, maxTokens }));
+      } else if (w === 'escalate') {
+        // As for a credential's clauses: each is written once, since a second would silently replace the first.
+        if (escalate !== null) this.fail('a route states its escalation once', is);
+        this.word('when');
+        escalate = [this.routeTerm()];
+        while (this.at('or')) { this.next(); escalate.push(this.routeTerm()); }
+      } else if (w === 'budget') {
+        if (budgetSeen) this.fail('a route names its budget once', is);
+        budgetSeen = true;
+        budget = this.ident('a budget name');
+      } else this.fail('expected tier, escalate or budget', is);
+    }
+    if (escalate === null) this.fail('a route states when it escalates: escalate when conf < c or margin < c or failed (PT10r)');
+    this.next();
+    return this.node<A.Route>(start, { kind: 'Route', name, tiers, escalate, budget }, true);
+  }
+
+  /** `conf < c`, `margin < c` or `failed`, one term of a route's escalation (PS18.1). */
+  private routeTerm(): A.RouteTerm {
+    const is = this.peek();
+    const w = this.ident('conf, margin or failed');
+    if (w === 'failed') return { on: 'failed' };
+    if (w !== 'conf' && w !== 'margin') this.fail('expected conf < c, margin < c or failed', is);
+    this.expect('<');
+    return { on: w, below: this.decimal() };
+  }
+
+  /** `budget b { cap <currency> <amount> per run | per scope | per <period> [per scope] …  [on exhausted deny | escalate] }` (PT10r, PS18.4). */
+  private budget(): A.Budget {
+    const start = this.next();
+    const name = this.ident('a budget name');
+    this.expect('{');
+    const caps: A.BudgetCap[] = [];
+    let onExhausted: A.Budget['onExhausted'] | null = null;
+    while (!this.atPunct('}')) {
+      const is = this.peek();
+      const w = this.ident('cap or on');
+      if (w === 'cap') {
+        const currency = this.ident('a currency');
+        const tok = this.peek();
+        if (tok.kind !== 'int' && tok.kind !== 'decimal') this.fail('expected an amount such as 0.50');
+        this.next();
+        // PS18.3: the amount in micro-units, exactly: the lexer gives at most three places, so it is a whole number of them.
+        const [whole, frac = ''] = tok.text.split('.');
+        const amount = Number(whole) * 1_000_000 + Number(frac.padEnd(6, '0'));
+        if (!Number.isSafeInteger(amount)) this.fail(`the amount ${tok.text} is out of range`, tok);
+        let run = false;
+        let period: A.BudgetCap['period'] = null;
+        let scope = false;
+        this.word('per');
+        const p = this.peek();
+        const first = this.ident('run, scope, hour, day or month');
+        if (first === 'run') run = true;
+        else if (first === 'scope') scope = true;
+        else if (first === 'hour' || first === 'day' || first === 'month') {
+          period = first;
+          if (this.at('per')) { this.next(); this.word('scope'); scope = true; }
+        } else this.fail('expected per run, per scope, or per hour, day or month', p);
+        caps.push(this.node<A.BudgetCap>(is, { kind: 'BudgetCap', currency, amount, run, period, scope }));
+      } else if (w === 'on') {
+        if (onExhausted !== null) this.fail('a budget states what it does when exhausted once', is);
+        this.word('exhausted');
+        const what = this.ident('deny or escalate');
+        if (what !== 'deny' && what !== 'escalate') this.fail('expected deny or escalate', is);
+        onExhausted = what;
+      } else this.fail('expected cap or on exhausted', is);
+    }
+    this.next();
+    return this.node<A.Budget>(start, { kind: 'Budget', name, caps, onExhausted: onExhausted ?? 'deny' }, true);
+  }
+
+  /** The keyword `w`, as an identifier the grammar fixes at this place. */
+  private word(w: string): void {
+    const tok = this.peek();
+    if (tok.kind !== 'ident' || tok.text !== w) this.fail(`expected ${w}`, tok);
+    this.next();
   }
 
   /** `credential c: oauth2 { provider "p"  grant authorization_code [pkce] | client_credentials  scopes { … }  holder T }` (PT10e). */
@@ -1129,8 +1236,9 @@ class Parser {
         const hi = this.decimal();
         items.push(this.effItem(is, { kind: 'DecBand', lo, hi }) as unknown as A.DecisionItem);
       } else if (w === 'cites') items.push(this.effItem(is, { kind: 'DecCites', param: this.ident('an Items parameter') }) as unknown as A.DecisionItem);
+      else if (w === 'route') items.push(this.effItem(is, { kind: 'DecRoute', route: this.ident('a route name') }) as unknown as A.DecisionItem);
       else if (w === 'ok' || w === 'failed' || w === 'exhausted') items.push(this.outcome(is, w));
-      else this.fail('expected provider, labels, timeout, band, cites, ok or failed', is);
+      else this.fail('expected provider, route, labels, timeout, band, cites, ok or failed', is);
     }
     this.next();
     return this.node<A.Decision>(start, { kind: 'Decision', name, params, result, items }, true);

@@ -192,6 +192,12 @@ export const CODES: Record<string, CodeInfo> = {
   PL6202: { name: 'DECISION_WITHOUT_FAILURE', stage: 'types', severity: 'error' },
   // PS18.3, S350 (M11): a route's price table that does not name the source its prices were read from and the date.
   PL6843: { name: 'PRICE_UNSOURCED', stage: 'types', severity: 'error' },
+  // PT24.1b (M11): a route that escalates on conf or margin with a tier that has no calibration map to read them through.
+  PL6841: { name: 'TIER_WITHOUT_CALIBRATION', stage: 'types', severity: 'error' },
+  // PS18.3, PS18.4 (M11): a route's tiers priced in two currencies, or a cap in another currency than its route's tiers.
+  PL6844: { name: 'BUDGET_CURRENCY_MISMATCH', stage: 'types', severity: 'error' },
+  // PS18.4 (M11): a tier whose reservation is above a cap of its route's budget, so it could never be called.
+  PL6845: { name: 'RESERVATION_ABOVE_CAP', stage: 'types', severity: 'error' },
   // M4 review C5, K10: a send of an action that completes one of the receiver's decisions.
   PL6204: { name: 'DECISION_COMPLETION_SENT', stage: 'types', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.

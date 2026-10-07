@@ -171,7 +171,7 @@ class Reader {
 
   // ── declarations ─────────────────────────────────────────────────────────
   private decl(node: ts.Expression): A.Decl {
-    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow', 'channel', 'credential', 'audience', 'source');
+    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow', 'channel', 'credential', 'audience', 'source', 'route', 'budget');
     switch (c.name) {
       case 'enumType': {
         const [name, members] = this.argsOf(c, 2, 2);
@@ -233,8 +233,57 @@ class Reader {
         if (stale !== 'escalate' && stale !== 'deny') this.fail(o.get('stale')!, 'expected escalate or deny');
         return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale });
       }
+      case 'route': {
+        // PT10r: route(name, { tiers: [{ name, provider, prices, calibration?, maxTokens }], escalate: [['conf', 0.8], ['failed']], budget? }).
+        const [name, body] = this.argsOf(c, 2, 2);
+        const o = this.opts(body, ['tiers', 'escalate', 'budget']);
+        if (!o.has('tiers') || !o.has('escalate')) this.fail(body, 'a route names its tiers and when it escalates (PT10r)');
+        const tiers = this.arr(o.get('tiers')!).map((t) => {
+          const to = this.opts(t, ['name', 'provider', 'prices', 'calibration', 'maxTokens']);
+          if (!to.has('name') || !to.has('provider') || !to.has('prices') || !to.has('maxTokens')) this.fail(t, 'a tier names its name, provider, prices and maxTokens (PT10r)');
+          return this.mk<A.RouteTier>(t, { kind: 'RouteTier', name: this.str(to.get('name')!), provider: this.str(to.get('provider')!), prices: this.str(to.get('prices')!), calibration: to.has('calibration') ? this.str(to.get('calibration')!) : null, maxTokens: this.int(to.get('maxTokens')!) });
+        });
+        const escalate = this.arr(o.get('escalate')!).map((e): A.RouteTerm => {
+          const parts = this.arr(e);
+          const on = parts.length ? this.str(parts[0]) : '';
+          if (on === 'failed' && parts.length === 1) return { on: 'failed' };
+          if ((on === 'conf' || on === 'margin') && parts.length === 2) return { on, below: this.decimal(parts[1]) };
+          this.fail(e, "expected ['conf', c], ['margin', c] or ['failed']");
+        });
+        return this.mk<A.Route>(c.node, { kind: 'Route', name: this.str(name), tiers, escalate, budget: o.has('budget') ? this.str(o.get('budget')!) : null });
+      }
+      case 'budget': {
+        // PT10r: budget(name, { caps: [{ currency, amount, per, scope? }], onExhausted? }), the amount a decimal as written.
+        const [name, body] = this.argsOf(c, 2, 2);
+        const o = this.opts(body, ['caps', 'onExhausted']);
+        if (!o.has('caps')) this.fail(body, 'a budget names its caps (PT10r)');
+        const caps = this.arr(o.get('caps')!).map((x) => {
+          const co = this.opts(x, ['currency', 'amount', 'per', 'scope']);
+          if (!co.has('currency') || !co.has('amount') || !co.has('per')) this.fail(x, 'a cap names its currency, amount and per (PT10r)');
+          const per = this.str(co.get('per')!);
+          if (!['run', 'scope', 'hour', 'day', 'month'].includes(per)) this.fail(co.get('per')!, 'expected run, scope, hour, day or month');
+          const sc = co.get('scope');
+          const scope = !!sc && this.unparen(sc).kind === ts.SyntaxKind.TrueKeyword;
+          if (sc && (!scope || !['hour', 'day', 'month'].includes(per))) this.fail(sc, 'scope: true goes with a period (hour, day or month), or is left out');
+          return this.mk<A.BudgetCap>(x, { kind: 'BudgetCap', currency: this.str(co.get('currency')!), amount: this.amount(co.get('amount')!), run: per === 'run', period: per === 'hour' || per === 'day' || per === 'month' ? per : null, scope: per === 'scope' || scope });
+        });
+        const ex = o.has('onExhausted') ? this.str(o.get('onExhausted')!) : 'deny';
+        if (ex !== 'deny' && ex !== 'escalate') this.fail(o.get('onExhausted')!, 'expected deny or escalate');
+        return this.mk<A.Budget>(c.node, { kind: 'Budget', name: this.str(name), caps, onExhausted: ex });
+      }
       default: return this.configuration(c);
     }
+  }
+
+  /** PS18.3: an amount as written, `0.50` or `20`, in micro-units; at most three places, as the standalone lexer reads it. */
+  private amount(node: ts.Expression): number {
+    const n = this.unparen(node);
+    const raw = ts.isNumericLiteral(n) ? n.getText(this.sf) : '';
+    if (!/^\d+(\.\d{1,3})?$/.test(raw)) this.fail(n, 'expected an amount such as 0.50, with at most three digits after the point');
+    const [w, f = ''] = raw.split('.');
+    const v = Number(w) * 1_000_000 + Number(f.padEnd(6, '0'));
+    if (!Number.isSafeInteger(v)) this.fail(n, `the amount ${raw} is out of range`);
+    return v;
   }
 
   /** PT10: `workflow(name, { runs, input, key?: { template, where? }, tools: { kind: { tool, target?, why } } })`. */
@@ -456,10 +505,11 @@ class Reader {
   }
 
   private decisionItem(node: ts.Expression): A.DecisionItem {
-    const c = this.call(node, 'provider', 'labels', 'timeout', 'band', 'cites', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'provider', 'route', 'labels', 'timeout', 'band', 'cites', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.DecisionItem;
     if (c.name === 'provider') return mk({ kind: 'DecProvider', value: this.str(this.argsOf(c, 1, 1)[0]) });
     if (c.name === 'timeout') return mk({ kind: 'DecTimeout', value: this.str(this.argsOf(c, 1, 1)[0]) });
+    if (c.name === 'route') return mk({ kind: 'DecRoute', route: this.str(this.argsOf(c, 1, 1)[0]) });
     if (c.name === 'band') { const [lo, hi] = this.argsOf(c, 2, 2); return mk({ kind: 'DecBand', lo: this.decimal(lo), hi: this.decimal(hi) }); }
     // PS17.6: cites(param).
     if (c.name === 'cites') return mk({ kind: 'DecCites', param: this.str(this.argsOf(c, 1, 1)[0]) });

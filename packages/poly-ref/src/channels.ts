@@ -59,11 +59,63 @@ function credentialModules(module: A.Module, program: A.Module[]): A.Module[] {
   });
 }
 
+/**
+ * PS18.0, PS18.1, read from their text: each route r of the module is the module m.r, std.routing without Budget and with
+ * Route instantiated for r. In Route, every type 0..1 is 0..T-1 for T tiers, and left starts at T-1; every expression
+ * `conf < 0.8 || margin < 0.1` is r's condition, its conf and margin terms joined by || in the order written, or false
+ * with none; when r's escalation does not name failed, every `left > 0` in the handler of Fail is false; and the effect
+ * call has the kind route.r.call, the labels of the decision that names r, and one attempt within that decision's
+ * timeout. Each budget b is the module m.b, std.routing without Route.
+ */
+function routingModules(module: A.Module, program: A.Module[]): A.Module[] {
+  const lib = program.find((x) => x.name === 'std.routing');
+  if (!lib) return [];
+  const drop = (name: string): A.Module => ({ ...structuredClone(lib), decls: structuredClone(lib.decls).filter((d) => !(d.kind === 'Machine' && d.name === name)) });
+  const isCondition = (n: Record<string, unknown>): boolean => {
+    const l = n.left as Record<string, any> | undefined, r = n.right as Record<string, any> | undefined;
+    return n.kind === 'Binary' && n.op === '||'
+      && l?.kind === 'Binary' && l.op === '<' && l.left?.kind === 'Name' && l.left.name === 'conf' && l.right?.kind === 'Decimal' && l.right.value === 800
+      && r?.kind === 'Binary' && r.op === '<' && r.left?.kind === 'Name' && r.left.name === 'margin' && r.right?.kind === 'Decimal' && r.right.value === 100;
+  };
+  const out: A.Module[] = [];
+  for (const r of module.decls.filter((d): d is A.Route => d.kind === 'Route')) {
+    const T = r.tiers.length;
+    let decision: A.Decision | undefined;
+    for (const m of module.decls) if (m.kind === 'Machine') for (const it of m.items) if (it.kind === 'Decision' && !decision && it.items.some((x) => x.kind === 'DecRoute' && x.route === r.name)) decision = it;
+    const labels = decision?.items.find((x) => x.kind === 'EffLabels') as { labels: string[] } | undefined;
+    const timeout = decision?.items.find((x) => x.kind === 'DecTimeout') as { value: string } | undefined;
+    const terms = r.escalate.filter((t) => t.on !== 'failed') as { on: 'conf' | 'margin'; below: number }[];
+    const condition = (): A.Expr => terms.length
+      ? terms.map((t): A.Expr => ({ kind: 'Binary', id: '', op: '<', left: { kind: 'Name', id: '', name: t.on }, right: { kind: 'Decimal', id: '', value: t.below } } as A.Expr)).reduce((a, b) => ({ kind: 'Binary', id: '', op: '||', left: a, right: b } as A.Expr))
+      : ({ kind: 'Bool', id: '', value: false } as A.Expr);
+    const onFailure = r.escalate.some((t) => t.on === 'failed');
+    const read = (x: unknown, inFail: boolean): unknown => {
+      if (Array.isArray(x)) return x.map((y) => read(y, inFail));
+      if (!x || typeof x !== 'object') return x;
+      const n = x as Record<string, unknown>;
+      if (n.kind === 'TRange' && n.lo === 0 && n.hi === 1) return { ...n, hi: T - 1 };
+      if (isCondition(n)) return condition();
+      const l = n.left as Record<string, any> | undefined, rr = n.right as Record<string, any> | undefined;
+      if (inFail && !onFailure && n.kind === 'Binary' && n.op === '>' && l?.kind === 'Name' && l.name === 'left' && rr?.kind === 'Int' && rr.value === 0) return { kind: 'Bool', id: '', value: false };
+      if (n.kind === 'Field' && n.name === 'left') return { ...n, type: read(n.type, false), init: { kind: 'Int', id: '', value: T - 1 } };
+      if (n.kind === 'EffKind') return { ...n, value: `route.${r.name}.call` };
+      if (n.kind === 'EffLabels' && labels) return { ...n, labels: [...labels.labels] };
+      if (n.kind === 'EffRetry' && timeout) return { ...n, attempts: 1, timeout: timeout.value };
+      return Object.fromEntries(Object.entries(n).map(([k, v]) => [k, read(v, inFail || (n.kind === 'Handler' && n.action === 'Fail'))]));
+    };
+    const mod = drop('Budget');
+    mod.decls = mod.decls.map((d) => (d.kind === 'Machine' && d.name === 'Route' ? (read(d, false) as A.Machine) : d));
+    out.push({ ...mod, name: `${module.name}.${r.name}` });
+  }
+  for (const b of module.decls.filter((d): d is A.Budget => d.kind === 'Budget')) out.push({ ...drop('Route'), name: `${module.name}.${b.name}` });
+  return out;
+}
+
 /** PS15.0: a module with no channel means itself. */
 export function readChannels(module: A.Module, program: A.Module[]): ChannelReading {
   const channels = module.decls.filter((d): d is A.Channel => d.kind === 'Channel');
   if (!channels.length) {
-    const grants = credentialModules(module, program);
+    const grants = [...credentialModules(module, program), ...routingModules(module, program)];
     return { module, conversations: grants, program: [...program, ...grants], descriptors: new Map() };
   }
   // Polywatch: a reading is the module's with the libraries it was read against; another program is read again.
@@ -166,7 +218,7 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
     } as A.Configuration);
   }
   const expanded: A.Module = { ...module, decls };
-  conversations.push(...credentialModules(module, program));
+  conversations.push(...credentialModules(module, program), ...routingModules(module, program));
   const reading: ChannelReading = { module: expanded, conversations, program: [...program.filter((x) => x.name !== module.name), expanded, ...conversations], descriptors };
   readings.set(module, { libraries, reading });
   return reading;

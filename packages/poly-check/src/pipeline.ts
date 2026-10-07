@@ -20,7 +20,7 @@ import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
-import { expandChannels, expandCredentials, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
+import { expandChannels, expandCredentials, expandRoutes, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
 import { attachFixes } from './fixes.js';
@@ -33,6 +33,7 @@ import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 import { resolveUses, STD } from './uses.js';
 import { resolveProviders } from './providers.js';
+import { resolveRouting } from './routing.js';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration' | 'flow';
 
@@ -180,6 +181,9 @@ export interface CheckOptions {
   channels?: ChannelPlan[];
   /** PT10e, set by checkFile: the provider profiles the program's credentials name. */
   providers?: Record<string, import('@poly/core').ProviderEntry>;
+  /** PT10r, set by checkFile: the price tables and calibration maps the module's routes name, and the source's directory poly-ref reads them from. */
+  routing?: import('@poly/core').RoutingFiles;
+  sourceDir?: string;
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
   text?: string;
   /** PT28.1d, PT10h: a tsconfig naming host code to compile against the generated declarations, after the check. */
@@ -245,12 +249,18 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const credentials = expandCredentials(original, uses.program);
   report.diagnostics.push(...credentials.diagnostics);
   expansion.extra.push(...credentials.extra);
+  // PS18: each route's Route, the module m.r, and each budget's Budget, the module m.b, checked like a credential's Grant.
+  const routes = expandRoutes(original, uses.program);
+  report.diagnostics.push(...routes.diagnostics);
+  expansion.extra.push(...routes.extra);
   const module = expansion.module;
   const program = [...uses.program.filter((m) => m !== original), module, ...expansion.extra];
   // PT10e: the profiles of the providers the program's credentials name, under the same std as its modules.
   const providers = resolveProviders(program, opts.std ?? STD);
-  opts = { ...opts, uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans, providers };
-  const checked = checkModule(module, { program, providers });
+  // PT10r: the price tables and calibration maps the routes name, beside the source.
+  const routing = resolveRouting(original, file);
+  opts = { ...opts, uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans, providers, routing, sourceDir: dirname(resolve(file)) };
+  const checked = checkModule(module, { program, providers, routing });
   report.diagnostics.push(...checked.diagnostics);
   // Review B-F1: a used module the checker refuses refuses this check too, with its own errors, each at its own line;
   // poly-ref would otherwise explore machines the compiler rejects, and a configuration over them could read CLEAN.
@@ -408,7 +418,7 @@ function notRun(mc: MachineCheck, stages: StageName[], reason: string): void {
 async function checkMachineStages(module: Module, checked: ReturnType<typeof checkModule>, machine: string, mc: MachineCheck, opts: CheckOptions, engines: Record<string, string>): Promise<void> {
   // ── lower ─────────────────────────────────────────────────────────────
   let t0 = performance.now();
-  const { lowered, diagnostics } = lowerMachine(module, checked, machine, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses, ...(opts.channels?.length ? { channels: opts.channels } : {}), ...(opts.providers ? { providers: opts.providers } : {}) });
+  const { lowered, diagnostics } = lowerMachine(module, checked, machine, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: opts.uses, ...(opts.channels?.length ? { channels: opts.channels } : {}), ...(opts.providers ? { providers: opts.providers } : {}), ...(opts.routing ? { routing: opts.routing } : {}) });
   if (!lowered) {
     mc.diagnostics.push(...diagnostics);
     mc.stages.push({ stage: 'lower', status: 'ran', engine: '@poly/lower', verdict: 'REFUSED', ms: performance.now() - t0 });
@@ -442,7 +452,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     }
     // PS15: a channel's descriptor sits in .poly/build/channels/, beside the machines' directories; PT10e: a
     // credential's in .poly/build/credentials/; PS17: a source's in .poly/build/sources/, a module's flow in .poly/build/flow/.
-    if (f.startsWith('../channels/') || f.startsWith('../credentials/') || f.startsWith('../sources/') || f.startsWith('../flow/')) mkdirSync(dirname(join(dir, f)), { recursive: true });
+    if (f.startsWith('../channels/') || f.startsWith('../credentials/') || f.startsWith('../sources/') || f.startsWith('../flow/') || f.startsWith('../routes/') || f.startsWith('../budgets/')) mkdirSync(dirname(join(dir, f)), { recursive: true });
     writeFileSync(join(dir, f), text);
   }
   mc.buildDir = dir;
@@ -473,7 +483,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   t0 = performance.now();
   // PS15: poly-ref is given the source as written (and c.Conversation for a channel's conversation), never the expansion.
   const refProgram = opts.refProgram ?? opts.uses;
-  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, std: opts.std ?? STD, ...(opts.refFault ? { fault: opts.refFault } : {}) });
+  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, std: opts.std ?? STD, ...(opts.sourceDir ? { sourceDir: opts.sourceDir } : {}), ...(opts.refFault ? { fault: opts.refFault } : {}) });
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
   if (tv.mismatches.length) {

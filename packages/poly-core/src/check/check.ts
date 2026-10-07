@@ -11,6 +11,8 @@ import { buildTypeEnv, cardinality, type TypeEnv, type UnionInfo } from '../type
 import { digest } from '../digest.js';
 import { RESERVED_MODULE, RUNTIME_MODEL_DIGESTS } from '../reserved.js';
 import { profileProblem, underBase, type ProviderEntry, type ProviderProfile } from '../credentials.js';
+import { priceTableProblem, reservationOf, type PriceTable } from '../money.js';
+import { mapProblem, routePathOk, routedDecisions, type CalibrationFile, type RoutingFiles } from '../routing.js';
 
 // ── semantic types ─────────────────────────────────────────────────────────
 
@@ -39,7 +41,7 @@ const BOOL: Ty = { k: 'bool' };
 const INT: Ty = { k: 'int', lo: -Infinity, hi: Infinity };
 const ERR: Ty = { k: 'error' };
 /** The reasons the runtime gives (PS3.2, S101, S127), which a module may not use (PL1207). */
-export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing', 'unknown-thread', 'thread-not-started', 'creation-unavailable', 'uncited'];
+export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing', 'unknown-thread', 'thread-not-started', 'creation-unavailable', 'uncited', 'route-exhausted'];
 
 export function tyToString(t: Ty): string {
   switch (t.k) {
@@ -190,6 +192,8 @@ export interface CheckOptions {
   view?: string;
   /** PT10e: the provider profiles the module's credentials name, found by poly-check under std/credentials/providers. */
   providers?: Readonly<Record<string, ProviderEntry>>;
+  /** PS18.3, PT10r: the price tables and calibration maps the module's routes name, found by poly-check beside the source. */
+  routing?: Readonly<RoutingFiles>;
 }
 
 export function checkModule(module: A.Module, opts: CheckOptions = {}): CheckResult {
@@ -369,6 +373,7 @@ class Checker {
     this.sharedCompletions(machines);
     this.credentials();
     this.memory();
+    this.routing();
     const configs = new Set<string>();
     for (const d of this.module.decls) {
       if (d.kind !== 'Configuration') continue;
@@ -493,6 +498,93 @@ class Checker {
   private profile(provider: string): ProviderProfile | null {
     const entry = this.opts.providers?.[provider];
     return entry && !profileProblem(entry.profile, provider) ? (entry.profile as ProviderProfile) : null;
+  }
+
+  // ── routes and budgets (PS18, PT10r, M11) ──────────────────────────────
+  /** A price table when it is well formed for its provider, else null (a missing or malformed one is reported by routing()). */
+  private priceTable(path: string, provider: string): PriceTable | null {
+    const e = this.opts.routing?.prices[path];
+    return e && !priceTableProblem(e.table, provider) ? (e.table as PriceTable) : null;
+  }
+
+  private routing(): void {
+    const routes = this.module.decls.filter((d): d is A.Route => d.kind === 'Route');
+    const budgets = this.module.decls.filter((d): d is A.Budget => d.kind === 'Budget');
+    const names = new Set<string>();
+    for (const d of [...routes, ...budgets]) {
+      if (names.has(d.name)) this.err('PL1002', d, `${d.kind === 'Route' ? 'route' : 'budget'} ${d.name} is declared twice, or shares its name with a route or a budget`);
+      names.add(d.name);
+    }
+    for (const b of budgets) {
+      if (!b.caps.length) this.err('PL1201', b, `budget ${b.name} declares no cap`);
+      const per = new Set<string>();
+      for (const c of b.caps) {
+        if (!/^[a-z]{3}$/.test(c.currency)) this.err('PL1201', c, `${c.currency} is not a currency: a lower-case three-letter code, usd for example (PS18.3)`);
+        if (c.amount <= 0) this.err('PL1201', c, `a cap of budget ${b.name} is zero, so nothing could ever be reserved under it`);
+        const key = c.run ? 'run' : `${c.period ?? ''}:${c.scope}`;
+        if (per.has(key)) this.err('PL1002', c, `budget ${b.name} has two caps per ${c.run ? 'run' : [c.period, c.scope ? 'scope' : null].filter(Boolean).join(' per ')}; one cap per address (PS18.4)`);
+        per.add(key);
+      }
+    }
+    const named = routedDecisions(this.module);
+    for (const r of routes) {
+      const decisions = named.get(r.name) ?? [];
+      // PD1.6a: a tier's map is fitted for one decision, so a route serves one decision.
+      if (decisions.length > 1) this.err('PL1201', r, `route ${r.name} is named by ${decisions.length} decisions (${decisions.map((x) => `${x.machine.name}.${x.decision.name}`).join(', ')}); a route serves one decision, since its maps are fitted for that decision (PS18.2)`);
+      if (!r.tiers.length) this.err('PL1201', r, `route ${r.name} has no tier`);
+      const tierNames = new Set<string>();
+      const currencies = new Set<string>();
+      const reservations: { tier: A.RouteTier; r: number }[] = [];
+      for (const t of r.tiers) {
+        if (tierNames.has(t.name)) this.err('PL1002', t, `route ${r.name} has two tiers ${t.name}`);
+        tierNames.add(t.name);
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(t.provider)) this.err('PL1201', t, `tier ${t.name}: the provider "${t.provider}" is not a plain name (lower-case letters, digits and -)`);
+        if (t.maxTokens < 1) this.err('PL1201', t, `tier ${t.name}: its token limit is at least 1 (PS18.3)`);
+        for (const [what, p] of [['price table', t.prices], ['calibration map', t.calibration]] as const) {
+          if (p !== null && !routePathOk(p)) this.err('PL1201', t, `tier ${t.name}: the ${what} "${p}" is not a relative path to a .json file under the source's directory, with no . or .. segment (PS18.3)`);
+        }
+        const entry = routePathOk(t.prices) ? this.opts.routing?.prices[t.prices] : undefined;
+        if (routePathOk(t.prices) && !entry) this.err('PL1001', t, `tier ${t.name}: no price table at ${t.prices} beside the source (PS18.3)`);
+        else if (entry) {
+          const problem = priceTableProblem(entry.table, t.provider);
+          if (problem) this.err(problem.code, t, `tier ${t.name}: the price table ${t.prices} ${problem.message} (PS18.3, S350)`);
+        }
+        const table = this.priceTable(t.prices, t.provider);
+        if (table) { currencies.add(table.currency); reservations.push({ tier: t, r: reservationOf(t.maxTokens, table) }); }
+        if (t.calibration !== null && routePathOk(t.calibration)) {
+          const m = this.opts.routing?.maps[t.calibration];
+          if (!m) this.err('PL1001', t, `tier ${t.name}: no calibration map at ${t.calibration} beside the source (PS18.1)`);
+          else {
+            const problem = mapProblem(m.map);
+            if (problem) this.err('PL1201', t, `tier ${t.name}: the calibration map ${t.calibration} ${problem} (PD1.6)`);
+            else {
+              const map = m.map as CalibrationFile;
+              for (const x of decisions) if (map.decision !== x.decision.name) this.err('PL1201', t, `tier ${t.name}: the calibration map ${t.calibration} was fitted for decision ${map.decision}, and route ${r.name} serves ${x.decision.name} (PD1.6a)`);
+            }
+          }
+        }
+      }
+      if (currencies.size > 1) this.err('PL6844', r, `route ${r.name} prices its tiers in ${[...currencies].sort().join(' and ')}; a route's tiers are priced in one currency (PS18.3)`);
+      const kinds = new Set<string>();
+      for (const e of r.escalate) {
+        if (kinds.has(e.on)) this.err('PL1002', r, `route ${r.name} names ${e.on} twice in its escalation`);
+        kinds.add(e.on);
+        if (e.on !== 'failed' && !(e.below > 0 && e.below <= 1000)) this.err('PL1201', r, `route ${r.name}: ${e.on} < c needs 0 < c <= 1 (PD1.3a)`);
+      }
+      // PT24.1b: conf and margin are calibrated values, read through each tier's map.
+      const reads = r.escalate.filter((e) => e.on !== 'failed').map((e) => e.on);
+      for (const t of r.tiers) if (reads.length && t.calibration === null) this.err('PL6841', t, `route ${r.name} escalates on ${reads.join(' and ')}, and tier ${t.name} has no calibration map to read them through (PT24.1b)`);
+      if (r.budget !== null) {
+        const b = budgets.find((x) => x.name === r.budget);
+        if (!b) this.err('PL1001', r, `route ${r.name} names budget ${r.budget}, which the module does not declare`);
+        else {
+          for (const c of b.caps) {
+            for (const cur of currencies) if (cur !== c.currency) this.err('PL6844', c, `budget ${b.name} caps ${c.currency}, and route ${r.name} prices its tiers in ${cur} (PS18.3)`);
+            for (const x of reservations) if (currencies.has(c.currency) && x.r > c.amount) this.err('PL6845', x.tier, `tier ${x.tier.name} of route ${r.name} reserves ${x.r} micro-units, above budget ${b.name}'s cap of ${c.amount}, so it could never be called (PS18.4)`);
+          }
+        }
+      }
+    }
   }
 
   private credentials(): void {
@@ -1351,6 +1443,12 @@ class Checker {
       seen.add(key);
       if (it.kind === 'EffLabels') { labelled = true; for (const l of it.labels) if (!LABELS.has(l)) this.err('PL1001', it, `${l} is not a label of the closed vocabulary (PT6.2)`); }
       if (it.kind === 'DecTimeout' && durationMs(it.value) === null) this.err('PL1201', it, `${it.value} is not a duration`);
+      // PT24.1c, PS18.2: a routed decision's tiers name their providers, and its one confidence is what the route reads.
+      if (it.kind === 'DecRoute') {
+        if (!this.module.decls.some((x) => x.kind === 'Route' && x.name === it.route)) this.err('PL1001', it, `decision ${d.name} names route ${it.route}, which the module does not declare`);
+        if (d.items.some((x) => x.kind === 'DecProvider')) this.err('PL1201', it, `decision ${d.name} names its route, so its tiers name the providers, and it names no provider (PT24.1c)`);
+        if (result.k === 'record') this.err('PL1201', it, `decision ${d.name} returns a record, with a confidence per field; a routed decision has one answer and one confidence for its route to read (PS18.1)`);
+      }
       if (it.kind === 'DecBand') {
         if (!tri) this.err('PL1201', it, `band belongs to a decision whose result is Tri (PD1.2d)`);
         else if (!(it.lo < it.hi && it.hi <= 1000)) this.err('PL1201', it, `a band is lo..hi with 0 <= lo < hi <= 1 (PD1.2d)`);

@@ -55,6 +55,16 @@ class Printer {
       // PS1.4b, PS17.0: audience([…]) and source(name, { … }).
       case 'Audience': return `${this.use('audience')}([${d.classes.map(q).join(', ')}])`;
       case 'Source': return `${this.use('source')}(${q(d.name)}, { kind: ${q(d.sourceKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, audience: ${q(d.audience)}${d.owned ? ', owned: true' : ''}${d.freshness === null ? '' : `, freshness: ${q(d.freshness)}`}${d.stale === 'escalate' ? '' : `, stale: ${q(d.stale)}`} })`;
+      // PT10r: route(name, { tiers: [{ … }], escalate: [[…]], budget? }) and budget(name, { caps: [{ … }], onExhausted? }).
+      case 'Route': {
+        const tiers = d.tiers.map((t) => `${ind}  { name: ${q(t.name)}, provider: ${q(t.provider)}, prices: ${q(t.prices)}${t.calibration === null ? '' : `, calibration: ${q(t.calibration)}`}, maxTokens: ${t.maxTokens} },\n`).join('');
+        const escalate = d.escalate.map((e) => (e.on === 'failed' ? "['failed']" : `[${q(e.on)}, ${decimal(e.below)}]`)).join(', ');
+        return `${this.use('route')}(${q(d.name)}, { tiers: [\n${tiers}${ind}], escalate: [${escalate}]${d.budget === null ? '' : `, budget: ${q(d.budget)}`} })`;
+      }
+      case 'Budget': {
+        const caps = d.caps.map((c) => `${ind}  { currency: ${q(c.currency)}, amount: ${money(c.amount)}, per: ${q(c.run ? 'run' : c.period ?? 'scope')}${c.period !== null && c.scope ? ', scope: true' : ''} },\n`).join('');
+        return `${this.use('budget')}(${q(d.name)}, { caps: [\n${caps}${ind}]${d.onExhausted === 'deny' ? '' : `, onExhausted: ${q(d.onExhausted)}`} })`;
+      }
       case 'Workflow': {
         const key = d.key ? `, key: { template: ${q(d.key.template)}${d.key.fields.length ? `, where: { ${d.key.fields.map((f) => `${this.key(f.name)}: ${q(f.pattern)}`).join(', ')} }` : ''} }` : '';
         const tools = d.tools.map((t) => `${ind}  ${q(t.effect)}: { tool: ${q(t.tool)}${t.target === null ? '' : `, target: ${q(t.target)}`}, why: ${q(t.why)} },\n`).join('');
@@ -191,6 +201,7 @@ class Printer {
       case 'DecTimeout': return `${this.use('timeout')}(${q(x.value)})`;
       case 'DecBand': return `${this.use('band')}(${decimal(x.lo)}, ${decimal(x.hi)})`;
       case 'DecCites': return `${this.use('cites')}(${q(x.param)})`;
+      case 'DecRoute': return `${this.use('route')}(${q(x.route)})`;
       default: return this.effItem(x);
     }
   }
@@ -329,6 +340,13 @@ class Printer {
 }
 
 /** A decimal literal (S76) from thousandths, always with a point, so that it reads back as a decimal. */
+/** PS18.3: an amount of micro-units as a decimal literal, `0.5` or `20`. */
+function money(micro: number): string {
+  const whole = Math.trunc(micro / 1_000_000);
+  const frac = String(micro % 1_000_000).padStart(6, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : String(whole);
+}
+
 function decimal(v: number): string {
   const whole = Math.trunc(v / 1000);
   const frac = String(v % 1000).padStart(3, '0').replace(/0+$/, '');

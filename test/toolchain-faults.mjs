@@ -73,6 +73,11 @@ export const FAULT_SOURCES = {
   'source-unowned': ['test/fixtures/m10/concierge-memory.poly'],
   'flow-class-lowered': ['test/fixtures/m10/concierge-memory.poly'],
   'flow-recipient-dropped': ['test/fixtures/m10/concierge-memory.poly'],
+  // PT10r (M11): the route's and the budget's descriptors the runtime reads to run the tiers and hold the caps.
+  'route-threshold-changed': ['test/fixtures/m11/desk.poly'],
+  'route-tier-dropped': ['test/fixtures/m11/desk.poly'],
+  'route-price-stale': ['test/fixtures/m11/desk.poly'],
+  'budget-cap-raised': ['test/fixtures/m11/desk.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);
