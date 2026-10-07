@@ -10,7 +10,7 @@
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
-import { capabilitiesFor, type Transports } from './capabilities.js';
+import { capabilitiesFor, type ApiTransport, type Transports } from './capabilities.js';
 import type { ChannelAdapter, ChannelTransports, IngressAnswer, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -18,7 +18,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import { RESERVED_MODULE, verifyRecord, type Certificate } from '@poly/core';
+import { RESERVED_MODULE, revocationSubject, verifyRecord, type Certificate } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { contentValues, dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type VerifiedWorkflow, type WorkOrderTool } from './load.js';
@@ -217,12 +217,13 @@ export class PolyRuntime {
       },
       capabilities: (row, decl) => capabilitiesFor(decl ?? {}, opts.transports ?? {}, async (reason) => {
         await this.store.insertAudit({ at: this.now(), instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule: 'PL6406', reason });
-      }),
+      }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>)),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
       // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a
       // keyed digest (never the address itself, G10), its class (external in M8, S181), and the message kind it carries.
       outsideMandate: (row) => this.outsideMandate(row.instance_id, row.seq, row.kind, (row.payload ?? {}) as Record<string, unknown>),
+      grantCheck: (row, decl) => this.grantCheck(row.instance_id, decl, (row.payload ?? {}) as Record<string, unknown>),
       channelOf: (row) => {
         const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
         const d = m && verified.channels.find((c) => c.channel === m[1]);
@@ -538,6 +539,133 @@ export class PolyRuntime {
     if (adapter.kind !== pin.adapter) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: channel ${channel} declares adapter ${pin.adapter}, and this is a ${adapter.kind} adapter (S182)`);
   }
 
+  // ── grants (PS16, PT10g) ──────────────────────────────────────────────────────────────────────────────────────
+
+  /** PS16.1: the certified credential's descriptor and the machine id of its Grant, or null for an unknown credential. */
+  #credential(c: string): { machine: string; scopes: string[]; holder: boolean } | null {
+    const entry = this.certificate.poly.credentials?.find((x) => x.name === c);
+    const m = this.verified.machines.find((x) => x.id.endsWith(`.${c}.Grant`));
+    if (!entry || !m) return null;
+    const d = JSON.parse(readFileSync(join(this.verified.root, entry.descriptor), 'utf8')) as { scopes: string[]; holder: boolean };
+    return { machine: m.id, scopes: d.scopes, holder: d.holder };
+  }
+
+  /** PT10g: the keyed digest a holder is named by, never the holder itself (S191). */
+  #holderKey(holder: string | null): string { return holder === null ? '-' : this.store.recipientDigest(`holder:${holder}`); }
+
+  /** PS16.2: the current grant instance of a credential and holder, or null. */
+  grantOf(c: string, holder: string | null): string | null {
+    const r = this.store.db.prepare('SELECT instance FROM poly_grant WHERE credential = ? AND holder = ? ORDER BY generation DESC LIMIT 1').get(c, this.#holderKey(holder)) as { instance: string } | undefined;
+    return r?.instance ?? null;
+  }
+
+  /** PT22.3: the authorization URLs of the grants requested through the approvals folder, for the host to deliver. */
+  readonly #authorizations: { credential: string; url: string }[] = [];
+  takeAuthorizations(): { credential: string; url: string }[] { return this.#authorizations.splice(0); }
+
+  /** PS16.4: a person's signed revocation, matched to its grant by its subject. */
+  private async revokeBySubject(record: unknown): Promise<void> {
+    const subject = (record as { subject?: unknown } | null)?.subject;
+    const rows = this.store.db.prepare('SELECT credential, instance FROM poly_grant').all() as { credential: string; instance: string }[];
+    const hit = rows.find((r) => revocationSubject(r.instance) === subject);
+    if (!hit) throw new ApprovalRefused('the revocation names no grant of this store', 'unmatched');
+    const v = verifyRecord(record, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind: 'revocation', subject: revocationSubject(hit.instance) });
+    if (!v.ok) throw new ApprovalRefused(`the revocation is refused: ${v.problem} (PS16.4)`, 'wrong-key');
+    await this.dispatch(hit.instance, 'Revoke');
+    this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+    await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'revocation', credential: hit.credential, grant: hit.instance, source: 'person' }, this.now()); });
+  }
+
+  /** PS16.4: what a person signs to revoke the current grant of a credential and holder. */
+  revocationSubject(c: string, holder: string | null): string {
+    const g = this.grantOf(c, holder);
+    if (!g) throw new Error(`no grant of credential ${c} for that holder`);
+    return revocationSubject(g);
+  }
+
+  /**
+   * PT22.3, PT10g: asks the holder for a grant: the Grant instance is created (a new one after a revocation) or asked
+   * again, and the vault's authorization URL is returned for the host to deliver. The URL is never journaled.
+   */
+  async requestGrant(c: string, holder: string | null): Promise<string> {
+    const cred = this.#credential(c);
+    if (!cred) throw new Error(`no credential ${c} in the certified build (PS16)`);
+    if (cred.holder !== (holder !== null)) throw new Error(`credential ${c} ${cred.holder ? 'is granted by a holder, a Principal' : 'is the service\'s own, with no holder'} (PT10e)`);
+    const vault = this.#vaults.get(c);
+    if (!vault) throw new Error(`no vault is connected for credential ${c} (PT10f)`);
+    let id = this.grantOf(c, holder);
+    const state = id ? (await this.store.getInstance(id))?.state as { g?: string } | undefined : undefined;
+    if (!id || state?.g === 'Revoked') {
+      const key = this.#holderKey(holder);
+      const generation = ((this.store.db.prepare('SELECT MAX(generation) AS n FROM poly_grant WHERE credential = ? AND holder = ?').get(c, key) as { n: number | null }).n ?? 0) + 1;
+      id = holder === null ? `grant:${c}#${generation}` : `grant:${c}:${key}#${generation}`;
+      await this.create(cred.machine, { id });
+      const grantId = id;
+      await this.store.txn(() => { this.store.db.prepare('INSERT INTO poly_grant (credential, holder, generation, instance) VALUES (?, ?, ?, ?)').run(c, key, generation, grantId); });
+    } else if (state?.g === 'Granted' || state?.g === 'Expired') await this.dispatch(id, 'Reauthorize');
+    return (await vault.authorize({ grantId: id, scopes: cred.scopes, now: this.now() })).url;
+  }
+
+  /** PT10f, S202 (CredentialHost): the holder's consent, from the provider's redirect, as Callback(granted). */
+  async grantCallback(c: string, grantId: string, scopes: string[]): Promise<void> {
+    const cred = this.#credential(c);
+    if (!cred || !grantId.startsWith(`grant:${c}`)) throw new Error(`grant ${grantId} is not one of credential ${c}`);
+    const granted = Object.fromEntries(cred.scopes.map((s) => [s.split('.').join('_'), scopes.includes(s)]));
+    await this.dispatch(grantId, 'Callback', { granted });
+  }
+
+  /** PT10f (CredentialHost): a callback's outcome, on runtime:ingress; never a code, a state or a token. */
+  async credentialRecord(credential: string, record: { stage: 'callback'; outcome: 'refused' | 'granted'; provider: string; reason?: string }): Promise<void> {
+    this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+    await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { credential, ...record }, this.now()); });
+  }
+
+  /**
+   * PS16.4: revokes the current grant of a credential and holder: from the provider, a security signal, or a person's
+   * signed record of the kind revocation, by a key of the people ring. The source is recorded on runtime:ingress.
+   */
+  async revokeGrant(c: string, holder: string | null, opts: { source: 'provider' | 'security' | 'person'; record?: unknown }): Promise<void> {
+    const id = this.grantOf(c, holder);
+    if (!id) throw new Error(`no grant of credential ${c} for that holder`);
+    if (opts.source === 'person') {
+      const v = verifyRecord(opts.record, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind: 'revocation', subject: revocationSubject(id) });
+      if (!v.ok) throw new Error(`the revocation is refused: ${v.problem} (PS16.4)`);
+    }
+    await this.dispatch(id, 'Revoke');
+    this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+    await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'revocation', credential: c, grant: id, source: opts.source }, this.now()); });
+  }
+
+  /**
+   * PS16.3, S199: the grant check of an intent whose effect uses a credential, read as of now: no vault, no grant, or a
+   * grant not Granted is credential-unavailable; a scope it does not hold is insufficient-scope.
+   */
+  grantCheck(instanceId: string, decl: { uses?: { credential: string; scopes: string[]; holder: string | null } } | null, payload: Record<string, unknown>): { deny: string; reads?: Record<string, number> } | { credential: { name: string; grantState: string; scopes: string[] }; reads: Record<string, number> } | null {
+    const uses = decl?.uses;
+    if (!uses) return null;
+    const holder = uses.holder === null ? null : payload[uses.holder];
+    if (uses.holder !== null && (typeof holder !== 'string' || holder === '')) return { deny: 'credential-unavailable' };
+    const id = this.#vaults.has(uses.credential) ? this.grantOf(uses.credential, holder as string | null) : null;
+    const row = id ? this.store.db.prepare('SELECT seq, state FROM pr_instance WHERE instance_id = ?').get(id) as { seq: number; state: string } | undefined : undefined;
+    if (!id || !row) return { deny: 'credential-unavailable' };
+    const reads = { [id]: Number(row.seq) };
+    const state = JSON.parse(row.state) as Record<string, unknown>;
+    if (state.g !== 'Granted') return { deny: 'credential-unavailable', reads };
+    const cred = this.#credential(uses.credential)!;
+    const held = cred.scopes.filter((s) => scopeHeld(state, s));
+    if (!uses.scopes.every((s) => held.includes(s))) return { deny: 'insufficient-scope', reads };
+    return { credential: { name: uses.credential, grantState: 'Granted', scopes: held }, reads };
+  }
+
+  /** PT22.5: the vault's transport for an intent of an effect that uses a credential, bound to the intent's grant. */
+  apiFor(decl: { uses?: { credential: string; holder: string | null } } | null, payload: Record<string, unknown>): ApiTransport | undefined {
+    const uses = decl?.uses;
+    const vault = uses ? this.#vaults.get(uses.credential) : undefined;
+    if (!uses || !vault) return undefined;
+    const holder = uses.holder === null ? null : (payload[uses.holder] as string);
+    return { request: async (r) => { const id = this.grantOf(uses.credential, holder); if (!id) throw new Error(`no grant of credential ${uses.credential}`); return vault.withToken(id, r); } };
+  }
+
   /**
    * PT10f, S200: the vault of a credential the certificate names, made by the certified adapter package, of the store the
    * certificate binds (PL6408 otherwise). The runtime holds it for the grant check and `api` (PT22.4, PT22.5).
@@ -548,6 +676,15 @@ export class PolyRuntime {
     if (!this.#ioPackage?.madeHere(adapter) || adapter.kind !== 'vault') throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the vault for ${credential} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S200)`);
     if (adapter.store !== pin.store) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: credential ${credential} is certified with the ${pin.store} store, and this vault keeps its tokens in the ${adapter.store} store (S200)`);
     this.#vaults.set(credential, adapter);
+    // PT10g: the Grant's effects, run by the vault: a refresh completes Refreshed(valid), a revoke forgets the tokens.
+    const vaultOf = (instanceId: string) => {
+      const c = /^grant:([^:#]+)/.exec(instanceId)?.[1];
+      const v = c ? this.#vaults.get(c) : undefined;
+      if (!v) throw Object.assign(new Error(`no vault for ${instanceId}`), { permanent: true });
+      return v;
+    };
+    this.#handlers.set('credential.refresh', async (_p, _caps, ctx) => vaultOf(ctx.instanceId).refresh(ctx.instanceId));
+    this.#handlers.set('credential.revoke', async (_p, _caps, ctx) => { await vaultOf(ctx.instanceId).revoke(ctx.instanceId); return {}; });
   }
 
   connectChannel(channel: string, adapter: ChannelAdapter, transports: ChannelTransports): void {
@@ -602,6 +739,25 @@ export class PolyRuntime {
         else text = readFileSync(join(dir, file), 'utf8');
       } catch (e) { reason = 'not-a-record'; message = `the file cannot be read (${(e as NodeJS.ErrnoException).code ?? 'error'})`; }
       if (!reason) { try { record = JSON.parse(text); } catch { reason = 'not-a-record'; message = 'the file is not JSON'; } }
+      // PT10g: the approvals folder takes a grant request and a person's signed revocation too. A request is not kept
+      // in the journal, since it names a holder; its outcome is.
+      const kind = (record as { kind?: unknown } | null)?.kind;
+      if (!reason && (kind === 'grant-request' || kind === 'revocation')) {
+        try {
+          if (kind === 'grant-request') {
+            const r = record as { credential?: unknown; holder?: unknown };
+            if (typeof r.credential !== 'string' || (r.holder !== null && typeof r.holder !== 'string')) throw new ApprovalRefused('a grant request names a credential and a holder or null', 'not-a-record');
+            this.#authorizations.push({ credential: r.credential, url: await this.requestGrant(r.credential, r.holder as string | null) });
+          } else await this.revokeBySubject(record);
+        } catch (e) { reason = e instanceof ApprovalRefused ? e.reason : 'unmatched'; message = (e as Error).message; }
+        await this.store.txn(() => { this.store.appendEvent(APPROVALS_RUN, 'verdict', { stage: kind, file, ...(kind === 'revocation' ? { record: this.store.keep(text) } : {}), outcome: reason ? 'refused' : 'applied', ...(reason ? { reason } : {}) }, this.now()); });
+        const to = join(dir, reason ? 'refused' : 'applied');
+        mkdirSync(to, { recursive: true });
+        const target = freeName(to, file);
+        try { renameSync(join(dir, file), join(to, target)); if (reason) writeFileSync(join(to, `${target}.reason.txt`), `${reason}: ${message}\n`); } catch { this.unmovable.add(file); }
+        out.push({ file, outcome: reason ? 'refused' : 'applied', ...(reason ? { reason } : {}) });
+        continue;
+      }
       if (!reason) {
         try { await this.approve(record); } catch (e) {
           if (!(e instanceof ApprovalRefused)) throw e;
@@ -1385,4 +1541,11 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     ioPackage = (await import(pathToFileURL(realpathSync(createRequire(import.meta.url).resolve('@poly/io'))).href)) as { madeHere(a: unknown): boolean };
   }
   return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault, ioPackage });
+}
+
+/** PS16.1: whether a Grant's state holds a scope, whose field is the scope with each . written _ (flat or nested). */
+function scopeHeld(state: Record<string, unknown>, scope: string): boolean {
+  const f = scope.split('.').join('_');
+  const nested = state.scopes as Record<string, unknown> | undefined;
+  return (nested && typeof nested === 'object' ? nested[f] : state[`scopes.${f}`]) === true;
 }

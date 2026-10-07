@@ -152,6 +152,9 @@ export const CODES: Record<string, CodeInfo> = {
   PL6821: { name: 'SCOPE_NOT_DECLARED', stage: 'types', severity: 'error' },
   PL6822: { name: 'HOLDER_NOT_NAMED', stage: 'types', severity: 'error' },
   PL6823: { name: 'TARGET_OUTSIDE_PROVIDER', stage: 'types', severity: 'error' },
+  // PT10g, PT22.5 (M9): a handler reads a header that carries a credential; a token-shaped string in poly.json.
+  PL6824: { name: 'TOKEN_READ_IN_HANDLER', stage: 'lint', severity: 'error' },
+  PL6825: { name: 'SECRET_IN_CONFIG', stage: 'runtime', severity: 'error' },
   // PT10f, S200 (M9): admission refuses the development keychain in a build for production.
   PL6826: { name: 'VAULT_NOT_FOR_PRODUCTION', stage: 'runtime', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },

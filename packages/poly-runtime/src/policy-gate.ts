@@ -205,7 +205,7 @@ export class PolicyGate implements Gate {
     const statusAge = ageOf(ev?.statusAt);
     const inner = ev?.mandates?.length ? ev.mandates[ev.mandates.length - 1] : null;
     const step = claims ? { claims, ...(age ? { age: age.v } : {}), ...(statusAge ? { statusAge: statusAge.v } : {}), ...(inner ? { mandate: { delegate: inner.delegate, delegator: inner.delegator } } : {}) } : null;
-    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine, ...(proposal.channel ? { channel: proposal.channel } : {}) }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(step ? { step } : {}), ...(lineage ? { lineage } : {}) };
+    const row = { proposal: proposal.kind, effect: { kind: proposal.effectKind, class: proposal.class, machine: proposal.machine, ...(proposal.channel ? { channel: proposal.channel } : {}), ...(proposal.credential ? { credential: { name: proposal.credential.name, grantState: proposal.credential.grantState } } : {}) }, effects: proposal.labels, machines, decisions: this.view.decisions(proposal.instance), ...(step ? { step } : {}), ...(lineage ? { lineage } : {}) };
     return { action: actionOf(row), reads, singletons, claims };
   }
 

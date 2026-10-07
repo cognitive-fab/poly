@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "credential": {
+      "type": "string",
+      "description": "the credential"
+    },
+    "for": {
+      "type": "string",
+      "description": "the holder, a principal; omitted for the service's own credential"
+    },
+    "out": {
+      "type": "string",
+      "description": "the request file to write, in the approvals folder"
+    }
+  },
+  "required": [
+    "credential",
+    "out"
+  ]
+}

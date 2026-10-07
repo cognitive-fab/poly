@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "grant": {
+      "type": "string",
+      "description": "the grant's instance id"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the record"
+    }
+  },
+  "required": [
+    "grant",
+    "by",
+    "key"
+  ]
+}

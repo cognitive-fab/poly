@@ -43,6 +43,8 @@ export interface PolicyProgram {
   intents: string[];
   /** S185, PT25.1: the program's channels, their kinds, and the message kinds their conversations send. */
   channels: { name: string; kind: string; messageKinds: string[] }[];
+  /** PS16.3: the program's credentials, which an effect's `credential` field names. */
+  credentials: string[];
 }
 
 const CLASSES = ['none', 'reversible', 'compensable', 'irreversible'];
@@ -110,7 +112,8 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
     channels.push({ name: d.name, kind: d.channelKind, messageKinds: e ? [...e.members] : [] });
   }
   const all = [...machines.values()].flatMap((m) => m.effects);
-  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
+  const credentials = [...new Set(modules.flatMap((x) => x.decls.flatMap((d) => (d.kind === 'Credential' ? [d.name] : []))))].sort();
+  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, credentials, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
 }
 
 const DECISION_FIELDS = (result: PType): Record<string, PType> => ({
@@ -176,7 +179,9 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (e.prop === 'labels') return { k: 'labels' };
             // S185, PT25.1: a channel send's channel. Every recipient is external in M8 (audiences arrive in M10, S181).
             if (e.prop === 'channel') return { k: 'record', fields: { name: { k: 'str', values: program.channels.map((c) => c.name) }, kind: { k: 'str', values: [...new Set(program.channels.map((c) => c.kind))] }, recipient: { k: 'str', values: null }, recipientClass: { k: 'str', values: ['external'] }, messageKind: { k: 'str', values: [...new Set(program.channels.flatMap((c) => c.messageKinds))] } } };
-            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel)`);
+            // PS16.3: the grant of an effect that uses a credential, as the runtime's check read it; never its holder.
+            if (e.prop === 'credential') return { k: 'record', fields: { name: { k: 'str', values: program.credentials }, grantState: { k: 'str', values: ['Requested', 'Granted', 'Refreshing', 'Expired', 'Revoked'] } } };
+            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel, credential)`);
             return null;
           }
           if (e.object.kind === 'Name' && e.object.name === 'send' && !vars.has('send')) {

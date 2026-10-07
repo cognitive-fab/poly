@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXIT_CODES, digest, loadProject, toJson, type Certificate } from '@poly/core';
+import { EXIT_CODES, digest, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
@@ -259,6 +259,31 @@ export const COMMANDS: Command[] = [
       const dir = resolve(opt(input, 'project') ?? process.cwd());
       const r = await signPolicy(dir, need(input, 'scope'), need(input, 'by'), personKey(need(input, 'key')), new Date().toISOString());
       return { exit: EXIT_CODES.CLEAN, result: r, text: `${r.subject}\n  written to ${r.path}; admission and load verify it (S194)\n` };
+    },
+  },
+  {
+    name: 'grant-request', mcp: null, lsp: false,
+    summary: 'Asks a holder for a grant of a credential: writes the request to the runtime\'s approvals folder, which rt.takeApprovals takes, and the runtime hands the authorization URL to the host to deliver (PT22.3, PT10g). An agent cannot start a grant for a person; never over MCP.',
+    input: obj({ credential: str('the credential'), for: str('the holder, a principal; omitted for the service\'s own credential'), out: str('the request file to write, in the approvals folder') }, ['credential', 'out']),
+    output: obj({ path: str('where the request was written') }, ['path']),
+    async run(input) {
+      const out = need(input, 'out');
+      const holder = opt(input, 'for');
+      writeFileSync(out, JSON.stringify({ kind: 'grant-request', credential: need(input, 'credential'), holder: holder ?? null }, null, 2) + '\n');
+      return { exit: EXIT_CODES.CLEAN, result: { path: out }, text: `${out}\n  the runtime takes it from its approvals folder (PT10g)\n` };
+    },
+  },
+  {
+    name: 'grant-revoke', mcp: null, lsp: false,
+    summary: 'Signs the revocation of a grant with a person key given by file, a record of the kind revocation over the grant\'s instance id, for rt.takeApprovals or rt.revokeGrant (PS16.4, PT10g). Never over MCP.',
+    input: obj({ grant: str('the grant\'s instance id'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record') }, ['grant', 'by', 'key']),
+    output: obj({ record: { type: 'object', description: 'the signed revocation' }, path: str('where it was written, when out was given') }, ['record']),
+    async run(input) {
+      const record = signRecord({ kind: 'revocation', subject: revocationSubject(need(input, 'grant')), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
+      const text = JSON.stringify(record, null, 2) + '\n';
+      const out = opt(input, 'out');
+      if (out) writeFileSync(out, text);
+      return { exit: EXIT_CODES.CLEAN, result: { record, ...(out ? { path: out } : {}) }, text: out ? '' : text };
     },
   },
   {

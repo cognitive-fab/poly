@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "where the request was written"
+    }
+  },
+  "required": [
+    "path"
+  ]
+}

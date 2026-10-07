@@ -22,6 +22,8 @@ const AMBIENT = new Set([
  */
 const AMBIENT_GLOBALS = new Set(['fetch', 'process', 'global', 'globalThis', 'require', 'module', 'eval', 'Function', 'WebSocket', 'XMLHttpRequest', 'EventSource', 'Deno', 'Bun']);
 const bare = (spec: string) => spec.replace(/^node:/, '');
+/** PT22.5: the response headers that can carry a credential back. */
+const TOKEN_HEADERS = new Set(['authorization', 'proxy-authorization', 'set-cookie']);
 
 export function lintHandlerText(text: string, file: string): Diagnostic[] {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.ts') ? ts.ScriptKind.TS : ts.ScriptKind.JS);
@@ -32,6 +34,14 @@ export function lintHandlerText(text: string, file: string): Diagnostic[] {
   };
   const moduleSpec = (node: ts.Node, spec: string) => {
     if (AMBIENT.has(bare(spec))) report(node, `the handler imports ${spec}; a handler receives its capabilities from the runtime`);
+    // PT22.5: the vault adapter lives in @poly/io; a handler reaches a provider only through api, never the vault.
+    if (spec === '@poly/io' || spec.startsWith('@poly/io/')) report(node, `the handler imports ${spec}, the module of the vault and the channel adapters; a handler calls a provider through api`);
+  };
+  // PT22.5: a response header that carries a credential, read by name, is PL6824.
+  const tokenHeader = (node: ts.Node, name: string) => {
+    if (!TOKEN_HEADERS.has(name.toLowerCase())) return;
+    const at = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+    out.push(diag('PL6824', { line: at.line + 1, col: at.character + 1 }, `${file}: the handler reads the header ${name}, which can carry a credential; the vault removes it from what api returns, and a handler never reads it (PT22.5)`));
   };
   // A local `fetch` bound to a capability is not the global one, but only within its own scope: a name is
   // declared for a use when a scope enclosing the use declares it (polywatch, after the review).
@@ -79,6 +89,9 @@ export function lintHandlerText(text: string, file: string): Diagnostic[] {
       if (ts.isIdentifier(obj) && obj.text === 'process' && n.name.text === 'env' && !declared(n, 'process')) { report(n, 'the handler reads process.env; a secret is the secrets capability its labels grant'); reported.add(obj); }
       if (ts.isIdentifier(obj) && obj.text === 'globalThis' && ['fetch', 'process', 'require'].includes(n.name.text)) { report(n, `the handler reads globalThis.${n.name.text}`); reported.add(obj); }
     }
+    if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression)) tokenHeader(n, n.argumentExpression.text);
+    if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.name) && /^headers$/i.test(ts.isPropertyAccessExpression(n.expression) ? n.expression.name.text : ts.isIdentifier(n.expression) ? n.expression.text : '')) tokenHeader(n, n.name.text);
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ['get', 'has', 'getAll'].includes(n.expression.name.text) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0])) tokenHeader(n, n.arguments[0].text);
     if (ts.isElementAccessExpression(n) && ts.isIdentifier(n.expression) && (n.expression.text === 'globalThis' || n.expression.text === 'process') && !declared(n, n.expression.text)) { report(n, `the handler reads ${n.expression.text} by a computed name`); reported.add(n.expression); }
     // Any other use of an ambient global it does not declare: an alias, a destructuring, a bare reference.
     if (ts.isIdentifier(n) && AMBIENT_GLOBALS.has(n.text) && !declared(n, n.text) && !reported.has(n) && isReference(n)) report(n, `the handler uses the global ${n.text}, which reaches ambient authority`);

@@ -12,7 +12,7 @@ import { canonicalize } from './jcs.js';
 /** `invocation` (PD5.1.4, S107): a person's signature on one dispatch, which the person-key adapter turns into claims. */
 /** `keyring` (S194, M9): a person's signature on a change of the people or agents ring, over { parent, rings }. */
 /** `policy` (S194, Q8, M9): a person's signature on a policy scope, over its document, source and engine. */
-export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy';
+export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation';
 
 export interface SignedRecord {
   v: 1;
@@ -56,9 +56,9 @@ export function verifyRecord(record: unknown, keyrings: Keyrings, expect: { kind
   if (fields !== 'at,by,kind,sig,subject,v' || r.v !== 1 || typeof r.sig !== 'string' || typeof r.by !== 'string' || typeof r.subject !== 'string' || typeof r.at !== 'string') {
     return { ok: false, problem: 'not a signed record { v: 1, kind, subject, by, at, sig }: an unsigned approval has no effect (PT12.5)' };
   }
-  if (r.kind !== expect.kind) return { ok: false, problem: `a ${r.kind} record, where an ${expect.kind} is needed` };
+  if (r.kind !== expect.kind) return { ok: false, problem: `a ${r.kind} record, where a record of the kind ${expect.kind} is needed` };
   if (expect.subject !== undefined && r.subject !== expect.subject) return { ok: false, problem: `the record is for ${r.subject}, not for ${expect.subject}` };
-  if (keyrings.agents.some((a) => a.keyId === r.by)) return { ok: false, problem: `${r.by} is an agent key, and an agent key never signs an ${r.kind} (PT12.5)` };
+  if (keyrings.agents.some((a) => a.keyId === r.by)) return { ok: false, problem: `${r.by} is an agent key, and an agent key never signs a record of the kind ${r.kind} (PT12.5)` };
   const person = keyrings.people.find((p) => p.keyId === r.by);
   if (!person) return { ok: false, problem: `${r.by} is not a key in the certified people keyring (PT12.5)` };
   const digest = recordDigest(r as SignedRecord);
@@ -104,4 +104,9 @@ export function sameKeyrings(a: Keyrings, b: Keyrings): boolean {
     agents: [...k.agents].map((p) => ({ name: p.name, keyId: p.keyId, publicKey: p.publicKey.trim() })).sort((x, y) => (x.keyId < y.keyId ? -1 : 1)),
   });
   return norm(a) === norm(b);
+}
+
+/** PS16.4: what a person's revocation of a grant signs: the grant's instance id, whose holder part is a keyed digest. */
+export function revocationSubject(grantId: string): string {
+  return `sha256:${createHash('sha256').update(canonicalize({ grant: grantId }), 'utf8').digest('hex')}`;
 }

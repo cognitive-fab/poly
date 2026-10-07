@@ -11,5 +11,5 @@ export { profileProblem, underBase, expandCredentials, scopeField, type Provider
 export { expandChannels, type ChannelExpansion, type ChannelPlan } from './channels.js';
 export { checkPolicies, policyProgram, type PolicyProgram, type PolicyMachine, type PType, type PolicyCheck } from './check/policy.js';
 export { parseManifest, loadProject, keyringsOf, ManifestError, RUN_SCHEMA, type Manifest, type RunConfig } from './manifest.js';
-export { signRecord, invocationSubject, verifyRecord, recordDigest, recordMessage, sameKeyrings, keyringDigest, keyringSubject, policySubject, type PolicySubjectParts, EMPTY_KEYRINGS, type SignedRecord, type RecordKind, type Keyrings, type KeyHolder } from './records.js';
+export { signRecord, invocationSubject, verifyRecord, recordDigest, recordMessage, sameKeyrings, keyringDigest, keyringSubject, policySubject, revocationSubject, type PolicySubjectParts, EMPTY_KEYRINGS, type SignedRecord, type RecordKind, type Keyrings, type KeyHolder } from './records.js';
 export { CERTIFIED_ARTEFACTS, sha256OfBytes, certificateDigest, certificateMessage, buildIdOf, signDigest, publicKeyOf, certificateProblems, type Certificate, type CertifiedMachine, type CertificateSignature, type CertificateProblem } from './certificate.js';

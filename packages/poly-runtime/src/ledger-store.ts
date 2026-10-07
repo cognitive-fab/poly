@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS poly_ingress_nonce (
   until   INTEGER NOT NULL,
   PRIMARY KEY (channel, nonce)
 );
+CREATE TABLE IF NOT EXISTS poly_grant (
+  credential TEXT NOT NULL,
+  holder     TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  instance   TEXT NOT NULL,
+  PRIMARY KEY (credential, holder, generation)
+);
 CREATE TABLE IF NOT EXISTS poly_erasable (
   digest TEXT PRIMARY KEY
 );

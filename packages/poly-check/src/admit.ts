@@ -16,6 +16,7 @@ import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import { checkFile, checkProject, type ProjectReport } from './pipeline.js';
 import { STD } from './uses.js';
+import { secretShapes } from './secrets.js';
 import { LINT_VERSION, handlerClosure } from './handlers.js';
 import { KeyringError, keyringChain } from './keyrings.js';
 import { policySignaturePath } from './policy-sign.js';
@@ -172,6 +173,10 @@ async function checkTarget(target: string, root?: string, std?: string): Promise
 export async function admit(target: string, opts: AdmitOptions & { root?: string } = {}): Promise<AdmitResult> {
   const abs = resolve(target);
   const projectDir = existsSync(join(abs, 'poly.json')) ? abs : null;
+  // PT10g, PL6825: poly.json is committed, so it holds no secret. The check comes first, so no later message repeats
+  // one, and what poly.json holds is named by its kind only.
+  const shapes = projectDir ? secretShapes(readFileSync(join(projectDir, 'poly.json'), 'utf8')) : [];
+  if (shapes.length) throw new AdmitError(`not admitted: PL6825 SECRET_IN_CONFIG: poly.json holds a string with the shape of ${shapes.join(' and ')}; a secret is named by reference (file:PATH), never written in poly.json (PT10g)`);
   const named = projectDir ? loadProject(projectDir).manifest.keys?.admission : undefined;
   const key = admissionKey(projectDir ?? dirname(abs), named, opts.key);
   // A failed admission leaves no certificate: an old one would describe a build this check is about to replace.

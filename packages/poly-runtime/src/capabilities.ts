@@ -21,8 +21,11 @@ export class CapabilityRefused extends Error {
   constructor(message: string) { super(message); this.name = 'CapabilityRefused'; }
 }
 
-/** The manifest entry's labels and targets, as the lowering wrote them (PT6.1, S151). */
-export interface CapabilityDecl { labels?: string[]; targets?: Record<string, string[]> }
+/** The manifest entry's labels and targets, as the lowering wrote them (PT6.1, S151), and the credential it uses (PT10e). */
+export interface CapabilityDecl { labels?: string[]; targets?: Record<string, string[]>; uses?: { credential: string; scopes: string[]; holder: string | null } }
+
+/** PT22.5, S201: the vault's transport for the intent's grant: the credential is attached inside the vault adapter. */
+export interface ApiTransport { request(r: { method: 'GET' | 'POST'; url: string; headers: Record<string, string>; body: string }): Promise<{ status: number; headers: Record<string, string>; body: string }> }
 
 /** Redirects followed before a request is given up; each hop is checked against the prefixes. */
 export const MAX_REDIRECTS = 5;
@@ -55,7 +58,7 @@ export function withinPrefix(url: string, prefixes: readonly string[]): string |
  * The frozen capability object for one effect kind, for one call of its handler. `audit` writes the PL6406 row; it
  * is awaited before the refusal is thrown, so a refusal is in the ledger whatever the handler does with the error.
  */
-export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string) => Promise<void>): Readonly<Record<string, unknown>> {
+export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string) => Promise<void>, api?: ApiTransport): Readonly<Record<string, unknown>> {
   const targets = decl.targets ?? {};
   const refuse = async (reason: string): Promise<never> => { await audit(reason); throw new CapabilityRefused(`PL6406 CAPABILITY_REFUSED: ${reason}`); };
   const need = <K extends keyof Transports>(k: K): NonNullable<Transports[K]> => {
@@ -64,7 +67,23 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
     return t as NonNullable<Transports[K]>;
   };
   const caps: Record<string, unknown> = {};
-  if (has(decl, 'egress:external', 'egress:public')) {
+  // PT22.5, S201: an effect that uses a credential gets api in place of egress, bound to its declared targets, its
+  // requests sent through the vault for the intent's grant. It follows no redirect. With no vault it cannot act.
+  if (decl.uses) {
+    const prefixes = targets.egress ?? [];
+    const call = async (method: 'GET' | 'POST', url: string, body: unknown, headers: Record<string, string> = {}) => {
+      const at = withinPrefix(url, prefixes);
+      if (at === null) return refuse(`${method} ${url} is outside the declared egress targets ${JSON.stringify(prefixes)}`);
+      if (!api) throw new Error(`no vault is connected for credential ${decl.uses!.credential}, so api cannot act (PT22.5)`);
+      const text = body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body);
+      const h = typeof body === 'object' && body !== null && !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type') ? { ...headers, 'content-type': 'application/json' } : headers;
+      return api.request({ method, url: at, headers: h, body: text });
+    };
+    caps.api = Object.freeze({
+      get: (url: string, opts?: { headers?: Record<string, string> }) => call('GET', url, undefined, opts?.headers),
+      post: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => call('POST', url, body, opts?.headers),
+    });
+  } else if (has(decl, 'egress:external', 'egress:public')) {
     const prefixes = targets.egress ?? [];
     const request = async (method: 'GET' | 'POST', url: string, body: unknown, headers: Record<string, string> | undefined): Promise<EgressResponse> => {
       let at = withinPrefix(url, prefixes);

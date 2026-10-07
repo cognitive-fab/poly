@@ -29,6 +29,8 @@ export interface Proposal {
   rechecks?: number;
   /** PT25.1, S185: a channel send's channel. */
   channel?: { name: string; kind: string; recipient: string; recipientClass: string; messageKind?: string };
+  /** PS16.3, S199: the grant of an effect that uses a credential, as the runtime's check read it; never its holder. */
+  credential?: { name: string; grantState: string; scopes: string[] };
 }
 
 /**
@@ -89,6 +91,11 @@ export interface WorkerOptions {
   channelOf?: (row: OutboxRow) => Proposal['channel'] | null;
   /** PS8.9, S199: whether the emitting step's innermost mandate excludes this effect; such a proposal is denied before any policy. */
   outsideMandate?: (row: OutboxRow) => boolean;
+  /**
+   * PS16.3, S199: the grant check of an effect that uses a credential: a refusal, final whatever a policy says, or the
+   * field `credential` and the grant instance's sequence number the allow reads; null for an effect with no `uses`.
+   */
+  grantCheck?: (row: OutboxRow, decl: any) => { deny: string; reads?: Record<string, number> } | { credential: NonNullable<Proposal['credential']>; reads: Record<string, number> } | null;
   /** S180: the completion's data, marked when a Content in it names no body in the content store. */
   markContent?: (instanceId: string, action: string, data: Record<string, unknown>) => Record<string, unknown>;
   /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
@@ -364,10 +371,15 @@ export class EffectWorker {
           const d = st.intent_decision!;
           const approval = d === 2 ? this.lastApproval(row) : undefined;
           const { proposal, snapshot } = await this.proposalOf(row, decl, approval, st.intent_rechecks ?? 0);
+          // PS16.3, S199: the grant check comes first, then the mandate's; each refusal is final whatever a policy says.
+          const grant = this.opts.grantCheck?.(row, decl) ?? null;
+          if (grant && 'credential' in grant) proposal.credential = grant.credential;
           let g: GateDecision;
           try {
-            // PS8.9, S199: the runtime's own mandate check comes first, and its refusal is final whatever a policy says.
-            g = this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot);
+            g = grant && 'deny' in grant ? { decision: 'deny', reason: grant.deny, ...(grant.reads ? { reads: grant.reads } : {}) }
+              : this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot);
+            // PS16.3, S147: the allow reads the grant as it reads a singleton, so a grant that steps makes it stale.
+            if (grant && 'reads' in grant && g.decision === 'allow') g = { ...g, reads: { ...(g.reads ?? {}), ...grant.reads } };
           } catch (e) {
             // Review C6: a gate that fails holds only this intent, Proposed with a backoff, and never allows it (PT9.5).
             const held = (e as { record?: Record<string, unknown> })?.record;
