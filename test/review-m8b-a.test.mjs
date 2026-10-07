@@ -232,6 +232,8 @@ test('A-F2, as ruled: an application that answers a message on the other channel
   }
   // As measured on the review of M8b, and reported for a ruling: in text's configuration the mail conversation gets
   // no receipts, so its slot is never freed and the second cross reply is refused busy (PL5407); mail's is CLEAN.
-  assert.deepEqual(r.configurations.map((c) => [c.configuration, c.verdict, [...new Set(c.diagnostics.map((d) => d.code))]]), [['text', 'FINDINGS', ['PL5407']], ['mail', 'CLEAN', []]]);
+  // S207, as ruled: the PL5407 is the program's (an email reply that answers no waiting message), and the application
+  // also gets the joint configuration Agent, capped and INCONCLUSIVE at its cap (test/s206-s207.test.mjs).
+  assert.deepEqual(r.configurations.map((c) => [c.configuration, c.verdict, [...new Set(c.diagnostics.map((d) => d.code))]]), [['text', 'FINDINGS', ['PL5407']], ['mail', 'CLEAN', []], ['Agent', 'INCONCLUSIVE', ['PL3901']]]);
   console.log(`a2-cross: ${r.configurations.map((c) => `${c.configuration} ${c.verdict} ${[...new Set(c.diagnostics.map((d) => d.code))].join(',')} ${c.instance?.states ?? ''}`).join('; ')}`);
 });

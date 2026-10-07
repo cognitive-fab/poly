@@ -233,6 +233,15 @@ Steps 5, 9 and 10 are accepted as built. The new check-memory window (from check
 
 Steps 6, 7, 8 and 11 go ahead. Step 12 waits on E13.
 
+## S206 and S207, built as ruled
+
+PS15.5 was amended first (8a3099c), with the owner's documents committed beside it as ruled.
+
+- **S206 is on.** poly-ref keeps every instance's armed timers in every configuration; the switch is gone. The 159 measured files differ from M8's close in exactly the two ruled files, and are identical to the switch-on measurement: `chat-ruled-out.poly` is FINDINGS (its configuration `pair`, 15 global states and 36 steps, counts the never violation), and `chat-confirmed.poly`'s `pair` has 22 states and 79 steps. These are the measured verdicts from now on, and the limit S192 is closed. `chat-ruled-out.poly`'s comment says so. The ruled-out case it used to show, a witness no configuration reaches, moved to `test/fixtures/m9/chat-ruled-out-plain.poly`, where the window closes by an action the configuration does not offer; `never.test.mjs` and `review-m8a-d.test.mjs` read it there, `never.test.mjs` asserts the conformance file's new finding, and `m4f-recheck.test.mjs` no longer lists it as vacuous.
+- **S207 as ruled.** The per-channel configurations stay. An application whose handler of one channel's message emits a reply or a template on another gets one more configuration, named after it (`joint` in the AST), in the compiler's expansion and in poly-ref's reading, each from the source. poly-ref explores it to `JOINT_CAP`, 10,000 global states; reaching the cap is `PL3901`, so the configuration reads INCONCLUSIVE. The cross-channel application now reads `text` FINDINGS (`PL5407`, the program's), `mail` CLEAN and `Agent` INCONCLUSIVE at the cap; the application that answers each channel on its own has no joint configuration. The cap's value is the plan's choice: at 60,000 states the joint space held 8 million steps and up to 11.8 GB, and 10,000 keeps one check within about 2 GB. PT10d says how it is built.
+- **Tests.** `test/s206-s207.test.mjs` (renamed from the switch tests): a declared configuration fires its lamp's timer (CLEAN, where it was stuck with `PL5402`); the application answering each channel on its own keeps two configurations, the cross one gets `Agent` with `instances 3` and the summed transit, in both readings; and the cross application's joint configuration stops at the cap, INCONCLUSIVE, with the per-channel verdicts unchanged. `review-m8b-a.test.mjs`'s cross test expects `Agent` too.
+- **Checked.** The full suite: 1,859 tests and one after the M3 runs, 1,847 pass, no failure, 1 skipped and 11 waiting; check-memory passed (`.poly/logs/8a3099c-2026-10-07T03-33-29-576Z-s206on.log`).
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.

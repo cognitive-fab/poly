@@ -1,8 +1,10 @@
 // S178, PS5.2a: a witness that needs an environment nothing provides. Alone, Reply can arrive in any state, so Chat
 // sends from a closed window at once; Reply is a message only App sends, so that witness is marked
 // environment: unconstrained. In the configuration App replies only to a Message, which Chat sends when the window
-// opens, and nothing closes it again (Expired is a timer's completion, and the configuration does not offer it):
-// the configuration check rules the witness out, and it is not counted as a finding.
+// opens. Before S206 nothing closed it again there (Expired is a timer's completion, and the configuration did not fire
+// timers), so the witness was ruled out. Since S206 the timer fires in every configuration (PS15.5): the window can
+// close before the reply, the witness is reached, and it is a finding (ruled 2026-10-06). The ruled-out case without a
+// timer is test/fixtures/m9/chat-ruled-out-plain.poly.
 module chat
 
 enum Window { Closed, Open }

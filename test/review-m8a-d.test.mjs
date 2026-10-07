@@ -11,7 +11,8 @@ import { ROOT } from './helpers.mjs';
 
 const OUT = join(ROOT, '.poly', 'test-review-m8a-d');
 const FIX = join(ROOT, 'test', 'fixtures', 'review-m8a');
-const CHAT = readFileSync(join(ROOT, 'conformance', 'm8', 'never', 'chat-ruled-out.poly'), 'utf8');
+// The ruled-out chat with no timer: since S206 a timer fires in every configuration (PS15.5).
+const CHAT = readFileSync(join(ROOT, 'test', 'fixtures', 'm9', 'chat-ruled-out-plain.poly'), 'utf8');
 const swap = (src, from, to) => { assert.ok(src.includes(from), from); return src.replace(from, to); };
 async function run(name, src) {
   const dir = join(OUT, name);

@@ -143,9 +143,9 @@ export interface ConfigReport {
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
 const sortMu = (mu: Message[]) => [...mu].sort((a, b) => (msgKey(a) < msgKey(b) ? -1 : msgKey(a) > msgKey(b) ? 1 : 0));
 
-export function buildConfiguration(source: Module, name: string, opts: { program?: Module[]; fault?: RefFault; s207?: boolean } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[]; channels: ChannelRoles[] } {
+export function buildConfiguration(source: Module, name: string, opts: { program?: Module[]; fault?: RefFault } = {}): { decl: A.Configuration; instances: ConfigInstance[]; groups: string[]; channels: ChannelRoles[] } {
   // PS15: a module with channels means its expansion, with the configuration of each channel.
-  const reading = readChannels(source, opts.program ?? [], { joint: opts.s207 });
+  const reading = readChannels(source, opts.program ?? []);
   const module = reading.module;
   opts = { ...opts, program: reading.program };
   const found = module.decls.find((d): d is A.Configuration => d.kind === 'Configuration' && d.name === name);
@@ -376,22 +376,24 @@ function timerTargets(M: RMachine): string[] {
   return [...out];
 }
 
+/** PS15.5 (S207): the cap on a joint configuration's global states. */
+export const JOINT_CAP = 10_000;
+
 /** Explores a configuration and checks it (PS13.5, PS13.6). */
-export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[]; fault?: RefFault; s206?: boolean; s207?: boolean } = {}): ConfigReport {
-  const { decl, instances, groups: spawnedGroups, channels } = buildConfiguration(module, name, { program: opts.program, ...(opts.fault ? { fault: opts.fault } : {}), ...(opts.s207 ? { s207: true } : {}) });
-  // S207 (switch off until ruled): the joint configuration holds the channels it names, all live.
+export function checkConfiguration(module: Module, name: string, opts: { maxStates?: number; program?: Module[]; fault?: RefFault } = {}): ConfigReport {
+  const { decl, instances, groups: spawnedGroups, channels } = buildConfiguration(module, name, { program: opts.program, ...(opts.fault ? { fault: opts.fault } : {}) });
+  // PS15.5 (S207): the joint configuration holds the channels it names, all live.
   const ofThis = (c: ChannelRoles) => c.name === decl.name || (decl.joint ?? []).includes(c.name);
   // PS15.5, ruled on the review of M8b (A-F2): another channel's conversation in a channel's configuration has its never
   // statements checked in its own channel's configuration, not here.
   const elsewhere = (inst: ConfigInstance) => decl.generated === 'channel' && channels.some((c) => !ofThis(c) && c.conversation === inst.machine.id);
-  // PS15.5: a channel's generated configuration keeps its conversation's armed timers; a declared one does not (S61).
-  // Review A-F2 (M8b): only this channel's conversation; another channel's, spawned beside it, keeps no timers here.
-  // S206 (switch off until ruled): every configuration keeps every instance's armed timers.
-  const timed = new Set<number>(opts.s206 ? instances.map((x, k) => (timerTargets(x.machine).length ? k : -1)).filter((k) => k >= 0)
-    : decl.generated === 'channel' ? instances.map((x, k) => (channels.some((c) => ofThis(c) && c.conversation === x.machine.id) ? k : -1)).filter((k) => k >= 0) : []);
+  // PS15.5 (S206, as ruled): every configuration keeps every instance's armed timers, and the environment may fire one
+  // while it is armed. It replaces S61's rule for declared configurations, and A-F2's for another channel's conversation.
+  const timed = new Set<number>(instances.map((x, k) => (timerTargets(x.machine).length ? k : -1)).filter((k) => k >= 0));
   const sys = configurationSystem(decl, instances, { timed, fault: opts.fault });
   const absent = (err: unknown) => err instanceof AbsentInstance;
-  const g = explore(sys, opts.maxStates);
+  // PS15.5 (S207): a joint configuration is explored to 10,000 global states at most; the cap is PL3901, INCONCLUSIVE.
+  const g = explore(sys, decl.joint ? Math.min(opts.maxStates ?? JOINT_CAP, JOINT_CAP) : opts.maxStates);
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, ...(node ? { node } : {}) });
   const digestOf = (s: GlobalState) => 'sha256:' + createHash('sha256').update(sys.key(s)).digest('hex');

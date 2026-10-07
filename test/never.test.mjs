@@ -108,9 +108,9 @@ test('PS5.2a, PS4.4: alone, a witness that needs a message nothing sent is marke
 });
 
 test('PS5.2a: a configuration that cannot reach the violation rules the unconstrained witness out, and it is not counted', { timeout: 180_000 }, async () => {
-  const r = await checkFile(join(DIR, 'chat-ruled-out.poly'), { root: join(OUT, 'ruled-out') });
-  // PS5.2a, ruled on M8 plan step 10: the declared configuration pair offers no timer (S61), so it never takes Reply
-  // from a closed window: the never is untested there, listed vacuous, and the verdict is INCONCLUSIVE, not CLEAN.
+  const r = await checkFile(join(ROOT, 'test', 'fixtures', 'm9', 'chat-ruled-out-plain.poly'), { root: join(OUT, 'ruled-out') });
+  // PS5.2a: the declared configuration pair never offers Expired, so it never takes Reply from a closed window: the
+  // never is untested there, listed vacuous, and the verdict is INCONCLUSIVE, not CLEAN.
   assert.equal(r.verdict, 'INCONCLUSIVE', messages(r));
   assert.deepEqual(r.configurations[0].vacuous.map((v) => v.property), ['chat.free-when-closed']);
   const chat = r.machines.find((m) => m.machine === 'Chat');
@@ -132,4 +132,13 @@ test('PS5.2a: a configuration that reaches the violation confirms the unconstrai
   assert.ok(g, messages(r));
   assert.equal(g.property, 'chat.free-when-closed');
   assert.equal(g.witness.trace.at(-1).action, 'Reply');
+});
+
+// PS15.5, S206 as ruled: the window's timer fires in the declared configuration pair, so the window can close before
+// the reply, and the witness the configuration used to rule out is reached and counted.
+test('S206: with timers firing in every configuration, chat-ruled-out\'s never violation is a finding of pair', { timeout: 180_000 }, async () => {
+  const r = await checkFile(join(DIR, 'chat-ruled-out.poly'), { root: join(OUT, 's206') });
+  assert.equal(r.verdict, 'FINDINGS', messages(r));
+  assert.ok(r.configurations[0].diagnostics.some((d) => d.code === 'PL3002' && d.property === 'chat.free-when-closed'), messages(r));
+  assert.deepEqual(r.configurations[0].vacuous, []);
 });

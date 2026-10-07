@@ -161,8 +161,8 @@ export interface Configuration extends NodeBase {
   /** PS15.5: the configuration a channel generates, named after it. */
   generated?: 'channel';
   /**
-   * S207, behind a switch that is off until ruled: the one configuration of an application bound to several channels,
-   * named after the application, with every one of these channels' conversations live.
+   * PS15.5 (S207): the joint configuration of an application that answers a message from one channel on another, named
+   * after the application, with every one of these channels' conversations live.
    */
   joint?: string[];
 }
