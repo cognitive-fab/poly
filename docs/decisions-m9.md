@@ -351,6 +351,23 @@ The review found that admission and load trust the project's own files for six t
 
 Until the ruling, the build does as the specs say, and none of the six is changed.
 
+## S210 ruled, and the gate (owner, 2026-10-07)
+
+All six proposals are accepted. They close one gap: the project's own environment could undo what a person decided. The rule behind all six: **what a person decides is anchored outside the project and only moves forward.**
+
+- **D1: load verifies the keyring chain from the anchor**, as admission does, and refuses a certificate whose rings are not the chain's head. Holding the admission key is no longer enough to widen the people ring. Reviewer D's forged load (`.poly/reviewD/load-forged.mjs`) becomes a test that must be refused.
+- **D2 and D7: no rollback.** The anchor's directory (outside the project, under the owner's file permissions) keeps the highest keyring head admitted for the project, and the highest signed version of each policy scope. A policy signature names a sequence number for its scope. Admission and load refuse a chain that does not extend the kept head, and a policy whose sequence is lower than the kept one. Tests: the cut-back history and the older permissive policy are both refused.
+- **D3: a keyring record names its project** (the anchor's id). The change signed for project A is refused in project B, with a test.
+- **D9: production is a property of the anchor**, not of `poly.json`. The anchor's directory records whether the project is production; `poly.json` cannot set or clear it. With it set, the development keychain is refused (`PL6826`) whatever `poly.json` says. Test: removing the field from `poly.json` changes nothing.
+- **B3 and D6: a grant request is a signed record** (kind `grant-request`, by a key of the people ring), as a revocation is. An unsigned file in the approvals folder is refused `not-a-record` and journaled; a `Granted` grant cannot be pushed back to `Requested` by anyone who can only write to the folder.
+- **`LoadOptions.fault`** is refused in a production project, so no test hook is reachable there.
+
+The PT12.5 and PT10g text is updated first. The anchor's directory format is written into the spec with its fields (first ring, head, per-scope policy sequence, production flag).
+
+**The gate report is accepted** as a record of c0cfff1, including the comment-only commit after it. The slower gate is explained by contention inside the suite, not by a change in any test: `channels-adapter-pin` alone is unchanged. Keeping the per-file times in `docs/m9/gate-file-times.json` is accepted; M10 and M11 compare against it.
+
+**M9 closes after S210.** Because the fixes change admission and load, the closing gate runs again from a clean build once they are in, compared file by file with `gate-file-times.json`, and is recorded in `plan-m9.md`. If it passes with no failure and the measured verdicts unchanged, M9 is closed with no further ruling, and M10 and M11 start in their own worktrees.
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled. Every step is now built as ruled, E13 is vendored, the review's findings that keep the security model are fixed, and the gate passed from a clean build (`plan-m9.md`, section 10). S210 asks the owner what admission and load should remember, so that a key holder in the project's own environment cannot widen the people ring, roll back a ring or a policy, or turn production off.
