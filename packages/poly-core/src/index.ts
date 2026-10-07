@@ -9,6 +9,7 @@ export * from './diagnostics.js';
 export { checkModule, usedModuleOf, type CheckOptions as CheckModuleOptions, tyToString, boundPath, effectKind, effectClass, effectLabels, effectSignature, SOURCE_KINDS, SOURCE_ADAPTERS, childSpec, type ChildSpec, durationMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
 export { profileProblem, underBase, expandCredentials, scopeField, type ProviderProfile, type ProviderEntry } from './credentials.js';
 export { expandChannels, type ChannelExpansion, type ChannelPlan } from './channels.js';
+export { MICRO, parseAmount, formatAmount, priceTableProblem, reservationOf, costOf, type PriceTable, type PriceEntry } from './money.js';
 export { checkPolicies, policyProgram, type PolicyProgram, type PolicyMachine, type PType, type PolicyCheck } from './check/policy.js';
 export { parseManifest, loadProject, keyringsOf, ManifestError, RUN_SCHEMA, type Manifest, type RunConfig } from './manifest.js';
 export { signRecord, invocationSubject, verifyRecord, recordDigest, recordMessage, sameKeyrings, keyringDigest, keyringSubject, policySubject, revocationSubject, grantRequestSubject, memoryVerifySubject, forgetSubject, recordAnchor, type PolicySubjectParts, EMPTY_KEYRINGS, type SignedRecord, type RecordKind, type Keyrings, type KeyHolder } from './records.js';

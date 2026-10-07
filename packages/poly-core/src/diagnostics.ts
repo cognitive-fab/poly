@@ -190,6 +190,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6407: { name: 'TYPE_MODULE_CHANGED', stage: 'runtime', severity: 'error' },
   PL6201: { name: 'UNGATED_DECISION', stage: 'effects', severity: 'finding' },
   PL6202: { name: 'DECISION_WITHOUT_FAILURE', stage: 'types', severity: 'error' },
+  // PS18.3, S350 (M11): a route's price table that does not name the source its prices were read from and the date.
+  PL6843: { name: 'PRICE_UNSOURCED', stage: 'types', severity: 'error' },
   // M4 review C5, K10: a send of an action that completes one of the receiver's decisions.
   PL6204: { name: 'DECISION_COMPLETION_SENT', stage: 'types', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.
