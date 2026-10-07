@@ -35,6 +35,10 @@ export interface Proposal {
   taint?: { class: string; owners: string[] };
   /** PT25.1, PT10k: the item sets an intent carries: their count, class and greatest age. */
   items?: { count: number; class: string; ageMs: number; provenance: string };
+  /** PT25.1, PS18.2: a tier's call: its route, its tier and its reservation in micro-units. */
+  route?: { route: string; tier: string; reservation: number };
+  /** PT25.1, PS18.4: a tier's call under a budget: the budget, its scope, and the least it has left before this call. */
+  budget?: { budget: string; scope: string | null; remaining: number };
 }
 
 /**
@@ -102,6 +106,20 @@ export interface WorkerOptions {
   grantCheck?: (row: OutboxRow, decl: any) => { deny: string; reads?: Record<string, number> } | { credential: NonNullable<Proposal['credential']>; reads: Record<string, number> } | null;
   /** PT10k (S302, S307): the memory check, before the grant check: a final refusal, an escalation, or the proposal's fields. */
   memoryCheck?: (row: OutboxRow, decl: any, approved: boolean) => { deny: string } | { escalate: string; fields: Pick<Proposal, 'taint' | 'items'> } | { fields: Pick<Proposal, 'taint' | 'items'> } | null;
+  /**
+   * PS18.4, S353: the budget check of a tier's call, before the policy: a refusal (deny or escalate `budget`), final
+   * whatever a policy says, or the proposal's fields `route` and `budget` and the reservation to take with the allow;
+   * null for any other intent.
+   */
+  budgetCheck?: (row: OutboxRow, approved: boolean) => import('./routing.js').BudgetCheck | null;
+  /** PS18.4: takes the reservation in the allow's transaction; false, with nothing written, when it no longer fits. */
+  reserve?: (row: OutboxRow, plan: import('./routing.js').ReservationPlan[]) => Promise<boolean>;
+  /** PS18.4: in the transaction of an intent's terminal transition: its reservations settled (SettleOk) or released. */
+  onTerminal?: (row: OutboxRow, action: string) => Promise<void> | void;
+  /** PS18.2: a routed decision's intent, started, starts its route instead of a provider; true when it did. */
+  issueRoute?: (row: OutboxRow, decl: any) => Promise<boolean>;
+  /** PS18.2: after each pass, the routes that ended complete their decisions' intents (and after a crash, at the next). */
+  sweep?: () => Promise<void>;
   /** S180: the completion's data, marked when a Content in it names no body in the content store. */
   markContent?: (instanceId: string, action: string, data: Record<string, unknown>) => Record<string, unknown>;
   /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
@@ -216,6 +234,7 @@ export class EffectWorker {
       await this.transition(row, action);
       if (completion) await this.dispatchCompletion(row, completion.hook, completion.suffix, completion.data);
       await after();
+      await this.opts.onTerminal?.(row, action);
     });
   }
 
@@ -316,6 +335,8 @@ export class EffectWorker {
         await this.store.insertAudit({ at: now, instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule: 'PL2401', reason: e.message });
       }
     }
+    // PS18.2: a route that ended in this pass, or before a crash, completes its decision's intent.
+    try { await this.opts.sweep?.(); } catch (e) { errors.push(e); }
     // An unexpected error (a crash of the pass) is reported once the batch is done; its row recovers by its lease.
     if (errors.length) throw errors[0];
     return claimed.length;
@@ -390,11 +411,15 @@ export class EffectWorker {
           const mem = this.opts.memoryCheck?.(row, decl, d === 2 && this.lastEscalation(row) === 'stale-items') ?? null;
           if (mem && 'fields' in mem) Object.assign(proposal, mem.fields);
           // PS16.3, S199: the grant check comes next, then the mandate's; each refusal is final whatever a policy says.
+          // PS18.4, S353: a tier's call is read against its budget first; its refusal is final whatever a policy says.
+          const budget = this.opts.budgetCheck?.(row, d === 2) ?? null;
+          if (budget) { proposal.route = budget.route; if (budget.budget) proposal.budget = budget.budget; }
           const grant = this.opts.grantCheck?.(row, decl) ?? null;
           if (grant && 'credential' in grant) proposal.credential = grant.credential;
           let g: GateDecision;
           try {
             g = mem && 'deny' in mem ? { decision: 'deny', reason: mem.deny } : mem && 'escalate' in mem ? { decision: 'escalate', reason: String(mem.escalate) }
+              : budget && 'refuse' in budget ? (budget.refuse === 'escalate' ? { decision: 'escalate', reason: 'budget' } : { decision: 'deny', reason: 'budget' })
               : grant && 'deny' in grant ? { decision: 'deny', reason: grant.deny, ...(grant.reads ? { reads: grant.reads } : {}) }
               : this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot);
             // PS16.3, S147: the allow reads the grant as it reads a singleton, so a grant that steps makes it stale.
@@ -416,9 +441,16 @@ export class EffectWorker {
           const { action: gateAction, ...gateRecord } = (g.record ?? {}) as Record<string, unknown>;
           const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot), ...(g.reads ? { reads: g.reads } : {}), ...gateRecord, ...(gateAction ? { action: this.store.keep(gateAction), gateDecision: g.decision } : {}) };
           if (g.decision === 'allow') {
-            await this.store.txn(async () => { await this.transition(row, 'GateAllow'); this.verdict(row, { outcome: 'allowed', ...recorded }); });
-            this.opts.onAllowed?.(row, proposal);
-            continue;
+            // PS18.4: the reservation and the allow commit together; a budget another call took first in between
+            // refuses this one, as the check before the policy would have.
+            let reserved = true;
+            await this.store.txn(async () => {
+              if (budget && 'plan' in budget && !budget.held && budget.plan.length && !(await this.opts.reserve!(row, budget.plan))) { reserved = false; return; }
+              await this.transition(row, 'GateAllow');
+              this.verdict(row, { outcome: 'allowed', ...recorded });
+            });
+            if (reserved) { this.opts.onAllowed?.(row, proposal); continue; }
+            g = { decision: 'deny', reason: 'budget', ...(g.record ? { record: g.record } : {}) };
           }
           if (g.decision === 'deny') {
             const deny = { reason: g.reason, witnessDigest: g.witnessDigest ?? null };
@@ -452,6 +484,8 @@ export class EffectWorker {
             return;
           }
           await this.store.txn(() => this.transition(row, 'Start'));
+          // PS18.2: a routed decision's intent runs no provider; it starts its route, and waits for the route's end.
+          if (await this.opts.issueRoute?.(row, decl)) return;
           // S173: a work order is issued, not executed. The intent stays Running until the agent's report, or until
           // the order's deadline lapses and recovery counts the attempt, as a crash would.
           {
@@ -614,6 +648,29 @@ export class EffectWorker {
     }
     await this.store.txn(async () => { await this.transition(row, 'HandlerOk'); this.observed(row, n, 'ok'); });
     return (await this.settle(row, decl, n, rep.result ?? {}, now, m)) ? { status: 'settled' } : { status: n < m ? 'retrying' : 'failed' };
+  }
+
+  /**
+   * PS18.2: the end of a routed decision's route completes the decision's intent: an answer as the handler's result
+   * (with the gate's settle and the decision event the caller keeps for the completion), or the failure
+   * `route-exhausted`, final. Only an intent Running for its route is completed, once; false otherwise.
+   */
+  async completeRoute(intentId: string, end: { ok: true; result: unknown } | { ok: false; reason: string }): Promise<boolean> {
+    const now = this.now;
+    const raw = this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(intentId) as (OutboxRow & { claimed_until: number | null; status: string; payload: string }) | undefined;
+    if (!raw || raw.status !== 'inflight') return false;
+    const row = { ...raw, payload: JSON.parse(raw.payload) } as OutboxRow;
+    const st = await this.intentState(row);
+    if (st?.intent !== 'Running') return false;
+    (row as Fenced).fence = raw.claimed_until ?? undefined;
+    const decl = this.decl(row);
+    if (decl === null) return false;
+    const n = st.intent_attempt!;
+    const m = await this.boundOf(row);
+    if (!end.ok) { await this.permanent(row, decl, n, end.reason); return true; }
+    await this.store.txn(async () => { await this.transition(row, 'HandlerOk'); this.observed(row, n, 'ok'); });
+    await this.settle(row, decl, n, end.result, now, m);
+    return true;
   }
 
   /** S147: the allow this intent holds read a singleton that has moved on since. */

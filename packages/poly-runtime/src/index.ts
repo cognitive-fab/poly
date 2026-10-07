@@ -1,5 +1,6 @@
 export { EffectWorker, ALLOW_ALL, RuntimeFault, WORKER_DRIFTS, type Gate, type GateDecision, type Proposal, type EffectHandler, type WorkerDrift, type ReportOutcome, orderIdOf, parseOrderId } from './worker.js';
-export { calibrate, mapDigest, answerProbability, decisionHandler, type Provider, type ProviderAnswer, type ProviderConfig, type CalibrationMap, type DecisionRecord } from './provider.js';
+export { calibrate, mapDigest, answerProbability, decisionHandler, recordedProvider, type Provider, type ProviderAnswer, type ProviderConfig, type ProviderQuestion, type Recorded, type CalibrationMap, type DecisionRecord } from './provider.js';
+export { periodKey, type BudgetCheck, type ReservationPlan } from './routing.js';
 export { load, PolyRuntime, RUNTIME_FAULTS, IO_ADAPTERS, adapterPackagePin, RefusedDispatch, ApprovalRefused, OutcomeWithoutDecision, LoadError, APPROVALS_RUN, type LoadOptions, type Handler, type WorkOrder, type ApprovalRefusal, type HostAction, type DataOf } from './runtime.js';
 export { LedgerStore, openLedgerStore, type StepEvents } from './ledger-store.js';
 export { countersignHeads, countersignaturesOf, verifyCountersignatures, type CountersignAdapter, type Countersignature } from './journal.js';

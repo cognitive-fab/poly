@@ -1,0 +1,12 @@
+// PT25.1, PS18.2: a policy over a route's calls, in the route's own trust scope (the module desk.triage): only the
+// small tier is called, and a call on another tier is denied, so the route is exhausted after the small one.
+module tiers_policy
+
+policy tiers {
+  scope "desk.triage"
+  obligation small-only "Only the small tier is called." rule {
+    when effect.kind == "route.triage.call"
+    require effect.route.tier == "small" else deny
+    on unknown deny
+  }
+}

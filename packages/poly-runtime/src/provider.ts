@@ -19,6 +19,8 @@ export interface ProviderAnswer {
   cost?: { units: number; unit: string };
   /** PS17.6: the ids of the items the answer cites, for a decision with `cites`. */
   cites?: string[];
+  /** PS18.3, K15: a tier's provider reports the tokens it used, by class; the cost is computed from them. */
+  usage?: Record<string, number>;
 }
 
 /**
@@ -27,7 +29,10 @@ export interface ProviderAnswer {
  */
 export interface Materials { bodies: Record<string, string | null>; items: Record<string, { id: string; body: string | null }[]> }
 
-export type Provider = (question: { decision: string; payload: unknown; intent: string }, materials?: Materials) => Promise<ProviderAnswer> | ProviderAnswer;
+/** The question a provider is asked; a route's tier is also given its name and its token limit (PS18.3, K15). */
+export interface ProviderQuestion { decision: string; payload: unknown; intent: string; tier?: string; limits?: { maxTokens: number } }
+
+export type Provider = (question: ProviderQuestion, materials?: Materials) => Promise<ProviderAnswer> | ProviderAnswer;
 
 /** PS17.2: how the runtime gives a decision its materials, and keeps a Content answer as a body with the decision's taint. */
 export interface DecisionMemory {
@@ -36,6 +41,27 @@ export interface DecisionMemory {
   answer(body: string, taint: unknown): Promise<string>;
   /** PS17.6: the item set the answer cites, from the ids the provider gave, or a refusal, uncited. */
   cite(given: unknown, ids: unknown, run: string, intent: string): Promise<{ ref: string; count: number }>;
+}
+
+/**
+ * S356: the one provider poly ships. It replays recorded answers and usage and calls no model: each call is answered by
+ * the first recorded entry whose `match` holds every field of the question it names (a tier, a decision, or the
+ * question's payload), or fails, as a provider with no answer does. An entry with `fail` fails with that message.
+ * `asked` lists the questions, for a test to read.
+ */
+export interface Recorded { match?: Partial<ProviderQuestion>; answer?: unknown; distribution?: [unknown, number][]; usage?: Record<string, number>; reported?: string | null; fail?: string }
+export function recordedProvider(calls: Recorded[]): Provider & { asked: ProviderQuestion[] } {
+  const asked: ProviderQuestion[] = [];
+  const same = (a: unknown, b: unknown) => digest(a ?? null) === digest(b ?? null);
+  const fn = ((q: ProviderQuestion) => {
+    asked.push(q);
+    const hit = calls.find((c) => Object.entries(c.match ?? {}).every(([k, v]) => same((q as unknown as Record<string, unknown>)[k], v)));
+    if (!hit) throw new Error(`no recorded answer for this question (${q.decision}${q.tier ? `, tier ${q.tier}` : ''})`);
+    if (hit.fail) throw new Error(hit.fail);
+    return { answer: hit.answer, distribution: hit.distribution ?? [[hit.answer, 1]], usage: hit.usage ?? {}, reported: hit.reported ?? null, latencyMs: 0 };
+  }) as Provider & { asked: ProviderQuestion[] };
+  fn.asked = asked;
+  return fn;
 }
 
 /** PD1.6: a monotone map from raw to calibrated confidence, in thousandths, fitted for one model of one decision. */

@@ -40,6 +40,38 @@ export interface VerifiedBuild {
   production: boolean;
   /** PT10i, PS17: each source's and each module's flow descriptor, from the verified bytes. */
   memory: { sources: SourceDescriptor[]; flows: FlowDescriptor[] };
+  /** PT10r: each certified route and budget, from the verified bytes of its descriptor, read once here. */
+  routes: VerifiedRoute[];
+  budgets: VerifiedBudget[];
+}
+
+/** PS18.1 to PS18.3, PT10r: what the runtime needs of a route: its machine, its call's kind, its decision and its tiers. */
+export interface VerifiedRoute {
+  name: string;
+  module: string;
+  machine: string;
+  effectKind: string;
+  decision: { machine: string; name: string };
+  tiers: VerifiedTier[];
+  escalate: ({ on: 'conf' | 'margin'; below: number } | { on: 'failed' })[];
+  budget: string | null;
+}
+export interface VerifiedTier {
+  name: string;
+  provider: string;
+  model: string;
+  maxTokens: number;
+  reservation: number;
+  prices: { path: string; digest: string; currency: string; perMillionTokens: Record<string, number> };
+  calibration: { path: string; digest: string; decision: string; version: number; fittedFor: string; points: [number, number][]; mapDigest: string } | null;
+}
+/** PS18.4, PT10r: what the runtime needs of a budget: its machine and its caps, each with its address. */
+export interface VerifiedBudget {
+  name: string;
+  module: string;
+  machine: string;
+  caps: { currency: string; amount: number; run: boolean; period: 'hour' | 'day' | 'month' | null; scope: boolean }[];
+  onExhausted: 'deny' | 'escalate';
 }
 
 /** PS16.1, PT10e: what the runtime needs of a credential: its Grant machine, provider, scopes and whether it has a holder. */
@@ -281,7 +313,24 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (d.module !== f.module) throw new LoadError(`refused at load: the certificate's flow of ${f.module} has the descriptor of ${String(d.module)} (PT10i)`);
     memoryFlows.push(d);
   }
-  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true, anchorId: anchor?.id ?? null, memory: { sources: memorySources, flows: memoryFlows } };
+  // PT10r: each route's and budget's descriptor is the certificate entry's own, by name, and its machine one the
+  // certificate names; the runtime keeps what was read here and never reads the file again.
+  const routes: VerifiedRoute[] = [];
+  for (const c of certificate.poly?.routes ?? []) {
+    const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as VerifiedRoute & { route?: unknown };
+    if (d.route !== c.name) throw new LoadError(`refused at load: the certificate's route ${c.name} has the descriptor of route ${String(d.route)} (PT10r)`);
+    for (const id of [d.machine, d.decision?.machine]) if (!machines.some((x) => x.id === id)) throw new LoadError(`refused at load: route ${c.name} names ${String(id)}, which the certificate does not name (PS18.2)`);
+    if (!Array.isArray(d.tiers) || !d.tiers.length) throw new LoadError(`refused at load: the descriptor of route ${c.name} has no tier (PT10r)`);
+    routes.push({ name: c.name, module: d.module, machine: d.machine, effectKind: d.effectKind, decision: d.decision, tiers: d.tiers, escalate: d.escalate, budget: d.budget ?? null });
+  }
+  const budgets: VerifiedBudget[] = [];
+  for (const c of certificate.poly?.budgets ?? []) {
+    const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as VerifiedBudget & { budget?: unknown };
+    if (d.budget !== c.name) throw new LoadError(`refused at load: the certificate's budget ${c.name} has the descriptor of budget ${String(d.budget)} (PT10r)`);
+    if (!machines.some((x) => x.id === d.machine)) throw new LoadError(`refused at load: budget ${c.name} names ${String(d.machine)}, which the certificate does not name (PS18.4)`);
+    budgets.push({ name: c.name, module: d.module, machine: d.machine, caps: d.caps, onExhausted: d.onExhausted });
+  }
+  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true, anchorId: anchor?.id ?? null, memory: { sources: memorySources, flows: memoryFlows }, routes, budgets };
 }
 
 /**

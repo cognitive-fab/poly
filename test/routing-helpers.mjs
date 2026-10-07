@@ -4,7 +4,7 @@ import { cpSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { admit } from '@poly/check';
 import { ROOT } from './helpers.mjs';
-import { makeKey, project } from './runtime-helpers.mjs';
+import { makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
 export const FIX = join(ROOT, 'test', 'fixtures', 'm11');
 export const DESK = readFileSync(join(FIX, 'desk.poly'), 'utf8');
@@ -17,6 +17,8 @@ export async function admittedDesk(name, src = DESK, files = {}) {
   cpSync(join(FIX, 'prices'), join(dir, 'src', 'prices'), { recursive: true });
   cpSync(join(FIX, 'maps'), join(dir, 'src', 'maps'), { recursive: true });
   for (const [f, body] of Object.entries(files)) writeFileSync(join(dir, 'src', f), typeof body === 'string' ? body : JSON.stringify(body, null, 2));
+  // S194: a policy is admitted only with a person's signature.
+  if (Object.keys(files).some((f) => f.endsWith('.policy.poly'))) await signPolicies(dir);
   const r = await admit(dir);
   return { dir, key, build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey }, cert: r.certificate };
 }

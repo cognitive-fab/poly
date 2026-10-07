@@ -28,8 +28,9 @@ import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrif
 import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
-import { decisionHandler, mapDigest, type DecisionMemory, type DecisionRecord, type ProviderConfig } from './provider.js';
+import { decisionHandler, mapDigest, type DecisionMemory, type DecisionRecord, type Provider, type ProviderConfig } from './provider.js';
 import { Memory, BOTTOM, type Taint } from './memory.js';
+import { RoutingHost } from './routing.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, evidenceOf, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
 export { LoadError };
@@ -180,6 +181,8 @@ export class PolyRuntime {
   readonly #adapters = new Map<string, ChannelAdapter>();
   /** PT10f: each credential's certified vault. */
   readonly #vaults = new Map<string, VaultAdapter>();
+  /** PS18.2, PS18.4: the routes' and budgets' instances, reservations and tier providers. */
+  readonly #routing: RoutingHost;
   private readonly channelSenders = new Map<string, { kind: string; sender: string }>();
   /** Review A-F2: approvals entries refused or applied but not movable, journaled once and passed over since. */
   private readonly unmovable = new Set<string>();
@@ -237,6 +240,9 @@ export class PolyRuntime {
       builtins[kind] = (payload, _caps, ctx) => this.memory.remember(spec, (payload ?? {}) as Record<string, unknown>, ctx.instanceId, ctx.idempotencyKey, this.now());
     }
     this.memory.body = (d) => this.contentBody(d);
+    // PS18.2: a route's call runs its tier's provider, through the runtime's own handler.
+    this.#routing = new RoutingHost(kernel, store, verified.routes, verified.budgets, () => this.now(), this.records);
+    for (const r of verified.routes) builtins[r.effectKind] = this.#routing.handler(r);
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
@@ -247,7 +253,8 @@ export class PolyRuntime {
       },
       // PD2.2, K10: the decision event is written with the completion step, in its transaction.
       beforeCompletion: (row, decl) => {
-        const record = decl?.decision ? this.records.get(row.intent_id) : undefined;
+        // PS18.6: a tier's call writes its own decision event, with its usage and cost, on the route's instance.
+        const record = decl?.decision || this.#routing.tierOf(row) ? this.records.get(row.intent_id) : undefined;
         if (record) this.store.pending.set(`${row.instance_id}\u0000${row.intent_id}:done`, { before: [{ kind: 'decision', body: record }] });
       },
       capabilities: (row, decl) => capabilitiesFor(decl ?? {}, opts.transports ?? {}, async (reason) => {
@@ -269,6 +276,15 @@ export class PolyRuntime {
         const ch = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
         return this.memory.check({ instance: row.instance_id, machineId, kind: row.kind, payload: (row.payload ?? {}) as Record<string, unknown>, decl, step: { action: j?.action ?? null, claims: claims && typeof claims === 'object' ? claims : null }, channelAudience: ch ? verified.channels.find((c) => c.channel === ch[1])?.audience ?? null : null, approved, now: this.now(), keyed: (s) => store.recipientDigest(`principal:${s}`) });
       },
+      // PS18.4, S353: a tier's call is read against its budget before any policy, and reserved with its allow.
+      budgetCheck: (row, approved) => this.#routing.budgetCheck(row, approved),
+      reserve: (row, plan) => this.#routing.reserve(row, plan),
+      onTerminal: async (row, action) => {
+        const record = action === 'SettleOk' ? (this.records.get(row.intent_id) as { cost?: { units?: number } | null } | undefined) : undefined;
+        await this.#routing.settle(row, typeof record?.cost?.units === 'number' ? record.cost.units : null);
+      },
+      issueRoute: (row, decl) => this.#issueRoute(row, decl),
+      sweep: () => this.#sweepRoutes(),
       channelOf: (row) => {
         const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
         const d = m && verified.channels.find((c) => c.channel === m[1]);
@@ -977,8 +993,68 @@ export class PolyRuntime {
     return ns;
   }
 
+  /**
+   * PS18.2: a routed decision's intent, started, starts its route and waits for its end: the claim is held until the
+   * route ends, which the sweep sees, so no lease runs out on a route whose tiers wait at the gate.
+   */
+  async #issueRoute(row: { intent_id: string; instance_id: string; kind: string }, decl: { decision?: { route?: string } } | null): Promise<boolean> {
+    if (!decl?.decision?.route) return false;
+    const machine = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(row.instance_id)?.machine_id as string;
+    const route = this.#routing.routeOfDecision(machine, row.kind);
+    if (!route) throw new Error(`${row.kind} of ${machine} names route ${decl.decision.route}, which the certificate does not name (PS18.2)`);
+    await this.store.txn(async () => {
+      const instance = await this.#routing.issue(row as never, route);
+      this.store.appendEvent(row.instance_id, 'observation', { stage: 'route', intent: row.intent_id, outcome: 'issued', route: route.name, instance }, this.now());
+      this.store.db.prepare(`UPDATE pr_outbox SET claimed_until = ? WHERE intent_id = ? AND status = 'inflight'`).run(Number.MAX_SAFE_INTEGER, row.intent_id);
+    });
+    return true;
+  }
+
+  /**
+   * PS18.2: each route that ended completes its decision's intent: Answered with the answering tier's answer, whose
+   * decision event the decision's own repeats and links; Exhausted with route-exhausted. Run after every pass of the
+   * worker, so a route that ended before a crash completes at the next. Passes run at once share one sweep at a
+   * time, so no route's end is taken twice.
+   */
+  #sweeping: Promise<void> = Promise.resolve();
+  #sweepRoutes(): Promise<void> {
+    const next = this.#sweeping.then(() => this.#sweepOnce());
+    this.#sweeping = next.catch(() => undefined);
+    return next;
+  }
+
+  async #sweepOnce(): Promise<void> {
+    const running = this.store.db.prepare("SELECT intent, instance FROM poly_route WHERE status = 'running'").all() as { intent: string; instance: string }[];
+    for (const r of running) {
+      const end = ((await this.store.getInstance(r.instance))?.state as { r?: string } | undefined)?.r;
+      if (end !== 'Answered' && end !== 'Exhausted') continue;
+      if (end === 'Answered') {
+        const e = this.store.db.prepare("SELECT event, hash FROM poly_ledger WHERE run = ? AND kind = 'decision' ORDER BY seq DESC LIMIT 1").get(r.instance) as { event: string; hash: string } | undefined;
+        if (!e) throw new Error(`route ${r.instance} is Answered with no decision event for its answer (PS18.6)`);
+        const body = JSON.parse(e.event).body as Record<string, unknown>;
+        this.records.set(r.intent, { ...body, intent: r.intent, via: e.hash } as unknown as DecisionRecord);
+        await this.worker.completeRoute(r.intent, { ok: true, result: { answer: body.answer, conf: body.conf, margin: body.margin } });
+      } else {
+        await this.worker.completeRoute(r.intent, { ok: false, reason: 'route-exhausted' });
+      }
+      await this.store.txn(() => { this.store.db.prepare("UPDATE poly_route SET status = 'done' WHERE intent = ?").run(r.intent); });
+    }
+  }
+
+  /**
+   * PS18.2, S356: the provider of every tier that names `provider`: host code, registered by the name the source gives,
+   * and recorded in tests (recordedProvider). The tier's model, prices and map are the certificate's, never the host's.
+   */
+  provideTier(provider: string, fn: Provider): void {
+    if (!this.verified.routes.some((r) => r.tiers.some((t) => t.provider === provider))) throw new Error(`no tier of a certified route names provider ${provider} (PS18.2)`);
+    if (typeof fn !== 'function') throw new Error(`the provider of ${provider} is a function (S356)`);
+    this.#routing.providers.set(provider, fn);
+  }
+
   /** PT15: a handler for an effect kind. It runs only from the outbox worker, after the gate allows (PT9.2). */
   handle(kind: string, handler: Handler): void {
+    // PS18.2: a route's call runs its tier's provider, through the runtime's own handler.
+    if (this.verified.routes.some((r) => r.effectKind === kind)) throw new Error(`${kind} is a route's call: register its tiers' providers with rt.provideTier, never rt.handle (PS18.2)`);
     // S173: a workflow's mapped kind is a work order; the agent's report is its result, and no handler runs it.
     for (const [machine, kinds] of this.orderTools) if (kinds.has(kind)) throw new Error(`${kind} is a work order of workflow ${kinds.get(kind)!.workflow} on ${machine}: the agent's report settles it through rt.reportWorkOrder, and no handler runs it (S173)`);
     // Review B2: a decision's handler is the provider host's, which keeps the record its completion commits with.
@@ -1002,6 +1078,12 @@ export class PolyRuntime {
    * and an action with claims gets them from the verifier, with the creation's credentials (PD5.1.4).
    */
   async create(machineId: string, opts: { id?: string; creation?: { action: string; data?: unknown }; credentials?: unknown } = {}): Promise<{ id: string; state: Record<string, unknown> }> {
+    // PS18.4: a route's and a budget's instances are the runtime's own, created only by it.
+    if (this.#routing.internal(machineId)) {
+      const reason = `${machineId}: a route's or a budget's instance is created only by the runtime (PS18.2, PS18.4)`;
+      await this.store.insertAudit({ at: this.now(), instanceId: opts.id ?? machineId, action: '$create', actionId: '$create', rule: 'PS18.4', reason });
+      throw new RefusedDispatch(reason, 'PS18.4');
+    }
     let creation = opts.creation;
     if (creation) {
       const id = opts.id ?? '';
@@ -1057,6 +1139,13 @@ export class PolyRuntime {
       const reason = `${action} on ${instanceId}: an OutboxIntent instance is internal to the runtime, and only its worker takes its transitions (S119)`;
       await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'S119', reason });
       throw new RefusedDispatch(reason, 'S119');
+    }
+    // PS18.4: a route's and a budget's instances take steps only from the runtime: its reservations, settlements,
+    // releases and its worker's completions.
+    if (inst && this.#routing.internal(inst.machine_id)) {
+      const reason = `${action} on ${instanceId}: a route's or a budget's instance takes steps only from the runtime, never from an outside dispatch (PS18.4)`;
+      await this.store.insertAudit({ at: this.now(), instanceId, action, actionId, rule: 'PS18.4', reason });
+      throw new RefusedDispatch(reason, 'PS18.4');
     }
     // PS16.4, review B2 (M9): a grant's transitions are the runtime's, from their sources; the host keeps TokenExpiring.
     if (inst && GRANT_ONLY.has(action) && !opts[GRANT_STEP] && this.verified.credentials.some((c) => c.machine === inst.machine_id)) {
@@ -1350,6 +1439,8 @@ export class PolyRuntime {
     const kind = `decision.${decision}`;
     const entry = this.verified.machines.map((m) => m.manifest?.effects?.[kind]).find(Boolean);
     if (!entry) throw new Error(`no decision ${decision} in the certified build`);
+    // PS18.2: a routed decision's providers are its tiers', each registered by name.
+    if (entry.decision?.route) throw new Error(`decision ${decision} is routed through ${entry.decision.route}: register its tiers' providers with rt.provideTier (PS18.2)`);
     if (config.calibration && config.calibration.decision !== decision) throw new Error(`the calibration map is for ${config.calibration.decision}, not ${decision}`);
     // Review B10, PD1.6: the decision event names the map by its digest, so the digest must be the map applied, and
     // the map must be the non-decreasing step function calibrate reads.

@@ -49,6 +49,9 @@ export interface PolicyProgram {
   audience: string[];
   /** PS1.4b: the largest limit among the program's retrievals, the top of `effect.items.count`. */
   itemsLimit: number;
+  /** PS18.2, PS18.4: the program's routes with their tiers, and its budgets, which a call's `route` and `budget` fields name. */
+  routes: { name: string; tiers: string[] }[];
+  budgets: string[];
 }
 
 const CLASSES = ['none', 'reversible', 'compensable', 'irreversible'];
@@ -84,6 +87,14 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
       if (!(f.name in claims) && !claimsConflicts.has(f.name)) { claims[f.name] = t; claimsOwner.set(f.name, d.name); continue; }
       if (claims[f.name] && JSON.stringify(claims[f.name]) !== JSON.stringify(t)) { claimsConflicts.set(f.name, [claimsOwner.get(f.name)!, d.name]); delete claims[f.name]; }
       else if (claimsConflicts.has(f.name)) claimsConflicts.get(f.name)!.push(d.name);
+    }
+    // PS18.2: each route r is the machine m.r.Route, whose one effect, a tier's call, has the kind route.r.call, class
+    // none and the labels of the decision that names r; a policy of the scope m.r reads it.
+    for (const d of m.decls) {
+      if (d.kind !== 'Route') continue;
+      const decision = m.decls.flatMap((x) => (x.kind === 'Machine' ? x.items : [])).find((i): i is A.Decision => i.kind === 'Decision' && i.items.some((y) => y.kind === 'DecRoute' && y.route === d.name));
+      const labels = decision?.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])) ?? ['egress:external'];
+      machines.set(`${m.name}.${d.name}.Route`, { id: `${m.name}.${d.name}.Route`, service: false, fields: new Map(), effects: [{ kind: `route.${d.name}.call`, class: 'none', labels }] });
     }
     for (const d of m.decls) {
       if (d.kind !== 'Machine') continue;
@@ -125,7 +136,9 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
   // effect or decision times the largest limit.
   for (const x of modules) for (const d of x.decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl' || it.kind === 'Decision') itemsParams = Math.max(itemsParams, it.params.filter((q) => q.type.kind === 'TName' && q.type.name === 'Items').length);
   itemsLimit *= itemsParams;
-  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, credentials, audience: [...new Set(audience)], itemsLimit, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
+  const routes = modules.flatMap((x) => x.decls.flatMap((d) => (d.kind === 'Route' ? [{ name: d.name, tiers: d.tiers.map((t) => t.name) }] : [])));
+  const budgets = [...new Set(modules.flatMap((x) => x.decls.flatMap((d) => (d.kind === 'Budget' ? [d.name] : []))))].sort();
+  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, credentials, audience: [...new Set(audience)], itemsLimit, routes, budgets, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
 }
 
 const DECISION_FIELDS = (result: PType): Record<string, PType> => ({
@@ -196,7 +209,11 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             // PT10k: the taint of the Content an intent carries, and the item sets it carries.
             if (e.prop === 'taint') return { k: 'record', fields: { class: { k: 'str', values: program.audience } } };
             if (e.prop === 'items') return { k: 'record', fields: { count: { k: 'int', lo: 0, hi: program.itemsLimit }, class: { k: 'str', values: program.audience }, age: { k: 'int', lo: 0, hi: 1_000_000_000_000 }, provenance: { k: 'str', values: ['observed', 'derived', 'verified'] } } };
-            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel, credential, taint, items)`);
+            // PT25.1, PS18.2, PS18.4: a tier's call, its route and tier, and the budget it reserves on. The reservation
+            // and the remainder are amounts, which no policy reads in M11: they are in the verdict, not compared.
+            if (e.prop === 'route') return { k: 'record', fields: { route: { k: 'str', values: program.routes.map((r) => r.name) }, tier: { k: 'str', values: [...new Set(program.routes.flatMap((r) => r.tiers))] } } };
+            if (e.prop === 'budget') return { k: 'record', fields: { budget: { k: 'str', values: program.budgets } } };
+            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel, credential, taint, items, route, budget)`);
             return null;
           }
           if (e.object.kind === 'Name' && e.object.name === 'send' && !vars.has('send')) {

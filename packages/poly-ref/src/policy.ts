@@ -17,7 +17,7 @@ export type V = string | number | boolean | null | string[];
 export type Decision = 'allow' | 'deny' | 'escalate';
 
 export interface PolicyFacts {
-  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: number }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
+  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: number; route?: { route: string; tier: string }; budget?: { budget: string } }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
   decisions: Map<string, { answers: (string | number | boolean)[] | null }>;
   /** PT9.9: each send a machine's handlers make to an address of a known machine. */
   sends: { from: string; to: string; action: string }[];
@@ -31,6 +31,8 @@ export interface PolicyFacts {
 
 /** The program facts a policy reads, from the modules' ASTs. */
 export function policyFacts(modules: Module[]): PolicyFacts {
+  // PS18.2, PS18.4: each route's tiers and budget; a call of route r is the effect route.r.call of m.r.Route.
+  const routes = new Map(modules.flatMap((m) => m.decls.flatMap((d) => (d.kind === 'Route' ? [[`route.${d.name}.call` as string, { route: d.name, tiers: d.tiers.map((t) => t.name), budget: d.budget }] as const] : []))));
   const machines: PolicyFacts['machines'] = new Map();
   const decisions: PolicyFacts['decisions'] = new Map();
   const sends: PolicyFacts['sends'] = [];
@@ -46,6 +48,14 @@ export function policyFacts(modules: Module[]): PolicyFacts {
       if (t.kind === 'TName' && enums.has(t.name)) return enums.get(t.name)!;
       return null;
     };
+    // PS18.2, read here from the declaration: a route r is the machine m.r.Route, whose call has the kind route.r.call,
+    // class none and its decision's labels, proposed once per tier with its route and its budget (PS18.4).
+    for (const d of m.decls) {
+      if (d.kind !== 'Route') continue;
+      let labels: string[] = ['egress:external'];
+      for (const x of m.decls) if (x.kind === 'Machine') for (const i of x.items) if (i.kind === 'Decision' && i.items.some((y) => y.kind === 'DecRoute' && y.route === d.name)) labels = i.items.flatMap((y) => (y.kind === 'EffLabels' ? y.labels : []));
+      machines.set(`${m.name}.${d.name}.Route`, { service: false, fields: new Map(), effects: d.tiers.map((t) => ({ kind: `route.${d.name}.call`, class: 'none', labels, route: { route: d.name, tier: t.name }, ...(d.budget ? { budget: { budget: d.budget } } : {}) })), claims: [] });
+    }
     for (const d of m.decls) {
       if (d.kind !== 'Machine') continue;
       const fields = new Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>();
@@ -58,7 +68,7 @@ export function policyFacts(modules: Module[]): PolicyFacts {
         return vs.every((v) => v !== undefined) ? (vs as (string | number | boolean)[]) : null;
       };
       for (const f of d.fields) fields.set(f.name, { values: values(f.type) ?? checked(f as never), conf: f.type.kind === 'TConf' });
-      const effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: number }[] = [];
+      const effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: number; route?: { route: string; tier: string }; budget?: { budget: string } }[] = [];
       const isContent = (x: TypeExpr) => x.kind === 'TName' && x.name === 'Content';
       const isItems = (x: TypeExpr) => x.kind === 'TName' && x.name === 'Items';
       for (const it of d.items) {
@@ -74,7 +84,11 @@ export function policyFacts(modules: Module[]): PolicyFacts {
           const lowest = (m.decls.find((x) => x.kind === 'Audience') as { classes: string[] } | undefined)?.classes[0];
           const memKind = r ? `source.${r.source}.retrieve` : w ? `source.${w.source}.remember` : null;
           const memLabels = w ? ['write:store'] : r ? [src && (src.owned || src.audience !== lowest) ? 'read:private' : 'read:store'] : null;
-          effects.push({ kind: memKind ?? kind?.value ?? it.name, class: cls?.value ?? 'none', labels: memLabels ?? it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}), ...(!memKind && it.params.some((x) => isContent(x.type)) ? { content: true } : {}), ...(!memKind && it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}) });
+          const effect = { kind: memKind ?? kind?.value ?? it.name, class: cls?.value ?? 'none', labels: memLabels ?? it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}), ...(!memKind && it.params.some((x) => isContent(x.type)) ? { content: true } : {}), ...(!memKind && it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}) };
+          // PS18.4: the budget check precedes the policy, so a call reaches it once per tier, with its route and budget.
+          const routed = routes.get(effect.kind);
+          if (routed) for (const tier of routed.tiers) effects.push({ ...effect, route: { route: routed.route, tier }, ...(routed.budget ? { budget: { budget: routed.budget } } : {}) });
+          else effects.push(effect);
         }
         if (it.kind === 'Decision') {
           effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}), ...(it.params.some((x) => isContent(x.type) || isItems(x.type)) ? { content: true } : {}) });
@@ -332,7 +346,7 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
     const provs = want('provenance') ? ['observed', 'derived', 'verified'] : ['observed'];
     return [null, ...product([counts, cls, ages, provs] as unknown[][]).map(([count, c, age, provenance]) => ({ count, class: c, age, provenance } as Record<string, V>))];
   };
-  for (const [machine, m] of facts.machines) for (const eff of m.effects) for (const taint of taintChoices(eff)) for (const items of itemsChoices(eff)) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine, ...(eff.uses ? { credential: { name: eff.uses, grantState: 'Granted' } } : {}), ...(taint ? { taint } : {}), ...(items ? { items } : {}) }, effects: eff.labels, machines, decisions }) });
+  for (const [machine, m] of facts.machines) for (const eff of m.effects) for (const taint of taintChoices(eff)) for (const items of itemsChoices(eff)) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine, ...(eff.uses ? { credential: { name: eff.uses, grantState: 'Granted' } } : {}), ...(taint ? { taint } : {}), ...(items ? { items } : {}), ...(eff.route ? { route: eff.route } : {}), ...(eff.budget ? { budget: eff.budget } : {}) }, effects: eff.labels, machines, decisions }) });
   for (const s of facts.sends) proposals.push({ machine: s.from, row: (machines, decisions) => ({ proposal: 'send', send: { to: s.to, action: s.action, scope: s.to.slice(0, s.to.lastIndexOf('.')) }, machines, decisions }) });
   for (const { machine, row: build } of proposals) {
     const m = facts.machines.get(machine)!;
