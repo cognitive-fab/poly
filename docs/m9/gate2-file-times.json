@@ -1,0 +1,976 @@
+{
+ "gate": "M9 closing after S210, from a clean build",
+ "commit": "4fa31cf",
+ "started": "2026-10-07T09:11:38-07:00",
+ "ended": "2026-10-07T10:00:41-07:00",
+ "suite": {
+  "totalMs": 2698478,
+  "files": [
+   {
+    "file": "test/channels-whatsapp.test.mjs",
+    "ms": 1899894,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/std-channels.test.mjs",
+    "ms": 1842624,
+    "tests": 62,
+    "failed": 0
+   },
+   {
+    "file": "test/channels-adapter-pin.test.mjs",
+    "ms": 1756972,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/channels-events.test.mjs",
+    "ms": 1726952,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8b-a.test.mjs",
+    "ms": 1435489,
+    "tests": 11,
+    "failed": 0
+   },
+   {
+    "file": "test/standing.test.mjs",
+    "ms": 1262520,
+    "tests": 359,
+    "failed": 0
+   },
+   {
+    "file": "test/channels-escalation.test.mjs",
+    "ms": 1247553,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/m4f-recheck.test.mjs",
+    "ms": 1025323,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-freeze-eol.test.mjs",
+    "ms": 976903,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-runner.test.mjs",
+    "ms": 947157,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8b-d.test.mjs",
+    "ms": 909709,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/outbox-intent.test.mjs",
+    "ms": 835532,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-channel.test.mjs",
+    "ms": 796284,
+    "tests": 11,
+    "failed": 0
+   },
+   {
+    "file": "test/channels-ingress.test.mjs",
+    "ms": 775206,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/certificate.test.mjs",
+    "ms": 612568,
+    "tests": 13,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-tasks.test.mjs",
+    "ms": 587636,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/s206-s207.test.mjs",
+    "ms": 583459,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/credentials-canary.test.mjs",
+    "ms": 432469,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/credentials-mandate.test.mjs",
+    "ms": 422518,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/witness.test.mjs",
+    "ms": 360452,
+    "tests": 11,
+    "failed": 0
+   },
+   {
+    "file": "test/credentials-scope.test.mjs",
+    "ms": 358621,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/delivery.test.mjs",
+    "ms": 309844,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m2.test.mjs",
+    "ms": 288395,
+    "tests": 33,
+    "failed": 0
+   },
+   {
+    "file": "test/check-memory.test.mjs",
+    "ms": 283384,
+    "tests": 1,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-o1r.test.mjs",
+    "ms": 264263,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/modes.test.mjs",
+    "ms": 233269,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-manual.test.mjs",
+    "ms": 195017,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-cleanup.test.mjs",
+    "ms": 183599,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/journal-cli.test.mjs",
+    "ms": 173199,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/tv.test.mjs",
+    "ms": 166961,
+    "tests": 99,
+    "failed": 0
+   },
+   {
+    "file": "test/fixes.test.mjs",
+    "ms": 163045,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/cli.test.mjs",
+    "ms": 155284,
+    "tests": 9,
+    "failed": 0
+   },
+   {
+    "file": "test/workflow-runtime.test.mjs",
+    "ms": 137727,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/gate-outage.test.mjs",
+    "ms": 135227,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/config-timers.test.mjs",
+    "ms": 135131,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/config-polyrun.test.mjs",
+    "ms": 130111,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m6-c.test.mjs",
+    "ms": 126359,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/vendor.test.mjs",
+    "ms": 123153,
+    "tests": 18,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-signature.test.mjs",
+    "ms": 117434,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/run-config.test.mjs",
+    "ms": 114591,
+    "tests": 13,
+    "failed": 0
+   },
+   {
+    "file": "test/embed.test.mjs",
+    "ms": 112816,
+    "tests": 9,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-ranges.test.mjs",
+    "ms": 112692,
+    "tests": 174,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-lineage.test.mjs",
+    "ms": 112403,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-replay.test.mjs",
+    "ms": 110116,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-decisions.test.mjs",
+    "ms": 103465,
+    "tests": 13,
+    "failed": 0
+   },
+   {
+    "file": "test/session-replay.test.mjs",
+    "ms": 97997,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/revocation.test.mjs",
+    "ms": 89569,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/pd6.test.mjs",
+    "ms": 88007,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-gate.test.mjs",
+    "ms": 87465,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-front.test.mjs",
+    "ms": 79140,
+    "tests": 24,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-consistency.test.mjs",
+    "ms": 77833,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/witness-certificate.test.mjs",
+    "ms": 74173,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/decisions.test.mjs",
+    "ms": 68469,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/field-studies.test.mjs",
+    "ms": 66743,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/detached.test.mjs",
+    "ms": 63879,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/poly-new.test.mjs",
+    "ms": 60636,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8b-b.test.mjs",
+    "ms": 57886,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-isolation.test.mjs",
+    "ms": 57571,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/gate-bench.test.mjs",
+    "ms": 56819,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-cleanup-mutants.test.mjs",
+    "ms": 54291,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/agent-lsp.test.mjs",
+    "ms": 53543,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m9.test.mjs",
+    "ms": 52341,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/person-keys.test.mjs",
+    "ms": 47945,
+    "tests": 9,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-freeze.test.mjs",
+    "ms": 47604,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/liveness.test.mjs",
+    "ms": 45448,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m6-b.test.mjs",
+    "ms": 41591,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/workflow-ac5.test.mjs",
+    "ms": 41395,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-score-timeout.test.mjs",
+    "ms": 41288,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/lint.test.mjs",
+    "ms": 41281,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/grants.test.mjs",
+    "ms": 38316,
+    "tests": 11,
+    "failed": 0
+   },
+   {
+    "file": "test/package-closure.test.mjs",
+    "ms": 37594,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/manifest.test.mjs",
+    "ms": 36223,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/provenance-pd5.test.mjs",
+    "ms": 35945,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8a-a.test.mjs",
+    "ms": 32337,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m6-d.test.mjs",
+    "ms": 32144,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-claims.test.mjs",
+    "ms": 31929,
+    "tests": 1,
+    "failed": 0
+   },
+   {
+    "file": "test/channels-adapters.test.mjs",
+    "ms": 30704,
+    "tests": 30,
+    "failed": 0
+   },
+   {
+    "file": "test/oms.test.mjs",
+    "ms": 29949,
+    "tests": 9,
+    "failed": 0
+   },
+   {
+    "file": "test/adapters.test.mjs",
+    "ms": 27309,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-environment.test.mjs",
+    "ms": 25726,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/s210.test.mjs",
+    "ms": 24543,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/erasure.test.mjs",
+    "ms": 22669,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/lineage.test.mjs",
+    "ms": 19771,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/cross-scope.test.mjs",
+    "ms": 18776,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/claims-runtime.test.mjs",
+    "ms": 17703,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m1.test.mjs",
+    "ms": 16654,
+    "tests": 32,
+    "failed": 0
+   },
+   {
+    "file": "test/keyrings.test.mjs",
+    "ms": 15653,
+    "tests": 11,
+    "failed": 0
+   },
+   {
+    "file": "test/effects.test.mjs",
+    "ms": 14791,
+    "tests": 18,
+    "failed": 0
+   },
+   {
+    "file": "test/enums-across.test.mjs",
+    "ms": 14701,
+    "tests": 9,
+    "failed": 0
+   },
+   {
+    "file": "test/vault.test.mjs",
+    "ms": 14294,
+    "tests": 14,
+    "failed": 0
+   },
+   {
+    "file": "test/credentials.test.mjs",
+    "ms": 14066,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/run-approvals.test.mjs",
+    "ms": 13992,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-o1-freeze.test.mjs",
+    "ms": 13936,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8a-c.test.mjs",
+    "ms": 13645,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-count.test.mjs",
+    "ms": 13218,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/channels.test.mjs",
+    "ms": 12617,
+    "tests": 16,
+    "failed": 0
+   },
+   {
+    "file": "test/agent-mcp.test.mjs",
+    "ms": 12240,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/use.test.mjs",
+    "ms": 11705,
+    "tests": 12,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-review-c.test.mjs",
+    "ms": 11159,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/polyflow-vendored.test.mjs",
+    "ms": 10853,
+    "tests": 1,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m9-check.test.mjs",
+    "ms": 10182,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-type.test.mjs",
+    "ms": 9849,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/claims.test.mjs",
+    "ms": 9844,
+    "tests": 15,
+    "failed": 0
+   },
+   {
+    "file": "test/std-credentials.test.mjs",
+    "ms": 9800,
+    "tests": 12,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m4-checker.test.mjs",
+    "ms": 9013,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8a-d.test.mjs",
+    "ms": 8951,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/tree-guard.test.mjs",
+    "ms": 8555,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/capabilities.test.mjs",
+    "ms": 7638,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-adapter.test.mjs",
+    "ms": 7415,
+    "tests": 21,
+    "failed": 0
+   },
+   {
+    "file": "test/certified-handlers.test.mjs",
+    "ms": 7103,
+    "tests": 11,
+    "failed": 0
+   },
+   {
+    "file": "test/unions.test.mjs",
+    "ms": 6833,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/families.test.mjs",
+    "ms": 6819,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/vacuous.test.mjs",
+    "ms": 6803,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/workflow-orders.test.mjs",
+    "ms": 6481,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/evidence.test.mjs",
+    "ms": 6200,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8a-b.test.mjs",
+    "ms": 6196,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m6-a.test.mjs",
+    "ms": 6151,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/initial-values.test.mjs",
+    "ms": 5701,
+    "tests": 35,
+    "failed": 0
+   },
+   {
+    "file": "test/workflow-lower.test.mjs",
+    "ms": 5575,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-drift.test.mjs",
+    "ms": 5333,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-regions.test.mjs",
+    "ms": 5324,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-delivery.test.mjs",
+    "ms": 5111,
+    "tests": 5,
+    "failed": 1
+   },
+   {
+    "file": "test/content.test.mjs",
+    "ms": 5084,
+    "tests": 12,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-load.test.mjs",
+    "ms": 4860,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/checkout.test.mjs",
+    "ms": 4833,
+    "tests": 17,
+    "failed": 0
+   },
+   {
+    "file": "test/sends.test.mjs",
+    "ms": 4678,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/sandbox.test.mjs",
+    "ms": 4621,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/review.test.mjs",
+    "ms": 4554,
+    "tests": 25,
+    "failed": 0
+   },
+   {
+    "file": "test/never.test.mjs",
+    "ms": 3985,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/children.test.mjs",
+    "ms": 3905,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/records.test.mjs",
+    "ms": 3848,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/validate.test.mjs",
+    "ms": 3549,
+    "tests": 29,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-after.test.mjs",
+    "ms": 3446,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-journal.test.mjs",
+    "ms": 3428,
+    "tests": 9,
+    "failed": 0
+   },
+   {
+    "file": "test/boundaries.test.mjs",
+    "ms": 2818,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/runtime-ledger.test.mjs",
+    "ms": 2683,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/unhandled.test.mjs",
+    "ms": 2611,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/reserved-reasons.test.mjs",
+    "ms": 1968,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/reserved-runtime.test.mjs",
+    "ms": 1285,
+    "tests": 4,
+    "failed": 0
+   },
+   {
+    "file": "test/agent-registry.test.mjs",
+    "ms": 1223,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "test/docs.test.mjs",
+    "ms": 1210,
+    "tests": 46,
+    "failed": 0
+   },
+   {
+    "file": "test/adjudicate.test.mjs",
+    "ms": 1063,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/completions.test.mjs",
+    "ms": 952,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/workflow-front.test.mjs",
+    "ms": 889,
+    "tests": 7,
+    "failed": 0
+   },
+   {
+    "file": "test/policy-peer.test.mjs",
+    "ms": 767,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/lower.test.mjs",
+    "ms": 577,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/timers.test.mjs",
+    "ms": 482,
+    "tests": 3,
+    "failed": 0
+   },
+   {
+    "file": "packages/poly-lang/dist/test/lang.test.js",
+    "ms": 456,
+    "tests": 14,
+    "failed": 0
+   },
+   {
+    "file": "test/retry-default.test.mjs",
+    "ms": 326,
+    "tests": 1,
+    "failed": 0
+   },
+   {
+    "file": "packages/poly-lang/dist/test/check.test.js",
+    "ms": 220,
+    "tests": 5,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-blocks.test.mjs",
+    "ms": 208,
+    "tests": 11,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-toolchain-use.test.mjs",
+    "ms": 180,
+    "tests": 2,
+    "failed": 0
+   },
+   {
+    "file": "test/ref-semantics.test.mjs",
+    "ms": 176,
+    "tests": 10,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-analysis.test.mjs",
+    "ms": 127,
+    "tests": 12,
+    "failed": 0
+   },
+   {
+    "file": "test/m3-sensitivity.test.mjs",
+    "ms": 117,
+    "tests": 6,
+    "failed": 0
+   },
+   {
+    "file": "test/evaluate.test.mjs",
+    "ms": 100,
+    "tests": 1,
+    "failed": 0
+   },
+   {
+    "file": "test/review-m8b-c.test.mjs",
+    "ms": 66,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "packages/poly-core/dist/test/core.test.js",
+    "ms": 7,
+    "tests": 8,
+    "failed": 0
+   },
+   {
+    "file": "test/config-instances.test.mjs",
+    "ms": 5,
+    "tests": 2,
+    "failed": 0
+   }
+  ]
+ },
+ "after": {
+  "totalMs": 215735,
+  "files": [
+   {
+    "file": "test/after/account-independence.test.mjs",
+    "ms": 214080,
+    "tests": 1,
+    "failed": 0
+   }
+  ]
+ }
+}
