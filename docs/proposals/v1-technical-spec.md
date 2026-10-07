@@ -572,7 +572,7 @@ M8 starts now that M6 is closed. M7 (feedback) follows M11 (Q6, ruled).
 6. **Q6. Ruled:** M8 to M11 come before M7.
 7. **Q7.** Should the concierge tasks become the harder tasks of the second, pre-registered experiment proposed after M3?
 8. **Q8.** Should admitting or changing a policy require a person's signature, as accepting a finding and approving an escalation already do (PF9.6, PT12.5)? Agents are expected to write policies, and an agent may write the policy that governs its own effects. The proposal: an agent drafts the policy, the checker proves it, and a person signs it before admission; an unsigned policy change is refused at load. To be ruled before M9, since delegated credentials make policies more powerful.
-9. **Q9.** Where do PT28.1 and PT28.2 go in the plan? The proposal: generated host types and the playground in M8b, since neither needs a new construct and both shorten the agent's loop for every later milestone; the extraction pattern with the concierge (AC30) in the v1 release gate.
+9. **Q9.** Where do PT28.1 and PT28.2 go in the plan? The proposal: generated host types and the playground in M8b, since neither needs a new construct and both shorten the agent's loop for every later milestone; the extraction pattern with the concierge (AC30) in the v1 release gate. Ruled (2026-10-06): generated host types (PT28.1) and `poly_edit_check` (PT28.4) at the start of M10, `poly try` (PT28.2) at the start of M11.
 
 ## PT28. Agent experience (proposed)
 
@@ -597,6 +597,13 @@ These sections specify PF15. They add no construct to the language.
 - **PT28.3a** The extraction pattern is a decision whose result type is a record of finite fields with strict check domains (PD1.2a), for example `decision amount(text: Content) -> { value: 0..500 }`.
 - **PT28.3b** No new check is needed: a machine cannot read `Content` (PT20.1a), so a body can reach a branch only through a decision. The guide shows the pattern with the concierge's refund amount (AC30).
 
+### PT28.4 Edit and check in one call
+
+- **PT28.4a** An MCP tool `poly_edit_check` takes a module, an edit (a replacement of exact text, or a whole file) and an optional configuration. It applies the edit to a working copy, runs `poly check`, and returns the verdict and the findings with their witnesses in one reply, so an agent does not spend a model round trip between editing and checking.
+- **PT28.4b** The reply is short by construction: the verdict, each finding's code, its line and its witness, and a handle (a path under `.poly/`) to the full report. The full report is read only through the handle.
+- **PT28.4c** The edit is written to the project only when the agent asks for it (`apply: true`), and only after the check ran. A refused or failing edit leaves the project unchanged.
+- **PT28.4d** It is a registry command, like `poly try`: served over MCP and through the language server, never a path that admits, signs or runs anything.
+
 ## Conclusion
 
 The four v1 surfaces add little to poly's core. They add one opaque type (`Content`), one ghost component (taint), five kinds of declaration and a standard library of machines written in poly. Everything else lowers to what already exists:
@@ -610,6 +617,7 @@ The trust boundary moves outward by three named assumptions (K13 to K15). It cov
 
 ## Glossary
 
+- **Edit and check:** `poly_edit_check`, one MCP call that applies an edit to a working copy and returns the verdict, the findings and a handle to the full report (PT28.4).
 - **Generated host types:** the `types.d.ts` file written for each machine, against which host code is compiled (PT28.1).
 - **Playground:** `poly try`, an in-memory session that steps a machine through the runtime kernel with no handler, model, store or ledger (PT28.2).
 - **Authenticated capability (`api`):** the handler capability that calls a provider with a grant's token attached by the vault adapter.

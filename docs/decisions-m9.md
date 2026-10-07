@@ -217,6 +217,22 @@ The concierge with S206 on is unchanged too (its configurations are generated, a
 
 M9 stops here for the rulings it needs: S208 and S209 (from step 5), on which steps 6, 7, 8 and 11 wait, and S206 and S207. Step 12 waits on all of them and on E13.
 
+## Four rulings: S208, S209, S206, S207 (owner, 2026-10-06)
+
+Steps 5, 9 and 10 are accepted as built. The new check-memory window (from check 20, same 0.3 MB margin) is accepted because the heap was measured to level off after warm-up; the measurement stays recorded here.
+
+**S208, Stripe's tokens: accepted as proposed, with Google added.** The vault is built and tested against a generic OAuth 2.0 provider from the RFCs (PKCE, refresh, RFC 7009 revocation). Stripe is a profile: the platform's secret key in the vault, attached as a `Stripe-Account` header, with Stripe's own deauthorization as a profile-specific effect. Add a **Google OAuth profile** (Gmail scopes `gmail.readonly`, `gmail.compose`, `gmail.send`; PKCE; RFC 7009 revocation), since the inbox assistant (`proposals/example-inbox.md`) needs it and Google follows the RFCs closely. Every profile is written from the provider's documentation with a PROVENANCE file, and tested against recorded traffic only.
+
+**S209, one Grant instance per credential: accepted.** As each channel has its own conversation, each credential gets its own `Grant` instance, keyed by credential and holder, with that credential's scope set. The PS text is written first. A test shows that a scope granted on one credential never satisfies an effect that uses another.
+
+**S206: turned on.** Timers fire in every configuration (PS15.5's wording, as recorded). Both changes are accepted: `chat-ruled-out.poly` goes to FINDINGS (a real `never` violation the unfired timer was hiding), and `chat-confirmed.poly` goes from 15 to 22 states. Update the measured verdicts and the S192 limit is closed.
+
+**S207: accepted as proposed.** One generated configuration per channel stays the default. A joint configuration is added only for an application that sends on a channel other than the one the message came in on, with a cap on global states; hitting the cap reads INCONCLUSIVE, never CLEAN. Record that the PL5407 of the cross-channel test application is a finding of the program (an email reply that answers no waiting message), so S193's note that it came only from how the configuration was built is corrected.
+
+**Uncommitted files.** Commit `proposals/v1-technical-spec.md` (PT28.4 and Q9 ruled), `proposals/example-inbox.md` and `proposals/example-harness.md` with the next step.
+
+Steps 6, 7, 8 and 11 go ahead. Step 12 waits on E13.
+
 ## Conclusion
 
 M9 starts from an accepted plan. The one change closes the path by which an agent could sign its own policy: keyring changes are signed by a person already trusted, and the first ring is anchored outside the project. The two issues that can change existing verdicts are measured before they are ruled.
