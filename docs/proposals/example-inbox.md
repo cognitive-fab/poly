@@ -119,10 +119,10 @@ A TypeScript host on the owner's machine: it loads the admitted assistant, runs 
 ## IT9. Open questions for the owner
 
 1. **Q-I1.** Ruled (owner, 2026-10-06): the inbox assistant stands beside the concierge. The concierge stays the v1 release example (AC27); the inbox assistant is the second v1 example, with its own gate (IAC1 to IAC9).
-2. **Q-I2.** Gmail sending: drafts only for v1 (the owner sends from Gmail), or send after approval from the start?
-3. **Q-I3.** Linked accounts: which accounts may share content in drafts (for example, two addresses of the same business)?
-4. **Q-I4.** The digest: delivered on the local page only, or also mailed to one chosen address?
-5. **Q-I5.** Gmail push (Pub/Sub `watch`) instead of polling: lower latency, but it needs a Google Cloud project. Polling is proposed for v1.
+2. **Q-I2.** Ruled (owner, 2026-10-08): drafts only for v1. The assistant writes Gmail drafts; the owner sends them from Gmail. No send scope is requested.
+3. **Q-I3.** Ruled (owner, 2026-10-08): no linked accounts in v1. Each inbox is its own audience, and a draft uses only mail from its own account.
+4. **Q-I4.** Ruled (owner, 2026-10-08): the digest is shown on the local page only; nothing is mailed.
+5. **Q-I5.** Ruled (owner, 2026-10-08): polling through the history API for v1. Push through Pub/Sub is left for later.
 
 ## Conclusion
 
