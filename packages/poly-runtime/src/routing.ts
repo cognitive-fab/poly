@@ -7,7 +7,7 @@
 // policy, reserves on each in the transaction that records the allow, settles each in the transaction of the call's
 // completion, and releases each when the intent dies; each step has an action id derived from the intent, so a step
 // repeated after a crash is deduplicated (K4) and no reservation is lost or counted twice.
-import { costOf } from '@poly/core';
+import { costOf, digest } from '@poly/core';
 import type { OutboxRow, Runtime } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import type { LedgerStore } from './ledger-store.js';
 import { answerProbability, calibrate, type DecisionRecord, type Provider } from './provider.js';
@@ -55,7 +55,8 @@ export class RoutingHost {
   /** The tier providers, by the provider name a tier gives (S356): host code, never certified, recorded in tests. */
   readonly providers = new Map<string, Provider>();
 
-  constructor(private readonly kernel: Runtime, private readonly store: LedgerStore, readonly routes: VerifiedRoute[], readonly budgets: VerifiedBudget[], private readonly now: () => number, private readonly records: Map<string, DecisionRecord>) {
+  /** `resultOf` gives a routed decision's result values, as its certified manifest lists them. */
+  constructor(private readonly kernel: Runtime, private readonly store: LedgerStore, readonly routes: VerifiedRoute[], readonly budgets: VerifiedBudget[], private readonly now: () => number, private readonly records: Map<string, DecisionRecord>, private readonly resultOf: (route: VerifiedRoute) => unknown = () => null) {
     store.db.exec(SCHEMA);
   }
 
@@ -225,20 +226,27 @@ export class RoutingHost {
       const usage = violation ? null : (raw as Record<string, number>);
       const { cost, unpriced } = usage ? costOf(usage, t.tier.prices) : { cost: t.tier.reservation, unpriced: [] as string[] };
       const machine = this.machineOf(t.decision.run) ?? '';
+      // S310, PS18.6, F1 as ruled: an answer outside the decision's type is a provider's free text, which may carry what
+      // the question held. It is recorded by its digest only, in the answer and the distribution alike; the completion
+      // still fails outside its type (S140). A decision whose result values are not listed is read as holding none.
+      const values = this.resultOf(route);
+      const inType = (x: unknown) => Array.isArray(values) && values.some((v) => digest(v) === digest(x ?? null));
+      const kept = (x: unknown) => (inType(x) ? x : { digest: digest(x ?? null) });
+      const outside = !inType(a.answer);
       const record: DecisionRecord & Record<string, unknown> = {
         decision: route.decision.name, intent: ctx.idempotencyKey, provider: t.tier.provider,
         model: { id: t.tier.model, reported: a.reported ?? null },
         calibration: map ? { version: map.version, fittedFor: map.fittedFor, digest: map.digest } : { uncalibrated: true },
-        question, inputs: [], answer: a.answer, raw: first, conf, margin, distribution: dist,
+        question, inputs: [], answer: kept(a.answer), raw: first, conf, margin, distribution: dist.map(([x, p]): [unknown, number] => [kept(x), p]),
         latencyMs: a.latencyMs ?? this.now() - t0, cost: { units: cost, unit: `micro-${t.tier.prices.currency}` },
-        route: route.name, tier: t.tier.name, tierIndex: t.index, usage, ...(violation ? { usageViolation: violation } : {}), ...(unpriced.length ? { unpriced } : {}),
+        route: route.name, tier: t.tier.name, tierIndex: t.index, usage, ...(violation ? { usageViolation: violation } : {}), ...(outside ? { answerOutsideType: true } : {}), ...(unpriced.length ? { unpriced } : {}),
         reservation: t.tier.reservation, prices: t.tier.prices.digest,
         run: t.decision.run, scope: machine.slice(0, machine.lastIndexOf('.')),
       };
       this.records.set(ctx.idempotencyKey, record);
       // Review B2 (M11): kept as soon as the provider answered, so a call that ran is charged however its intent ends.
-      const { question: q, ...kept } = record;
-      await this.store.txn(() => { this.store.db.prepare('INSERT OR REPLACE INTO poly_route_call (intent, record) VALUES (?, ?)').run(ctx.idempotencyKey, JSON.stringify({ ...kept, request: this.store.keep(q) })); });
+      const { question: q, ...rest } = record;
+      await this.store.txn(() => { this.store.db.prepare('INSERT OR REPLACE INTO poly_route_call (intent, record) VALUES (?, ?)').run(ctx.idempotencyKey, JSON.stringify({ ...rest, request: this.store.keep(q) })); });
       return { conf, margin };
     };
   }

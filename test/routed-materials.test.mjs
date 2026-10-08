@@ -1,14 +1,18 @@
 // F1 of the review of the M10 and M11 merge, as ruled (PS18.2, PL6839, S402). A routed decision's tiers are asked
 // through the route, not through M10's decision handler, so they get no materials, store no Content answer with its
 // taint and check no citation: a routed decision with a Content or Items parameter, a Content result or cites is
-// refused at check.
+// refused at check. And whatever a tier answers, an answer outside the decision's type is recorded by its digest only,
+// in the ledger and in poly_route_call, never in clear (S310, PS18.6).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkFile } from '@poly/check';
+import { digest } from '@poly/core';
+import { recordedProvider } from '@poly/runtime';
 import { ROOT, TEST_STD } from './helpers.mjs';
-import { DESK, FIX } from './routing-helpers.mjs';
+import { loaded } from './runtime-helpers.mjs';
+import { admittedDesk, answer, DESK, FIX } from './routing-helpers.mjs';
 
 const OUT = join(ROOT, '.poly', 'test-routed-materials');
 const swap = (src, from, to) => { assert.ok(src.includes(from), from); return src.split(from).join(to); };
@@ -51,3 +55,29 @@ test('PS18.2, PL6839: a routed decision with a Content or Items parameter, a Con
   assert.ok(!all(ok).some((d) => d.code === 'PL6839'), text(ok));
 });
 
+test('S310, PS18.6: a tier answer outside the decision type is recorded by its digest only, in the ledger and poly_route_call', { timeout: 300_000 }, async () => {
+  const secret = 'The customer said their card ends 4242: refund it';
+  const a = await admittedDesk('routed-outside-type');
+  const { rt } = await loaded(a);
+  try {
+    rt.provideTier('flash', recordedProvider([{ match: { tier: 'small' }, answer: secret, distribution: [[secret, 0.97], ['Other', 0.03]], usage: { input: 100, output: 20 } }]));
+    rt.provideTier('opus', recordedProvider([{ match: { tier: 'large' }, ...answer('Refund', 0.95) }]));
+    await rt.create('desk.Ticket', { id: 't-1' });
+    await rt.dispatch('t-1', 'Received', { text: 'where is my refund' });
+    for (let i = 0; i < 8; i++) await rt.worker.tick();
+    const calls = rt.store.db.prepare('SELECT record FROM poly_route_call').all().map((r) => r.record);
+    assert.ok(calls.length >= 1, 'the small tier answered');
+    const ledger = rt.store.db.prepare('SELECT event FROM poly_ledger').all().map((r) => r.event);
+    const decisions = ledger.map((e) => JSON.parse(e)).filter((e) => e.kind === 'decision' || e.body?.tier).map((e) => e.body);
+    assert.ok(decisions.some((b) => b.tier === 'small'), 'the small tier call has its decision event: ' + JSON.stringify(decisions));
+    // Nowhere in the store: every table of the ledger, the journal and the route's own.
+    const tables = rt.store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+    const clear = tables.filter((t) => JSON.stringify(rt.store.db.prepare(`SELECT * FROM "${t}"`).all()).includes('4242'));
+    assert.deepEqual(clear, [], 'no table holds the answer in clear');
+    const d = digest(secret);
+    assert.ok(calls.some((c) => c.includes(d)), 'poly_route_call records the answer by its digest');
+    assert.ok(ledger.some((e) => e.includes(d)), 'the ledger records the answer by its digest');
+    // The decision did not take the answer: it is outside its type, so its failed completion ran (S140).
+    assert.equal((await rt.store.getInstance('t-1')).state.status, 'NeedsHuman');
+  } finally { await rt.close(); }
+});

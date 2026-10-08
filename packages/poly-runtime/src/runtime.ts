@@ -241,7 +241,7 @@ export class PolyRuntime {
     }
     this.memory.body = (d) => this.contentBody(d);
     // PS18.2: a route's call runs its tier's provider, through the runtime's own handler.
-    this.#routing = new RoutingHost(kernel, store, verified.routes, verified.budgets, () => this.now(), this.records);
+    this.#routing = new RoutingHost(kernel, store, verified.routes, verified.budgets, () => this.now(), this.records, (r) => verified.machines.find((x) => x.id === r.decision.machine)?.manifest?.effects?.[`decision.${r.decision.name}`]?.decision?.result ?? null);
     for (const r of verified.routes) builtins[r.effectKind] = this.#routing.handler(r);
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
