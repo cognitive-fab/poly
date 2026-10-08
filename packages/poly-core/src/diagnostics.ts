@@ -194,6 +194,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6843: { name: 'PRICE_UNSOURCED', stage: 'types', severity: 'error' },
   // PT24.1b (M11): a route that escalates on conf or margin with a tier that has no calibration map to read them through.
   PL6841: { name: 'TIER_WITHOUT_CALIBRATION', stage: 'types', severity: 'error' },
+  // PT24.5, S355 (M11): a tier whose model, its price table's, is not the model its calibration map was fitted for.
+  PL6842: { name: 'MODEL_WITHOUT_REFITTED_MAP', stage: 'types', severity: 'error' },
   // PS18.3, PS18.4 (M11): a route's tiers priced in two currencies, or a cap in another currency than its route's tiers.
   PL6844: { name: 'BUDGET_CURRENCY_MISMATCH', stage: 'types', severity: 'error' },
   // PS18.4 (M11): a tier whose reservation is above a cap of its route's budget, so it could never be called.

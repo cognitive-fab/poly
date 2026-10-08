@@ -560,6 +560,10 @@ class Checker {
             else {
               const map = m.map as CalibrationFile;
               for (const x of decisions) if (map.decision !== x.decision.name) this.err('PL1201', t, `tier ${t.name}: the calibration map ${t.calibration} was fitted for decision ${map.decision}, and route ${r.name} serves ${x.decision.name} (PD1.6a)`);
+              // PT24.5, PD3.2, S355: the tier's model is its price table's, and its map must be fitted for that model;
+              // a model changed without a refitted map would leave the route's thresholds with no meaning.
+              const table = this.priceTable(t.prices, t.provider);
+              if (table && map.fittedFor !== table.model) this.err('PL6842', t, `tier ${t.name} calls model ${table.model} (its price table ${t.prices}), and its calibration map ${t.calibration} was fitted for ${map.fittedFor}: refit the map for ${table.model} with poly journal fit (PT24.5, PD3.2)`);
             }
           }
         }

@@ -72,6 +72,12 @@ PT10r says what was built. Decided by the plan's rules, each with its reason:
 - **Tests first.** `test/cost.test.mjs` has four tests over three recorded runs (escalated and answered, answered on the small tier, exhausted): the totals per run, scope and day from the ledger alone (five calls, 42,540 micro-units) and the filters; a price table of November priced again by its digest (two large calls, 14,000) with the recorded costs unchanged, and an unsourced table refused `PL6843`; replay of every run, the three routes and the budgets included, with no provider registered and no divergence; and a completion body a provider returns beside its answer found nowhere in the store's file. The first three failed first: no command, and replay threw on `desk.triage.Route`.
 - **Checked.** The 159 measured files are identical to M9's close. The full suite (`.poly/logs/268a44a-2026-10-07T23-39-05-484Z-step7.log`): 1,984 tests and one after the M3 runs, 1,979 pass, no failure, 2 skipped and 4 waiting; check-memory passed.
 
+## Step 8: the tier swap, built (S355)
+
+- **Where the model is.** A tier names its provider, never a model (PD1.2e); its model is its price table's, which a price change already makes a new version (S350). So a tier's model changes exactly when its table names another model, and `PL6842` compares that model with the map's `fittedFor`. Since `poly deploy` is not built, the check is at `poly check`, and admission, which runs it, refuses the version (S355).
+- **Tests first.** `test/routing-swap.test.mjs` has two tests: the large tier's table moved to a new model with its map unchanged is refused `PL6842` at check and at admission, the finding naming both models; and a map refitted for the new model (version 2, its digest the one `poly journal fit` writes) is admitted, the certificate binding the new model and map and leaving the small tier unchanged. The first failed first, admitted; the second passed before and after, as the control.
+- **Checked.** The 159 measured files are identical to M9's close. The full suite (`.poly/logs/023fddf-2026-10-07T23-55-34-118Z-step8.log`): 1,986 tests and one after the M3 runs, 1,981 pass, no failure, 2 skipped and 4 waiting; check-memory passed.
+
 **For the owner, not blocking: `poly try`.** Q9 was ruled on 2026-10-06 to put `poly try` (PT28.2) at the start of M11. The M11 plan, ruled on 2026-10-07, does not list it, and its scope is PT27.3's row. The session follows the later ruled plan and does not build `poly try`; it is raised again at M11's close.
 
 ## Conclusion
