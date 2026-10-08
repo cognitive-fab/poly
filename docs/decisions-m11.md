@@ -151,6 +151,10 @@ At 163fc0e3, after `npm run clean`, with no M10 work on the machine (a watcher s
 - **Gate times.** The baseline for the v1 gate is docs/m11/gate2-file-times.json, measured with nothing else running. The M9 times stay on record but are not used for comparison.
 - **Next, unchanged.** M10 merges into m4 first. M11 then rebases, resolves the three expected conflicts, runs the full suite once, and merges with no further ruling if that suite has no failure and the measured files are identical. Replaying a credential's grant stays on the v1 gate list.
 
+## Polywatch on the rulings: a route with no budget
+
+Polywatch found that the lost-completion fix (review B2) wrote a call's `decision` event only after the reservations were found, so a route with no budget, which holds none, recorded nothing for an answered call whose completion was lost. The event is now written first. `test/review-m11.test.mjs` gains the test, which failed on the code before it. The fix is small and is checked by the one full suite the ruling sets after the rebase.
+
 ## Conclusion
 
 M11 is ruled and built. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains: sixty-four concurrent runs never pass a cap, and a crash never loses or doubles a reservation. A route is a checked machine whose every tier choice replays from the ledger with no model call, and `poly cost` sums every answered call from the ledger alone. The review's findings are fixed, the owner's rulings on them are built (an input limit in every reservation, an unpriceable report charged in full, `poly try`), and the gate passed again from a clean build on a quiet machine. M11 waits only for M10 to merge first.

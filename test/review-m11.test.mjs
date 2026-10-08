@@ -185,3 +185,28 @@ test('review C8: a certificate with a route lists what a call\'s cost does not c
   const a = await admittedDesk('review-m11-c8');
   assert.ok(a.cert.poly.limits.some((l) => /K15/.test(l) && /released/.test(l) && /overrun/.test(l)));
 });
+
+test('polywatch on the rulings: a route with no budget records an answered call whose completion was lost', async () => {
+  const a = await admittedDesk('review-m11-nobudget', swap(DESK, '  budget support\n}', '}'));
+  const { rt, clock } = await loaded(a);
+  try {
+    rt.provideTier('flash', recordedProvider([answer('Refund', 0.96, { input: 1000, output: 3000 })]));
+    rt.provideTier('opus', recordedProvider([answer('Refund', 0.96)]));
+    await rt.create('desk.Ticket', { id: 'nb' });
+    await rt.dispatch('nb', 'Received', TEXT);
+    const commit = rt.store.commitStep.bind(rt.store);
+    rt.store.commitStep = (step) => rt.store.txn(async () => {
+      await commit(step);
+      if (step.instanceId.startsWith('route:') && step.journal.action === 'Answer') throw new Error('crash before the commit');
+    });
+    for (let i = 0; i < 4; i++) await rt.worker.tick().catch((e) => { if (!/crash before the commit/.test(e.message)) throw e; });
+    rt.store.commitStep = commit;
+    clock.advance(61_000);
+    for (let i = 0; i < 6; i++) await rt.worker.tick();
+    assert.equal(reservations(rt).length, 0, 'no budget, no reservation');
+    const route = rt.store.db.prepare("SELECT instance FROM poly_route WHERE run = 'nb'").get().instance;
+    const lost = (await rt.chain(route)).filter((e) => e.kind === 'decision').map((e) => e.body).find((c) => c.tier === 'small');
+    assert.ok(lost, 'the lost call is recorded');
+    assert.deepEqual([lost.completed, lost.cost], [false, { units: 1300, unit: 'micro-usd' }]);
+  } finally { await rt.close(); }
+});

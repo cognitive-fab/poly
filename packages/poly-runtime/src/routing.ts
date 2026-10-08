@@ -174,7 +174,6 @@ export class RoutingHost {
   async settle(row: OutboxRow, action: string): Promise<void> {
     const intent = row.intent_id;
     const held = this.store.db.prepare("SELECT budget, amount FROM poly_reservation WHERE intent = ? AND status = 'held'").all(intent) as { budget: string; amount: number }[];
-    if (!held.length) return;
     // Review B2, C1 (M11): a call whose provider answered is settled with its cost whatever ends its intent (a lost
     // completion, a refused settle, a completion outside its type), and only a call with no answer is released. Its
     // record was kept when the provider answered; when no completion wrote it, it is written here (PS18.6).
@@ -182,6 +181,8 @@ export class RoutingHost {
     const record = kept ? (JSON.parse(kept.record) as Record<string, any>) : null;
     const cost: number | null = record && typeof record.cost?.units === 'number' ? record.cost.units : null;
     if (record && action !== 'SettleOk') this.store.appendEvent(row.instance_id, 'decision', { ...record, completed: false, ended: action }, this.now());
+    // Polywatch on the rulings: a route with no budget holds no reservation, and its answered call is still recorded above.
+    if (!held.length) return;
     // S352 as ruled, PT24.3: each settlement is journaled on the call's run, an overrun named in it, never hidden.
     this.store.appendEvent(row.instance_id, 'verdict', { stage: 'budget', intent, outcome: cost === null ? 'released' : 'settled', budgets: held.map((h) => (cost === null ? { instance: h.budget, reserved: h.amount, released: true } : { instance: h.budget, reserved: h.amount, actual: cost, overrun: Math.max(0, cost - h.amount) })) }, this.now());
     for (const h of held) {
