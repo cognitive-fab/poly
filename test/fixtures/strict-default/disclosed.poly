@@ -1,0 +1,9 @@
+module disclosed
+
+machine M {
+  state {
+    k : int check { 1, 2 } = 1
+  }
+  action SetD(v: int check { 1, 2 } disclosed)
+  on SetD(v) { k' = v }
+}

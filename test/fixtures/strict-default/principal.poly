@@ -1,0 +1,9 @@
+module principal
+
+machine M {
+  state {
+    who : Principal = none
+  }
+  action Who(p: Principal)
+  on Who(p) { who' = p }
+}

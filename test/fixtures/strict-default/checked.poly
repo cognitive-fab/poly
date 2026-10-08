@@ -1,0 +1,9 @@
+module checked
+
+machine M {
+  state {
+    k : int check { 1, 2 } = 1
+  }
+  action SetK(v: int check { 1, 2 })
+  on SetK(v) { k' = v }
+}

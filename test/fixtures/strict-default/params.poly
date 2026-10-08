@@ -1,0 +1,20 @@
+module params
+
+type Color = red | green
+
+machine M {
+  state {
+    n : 0..3 = 0
+    k : int check { 1, 2 } = 1
+    c : Color = red
+    b : bool = false
+  }
+  action SetN(v: 1..3)
+  action SetK(v: int check { 1, 2 })
+  action SetC(v: Color)
+  action SetB(v: bool)
+  on SetN(v) { n' = v }
+  on SetK(v) { k' = v }
+  on SetC(v) { c' = v }
+  on SetB(v) { b' = v }
+}
