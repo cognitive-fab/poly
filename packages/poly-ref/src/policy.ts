@@ -17,7 +17,7 @@ export type V = string | number | boolean | null | string[];
 export type Decision = 'allow' | 'deny' | 'escalate';
 
 export interface PolicyFacts {
-  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: boolean }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
+  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: number }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
   decisions: Map<string, { answers: (string | number | boolean)[] | null }>;
   /** PT9.9: each send a machine's handlers make to an address of a known machine. */
   sends: { from: string; to: string; action: string }[];
@@ -58,7 +58,7 @@ export function policyFacts(modules: Module[]): PolicyFacts {
         return vs.every((v) => v !== undefined) ? (vs as (string | number | boolean)[]) : null;
       };
       for (const f of d.fields) fields.set(f.name, { values: values(f.type) ?? checked(f as never), conf: f.type.kind === 'TConf' });
-      const effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: boolean }[] = [];
+      const effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: number }[] = [];
       const isContent = (x: TypeExpr) => x.kind === 'TName' && x.name === 'Content';
       const isItems = (x: TypeExpr) => x.kind === 'TName' && x.name === 'Items';
       for (const it of d.items) {
@@ -74,10 +74,10 @@ export function policyFacts(modules: Module[]): PolicyFacts {
           const lowest = (m.decls.find((x) => x.kind === 'Audience') as { classes: string[] } | undefined)?.classes[0];
           const memKind = r ? `source.${r.source}.retrieve` : w ? `source.${w.source}.remember` : null;
           const memLabels = w ? ['write:store'] : r ? [src && (src.owned || src.audience !== lowest) ? 'read:private' : 'read:store'] : null;
-          effects.push({ kind: memKind ?? kind?.value ?? it.name, class: cls?.value ?? 'none', labels: memLabels ?? it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}), ...(!memKind && it.params.some((x) => isContent(x.type)) ? { content: true } : {}) });
+          effects.push({ kind: memKind ?? kind?.value ?? it.name, class: cls?.value ?? 'none', labels: memLabels ?? it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}), ...(!memKind && it.params.some((x) => isContent(x.type)) ? { content: true } : {}), ...(!memKind && it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}) });
         }
         if (it.kind === 'Decision') {
-          effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(it.params.some((x) => isItems(x.type)) ? { items: true } : {}) });
+          effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}) });
           decisions.set(it.name, { answers: values(it.result) });
         }
       }
@@ -320,10 +320,12 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
   const classes = facts.audience ?? [];
   const taintChoices = (eff: { content?: boolean }): (Record<string, V> | null)[] => (reads.taint && eff.content ? [null, ...classes.map((c) => ({ class: c }))] : [null]);
   const ageCuts = [...new Set([0, ...[...reads.itemAges].flatMap((x) => [x, x + 1])])].filter((x) => x >= 0).sort((x, y) => x - y);
-  const itemsChoices = (eff: { items?: boolean }): (Record<string, V> | null)[] => {
+  // Review A F3, F4: any intent carrying an Items is proposed with items, its count the sum over its Items, so an effect
+  // or a decision with n Items parameters counts to n times the largest limit.
+  const itemsChoices = (eff: { items?: number }): (Record<string, V> | null)[] => {
     if (!reads.items.size || !eff.items) return [null];
     const want = (f: string) => reads.items.has('*') || reads.items.has(f);
-    const counts = want('count') ? Array.from({ length: (facts.itemsLimit ?? 0) + 1 }, (_, k) => k) : [0];
+    const counts = want('count') ? Array.from({ length: (facts.itemsLimit ?? 0) * (eff.items ?? 1) + 1 }, (_, k) => k) : [0];
     const cls = want('class') ? classes : classes.slice(0, 1);
     const ages = want('age') ? ageCuts : [0];
     // PT10l: an item's provenance, observed, derived or verified (PS17.5).

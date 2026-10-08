@@ -227,6 +227,13 @@ export class EffectWorker {
     return m[1] ? Number(m[1]) : 3;
   }
 
+  /** The reason of an intent's latest escalation, from its verdict events. */
+  private lastEscalation(row: OutboxRow): string | null {
+    const rows = this.store.db.prepare("SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict' ORDER BY seq DESC").all(row.instance_id) as { event: string }[];
+    for (const r of rows) { const b = JSON.parse(r.event).body; if (b?.intent === row.intent_id && b.outcome === 'escalated') return typeof b.reason === 'string' ? b.reason : null; }
+    return null;
+  }
+
   private verdict(row: OutboxRow, body: Record<string, unknown>): void {
     this.store.appendEvent(row.instance_id, 'verdict', { stage: 'gate', intent: row.intent_id, effectKind: row.kind, ...body }, this.now);
   }
@@ -378,7 +385,9 @@ export class EffectWorker {
           const approval = d === 2 ? this.lastApproval(row) : undefined;
           const { proposal, snapshot } = await this.proposalOf(row, decl, approval, st.intent_rechecks ?? 0);
           // PT10k, S302: the memory check comes first: the flow rule and freshness; its refusal is final whatever a policy says.
-          const mem = this.opts.memoryCheck?.(row, decl, d === 2) ?? null;
+          // Review B1: an approval lets stale items through only when the escalation it approved was stale-items; after
+          // any other, a stale re-proposal escalates, which rule 2 of PT9.7 denies escalate-once.
+          const mem = this.opts.memoryCheck?.(row, decl, d === 2 && this.lastEscalation(row) === 'stale-items') ?? null;
           if (mem && 'fields' in mem) Object.assign(proposal, mem.fields);
           // PS16.3, S199: the grant check comes next, then the mandate's; each refusal is final whatever a policy says.
           const grant = this.opts.grantCheck?.(row, decl) ?? null;

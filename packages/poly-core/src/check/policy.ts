@@ -119,8 +119,12 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
   const all = [...machines.values()].flatMap((m) => m.effects);
   const credentials = [...new Set(modules.flatMap((x) => x.decls.flatMap((d) => (d.kind === 'Credential' ? [d.name] : []))))].sort();
   const audience = modules.flatMap((x) => x.decls.flatMap((d) => (d.kind === 'Audience' ? d.classes : [])));
-  let itemsLimit = 0;
+  let itemsLimit = 0, itemsParams = 1;
   for (const x of modules) for (const d of x.decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl') for (const y of it.items) if (y.kind === 'EffRetrieve') itemsLimit = Math.max(itemsLimit, y.limit);
+  // Review A F4: effect.items.count is the sum over an intent's Items, so it reaches the most Items parameters of one
+  // effect or decision times the largest limit.
+  for (const x of modules) for (const d of x.decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl' || it.kind === 'Decision') itemsParams = Math.max(itemsParams, it.params.filter((q) => q.type.kind === 'TName' && q.type.name === 'Items').length);
+  itemsLimit *= itemsParams;
   return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, credentials, audience: [...new Set(audience)], itemsLimit, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
 }
 

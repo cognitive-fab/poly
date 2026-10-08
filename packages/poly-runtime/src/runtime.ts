@@ -637,25 +637,38 @@ export class PolyRuntime {
     if (!fresh) throw new ApprovalRefused('the grant request was taken before (S210)', 'replayed');
   }
 
-/** A person's signed record of a kind over a subject, taken once: not-a-record, wrong-key or replayed otherwise. */
-  async #takeRecord(record: unknown, kind: 'verify' | 'forget', subject: string, what: string): Promise<string> {
+  /**
+   * A person's signed record of a kind over a subject, verified and not yet taken: not-a-record, wrong-key or replayed
+   * otherwise. It is taken (#useRecord) in the transaction that records what it did, so a run cut short does not use it
+   * up (review C1).
+   */
+  #checkRecord(record: unknown, kind: 'verify' | 'forget', subject: string, what: string): string {
     const r = record as Partial<SignedRecord> | null;
     if (!r || typeof r !== 'object' || typeof r.sig !== 'string') throw new ApprovalRefused(`${what} is signed by a person (PS17)`, 'not-a-record');
     const v = verifyRecord(r, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind, subject });
     if (!v.ok) throw new ApprovalRefused(`${what} is refused: ${v.problem}`, v.problem.startsWith('not a signed record') ? 'not-a-record' : 'wrong-key');
     const d = recordDigest(r as SignedRecord);
-    let fresh = false;
-    await this.store.txn(() => { fresh = this.store.db.prepare('INSERT OR IGNORE INTO poly_used_record (digest, at) VALUES (?, ?)').run(d, this.now()).changes === 1; });
-    if (!fresh) throw new ApprovalRefused(`${what} was taken before`, 'replayed');
+    if (this.store.db.prepare('SELECT 1 FROM poly_used_record WHERE digest = ?').get(d)) throw new ApprovalRefused(`${what} was taken before`, 'replayed');
     return d;
+  }
+
+  /** Takes a checked record, inside the caller's transaction; false when another took it first. */
+  #useRecord(d: string): boolean {
+    return this.store.db.prepare('INSERT OR IGNORE INTO poly_used_record (digest, at) VALUES (?, ?)').run(d, this.now()).changes === 1;
   }
 
   /** PS17.5 (S309): a person's signed record of the kind verify promotes a memory item to verified, once. */
   async verifyMemory(item: string, record: unknown): Promise<void> {
     if (!this.memory.memoryItem(item)) throw new Error(`no memory item ${item}`);
-    const d = await this.#takeRecord(record, 'verify', memoryVerifySubject(item), 'a memory verification');
+    const d = this.#checkRecord(record, 'verify', memoryVerifySubject(item), 'a memory verification');
     this.store.ensureRun(MEMORY_RUN, 'runtime', 'memory');
-    await this.store.txn(() => { this.memory.markVerified(item); this.store.appendEvent(MEMORY_RUN, 'verdict', { stage: 'memory', outcome: 'verified', item, record: d }, this.now()); });
+    let taken = false;
+    await this.store.txn(() => {
+      if (!(taken = this.#useRecord(d))) return;
+      this.memory.markVerified(item);
+      this.store.appendEvent(MEMORY_RUN, 'verdict', { stage: 'memory', outcome: 'verified', item, record: d }, this.now());
+    });
+    if (!taken) throw new ApprovalRefused('a memory verification was taken before', 'replayed');
   }
 
   /**
@@ -663,15 +676,25 @@ export class PolyRuntime {
    * the items that name it, asks each connected adapter to forget the subject, and records what it erased by digest.
    */
   async forget(target: { subject: string } | { source: string }, record: unknown): Promise<{ erased: string[] }> {
-    const d = await this.#takeRecord(record, 'forget', forgetSubject(target), 'a forget');
-    const { bodies } = this.memory.forgettable(target);
-    for (const b of bodies) if (this.store.db.prepare('SELECT 1 FROM poly_erasable WHERE digest = ?').get(b)) await this.erase(b);
+    // Review S4: a source the build does not have is refused before the record is looked at.
+    if ('source' in target && !this.memory.hasSource(target.source)) throw new Error(`no source ${target.source} in the certified build`);
+    const d = this.#checkRecord(record, 'forget', forgetSubject(target), 'a forget');
+    // Review S2: only an erasable body is erased, and only those are listed.
+    const bodies = this.memory.forgettable(target).bodies.filter((b) => this.store.db.prepare('SELECT 1 FROM poly_erasable WHERE digest = ?').get(b));
+    // Review C1: each erasure and the adapters' forget may be run again; the record is taken with the forget event, so a
+    // forget cut short by a failing adapter is completed by the same record.
+    for (const b of bodies) await this.erase(b);
     if ('subject' in target) for (const a of this.memory.connected()) await a.forget(target.subject);
     this.store.ensureRun(CONTENT_RUN, 'runtime', 'content');
+    let taken = false;
     await this.store.txn(() => {
+      if (!(taken = this.#useRecord(d))) return;
       this.memory.removeItems(target);
+      // Review C5: an erased body's taint record would keep the subject beside its digest.
+      this.memory.dropTaint(bodies);
       this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'forget', ...('subject' in target ? { subject: this.store.recipientDigest(`principal:${target.subject}`) } : { source: target.source }), erased: bodies, record: d }, this.now());
     });
+    if (!taken) throw new ApprovalRefused('a forget was taken before', 'replayed');
     return { erased: bodies };
   }
 
@@ -1138,6 +1161,14 @@ export class PolyRuntime {
     return d;
   }
 
+  /** Review B3: a body stored with its taint, and the source it was read from, in one transaction (PS17.4, PS17.7). */
+  async #putTainted(body: string, taint: Taint, source: string | null): Promise<string> {
+    if (typeof body !== 'string' || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(body)) throw new TypeError('a body is a well-formed string, with no lone surrogate (PS1.4a)');
+    const d = `sha256:${createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex')}`;
+    await this.store.txn(() => { this.store.keepErasable(d, body); this.memory.taint(d, taint); if (source) this.memory.fromSource(d, source); });
+    return d;
+  }
+
   /** S180: the body a Content names, or null when the store holds none. */
   async contentBody(d: string): Promise<string | null> {
     const r = this.store.db.prepare('SELECT body FROM poly_content WHERE digest = ?').get(d) as { body: string } | undefined;
@@ -1316,8 +1347,8 @@ export class PolyRuntime {
     }
     // PS17.2: the decision reads its materials, and a Content answer is kept with the decision's taint.
     const mem: DecisionMemory = {
-      materials: (payload) => this.memory.materials(payload, (d) => this.contentBody(d), (b) => this.putContent(b)),
-      answer: async (body, taint) => { const d = await this.putContent(body); await this.store.txn(() => this.memory.taint(d, taint as Taint)); return d; },
+      materials: (payload) => this.memory.materials(payload, (d) => this.contentBody(d), (b, t, s) => this.#putTainted(b, t, s)),
+      answer: async (body, taint) => this.#putTainted(body, taint as Taint, null),
       cite: (given, ids, run, intent) => this.memory.cite(given, ids, run, intent, this.now()),
     };
     this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records, { content: entry.decision?.result === 'content', cites: entry.decision?.cites ?? null, mem }));

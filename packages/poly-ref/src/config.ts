@@ -631,7 +631,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
       }
     }
     const cut = tg.edges.find((e) => e.outcome.kind === 'bound' && e.outcome.field.startsWith('pending '));
-    if (cut && cut.outcome.kind === 'bound') findings.push(finding('PL3901', undefined, `the flow rule's exploration stopped: ${cut.outcome.field.slice(8)} would hold more than ${PENDING_BOUND} pending intents (PS17.2)`, []));
+    if (cut && cut.outcome.kind === 'bound') findings.push(finding('PL3901', undefined, `the flow rule's exploration stopped: ${cut.outcome.field.slice(8)} would hold more than ${PENDING_BOUND} pending intents (PS17.2)`, [...pathTo(tg, cut.from), cut]));
     if (tg.capHit) findings.push(finding('PL3901', undefined, `the flow rule's exploration stopped at ${tg.states.length} global states`, []));
   }
 

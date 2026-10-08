@@ -20,8 +20,17 @@ export async function checkHost(tsconfig: string): Promise<HostCheck> {
   if (read.error) return { status: 'not-run', tsconfig: path, reason: `the tsconfig does not read: ${ts.flattenDiagnosticMessageText(read.error.messageText, ' ')}` };
   const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(path), undefined, path);
   if (parsed.errors.length) return { status: 'not-run', tsconfig: path, reason: `the tsconfig does not read: ${parsed.errors.map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' ')).join('; ')}` };
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, noEmit: true } });
+  // Review D3: noCheck would make every host clean, so the check always type checks.
+  const program = ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, noEmit: true, noCheck: false } });
   const diagnostics: Diagnostic[] = [];
+  // A host file that switches checking off with @ts-nocheck is a finding, never a clean file.
+  for (const f of parsed.fileNames) {
+    const text = ts.sys.readFile(f) ?? '';
+    if (/^\s*\/\/\s*@ts-nocheck\b/m.test(text)) {
+      const file = relative(dirname(path), f).split('\\').join('/');
+      diagnostics.push(diag('PL6836', { module: file, line: 1, col: 1 }, `${file}: @ts-nocheck switches type checking off, so the host file is not checked against the generated types`));
+    }
+  }
   for (const d of ts.getPreEmitDiagnostics(program)) {
     if (d.category !== ts.DiagnosticCategory.Error) continue;
     const text = ts.flattenDiagnosticMessageText(d.messageText, ' ');

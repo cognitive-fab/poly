@@ -6,7 +6,7 @@
 //   opensearch: the OpenSearch REST API (_search, _doc, _delete_by_query), as its documentation gives it, over an HTTP
 //               transport the host or a test gives, so a test replays recorded traffic.
 import type { HttpTransport, ItemRef, PgQuery, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
-import { made } from './util.js';
+import { made, oneLine } from './util.js';
 
 /** A SQL identifier or an OpenSearch field name written into a query: letters, digits and underscores only. */
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -23,7 +23,9 @@ const limitOf = (q: SourceQuery): number => {
 
 /** An `asOf` in milliseconds from a number of ms or an ISO 8601 date; an item with none is refused (K14). */
 const asOfMs = (adapter: string, v: unknown): number => {
-  const ms = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : v instanceof Date ? v.getTime() : NaN;
+  // A date and time with no zone is read as UTC, never in the runtime's own zone, so freshness does not move with it.
+  const zoneless = (s: string) => /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s) ? `${s.replace(' ', 'T')}Z` : s;
+  const ms = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(zoneless(v)) : v instanceof Date ? v.getTime() : NaN;
   if (!Number.isFinite(ms)) throw new Error(`${adapter}: an item has no asOf (K14)`);
   return ms;
 };
@@ -98,6 +100,8 @@ export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
   const owner = c.owner === undefined ? null : name(A, 'owner field', c.owner);
   const asOf = name(A, 'asOf field', c.asOf);
   const body = name(A, 'body field', c.body);
+  // Review D4: a header value is one line, as the channel adapters require (review C-F1, M8b).
+  if (c.authorization !== undefined) oneLine(A, { authorization: c.authorization });
   const headers = { 'content-type': 'application/json', accept: 'application/json', ...(c.authorization ? { authorization: c.authorization } : {}) };
   const url = (path: string) => `${base.origin}/${index}/${path}`;
   const call = async (method: string, path: string, payload?: unknown) => {
@@ -118,6 +122,8 @@ export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
       return r.json!.hits.hits.map((h: any) => ({ id: String(h._id), owner: owner ? (h._source?.[owner] === undefined || h._source?.[owner] === null ? null : String(h._source[owner])) : null, asOf: asOfMs(A, h._source?.[asOf]) }));
     },
     async resolve(item: string): Promise<string | null> {
+      // Review D5: `.` and `..` would leave the _doc API once the URL is normalised.
+      if (item === '.' || item === '..' || !item) throw new Error(`${A}: ${JSON.stringify(item)} is no document id`);
       const r = await call('GET', `_doc/${encodeURIComponent(item)}`);
       if (r.status === 404 || r.json?.found === false) return null;
       if (r.status !== 200) throw new Error(`${A}: _doc answered ${r.status}`);
@@ -128,6 +134,8 @@ export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
       if (!owner) return { removed: 0 };
       const r = await call('POST', '_delete_by_query?refresh=true', { query: { term: { [owner]: subject } } });
       if (r.status !== 200) throw new Error(`${A}: _delete_by_query answered ${r.status}`);
+      // A forget that deleted only part of the subject's documents is not done (PS17.7).
+      if (Array.isArray(r.json?.failures) && r.json!.failures.length) throw new Error(`${A}: _delete_by_query reported ${r.json!.failures.length} failures`);
       return { removed: Number(r.json?.deleted ?? 0) };
     },
   });

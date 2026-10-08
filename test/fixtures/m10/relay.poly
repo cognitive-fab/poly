@@ -1,0 +1,29 @@
+// M10 review D1: a module with no source and no audience, in a program whose other module has an owned source.
+module relay
+
+enum Phase { Idle, Sent }
+
+machine Relay {
+  state {
+    phase : Phase = Idle
+  }
+
+  action Forward(body: Content)
+  action Reset()
+
+  on Reset {
+    require phase == Sent else reject "idle"
+    phase' = Idle
+  }
+
+  on Forward(body) {
+    require phase == Idle else reject "busy"
+    phase' = Sent
+    emit send(body: body)
+  }
+
+  effect send(body: Content) {
+    kind "relay.send"
+    labels { egress:external }
+  }
+}

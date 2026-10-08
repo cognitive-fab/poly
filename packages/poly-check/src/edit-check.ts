@@ -40,6 +40,9 @@ export async function editCheck(input: EditCheckInput): Promise<EditCheckReply> 
   const refused = (reason: string): EditCheckReply => ({ status: 'refused', module: file, reason, written: false });
   if (!existsSync(file)) return refused(`no such module ${file}`);
   const before = readFileSync(file, 'utf8');
+  // Review D2: the target is a module, never poly.json, a certificate or a key; with a project, one of its modules.
+  if (!file.endsWith('.poly') && !(file.endsWith('.ts') && readEmbedded(before, file).module)) return refused(`${file} is not a module: a .poly file, or a .ts file that holds one`);
+  if (input.project && !loadProject(resolve(input.project)).files.some((f) => resolve(f) === file)) return refused(`${file} is not a module of the project ${resolve(input.project)}`);
   let after: string;
   if (typeof input.text === 'string') {
     if (input.old !== undefined || input.new !== undefined) return refused('an edit is old and new, or text, not both');

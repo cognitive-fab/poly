@@ -103,7 +103,10 @@ export class Memory {
   flowOf(machineId: string): FlowDescriptor | null {
     const parts = machineId.split('.');
     for (let n = parts.length - 1; n >= 1; n--) { const f = this.flows.get(parts.slice(0, n).join('.')); if (f) return f; }
-    return null;
+    // PS17.4, review D1: the runtime applies the flow rule to every intent of a program with memory. A module with no
+    // descriptor of its own has no source and no claims map; the program's one audience (PS1.4b) is every descriptor's.
+    const any = this.flows.values().next().value as FlowDescriptor | undefined;
+    return any ? { v: 1, module: parts.slice(0, -1).join('.'), audience: any.audience, sources: {}, claims: {} } : null;
   }
 
   /**
@@ -119,6 +122,8 @@ export class Memory {
     if (i.decl?.remember) {
       const src = this.sources.get(i.decl.remember.source as string);
       const subject = typeof i.payload[i.decl.remember.about] === 'string' ? (i.payload[i.decl.remember.about] as string) : null;
+      // PS17.0, K14, review C4: an item of an owned source has one owner, so a remember with no subject is refused.
+      if (src?.owned && subject === null) return { deny: 'audience' };
       const item: Taint = { c: src?.class ?? 0, o: src?.owned && subject !== null ? [subject] : [] };
       for (const v of Object.values(i.payload)) {
         if (typeof v !== 'string' || !DIGEST.test(v)) continue;
@@ -149,7 +154,8 @@ export class Memory {
           if (!i.approved) escalate = 'stale-items';
         }
       }
-      fields.items = { count, class: name(cls), ageMs: age, provenance: PROVENANCE[prov] };
+      // An empty item set holds nothing verified: its provenance is the lowest.
+      fields.items = { count, class: name(cls), ageMs: age, provenance: PROVENANCE[count ? prov : 0] };
     }
     // PS17.3: a decision is judged by the taint it gives its answer, not as a send.
     if (contents.length && !i.decl?.decision) {
@@ -171,7 +177,7 @@ export class Memory {
     return Object.keys(fields).length ? { fields } : null;
   }
 
-/** PS17.5: the project's memory, read as a source adapter reads its index. */
+  /** PS17.5: the project's memory, read as a source adapter reads its index. */
   private memoryAdapter(source: string): SourceAdapter {
     const db = this.store.db;
     return {
@@ -195,6 +201,7 @@ export class Memory {
     const d = this.sources.get(spec.source);
     if (!d || d.kind !== 'memory') throw new SourceRefused(`${spec.source} is no memory source`);
     const subject = typeof payload[spec.about] === 'string' ? (payload[spec.about] as string) : null;
+    if (d.owned && subject === null) throw new SourceRefused(`${spec.source} is owned, and the remember names no subject (K14)`);
     const items: string[] = [];
     await this.store.txn(() => {
       for (const v of Object.values(payload)) {
@@ -245,6 +252,19 @@ export class Memory {
       db.prepare('DELETE FROM poly_memory WHERE source = ?').run(target.source);
       db.prepare('DELETE FROM poly_items WHERE source = ?').run(target.source);
     }
+  }
+
+  /** Whether the certified build has the source. */
+  hasSource(source: string): boolean { return this.sources.has(source); }
+
+  /** Records that a body was read from a source (PS17.7). Inside a transaction. */
+  fromSource(d: string, source: string): void {
+    this.store.db.prepare('INSERT OR IGNORE INTO poly_body_source (digest, source) VALUES (?, ?)').run(d, source);
+  }
+
+  /** PS17.7, review C5: drops the taint records of erased bodies. Inside a transaction. */
+  dropTaint(digests: string[]): void {
+    for (const d of digests) this.store.db.prepare('DELETE FROM poly_taint WHERE digest = ?').run(d);
   }
 
   /** PS17.7: each connected adapter, to forget a subject at its source. */
@@ -325,14 +345,17 @@ export class Memory {
    * Items' bodies, resolved from the source now and kept in the erasable content store with the item's taint. The
    * decision's taint is the join of all of them.
    */
-  async materials(payload: Record<string, unknown>, body: (d: string) => Promise<string | null>, put: (b: string) => Promise<string>): Promise<{ bodies: Record<string, string | null>; items: Record<string, { id: string; body: string | null }[]>; taint: Taint }> {
+  async materials(payload: Record<string, unknown>, body: (d: string) => Promise<string | null>, put: (b: string, t: Taint, source: string | null) => Promise<string>): Promise<{ bodies: Record<string, string | null>; items: Record<string, { id: string; body: string | null }[]>; taint: Taint }> {
     const bodies: Record<string, string | null> = {};
     const items: Record<string, { id: string; body: string | null }[]> = {};
     let taint = BOTTOM;
     for (const [p, v] of Object.entries(payload)) {
       if (typeof v === 'string' && DIGEST.test(v)) {
         bodies[p] = await body(v);
-        taint = join(taint, this.taintOf(v) ?? BOTTOM);
+        // S302, review B: a Content with no taint record is one the runtime never stored, and fails closed here too.
+        const t = this.taintOf(v);
+        if (!t) throw new SourceRefused(`${p} names a body with no taint record (S302)`);
+        taint = join(taint, t);
       } else if (isItems(v)) {
         const set = this.itemsOf(v.ref);
         if (!set) throw new SourceRefused(`${p} names an item set the runtime did not retrieve`);
@@ -342,7 +365,8 @@ export class Memory {
         for (const it of set.items) {
           const b = await adapter.resolve(it.id);
           // A body read is kept erasable, with the item's taint, so forgetting its owner erases it (PS17.7).
-          if (b !== null) { const d = await put(b); await this.store.txn(() => { this.taint(d, { c: set.taint.c, o: it.owner === null ? [] : [it.owner] }); this.store.db.prepare('INSERT OR IGNORE INTO poly_body_source (digest, source) VALUES (?, ?)').run(d, set.source); }); }
+          // Review B3: the body, its taint and its source are stored in one transaction.
+          if (b !== null) await put(b, { c: set.taint.c, o: it.owner === null ? [] : [it.owner] }, set.source);
           out.push({ id: it.id, body: b });
         }
         items[p] = out;
