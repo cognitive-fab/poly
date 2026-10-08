@@ -137,7 +137,7 @@ The nearest systems each cover part of the ground:
   - `strict`: an input outside the domain is rejected at dispatch, so the checked domain is the running domain;
   - `disclosed`: an input outside the domain is accepted and journaled as drift, and the certificate lists the field.
 
-  The default is `strict` for any value that can reach an irreversible or compensable effect, and `disclosed` elsewhere.
+  The default is `strict` for every action parameter that has a check domain; `disclosed` applies only where it is written (S400, PT3.4a).
 - **PF1.3** A machine declares its actions (named intents with typed parameters) and its terminal states.
 - **PF1.4** A handler (`on Action`) either accepts, writing the next state, or rejects with a named reason.
   - A handler that writes nothing and does not reject is flagged.

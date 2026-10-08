@@ -290,7 +290,7 @@ The Claude Code plugin packages this loop as a skill with commands (`/poly:new`,
 | AD-5 | Host languages | TypeScript first; Python through the existing polyflow platform Python ports | TypeScript for v1. |
 | AD-6 | Worlds | (a) in v1; (b) deferred to v2 | (b). They are not needed for the first experiment and add a fourth expression language. |
 | AD-8 | How the two logics are kept apart | (a) separate files and operators (v0.2); (b) a separate truth type, `Tri`, checked by the type checker | (b), since v0.4. `.policy.poly` remains a reading convention. |
-| AD-9 | Out-of-domain inputs at runtime | (a) always accept and journal; (b) per-field `strict` or `disclosed`, `strict` by default where a value reaches an irreversible or compensable effect | (b). |
+| AD-9 | Out-of-domain inputs at runtime | (a) always accept and journal; (b) per-field `strict` or `disclosed`, `strict` by default where a value reaches an irreversible or compensable effect | (b), with `strict` the default for every parameter that has a check domain since S400 (PT3.4a). |
 | AD-7 | Licence | follow each engine's licence; the language and compiler under one licence | Open question for the owner (section 13). |
 
 ## 12. What changes in existing repositories
