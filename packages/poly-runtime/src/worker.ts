@@ -25,6 +25,8 @@ export interface Proposal {
   payloadDigest: string;
   stateDigest: string;
   approved?: { by: string; ref: string };
+  /** S401, PT9.3: an approved re-proposal's second snapshot, the emitter's latest post-state when it is re-proposed. */
+  later?: { seq: number; stateDigest: string };
   /** S147: how many times a stale allow of this intent was rechecked, when it was. */
   rechecks?: number;
   /** PT25.1, S185: a channel send's channel. */
@@ -50,7 +52,8 @@ export type GateDecision = ({ decision: 'allow' } | { decision: 'deny'; reason: 
 
 /** PT9.1 to PT9.4, before M5's policy gate (S118): a decision is a function of the proposal and the snapshot (K6). */
 export interface Gate {
-  propose(proposal: Proposal, snapshot: Record<string, unknown>): GateDecision | Promise<GateDecision>;
+  /** S401: `later` is the emitter's latest post-state at an approval's re-proposal, which a policy gate also evaluates. */
+  propose(proposal: Proposal, snapshot: Record<string, unknown>, later?: Record<string, unknown>): GateDecision | Promise<GateDecision>;
   /** PT9.4: the observed result of the handler for this proposal, by digest. */
   settle(observed: { ok: boolean; output: string }, proposal: Proposal): SettleResult | Promise<SettleResult>;
 }
@@ -295,6 +298,24 @@ export class EffectWorker {
     return { proposal, snapshot };
   }
 
+  /**
+   * S401, PT9.3: an approved re-proposal also reads the emitter's latest post-state, named in the proposal by its seq and
+   * digest. One that cannot be loaded throws, so the intent is held as for an unavailable gate (PT9.5), never evaluated
+   * against another state.
+   */
+  private async laterOf(row: OutboxRow, proposal: Proposal): Promise<Record<string, unknown>> {
+    let state: Record<string, unknown>;
+    let seq: number;
+    try {
+      seq = (await this.kernel.getState(row.instance_id)).seq;
+      state = await this.kernel.getStateAt(row.instance_id, seq);
+    } catch (e) {
+      throw new Error(`unavailable: the latest snapshot of ${row.instance_id} cannot be loaded for the approved re-proposal (S401, PT9.3): ${String((e as Error)?.message ?? e)}`);
+    }
+    proposal.later = { seq, stateDigest: digest(state) };
+    return state;
+  }
+
   /** Expired leases (S119): Running is HandlerFailed and counts an attempt; any other state returns to pending. */
   private async recover(now: number): Promise<void> {
     const rows: OutboxRow[] = await this.store.txn(() => this.store.db.prepare(
@@ -426,7 +447,7 @@ export class EffectWorker {
             g = mem && 'deny' in mem ? { decision: 'deny', reason: mem.deny } : mem && 'escalate' in mem ? { decision: 'escalate', reason: String(mem.escalate) }
               : budget && 'refuse' in budget ? (budget.refuse === 'escalate' ? { decision: 'escalate', reason: 'budget' } : { decision: 'deny', reason: 'budget' })
               : grant && 'deny' in grant ? { decision: 'deny', reason: grant.deny, ...(grant.reads ? { reads: grant.reads } : {}) }
-              : this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot);
+              : this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot, approval ? await this.laterOf(row, proposal) : undefined);
             // PS16.3, S147: the allow reads the grant as it reads a singleton, so a grant that steps makes it stale.
             if (grant && 'reads' in grant && g.decision === 'allow') g = { ...g, reads: { ...(g.reads ?? {}), ...grant.reads } };
           } catch (e) {

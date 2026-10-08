@@ -254,10 +254,21 @@ export class PolicyGate implements Gate {
     return { v, decision, reason };
   }
 
-  async propose(proposal: Proposal, snapshot: Record<string, unknown>): Promise<GateDecision> {
+  async propose(proposal: Proposal, snapshot: Record<string, unknown>, later?: Record<string, unknown>): Promise<GateDecision> {
     const session = sessionOf(proposal.machine);
     return this.serial(session, async () => {
-      const { action, reads, singletons, claims } = this.action(proposal, snapshot);
+      const emitting = this.action(proposal, snapshot);
+      const { reads, singletons, claims } = emitting;
+      // S401, PT9.3: an approved re-proposal is evaluated against the emitting snapshot and the emitter's latest one, and
+      // allowed only if both allow. The engine takes one decision, so Σ moves once: it is given the later snapshot's
+      // action when only that one denies (stale-approval), and the emitting one's otherwise. Both are judged first by the
+      // engine's own interpreter, which moves nothing.
+      let action = emitting.action;
+      let stale = false;
+      if (proposal.approved && later && proposal.later && proposal.later.seq !== proposal.seq) {
+        const after = this.action(proposal, later).action;
+        if (this.approvedDenies(session, after) && !this.approvedDenies(session, action)) { action = after; stale = true; }
+      }
       // An engine that throws or does not answer took no decision, and so no sequence number (PT9.5).
       const { v, decision, reason } = await this.decideAction(session, moduleOf(proposal.machine), action, proposal.idempotencyKey, proposal.approved, proposal.instance);
       const sseq = this.view.nextSseq(session);
@@ -268,11 +279,25 @@ export class PolicyGate implements Gate {
       if (held) throw new GateUnavailable(held, { session, sseq, action, engineDecision: v.decision, engineClass: v.class ?? null, engineRecord: v.record ?? null, stateBefore: v.state_before ?? null, ...approvedOf(proposal) });
       // PD4-A1: the singletons the decision read (a mode, say), in the verdict event itself.
       // PD5-A4: the verdict records the digest of the claims the decision read.
-      const record = { session, sseq, action, singletons, ...(claims ? { claims: digest(claims) } : {}), stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
+      const record = { session, sseq, action, singletons, ...(proposal.later ? { later: proposal.later } : {}), ...(stale ? { staleApproval: true } : {}), ...(claims ? { claims: digest(claims) } : {}), stateBefore: v.state_before ?? null, stateAfter: v.state_after ?? null, engineDecision: v.decision, engineReason: v.reason ?? null, policySet: v.policy_set ?? null, ...(approvedOf(proposal)), ...(v.witnesses?.length ? { witnesses: digest(v.witnesses) } : {}) };
       if (decision === 'allow') return { decision, reads, record };
-      if (decision === 'deny') return { decision, reason: this.staleReason(reason) ?? 'denied', witnessDigest: v.witnesses?.length ? digest(v.witnesses) : undefined, reads, record };
+      if (decision === 'deny') return { decision, reason: stale ? 'stale-approval' : this.staleReason(reason) ?? 'denied', witnessDigest: v.witnesses?.length ? digest(v.witnesses) : undefined, reads, record };
       return { decision, reason: reason ?? undefined, reads, record };
     });
+  }
+
+  /** S401: whether the engine's interpreter, with an approval and the session's Σ, refuses an action; nothing moves. */
+  private approvedDenies(session: string, action: Record<string, unknown>): boolean {
+    const raw = (this.engine.__raw ?? this.engine) as any;
+    const core = this.pxPackage.core;
+    for (const g of (raw._gates as Map<string, any> | undefined)?.values() ?? []) {
+      if (`scope:${g.scope}` !== session || !g.plan) continue;
+      const meta = g.sessions.meta(session);
+      const canonical = core.normalizeAction(action);
+      const r = core.stepPlan(g.plan, meta.state, core.routeAction(g.plan, canonical), { action: canonical, history: meta.history, run: { id: session, scope: g.scope, step: meta.step + 1 }, approved: { by: 'poly', ref: 'stale-approval' } });
+      return decisionOfReject(r.reject) !== 'allow';
+    }
+    return false;
   }
 
   /** S158: whether a deny stands behind an escalation, by the engine's own interpreter with the escalations lifted. */

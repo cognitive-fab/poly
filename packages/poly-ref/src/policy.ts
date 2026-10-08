@@ -568,13 +568,16 @@ export function validatePolicy(s: PolicyScope, facts: PolicyFacts, engine: { ini
       const got = engine.step(cur.model, row);
       const step: WitnessStep = { pre: cur.sigma, action: 'propose', data: row, post: want.next, verdict: want.decision };
       if (got.decision !== want.decision) return { mismatch: [...cur.path, step], detail: `PS8 decides ${want.decision}${want.reasons.length ? ` (${want.reasons.join(', ')})` : ''} and the lowered policy ${got.decision}`, pairs: queue.length, rows: table.rows.length, capHit };
-      // Review B1: an escalation a person approves is decided again with the approval, and its Σ explored.
+      // Review B1: an escalation a person approves is decided again with the approval, and its Σ explored. PS8.5, S401:
+      // an approved re-proposal is also evaluated, with the approval, against the emitter's state at approval, which may
+      // be any row of the table (a superset of the states the instance reaches while the intent waits); so every row's
+      // approved decision is compared too, and only an approved escalation moves Σ, as before.
       let next = want.decision === 'allow' ? { sigma: want.next, model: got.next, verdict: 'allow' } : null;
-      if (want.decision === 'escalate') {
+      {
         const wantA = (opts.evaluate ?? decide)(s, cur.sigma, row, { approved: true });
         const gotA = engine.step(cur.model, row, { approved: true });
         if (gotA.decision !== wantA.decision) return { mismatch: [...cur.path, { ...step, verdict: `${wantA.decision} (approved)` }], detail: `with a person's approval, PS8 decides ${wantA.decision} and the lowered policy ${gotA.decision}`, pairs: queue.length, rows: table.rows.length, capHit };
-        if (wantA.decision === 'allow') next = { sigma: wantA.next, model: gotA.next, verdict: 'allow (approved)' };
+        if (want.decision === 'escalate' && wantA.decision === 'allow') next = { sigma: wantA.next, model: gotA.next, verdict: 'allow (approved)' };
       }
       if (!next) continue;
       const nx = { sigma: next.sigma, model: next.model, path: [...cur.path, { ...step, post: next.sigma, verdict: next.verdict }] };
