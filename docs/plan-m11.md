@@ -126,20 +126,28 @@ AC25 ran in `routing` (escalation, an answer on the small tier, a failure escala
 
 **Compared file by file with M9's `gate-file-times.json`.** The suite took 1,745 s against 1,837 s, `test/after/` 148 s against 163 s, and the summed time of the 158 files in both 19,663 s against 19,427 s; 40 were faster and 18 slower by more than 20% and 5 s. The slowest are the channel files again (`channels-whatsapp` 1,348 s to 1,370 s, `channels-adapter-pin` 1,243 s to 1,298 s). The largest change is `certificate`, 486 s to 802 s, with two more faults over a project that admits a route. M11's own files take 104 s (`review-m11`, `cost`), 72 s (`std-routing`), and 22 s or less for each of the rest.
 
-**M11 is built and gated; it closes on the owner's rulings.** Two review findings change what a reservation and a cost mean, and wait as S360 and S361 (`decisions-m11.md`, step 9); `poly try`, which Q9 placed at M11's start and this plan does not list, waits for the owner too.
+**The rulings on the review, and the gate again.** The owner accepted S360 and S361, ruled `poly try` into M11, a failure-only route CLEAN, and channel names as identifiers; m4's anchor lock (c201ccf) was merged first (fbc2e6e). All are built (163fc0e3; `decisions-m11.md`), and the closing gate ran again at 163fc0e3 from 23:09:55 to 23:23:36 on 7 October 2026, after `npm run clean`, the same way. As ruled, it overlapped no M10 work: a watcher listed every minute, 14 times, every process naming the M10 worktree and every other suite run, and every file M10's logs, its working folder and its git index wrote; it saw none.
+
+| Gate | Commit | Tests (suite and `test/after/`) | Passed | Failed | Skipped | Waiting | Total |
+|---|---|---|---|---|---|---|---|
+| M9 closing, from a clean build | c0cfff1 | 1,925 | 1,919 | 0 | 2 | 4 | 33 min 40 s |
+| M11 closing, from a clean build | 514528a | 1,996 | 1,990 | 0 | 2 | 4 | 31 min 56 s |
+| **M11 closing after the rulings, from a clean build** | 163fc0e3 | 2,006 | 2,000 | 0 | 2 | 4 | 13 min 41 s |
+
+The ten new tests are `routing-rulings`'s three, `try`'s four (AC29 among them) and money's S360 limits; the waiting and skipped tests are the ones named above. `check-memory` passed, and the 159 measured files are identical to M9's close. **Compared file by file with M9's `gate-file-times.json`:** the suite took 735 s against 1,837 s, `test/after/` 76 s against 163 s, and the summed time of the 158 files in both 7,472 s against 19,427 s; 90 were faster and 3 slower by more than 20% and 5 s. The channel files, the slowest at every gate, took a third of their time (`channels-whatsapp` 1,348 s to 505 s, `channels-adapter-pin` 1,243 s to 465 s). Nothing in those files changed, so this is the machine: with no other session's work on it, the gate ran at the speed M9's record measured for one file alone. Every file's time is in `docs/m11/gate2-file-times.json`.
+
+**M11 is ready to merge,** as the ruling sets: the gate passed with no failure and the measured verdicts unchanged. As ruled, M10 merges into m4 first, and M11 then rebases on it, resolves the three expected conflicts and runs the full suite once more before its merge.
 
 **Limits M11 closes with.**
-- **A reservation covers the token limit at the highest price.** A call that uses its full output limit with input tokens can cost more than its reservation, recorded as an overrun (S360).
-- **A usage report poly cannot price.** None costs nothing; a fractional or negative one fails the call after its provider answered, and its reservation is released (S361). The certificate lists both.
-- **A call with no answer** has no usage and its reservation is released, so what a provider bills for it is not counted (K15).
-- **A route that escalates on failure alone** has two vacuous rules in `r.Route`, and checks `INCONCLUSIVE`, never `CLEAN`.
-- **A channel's name** is not checked to be an identifier, as a route's, a budget's and a credential's are; outside M11.
+- **A call with no answer** has no usage and its reservation is released, so what a provider bills for it is not counted (K15). The certificate lists it.
+- **An overrun is a provider reporting more than one of its limits** (S360), and a report poly cannot price is charged the full reservation (S361): both rest on K15, reconciled against invoices as a measure.
+- **`poly try`** gates by PS8 in poly-ref, not by the engine the runtime calls, and replays its session from the start on every call.
 - **Replay of a credential's `Grant`** needs `std.credentials`, which no build records; listed for the v1 gate (AC27).
 - **The gate's time** depends on the machine's load, as at M9's close.
 
 ## Conclusion
 
-M11 makes a budget a checked invariant and a route a checked machine: a reservation is taken before every model call and settled after it, so spent plus reserved never passes a cap, and every tier choice replays from the ledger with no model call. Every provider call in the tests is recorded, nothing spends money, and each change shared with M10 is listed for a joint ruling. As built, every step is done, the review's findings are fixed or raised, and the closing gate passed from a clean build with no failure and the measured verdicts unchanged; M11 closes on the owner's rulings on S360 and S361.
+M11 makes a budget a checked invariant and a route a checked machine: a reservation is taken before every model call and settled after it, so spent plus reserved never passes a cap, and every tier choice replays from the ledger with no model call. Every provider call in the tests is recorded, nothing spends money, and each change shared with M10 is listed for a joint ruling. As built, every step is done, the review's findings are fixed or raised, and the closing gate passed from a clean build with no failure and the measured verdicts unchanged; the owner's rulings on S360, S361 and `poly try` are built, and the gate passed again from a clean build with no other session's work on the machine; M11 is ready to merge after M10.
 
 ## Glossary
 
