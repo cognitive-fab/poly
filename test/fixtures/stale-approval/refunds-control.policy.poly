@@ -1,0 +1,10 @@
+// S401, the control: a person approves every refund, and no rule reads the order's status.
+module refunds_control
+
+policy refunds-control {
+  scope "refunds"
+  obligation refund-needs-person "A person approves every refund." rule {
+    when effect.kind == "payments.refund"
+    require false else escalate
+  }
+}

@@ -1,0 +1,35 @@
+// S401: an order whose refund a person approves. The refund is requested while the order is open and leaves it open,
+// so the order can be cancelled while the escalated refund waits for its approval. The request is recorded in `refund`
+// so the step changes the state (PL4002, S33).
+module refunds
+
+enum Status { Open, Cancelled }
+enum Refund { None, Requested }
+
+machine Order {
+  state {
+    status : Status = Open
+    refund : Refund = None
+  }
+  terminal status == Cancelled
+
+  action RequestRefund()
+  action Cancel()
+
+  on RequestRefund {
+    require status == Open else reject "not-open"
+    require refund == None else reject "already-requested"
+    refund' = Requested
+    emit refund(1)
+  }
+  on Cancel {
+    require status == Open else reject "not-open"
+    status' = Cancelled
+  }
+
+  effect refund(n: 0..1) {
+    kind "payments.refund"
+    labels { egress:external }
+    class irreversible
+  }
+}

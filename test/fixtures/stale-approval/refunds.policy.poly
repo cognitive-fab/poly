@@ -1,0 +1,14 @@
+// S401: a person approves every refund, and no refund is made on a cancelled order.
+module refunds_policy
+
+policy refunds-governance {
+  scope "refunds"
+  obligation refund-needs-person "A person approves every refund." rule {
+    when effect.kind == "payments.refund"
+    require false else escalate
+  }
+  obligation no-refund-when-cancelled "No refund on a cancelled order." rule {
+    when effect.kind == "payments.refund" && machine("refunds.Order").status == Cancelled
+    require false else deny
+  }
+}
