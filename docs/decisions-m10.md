@@ -192,6 +192,21 @@ S320 to S327 are built (3ba8b571), and the closing gate ran from a clean build a
   3. In poly-m4, `git merge --ff-only m10`. Record the merge here.
   4. Then M11 rebases on m4 as ruled in decisions-m11.md.
 
+## The merge with m4 (2026-10-08)
+
+Done in the order ruled.
+
+1. **The owner's documents on m4** (7523ba66): the revised example harness proposal, the experiment proposals on stage environments and a strict rerun, and the paper draft.
+2. **m4 merged into m10** (481c2f7c). m4 brought c201ccf, the anchor changed only under its lock. Where S321's anchor reads meet it, every read of an anchor now holds the lock: `readAnchor`, through which load's `verifyChain`, the commands that bind a record to the anchor and every other reader go; and a new anchor is written under it (`createAnchor`, for `poly anchor keyrings` and the bench's anchors). PT10m says so. A test in `test/rulings-m10.test.mjs`, failing first, shows a lock held by another process refusing the read of `poly forget` and of `readAnchor`, and the record naming the anchor once the lock is gone.
+   **Three flaws in the lock, found by polywatch on the merge and fixed**, with a test that failed on the lock as merged:
+   - A holder removed the lock unconditionally, so a holder that ran past a minute deleted the lock another process had taken over. The lock now holds its holder's token, and only that holder removes it.
+   - A stale lock was removed without checking that it was still the one judged stale, so two processes could both take over a dead process's lock. It is moved aside and compared by its token; a lock another process took meanwhile is put back.
+   - `writeAnchorFile` wrote without the lock. It takes the lock now, and the unlocked writer is private to `anchor.ts`.
+
+   **Checked.** `test/s210.test.mjs`, `test/rulings-m10.test.mjs` and `test/keyrings.test.mjs` pass (30 tests). The full suite: 2,009 tests and one after the M3 runs, 2,004 pass, no failure, 2 skipped and 4 waiting; check-memory passed (`.poly/logs/3067379c-2026-10-08T13-39-54-127Z-merge2.log`). The 159 measured files are identical, the 160th the error case of `PL6837` as before.
+3. **m4 fast-forwarded to m10** (`git merge --ff-only m10`, at 481c2f7c), and again to this record.
+4. M11 rebases on m4, as ruled in decisions-m11.md; that is the M11 session's.
+
 ## Conclusion
 
 M10 is ruled. Its one measured risk, the taint state space, was measured first and fit. Every step is built, the review's findings are fixed or ruled and built, and the closing gate passed from a clean build with no failure and the measured verdicts unchanged. M10 waits only for the owner to close it and for its merge with M11.
