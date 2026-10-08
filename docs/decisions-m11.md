@@ -144,6 +144,13 @@ PS18.1, PS18.3 and PS18.6 were amended first (b0dcad4b), and PT10r and PT14 with
 
 At 163fc0e3, after `npm run clean`, with no M10 work on the machine (a watcher saw no M10 process, suite run or file written in its 14 listings): 2,005 tests and one after the M3 runs, 2,000 pass, no failure, 2 skipped and 4 waiting; `check-memory` passed (`.poly/logs/163fc0e3-2026-10-08T06-09-57-680Z-gate2.log`). The 159 measured files are identical to M9's close. It took 13 min 41 s against 31 min 56 s at 514528a; the comparison file by file is in `plan-m11.md`, section 9, and every file's time in `docs/m11/gate2-file-times.json`. As the ruling sets, M11 is ready to merge: after M10 merges into m4, M11 rebases on it, resolves the three expected conflicts and runs the full suite once more.
 
+## M11 closed (owner's reviewer, 2026-10-08)
+
+- **Accepted.** The rulings as built (S360, S361, the failure-only routes, channel identifiers), poly try as S362 with PL6846, and the closing gate at 163fc0e3: 2,006 tests, 2,000 pass, no failure, the same skipped and waiting tests as M9's close, check-memory passed, and the 159 measured files identical.
+- **Polywatch's label finding: the false alarm stands.** PL6301 refuses an unlabelled routed decision at check, so no admitted program inherits the default.
+- **Gate times.** The baseline for the v1 gate is docs/m11/gate2-file-times.json, measured with nothing else running. The M9 times stay on record but are not used for comparison.
+- **Next, unchanged.** M10 merges into m4 first. M11 then rebases, resolves the three expected conflicts, runs the full suite once, and merges with no further ruling if that suite has no failure and the measured files are identical. Replaying a credential's grant stays on the v1 gate list.
+
 ## Conclusion
 
 M11 is ruled and built. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains: sixty-four concurrent runs never pass a cap, and a crash never loses or doubles a reservation. A route is a checked machine whose every tier choice replays from the ledger with no model call, and `poly cost` sums every answered call from the ledger alone. The review's findings are fixed, the owner's rulings on them are built (an input limit in every reservation, an unpriceable report charged in full, `poly try`), and the gate passed again from a clean build on a quiet machine. M11 waits only for M10 to merge first.
