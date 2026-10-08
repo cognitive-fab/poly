@@ -228,7 +228,7 @@ poly writes one ledger, in the polyflow platform event format, which is already 
 | Program kind | Declared with | Hosted by | Effects become | Gate mounted on |
 |---|---|---|---|---|
 | **Application core** | `machine` | the host process, through the TypeScript runtime API | host handlers | the outbox worker |
-| **Agent workflow** | `workflow` | the polyflow gateway (single agent) or the polycrew broker (several participants), over MCP | work orders claimed by an agent or a person | work-order issue and report |
+| **Agent workflow** | `workflow` | `poly run --mcp`, poly-runtime serving polyflow's workflow tools over MCP, under the gate since M8a (S173 to S175); the polycrew broker for several participants is not served in v1 | work orders claimed by an agent or a person | work-order issue and report |
 | **Agent policy** | `policy` | the Polyaxion daemon mounted on the agent harness (Claude Code hooks, MCP wrap, Agent SDK, Vercel AI SDK, NVIDIA NAT, OpenShell middleware) | the agent's own tool calls | every tool call |
 
 All three are checked by the same pipeline and journaled in the same ledger format. A coding agent can therefore work inside a workflow written in poly, governed by a policy written in poly, while writing application code in poly. One ledger holds all three.

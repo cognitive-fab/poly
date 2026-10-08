@@ -221,3 +221,20 @@ test('S173, K9: a work order\'s completion actions are delivered by the runtime 
     assert.deepEqual((await rt.audit('run-k9')).filter((r) => r.rule === 'K9').map((r) => r.action), ['TICKETS_READY', 'TICKETS_FAILED']);
   } finally { await rt.close(); }
 });
+
+// V5 of the v1 plan: a workflow under the gate replays like any run. A run driven to its end is folded by journal replay,
+// every post-state and gate decision reproduced, with no diagnostic. A confirmation: it passed when written.
+test('V5: a workflow run under the gate replays with no diagnostic (confirmation)', async () => {
+  const { replayRuntime } = await import('@poly/check');
+  const { rt } = await loaded(await build());
+  try {
+    await start(rt, 'run-replay');
+    await drive(rt, 'run-replay', []);
+    assert.equal((await state(rt, 'run-replay')).briefState, 'posted');
+    const runs = await replayRuntime(rt);
+    const r = runs.find((x) => x.run === 'run-replay');
+    assert.ok(r, 'the workflow run is replayed');
+    assert.ok(r.rows > 0 && r.folded === r.rows, `${r.folded} of ${r.rows} rows folded`);
+    for (const x of runs) assert.deepEqual([x.run, x.notRun ?? null, x.diagnostics.map((d) => `${d.code} ${d.message}`)], [x.run, null, []]);
+  } finally { await rt.close(); }
+});
