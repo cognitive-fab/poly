@@ -1,0 +1,156 @@
+{
+  "initial": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "emailAddress": "owner@home.example.net",
+          "messagesTotal": 2,
+          "threadsTotal": 2,
+          "historyId": "72000"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=INBOX&maxResults=100"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "messages": [
+            {
+              "id": "19a2f1aa00b30b02",
+              "threadId": "19a2f1aa00b30b02"
+            },
+            {
+              "id": "19a2f1aa00b30b01",
+              "threadId": "19a2f1aa00b30b01"
+            }
+          ],
+          "resultSizeEstimate": 2
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/19a2f1aa00b30b02?format=raw"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "19a2f1aa00b30b02",
+          "threadId": "19a2f1aa00b30b02",
+          "labelIds": [
+            "INBOX"
+          ],
+          "snippet": "",
+          "historyId": "71960",
+          "internalDate": "1791181200000",
+          "sizeEstimate": 437,
+          "raw": "RnJvbTogQ29saXMgRXhwcmVzcyA8c3VpdmlAY29saXMuZXhhbXBsZS5jb20-DQpUbzogb3duZXJAaG9tZS5leGFtcGxlLm5ldA0KU3ViamVjdDogPT9JU08tODg1OS0xP1E_Vm90cmVfY29saXNfYV89RTl0PUU5X2V4cD1FOWRpPUU5Pz0NCkRhdGU6IE1vbiwgMDUgT2N0IDIwMjYgMDY6MjA6MDAgKzAwMDANCk1lc3NhZ2UtSUQ6IDx0cmstNTUxMjBAY29saXMuZXhhbXBsZS5jb20-DQpNSU1FLVZlcnNpb246IDEuMA0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PWlzby04ODU5LTENCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IHF1b3RlZC1wcmludGFibGUNCg0KQm9uam91ciwNCg0KVm90cmUgY29saXMgNTUxMjAgYSA9RTl0PUU5IGV4cD1FOWRpPUU5IGV0IGFycml2ZXJhIGpldWRpLg0KQXVjdW5lIGFjdGlvbiBuJ2VzdCBuPUU5Y2Vzc2FpcmUuDQo"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/19a2f1aa00b30b01?format=raw"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "19a2f1aa00b30b01",
+          "threadId": "19a2f1aa00b30b01",
+          "labelIds": [
+            "INBOX",
+            "UNREAD"
+          ],
+          "snippet": "",
+          "historyId": "71950",
+          "internalDate": "1791129900000",
+          "sizeEstimate": 430,
+          "raw": "RnJvbTogPT9VVEYtOD9RP0NhbWlsbGVfQj1DMz1BOXJhcmQ_PSA8Y2FtaWxsZUBmcmllbmRzLmV4YW1wbGUub3JnPg0KVG86IG93bmVyQGhvbWUuZXhhbXBsZS5uZXQNClN1YmplY3Q6ID0_VVRGLTg_Qj9STU91Ym1WeUlITmhiV1ZrYVNBLz89DQpEYXRlOiBTdW4sIDA0IE9jdCAyMDI2IDE4OjA1OjAwICswMjAwDQpNZXNzYWdlLUlEOiA8Yy0yMDI2LTEwLTA0QGZyaWVuZHMuZXhhbXBsZS5vcmc-DQpNSU1FLVZlcnNpb246IDEuMA0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IGJhc2U2NA0KDQpVMkZzZFhRc0NncFBiaUJrdzY1dVpTQmphR1Y2SUc1dmRYTWdjMkZ0WldScElNT2dJREl3SUdnZ1B5QkVhWE10Ylc5cElITnBJSFIxDQpJSFpwWlc1ekxnb0tRMkZ0YVd4c1pRbz0NCg"
+        }
+      }
+    }
+  ],
+  "quiet": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=72000&historyTypes=messageAdded&labelId=INBOX&maxResults=100"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "historyId": "72000"
+        }
+      }
+    }
+  ],
+  "expired": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=72000&historyTypes=messageAdded&labelId=INBOX&maxResults=100"
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": {
+            "code": 404,
+            "message": "Requested entity was not found.",
+            "errors": [
+              {
+                "message": "Requested entity was not found.",
+                "domain": "global",
+                "reason": "notFound"
+              }
+            ],
+            "status": "NOT_FOUND"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "emailAddress": "owner@home.example.net",
+          "messagesTotal": 2,
+          "threadsTotal": 2,
+          "historyId": "72110"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=INBOX&maxResults=100&q=after%3A1791181200"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "messages": [
+            {
+              "id": "19a2f1aa00b30b02",
+              "threadId": "19a2f1aa00b30b02"
+            }
+          ],
+          "resultSizeEstimate": 1
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+From: Alice Moreau <alice@supplier.example.com>
+To: Owner <owner@work.example.com>
+Subject: Invoice 4471 for the October delivery
+Date: Mon, 05 Oct 2026 09:12:00 +0000
+Message-ID: <inv-4471@supplier.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+Please find the details of invoice 4471 for the October delivery below.
+The amount is 1,240.00 EUR and it is due on Friday 9 October.
+
+Could you confirm that the delivery address is still the warehouse?
+
+Alice
