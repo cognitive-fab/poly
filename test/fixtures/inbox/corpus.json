@@ -1,0 +1,18 @@
+{
+  "about": "The inbox assistant's synthetic corpus (plan-ex.md E2.0). Every mail, name and address is written for the tests; the domains are reserved for examples. scripts/ex-gmail-traffic.mjs builds the recorded Gmail traffic from it.",
+  "accounts": [
+    { "label": "work", "owner": "acct-work", "address": "owner@work.example.com", "startHistoryId": "41000", "afterPollHistoryId": "41090" },
+    { "label": "home", "owner": "acct-home", "address": "owner@home.example.net", "startHistoryId": "72000", "afterPollHistoryId": "72000" },
+    { "label": "club", "owner": "acct-club", "address": "owner@club.example.org", "startHistoryId": "15500", "afterPollHistoryId": "15500" }
+  ],
+  "messages": [
+    { "account": "work", "id": "19a2f0c4d1e70a01", "threadId": "19a2f0c4d1e70a01", "file": "work-1.eml", "labelIds": ["INBOX", "UNREAD"], "internalDate": "1791191520000", "historyId": "40990", "phase": "initial" },
+    { "account": "work", "id": "19a2f0c4d1e70a03", "threadId": "19a2f0c4d1e70a03", "file": "work-3.eml", "labelIds": ["INBOX", "CATEGORY_UPDATES"], "internalDate": "1791270000000", "historyId": "40995", "phase": "initial" },
+    { "account": "work", "id": "19a2f0c4d1e70a02", "threadId": "19a2f0c4d1e70a01", "file": "work-2.eml", "labelIds": ["INBOX", "UNREAD"], "internalDate": "1791297000000", "historyId": "41030", "phase": "poll" },
+    { "account": "work", "id": "19a2f0c4d1e70a04", "threadId": "19a2f0c4d1e70a04", "file": "work-4.eml", "labelIds": ["INBOX", "UNREAD"], "internalDate": "1791344640000", "historyId": "41080", "phase": "poll" },
+    { "account": "home", "id": "19a2f1aa00b30b01", "threadId": "19a2f1aa00b30b01", "file": "home-1.eml", "labelIds": ["INBOX", "UNREAD"], "internalDate": "1791129900000", "historyId": "71950", "phase": "initial" },
+    { "account": "home", "id": "19a2f1aa00b30b02", "threadId": "19a2f1aa00b30b02", "file": "home-2.eml", "labelIds": ["INBOX"], "internalDate": "1791181200000", "historyId": "71960", "phase": "initial" },
+    { "account": "club", "id": "19a2f2bb11c40c01", "threadId": "19a2f2bb11c40c01", "file": "club-1.eml", "labelIds": ["INBOX", "UNREAD"], "internalDate": "1790885700000", "historyId": "15420", "phase": "initial" },
+    { "account": "club", "id": "19a2f2bb11c40c02", "threadId": "19a2f2bb11c40c02", "file": "club-2.eml", "labelIds": ["INBOX"], "internalDate": "1790928000000", "historyId": "15430", "phase": "initial" }
+  ]
+}

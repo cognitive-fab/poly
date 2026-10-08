@@ -1,0 +1,25 @@
+From: Sam Okafor <sam@rowing.example.org>
+To: owner@club.example.org
+Subject: Board meeting: can you present the budget?
+Date: Thu, 01 Oct 2026 20:15:00 +0000
+Message-ID: <board-oct@rowing.example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=mix42
+
+--mix42
+Content-Type: text/plain; charset=utf-8
+
+Hi,
+
+The board meets next Tuesday at 19:00. Could you present the budget for
+next season? Please send me the slides by Monday.
+
+Sam
+--mix42
+Content-Type: application/pdf; name="budget-draft.pdf"
+Content-Disposition: attachment; filename="budget-draft.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcfsj6IKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8
+PC9Sb290IDEgMCBSPj4KJSVFT0YK
+--mix42--
