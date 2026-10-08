@@ -379,6 +379,8 @@ export class EffectWorker {
     const m = await this.boundOf(row);
     let result: unknown;
     let ran = false;
+    // Merge review F2 (PS18.4): how often a lost reservation sent the intent to be read again.
+    let reread = 0;
     for (;;) {
       const st = (await this.intentState(row))!;
       switch (st.intent) {
@@ -444,8 +446,9 @@ export class EffectWorker {
           const { action: gateAction, ...gateRecord } = (g.record ?? {}) as Record<string, unknown>;
           const recorded = { decision: d, proposal: this.store.keep(proposal), snapshot: this.store.keep(snapshot), ...(g.reads ? { reads: g.reads } : {}), ...gateRecord, ...(gateAction ? { action: this.store.keep(gateAction), gateDecision: g.decision } : {}) };
           if (g.decision === 'allow') {
-            // PS18.4: the reservation and the allow commit together; a budget another call took first in between
-            // refuses this one, as the check before the policy would have.
+            // PS18.4: the reservation and the allow commit together. A budget another call took first in between aborts
+            // the allow, and the intent is read again (merge review F2), so the budget's own on exhausted decides; a
+            // reservation lost again and again is denied budget, so a run never spins.
             let reserved = true;
             await this.store.txn(async () => {
               if (budget && 'plan' in budget && !budget.held && budget.plan.length && !(await this.opts.reserve!(row, budget.plan))) { reserved = false; return; }
@@ -453,6 +456,7 @@ export class EffectWorker {
               this.verdict(row, { outcome: 'allowed', ...recorded });
             });
             if (reserved) { this.opts.onAllowed?.(row, proposal); continue; }
+            if (reread++ < 3) continue;
             g = { decision: 'deny', reason: 'budget', ...(g.record ? { record: g.record } : {}) };
           }
           if (g.decision === 'deny') {

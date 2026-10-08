@@ -140,7 +140,7 @@ export function expandRoutes(module: A.Module, program: A.Module[]): { extra: A.
       if (STD_CONDITION(n)) return conditionOf(r, `${n.id as string}:${r.name}`);
       if (inFail && !failed && LEFT_GT_ZERO(n)) return { kind: 'Bool', id: `${n.id as string}:${r.name}`, value: false };
       if (n.kind === 'Field' && n.name === 'left') return { ...n, type: rewrite(n.type, false), init: { kind: 'Int', id: `${(n.init as A.NodeBase).id}:${r.name}`, value: T - 1 } };
-      if (n.kind === 'EffKind') return { ...n, value: `route.${r.name}.call` };
+      if (n.kind === 'EffKind') return { ...n, value: `route.${r.name}.call`, generated: 'route' };
       if (n.kind === 'EffLabels' && labels) return { ...n, labels: [...labels] };
       if (n.kind === 'EffRetry' && timeout) return { ...n, attempts: 1, timeout };
       const fail = inFail || (n.kind === 'Handler' && n.action === 'Fail');

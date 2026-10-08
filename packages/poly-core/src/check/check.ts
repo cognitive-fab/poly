@@ -1111,6 +1111,9 @@ class Checker {
       // adapter to the thread's address; only the expansion writes it, on the conversation's effect send (PS15.1).
       const generated = e.items.some((it) => it.kind === 'EffKind' && (it as { generated?: string }).generated === 'channel');
       if (/^channel\.[^.]+\.send$/.test(k) && !generated) this.err('PL1208', e, `effect ${e.name} has kind "${k}": channel.<c>.send is reserved for a channel's conversation, which the expansion writes (PS15.1, S182)`);
+      // Merge review F3 (PT10r): route.<r>.call is a route's tier, which only the route's generated module writes.
+      const routed = e.items.some((it) => it.kind === 'EffKind' && (it as { generated?: string }).generated === 'route');
+      if (/^route\.[^.]+\.call$/.test(k) && !routed) this.err('PL1208', e, `effect ${e.name} has kind "${k}": route.<r>.call is reserved for a route's tier, which its generated module writes (PT10r, PS18.1)`);
     }
     // PT6.3: timer keys are declared by use, so every `after` of the machine is read before any `cancel`.
     // Keys are declared by their use (PT6.3, PT6.4); an indexed key k[i] declares the family k (S49).
