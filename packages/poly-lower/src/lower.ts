@@ -308,6 +308,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     files[`../flow/${module.name}.json`] = JSON.stringify({
       v: 1, module: module.name, audience: classes,
       sources: Object.fromEntries(sources.map((s, i) => [s.name, { class: lowered(cls(s.audience), i === 0), owned: s.owned }])),
+      claims: flowClaims(module),
     }, null, 2) + '\n';
   }
   // S74: each liveness property's goal (and, for leads to, its start) as a state predicate, for exported witness
@@ -515,6 +516,21 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
   const timers = timerTargets(facts.machine);
   if (cx.fault === 'drop-timer-target') timers.pop();
   return { effects: Object.fromEntries(out), ...(timers.length ? { timerTargets: timers } : {}) };
+}
+
+/** PT10k, PS17.3: each action whose claims type has exactly one field of type Audience, with that field. */
+function flowClaims(module: A.Module): Record<string, string> {
+  const out: [string, string][] = [];
+  for (const d of module.decls) {
+    if (d.kind !== 'Machine') continue;
+    for (const it of d.items) {
+      if (it.kind !== 'Handler' || !it.by) continue;
+      const rec = module.decls.find((x): x is A.RecordDecl => x.kind === 'RecordDecl' && x.name === it.by!.type);
+      const fs = (rec?.fields ?? []).filter((f) => f.type.kind === 'TName' && f.type.name === 'Audience');
+      if (fs.length === 1) out.push([`${d.name}.${it.action}`, fs[0].name]);
+    }
+  }
+  return Object.fromEntries(out.sort(([a], [b]) => (a < b ? -1 : 1)));
 }
 
 /** The actions a machine's timers start (PT6.3, S162), sorted. */

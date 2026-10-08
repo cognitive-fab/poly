@@ -31,6 +31,10 @@ export interface Proposal {
   channel?: { name: string; kind: string; recipient: string; recipientClass: string; messageKind?: string };
   /** PS16.3, S199: the grant of an effect that uses a credential, as the runtime's check read it; never its holder. */
   credential?: { name: string; grantState: string; scopes: string[] };
+  /** PT25.1, PT10k: the join of the taints of the Content an intent carries, owners by keyed digest. */
+  taint?: { class: string; owners: string[] };
+  /** PT25.1, PT10k: the item sets an intent carries: their count, class and greatest age. */
+  items?: { count: number; class: string; ageMs: number };
 }
 
 /**
@@ -96,6 +100,8 @@ export interface WorkerOptions {
    * field `credential` and the grant instance's sequence number the allow reads; null for an effect with no `uses`.
    */
   grantCheck?: (row: OutboxRow, decl: any) => { deny: string; reads?: Record<string, number> } | { credential: NonNullable<Proposal['credential']>; reads: Record<string, number> } | null;
+  /** PT10k (S302, S307): the memory check, before the grant check: a final refusal, an escalation, or the proposal's fields. */
+  memoryCheck?: (row: OutboxRow, decl: any, approved: boolean) => { deny: string } | { escalate: string; fields: Pick<Proposal, 'taint' | 'items'> } | { fields: Pick<Proposal, 'taint' | 'items'> } | null;
   /** S180: the completion's data, marked when a Content in it names no body in the content store. */
   markContent?: (instanceId: string, action: string, data: Record<string, unknown>) => Record<string, unknown>;
   /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
@@ -371,12 +377,16 @@ export class EffectWorker {
           const d = st.intent_decision!;
           const approval = d === 2 ? this.lastApproval(row) : undefined;
           const { proposal, snapshot } = await this.proposalOf(row, decl, approval, st.intent_rechecks ?? 0);
-          // PS16.3, S199: the grant check comes first, then the mandate's; each refusal is final whatever a policy says.
+          // PT10k, S302: the memory check comes first: the flow rule and freshness; its refusal is final whatever a policy says.
+          const mem = this.opts.memoryCheck?.(row, decl, d === 2) ?? null;
+          if (mem && 'fields' in mem) Object.assign(proposal, mem.fields);
+          // PS16.3, S199: the grant check comes next, then the mandate's; each refusal is final whatever a policy says.
           const grant = this.opts.grantCheck?.(row, decl) ?? null;
           if (grant && 'credential' in grant) proposal.credential = grant.credential;
           let g: GateDecision;
           try {
-            g = grant && 'deny' in grant ? { decision: 'deny', reason: grant.deny, ...(grant.reads ? { reads: grant.reads } : {}) }
+            g = mem && 'deny' in mem ? { decision: 'deny', reason: mem.deny } : mem && 'escalate' in mem ? { decision: 'escalate', reason: String(mem.escalate) }
+              : grant && 'deny' in grant ? { decision: 'deny', reason: grant.deny, ...(grant.reads ? { reads: grant.reads } : {}) }
               : this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot);
             // PS16.3, S147: the allow reads the grant as it reads a singleton, so a grant that steps makes it stale.
             if (grant && 'reads' in grant && g.decision === 'allow') g = { ...g, reads: { ...(g.reads ?? {}), ...grant.reads } };

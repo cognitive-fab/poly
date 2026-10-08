@@ -17,13 +17,16 @@ export type V = string | number | boolean | null | string[];
 export type Decision = 'allow' | 'deny' | 'escalate';
 
 export interface PolicyFacts {
-  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[]; uses?: string }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
+  machines: Map<string, { service: boolean; fields: Map<string, { values: (string | number | boolean)[] | null; conf: boolean }>; effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: boolean }[]; claims?: Record<string, (string | number | boolean)[] | null>[] }>;
   decisions: Map<string, { answers: (string | number | boolean)[] | null }>;
   /** PT9.9: each send a machine's handlers make to an address of a known machine. */
   sends: { from: string; to: string; action: string }[];
   /** PD5.2.2c: every action of the program as an intent, and the values of every claims type's fields. */
   intents?: string[];
   claimsValues?: Record<string, (string | number | boolean)[] | null>[];
+  /** PT10k: the audience classes, and the largest limit among the retrievals. */
+  audience?: string[];
+  itemsLimit?: number;
 }
 
 /** The program facts a policy reads, from the modules' ASTs. */
@@ -55,17 +58,26 @@ export function policyFacts(modules: Module[]): PolicyFacts {
         return vs.every((v) => v !== undefined) ? (vs as (string | number | boolean)[]) : null;
       };
       for (const f of d.fields) fields.set(f.name, { values: values(f.type) ?? checked(f as never), conf: f.type.kind === 'TConf' });
-      const effects: { kind: string; class: string; labels: string[]; uses?: string }[] = [];
+      const effects: { kind: string; class: string; labels: string[]; uses?: string; content?: boolean; items?: boolean }[] = [];
+      const isContent = (x: TypeExpr) => x.kind === 'TName' && x.name === 'Content';
+      const isItems = (x: TypeExpr) => x.kind === 'TName' && x.name === 'Items';
       for (const it of d.items) {
         if (it.kind === 'EffectDecl') {
           const kind = it.items.find((x) => x.kind === 'EffKind') as { value: string } | undefined;
           const cls = it.items.find((x) => x.kind === 'EffClass') as { value: string } | undefined;
           // PS16.3: the credential an effect uses, whose grant the runtime checks before any policy.
           const uses = it.items.find((x) => x.kind === 'EffUses') as { credential: string } | undefined;
-          effects.push({ kind: kind?.value ?? it.name, class: cls?.value ?? 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}) });
+          // PS17.2, PS17.5: a retrieval's and a remember's kind and labels are the runtime's, read from the source here.
+          const r = it.items.find((x) => x.kind === 'EffRetrieve') as { source: string } | undefined;
+          const w = it.items.find((x) => x.kind === 'EffRemember') as { source: string } | undefined;
+          const src = r ? m.decls.find((x) => x.kind === 'Source' && (x as { name: string }).name === r.source) as { owned: boolean; audience: string } | undefined : undefined;
+          const lowest = (m.decls.find((x) => x.kind === 'Audience') as { classes: string[] } | undefined)?.classes[0];
+          const memKind = r ? `source.${r.source}.retrieve` : w ? `source.${w.source}.remember` : null;
+          const memLabels = w ? ['write:store'] : r ? [src && (src.owned || src.audience !== lowest) ? 'read:private' : 'read:store'] : null;
+          effects.push({ kind: memKind ?? kind?.value ?? it.name, class: cls?.value ?? 'none', labels: memLabels ?? it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}), ...(!memKind && it.params.some((x) => isContent(x.type)) ? { content: true } : {}) });
         }
         if (it.kind === 'Decision') {
-          effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])) });
+          effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(it.params.some((x) => isItems(x.type)) ? { items: true } : {}) });
           decisions.set(it.name, { answers: values(it.result) });
         }
       }
@@ -89,7 +101,11 @@ export function policyFacts(modules: Module[]): PolicyFacts {
   }
   const intents = modules.flatMap((m) => m.decls.flatMap((d) => (d.kind === 'Machine' ? d.items.filter((i) => i.kind === 'Action').map((i) => `${m.name}.${d.name}.${(i as { name: string }).name}`) : []))).sort();
   const claimsValues = [...machines.values()].flatMap((x) => x.claims ?? []);
-  return { machines, decisions, sends, intents, claimsValues };
+  // PT10k: the audience classes, and the largest limit among the retrievals.
+  const audience = [...new Set(modules.flatMap((m) => m.decls.flatMap((d) => (d.kind === 'Audience' ? d.classes : []))))];
+  let itemsLimit = 0;
+  for (const m of modules) for (const d of m.decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl') for (const y of it.items) if (y.kind === 'EffRetrieve') itemsLimit = Math.max(itemsLimit, y.limit);
+  return { machines, decisions, sends, intents, claimsValues, audience, itemsLimit };
 }
 
 // ── PS8.1: Kleene values ────────────────────────────────────────────────────
@@ -226,12 +242,18 @@ export function decide(s: PolicyScope, sigma: Sigma, proposal: Record<string, an
 
 // ── The decision table (S149) ──────────────────────────────────────────────
 
-interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>>; claims: Set<string>; origin: Set<string>; intent: boolean; attribution: boolean; ages: Map<string, Set<number>>; mandate: boolean }
+interface Reads { machines: Map<string, Set<string>>; decisions: Map<string, Set<string>>; confConstants: Map<string, Set<number>>; claims: Set<string>; origin: Set<string>; intent: boolean; attribution: boolean; ages: Map<string, Set<number>>; mandate: boolean; taint: boolean; items: Set<string>; itemAges: Set<number> }
 
 function readsOf(s: PolicyScope): Reads {
-  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map(), claims: new Set(), origin: new Set(), intent: false, attribution: s.policies.some((p) => p.requiresAttribution), ages: new Map(), mandate: false };
+  const reads: Reads = { machines: new Map(), decisions: new Map(), confConstants: new Map(), claims: new Set(), origin: new Set(), intent: false, attribution: s.policies.some((p) => p.requiresAttribution), ages: new Map(), mandate: false, taint: false, items: new Set(), itemAges: new Set() };
+  const isItemsField = (x: Expr): x is Expr & { kind: 'Member'; prop: string } => x.kind === 'Member' && x.object.kind === 'Member' && x.object.prop === 'items' && x.object.object.kind === 'Name' && x.object.object.name === 'effect';
   const walk = (e: Expr | null | undefined): void => {
     if (!e) return;
+    // PT10k: effect.taint and effect.items.f, read; an age's thresholds cut its intervals.
+    if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'effect' && e.prop === 'taint') reads.taint = true;
+    if (e.kind === 'Member' && e.object.kind === 'Name' && e.object.name === 'effect' && e.prop === 'items') reads.items.add('*');
+    if (isItemsField(e)) reads.items.add(e.prop);
+    if (e.kind === 'Binary' && ['<', '<=', '>', '>=', '==', '!='].includes(e.op)) for (const [x, c] of [[e.left, e.right], [e.right, e.left]] as const) if (c.kind === 'Int' && isItemsField(x) && x.prop === 'age') reads.itemAges.add(c.value);
     if (e.kind === 'Member' && e.object.kind === 'Call' && (e.object.callee === 'machine' || e.object.callee === 'decision')) {
       const name = (e.object.args[0] as { value: string }).value;
       const map = e.object.callee === 'machine' ? reads.machines : reads.decisions;
@@ -293,7 +315,20 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
   const proposals: { machine: string; row: (machines: Record<string, unknown>, decisions: Record<string, unknown>) => Record<string, any> }[] = [];
   // PS16.3, review A1 (M9): the grant check precedes the policy, so a proposal of an effect that uses a credential
   // reaches the policy only with its grant Granted.
-  for (const [machine, m] of facts.machines) for (const eff of m.effects) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine, ...(eff.uses ? { credential: { name: eff.uses, grantState: 'Granted' } } : {}) }, effects: eff.labels, machines, decisions }) });
+  // PT10k: where a policy reads them, an effect with a Content takes each class of taint and none, and a decision with an
+  // Items each count, class and age its thresholds cut, and none.
+  const classes = facts.audience ?? [];
+  const taintChoices = (eff: { content?: boolean }): (Record<string, V> | null)[] => (reads.taint && eff.content ? [null, ...classes.map((c) => ({ class: c }))] : [null]);
+  const ageCuts = [...new Set([0, ...[...reads.itemAges].flatMap((x) => [x, x + 1])])].filter((x) => x >= 0).sort((x, y) => x - y);
+  const itemsChoices = (eff: { items?: boolean }): (Record<string, V> | null)[] => {
+    if (!reads.items.size || !eff.items) return [null];
+    const want = (f: string) => reads.items.has('*') || reads.items.has(f);
+    const counts = want('count') ? Array.from({ length: (facts.itemsLimit ?? 0) + 1 }, (_, k) => k) : [0];
+    const cls = want('class') ? classes : classes.slice(0, 1);
+    const ages = want('age') ? ageCuts : [0];
+    return [null, ...product([counts, cls, ages] as unknown[][]).map(([count, c, age]) => ({ count, class: c, age } as Record<string, V>))];
+  };
+  for (const [machine, m] of facts.machines) for (const eff of m.effects) for (const taint of taintChoices(eff)) for (const items of itemsChoices(eff)) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine, ...(eff.uses ? { credential: { name: eff.uses, grantState: 'Granted' } } : {}), ...(taint ? { taint } : {}), ...(items ? { items } : {}) }, effects: eff.labels, machines, decisions }) });
   for (const s of facts.sends) proposals.push({ machine: s.from, row: (machines, decisions) => ({ proposal: 'send', send: { to: s.to, action: s.action, scope: s.to.slice(0, s.to.lastIndexOf('.')) }, machines, decisions }) });
   for (const { machine, row: build } of proposals) {
     const m = facts.machines.get(machine)!;

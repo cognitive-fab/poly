@@ -7,7 +7,7 @@
 // can never be known: a machine that is neither a service (a singleton) nor the emitter of any effect (S147).
 import type * as A from '../ast.js';
 import { diag, type Diagnostic, type NodeAt } from '../diagnostics.js';
-import { effectKind, effectClass, LABELS } from './check.js';
+import { effectKind, effectLabels, effectClass, LABELS } from './check.js';
 
 /** The type of a policy expression. Every input is optional, so `tri` is the type of a comparison (PS8.0). */
 export type PType =
@@ -45,6 +45,10 @@ export interface PolicyProgram {
   channels: { name: string; kind: string; messageKinds: string[] }[];
   /** PS16.3: the program's credentials, which an effect's `credential` field names. */
   credentials: string[];
+  /** PS1.4b, PT10k: the program's audience classes, which `effect.taint.class` and `effect.items.class` name. */
+  audience: string[];
+  /** PS1.4b: the largest limit among the program's retrievals, the top of `effect.items.count`. */
+  itemsLimit: number;
 }
 
 const CLASSES = ['none', 'reversible', 'compensable', 'irreversible'];
@@ -89,7 +93,8 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
       for (const f of d.fields) { const t = typeOf(f.type); if (t) fields.set(f.name, t); }
       const effects: PolicyMachine['effects'] = [];
       for (const it of d.items) {
-        if (it.kind === 'EffectDecl') effects.push({ kind: effectKind(it), class: effectClass(it), labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])) });
+        // PS17.2: a retrieval's and a remember's labels are the runtime's.
+        if (it.kind === 'EffectDecl') effects.push({ kind: effectKind(it), class: effectClass(it), labels: effectLabels(it, m) ?? [] });
         if (it.kind === 'Decision') {
           effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])) });
           decisions.set(it.name, { machine: id, result: typeOf(it.result) ?? { k: 'str', values: null } });
@@ -113,7 +118,10 @@ export function policyProgram(modules: A.Module[]): PolicyProgram {
   }
   const all = [...machines.values()].flatMap((m) => m.effects);
   const credentials = [...new Set(modules.flatMap((x) => x.decls.flatMap((d) => (d.kind === 'Credential' ? [d.name] : []))))].sort();
-  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, credentials, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
+  const audience = modules.flatMap((x) => x.decls.flatMap((d) => (d.kind === 'Audience' ? d.classes : [])));
+  let itemsLimit = 0;
+  for (const x of modules) for (const d of x.decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl') for (const y of it.items) if (y.kind === 'EffRetrieve') itemsLimit = Math.max(itemsLimit, y.limit);
+  return { machines, decisions, claims, claimsConflicts, intents: intents.sort(), channels, credentials, audience: [...new Set(audience)], itemsLimit, effectKinds: [...new Set(all.map((e) => e.kind))].sort(), labels: [...new Set(all.flatMap((e) => e.labels))].sort() };
 }
 
 const DECISION_FIELDS = (result: PType): Record<string, PType> => ({
@@ -181,7 +189,10 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (e.prop === 'channel') return { k: 'record', fields: { name: { k: 'str', values: program.channels.map((c) => c.name) }, kind: { k: 'str', values: [...new Set(program.channels.map((c) => c.kind))] }, recipient: { k: 'str', values: null }, recipientClass: { k: 'str', values: ['external'] }, messageKind: { k: 'str', values: [...new Set(program.channels.flatMap((c) => c.messageKinds))] } } };
             // PS16.3: the grant of an effect that uses a credential, as the runtime's check read it; never its holder.
             if (e.prop === 'credential') return { k: 'record', fields: { name: { k: 'str', values: program.credentials }, grantState: { k: 'str', values: ['Requested', 'Granted', 'Refreshing', 'Expired', 'Revoked'] } } };
-            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel, credential)`);
+            // PT10k: the taint of the Content an intent carries, and the item sets it carries.
+            if (e.prop === 'taint') return { k: 'record', fields: { class: { k: 'str', values: program.audience } } };
+            if (e.prop === 'items') return { k: 'record', fields: { count: { k: 'int', lo: 0, hi: program.itemsLimit }, class: { k: 'str', values: program.audience }, age: { k: 'int', lo: 0, hi: 1_000_000_000_000 } } };
+            err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel, credential, taint, items)`);
             return null;
           }
           if (e.object.kind === 'Name' && e.object.name === 'send' && !vars.has('send')) {

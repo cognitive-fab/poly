@@ -1,0 +1,18 @@
+// M10 (PT10k): the concierge's policy over the proposal fields taint and items. An answer is not asked over orders
+// older than a day, and a reply tainted at class staff is never sent.
+module concierge_memory_policy
+
+policy memory-rules {
+  scope "concierge_memory"
+  obligation fresh-answers "An answer is not asked over orders older than a day." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.answer" && effect.items.age > 86400000
+    require false else deny
+    on unknown deny
+  }
+  obligation no-staff-replies "A reply carrying staff facts is not sent." rule {
+    when proposal.kind == "effect" && effect.kind == "support.reply" && effect.taint.class == "staff"
+    require false else deny
+    on unknown deny
+  }
+  never no-stale-answer "An answer over orders older than a day is never allowed.": allow when effect.kind == "decision.answer" && effect.items.age > 86400000
+}

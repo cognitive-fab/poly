@@ -250,6 +250,16 @@ export class PolyRuntime {
       // keyed digest (never the address itself, G10), its class (external in M8, S181), and the message kind it carries.
       outsideMandate: (row) => this.outsideMandate(row.instance_id, row.seq, row.kind, (row.payload ?? {}) as Record<string, unknown>),
       grantCheck: (row, decl) => this.grantCheck(row.instance_id, decl, (row.payload ?? {}) as Record<string, unknown>),
+      // PT10k (S302, S307): the flow rule and freshness, before the grant check and the policy.
+      memoryCheck: (row, decl, approved) => {
+        if (!this.memory.flows.size) return null;
+        const machineId = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(row.instance_id)?.machine_id as string | undefined;
+        if (!machineId) return null;
+        const j = this.store.db.prepare('SELECT action, data FROM pr_journal WHERE instance_id = ? AND seq = ?').get(row.instance_id, row.seq) as { action: string; data: string } | undefined;
+        const claims = j ? JSON.parse(j.data)?.$claims : null;
+        const ch = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
+        return this.memory.check({ machineId, kind: row.kind, payload: (row.payload ?? {}) as Record<string, unknown>, decl, step: { action: j?.action ?? null, claims: claims && typeof claims === 'object' ? claims : null }, channelAudience: ch ? verified.channels.find((c) => c.channel === ch[1])?.audience ?? null : null, approved, now: this.now(), keyed: (s) => store.recipientDigest(`principal:${s}`) });
+      },
       channelOf: (row) => {
         const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
         const d = m && verified.channels.find((c) => c.channel === m[1]);

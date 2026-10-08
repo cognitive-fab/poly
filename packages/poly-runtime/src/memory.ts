@@ -15,7 +15,15 @@ export const join = (a: Taint, b: Taint): Taint => ({ c: Math.max(a.c, b.c), o: 
 /** PS17.0: a source's descriptor, as the build wrote it and admission certified it (PT10i). */
 export interface SourceDescriptor { v: 1; module: string; source: string; kind: string; adapter: string | null; audience: string; class: number; owned: boolean; freshnessMs: number | null; stale: 'escalate' | 'deny' }
 /** PS17.3: a module's flow descriptor (PT10i). */
-export interface FlowDescriptor { v: 1; module: string; audience: string[]; sources: Record<string, { class: number; owned: boolean }> }
+export interface FlowDescriptor { v: 1; module: string; audience: string[]; sources: Record<string, { class: number; owned: boolean }>; claims?: Record<string, string> }
+
+/** PS17.3: whether a recipient of class c and principal p may read a taint. */
+export const mayRead = (c: number, p: string | null, t: Taint): boolean => c > t.c || (c >= t.c && t.o.length === 0) || (t.o.length === 1 && p !== null && t.o[0] === p);
+
+/** What the memory check of an intent gives: a final refusal, an escalation, or the proposal's fields; null when it has none. */
+export type MemoryCheck = { deny: string } | { escalate: string; fields: ProposalMemory } | { fields: ProposalMemory } | null;
+/** PT25.1: the proposal fields taint and items. */
+export interface ProposalMemory { taint?: { class: string; owners: string[] }; items?: { count: number; class: string; ageMs: number } }
 
 /** One item of a set: its id at the source, its owner and its asOf, and the digest of its body once a decision read it. */
 interface Item { id: string; owner: string | null; asOf: number; body?: string }
@@ -70,6 +78,63 @@ export class Memory {
     if (d.kind === 'memory') throw new Error(`source ${source} is the project's memory, which the runtime keeps itself (PS17.5)`);
     if (adapter.kind !== d.adapter) throw new Error(`source ${source} declares the adapter ${d.adapter}, and was given a ${adapter.kind} adapter`);
     this.adapters.set(source, adapter);
+  }
+
+  /** The flow descriptor of the module a machine belongs to: its own, or, for a channel's conversation m.c.M, m's. */
+  flowOf(machineId: string): FlowDescriptor | null {
+    const parts = machineId.split('.');
+    for (let n = parts.length - 1; n >= 1; n--) { const f = this.flows.get(parts.slice(0, n).join('.')); if (f) return f; }
+    return null;
+  }
+
+  /**
+   * PT10k, PS17.3, PS17.6 (S302, S305, S307): the memory check of one intent, before the grant check and the policy. The
+   * flow rule over each Content of its payload (a body with no taint record is refused, fail closed), the freshness of
+   * each Items, and the proposal's fields taint and items.
+   */
+  check(i: { machineId: string; kind: string; payload: Record<string, unknown>; decl: any; step: { action: string | null; claims: Record<string, unknown> | null }; channelAudience: string | null; approved: boolean; now: number; keyed: (s: string) => string }): MemoryCheck {
+    const flow = this.flowOf(i.machineId);
+    if (!flow) return null;
+    if (i.kind.startsWith('outcome.') || i.decl?.retrieve || i.decl?.remember) return null;
+    const name = (c: number) => flow.audience[c] ?? String(c);
+    const fields: ProposalMemory = {};
+    const contents = Object.values(i.payload).filter((v): v is string => typeof v === 'string' && DIGEST.test(v));
+    const sets = Object.values(i.payload).filter(isItems);
+    let escalate: string | null = null;
+    // PS17.6, S307: each item set's age, by the runtime's clock now, against its source's freshness.
+    if (sets.length) {
+      let count = 0, cls = 0, age = 0;
+      for (const v of sets) {
+        const set = this.itemsOf(v.ref);
+        if (!set) return { deny: 'audience' };
+        const ageMs = set.asOf === null ? 0 : Math.max(0, i.now - set.asOf);
+        count += set.items.length; cls = Math.max(cls, set.taint.c); age = Math.max(age, ageMs);
+        const src = this.sources.get(set.source);
+        if (src && src.freshnessMs !== null && ageMs > src.freshnessMs) {
+          if (src.stale === 'deny') return { deny: 'stale-items' };
+          if (!i.approved) escalate = 'stale-items';
+        }
+      }
+      fields.items = { count, class: name(cls), ageMs: age };
+    }
+    // PS17.3: a decision is judged by the taint it gives its answer, not as a send.
+    if (contents.length && !i.decl?.decision) {
+      const to = i.decl?.recipient?.to as string | null | undefined;
+      const principal = to && typeof i.payload[to] === 'string' ? (i.payload[to] as string) : null;
+      const claimsField = i.step.action ? flow.claims?.[i.machineId.slice(i.machineId.lastIndexOf('.') + 1) + '.' + i.step.action] : undefined;
+      const claimed = claimsField && i.step.claims && typeof i.step.claims[claimsField] === 'string' ? flow.audience.indexOf(i.step.claims[claimsField] as string) : -1;
+      const declared = i.decl?.recipient?.audience ?? (i.kind.startsWith('channel.') ? i.channelAudience : null);
+      const cls = claimed >= 0 ? claimed : declared ? Math.max(0, flow.audience.indexOf(declared)) : 0;
+      let joined = BOTTOM;
+      for (const d of contents) {
+        const t = this.taintOf(d);
+        if (!t || !mayRead(cls, principal, t)) return { deny: 'audience' };
+        joined = join(joined, t);
+      }
+      fields.taint = { class: name(joined.c), owners: joined.o.map(i.keyed) };
+    }
+    if (escalate) return { escalate, fields };
+    return Object.keys(fields).length ? { fields } : null;
   }
 
   /** PS17.4: a body's taint, or null when the store holds no record of it. */

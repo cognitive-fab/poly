@@ -51,7 +51,7 @@ test('AC22 (static): the concierge with memory is CLEAN, its flow rule ran, and 
   assert.equal(flow?.verdict, 'CLEAN');
   assert.equal(r.machines[0].stages.find((s) => s.stage === 'translation-validation').verdict, 'CLEAN');
   assert.deepEqual(JSON.parse(readFileSync(join(build, 'sources', 'orders.json'), 'utf8')), { v: 1, module: 'concierge_memory', source: 'orders', kind: 'records', adapter: 'postgres', audience: 'customer', class: 1, owned: true, freshnessMs: 3_600_000, stale: 'escalate' });
-  assert.deepEqual(JSON.parse(readFileSync(join(build, 'flow', 'concierge_memory.json'), 'utf8')), { v: 1, module: 'concierge_memory', audience: ['public', 'customer', 'staff'], sources: { orders: { class: 1, owned: true } } });
+  assert.deepEqual(JSON.parse(readFileSync(join(build, 'flow', 'concierge_memory.json'), 'utf8')), { v: 1, module: 'concierge_memory', audience: ['public', 'customer', 'staff'], sources: { orders: { class: 1, owned: true } }, claims: {} });
   const manifest = JSON.parse(readFileSync(join(build, 'concierge_memory.Desk', 'effects.manifest.json'), 'utf8')).effects;
   assert.deepEqual(manifest['source.orders.retrieve'].retrieve, { source: 'orders', owner: 'customer', limit: 2 });
   assert.deepEqual(manifest['source.orders.retrieve'].labels, ['read:private']);

@@ -80,6 +80,18 @@ By the plan's rules, the order changed: a citation is checked against the items 
 - **Tests.** `test/memory-sources.test.mjs` (three) and `test/memory-runtime.test.mjs` (five), written with the code; each failed before it (no adapters, no retrieval, no materials, no citation check).
 - **Checked.** The 159 measured files are identical to the measurement at the M9 close. The full suite: 1,961 tests and one after the M3 runs, 1,956 pass, no failure, 2 skipped and 4 waiting; check-memory passed (`.poly/logs/4249edf4-2026-10-08T03-32-28-991Z-stepA2.log`). A first run was cut short when the session ended, and fourteen of its files were killed with it; it was run again whole.
 
+## Steps 6 and 8: freshness, the flow check at run time, and the proposal fields `taint` and `items`
+
+The PT text is PT10k, written first (69cf1df).
+
+- **The flow check (S302).** The worker runs it first, before the grant check, the mandate and the policy. Each payload value that is a body's digest is a `Content`; its taint is the content store's record, and a body with none is refused `audience` (fail closed). The recipient's principal is the manifest's `recipient.to`; its class the emitting step's claims field of type `Audience` (the flow descriptor's new `claims` map, read back by poly-ref), else the declared `audience`, else the channel's, else the lowest. A refusal is final and recorded with the reason.
+- **Freshness (S307).** An item set older than its source's `freshness` is denied `stale-items` (`stale deny`) or escalated `stale-items` (`stale escalate`, the default); an approved escalation is not escalated again for it.
+- **The proposal and policies.** An intent carrying a `Content` is proposed with `taint: { class, owners }`, owners by keyed digest; one carrying an `Items` with `items: { count, class, ageMs }`. A policy reads `effect.taint.class` and `effect.items.count`, `.class` and `.age`; poly-ref's decision table gives each value, and none, only where a policy reads it, and the policy translation validation agrees with Polyaxion. A retrieval's and a remember's kind and labels in the policy facts are now the runtime's, as in the manifest.
+- **Decided by the plan's rules.** A decision's own payload is judged for freshness and carries `items`, but is not a send: its taint goes to its answer (PS17.3). The owners in the proposal are keyed digests of `principal:<p>`, apart from the addresses' `<kind>:<address>`.
+- **Tests.** `test/memory-enforce.test.mjs`, six, written with the code: the concierge's reply allowed with its taint; AC22's run-time half, the leaking variant (its `PL6831` found first) loaded through a witness certificate and its reply denied `audience` before its handler ran; a body with no record refused, and a channel's send judged at the channel's class; stale orders escalated and then approved; `stale deny`; and a policy over `effect.items.age` and `effect.taint.class`, whose `never` is proved over the decision table and refuted, `PL6503`, without its rule.
+- **A review finding, not taken.** A reviewer asked that an `Items` in a send's payload be judged by the flow rule too. PS17.3 judges each `Content` only, and poly-ref does the same: an `Items` carries a reference and a count, never a body, and only a decision resolves its bodies (PF13.3). The runtime keeps to the semantics.
+- **Checked.** The 159 measured files are identical to the measurement at the M9 close. The full suite: 1,968 tests and one after the M3 runs, 1,963 pass, no failure, 2 skipped and 4 waiting; check-memory passed (`.poly/logs/69cf1df9-2026-10-08T04-08-02-755Z-stepB.log`).
+
 ## Conclusion
 
 M10 is ruled. Its one measured risk, the taint state space, is measured first and brought to the owner if it does not fit.
