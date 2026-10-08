@@ -23,10 +23,13 @@ export const mayRead = (c: number, p: string | null, t: Taint): boolean => c > t
 /** What the memory check of an intent gives: a final refusal, an escalation, or the proposal's fields; null when it has none. */
 export type MemoryCheck = { deny: string } | { escalate: string; fields: ProposalMemory } | { fields: ProposalMemory } | null;
 /** PT25.1: the proposal fields taint and items. */
-export interface ProposalMemory { taint?: { class: string; owners: string[] }; items?: { count: number; class: string; ageMs: number } }
+export interface ProposalMemory { taint?: { class: string; owners: string[] }; items?: { count: number; class: string; ageMs: number; provenance: string } }
 
-/** One item of a set: its id at the source, its owner and its asOf, and the digest of its body once a decision read it. */
-interface Item { id: string; owner: string | null; asOf: number; body?: string }
+/** One item of a set: its id at the source, its owner and its asOf, and, for a memory item, its provenance. */
+interface Item { id: string; owner: string | null; asOf: number; provenance?: string }
+
+/** PS17.5: provenance, lowest first. */
+const PROVENANCE = ['observed', 'derived', 'verified'];
 
 /** A body's digest, as a Content is (PS1.4a). */
 export const DIGEST = /^sha256:[0-9a-f]{64}$/;
@@ -43,6 +46,22 @@ CREATE TABLE IF NOT EXISTS poly_taint (
   digest TEXT PRIMARY KEY,
   class  INTEGER NOT NULL,
   owners TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS poly_memory (
+  item       TEXT PRIMARY KEY,
+  source     TEXT NOT NULL,
+  digest     TEXT NOT NULL,
+  subject    TEXT,
+  provenance TEXT NOT NULL,
+  class      INTEGER NOT NULL,
+  run        TEXT NOT NULL,
+  intent     TEXT NOT NULL,
+  at         INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS poly_body_source (
+  digest TEXT NOT NULL,
+  source TEXT NOT NULL,
+  PRIMARY KEY (digest, source)
 );
 CREATE TABLE IF NOT EXISTS poly_items (
   ref    TEXT PRIMARY KEY,
@@ -95,7 +114,21 @@ export class Memory {
   check(i: { machineId: string; kind: string; payload: Record<string, unknown>; decl: any; step: { action: string | null; claims: Record<string, unknown> | null }; channelAudience: string | null; approved: boolean; now: number; keyed: (s: string) => string }): MemoryCheck {
     const flow = this.flowOf(i.machineId);
     if (!flow) return null;
-    if (i.kind.startsWith('outcome.') || i.decl?.retrieve || i.decl?.remember) return null;
+    if (i.kind.startsWith('outcome.') || i.decl?.retrieve) return null;
+    // PS17.5: a remember may not write an item with a wider audience than its content, over every class and principal.
+    if (i.decl?.remember) {
+      const src = this.sources.get(i.decl.remember.source as string);
+      const subject = typeof i.payload[i.decl.remember.about] === 'string' ? (i.payload[i.decl.remember.about] as string) : null;
+      const item: Taint = { c: src?.class ?? 0, o: src?.owned && subject !== null ? [subject] : [] };
+      for (const v of Object.values(i.payload)) {
+        if (typeof v !== 'string' || !DIGEST.test(v)) continue;
+        const t = this.taintOf(v);
+        if (!t) return { deny: 'audience' };
+        const readers: (string | null)[] = [subject, '$other', null];
+        if (flow.audience.some((_, c) => readers.some((p) => mayRead(c, p, item) && !mayRead(c, p, t)))) return { deny: 'audience' };
+      }
+      return null;
+    }
     const name = (c: number) => flow.audience[c] ?? String(c);
     const fields: ProposalMemory = {};
     const contents = Object.values(i.payload).filter((v): v is string => typeof v === 'string' && DIGEST.test(v));
@@ -103,19 +136,20 @@ export class Memory {
     let escalate: string | null = null;
     // PS17.6, S307: each item set's age, by the runtime's clock now, against its source's freshness.
     if (sets.length) {
-      let count = 0, cls = 0, age = 0;
+      let count = 0, cls = 0, age = 0, prov = PROVENANCE.length - 1;
       for (const v of sets) {
         const set = this.itemsOf(v.ref);
         if (!set) return { deny: 'audience' };
         const ageMs = set.asOf === null ? 0 : Math.max(0, i.now - set.asOf);
         count += set.items.length; cls = Math.max(cls, set.taint.c); age = Math.max(age, ageMs);
+        for (const it of set.items) prov = Math.min(prov, PROVENANCE.indexOf(it.provenance ?? 'observed'));
         const src = this.sources.get(set.source);
         if (src && src.freshnessMs !== null && ageMs > src.freshnessMs) {
           if (src.stale === 'deny') return { deny: 'stale-items' };
           if (!i.approved) escalate = 'stale-items';
         }
       }
-      fields.items = { count, class: name(cls), ageMs: age };
+      fields.items = { count, class: name(cls), ageMs: age, provenance: PROVENANCE[prov] };
     }
     // PS17.3: a decision is judged by the taint it gives its answer, not as a send.
     if (contents.length && !i.decl?.decision) {
@@ -136,6 +170,85 @@ export class Memory {
     if (escalate) return { escalate, fields };
     return Object.keys(fields).length ? { fields } : null;
   }
+
+/** PS17.5: the project's memory, read as a source adapter reads its index. */
+  private memoryAdapter(source: string): SourceAdapter {
+    const db = this.store.db;
+    return {
+      kind: 'postgres',
+      retrieve: async (q) => (q.owner !== undefined
+        ? db.prepare('SELECT item, subject, at, provenance FROM poly_memory WHERE source = ? AND subject = ? ORDER BY at DESC, item LIMIT ?').all(source, q.owner, q.limit)
+        : db.prepare('SELECT item, subject, at, provenance FROM poly_memory WHERE source = ? ORDER BY at DESC, item LIMIT ?').all(source, q.limit)).map((r: any) => ({ id: r.item, owner: r.subject, asOf: r.at, provenance: r.provenance })),
+      resolve: async (id) => { const r = db.prepare('SELECT digest FROM poly_memory WHERE item = ?').get(id) as { digest: string } | undefined; return r ? this.body?.(r.digest) ?? null : null; },
+      forget: async () => ({ removed: 0 }),
+    };
+  }
+
+  /** How the memory reads a body from the content store; the runtime sets it. */
+  body: ((d: string) => Promise<string | null>) | null = null;
+
+  /**
+   * PS17.5 (S309): a remember, run by the runtime: each Content of the payload becomes an item of the memory source, its
+   * subject the about field's value, its taint the source's class and that subject, joined into the body's own.
+   */
+  async remember(spec: { source: string; provenance: string; about: string }, payload: Record<string, unknown>, run: string, intent: string, now: number): Promise<{ items: string[] }> {
+    const d = this.sources.get(spec.source);
+    if (!d || d.kind !== 'memory') throw new SourceRefused(`${spec.source} is no memory source`);
+    const subject = typeof payload[spec.about] === 'string' ? (payload[spec.about] as string) : null;
+    const items: string[] = [];
+    await this.store.txn(() => {
+      for (const v of Object.values(payload)) {
+        if (typeof v !== 'string' || !DIGEST.test(v)) continue;
+        const item = `mem:${createHash('sha256').update(canonical({ intent, digest: v }), 'utf8').digest('hex')}`;
+        this.store.db.prepare('INSERT OR IGNORE INTO poly_memory (item, source, digest, subject, provenance, class, run, intent, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(item, spec.source, v, subject, spec.provenance, d.class, run, intent, now);
+        this.taint(v, { c: d.class, o: d.owned && subject !== null ? [subject] : [] });
+        items.push(item);
+      }
+    });
+    return { items };
+  }
+
+  /** PS17.5: a memory item's subject and provenance, or null. */
+  memoryItem(item: string): { source: string; subject: string | null; provenance: string } | null {
+    return (this.store.db.prepare('SELECT source, subject, provenance FROM poly_memory WHERE item = ?').get(item) as { source: string; subject: string | null; provenance: string } | undefined) ?? null;
+  }
+
+  /** PS17.5: an item made verified. Inside a transaction. */
+  markVerified(item: string): void {
+    this.store.db.prepare("UPDATE poly_memory SET provenance = 'verified' WHERE item = ?").run(item);
+  }
+
+  /**
+   * PS17.7 (S306): what forgetting a subject or a source erases: every body whose taint names the subject among its owners
+   * or that was read from the source, every memory item's body of either; and the item sets and memory items to remove.
+   */
+  forgettable(target: { subject: string } | { source: string }): { bodies: string[] } {
+    const db = this.store.db;
+    const bodies = new Set<string>();
+    if ('subject' in target) {
+      for (const r of db.prepare('SELECT digest, owners FROM poly_taint').all() as { digest: string; owners: string }[]) if ((JSON.parse(r.owners) as string[]).includes(target.subject)) bodies.add(r.digest);
+      for (const r of db.prepare('SELECT digest FROM poly_memory WHERE subject = ?').all(target.subject) as { digest: string }[]) bodies.add(r.digest);
+    } else {
+      for (const r of db.prepare('SELECT digest FROM poly_body_source WHERE source = ?').all(target.source) as { digest: string }[]) bodies.add(r.digest);
+      for (const r of db.prepare('SELECT digest FROM poly_memory WHERE source = ?').all(target.source) as { digest: string }[]) bodies.add(r.digest);
+    }
+    return { bodies: [...bodies].sort() };
+  }
+
+  /** PS17.7: removes the item sets and memory items that name the subject or come from the source. Inside a transaction. */
+  removeItems(target: { subject: string } | { source: string }): void {
+    const db = this.store.db;
+    if ('subject' in target) {
+      db.prepare('DELETE FROM poly_memory WHERE subject = ?').run(target.subject);
+      for (const r of db.prepare('SELECT ref, owners FROM poly_items').all() as { ref: string; owners: string }[]) if ((JSON.parse(r.owners) as string[]).includes(target.subject)) db.prepare('DELETE FROM poly_items WHERE ref = ?').run(r.ref);
+    } else {
+      db.prepare('DELETE FROM poly_memory WHERE source = ?').run(target.source);
+      db.prepare('DELETE FROM poly_items WHERE source = ?').run(target.source);
+    }
+  }
+
+  /** PS17.7: each connected adapter, to forget a subject at its source. */
+  connected(): SourceAdapter[] { return [...this.adapters.values()]; }
 
   /** PS17.4: a body's taint, or null when the store holds no record of it. */
   taintOf(digest: string): Taint | null {
@@ -171,18 +284,18 @@ export class Memory {
   async retrieve(source: string, spec: { owner: string | null; limit: number }, payload: Record<string, unknown>, intent: string): Promise<{ items: { ref: string; count: number } }> {
     const d = this.sources.get(source);
     if (!d) throw new SourceRefused(`no source ${source} in the certified build`);
-    const adapter = this.adapters.get(source);
-    if (!adapter) throw new Error(`source ${source} has no adapter connected (PT26): connect one with rt.connectSource`);
     const owner = spec.owner === null ? undefined : payload[spec.owner];
     if (spec.owner !== null && typeof owner !== 'string') throw new SourceRefused(`the retrieval from ${source} names no owner`);
-    const got: ItemRef[] = await adapter.retrieve({ ...(owner !== undefined ? { owner: owner as string } : {}), limit: spec.limit });
+    const adapter = d.kind === 'memory' ? this.memoryAdapter(source) : this.adapters.get(source);
+    if (!adapter) throw new Error(`source ${source} has no adapter connected (PT26): connect one with rt.connectSource`);
+    const got: (ItemRef & { provenance?: string })[] = await adapter.retrieve({ ...(owner !== undefined ? { owner: owner as string } : {}), limit: spec.limit });
     if (!Array.isArray(got) || got.length > spec.limit) throw new SourceRefused(`source ${source} answered ${Array.isArray(got) ? got.length : 'no list of'} items for a limit of ${spec.limit} (K14)`);
     const items: Item[] = [];
     for (const i of got) {
       if (!i || typeof i.id !== 'string' || !Number.isFinite(i.asOf)) throw new SourceRefused(`source ${source} answered an item with no id or asOf (K14)`);
       if (d.owned && typeof i.owner !== 'string') throw new SourceRefused(`source ${source} is owned, and answered an item with no owner (K14)`);
       if (owner !== undefined && i.owner !== owner) throw new SourceRefused(`source ${source} answered an item of another owner for a retrieval by owner (K14)`);
-      items.push({ id: i.id, owner: d.owned ? i.owner : null, asOf: i.asOf });
+      items.push({ id: i.id, owner: d.owned ? i.owner : null, asOf: i.asOf, ...(i.provenance ? { provenance: i.provenance } : {}) });
     }
     let ref!: { ref: string; count: number };
     await this.store.txn(() => { ref = this.keepItems(source, items, intent); });
@@ -223,13 +336,13 @@ export class Memory {
       } else if (isItems(v)) {
         const set = this.itemsOf(v.ref);
         if (!set) throw new SourceRefused(`${p} names an item set the runtime did not retrieve`);
-        const adapter = this.adapters.get(set.source);
+        const adapter = this.sources.get(set.source)?.kind === 'memory' ? this.memoryAdapter(set.source) : this.adapters.get(set.source);
         if (!adapter) throw new Error(`source ${set.source} has no adapter connected (PT26)`);
         const out: { id: string; body: string | null }[] = [];
         for (const it of set.items) {
           const b = await adapter.resolve(it.id);
           // A body read is kept erasable, with the item's taint, so forgetting its owner erases it (PS17.7).
-          if (b !== null) { const d = await put(b); await this.store.txn(() => this.taint(d, { c: set.taint.c, o: it.owner === null ? [] : [it.owner] })); }
+          if (b !== null) { const d = await put(b); await this.store.txn(() => { this.taint(d, { c: set.taint.c, o: it.owner === null ? [] : [it.owner] }); this.store.db.prepare('INSERT OR IGNORE INTO poly_body_source (digest, source) VALUES (?, ?)').run(d, set.source); }); }
           out.push({ id: it.id, body: b });
         }
         items[p] = out;

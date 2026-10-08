@@ -82,6 +82,8 @@ export interface DecisionRecord {
   conf: number;
   margin: number;
   distribution: [unknown, number][];
+  /** PS17.6: the item set the answer cites, by reference, so a step's cites is checked against its record. */
+  cites?: { ref: string; count: number };
   latencyMs: number | null;
   cost: { units: number; unit: string } | null;
 }
@@ -122,6 +124,7 @@ export function decisionHandler(decision: string, providerKind: string | null, c
     };
     // PS17.6: the citations are checked before the completion; an uncited answer is refused and its failed outcome runs.
     const cited = memory?.cites ? await memory.mem.cite((payload as Record<string, unknown>)?.[memory.cites], raw.cites, ctx.instanceId ?? '', ctx.idempotencyKey) : null;
+    if (cited) record.cites = cited as { ref: string; count: number };
     records.set(ctx.idempotencyKey, record);
     return { answer: a.answer, conf, margin, ...(cited ? { cites: cited } : {}) };
   };

@@ -191,7 +191,7 @@ export function checkPolicies(module: A.Module, program: PolicyProgram): PolicyC
             if (e.prop === 'credential') return { k: 'record', fields: { name: { k: 'str', values: program.credentials }, grantState: { k: 'str', values: ['Requested', 'Granted', 'Refreshing', 'Expired', 'Revoked'] } } };
             // PT10k: the taint of the Content an intent carries, and the item sets it carries.
             if (e.prop === 'taint') return { k: 'record', fields: { class: { k: 'str', values: program.audience } } };
-            if (e.prop === 'items') return { k: 'record', fields: { count: { k: 'int', lo: 0, hi: program.itemsLimit }, class: { k: 'str', values: program.audience }, age: { k: 'int', lo: 0, hi: 1_000_000_000_000 } } };
+            if (e.prop === 'items') return { k: 'record', fields: { count: { k: 'int', lo: 0, hi: program.itemsLimit }, class: { k: 'str', values: program.audience }, age: { k: 'int', lo: 0, hi: 1_000_000_000_000 }, provenance: { k: 'str', values: ['observed', 'derived', 'verified'] } } };
             err('PL1001', e, `effect has no field ${e.prop} (kind, class, labels, machine, channel, credential, taint, items)`);
             return null;
           }

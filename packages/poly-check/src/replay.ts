@@ -40,13 +40,15 @@ export interface RunReplay {
   notRun?: string;
   /** Review B5: recorded gate decisions not replayed, for want of the gate they were made by (listed as not run). */
   gateNotRun: number;
+  /** PS11.3a: each step whose data names an erased body, with the forget event that erased it; no divergence. */
+  forgotten?: { seq: number; digest: string; forget: string | null }[];
   diagnostics: Diagnostic[];
 }
 
 const same = (a: unknown, b: unknown) => canonicalize(a) === canonicalize(b);
 const KERNEL_ROWS = new Set(['$create', '$undeliverable', '$migrate']);
 
-export function replayRun(module: A.Module, machineId: string, instanceId: string, rows: JournalRowLike[], opts: { modulePath?: string; snapshot?: Record<string, unknown> | null; gate?: GateDecisionLike[] } = {}): RunReplay {
+export function replayRun(module: A.Module, machineId: string, instanceId: string, rows: JournalRowLike[], opts: { modulePath?: string; snapshot?: Record<string, unknown> | null; gate?: GateDecisionLike[]; erased?: Map<string, string | null> } = {}): RunReplay {
   const machineName = machineId.slice(machineId.indexOf('.') + 1);
   const M = buildMachine(module, machineName);
   const at = { module: module.name, machine: machineName };
@@ -106,7 +108,11 @@ export function replayRun(module: A.Module, machineId: string, instanceId: strin
     const again = g.recompute();
     if (again !== g.decision) out.push(diag('PL9001', at, `run ${instanceId}: the gate decision at ledger seq ${g.seq} was ${g.decision}, and replay gives ${again}`));
   }
-  return { run: instanceId, machine: machineId, rows: rows.length, folded, windows: opts.modulePath ? windows.length : 0, gateNotRun, diagnostics: out };
+  // PS11.3a: replay reads no body, so a step whose data names an erased body folds as before; it is listed as forgotten.
+  const forgotten: NonNullable<RunReplay['forgotten']> = [];
+  const digests = (x: unknown, acc: string[] = []): string[] => { if (typeof x === 'string') { if (/^sha256:[0-9a-f]{64}$/.test(x)) acc.push(x); } else if (x && typeof x === 'object') for (const v of Object.values(x)) digests(v, acc); return acc; };
+  if (opts.erased?.size) for (const row of rows) for (const d of new Set(digests(row.data))) if (opts.erased.has(d)) forgotten.push({ seq: row.seq, digest: d, forget: opts.erased.get(d) ?? null });
+  return { run: instanceId, machine: machineId, rows: rows.length, folded, windows: opts.modulePath ? windows.length : 0, gateNotRun, diagnostics: out, ...(forgotten.length ? { forgotten } : {}) };
 }
 
 /** The certified sources of a build, read and checked against the certificate's digests, parsed, by module name. */
@@ -153,7 +159,7 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
     }
     const module = modules.get(inst.machineId.slice(0, inst.machineId.indexOf('.')));
     if (!module) throw new Error(`${inst.id}: machine ${inst.machineId} is not in the certified sources`);
-    const r = replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id) });
+    const r = replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id), erased: rt.forgottenBodies() });
     // PD5-A11: the claims and lineage digests each step event records are reproduced.
     for (const p of await rt.verifyAttribution(inst.id)) r.diagnostics.push(diag('PL9001', { machine: inst.machineId }, `run ${inst.id}: ${p}`));
     out.push(r);

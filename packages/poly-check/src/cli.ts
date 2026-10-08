@@ -35,6 +35,8 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly anchor production on|off [--project <dir>]
        poly sign keyrings --by <keyId> --key <private key file> [--project <dir>]
        poly sign policy <scope> --by <keyId> --key <private key file> [--project <dir>]
+       poly memory-verify --item <id> --by <keyId> --key <private key file> [--out <file>]
+       poly forget --subject <principal> | --source <source> --by <keyId> --key <private key file> [--out <file>]
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
        poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
        poly journal export --db <store> --run <id>
@@ -122,6 +124,22 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
     if (!by || !key) throw new UsageError('sign policy needs --by <keyId> and --key <private key file>');
     return { name: 'sign-policy', input: { scope: b, by, key, project: option(args, '--project') ?? undefined } };
   }
+  // PT10l: a person's verification of a memory item, and a forget of a subject or a source, each a signed record.
+  if (cmd === 'memory-verify' && positional.length === 1) {
+    const by = option(args, '--by');
+    const key = option(args, '--key');
+    const item = option(args, '--item');
+    if (!by || !key || !item) throw new UsageError('memory-verify needs --item <id>, --by <keyId> and --key <private key file>');
+    return { name: 'memory-verify', input: { item, by, key, out } };
+  }
+  if (cmd === 'forget' && positional.length === 1) {
+    const by = option(args, '--by');
+    const key = option(args, '--key');
+    const subject = option(args, '--subject') ?? undefined;
+    const source = option(args, '--source') ?? undefined;
+    if (!by || !key || (subject === undefined) === (source === undefined)) throw new UsageError('forget needs --subject <principal> or --source <source>, --by <keyId> and --key <private key file>');
+    return { name: 'forget', input: { subject, source, by, key, out } };
+  }
   if (cmd === 'sign' && a === 'keyrings' && positional.length === 2) {
     const by = option(args, '--by');
     const key = option(args, '--key');
@@ -156,7 +174,7 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();

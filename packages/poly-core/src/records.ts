@@ -13,7 +13,7 @@ import { canonicalize } from './jcs.js';
 /** `keyring` (S194, M9): a person's signature on a change of the people or agents ring, over { parent, rings }. */
 /** `policy` (S194, Q8, M9): a person's signature on a policy scope, over its document, source and engine. */
 /** `grant-request` (S210, B3, D6): a person's signature on asking a holder for a grant, over { credential, holder }. */
-export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation' | 'grant-request';
+export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation' | 'grant-request' | 'verify' | 'forget';
 
 export interface SignedRecord {
   v: 1;
@@ -115,6 +115,16 @@ export function sameKeyrings(a: Keyrings, b: Keyrings): boolean {
 /** PS16.4: what a person's revocation of a grant signs: the grant's instance id, whose holder part is a keyed digest. */
 export function revocationSubject(grantId: string): string {
   return `sha256:${createHash('sha256').update(canonicalize({ grant: grantId }), 'utf8').digest('hex')}`;
+}
+
+/** PS17.5, S309: what a person signs to promote a memory item to verified: the item's id. */
+export function memoryVerifySubject(item: string): string {
+  return `sha256:${createHash('sha256').update(canonicalize({ item }), 'utf8').digest('hex')}`;
+}
+
+/** PS17.7, S306: what a person signs to forget a subject, a principal, or a whole source. */
+export function forgetSubject(target: { subject: string } | { source: string }): string {
+  return `sha256:${createHash('sha256').update(canonicalize('subject' in target ? { subject: target.subject } : { source: target.source }), 'utf8').digest('hex')}`;
 }
 
 /** S210, B3, D6: what a person signs to ask a holder for a grant of a credential (holder null for the service's own). */

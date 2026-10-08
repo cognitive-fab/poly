@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXIT_CODES, fold, verdictOf, type Verdict, digest, grantRequestSubject, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
+import { EXIT_CODES, fold, verdictOf, type Verdict, digest, grantRequestSubject, memoryVerifySubject, forgetSubject, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
@@ -310,6 +310,35 @@ export const COMMANDS: Command[] = [
       const record = signRecord({ kind: 'grant-request', subject: grantRequestSubject(credential, holder), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
       writeFileSync(out, JSON.stringify({ kind: 'grant-request', credential, holder, record }, null, 2) + '\n');
       return { exit: EXIT_CODES.CLEAN, result: { path: out }, text: `${out}\n  the runtime takes it from its approvals folder (PT10g)\n` };
+    },
+  },
+  {
+    name: 'memory-verify', mcp: null, lsp: false,
+    summary: 'Signs the promotion of a memory item to verified with a person key given by file, a record of the kind verify over the item, for rt.verifyMemory (PS17.5, PT10l). Never over MCP.',
+    input: obj({ item: str('the memory item'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record') }, ['item', 'by', 'key']),
+    output: obj({ record: { type: 'object', description: 'the signed verification' }, path: str('where it was written, when out was given') }, ['record']),
+    async run(input) {
+      const record = signRecord({ kind: 'verify', subject: memoryVerifySubject(need(input, 'item')), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
+      const text = JSON.stringify(record, null, 2) + '\n';
+      const out = opt(input, 'out');
+      if (out) writeFileSync(out, text);
+      return { exit: EXIT_CODES.CLEAN, result: { record, ...(out ? { path: out } : {}) }, text: out ? '' : text };
+    },
+  },
+  {
+    name: 'forget', mcp: null, lsp: false,
+    summary: 'Signs the forgetting of a subject (a principal) or a whole source with a person key given by file, a record of the kind forget, for rt.forget (PS17.7, PT10l). Never over MCP.',
+    input: obj({ subject: str('the principal to forget'), source: str('or the source to forget'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record') }, ['by', 'key']),
+    output: obj({ record: { type: 'object', description: 'the signed forget' }, path: str('where it was written, when out was given') }, ['record']),
+    async run(input) {
+      const subject = opt(input, 'subject');
+      const source = opt(input, 'source');
+      if ((subject === undefined) === (source === undefined)) throw new CommandUsageError('forget names a subject or a source, one of them');
+      const record = signRecord({ kind: 'forget', subject: forgetSubject(subject !== undefined ? { subject } : { source: source! }), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
+      const text = JSON.stringify(record, null, 2) + '\n';
+      const out = opt(input, 'out');
+      if (out) writeFileSync(out, text);
+      return { exit: EXIT_CODES.CLEAN, result: { record, ...(out ? { path: out } : {}) }, text: out ? '' : text };
     },
   },
   {

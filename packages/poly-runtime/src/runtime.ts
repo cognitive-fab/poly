@@ -18,7 +18,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import { RESERVED_MODULE, grantRequestSubject, recordDigest, revocationSubject, verifyRecord, type Certificate, type SignedRecord } from '@poly/core';
+import { RESERVED_MODULE, grantRequestSubject, memoryVerifySubject, forgetSubject, recordDigest, revocationSubject, verifyRecord, type Certificate, type SignedRecord } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { contentValues, dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type VerifiedWorkflow, type WorkOrderTool } from './load.js';
@@ -90,6 +90,8 @@ function polygraphVersion(): string {
 export const INGRESS_RUN = 'runtime:ingress';
 /** S205: the runtime's own run, on which every erasure of a body or an address is journaled. */
 export const CONTENT_RUN = 'runtime:content';
+/** PS17.5: the runtime's own run where memory verifications are recorded. */
+export const MEMORY_RUN = 'runtime:memory';
 
 /** S182, plan step 10: the adapters @poly/io makes, by the name a channel declares (`adapter "whatsapp"`). */
 export const IO_ADAPTERS = ['whatsapp', 'sms', 'email', 'slack', 'webhook'];
@@ -228,6 +230,13 @@ export class PolyRuntime {
       const spec = e.retrieve as { source: string; owner: string | null; limit: number };
       builtins[kind] = (payload, _caps, ctx) => this.memory.retrieve(spec.source, spec, (payload ?? {}) as Record<string, unknown>, ctx.idempotencyKey);
     }
+    // PS17.5: a remember is the runtime's own effect too, writing to the project's memory.
+    for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
+      if (!e?.remember) continue;
+      const spec = e.remember as { source: string; provenance: string; about: string };
+      builtins[kind] = (payload, _caps, ctx) => this.memory.remember(spec, (payload ?? {}) as Record<string, unknown>, ctx.instanceId, ctx.idempotencyKey, this.now());
+    }
+    this.memory.body = (d) => this.contentBody(d);
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
@@ -626,6 +635,55 @@ export class PolyRuntime {
     let fresh = false;
     await this.store.txn(() => { fresh = this.store.db.prepare('INSERT OR IGNORE INTO poly_used_record (digest, at) VALUES (?, ?)').run(d, this.now()).changes === 1; });
     if (!fresh) throw new ApprovalRefused('the grant request was taken before (S210)', 'replayed');
+  }
+
+/** A person's signed record of a kind over a subject, taken once: not-a-record, wrong-key or replayed otherwise. */
+  async #takeRecord(record: unknown, kind: 'verify' | 'forget', subject: string, what: string): Promise<string> {
+    const r = record as Partial<SignedRecord> | null;
+    if (!r || typeof r !== 'object' || typeof r.sig !== 'string') throw new ApprovalRefused(`${what} is signed by a person (PS17)`, 'not-a-record');
+    const v = verifyRecord(r, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind, subject });
+    if (!v.ok) throw new ApprovalRefused(`${what} is refused: ${v.problem}`, v.problem.startsWith('not a signed record') ? 'not-a-record' : 'wrong-key');
+    const d = recordDigest(r as SignedRecord);
+    let fresh = false;
+    await this.store.txn(() => { fresh = this.store.db.prepare('INSERT OR IGNORE INTO poly_used_record (digest, at) VALUES (?, ?)').run(d, this.now()).changes === 1; });
+    if (!fresh) throw new ApprovalRefused(`${what} was taken before`, 'replayed');
+    return d;
+  }
+
+  /** PS17.5 (S309): a person's signed record of the kind verify promotes a memory item to verified, once. */
+  async verifyMemory(item: string, record: unknown): Promise<void> {
+    if (!this.memory.memoryItem(item)) throw new Error(`no memory item ${item}`);
+    const d = await this.#takeRecord(record, 'verify', memoryVerifySubject(item), 'a memory verification');
+    this.store.ensureRun(MEMORY_RUN, 'runtime', 'memory');
+    await this.store.txn(() => { this.memory.markVerified(item); this.store.appendEvent(MEMORY_RUN, 'verdict', { stage: 'memory', outcome: 'verified', item, record: d }, this.now()); });
+  }
+
+  /**
+   * PS17.7 (S306): a person's signed record of the kind forget erases every body about a subject, or from a source, removes
+   * the items that name it, asks each connected adapter to forget the subject, and records what it erased by digest.
+   */
+  async forget(target: { subject: string } | { source: string }, record: unknown): Promise<{ erased: string[] }> {
+    const d = await this.#takeRecord(record, 'forget', forgetSubject(target), 'a forget');
+    const { bodies } = this.memory.forgettable(target);
+    for (const b of bodies) if (this.store.db.prepare('SELECT 1 FROM poly_erasable WHERE digest = ?').get(b)) await this.erase(b);
+    if ('subject' in target) for (const a of this.memory.connected()) await a.forget(target.subject);
+    this.store.ensureRun(CONTENT_RUN, 'runtime', 'content');
+    await this.store.txn(() => {
+      this.memory.removeItems(target);
+      this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'forget', ...('subject' in target ? { subject: this.store.recipientDigest(`principal:${target.subject}`) } : { source: target.source }), erased: bodies, record: d }, this.now());
+    });
+    return { erased: bodies };
+  }
+
+  /** PS11.3a: each erased body, with the hash of the forget event that erased it (null for an erasure on its own). */
+  forgottenBodies(): Map<string, string | null> {
+    const out = new Map<string, string | null>();
+    for (const r of this.store.db.prepare('SELECT digest FROM poly_erased').all() as { digest: string }[]) out.set(r.digest, null);
+    for (const r of this.store.db.prepare("SELECT event, hash FROM poly_ledger WHERE run = ? AND kind = 'verdict'").all(CONTENT_RUN) as { event: string; hash: string }[]) {
+      const b = JSON.parse(r.event).body;
+      if (b?.stage === 'forget') for (const x of b.erased ?? []) out.set(x, r.hash);
+    }
+    return out;
   }
 
   /** PS16.4: what a person signs to revoke the current grant of a credential and holder. */
@@ -1310,7 +1368,8 @@ export class PolyRuntime {
         const result = d.body as Record<string, unknown>;
         for (const [field, path] of Object.entries(entry.onSuccess.map ?? {})) {
           const want = String(path).replace(/^\$\.result\.?/, '').split('.').filter(Boolean).reduce<any>((v, k) => (v == null ? v : v[k]), result);
-          if (JSON.stringify(data?.[field]) !== JSON.stringify(want)) problems.push(`step ${b.seq} (${b.action}): ${field} is ${JSON.stringify(data?.[field])}, and the decision event records ${JSON.stringify(want)}`);
+          // Compared canonically: a record's key order is not its value's (an Items' { ref, count }, PS17.6).
+          if (digest(data?.[field] ?? null) !== digest(want ?? null)) problems.push(`step ${b.seq} (${b.action}): ${field} is ${JSON.stringify(data?.[field])}, and the decision event records ${JSON.stringify(want)}`);
         }
       }
     }

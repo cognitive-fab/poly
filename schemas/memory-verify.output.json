@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "properties": {
+    "record": {
+      "type": "object",
+      "description": "the signed verification"
+    },
+    "path": {
+      "type": "string",
+      "description": "where it was written, when out was given"
+    }
+  },
+  "required": [
+    "record"
+  ]
+}

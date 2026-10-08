@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "item": {
+      "type": "string",
+      "description": "the memory item"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the record"
+    }
+  },
+  "required": [
+    "item",
+    "by",
+    "key"
+  ]
+}

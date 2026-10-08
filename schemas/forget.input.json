@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "subject": {
+      "type": "string",
+      "description": "the principal to forget"
+    },
+    "source": {
+      "type": "string",
+      "description": "or the source to forget"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the record"
+    }
+  },
+  "required": [
+    "by",
+    "key"
+  ]
+}

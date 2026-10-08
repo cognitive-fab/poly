@@ -326,7 +326,9 @@ export function proposalTable(s: PolicyScope, facts: PolicyFacts, maxRows = 200_
     const counts = want('count') ? Array.from({ length: (facts.itemsLimit ?? 0) + 1 }, (_, k) => k) : [0];
     const cls = want('class') ? classes : classes.slice(0, 1);
     const ages = want('age') ? ageCuts : [0];
-    return [null, ...product([counts, cls, ages] as unknown[][]).map(([count, c, age]) => ({ count, class: c, age } as Record<string, V>))];
+    // PT10l: an item's provenance, observed, derived or verified (PS17.5).
+    const provs = want('provenance') ? ['observed', 'derived', 'verified'] : ['observed'];
+    return [null, ...product([counts, cls, ages, provs] as unknown[][]).map(([count, c, age, provenance]) => ({ count, class: c, age, provenance } as Record<string, V>))];
   };
   for (const [machine, m] of facts.machines) for (const eff of m.effects) for (const taint of taintChoices(eff)) for (const items of itemsChoices(eff)) proposals.push({ machine, row: (machines, decisions) => ({ proposal: 'effect', effect: { kind: eff.kind, class: eff.class, machine, ...(eff.uses ? { credential: { name: eff.uses, grantState: 'Granted' } } : {}), ...(taint ? { taint } : {}), ...(items ? { items } : {}) }, effects: eff.labels, machines, decisions }) });
   for (const s of facts.sends) proposals.push({ machine: s.from, row: (machines, decisions) => ({ proposal: 'send', send: { to: s.to, action: s.action, scope: s.to.slice(0, s.to.lastIndexOf('.')) }, machines, decisions }) });

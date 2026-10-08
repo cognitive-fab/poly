@@ -34,7 +34,7 @@ export interface Proposal {
   /** PT25.1, PT10k: the join of the taints of the Content an intent carries, owners by keyed digest. */
   taint?: { class: string; owners: string[] };
   /** PT25.1, PT10k: the item sets an intent carries: their count, class and greatest age. */
-  items?: { count: number; class: string; ageMs: number };
+  items?: { count: number; class: string; ageMs: number; provenance: string };
 }
 
 /**
