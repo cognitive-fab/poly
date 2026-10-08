@@ -195,6 +195,9 @@ What a user of poly needs to know when a milestone changes a format, a command o
 - **Stated limit: an agent gets no stable key across attempts** (V5, S173). Each attempt's order id is new and opaque; an agent cannot use it to make an irreversible call once across a lapsed attempt. A stable key is proposed to the owner as an amendment of S173.
 - **Stated limit: budgets cover a route's calls only** (V5, PS18.4), not work orders; a workflow has no actor attribution and no polycrew claims in v1.
 - **The after-suite group runs one file at a time** (V6). `test/m3-isolation.test.mjs` runs there, so the suite's load cannot reach its CLI child's time limit.
+- **Stated limit: a value refused between machines is not a finding** (S400, probe review A). A `send`, `spawn` or signal whose argument lies outside the receiver's strict domain checks `CLEAN`, and at run time the receiver refuses the step `outside-check-domain`, which the sender does not see. Keep a sender's domain inside its receiver's. A check that reports such an argument is proposed to the owner.
+- **Stated limit: `PL1301` follows a value within one handler** (PT3.4a, probe review A). A `disclosed` parameter written to a field that a later step emits in an irreversible payload is not reported. Extending the flow through state fields is proposed to the owner.
+- **Stated limit: a re-proposal held for an unloadable later snapshot leaves no `verdict` event** (S401, probe review B). The hold shows in the outbox's last error, as an unavailable gate's does when it gave no answer.
 - **No new code in v1.** `PL6839` now covers only a routed decision's `Content` result and `cites`.
 
 ## Conclusion

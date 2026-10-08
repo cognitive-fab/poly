@@ -86,3 +86,25 @@ The release session works in the worktree `poly-v1`, on branch `v1` from m4 at f
 ### The suite and the measured verdicts after V2 to V7
 
 At b437c49b (V2 to V7 and the release notes): 2,120 tests and 6 in the after group, 2,114 and 6 passed, **no failure**, 2 skipped and 4 waiting (the waiting tests of M9's close); check-memory passed (`.poly/logs/b437c49b-2026-10-08T20-50-46-790Z-v2to6.log`). The 160 measured files are identical to the record after V1 (`docs/v1/verdicts-after-v1.json`): none differ. The examples session's one suite (`poly-ex`, its log a73d1b3a, 19:49 to 20:09 UTC) had ended before this one started at 20:50 UTC, and none ran during it. That suite did overlap V1's at e1118211 (started 19:19 UTC): V1's numbers stand, since this suite covers the whole set again with no failure.
+
+### The probe review of V1 to V5
+
+Two reviewers read the changes of V1 to V5 and ran probes, each in its own folder (`.poly/probe-a`, `.poly/probe-b`), without touching the source. Every finding below was reproduced by its probe; each real one fixed here has the probe as a test that failed first.
+
+| Finding | Verdict | What was done |
+|---|---|---|
+| **B1** An approved allow read the emitter at `later.seq`, but its `reads` did not name the emitter, so a `Cancel` between the allow and the start was never rechecked (S147) and the refund ran on a cancelled order. | Real, a defect of S401. | dede1aa7: the allow reads the emitter at `later.seq`; it is rechecked, and the rechecked intent is proposed afresh and waits for a person again (an approval is not reused across a recheck). |
+| **A F1** A parameter bound from a reply (S79) was strict whatever its type, so one holding a `Principal` was refused at run time over the check's representatives, and the instance stuck. | Real, older than S400, now against PT3.4a. | d3114e8f: compiler and poly-ref apply PT3.4a's test to it. |
+| **A F2** The `childKey`/`childState` exclusion went by names, so an ordinary action with those names escaped strict and a checked invariant broke at run time. | Real, a defect of S400 (7dd4f6b4's code). | d3114e8f: only an action a spawn names as its completion is excluded. |
+| **A F3** `PL1301` follows a value within one handler: a `disclosed` parameter stored in a field and emitted later in an irreversible payload is not reported. | Real gap, older than S400. | Not built: it widens a finding, a change of semantics not ruled. Stated in the release notes; proposal below. |
+| **A F4** Since S400, a `send`, `spawn` or signal argument outside the receiver's strict domain checks `CLEAN`, and the receiver refuses the step at run time, silently to the sender. | Real risk, from S400. | Not built: a new check is a change of semantics not ruled. Stated in the release notes; proposal below. |
+| **A N1** PT3.4a lists a map, but a map parameter is `PL0901`. | Real, text. | f88b0c18. |
+| **B2** Text still said workflows run on polyflow outside the gate (the AST's and the embedded form's comments, PT14's adapter paragraph). | Real, text. | 78b492e3, dede1aa7. |
+| **B3** Replay of a missing std module failed with a bare `ENOENT`. | Real, a nit. | dede1aa7: refused by name, as load refuses it. |
+| **B4** A re-proposal held because the later snapshot cannot be loaded leaves no `verdict` event, only the outbox's last error. | Real, accepted as is. | The gate gave no answer, as for an unavailable gate; stated in the release notes. |
+
+Probes that found nothing: the compiler and poly-ref agree on the strict set over records with nested unions, unions with payloads, a record holding a `Principal`, enums, decision outcomes and timers (no `PL2501`); lowered rows compare records by value; S402 leaks no body when a tier is denied or escalated, judges stale items per call, and the embedded form cannot slip a `Content` result or `cites` past `PL6839`; S401 over a rejected step, a stateful policy machine, a channel send and a workflow, with session replay and journal replay clean; V4's records with a channel, a route and a credential in one project, and a std module edited after certification refused by name at load and at replay.
+
+**For the owner: two proposals from the probe review.**
+- **F4, a check for values refused between machines.** A finding when the domain of a `send`, `spawn` or signal argument, as the sender's check explores it, is not inside the receiver parameter's strict domain, next to `PL1301` and with the same acceptance by a person. It is a static comparison of two domains, in the compiler and in poly-ref. Until ruled, the release notes state the limit.
+- **F3, `PL1301` through state fields.** Carry the flow from a `disclosed` parameter through a field it is written to into any handler's irreversible emit that reads that field. Until ruled, the release notes state the limit.
