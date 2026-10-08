@@ -26,7 +26,7 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin', 'drop-declassify'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -524,6 +524,9 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // PT10i: the broken writers rename a source's entry, and pin its adapter to another digest.
   if (opts.fault === 'rename-source' && memory.sources.length) memory.sources[0] = { ...memory.sources[0], name: `${memory.sources[0].name}x` };
   if (opts.fault === 'stale-source-pin' && memory.sources.length) memory.sources[0] = { ...memory.sources[0], digest: `sha256:${'0'.repeat(64)}` };
+  // S323, S325: each machine's declassification points, from the flow stage, in a stable order.
+  const declassify = declassifyOf(report);
+  if (declassify.decisions.length || declassify.counts.length) memory.declassify = opts.fault === 'drop-declassify' ? { decisions: [], counts: [] } : declassify;
   for (const cr of credentials) {
     const named = c.credentials?.[cr.name]?.store;
     if (!named) throw new AdmitError(`not admitted: credential ${cr.name} names no store in poly.json's "credentials" (dev-keychain or kms, PT10f)`);
@@ -583,6 +586,9 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // PT10i: the memory descriptors read back are the build's, each source's adapter the installed package (S308).
   if (JSON.stringify(back.poly.memory?.sources.map((s) => [s.name, s.descriptor, s.adapter]) ?? []) !== JSON.stringify(memorySources.map((s) => [s.name, s.descriptor, sourceAdapter(s)]))) problems.push({ name: 'memory', problem: 'the certified sources are not the build\'s source descriptors' });
   if (JSON.stringify(back.poly.memory?.flows.map((f) => [f.module, f.descriptor]) ?? []) !== JSON.stringify(memoryFlows.map((f) => [f.module, f.descriptor]))) problems.push({ name: 'memory', problem: 'the certified flow descriptors are not the build\'s' });
+  // S323, S325: the declassification points read back are the flow stage's.
+  const want = declassifyOf(report);
+  if (JSON.stringify(back.poly.memory?.declassify ?? { decisions: [], counts: [] }) !== JSON.stringify(want)) problems.push({ name: 'memory', problem: 'the certified declassification points are not the flow rule\'s (S323, S325)' });
   for (const x of back.poly.memory?.sources ?? []) if (x.adapter !== null && (!adapterPin || x.package !== adapterPin.package || x.version !== adapterPin.version || x.digest !== adapterPin.digest)) problems.push({ name: 'memory', problem: `source ${x.name}'s adapter is bound to ${x.package} ${x.version} ${x.digest}, and the installed package is not that` });
   // Review D8 (M9): each scope's source read back is the file that declares it, which load verifies its signature over.
   for (const q of back.poly.policies) if (q.source !== policyFile.get(q.scope)) problems.push({ name: 'policies', problem: `scope ${q.scope} is certified as written in ${q.source}, and ${policyFile.get(q.scope) ?? 'no file'} declares it` });
@@ -612,4 +618,14 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   rmSync(out, { force: true });
   renameSync(tmp, out);
   return { verdict: 'CLEAN', certificatePath: out, certificate: back, artefacts: artefactsOnDisk(dir, machines, policyPaths), report };
+}
+
+/** S323, S325: every machine's declassification points, decisions by kind and counts by machine, action and parameter. */
+function declassifyOf(report: ProjectReport): NonNullable<NonNullable<Certificate['poly']['memory']>['declassify']> {
+  const ms = report.files.flatMap((r) => r.machines.map((m) => ({ module: r.module, m })));
+  const decisions = new Map<string, { kind: string; class: string; answers: number }>();
+  for (const { m } of ms) for (const d of m.declassify?.decisions ?? []) if (!decisions.has(d.kind)) decisions.set(d.kind, d);
+  const counts = ms.flatMap(({ m }) => m.declassify?.counts ?? []);
+  const key = (c: { machine: string; action: string; param: string }) => `${c.machine}.${c.action}.${c.param}`;
+  return { decisions: [...decisions.values()].sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0)), counts: [...new Map(counts.map((c) => [key(c), c])).values()].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0)) };
 }

@@ -85,7 +85,12 @@ export interface Certificate {
      * PT10i, PS17 (M10): each source's descriptor, with its adapter bound by package, version and digest (S308), and each
      * module's flow descriptor, whose digests are under `artefacts`.
      */
-    memory?: { sources: { name: string; descriptor: string; adapter: string | null; package?: string; version?: string; digest?: string }[]; flows: { module: string; descriptor: string }[] };
+    memory?: {
+      sources: { name: string; descriptor: string; adapter: string | null; package?: string; version?: string; digest?: string }[];
+      flows: { module: string; descriptor: string }[];
+      /** PS1.4b, PS17.2 (S323, S325): the declassification points the flow rule found, disclosed to the owner. */
+      declassify?: { decisions: { kind: string; class: string; answers: number }[]; counts: { machine: string; action: string; param: string; retrieval: string }[] };
+    };
     /** PT10e: each credential an effect uses, by name, and its descriptor, whose digest is under `artefacts`. */
     credentials?: { name: string; descriptor: string }[];
     /** PT10f, S200: each credential's vault: its store, and the adapter package by name, version and digest. */

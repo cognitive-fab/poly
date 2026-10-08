@@ -170,6 +170,10 @@ export const CODES: Record<string, CodeInfo> = {
   PL6835: { name: 'OWNER_ON_UNOWNED', stage: 'types', severity: 'error' },
   // PT28.1d, PT10h, S312: a type error in host code compiled against the generated declarations.
   PL6836: { name: 'HOST_TYPE_ERROR', stage: 'host', severity: 'finding' },
+  // PS17.5, S320: remember as verified; only a person's signed record makes an item verified.
+  PL6837: { name: 'VERIFIED_BY_PERSON', stage: 'types', severity: 'error' },
+  // PS17.3, S322: a tainted message between machines that no configuration follows.
+  PL6838: { name: 'FLOW_NOT_FOLLOWED', stage: 'model-check', severity: 'inconclusive' },
   PL6826: { name: 'VAULT_NOT_FOR_PRODUCTION', stage: 'runtime', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.

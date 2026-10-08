@@ -77,7 +77,7 @@ export function policyFacts(modules: Module[]): PolicyFacts {
           effects.push({ kind: memKind ?? kind?.value ?? it.name, class: cls?.value ?? 'none', labels: memLabels ?? it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}), ...(!memKind && it.params.some((x) => isContent(x.type)) ? { content: true } : {}), ...(!memKind && it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}) });
         }
         if (it.kind === 'Decision') {
-          effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}) });
+          effects.push({ kind: `decision.${it.name}`, class: 'none', labels: it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}), ...(it.params.some((x) => isContent(x.type) || isItems(x.type)) ? { content: true } : {}) });
           decisions.set(it.name, { answers: values(it.result) });
         }
       }

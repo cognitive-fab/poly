@@ -61,6 +61,8 @@ export interface MachineCheck {
   buildDir?: string;
   /** Review A1: the SHA-256 of each artefact as the lowering wrote it, the bytes every later stage checked. */
   artefactDigests?: Record<string, string>;
+  /** PS1.4b, PS17.2 (S323, S325): the declassification points the flow stage found, for the certificate. */
+  declassify?: { decisions: { kind: string; class: string; answers: number }[]; counts: { machine: string; action: string; param: string; retrieval: string }[] };
   /**
    * PS5.2a (S178): never findings whose witness was environment: unconstrained and which every configuration that
    * includes the machine ruled out. They are not counted.
@@ -547,6 +549,7 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
     const flow = ref.flowFindings ?? [];
     mc.diagnostics.push(...flow);
     mc.stages.push({ stage: 'flow', status: 'ran', engine: 'poly-ref', verdict: verdictOf(flow), ms: 0, note: `${ref.flowStates} states with their taints (PS17.3)` });
+    if (ref.declassify) mc.declassify = ref.declassify;
   }
 
   // ── stage 2c: liveness (PS6) ──────────────────────────────────────────

@@ -44,7 +44,7 @@ test('review C1: a forget whose adapter fails is not used up; the same record co
     let down = true;
     const query = async (text, params) => { if (down && text.startsWith('DELETE')) throw new Error('connection reset'); return db.query(text, params); };
     await ask(rt, 'cust-a', query);
-    const rec = sign('forget', forgetSubject({ subject: 'cust-a' }));
+    const rec = sign('forget', forgetSubject(rt.anchorId, { subject: 'cust-a' }));
     await assert.rejects(rt.forget({ subject: 'cust-a' }, rec), /connection reset/);
     down = false;
     const { erased } = await rt.forget({ subject: 'cust-a' }, rec);
@@ -82,10 +82,10 @@ test('review C5, S2, S4: a forget drops the erased bodies\' taint records, lists
     const kept = `sha256:${'c'.repeat(64)}`;
     rt.store.db.exec('BEGIN'); rt.memory.taint(kept, { c: 1, o: ['cust-a'] }); rt.store.db.exec('COMMIT');
     // S4: an unknown source is refused, and the record stays usable.
-    const bad = sign('forget', forgetSubject({ source: 'nope' }));
+    const bad = sign('forget', forgetSubject(rt.anchorId, { source: 'nope' }));
     await assert.rejects(rt.forget({ source: 'nope' }, bad), /no source nope/);
     assert.equal(rt.store.db.prepare('SELECT count(*) AS n FROM poly_used_record').get().n, 0);
-    const { erased } = await rt.forget({ subject: 'cust-a' }, sign('forget', forgetSubject({ subject: 'cust-a' })));
+    const { erased } = await rt.forget({ subject: 'cust-a' }, sign('forget', forgetSubject(rt.anchorId, { subject: 'cust-a' })));
     assert.ok(!erased.includes(kept));
     for (const d of erased) assert.equal(rt.store.db.prepare('SELECT 1 FROM poly_erased WHERE digest = ?').get(d) !== undefined, true, d);
     // C5: no taint record of an erased body names the subject any more.

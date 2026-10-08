@@ -1,0 +1,26 @@
+// expect: PL6837 (a remember writes verified items; only a person's signed record makes an item verified, PS17.5, S320)
+module errors
+
+audience { public < customer }
+
+source memory: memory {
+  audience customer owned
+}
+
+machine Notes {
+  state {
+    count : 0..1 = 0
+  }
+
+  action Note(subject: Principal, fact: Content)
+
+  on Note(subject, fact) {
+    require count == 0 else reject "full"
+    count' = 1
+    emit keep(subject: subject, fact: fact)
+  }
+
+  effect keep(subject: Principal, fact: Content) {
+    remember memory as verified about subject
+  }
+}

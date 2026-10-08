@@ -482,6 +482,8 @@ class Checker {
       const s = src(m.source, m);
       if (s && s.sourceKind !== 'memory') this.err('PL1201', m, `effect ${e.name} remembers into source ${s.name}, which is not a memory source (PS17.5)`);
       principal(m.about, m, 'the subject');
+      // PS17.5, S320: only a person's signed record makes an item verified (poly memory-verify).
+      if (m.provenance === 'verified') this.err('PL6837', m, `effect ${e.name} remembers as verified; only a person's signed record makes an item verified (poly memory-verify, PS17.5)`);
       if (!e.params.some((p) => this.tyOf(p.type).k === 'content')) this.err('PL1201', m, `effect ${e.name} remembers, and its payload holds no Content to remember (PS17.5)`);
     }
   }

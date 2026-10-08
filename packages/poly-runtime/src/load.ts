@@ -34,6 +34,8 @@ export interface VerifiedBuild {
   channels: VerifiedChannel[];
   /** PT10e, review D4 (M9): each certified credential, from the verified bytes of its descriptor, read once here. */
   credentials: VerifiedCredential[];
+  /** S321: the id of the anchor load verified the keyrings from, which memory records name; null with no keyrings. */
+  anchorId: string | null;
   /** PT12.5, S210 (D9): whether the project's keyring anchor says it is production. */
   production: boolean;
   /** PT10i, PS17: each source's and each module's flow descriptor, from the verified bytes. */
@@ -279,7 +281,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (d.module !== f.module) throw new LoadError(`refused at load: the certificate's flow of ${f.module} has the descriptor of ${String(d.module)} (PT10i)`);
     memoryFlows.push(d);
   }
-  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true, memory: { sources: memorySources, flows: memoryFlows } };
+  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true, anchorId: anchor?.id ?? null, memory: { sources: memorySources, flows: memoryFlows } };
 }
 
 /**

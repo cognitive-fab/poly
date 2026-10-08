@@ -253,14 +253,15 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     }
     const got = read(`flow/${module.name}.json`);
     // PT10k: each action whose claims type has exactly one field of type Audience, read from the source here.
-    const claims: [string, string][] = [];
+    const claims: [string, { class: string; principal: string | null }][] = [];
     for (const d of module.decls) {
       if (d.kind !== 'Machine') continue;
       for (const it of d.items) {
         if (it.kind !== 'Handler' || !it.by) continue;
         const rec = module.decls.find((x): x is A.RecordDecl => x.kind === 'RecordDecl' && x.name === it.by!.type);
         const fs = (rec?.fields ?? []).filter((f) => f.type.kind === 'TName' && f.type.name === 'Audience');
-        if (fs.length === 1) claims.push([`${d.name}.${it.action}`, fs[0].name]);
+        const ps = (rec?.fields ?? []).filter((f) => f.type.kind === 'TName' && f.type.name === 'Principal');
+        if (fs.length === 1) claims.push([`${d.name}.${it.action}`, { class: fs[0].name, principal: ps.length === 1 ? ps[0].name : null }]);
       }
     }
     if (got !== undefined) differ(`flow/${module.name}.json`, got, { v: 1, module: module.name, audience: classes, sources: Object.fromEntries(sourceDecls.map((s) => [s.name, { class: cls(s.audience), owned: s.owned }])), claims: Object.fromEntries(claims.sort(([a], [b]) => (a < b ? -1 : 1))) });

@@ -7,18 +7,29 @@ import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
 import type { LedgerStore } from './ledger-store.js';
 import type { ItemRef, SourceAdapter } from './adapters.js';
 
-/** PS17.1: a class's index in the audience order, and the owners, principals as the runtime holds them, sorted. */
-export interface Taint { c: number; o: string[] }
+/**
+ * PS17.1: a class's index in the audience order, and the owners, principals as the runtime holds them, sorted. S326: a
+ * retrieval with no owner predicate has the owners Ω, and keeps the owners of the items it returned in `k`, which only a
+ * forget reads.
+ */
+export interface Taint { c: number; o: string[]; k?: string[] }
 export const BOTTOM: Taint = { c: 0, o: [] };
-export const join = (a: Taint, b: Taint): Taint => ({ c: Math.max(a.c, b.c), o: [...new Set([...a.o, ...b.o])].sort() });
+/** S326: Ω, every principal: a mark no principal reads alone. */
+export const OMEGA = '\u0000Ω';
+const kept = (t: Taint): string[] => t.k ?? t.o.filter((x) => x !== OMEGA);
+export const join = (a: Taint, b: Taint): Taint => {
+  const omega = a.o.includes(OMEGA) || b.o.includes(OMEGA);
+  const k = [...new Set([...kept(a), ...kept(b)])].sort();
+  return { c: Math.max(a.c, b.c), o: omega ? [OMEGA] : k, ...(omega ? { k } : {}) };
+};
 
 /** PS17.0: a source's descriptor, as the build wrote it and admission certified it (PT10i). */
 export interface SourceDescriptor { v: 1; module: string; source: string; kind: string; adapter: string | null; audience: string; class: number; owned: boolean; freshnessMs: number | null; stale: 'escalate' | 'deny' }
 /** PS17.3: a module's flow descriptor (PT10i). */
-export interface FlowDescriptor { v: 1; module: string; audience: string[]; sources: Record<string, { class: number; owned: boolean }>; claims?: Record<string, string> }
+export interface FlowDescriptor { v: 1; module: string; audience: string[]; sources: Record<string, { class: number; owned: boolean }>; claims?: Record<string, { class: string; principal: string | null }> }
 
 /** PS17.3: whether a recipient of class c and principal p may read a taint. */
-export const mayRead = (c: number, p: string | null, t: Taint): boolean => c > t.c || (c >= t.c && t.o.length === 0) || (t.o.length === 1 && p !== null && t.o[0] === p);
+export const mayRead = (c: number, p: string | null, t: Taint): boolean => c > t.c || (c >= t.c && t.o.length === 0) || (t.o.length === 1 && t.o[0] !== OMEGA && p !== null && t.o[0] === p);
 
 /** What the memory check of an intent gives: a final refusal, an escalation, or the proposal's fields; null when it has none. */
 export type MemoryCheck = { deny: string } | { escalate: string; fields: ProposalMemory } | { fields: ProposalMemory } | null;
@@ -45,7 +56,12 @@ export const MEMORY_SCHEMA = `
 CREATE TABLE IF NOT EXISTS poly_taint (
   digest TEXT PRIMARY KEY,
   class  INTEGER NOT NULL,
-  owners TEXT NOT NULL
+  owners TEXT NOT NULL,
+  kept   TEXT
+);
+CREATE TABLE IF NOT EXISTS poly_thread_sender (
+  instance TEXT PRIMARY KEY,
+  sender   TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS poly_memory (
   item       TEXT PRIMARY KEY,
@@ -68,6 +84,7 @@ CREATE TABLE IF NOT EXISTS poly_items (
   source TEXT NOT NULL,
   class  INTEGER NOT NULL,
   owners TEXT NOT NULL,
+  kept   TEXT,
   asof   INTEGER,
   items  TEXT NOT NULL
 );
@@ -114,7 +131,7 @@ export class Memory {
    * flow rule over each Content of its payload (a body with no taint record is refused, fail closed), the freshness of
    * each Items, and the proposal's fields taint and items.
    */
-  check(i: { machineId: string; kind: string; payload: Record<string, unknown>; decl: any; step: { action: string | null; claims: Record<string, unknown> | null }; channelAudience: string | null; approved: boolean; now: number; keyed: (s: string) => string }): MemoryCheck {
+  check(i: { instance?: string; machineId: string; kind: string; payload: Record<string, unknown>; decl: any; step: { action: string | null; claims: Record<string, unknown> | null }; channelAudience: string | null; approved: boolean; now: number; keyed: (s: string) => string }): MemoryCheck {
     const flow = this.flowOf(i.machineId);
     if (!flow) return null;
     if (i.kind.startsWith('outcome.') || i.decl?.retrieve) return null;
@@ -157,12 +174,24 @@ export class Memory {
       // An empty item set holds nothing verified: its provenance is the lowest.
       fields.items = { count, class: name(cls), ageMs: age, provenance: PROVENANCE[count ? prov : 0] };
     }
-    // PS17.3: a decision is judged by the taint it gives its answer, not as a send.
+    const shown = (o: string[]) => o.map((x) => (x === OMEGA ? 'Ω' : i.keyed(x)));
+    // S323: a decision is proposed with the taint of what it reads, so a policy may deny it by effect.taint.class; it is
+    // judged by the taint it gives its answer, not as a send (PS17.3).
+    if (i.decl?.decision && (contents.length || sets.length)) {
+      let joined = BOTTOM;
+      for (const d of contents) { const t = this.taintOf(d); if (!t) return { deny: 'audience' }; joined = join(joined, t); }
+      for (const v of sets) { const s = this.itemsOf(v.ref); if (s) joined = join(joined, s.taint); }
+      fields.taint = { class: name(joined.c), owners: shown(joined.o) };
+    }
     if (contents.length && !i.decl?.decision) {
       const to = i.decl?.recipient?.to as string | null | undefined;
-      const principal = to && typeof i.payload[to] === 'string' ? (i.payload[to] as string) : null;
-      const claimsField = i.step.action ? flow.claims?.[i.machineId.slice(i.machineId.lastIndexOf('.') + 1) + '.' + i.step.action] : undefined;
-      const claimed = claimsField && i.step.claims && typeof i.step.claims[claimsField] === 'string' ? flow.audience.indexOf(i.step.claims[claimsField] as string) : -1;
+      // PS17.4, S327: the recipient of a channel's send on a thread is the thread's sender.
+      const principal = to && typeof i.payload[to] === 'string' ? (i.payload[to] as string) : i.kind.startsWith('channel.') && i.instance ? this.threadSender(i.instance) : null;
+      const entry = i.step.action ? flow.claims?.[i.machineId.slice(i.machineId.lastIndexOf('.') + 1) + '.' + i.step.action] : undefined;
+      // S324: the claims class is the recipient's only when the recipient is the claimant.
+      const claimant = entry?.principal && i.step.claims && typeof i.step.claims[entry.principal] === 'string' ? (i.step.claims[entry.principal] as string) : null;
+      const theClaimant = !to || (principal !== null && principal === claimant);
+      const claimed = entry && theClaimant && i.step.claims && typeof i.step.claims[entry.class] === 'string' ? flow.audience.indexOf(i.step.claims[entry.class] as string) : -1;
       const declared = i.decl?.recipient?.audience ?? (i.kind.startsWith('channel.') ? i.channelAudience : null);
       const cls = claimed >= 0 ? claimed : declared ? Math.max(0, flow.audience.indexOf(declared)) : 0;
       let joined = BOTTOM;
@@ -171,7 +200,7 @@ export class Memory {
         if (!t || !mayRead(cls, principal, t)) return { deny: 'audience' };
         joined = join(joined, t);
       }
-      fields.taint = { class: name(joined.c), owners: joined.o.map(i.keyed) };
+      fields.taint = { class: name(joined.c), owners: shown(joined.o) };
     }
     if (escalate) return { escalate, fields };
     return Object.keys(fields).length ? { fields } : null;
@@ -233,7 +262,8 @@ export class Memory {
     const db = this.store.db;
     const bodies = new Set<string>();
     if ('subject' in target) {
-      for (const r of db.prepare('SELECT digest, owners FROM poly_taint').all() as { digest: string; owners: string }[]) if ((JSON.parse(r.owners) as string[]).includes(target.subject)) bodies.add(r.digest);
+      const names = this.subjectNames(target.subject);
+      for (const r of db.prepare('SELECT digest, owners, kept FROM poly_taint').all() as { digest: string; owners: string; kept: string | null }[]) if ([...JSON.parse(r.owners), ...JSON.parse(r.kept ?? '[]')].some((x: string) => names.includes(x))) bodies.add(r.digest);
       for (const r of db.prepare('SELECT digest FROM poly_memory WHERE subject = ?').all(target.subject) as { digest: string }[]) bodies.add(r.digest);
     } else {
       for (const r of db.prepare('SELECT digest FROM poly_body_source WHERE source = ?').all(target.source) as { digest: string }[]) bodies.add(r.digest);
@@ -247,11 +277,26 @@ export class Memory {
     const db = this.store.db;
     if ('subject' in target) {
       db.prepare('DELETE FROM poly_memory WHERE subject = ?').run(target.subject);
-      for (const r of db.prepare('SELECT ref, owners FROM poly_items').all() as { ref: string; owners: string }[]) if ((JSON.parse(r.owners) as string[]).includes(target.subject)) db.prepare('DELETE FROM poly_items WHERE ref = ?').run(r.ref);
+      const names = this.subjectNames(target.subject);
+      for (const r of db.prepare('SELECT ref, owners, kept FROM poly_items').all() as { ref: string; owners: string; kept: string | null }[]) if ([...JSON.parse(r.owners), ...JSON.parse(r.kept ?? '[]')].some((x: string) => names.includes(x))) db.prepare('DELETE FROM poly_items WHERE ref = ?').run(r.ref);
+      for (const r of db.prepare('SELECT instance, sender FROM poly_thread_sender').all() as { instance: string; sender: string }[]) if (names.includes(r.sender)) db.prepare('DELETE FROM poly_thread_sender WHERE instance = ?').run(r.instance);
     } else {
       db.prepare('DELETE FROM poly_memory WHERE source = ?').run(target.source);
       db.prepare('DELETE FROM poly_items WHERE source = ?').run(target.source);
     }
+  }
+
+  /** S327: a subject as an owner may hold it: as given, and as the keyed digest a channel's sender is kept by. */
+  private subjectNames(subject: string): string[] { return [subject, this.store.recipientDigest(subject)]; }
+
+  /** S327: records a thread's sender, the principal its conversation's sends go to. Inside a transaction. */
+  setThreadSender(instance: string, sender: string): void {
+    this.store.db.prepare('INSERT INTO poly_thread_sender (instance, sender) VALUES (?, ?) ON CONFLICT(instance) DO UPDATE SET sender = excluded.sender').run(instance, sender);
+  }
+
+  /** S327: a thread's sender, or null. */
+  threadSender(instance: string): string | null {
+    return (this.store.db.prepare('SELECT sender FROM poly_thread_sender WHERE instance = ?').get(instance) as { sender: string } | undefined)?.sender ?? null;
   }
 
   /** Whether the certified build has the source. */
@@ -272,28 +317,29 @@ export class Memory {
 
   /** PS17.4: a body's taint, or null when the store holds no record of it. */
   taintOf(digest: string): Taint | null {
-    const r = this.store.db.prepare('SELECT class, owners FROM poly_taint WHERE digest = ?').get(digest) as { class: number; owners: string } | undefined;
-    return r ? { c: r.class, o: JSON.parse(r.owners) as string[] } : null;
+    const r = this.store.db.prepare('SELECT class, owners, kept FROM poly_taint WHERE digest = ?').get(digest) as { class: number; owners: string; kept: string | null } | undefined;
+    return r ? { c: r.class, o: JSON.parse(r.owners) as string[], ...(r.kept !== null ? { k: JSON.parse(r.kept) as string[] } : {}) } : null;
   }
 
   /** PS17.4, S319: records a body's taint, joined with what the store already holds for it. Inside a transaction. */
   taint(digest: string, t: Taint): void {
     const t2 = join(this.taintOf(digest) ?? BOTTOM, t);
-    this.store.db.prepare('INSERT INTO poly_taint (digest, class, owners) VALUES (?, ?, ?) ON CONFLICT(digest) DO UPDATE SET class = excluded.class, owners = excluded.owners').run(digest, t2.c, JSON.stringify(t2.o));
+    this.store.db.prepare('INSERT INTO poly_taint (digest, class, owners, kept) VALUES (?, ?, ?, ?) ON CONFLICT(digest) DO UPDATE SET class = excluded.class, owners = excluded.owners, kept = excluded.kept').run(digest, t2.c, JSON.stringify(t2.o), t2.k ? JSON.stringify(t2.k) : null);
   }
 
   /** An item set's taint, source and items. */
   itemsOf(ref: string): { source: string; taint: Taint; asOf: number | null; items: Item[] } | null {
-    const r = this.store.db.prepare('SELECT source, class, owners, asof, items FROM poly_items WHERE ref = ?').get(ref) as { source: string; class: number; owners: string; asof: number | null; items: string } | undefined;
-    return r ? { source: r.source, taint: { c: r.class, o: JSON.parse(r.owners) as string[] }, asOf: r.asof, items: JSON.parse(r.items) as Item[] } : null;
+    const r = this.store.db.prepare('SELECT source, class, owners, kept, asof, items FROM poly_items WHERE ref = ?').get(ref) as { source: string; class: number; owners: string; kept: string | null; asof: number | null; items: string } | undefined;
+    return r ? { source: r.source, taint: { c: r.class, o: JSON.parse(r.owners) as string[], ...(r.kept !== null ? { k: JSON.parse(r.kept) as string[] } : {}) }, asOf: r.asof, items: JSON.parse(r.items) as Item[] } : null;
   }
 
-  private keepItems(source: string, items: Item[], salt: string): { ref: string; count: number } {
+  private keepItems(source: string, items: Item[], salt: string, omega = false): { ref: string; count: number } {
     const d = this.sources.get(source)!;
     const ref = `items:${createHash('sha256').update(canonical({ source, salt, ids: items.map((i) => i.id) }), 'utf8').digest('hex')}`;
-    const owners = d.owned ? [...new Set(items.flatMap((i) => (i.owner === null ? [] : [i.owner])))].sort() : [];
+    const real = d.owned ? [...new Set(items.flatMap((i) => (i.owner === null ? [] : [i.owner])))].sort() : [];
     const asOf = items.length ? Math.min(...items.map((i) => i.asOf)) : null;
-    this.store.db.prepare('INSERT OR IGNORE INTO poly_items (ref, source, class, owners, asof, items) VALUES (?, ?, ?, ?, ?, ?)').run(ref, source, d.class, JSON.stringify(owners), asOf, JSON.stringify(items));
+    // S326: with no owner predicate on an owned source the set's owners are Ω; the real ones are kept for a forget.
+    this.store.db.prepare('INSERT OR IGNORE INTO poly_items (ref, source, class, owners, kept, asof, items) VALUES (?, ?, ?, ?, ?, ?, ?)').run(ref, source, d.class, JSON.stringify(omega ? [OMEGA] : real), omega ? JSON.stringify(real) : null, asOf, JSON.stringify(items));
     return { ref, count: items.length };
   }
 
@@ -318,7 +364,7 @@ export class Memory {
       items.push({ id: i.id, owner: d.owned ? i.owner : null, asOf: i.asOf, ...(i.provenance ? { provenance: i.provenance } : {}) });
     }
     let ref!: { ref: string; count: number };
-    await this.store.txn(() => { ref = this.keepItems(source, items, intent); });
+    await this.store.txn(() => { ref = this.keepItems(source, items, intent, d.owned && spec.owner === null); });
     return { items: ref };
   }
 
@@ -336,7 +382,7 @@ export class Memory {
     }
     const cited = set.items.filter((i) => (list as string[]).includes(i.id));
     let ref!: { ref: string; count: number };
-    await this.store.txn(() => { ref = this.keepItems(set.source, cited, `${intent}:cites`); });
+    await this.store.txn(() => { ref = this.keepItems(set.source, cited, `${intent}:cites`, set.taint.o.includes(OMEGA)); });
     return ref;
   }
 
@@ -366,7 +412,8 @@ export class Memory {
           const b = await adapter.resolve(it.id);
           // A body read is kept erasable, with the item's taint, so forgetting its owner erases it (PS17.7).
           // Review B3: the body, its taint and its source are stored in one transaction.
-          if (b !== null) await put(b, { c: set.taint.c, o: it.owner === null ? [] : [it.owner] }, set.source);
+          // S326: an item's body under Ω is Ω for the flow rule, and keeps its real owner for a forget.
+          if (b !== null) await put(b, set.taint.o.includes(OMEGA) ? { c: set.taint.c, o: [OMEGA], k: it.owner === null ? [] : [it.owner] } : { c: set.taint.c, o: it.owner === null ? [] : [it.owner] }, set.source);
           out.push({ id: it.id, body: b });
         }
         items[p] = out;

@@ -64,10 +64,12 @@ export function mayRead(c: number, p: string | null, t: Taint): boolean {
 export interface FlowBreak { code: 'PL6831' | 'PL6832'; text: string }
 
 /**
- * PS17.3, PS17.5: the flow rule over one accepted step's intents. `claimsClass` is the class in the step's claims, when
+ * PS17.3, PS17.5: the flow rule over one accepted step's intents. `claims` is the class in the step's claims, and the
+ * claimant's principal, when the action's claims carry them; the class is the recipient's only when the recipient is the
+ * claimant (S324).
  * the action's claims carry one; `channelClass` gives a channel's provider effect its declared class.
  */
-export function flowBreaks(mem: RMemory, intents: Intent[], claimsClass: number | null, channelClass: (kind: string) => number | null): FlowBreak[] {
+export function flowBreaks(mem: RMemory, intents: Intent[], claims: StepClaims | null, channelClass: (kind: string) => number | null): FlowBreak[] {
   const out: FlowBreak[] = [];
   const name = (c: number) => mem.classes[c] ?? String(c);
   const owners = (t: Taint) => (t.o.length ? `{${t.o.join(', ')}}` : '{}');
@@ -90,7 +92,8 @@ export function flowBreaks(mem: RMemory, intents: Intent[], claimsClass: number 
     }
     const rec = mem.recipients.get(i.kind);
     const p = rec?.to ? bare(i.payload[rec.to] ?? null) : null;
-    const c = claimsClass ?? rec?.cls ?? channelClass(i.kind) ?? 0;
+    const claimant = claims && claims.cls !== null && (!rec?.to || (typeof p === 'string' && p === claims.principal)) ? claims.cls : null;
+    const c = claimant ?? rec?.cls ?? channelClass(i.kind) ?? 0;
     for (const [f, v] of Object.entries(i.payload)) {
       // PS17.3: the Content values of the payload; an untainted one carries ⊥, which every recipient reads.
       if (!isTainted(v)) continue;
@@ -102,16 +105,25 @@ export function flowBreaks(mem: RMemory, intents: Intent[], claimsClass: number 
   return out;
 }
 
-/** PS17.3: the class in a step's claims, when the action's claims type has exactly one field of type Audience. */
-export function claimsClass(M: RMachine, action: string, d: Record<string, Value>): number | null {
+/** PS17.3, S324: a step's claims as the flow rule reads them: its class, and the claimant's principal. */
+export interface StepClaims { cls: number | null; principal: string | null }
+
+/**
+ * PS17.3: the class in a step's claims, when the action's claims type has exactly one field of type Audience, and the
+ * claimant's principal, when it has exactly one field of type Principal (S324).
+ */
+export function claimsClass(M: RMachine, action: string, d: Record<string, Value>): StepClaims | null {
   const a = M.actions.find((x) => x.name === action);
   const mem = M.memory;
   if (!a?.claims || !mem || a.claims.type.k !== 'record') return null;
-  const fs = M.records.get(a.claims.type.name)!.fields.filter((f) => f.type.k === 'union' && f.type.name === 'Audience');
-  if (fs.length !== 1) return null;
+  const fields = M.records.get(a.claims.type.name)!.fields;
+  const fs = fields.filter((f) => f.type.k === 'union' && f.type.name === 'Audience');
+  const ps = fields.filter((f) => f.type.k === 'principal');
   const c = d.$claims;
-  const v = c && typeof c === 'object' && 'fields' in c ? c.fields[fs[0].name] : null;
-  return v && typeof v === 'object' && 'ctor' in v ? mem.classes.indexOf(v.ctor) : null;
+  const rec = c && typeof c === 'object' && 'fields' in c ? c.fields : null;
+  const v = fs.length === 1 && rec ? rec[fs[0].name] : null;
+  const who = ps.length === 1 && rec ? bare(rec[ps[0].name] ?? null) : null;
+  return { cls: v && typeof v === 'object' && 'ctor' in v ? mem.classes.indexOf(v.ctor) : null, principal: typeof who === 'string' ? who : null };
 }
 
 /** A machine with its ghost, as a System (PS17.2): the machine's steps, each completion taking a pending taint. */
@@ -126,10 +138,12 @@ export function taintSystem(M: RMachine): System<TaintState> {
       const out: { label: Label; outcome: Outcome<TaintState> }[] = [];
       for (const { a, ds } of domains) {
         const kinds = mem.completes.get(a.name) ?? [];
-        // PS17.2: one choice per distinct pending taint of a kind this action completes; ⊥ when none is pending.
+        // PS17.2: one choice per distinct pending taint of a kind this action completes; ⊥ when none is pending. S322:
+        // an armed timer whose data carried a taint is pending as `timer <key> <action>`, and its firing takes it.
+        const takes = (k: string) => kinds.includes(k) || (k.startsWith('timer ') && k.endsWith(` ${a.name}`));
         const seen = new Set<string>();
         const choices: (number | null)[] = [];
-        x.pending.forEach((p, j) => { if (kinds.includes(p.kind) && !seen.has(pendingKey(p))) { seen.add(pendingKey(p)); choices.push(j); } });
+        x.pending.forEach((p, j) => { if (takes(p.kind) && !seen.has(pendingKey(p))) { seen.add(pendingKey(p)); choices.push(j); } });
         if (!choices.length) choices.push(null);
         for (const d of ds) {
           for (const j of choices) {
@@ -137,7 +151,14 @@ export function taintSystem(M: RMachine): System<TaintState> {
             const rest = j === null ? x.pending : x.pending.filter((_, k) => k !== j);
             const st = transition(M, x.s, a.name, data);
             const added = st.verdict.kind === 'accepted' ? st.effects.flatMap((i) => { const t = intentTaint(mem, i, reps); return t ? [{ kind: i.kind, t }] : []; }) : [];
-            const pending = sortPending([...rest, ...added]);
+            // S322: setting a timer's key again replaces its pending taint, cancelling it removes it.
+            let kept = rest;
+            if (st.verdict.kind === 'accepted') for (const i of st.effects) {
+              if (i.type !== 'timer' && i.type !== 'cancel') continue;
+              kept = kept.filter((p) => !p.kind.startsWith(`timer ${i.key} `));
+              if (i.type === 'timer') { const tt = Object.values(i.data).reduce<Taint>((acc, v) => join(acc, taintOf(v)), BOTTOM); if (tt.c !== 0 || tt.o.length) added.push({ kind: `timer ${i.key} ${i.action}`, t: tt }); }
+            }
+            const pending = sortPending([...kept, ...added]);
             const label: Label = { action: a.name, data, verdict: st.verdict, effects: st.effects };
             const next: TaintState = { s: st.next, pending };
             const over = [...new Set(pending.map((p) => p.kind))].find((k) => pending.filter((p) => p.kind === k).length > PENDING_BOUND);

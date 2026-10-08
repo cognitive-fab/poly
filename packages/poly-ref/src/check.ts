@@ -6,7 +6,7 @@
 // the same Graph.
 import type * as A from '@poly/core';
 import type { Diagnostic, Expr, FairGroup as AstFairGroup, Module, Witness, WitnessStep } from '@poly/core';
-import { buildMachine, dataDomain, valuesOf, monitorStart, monitorStep, clauseText, type PathClause, type RMachine, type RPathProperty, type RType } from './model.js';
+import { buildMachine, dataDomain, valuesOf, selfAlone, monitorStart, monitorStep, clauseText, type PathClause, type RMachine, type RPathProperty, type RType } from './model.js';
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
 import { isTerminal, type Intent } from './step.js';
@@ -14,7 +14,8 @@ import { machineHome } from './channels.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
-import { taintSystem, firstBreaks, PENDING_BOUND, type TaintState } from './taint.js';
+import { taintSystem, firstBreaks, claimsClass, PENDING_BOUND, type TaintState } from './taint.js';
+import { bare, isBottom, taintOf } from './values.js';
 import { antecedents, emittingActions, judge, neverParts, type Members, type RefFault, type Vacuous } from './vacuity.js';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
@@ -32,6 +33,7 @@ const CODE = {
   PL6203: ['ADJUDICATION_WITHOUT_DECISION', 'finding', 'effects'],
   PL6831: ['AUDIENCE_LEAK', 'finding', 'model-check'],
   PL6832: ['TAINT_DOWNGRADE', 'finding', 'model-check'],
+  PL6838: ['FLOW_NOT_FOLLOWED', 'inconclusive', 'model-check'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -67,6 +69,14 @@ export interface MachineReport {
   flowStates?: number;
   /** PS17.3, PS17.5: the flow rule's findings (PL6831, PL6832, and its bound hits), reported in a stage of their own. */
   flowFindings?: Diagnostic[];
+  /** PS1.4b, PS17.2 (S323, S325): the declassification points the certificate lists. */
+  declassify?: Declassify;
+}
+
+/** S323, S325: each decision with a finite answer over tainted data, and each count over another owner's items. */
+export interface Declassify {
+  decisions: { kind: string; class: string; answers: number }[];
+  counts: { machine: string; action: string; param: string; retrieval: string }[];
 }
 
 export interface CheckOptions {
@@ -333,6 +343,7 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
 
   // PS17.3, PS17.5 (S301): the flow rule, over the machine with its taints, when the program declares a source.
   let flowStates: number | undefined;
+  let declassify: Declassify | undefined;
   const flowFindings: Diagnostic[] = [];
   if (M.memory) {
     const tg = explore(taintSystem(M), opts.maxStates);
@@ -349,11 +360,80 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
     const cut = tg.edges.find((e) => e.outcome.kind === 'bound' && e.outcome.field.startsWith('pending '));
     if (cut && cut.outcome.kind === 'bound') flowFindings.push(finding('PL3901', undefined, `the flow rule's exploration stopped: ${cut.outcome.field.slice(8)} would hold more than ${PENDING_BOUND} pending intents (PS17.2)`, ttrace([...pathTo(tg, cut.from), cut])));
     if (tg.capHit) flowFindings.push(finding('PL3901', undefined, `the flow rule's exploration stopped at ${tg.states.length} states`, []));
+    const mem = M.memory;
+    const program = [module, ...(opts.program ?? [])];
+    // PS17.3, S322: a message no configuration follows. Two machines are followed together when some configuration of
+    // the program holds both (two instances, for a message to another instance of the same machine).
+    const counts = new Map<string, number>();
+    const followed = (target: string): boolean => program.some((mod) => mod.decls.some((d) => {
+      if (d.kind !== 'Configuration') return false;
+      counts.clear();
+      for (const x of d.instances) { const n = x.machine[x.machine.length - 1]; counts.set(n, (counts.get(n) ?? 0) + (x.count ?? 1)); }
+      return target === M.name ? (counts.get(M.name) ?? 0) >= 2 : counts.has(M.name) && counts.has(target);
+    }));
+    const tainted = (data: Record<string, unknown>): string | null => {
+      for (const [f, v] of Object.entries(data)) if (!isBottom(taintOf(v as never))) return f;
+      return null;
+    };
+    const reported = new Set<string>();
+    for (const e of tg.edges) {
+      if (e.label.verdict.kind !== 'accepted') continue;
+      for (const i of e.label.effects) {
+        let target: string | null = null;
+        let data: Record<string, unknown> | null = null;
+        let action = '';
+        if (i.type === 'send') { const a = bare(i.target); if (typeof a !== 'string' || a === selfAlone(M)) continue; target = a.slice(0, a.lastIndexOf('#')); data = i.data; action = i.action; }
+        else if (i.type === 'create' || i.type === 'spawn') { target = (i.type === 'create' ? i.machine : i.machineId).split('.').pop()!; data = i.create?.data ?? null; action = i.create?.action ?? ''; }
+        else if (i.type === 'signal') { target = M.children.get(i.key)?.machine ?? null; data = i.data; action = i.action; }
+        if (!target || !data) continue;
+        const f = tainted(data);
+        if (f === null || followed(target)) continue;
+        const key = `${e.label.action}>${target}.${action}`;
+        if (reported.has(key)) continue;
+        reported.add(key);
+        flowFindings.push(finding('PL6838', M.handlers.get(e.label.action)?.id, `${e.label.action} sends ${action} to ${target} carrying ${f}, tainted, and no configuration of the program holds ${M.name} and ${target}, so the flow rule does not follow the message (PS17.3, S322)`, ttrace([...pathTo(tg, e.from), e])));
+      }
+    }
+    // S323, S325: the declassification points, for the certificate.
+    if (mem) {
+      const decisions = new Map<string, { kind: string; class: string; answers: number }>();
+      const foreign = new Set<string>();
+      for (const e of tg.edges) {
+        if (e.label.verdict.kind !== 'accepted') continue;
+        const claimant = claimsClass(M, e.label.action, e.label.data)?.principal ?? null;
+        for (const i of e.label.effects) {
+          if (i.type !== 'effect') continue;
+          const r = mem.retrievals.get(i.kind);
+          if (r?.owned) { const v = r.owner === null ? null : bare(i.payload[r.owner] ?? null); if (r.owner === null || v === null || v !== claimant) foreign.add(i.kind); }
+          if (!mem.decisions.has(i.kind)) continue;
+          const d = [...M.decisions.values()].find((x) => x.kind === i.kind);
+          const okAction = d?.ok ? M.actions.find((x) => x.name === d.ok!.action) : undefined;
+          const answer = okAction?.params.filter((x) => d!.ok!.answer.includes(x.name)) ?? [];
+          if (!answer.length || answer.some((x) => x.type.k === 'content' || x.type.k === 'items')) continue;
+          let top = -1;
+          for (const v of Object.values(i.payload)) { const tt = taintOf(v); if (!isBottom(tt)) top = Math.max(top, tt.c); }
+          if (top < 0) continue;
+          const answers = answer.reduce((n, x) => n * valuesOf(x.type, M).length, 1);
+          const prev = decisions.get(i.kind);
+          if (!prev || mem.classes.indexOf(prev.class) < top) decisions.set(i.kind, { kind: i.kind, class: mem.classes[top] ?? String(top), answers });
+        }
+      }
+      // A count read: x.count in the handler of an action that completes a retrieval whose owner is not the claimant's.
+      const countsOut: Declassify['counts'] = [];
+      for (const [action, kinds] of mem.completes) for (const kind of kinds) {
+        if (!foreign.has(kind)) continue;
+        const a = M.actions.find((x) => x.name === action);
+        const h = M.handlers.get(action);
+        if (!a || !h) continue;
+        for (const prm of a.params) if (prm.type.k === 'items' && readsCount(h, prm.name)) countsOut.push({ machine: M.name, action, param: prm.name, retrieval: kind });
+      }
+      declassify = { decisions: [...decisions.values()].sort((x, y) => (x.kind < y.kind ? -1 : 1)), counts: countsOut };
+    }
   }
 
   return {
     vacuous,
-    ...(flowStates !== undefined ? { flowStates, flowFindings } : {}),
+    ...(flowStates !== undefined ? { flowStates, flowFindings, ...(declassify ? { declassify } : {}) } : {}),
     machine: M.name,
     states: g.states.length,
     transitions: g.edges.length,
@@ -569,4 +649,17 @@ export function machineVacuity(M: RMachine, g: Graph<State>, fault?: RefFault): 
     if (c) out.push({ property: p.name, id: p.id, parts: [], text: `before("${c.first}", "${c.then}"): no ${c.then} is emitted` });
   }
   return out;
+}
+
+/** S325: whether a handler reads `p.count` anywhere in its body. */
+function readsCount(h: A.Handler, p: string): boolean {
+  let hit = false;
+  const walk = (x: unknown): void => {
+    if (hit || !x || typeof x !== 'object') return;
+    const n = x as { kind?: string; object?: { kind?: string; name?: string }; prop?: string };
+    if (n.kind === 'Member' && n.prop === 'count' && n.object?.kind === 'Name' && n.object.name === p) { hit = true; return; }
+    for (const v of Object.values(x)) walk(v);
+  };
+  walk(h.body);
+  return hit;
 }

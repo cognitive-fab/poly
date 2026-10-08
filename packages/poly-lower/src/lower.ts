@@ -518,16 +518,20 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
   return { effects: Object.fromEntries(out), ...(timers.length ? { timerTargets: timers } : {}) };
 }
 
-/** PT10k, PS17.3: each action whose claims type has exactly one field of type Audience, with that field. */
-function flowClaims(module: A.Module): Record<string, string> {
-  const out: [string, string][] = [];
+/**
+ * PT10k, PS17.3, S324: each action whose claims type has exactly one field of type Audience, with that field and the
+ * claims' one field of type Principal (null when it has none or several).
+ */
+function flowClaims(module: A.Module): Record<string, { class: string; principal: string | null }> {
+  const out: [string, { class: string; principal: string | null }][] = [];
   for (const d of module.decls) {
     if (d.kind !== 'Machine') continue;
     for (const it of d.items) {
       if (it.kind !== 'Handler' || !it.by) continue;
       const rec = module.decls.find((x): x is A.RecordDecl => x.kind === 'RecordDecl' && x.name === it.by!.type);
       const fs = (rec?.fields ?? []).filter((f) => f.type.kind === 'TName' && f.type.name === 'Audience');
-      if (fs.length === 1) out.push([`${d.name}.${it.action}`, fs[0].name]);
+      const ps = (rec?.fields ?? []).filter((f) => f.type.kind === 'TName' && f.type.name === 'Principal');
+      if (fs.length === 1) out.push([`${d.name}.${it.action}`, { class: fs[0].name, principal: ps.length === 1 ? ps[0].name : null }]);
     }
   }
   return Object.fromEntries(out.sort(([a], [b]) => (a < b ? -1 : 1)));

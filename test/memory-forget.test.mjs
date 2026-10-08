@@ -58,9 +58,9 @@ test('PS17.5: an answer is remembered about its customer, derived, read back fro
     assert.deepEqual([mine.items.count, theirs.items.count], [1, 0]);
     // Verified once, by a person; an agent's key and a replay are refused.
     const item = rows[0].item;
-    await assert.rejects(rt.verifyMemory(item, sign('verify', memoryVerifySubject(item), AGENT)), (e) => e.reason === 'wrong-key');
-    await assert.rejects(rt.verifyMemory(item, sign('verify', memoryVerifySubject('mem:other'))), (e) => e.reason === 'wrong-key');
-    const rec = sign('verify', memoryVerifySubject(item));
+    await assert.rejects(rt.verifyMemory(item, sign('verify', memoryVerifySubject(rt.anchorId, item), AGENT)), (e) => e.reason === 'wrong-key');
+    await assert.rejects(rt.verifyMemory(item, sign('verify', memoryVerifySubject(rt.anchorId, 'mem:other'))), (e) => e.reason === 'wrong-key');
+    const rec = sign('verify', memoryVerifySubject(rt.anchorId, item));
     await rt.verifyMemory(item, rec);
     assert.equal(rt.memory.memoryItem(item).provenance, 'verified');
     await assert.rejects(rt.verifyMemory(item, rec), (e) => e.reason === 'replayed');
@@ -81,8 +81,8 @@ test('AC24: forgetting a customer erases every body about them, removes their it
     assert.ok(before.every((r) => !r.diagnostics.length && !r.forgotten), JSON.stringify(before));
     // An unsigned forget, and one over another subject, are refused.
     await assert.rejects(rt.forget({ subject: 'cust-a' }, { kind: 'forget' }), (e) => e.reason === 'not-a-record');
-    await assert.rejects(rt.forget({ subject: 'cust-a' }, sign('forget', forgetSubject({ subject: 'cust-b' }))), (e) => e.reason === 'wrong-key');
-    const { erased } = await rt.forget({ subject: 'cust-a' }, sign('forget', forgetSubject({ subject: 'cust-a' })));
+    await assert.rejects(rt.forget({ subject: 'cust-a' }, sign('forget', forgetSubject(rt.anchorId, { subject: 'cust-b' }))), (e) => e.reason === 'wrong-key');
+    const { erased } = await rt.forget({ subject: 'cust-a' }, sign('forget', forgetSubject(rt.anchorId, { subject: 'cust-a' })));
     assert.ok(erased.includes(answer));
     assert.ok(erased.length >= 3, 'the answer and the two orders the decision read');
     for (const d of erased) assert.equal(await rt.contentBody(d), null, d);
@@ -137,11 +137,11 @@ test('PT10l: poly memory-verify and poly forget sign records, never over MCP; fo
     await rt.create('concierge_memory.Desk', { id: 'desk' });
     await ask(rt, 'cust-a');
     const item = rt.store.db.prepare('SELECT item FROM poly_memory').get().item;
-    const v = await verify.run({ item, by: PERSON.keyId, key: keyFile });
+    const v = await verify.run({ project: dir, item, by: PERSON.keyId, key: keyFile });
     await rt.verifyMemory(item, v.result.record);
     assert.equal(rt.memory.memoryItem(item).provenance, 'verified');
-    await assert.rejects(forget.run({ by: PERSON.keyId, key: keyFile }), /a subject or a source/);
-    const f = await forget.run({ source: 'orders', by: PERSON.keyId, key: keyFile });
+    await assert.rejects(forget.run({ project: dir, by: PERSON.keyId, key: keyFile }), /a subject or a source/);
+    const f = await forget.run({ project: dir, source: 'orders', by: PERSON.keyId, key: keyFile });
     const { erased } = await rt.forget({ source: 'orders' }, f.result.record);
     assert.equal(erased.length, 2, 'the two orders the decision read, and not the answer, which memory holds');
     assert.ok(rt.memory.memoryItem(item), 'the memory item stays');
@@ -149,7 +149,7 @@ test('PT10l: poly memory-verify and poly forget sign records, never over MCP; fo
     const ev = rt.store.db.prepare("SELECT event FROM poly_ledger WHERE run = 'runtime:content' AND kind = 'verdict'").all().map((r) => JSON.parse(r.event).body).filter((x) => x.stage === 'forget');
     assert.deepEqual(ev.map((x) => x.source), ['orders']);
     // The orders' bodies are in no step's data; the answer is, and forgetting the customer erases it.
-    const s = await forget.run({ subject: 'cust-a', by: PERSON.keyId, key: keyFile });
+    const s = await forget.run({ project: dir, subject: 'cust-a', by: PERSON.keyId, key: keyFile });
     assert.ok((await rt.forget({ subject: 'cust-a' }, s.result.record)).erased.length >= 1);
   } finally { await rt.close(); }
   try {

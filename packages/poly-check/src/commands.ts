@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXIT_CODES, fold, verdictOf, type Verdict, digest, grantRequestSubject, memoryVerifySubject, forgetSubject, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
+import { EXIT_CODES, fold, verdictOf, type Verdict, digest, grantRequestSubject, memoryVerifySubject, forgetSubject, loadProject, readAnchor, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
@@ -315,10 +315,10 @@ export const COMMANDS: Command[] = [
   {
     name: 'memory-verify', mcp: null, lsp: false,
     summary: 'Signs the promotion of a memory item to verified with a person key given by file, a record of the kind verify over the item, for rt.verifyMemory (PS17.5, PT10l). Never over MCP.',
-    input: obj({ item: str('the memory item'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record') }, ['item', 'by', 'key']),
+    input: obj({ item: str('the memory item'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record'), project: str('the project whose anchor the record is bound to (default: the working directory)') }, ['item', 'by', 'key']),
     output: obj({ record: { type: 'object', description: 'the signed verification' }, path: str('where it was written, when out was given') }, ['record']),
     async run(input) {
-      const record = signRecord({ kind: 'verify', subject: memoryVerifySubject(need(input, 'item')), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
+      const record = signRecord({ kind: 'verify', subject: memoryVerifySubject(anchorIdOf(opt(input, 'project')), need(input, 'item')), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
       const text = JSON.stringify(record, null, 2) + '\n';
       const out = opt(input, 'out');
       if (out) writeFileSync(out, text);
@@ -328,13 +328,13 @@ export const COMMANDS: Command[] = [
   {
     name: 'forget', mcp: null, lsp: false,
     summary: 'Signs the forgetting of a subject (a principal) or a whole source with a person key given by file, a record of the kind forget, for rt.forget (PS17.7, PT10l). Never over MCP.',
-    input: obj({ subject: str('the principal to forget'), source: str('or the source to forget'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record') }, ['by', 'key']),
+    input: obj({ subject: str('the principal to forget'), source: str('or the source to forget'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record'), project: str('the project whose anchor the record is bound to (default: the working directory)') }, ['by', 'key']),
     output: obj({ record: { type: 'object', description: 'the signed forget' }, path: str('where it was written, when out was given') }, ['record']),
     async run(input) {
       const subject = opt(input, 'subject');
       const source = opt(input, 'source');
       if ((subject === undefined) === (source === undefined)) throw new CommandUsageError('forget names a subject or a source, one of them');
-      const record = signRecord({ kind: 'forget', subject: forgetSubject(subject !== undefined ? { subject } : { source: source! }), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
+      const record = signRecord({ kind: 'forget', subject: forgetSubject(anchorIdOf(opt(input, 'project')), subject !== undefined ? { subject } : { source: source! }), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
       const text = JSON.stringify(record, null, 2) + '\n';
       const out = opt(input, 'out');
       if (out) writeFileSync(out, text);
@@ -441,3 +441,11 @@ export const NOT_BUILT: { name: string; mcp: string; when: string }[] = [
 ];
 
 export const commandNamed = (name: string): Command | undefined => COMMANDS.find((c) => c.name === name);
+
+/** S321: the id of the anchor a project's records are bound to; a project with none cannot sign one. */
+function anchorIdOf(project: string | undefined): string {
+  const dir = project ?? process.cwd();
+  const a = readAnchor(dir, loadProject(dir).manifest.name);
+  if (!a) throw new CommandUsageError(`${dir} has no keyring anchor, so a record cannot be bound to it (S321): anchor it with poly anchor keyrings`);
+  return a.anchor.id;
+}

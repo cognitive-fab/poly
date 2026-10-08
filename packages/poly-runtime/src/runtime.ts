@@ -18,7 +18,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type Runtime, type DispatchResult, type JournalRow } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
-import { RESERVED_MODULE, grantRequestSubject, memoryVerifySubject, forgetSubject, recordDigest, revocationSubject, verifyRecord, type Certificate, type SignedRecord } from '@poly/core';
+import { RESERVED_MODULE, grantRequestSubject, memoryVerifySubject, forgetSubject, recordAnchor, recordDigest, revocationSubject, verifyRecord, type Certificate, type SignedRecord } from '@poly/core';
 import { LedgerStore, openLedgerStore, InputOutsideType } from './ledger-store.js';
 import { contentValues, dataOutside } from './types.js';
 import { verifyBuild, recheckCopy, LoadError, type VerifiedBuild, type VerifiedWorkflow, type WorkOrderTool } from './load.js';
@@ -153,7 +153,7 @@ export class OutcomeWithoutDecision extends Error {
 
 /** PT12.5: an approval that is not a person's signed record for a waiting escalation. Audited, with no effect. */
 /** S189: why an approval was refused, as the drop folder names it. */
-export type ApprovalRefusal = 'not-a-record' | 'wrong-key' | 'unmatched' | 'replayed' | 'expired';
+export type ApprovalRefusal = 'not-a-record' | 'wrong-key' | 'unmatched' | 'replayed' | 'expired' | 'wrong-project';
 
 export class ApprovalRefused extends Error {
   constructor(message: string, readonly reason: ApprovalRefusal = 'unmatched') { super(message); this.name = 'ApprovalRefused'; }
@@ -267,7 +267,7 @@ export class PolyRuntime {
         const j = this.store.db.prepare('SELECT action, data FROM pr_journal WHERE instance_id = ? AND seq = ?').get(row.instance_id, row.seq) as { action: string; data: string } | undefined;
         const claims = j ? JSON.parse(j.data)?.$claims : null;
         const ch = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
-        return this.memory.check({ machineId, kind: row.kind, payload: (row.payload ?? {}) as Record<string, unknown>, decl, step: { action: j?.action ?? null, claims: claims && typeof claims === 'object' ? claims : null }, channelAudience: ch ? verified.channels.find((c) => c.channel === ch[1])?.audience ?? null : null, approved, now: this.now(), keyed: (s) => store.recipientDigest(`principal:${s}`) });
+        return this.memory.check({ instance: row.instance_id, machineId, kind: row.kind, payload: (row.payload ?? {}) as Record<string, unknown>, decl, step: { action: j?.action ?? null, claims: claims && typeof claims === 'object' ? claims : null }, channelAudience: ch ? verified.channels.find((c) => c.channel === ch[1])?.audience ?? null : null, approved, now: this.now(), keyed: (s) => store.recipientDigest(`principal:${s}`) });
       },
       channelOf: (row) => {
         const m = /^channel\.([A-Za-z_][A-Za-z0-9_]*)\.send$/.exec(row.kind);
@@ -453,13 +453,16 @@ export class PolyRuntime {
     }
     for (const r of v.receipts) await this.ingressRecord(channel, { stage: 'receipt', outcome: 'recorded', provider: adapter.provider, providerId: r.providerId, status: r.status, ...(r.error ? { reason: r.error } : {}) });
     for (const m of v.messages) {
-      const content = await this.putContent(m.body);
       // S191: the sender the adapter verified is an address, journaled by its keyed digest.
       let sender = m.claims.sender;
       if (this.#fault !== 'address-in-clear') await this.store.txn(() => { sender = this.store.keepAddress(m.claims.sender); });
+      // PS17.4, S327: a body received on a channel is owned by its sender, at the channel's class.
+      const owner = this.store.recipientDigest(m.claims.sender);
+      const content = this.memory.flows.size ? await this.#putTainted(m.body, { c: this.channelClass(channel), o: [owner] }, null) : await this.putContent(m.body);
       await this.ingressRecord(channel, { stage: 'claims', outcome: m.claims.verified ? 'verified' : 'unverified', provider: adapter.provider, messageId: m.providerMessageId, claims: { ...m.claims, sender } });
       // K11, PT21.4: the adapter's claims, typed as std's Sender (verified is Verified or Unverified).
-      await this.#deliver(channel, { ...m.fields, body: content }, m.providerMessageId, { verified: m.claims.verified ? 'Verified' : 'Unverified' });
+      const delivered = await this.#deliver(channel, { ...m.fields, body: content }, m.providerMessageId, { verified: m.claims.verified ? 'Verified' : 'Unverified' });
+      if (this.memory.flows.size && delivered.conversation) await this.store.txn(() => this.memory.setThreadSender(delivered.conversation, owner));
     }
     return v.answer ?? { status: 200, contentType: 'text/plain', body: 'ok' };
   }
@@ -645,6 +648,9 @@ export class PolyRuntime {
   #checkRecord(record: unknown, kind: 'verify' | 'forget', subject: string, what: string): string {
     const r = record as Partial<SignedRecord> | null;
     if (!r || typeof r !== 'object' || typeof r.sig !== 'string') throw new ApprovalRefused(`${what} is signed by a person (PS17)`, 'not-a-record');
+    // S321: a record bound to another project's anchor is refused before anything else is looked at.
+    const named = recordAnchor(r.subject);
+    if (named !== null && named !== this.anchorId) throw new ApprovalRefused(`${what} is bound to another project's anchor (S321)`, 'wrong-project');
     const v = verifyRecord(r, this.certificate.poly.keyrings ?? { people: [], agents: [] }, { kind, subject });
     if (!v.ok) throw new ApprovalRefused(`${what} is refused: ${v.problem}`, v.problem.startsWith('not a signed record') ? 'not-a-record' : 'wrong-key');
     const d = recordDigest(r as SignedRecord);
@@ -657,10 +663,20 @@ export class PolyRuntime {
     return this.store.db.prepare('INSERT OR IGNORE INTO poly_used_record (digest, at) VALUES (?, ?)').run(d, this.now()).changes === 1;
   }
 
+  /** S327: a channel's class in the program's audience: the one it declares, else the lowest. */
+  private channelClass(channel: string): number {
+    const flow = [...this.memory.flows.values()][0];
+    const a = this.verified.channels.find((c) => c.channel === channel)?.audience ?? null;
+    return flow && a ? Math.max(0, flow.audience.indexOf(a)) : 0;
+  }
+
+  /** S321: the id of the project's anchor, which a memory record names. */
+  get anchorId(): string | null { return this.verified.anchorId; }
+
   /** PS17.5 (S309): a person's signed record of the kind verify promotes a memory item to verified, once. */
   async verifyMemory(item: string, record: unknown): Promise<void> {
     if (!this.memory.memoryItem(item)) throw new Error(`no memory item ${item}`);
-    const d = this.#checkRecord(record, 'verify', memoryVerifySubject(item), 'a memory verification');
+    const d = this.#checkRecord(record, 'verify', memoryVerifySubject(this.anchorId ?? '', item), 'a memory verification');
     this.store.ensureRun(MEMORY_RUN, 'runtime', 'memory');
     let taken = false;
     await this.store.txn(() => {
@@ -678,7 +694,7 @@ export class PolyRuntime {
   async forget(target: { subject: string } | { source: string }, record: unknown): Promise<{ erased: string[] }> {
     // Review S4: a source the build does not have is refused before the record is looked at.
     if ('source' in target && !this.memory.hasSource(target.source)) throw new Error(`no source ${target.source} in the certified build`);
-    const d = this.#checkRecord(record, 'forget', forgetSubject(target), 'a forget');
+    const d = this.#checkRecord(record, 'forget', forgetSubject(this.anchorId ?? '', target), 'a forget');
     // Review S2: only an erasable body is erased, and only those are listed.
     const bodies = this.memory.forgettable(target).bodies.filter((b) => this.store.db.prepare('SELECT 1 FROM poly_erasable WHERE digest = ?').get(b));
     // Review C1: each erasure and the adapters' forget may be run again; the record is taken with the forget event, so a

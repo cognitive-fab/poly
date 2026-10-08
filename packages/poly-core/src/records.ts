@@ -117,14 +117,20 @@ export function revocationSubject(grantId: string): string {
   return `sha256:${createHash('sha256').update(canonicalize({ grant: grantId }), 'utf8').digest('hex')}`;
 }
 
-/** PS17.5, S309: what a person signs to promote a memory item to verified: the item's id. */
-export function memoryVerifySubject(item: string): string {
-  return `sha256:${createHash('sha256').update(canonicalize({ item }), 'utf8').digest('hex')}`;
+/** PS17.5, S309, S321: what a person signs to promote a memory item to verified: the project's anchor id and the item's id. */
+export function memoryVerifySubject(anchor: string, item: string): string {
+  return `${anchor}:sha256:${createHash('sha256').update(canonicalize({ item }), 'utf8').digest('hex')}`;
 }
 
-/** PS17.7, S306: what a person signs to forget a subject, a principal, or a whole source. */
-export function forgetSubject(target: { subject: string } | { source: string }): string {
-  return `sha256:${createHash('sha256').update(canonicalize('subject' in target ? { subject: target.subject } : { source: target.source }), 'utf8').digest('hex')}`;
+/** PS17.7, S306, S321: what a person signs to forget a subject or a whole source, bound to the project's anchor id. */
+export function forgetSubject(anchor: string, target: { subject: string } | { source: string }): string {
+  return `${anchor}:sha256:${createHash('sha256').update(canonicalize('subject' in target ? { subject: target.subject } : { source: target.source }), 'utf8').digest('hex')}`;
+}
+
+/** S321: the anchor id a memory record's subject names, or null when it names none. */
+export function recordAnchor(subject: unknown): string | null {
+  const m = typeof subject === 'string' ? /^(.+):sha256:[0-9a-f]{64}$/.exec(subject) : null;
+  return m ? m[1] : null;
 }
 
 /** S210, B3, D6: what a person signs to ask a holder for a grant of a credential (holder null for the service's own). */

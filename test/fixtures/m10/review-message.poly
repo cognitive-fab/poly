@@ -1,0 +1,94 @@
+// M10 S322: the desk sends its answer, tainted with every customer's orders, to a relay that posts it to the public;
+// no configuration holds the two, so the flow rule cannot follow the message (PL6838).
+module concierge_memory
+
+audience { public < customer < staff }
+
+claims Customer {
+  principal: Principal
+}
+
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+}
+
+enum Phase { Idle, Looking, Answering }
+
+machine Desk {
+  state {
+    phase    : Phase     = Idle
+    customer : Principal = none
+    question : Content   = none
+    relay    : Ref<Relay> = none
+  }
+
+  action Ask(question: Content, to: Ref<Relay>)
+  action Found(items: Items)
+  action LookupFailed()
+  action Answered(text: Content, cites: Items)
+  action AnswerFailed()
+
+  on Ask(question, to) by c: Customer {
+    require to != none else reject "none"
+    require phase == Idle else reject "busy"
+    phase' = Looking
+    relay' = to
+    customer' = c.principal
+    question' = question
+    emit lookup(customer: c.principal)
+  }
+
+  on Found(items) {
+    require phase == Looking else reject "not-looking"
+    phase' = Answering
+    decide answer(question: question, context: items)
+  }
+
+  on LookupFailed {
+    require phase == Looking else reject "not-looking"
+    phase' = Idle
+  }
+
+  on Answered(text, cites) {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    send relay <- Forward(body: text)
+  }
+
+  on AnswerFailed {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+  }
+
+  effect lookup(customer: Principal) {
+    retrieve orders limit 2
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision answer(question: Content, context: Items) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    cites context
+    ok(r) -> Answered(text: r.answer, cites: r.cites)
+    failed -> AnswerFailed()
+  }
+
+}
+
+service machine Relay {
+  state { n : 0..1 = 0 }
+  action Forward(body: Content)
+  on Forward(body) {
+    n' = 1 - n
+    emit post(body: body)
+  }
+  effect post(body: Content) {
+    kind "support.post"
+    labels { egress:external }
+    audience public
+  }
+}

@@ -16,6 +16,10 @@
     "out": {
       "type": "string",
       "description": "where to write the record"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project whose anchor the record is bound to (default: the working directory)"
     }
   },
   "required": [

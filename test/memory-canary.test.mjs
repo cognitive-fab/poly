@@ -71,7 +71,7 @@ test('S310: no record or output of the concierge with memory holds an item body,
     for (const s of db.seen) assert.ok(!s.text.includes('cust-a'), s.text);
     assert.ok(db.seen.some((s) => s.params.includes('cust-a')));
     // Forgotten, the customer's bodies leave the content store; the question, which no source tainted, stays.
-    await rt.forget({ subject: 'cust-a' }, signRecord({ kind: 'forget', subject: forgetSubject({ subject: 'cust-a' }), by: PERSON.keyId, at: '2026-10-07T00:00:00.000Z' }, PERSON.privateKeyPem));
+    await rt.forget({ subject: 'cust-a' }, signRecord({ kind: 'forget', subject: forgetSubject(rt.anchorId, { subject: 'cust-a' }), by: PERSON.keyId, at: '2026-10-07T00:00:00.000Z' }, PERSON.privateKeyPem));
     assert.deepEqual(found(outputs(rt, a.dir, printed, { content: true }), tokens), ['table poly_content'], 'the question only');
     assert.deepEqual(found(outputs(rt, a.dir, printed, { content: true }), [`${canary}-question`]), ['table poly_content']);
   } finally { await rt.close(); }
