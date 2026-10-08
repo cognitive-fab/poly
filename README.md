@@ -179,6 +179,8 @@ No per-machine check can see this. The defect lives in the arrival order between
 0b. **Machines talk only by messages.** Addresses are values, `send` is the only way to affect a peer, and interacting machines are checked together as configurations.
 1. **The engines check single machines; poly checks how machines relate.** Safety, governance, simulation and mining stay in the engines. poly's own model checker, poly-ref, checks the lowering, deadlock, liveness and configurations.
 2. **The checked program is the running program, over its check domains.** A certificate binds the source, the artefacts and the check results by digest. Out-of-domain inputs are rejected (`strict`) or journaled as drift (`disclosed`).
+
+   **Domains refuse by default (S400, PT3.4a).** A check domain on an action's parameter is a constraint: an integer range, an enum, a `bool` or a `check { … }` clause refuses a value outside it at dispatch, with the reason `outside-check-domain`, before the handler runs. Write `disclosed` after a `check` clause (`amount: int check { 1, 2 } disclosed`) to accept values outside the domain and only report them; such a value is then outside what was checked.
 3. **One source per machine.** Every engine artefact is derived.
 4. **No silent clean.** Every check reports clean, findings, refused, underpowered or inconclusive.
 5. **No model call on a check or decision path.**
@@ -195,7 +197,7 @@ The Poly stack already holds the primitives a coding agent needs to write statef
 | **SAM** | State-Action-Model. The pattern every poly machine lowers to, in its v2 strict profile. |
 | **Machine** | A sealed state, a set of actions and one handler per action. The unit of checking and of execution. |
 | **Handler** | `on Action { … }`. Requires first, then writes. It either accepts or rejects with a named reason. |
-| **Check domain** | The finite set of values a field or parameter takes during checking. Narrower than the runtime type when declared so, and then disclosed. |
+| **Check domain** | The finite set of values a field or parameter takes during checking. Narrower than the runtime type when declared so, and strict unless written disclosed (S400). |
 | **Invariant** | A predicate on states that holds in every reachable state. |
 | **Step property** | A predicate on every accepted step `(pre, action, data, post)`. |
 | **Reject property** | A predicate on every step, whatever its verdict. |

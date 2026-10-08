@@ -331,6 +331,25 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
     decisions.set(it.name, { id: it.id, name: it.name, kind: `decision.${it.name}`, params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })), ok: ok ? { action: ok.action, answer: bound(['answer']), confidence: bound(['conf', 'margin']) } : null });
   }
   const guardedInputs = strictInputs(m, effects);
+  // PT3.4a, S400: a parameter of a handled action is strict unless written disclosed, when its type has a check domain
+  // the runtime can test: not a Principal, a Ref, a Content or an Items, nor a type holding one (PS4.1c, PS4.1f), and
+  // not a completion's childKey and childState, which the runtime supplies from the child (S44, S51).
+  const handledActions = new Set(m.items.flatMap((h) => (h.kind === 'Handler' ? [h.action] : [])));
+  const testable = (t: RType, seen = new Set<string>()): boolean => {
+    if (t.k === 'principal' || t.k === 'ref' || t.k === 'content' || t.k === 'items' || t.k === 'string') return false;
+    if (t.k === 'int') return Number.isFinite(t.lo) && Number.isFinite(t.hi);
+    if (t.k === 'map') return testable(t.key, seen) && testable(t.value, seen);
+    if (t.k !== 'record' && t.k !== 'union') return true;
+    if (seen.has(t.name)) return true;
+    seen.add(t.name);
+    const fs = t.k === 'record' ? records.get(t.name)?.fields ?? [] : (unions.get(t.name)?.ctors ?? []).flatMap((c) => c.fields);
+    return fs.every((x) => testable(x.type, seen));
+  };
+  const strictByDefault = (a: A.Action, p: A.Param): boolean => {
+    if (!handledActions.has(a.name) || p.check?.mode === 'disclosed') return false;
+    if (a.params.length === 2 && a.params[0].name === 'childKey' && a.params[1].name === 'childState') return false;
+    return p.check !== null || testable(typeOf(p.type));
+  };
   // PS2.2, S176: what a send may name: this module's machines, and those of the modules it uses.
   const receiverModules = [module.name, ...decls.filter((d): d is A.UseDecl => d.kind === 'Use').map((d) => usedModule(d.path, program))];
   const receivers = new Map([...new Set(receiverModules)].flatMap((mod) => (moduleNamed(mod)?.decls ?? []).filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [spell(mod, d.name), d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeIn(mod)(p.type) })) }))] as const)));
@@ -401,7 +420,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
         // an irreversible or compensable effect; `disclosed` written out keeps it disclosed.
         params: it.params.map((p) => ({
           name: p.name, type: typeOf(p.type), check: checkValues(p.check),
-          strict: p.check?.mode === 'strict' || (p.check !== null && p.check.mode === null && guardedInputs.has(`${it.name}.${p.name}`)),
+          strict: p.check?.mode === 'strict' || (p.check !== null && p.check.mode === null && guardedInputs.has(`${it.name}.${p.name}`)) || strictByDefault(it, p),
         })),
       });
     }

@@ -1954,8 +1954,14 @@ class Checker {
    * irreversible payload is PL1301, a finding a person must accept (PT12.5).
    */
   private strictFlow(m: A.Machine, facts: MachineFacts): void {
+    const handled = new Set(m.items.flatMap((h) => (h.kind === 'Handler' ? [h.action] : [])));
     for (const it of m.items) {
-      if (it.kind === 'Action') for (const p of it.params) if (p.check?.mode === 'strict') facts.strictParams.add(`${it.name}.${p.name}`);
+      if (it.kind !== 'Action') continue;
+      for (const p of it.params) {
+        if (p.check?.mode === 'strict') facts.strictParams.add(`${it.name}.${p.name}`);
+        // S400: every parameter of a handled action with a check domain is strict unless written disclosed.
+        else if (handled.has(it.name) && p.check?.mode !== 'disclosed' && this.hasCheckDomain(it, p)) facts.strictParams.add(`${it.name}.${p.name}`);
+      }
     }
     for (const h of m.items) {
       if (h.kind !== 'Handler') continue;
@@ -1994,6 +2000,28 @@ class Checker {
         if (f.check?.mode === 'disclosed' && read) this.errOnce('PL1301', f.check, `${f.name} is disclosed, and it flows into an irreversible effect (PT3.4a)`);
       }
     }
+  }
+
+  /**
+   * PT3.4a, S400: whether a parameter has a check domain the runtime can test at dispatch. A Principal, a Ref, a
+   * Content or an Items, or a type that holds one, is explored by representatives and has none (PS4.1c, PS4.1f);
+   * nor has a completion's childKey and childState, which the runtime supplies from the child (S44, S51).
+   */
+  private hasCheckDomain(act: A.Action, p: A.Param): boolean {
+    if (act.params.length === 2 && act.params[0].name === 'childKey' && act.params[1].name === 'childState') return false;
+    const ty = this.tyOf(p.type);
+    if ((ty.k === 'int' && !Number.isFinite(ty.lo)) || ty.k === 'string') return p.check !== null;
+    const seen = new Set<string>();
+    const opaque = (t: Ty): boolean => {
+      if (t.k === 'principal' || t.k === 'ref' || t.k === 'content' || t.k === 'items' || t.k === 'error' || t.k === 'action') return true;
+      if (t.k === 'string' || (t.k === 'int' && !Number.isFinite(t.lo))) return true;
+      if (t.k === 'map') return opaque(t.key) || opaque(t.value);
+      if ((t.k !== 'record' && t.k !== 'union') || seen.has(t.name)) return false;
+      seen.add(t.name);
+      const fields = t.k === 'record' ? this.env.records.get(t.name)!.fields : this.env.unions.get(t.name)!.ctors.flatMap((c) => c.fields);
+      return fields.some((f) => opaque(this.tyOf(f.type)));
+    };
+    return !opaque(ty);
   }
 
   private checkDomain(what: string, t: A.TypeExpr, ty: Ty, check: A.CheckClause | null, at: A.NodeBase): void {

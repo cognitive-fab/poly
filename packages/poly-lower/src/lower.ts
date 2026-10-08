@@ -121,7 +121,10 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     for (const s of strict) {
       // PD1.4b: a Conf is explored by its intervals, and at runtime its domain is 0..1000 (PD1.3a).
       const isConf = actions.find((a) => a.name === s.a)?.params.find((p) => p.name === s.p)?.type.kind === 'TConf';
-      const test = isConf ? `!(Number.isInteger(proposal[${JSON.stringify(s.p)}]) && proposal[${JSON.stringify(s.p)}] >= 0 && proposal[${JSON.stringify(s.p)}] <= 1000)` : s.values.some((v) => v !== null && typeof v === 'object')
+      // S400: every range is strict now, so a long run of consecutive integers is tested by its bounds, not listed.
+      const ints = s.values.length > 16 && s.values.every((v, k) => Number.isInteger(v) && (k === 0 || v === (s.values[k - 1] as number) + 1));
+      const [lo, hi] = ints ? [s.values[0], s.values[s.values.length - 1]] : isConf ? [0, 1000] : [null, null];
+      const test = isConf || ints ? `!(Number.isInteger(proposal[${JSON.stringify(s.p)}]) && proposal[${JSON.stringify(s.p)}] >= ${lo} && proposal[${JSON.stringify(s.p)}] <= ${hi})` : s.values.some((v) => v !== null && typeof v === 'object')
           // A record or a union with payloads is compared by value (review B1): `includes` compares objects by identity.
           ? `!${JSON.stringify(s.values)}.some((v) => __eq(v, proposal[${JSON.stringify(s.p)}]))`
           : `!${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])`;
