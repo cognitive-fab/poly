@@ -1,0 +1,40 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:028eed2530d2946d5c7f0c4c3bb4750bd8d6e96d566c5e4e9e9a407068d9f41b",
+  "stateKeys": [
+    {
+      "name": "status",
+      "type": "'idle' | 'busy'"
+    },
+    {
+      "name": "run",
+      "type": "address of Run | null"
+    },
+    {
+      "name": "task",
+      "type": "0..1"
+    }
+  ],
+  "initState": {
+    "status": "idle",
+    "run": null,
+    "task": 0
+  },
+  "actions": {
+    "Assign": {
+      "dataFields": {}
+    },
+    "Abort": {
+      "dataFields": {}
+    },
+    "Done": {
+      "dataFields": {}
+    },
+    "Fail": {
+      "dataFields": {}
+    }
+  },
+  "terminalStates": [],
+  "dataDomain": {},
+  "invariants": "invariants.mjs"
+}

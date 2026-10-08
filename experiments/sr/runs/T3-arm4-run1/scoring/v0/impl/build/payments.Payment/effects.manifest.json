@@ -1,0 +1,27 @@
+{
+  "effects": {
+    "card.authorize": {
+      "payloadSchema": {
+        "amount": {
+          "type": "number",
+          "required": true
+        }
+      },
+      "labels": [
+        "egress:external"
+      ],
+      "retry": {
+        "maxAttempts": 1,
+        "baseMs": 100,
+        "timeoutMs": 2000
+      },
+      "onSuccess": {
+        "action": "Approved"
+      },
+      "onFailure": {
+        "action": "Declined"
+      },
+      "class": "reversible"
+    }
+  }
+}

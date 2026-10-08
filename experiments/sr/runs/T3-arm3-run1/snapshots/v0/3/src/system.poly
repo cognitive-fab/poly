@@ -1,0 +1,79 @@
+// T3, card payments: one Payment instance per payment id, created by authorize.
+module payments
+
+enum Status { new, authorizing, authorized, declined, failed, captured, voided, refunded }
+
+machine Payment {
+  state {
+    status     : Status = New
+    authorized : 0..2   = 0
+    captured   : 0..2   = 0
+    refunded   : 0..2   = 0
+    requests   : 0..3   = 0
+  }
+  terminal status in { declined, failed, voided, refunded }
+
+  action Authorize(amount: int check { 1, 2 })
+  action TimedOut()
+  action Approved()
+  action Declined()
+  action Capture(amount: int check { 1, 2 })
+  action Void()
+  action Refund(amount: int check { 1, 2 })
+
+  on Authorize(amount) {
+    require status == New else reject "exists"
+    status' = Authorizing
+    authorized' = amount
+    requests' = 1
+    emit authorize(amount)
+  }
+  on TimedOut {
+    require status == Authorizing else reject "not-authorizing"
+    if requests < 3 {
+      requests' = requests + 1
+      emit authorize(authorized)
+    } else {
+      status' = Failed
+    }
+  }
+  on Approved {
+    require status == Authorizing else reject "not-authorizing"
+    status' = Authorized
+  }
+  on Declined {
+    require status == Authorizing else reject "not-authorizing"
+    status' = declined
+  }
+  on Capture(amount) {
+    require status == Authorized else reject "not-authorized"
+    require amount <= authorized else reject "exceeds-authorized"
+    status' = Captured
+    captured' = amount
+  }
+  on Void {
+    require status == Authorized else reject "not-authorized"
+    require captured == 0 else reject "captured"
+    status' = Voided
+  }
+  on Refund(amount) {
+    require status == Captured else reject "not-captured"
+    require refunded + amount <= captured else reject "exceeds-captured"
+    refunded' = refunded + amount
+    if refunded + amount == captured { status' = Refunded }
+  }
+
+  invariant captured-within-authorized: captured <= authorized
+  invariant refunded-within-captured: refunded <= captured
+  invariant voided-captured-nothing: status == Voided implies captured == 0
+  invariant at-most-three-requests: requests <= 3
+  path property at-most-three-sends: count("card.authorize") <= 3
+
+  effect authorize(amount: int) {
+    kind "card.authorize"
+    labels { egress:external }
+    class irreversible
+    ok -> Approved()
+    failed -> Declined()
+  }
+}

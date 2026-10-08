@@ -1,0 +1,19 @@
+{
+  "module": "workflow",
+  "instances": {
+    "run": { "machine": "Run", "init": { "w0": "worker0", "w1": "worker1" } },
+    "worker0": { "machine": "Worker", "init": { "task": 0, "run": "run" } },
+    "worker1": { "machine": "Worker", "init": { "task": 1, "run": "run" } }
+  },
+  "methods": {
+    "start": { "instance": "run", "action": "Start" },
+    "cancel": { "instance": "run", "action": "Cancel" },
+    "taskTimeout": { "instance": "run", "action": "Timeout", "params": { "task": "$arg:task" } },
+    "workDone": { "instance": "$arg:worker", "machine": "Worker", "action": "Done", "params": { "items": "$arg:items" } },
+    "workFailed": { "instance": "$arg:worker", "machine": "Worker", "action": "Fail" }
+  },
+  "queries": {
+    "run": { "instance": "run", "fields": { "status": "status", "task0": "task0", "task1": "task1", "retried0": "retried0", "retried1": "retried1" } },
+    "worker": { "instance": "$arg:worker", "machine": "Worker", "fields": { "status": "status" } }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:fe721cf53ce8ca4580ae982876615296aa00c52b7840017d1c3af50383cce788",
+  "stateKeys": [
+    {
+      "name": "status",
+      "type": "'idle' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled'"
+    },
+    {
+      "name": "task0",
+      "type": "'idle' | 'assigned' | 'completed' | 'failed' | 'cancelled'"
+    },
+    {
+      "name": "task1",
+      "type": "'idle' | 'assigned' | 'completed' | 'failed' | 'cancelled'"
+    },
+    {
+      "name": "w0",
+      "type": "address of Worker | null"
+    },
+    {
+      "name": "w1",
+      "type": "address of Worker | null"
+    }
+  ],
+  "initState": {
+    "status": "idle",
+    "task0": "idle",
+    "task1": "idle",
+    "w0": null,
+    "w1": null
+  },
+  "actions": {
+    "Start": {
+      "dataFields": {}
+    },
+    "Cancel": {
+      "dataFields": {}
+    },
+    "Report": {
+      "dataFields": {
+        "task": "0..1",
+        "outcome": "'idle' | 'assigned' | 'completed' | 'failed' | 'cancelled'"
+      }
+    }
+  },
+  "terminalStates": [
+    "completed",
+    "failed",
+    "cancelled"
+  ],
+  "dataDomain": {
+    "Report": {
+      "task": [
+        0,
+        1
+      ],
+      "outcome": [
+        "idle",
+        "assigned",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

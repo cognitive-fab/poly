@@ -1,0 +1,22 @@
+{
+  "effects": {
+    "card.authorize": {
+      "payloadSchema": {
+        "amount": {
+          "type": "number",
+          "required": true
+        }
+      },
+      "labels": [
+        "egress:external"
+      ],
+      "onSuccess": {
+        "action": "Approved"
+      },
+      "onFailure": {
+        "action": "Declined"
+      },
+      "class": "reversible"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+runs with at least one escaped O1 defect: SR3 0 of 20, M3 5 of 20; one-sided Fisher p = 0.0236 (significant at 0.05)
+  SR3: none; M3: T3-arm3-run2, T3-arm3-run4, T3-arm4-run2, T3-arm4-run5, T7-arm4-run1
+SR3: 20 scored, 20 delivered, 20 admitted
+  arm 3 T3: escaped per delivered 0.00, O1-R per delivered 0.00, admitted 1.00, tokens per delivered 1450896
+  arm 3 T7: escaped per delivered 0.00, O1-R per delivered 0.00, admitted 1.00, tokens per delivered 2175963
+  arm 4 T3: escaped per delivered 0.00, O1-R per delivered 0.00, admitted 1.00, tokens per delivered 1309116
+  arm 4 T7: escaped per delivered 0.00, O1-R per delivered 0.00, admitted 1.00, tokens per delivered 2286580
+M3: 20 scored, 20 delivered, 20 admitted
+  arm 3 T3: escaped per delivered 10.40, O1-R per delivered 6.40, admitted 1.00, tokens per delivered 1563567
+  arm 3 T7: escaped per delivered 0.00, O1-R per delivered 0.00, admitted 1.00, tokens per delivered 2363077
+  arm 4 T3: escaped per delivered 10.40, O1-R per delivered 6.40, admitted 1.00, tokens per delivered 1268239
+  arm 4 T7: escaped per delivered 0.40, O1-R per delivered 0.80, admitted 1.00, tokens per delivered 2041726

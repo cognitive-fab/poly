@@ -1,0 +1,89 @@
+{
+  "lang": "javascript",
+  "machineVersion": "sha256:67d7d1a4b7b3cefea47490206d9e9444e20c8187f90afd4fea0a117cd4a4e230",
+  "stateKeys": [
+    {
+      "name": "status",
+      "type": "'authorizing' | 'authorized' | 'declined' | 'failed' | 'captured' | 'voided' | 'refunded'"
+    },
+    {
+      "name": "authAmount",
+      "type": "0..2"
+    },
+    {
+      "name": "capturedAmount",
+      "type": "0..2"
+    },
+    {
+      "name": "refundedAmount",
+      "type": "0..2"
+    },
+    {
+      "name": "requests",
+      "type": "0..3"
+    }
+  ],
+  "initState": {
+    "status": "authorizing",
+    "authAmount": 0,
+    "capturedAmount": 0,
+    "refundedAmount": 0,
+    "requests": 0
+  },
+  "actions": {
+    "Authorize": {
+      "dataFields": {
+        "amount": "number"
+      }
+    },
+    "TimedOut": {
+      "dataFields": {}
+    },
+    "Approved": {
+      "dataFields": {}
+    },
+    "Declined": {
+      "dataFields": {}
+    },
+    "Capture": {
+      "dataFields": {
+        "amount": "number"
+      }
+    },
+    "Void": {
+      "dataFields": {}
+    },
+    "Refund": {
+      "dataFields": {
+        "amount": "number"
+      }
+    }
+  },
+  "terminalStates": [
+    "declined",
+    "failed",
+    "voided",
+    "refunded"
+  ],
+  "dataDomain": {
+    "Authorize": {
+      "amount": [
+        1,
+        2
+      ]
+    },
+    "Capture": {
+      "amount": [
+        1,
+        2
+      ]
+    },
+    "Refund": {
+      "amount": [
+        1,
+        2
+      ]
+    }
+  },
+  "invariants": "invariants.mjs"
+}

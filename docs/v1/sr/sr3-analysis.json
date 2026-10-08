@@ -1,0 +1,209 @@
+{
+  "primary": {
+    "sr3": "0 of 20",
+    "m3": "5 of 20",
+    "p": 0.02356202356202356,
+    "significant": true,
+    "alpha": 0.05
+  },
+  "sr3": {
+    "runs": 20,
+    "notScored": [],
+    "withDefects": [],
+    "admitted": 20,
+    "delivered": 20,
+    "table": {
+      "3": {
+        "T3": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 0,
+          "o1rPerDelivered": 0,
+          "tokensPerDelivered": 1450896.2,
+          "tokenPartsPerDelivered": {
+            "input": 42,
+            "output": 12340.8,
+            "cacheRead": 1365620.6,
+            "cacheWrite": 72892.8
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 171658,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0,
+          "caughtMean": 0
+        },
+        "T7": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 0,
+          "o1rPerDelivered": 0,
+          "tokensPerDelivered": 2175963.2,
+          "tokenPartsPerDelivered": {
+            "input": 60.8,
+            "output": 20233.6,
+            "cacheRead": 2075340,
+            "cacheWrite": 80328.8
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 254204,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0,
+          "caughtMean": 12.6
+        }
+      },
+      "4": {
+        "T3": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 0,
+          "o1rPerDelivered": 0,
+          "tokensPerDelivered": 1309115.8,
+          "tokenPartsPerDelivered": {
+            "input": 42.4,
+            "output": 15230.4,
+            "cacheRead": 1233273.8,
+            "cacheWrite": 60569.2
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 220641,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0,
+          "caughtMean": 18
+        },
+        "T7": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 0,
+          "o1rPerDelivered": 0,
+          "tokensPerDelivered": 2286580.2,
+          "tokenPartsPerDelivered": {
+            "input": 63.2,
+            "output": 23104.2,
+            "cacheRead": 2180712.4,
+            "cacheWrite": 82700.4
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 277428.4,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0,
+          "caughtMean": 17.8
+        }
+      }
+    }
+  },
+  "m3": {
+    "runs": 20,
+    "notScored": [],
+    "withDefects": [
+      "T3-arm3-run2",
+      "T3-arm3-run4",
+      "T3-arm4-run2",
+      "T3-arm4-run5",
+      "T7-arm4-run1"
+    ],
+    "admitted": 20,
+    "delivered": 20,
+    "table": {
+      "3": {
+        "T3": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 10.4,
+          "o1rPerDelivered": 6.4,
+          "tokensPerDelivered": 1563567,
+          "tokenPartsPerDelivered": {
+            "input": 41.6,
+            "output": 13656.8,
+            "cacheRead": 1470755.8,
+            "cacheWrite": 79112.8
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 244677,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0.4,
+          "caughtMean": 0
+        },
+        "T7": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 0,
+          "o1rPerDelivered": 0,
+          "tokensPerDelivered": 2363077.4,
+          "tokenPartsPerDelivered": {
+            "input": 61.6,
+            "output": 24734.2,
+            "cacheRead": 2248863.6,
+            "cacheWrite": 89418
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 314846.4,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0,
+          "caughtMean": 14.6
+        }
+      },
+      "4": {
+        "T3": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 10.4,
+          "o1rPerDelivered": 6.4,
+          "tokensPerDelivered": 1268239,
+          "tokenPartsPerDelivered": {
+            "input": 39.2,
+            "output": 14823.6,
+            "cacheRead": 1184514.2,
+            "cacheWrite": 68862
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 262133.8,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0.4,
+          "caughtMean": 0
+        },
+        "T7": {
+          "runs": 5,
+          "deliveredRuns": 5,
+          "deliveryRate": 1,
+          "admittedRate": 1,
+          "escapedPerDelivered": 0.4,
+          "o1rPerDelivered": 0.8,
+          "tokensPerDelivered": 2041726,
+          "tokenPartsPerDelivered": {
+            "input": 57.6,
+            "output": 24962,
+            "cacheRead": 1933423.2,
+            "cacheWrite": 83283.2
+          },
+          "costPerDelivered": null,
+          "wallMsMean": 316275.2,
+          "o2Mean": 0,
+          "o3Mean": 0,
+          "introducedMean": 0,
+          "caughtMean": 14
+        }
+      }
+    }
+  }
+}

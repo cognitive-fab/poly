@@ -108,3 +108,24 @@ Probes that found nothing: the compiler and poly-ref agree on the strict set ove
 **For the owner: two proposals from the probe review.**
 - **F4, a check for values refused between machines.** A finding when the domain of a `send`, `spawn` or signal argument, as the sender's check explores it, is not inside the receiver parameter's strict domain, next to `PL1301` and with the same acceptance by a person. It is a static comparison of two domains, in the compiler and in poly-ref. Until ruled, the release notes state the limit.
 - **F3, `PL1301` through state fields.** Carry the flow from a `disclosed` parameter through a field it is written to into any handler's irreversible emit that reads that field. Until ruled, the release notes state the limit.
+
+### V8: SR3, the live rerun (closed)
+
+- **How.** `experiments/sr/sr3.mjs` ran the 20 cells (T3 and T7, arms 3 and 4, runs 1 to 5) with the M3 frozen runner from the worktree `poly-sr` (b8a8cfb, the S400 patch, and the manual with SR1's paragraph and PT3.4a in its S400 form, `docs/v1/sr/sr3-manual.patch`): claude-opus-5-5 through the claude CLI 2.1.287 on the subscription, Node v24.12.0 (both as `freeze.json` records), 15,000,000 tokens, 3,600 s and $15 per run, in M3's block order. Ten blocks from 21:20 to 22:17 UTC; every runner exited 0, no run was stopped by a cap, none was refused or unscored (`experiments/sr/runs/blocks.jsonl`).
+- **A void first attempt.** The first block, with both arms started at once, failed: the two CLIs share the arms' login folder, and the first three turns of each could not refresh the OAuth token ("another Claude Code process is refreshing it"), spending no token. The frozen runner does not mark that unscored, so the batch went on into block 2 before it was stopped. The four records are kept in `experiments/sr/void/block1-oauth`, none scored (8f169aa6). The batch then started arm 4 90 s after arm 3 and stops on any turn that exits with an error having spent no token, as M3 stops on a failed login.
+- **The machine.** No suite ran during the batch (the examples session's one log ends at 20:09 UTC). In its first fifteen minutes the two probe reviewers ran small scripts, and the builder ran three test files.
+- **Scored** with the frozen scorer (`experiments/sr/sr3-score.mjs`): every run delivered and admitted, and every O1 test of every version passes.
+- **Result (SR-AC3).** `node experiments/sr/sr3-analysis.mjs experiments/sr/runs experiments/m3/runs --json docs/v1/sr/sr3-analysis.json`, printed to `docs/v1/sr/sr3-report.txt` (sha256 6f8a7eac…; the JSON 6a7fd9a2…):
+
+  | | SR3 | M3, same cells |
+  |---|---|---|
+  | Runs with at least one escaped O1 defect | 0 of 20 | 5 of 20 |
+  | One-sided Fisher exact test | p = 0.0236, significant at 0.05 | |
+  | Escaped defects per delivered run, arm 3 (T3, T7) | 0.00, 0.00 | 10.40, 0.00 |
+  | Escaped defects per delivered run, arm 4 (T3, T7) | 0.00, 0.00 | 10.40, 0.40 |
+  | O1-R failures per delivered run, arm 3 and arm 4 on T3 | 0.00, 0.00 | 6.40, 6.40 |
+  | Admitted runs | 20 of 20 | 20 of 20 |
+  | Tokens per delivered run, arm 3 (T3, T7) | 1,450,896, 2,175,963 | 1,563,567, 2,363,077 |
+  | Tokens per delivered run, arm 4 (T3, T7) | 1,309,116, 2,286,580 | 1,268,239, 2,041,726 |
+
+  The pre-registered comparison (zero of 20 against five of 20 gives p = 0.024) is met. M3's verdict is not reopened.
