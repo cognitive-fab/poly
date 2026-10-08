@@ -16,13 +16,15 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { ROOT } from '../helpers.mjs';
 
-/** The test files that load the M3 runner, found by what they import, so a new one is covered too. */
+/**
+ * The test files that load the M3 runner, found by what they import, so a new one is covered too: in test/ and in
+ * test/after/, where m3-isolation runs since the v1 gate list (decisions-v1.md, V6).
+ */
 function runnerTests() {
-  const dir = join(ROOT, 'test');
-  return readdirSync(dir)
+  return ['test', join('test', 'after')].flatMap((d) => readdirSync(join(ROOT, d))
     .filter((f) => f.endsWith('.test.mjs') && f !== 'account-independence.test.mjs')
-    .filter((f) => /runner[/'", ]+(run|isolation|agent)\.mjs|runner\/(run|isolation|agent)\.mjs/.test(readFileSync(join(dir, f), 'utf8')))
-    .map((f) => join('test', f));
+    .filter((f) => /runner[/'", ]+(run|isolation|agent)\.mjs|runner\/(run|isolation|agent)\.mjs/.test(readFileSync(join(ROOT, d, f), 'utf8')))
+    .map((f) => join(d, f)));
 }
 
 /**

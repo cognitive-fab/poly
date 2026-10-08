@@ -4,6 +4,9 @@
 // the owner's own setup (user CLAUDE.md, settings, skills, and a CLAUDE.md above the workspace) and runs the CLI with
 // the runner's own arguments and environment against a local stand-in for the API, which records what the CLI would
 // send to the model: no marker may reach it. No model is called and nothing is billed.
+//
+// It runs in the serial after-suite group (test/after/, one file at a time), as the v1 gate list rules (decisions-v1.md,
+// V6): in the suite at 7175e4f0 its CLI child took 108 s against its 60 s limit under load, and 38 s alone.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -12,9 +15,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { M3 } from '../experiments/m3/lib/task.mjs';
-import { claudeArgs } from '../experiments/m3/runner/agent.mjs';
-import { armEnv, configProblems, apiKeyProblems, SETTINGS } from '../experiments/m3/runner/isolation.mjs';
+import { M3 } from '../../experiments/m3/lib/task.mjs';
+import { claudeArgs } from '../../experiments/m3/runner/agent.mjs';
+import { armEnv, configProblems, apiKeyProblems, SETTINGS } from '../../experiments/m3/runner/isolation.mjs';
 
 const MARKERS = ['M3-MARKER-USER-CLAUDE-MD', 'M3-MARKER-ANCESTOR-CLAUDE-MD', 'M3-MARKER-SKILL', 'm3-marker-skill', 'Explanatory', 'M3_MARKER_ENV'];
 
@@ -150,7 +153,7 @@ test('no API billing: the runner refuses to start while ANTHROPIC_API_KEY or ANT
 });
 
 test('no arm may use the Skill tool, and the arm\'s CLI loads no MCP server and syncs no plugin or skill from the account', async () => {
-  const { ALLOWED_TOOLS } = await import('../experiments/m3/runner/agent.mjs');
+  const { ALLOWED_TOOLS } = await import('../../experiments/m3/runner/agent.mjs');
   for (const [arm, tools] of Object.entries(ALLOWED_TOOLS)) assert.ok(!tools.some((t) => /^Skill\b/.test(t)), `arm ${arm} may use the Skill tool`);
   // Measured on the arms' folder after the owner's login, against the local stand-in: without these, the CLI synced
   // the account's 8 plugins and 58 MCP servers (Gmail and Drive among them) into the arm, and their names reached the model.
@@ -162,8 +165,8 @@ test('no arm may use the Skill tool, and the arm\'s CLI loads no MCP server and 
 });
 
 test('no arm\'s own material reaches it through a CLAUDE.md, which the arm\'s environment would not read', async () => {
-  const { makeWorkspace } = await import('../experiments/m3/runner/workspace.mjs');
-  const { versions } = await import('../experiments/m3/lib/task.mjs');
+  const { makeWorkspace } = await import('../../experiments/m3/runner/workspace.mjs');
+  const { versions } = await import('../../experiments/m3/lib/task.mjs');
   for (const arm of [1, 2, 3, 4]) {
     const { ws, files } = makeWorkspace(join(tmpdir(), 'poly-m3-ws-test', `claude-md-arm${arm}`), arm, versions('T1')[0]);
     assert.deepEqual(files.filter((f) => /(^|\/)(CLAUDE(\.local)?\.md|AGENTS\.md|\.claude)(\/|$)/i.test(f)), [], `arm ${arm}`);
