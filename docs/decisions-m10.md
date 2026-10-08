@@ -41,6 +41,21 @@ The PT text is PT10h, written first.
 - **The environment.** This worktree had no `poly` command under `node_modules/.bin`, which the install test launches; the three shims were copied from the main checkout's. They are not in the repository.
 - **Checked.** The 159 measured files are identical to the measurement at the M9 close (e62b7a5). The full suite: 1,939 tests, 1,931 pass, 2 failed, 2 skipped and 4 waiting; check-memory passed (`.poly/logs/5ef9666-2026-10-08T00-48-27-776Z-step0.log`). Both failures were the missing `poly` command above; after the shims both files pass (13 tests), and the after run passes (1 test).
 
+## Step 1 waits for step 4, by the plan's rules
+
+Step 1 measures taint's cost on the concierge with a `retrieve` added, and the concierge cannot have one until `retrieve` exists (step 3) and poly-ref carries taints (step 4). So the measurement is taken when step 4 is built, on the concierge of `test/fixtures/m10/concierge-memory.poly`, and recorded there; if the taint space does not fit the checker's bounds, M10 stops there with the numbers, as ruled on S300. The PS text (step 2) comes first, as the plan orders.
+
+## Step 2: PS17 written into the semantics before the code
+
+PS1.4b (audiences and `Items`), PS15.0a (a channel's recipients), PS17 (memory), PS11.3a (forgotten steps) and `uncited` among PS3.2's reserved reasons. Section 6 of the plan lists these changes, ruled with M11's plan. The text settles six points the plan left open, each by the plan's rules and recorded here for the owner's reading:
+
+- **S314, the recipient's principal.** S301 names "the recipient's class and principal at the send" and S305 gives the class, not the principal. An effect names its recipient with `to p`, a `Principal` parameter, as `uses c … for p` names a credential's holder (PT10e). A channel's recipient has no principal a module names, so an owned item reaches a channel only by class (PS15.0a); a channel thread's principal is a question for the concierge example of the v1 gate, not for M10. An effect may also declare `audience c`, its recipients' default class, beside a channel's (S305).
+- **S315, pending taints.** The taint of a completion's data must come from the intent it completes, or a correct concierge would be reported leaking (a completion offered with any taint) or a stale completion would carry an earlier customer's taint. Each instance keeps, as ghost state, the multiset of the taints of its retrievals' and decisions' intents not yet completed, and a completion takes one. A machine that would hold more than 3 of one kind is a bound hit, never `CLEAN`.
+- **S316, `Items` is passed, not stored.** A module reads `x.count` and passes an `Items` to a decision or an effect; it is no field, record field, payload or map value. This keeps the state's shape and every existing count, and nothing in AC22 to AC24 needs one stored.
+- **S317, one more principal representative** when a program declares an owned source, with the lemma in PS17.4: the owner a violation names keeps a representative of its own, distinct from the recipient's.
+- **S318, a decision's answer may be a `Content`**, as PT23.1's `r.text` needs; until now PL0901 refused a decision over a `Content`, a limit of M8a that M10 lifts.
+- **S319, taint per value in the check, per body at run time.** The checker carries a taint with each occurrence of a value; the runtime keeps a body's taint in the content store by digest, joined over every time it was stored. The runtime's taint is never less than the check's, so it refuses every send the flow rule refuses and may refuse more (fail closed): two customers whose messages happen to have the same bytes share a body. The flow rule is explored apart from the machine's own graph, so the ghost changes no verdict and no state count of any file.
+
 ## Conclusion
 
 M10 is ruled. Its one measured risk, the taint state space, is measured first and brought to the owner if it does not fit.
