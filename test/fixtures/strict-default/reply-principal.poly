@@ -1,0 +1,22 @@
+// Probe reviewer A, F1: a reply field bound to a parameter whose record type holds a Principal (S79 strict, PT3.4a no dispatch row).
+module replyp
+
+type Who = { p: Principal, n: 0..1 }
+enum S { Idle, Asked, Done }
+
+machine M {
+  state { s : S = Idle   who : Who = { p: none, n: 0 } }
+  terminal s == Done
+  action Go()
+  action Got(w: Who)
+  action Bad()
+  on Go { require s == Idle else reject "busy"   s' = Asked   emit fetch() }
+  on Got(w) { require s == Asked else reject "not-waiting"   s' = Done   who' = w }
+  on Bad { require s == Asked else reject "not-waiting"   s' = Done }
+  effect fetch() {
+    kind "x.fetch"
+    labels { egress:external }
+    ok(r) -> Got(w: r.w)
+    failed -> Bad()
+  }
+}

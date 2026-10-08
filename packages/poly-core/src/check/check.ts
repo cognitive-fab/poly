@@ -1387,7 +1387,8 @@ class Checker {
         if (!same(bt, pt) || (bt.k === 'conf') !== (pt.k === 'conf')) { this.err('PL1201', p, `${it.action}.${a.name} is ${tyToString(pt)}, and ${[it.bind, ...path].join('.')} is ${tyToString(bt)} (PD1.2f)`); continue; }
         if (pt.k === 'conf' && p.check) this.err('PL1201', p.check, `a Conf takes no check clause: it is explored by the intervals the program uses (PD1.4b)`);
         // PS4.1f, S180: a Content has no check domain; its representatives are the check's, never a run-time domain.
-        if (p.check?.mode !== 'disclosed' && pt.k !== 'content' && pt.k !== 'items') this.facts!.strictParams.add(`${it.action}.${a.name}`);
+        // Probe reviewer A, F1: nor a Principal, a Ref or a type holding one, which has no dispatch row (PT3.4a).
+        if (p.check?.mode !== 'disclosed' && this.hasCheckDomain(act, p)) this.facts!.strictParams.add(`${it.action}.${a.name}`);
         continue;
       }
       const t = this.typeOf(a.value, this.scope('init'), pt);
@@ -2008,7 +2009,9 @@ class Checker {
    * nor has a completion's childKey and childState, which the runtime supplies from the child (S44, S51).
    */
   private hasCheckDomain(act: A.Action, p: A.Param): boolean {
-    if (act.params.length === 2 && act.params[0].name === 'childKey' && act.params[1].name === 'childState') return false;
+    // Probe reviewer A, F2: only a completion a spawn names is supplied by the runtime (S44, S51), not any action whose
+    // parameters carry those names.
+    if (this.facts?.childKeyDomains.has(act.name) && act.params.length === 2 && act.params[0].name === 'childKey' && act.params[1].name === 'childState') return false;
     const ty = this.tyOf(p.type);
     if ((ty.k === 'int' && !Number.isFinite(ty.lo)) || ty.k === 'string') return p.check !== null;
     const seen = new Set<string>();

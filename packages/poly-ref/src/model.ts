@@ -347,7 +347,8 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
   };
   const strictByDefault = (a: A.Action, p: A.Param): boolean => {
     if (!handledActions.has(a.name) || p.check?.mode === 'disclosed') return false;
-    if (a.params.length === 2 && a.params[0].name === 'childKey' && a.params[1].name === 'childState') return false;
+    // Only a completion that a spawn names is supplied by the runtime (S44, S51), not any action with those names.
+    if ([...children.values()].some((c) => c.onComplete === a.name) && a.params.length === 2 && a.params[0].name === 'childKey' && a.params[1].name === 'childState') return false;
     return p.check !== null || testable(typeOf(p.type));
   };
   // PS2.2, S176: what a send may name: this module's machines, and those of the modules it uses.
@@ -453,7 +454,8 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
         const p = act?.params.find((x) => x.name === a.name);
         if (!p) continue;
         // PS4.1f, PS1.4b: a Content or an Items bound from a reply has no check domain; the runtime gives it.
-        if (decl?.params.find((x) => x.name === a.name)?.check?.mode !== 'disclosed' && p.type.k !== 'content' && p.type.k !== 'items') p.strict = true;
+        // PT3.4a: nor a Principal, a Ref or a type holding one, which has no dispatch row.
+        if (decl?.params.find((x) => x.name === a.name)?.check?.mode !== 'disclosed' && (p.check !== null || testable(p.type))) p.strict = true;
         if (p.type.k === 'conf') p.check = confPartition(m, o.action, p.name);
       }
     }

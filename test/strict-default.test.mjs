@@ -104,3 +104,21 @@ test('S400: a Principal parameter has no dispatch row and accepts an arbitrary i
   assert.notEqual(step.classification, 'rejected', `rejected: ${step.rejections[0]?.reason}`);
   assert.equal(after.who, 'user-42');
 });
+
+// Probe reviewer A on V1 to V5, F1: a parameter bound from a reply (S79) whose type holds a Principal has no dispatch
+// row (PT3.4a); it was strict over the check's representatives, so a real principal was refused at run time.
+test('S400, probe A F1: a reply-bound parameter holding a Principal accepts a real principal', () => {
+  const [b] = build(join(FIX, 'reply-principal.poly'), 'strict-default');
+  const mod = requireModule(b.dir);
+  mod.init();
+  mod.setState({ ...b.lowered.contract.initState, s: 'Asked' });
+  mod.actions.Got({ w: { p: 'user-42', n: 0 } });
+  const step = mod.instance({}).lastStep();
+  assert.notEqual(step.classification, 'rejected', JSON.stringify(step.rejections));
+});
+
+// F2: only a completion a spawn names supplies childKey and childState (S44); an ordinary action with those names is
+// strict, so a value outside its domain cannot break a checked invariant at run time.
+test('S400, probe A F2: an ordinary action named like a completion is strict', () => {
+  assertRejectedOutside(dispatch('child-names.poly', 'Pick', { childKey: 9, childState: true }));
+});

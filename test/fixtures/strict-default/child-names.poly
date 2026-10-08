@@ -1,0 +1,12 @@
+// Probe reviewer A, F2: an ordinary action whose parameters are named childKey and childState is not a completion (S44),
+// so its domains are strict like any other (PT3.4a, S400).
+module childnames
+
+machine M {
+  state {
+    k : int check { 1, 2 } = 1
+  }
+  action Pick(childKey: int check { 1, 2 }, childState: bool)
+  on Pick(childKey, childState) { k' = childKey }
+  invariant small: k < 3
+}
