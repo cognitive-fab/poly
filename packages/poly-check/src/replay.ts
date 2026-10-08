@@ -171,7 +171,7 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
   const std: A.Module[] = [];
   for (const [name, x] of Object.entries(rt.certificate.poly.typeModules ?? {})) {
     if (!name.startsWith('std.') || !x.path.startsWith('std:')) continue;
-    const file = join(STD_ROOT, x.path.slice(4));
+    const file = join(rt.verified.std ?? STD_ROOT, x.path.slice(4));
     const bytes = readFileSync(file);
     if (sha256OfBytes(bytes) !== x.file) throw new Error(`${x.path}: the std module changed since certification (certified ${x.file}, found ${sha256OfBytes(bytes)})`);
     const m = parse(bytes.toString('utf8')).module;
@@ -184,6 +184,10 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
   const live = new Set(instances.map((i) => i.id));
   for (const run of await rt.runs()) {
     if (live.has(run.run) || (opts.runs && !opts.runs.includes(run.run))) continue;
+    // V4: runtime:ingress, runtime:approvals, runtime:content and the like are the runtime's own records, events of no
+    // machine: there was never a journal to fold, so they are not runs here, and not archived ones (their chains are
+    // verified with every other by journal verify).
+    if (run.run.startsWith('runtime:')) continue;
     out.push({ run: run.run, machine: run.wf, rows: 0, folded: 0, windows: 0, gateNotRun: 0, diagnostics: [], notRun: 'archived, its journal is gone; not replayed' });
   }
   for (const inst of instances) {

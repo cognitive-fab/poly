@@ -52,7 +52,7 @@ test('AC27, V4: replay of a concierge run with a delegated refund reproduces eve
       // No diagnostic: every post-state and every snapshot agrees with the fold (PL9001 otherwise, PS11.4).
       assert.deepEqual([r.run, r.diagnostics.map((d) => `${d.code} ${d.message}`)], [r.run, []]);
       assert.equal(r.folded, r.rows, `${r.run}: every row is folded`);
-      assert.deepEqual([r.run, r.notRun ?? []], [r.run, []], 'nothing listed as not run');
+      assert.deepEqual([r.run, r.notRun ?? []], [r.run, []], 'nothing listed as not run: ' + r.run + ' ' + JSON.stringify(r.notRun));
       assert.ok(!r.archived && !r.skipped, `${r.run} is replayed, not skipped`);
     }
   } finally { await c.rt.close(); }

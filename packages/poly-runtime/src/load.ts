@@ -21,6 +21,8 @@ export interface VerifiedBuild {
   certificate: Certificate;
   /** The project root the certificate's paths are relative to. */
   root: string;
+  /** V4: the std the certificate's std: paths were verified against, so replay reads the same modules. */
+  std: string;
   /** Where the verified copy lives: one directory per machine, as in the build. */
   runDir: string;
   machines: { id: string; module: string; contract?: string; effects?: { mapper: string; manifest: string }; manifest: { effects?: Record<string, any> } | null; types: Map<string, [string, TypeNode][]> }[];
@@ -338,7 +340,7 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (!machines.some((x) => x.id === d.machine)) throw new LoadError(`refused at load: budget ${c.name} names ${String(d.machine)}, which the certificate does not name (PS18.4)`);
     budgets.push({ name: c.name, module: d.module, machine: d.machine, caps: d.caps, onExhausted: d.onExhausted });
   }
-  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true, anchorId: anchor?.id ?? null, memory: { sources: memorySources, flows: memoryFlows }, routes, budgets };
+  return { certificate, root, std: opts.std ?? STD, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true, anchorId: anchor?.id ?? null, memory: { sources: memorySources, flows: memoryFlows }, routes, budgets };
 }
 
 /**

@@ -256,7 +256,17 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // PS11.4, PS18.0: the std.routing a build's routes and budgets were made from, recorded with the build's type
   // modules, so load binds its file and replay reads the module the build instantiated.
   const routingLib = uses.program.find((m) => m.name === 'std.routing');
-  if (routes.extra.length && routingLib && uses.files.get('std.routing')) routingLibs.set(report, { file: uses.files.get('std.routing')!, digest: digest(routingLib) });
+  const libs: Record<string, { file: string; digest: string }> = {};
+  if (routes.extra.length && routingLib && uses.files.get('std.routing')) libs['std.routing'] = { file: uses.files.get('std.routing')!, digest: digest(routingLib) };
+  // V4, AC27 (PT10e): a credential's Grant is std.credentials instantiated, so its build records that module too.
+  const credentialsLib = uses.program.find((m) => m.name === 'std.credentials');
+  if (credentials.extra.length && credentialsLib && uses.files.get('std.credentials')) libs['std.credentials'] = { file: uses.files.get('std.credentials')!, digest: digest(credentialsLib) };
+  // V4: a channel's conversation is std.channels.<kind> instantiated, so replay reads that module as well.
+  for (const lib of uses.program.filter((m) => m.name.startsWith('std.channels.') && original.decls.some((d) => d.kind === 'Channel' && `std.channels.${d.channelKind}` === m.name))) {
+    const file = uses.files.get(lib.name);
+    if (file) libs[lib.name] = { file, digest: digest(lib) };
+  }
+  if (Object.keys(libs).length) routingLibs.set(report, libs);
   const module = expansion.module;
   const program = [...uses.program.filter((m) => m !== original), module, ...expansion.extra];
   // PT10e: the profiles of the providers the program's credentials name, under the same std as its modules.
@@ -972,8 +982,8 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
 
 /** S190: the files of the modules a report's check used, so that finish can record those whose types a build used. */
 const usesFiles = new WeakMap<CheckReport, Map<string, string>>();
-/** PS18.0: the std.routing a report's routes and budgets were instantiated from. */
-const routingLibs = new WeakMap<CheckReport, { file: string; digest: string }>();
+/** PS18.0, PT10e: the std modules a report's routes, budgets and credentials were instantiated from. */
+const routingLibs = new WeakMap<CheckReport, Record<string, { file: string; digest: string }>>();
 
 function finish(report: CheckReport, module?: Module): CheckReport {
   // S190: the modules whose enums a machine's build uses, from each contract, with the file each was read from.
@@ -986,7 +996,7 @@ function finish(report: CheckReport, module?: Module): CheckReport {
     }
   }
   const lib = routingLibs.get(report);
-  if (lib && report.machines.some((m) => m.buildDir)) (report.typeModules ??= {})['std.routing'] = lib;
+  if (lib && report.machines.some((m) => m.buildDir)) for (const [name, x] of Object.entries(lib)) (report.typeModules ??= {})[name] = x;
   // S69, S86: a witness id is the digest of { moduleDigest, subject, property, trace }, the subject being the
   // machine or configuration it is about, so the same trace in another version of the module, or in another
   // machine with the same defect, is another witness.
