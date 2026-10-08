@@ -11,7 +11,7 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
 import { capabilitiesFor, type ApiTransport, type Transports } from './capabilities.js';
-import type { ChannelAdapter, ChannelTransports, IngressAnswer, VaultAdapter, Verified, Webhook } from './adapters.js';
+import type { ChannelAdapter, ChannelTransports, IngressAnswer, SourceAdapter, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -28,7 +28,8 @@ import { EffectWorker, ALLOW_ALL, type Gate, type EffectHandler, type WorkerDrif
 import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
-import { decisionHandler, mapDigest, type DecisionRecord, type ProviderConfig } from './provider.js';
+import { decisionHandler, mapDigest, type DecisionMemory, type DecisionRecord, type ProviderConfig } from './provider.js';
+import { Memory, BOTTOM, type Taint } from './memory.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, evidenceOf, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
 export { LoadError };
@@ -201,6 +202,9 @@ export class PolyRuntime {
   /** PD5.1.4: the verifier adapter. */
   private readonly verifier: Verifier;
 
+  /** PS17 (M10): the taint of each body, the item sets retrievals return, and the sources' adapters. */
+  readonly memory: Memory;
+
   constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: { madeHere(a: unknown): boolean } | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
     this.#ioPackage = opts.ioPackage ?? null;
@@ -215,8 +219,15 @@ export class PolyRuntime {
       if (!this.orderTools.has(w.machine)) this.orderTools.set(w.machine, new Map());
       for (const [kind, t] of Object.entries(w.tools)) this.orderTools.get(w.machine)!.set(kind, { ...t, workflow: w.name });
     }
+    this.memory = new Memory(store, verified.memory.sources, verified.memory.flows);
     const builtins: Record<string, EffectHandler> = {};
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
+    // PS17.2: a retrieval is the runtime's own effect, run through its source's certified adapter.
+    for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
+      if (!e?.retrieve) continue;
+      const spec = e.retrieve as { source: string; owner: string | null; limit: number };
+      builtins[kind] = (payload, _caps, ctx) => this.memory.retrieve(spec.source, spec, (payload ?? {}) as Record<string, unknown>, ctx.idempotencyKey);
+    }
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
@@ -725,6 +736,16 @@ export class PolyRuntime {
     this.#handlers.set('credential.revoke', async (_p, _caps, ctx) => { await vaultOf(ctx.instanceId).revoke(ctx.instanceId); return {}; });
   }
 
+  /** PT26, S308: binds a source's adapter; only one the certified poly-io made, of the kind the source declares. */
+  connectSource(source: string, adapter: SourceAdapter): void {
+    const pin = this.certificate.poly.memory?.sources.find((x) => x.name === source);
+    if (!pin) throw new Error(`no source ${source}; the certificate names ${(this.certificate.poly.memory?.sources ?? []).map((x) => x.name).join(', ') || 'none'} (PS17.0)`);
+    if (pin.adapter === null) throw new Error(`source ${source} is the project's memory, which the runtime keeps itself (PS17.5)`);
+    if (!this.#ioPackage?.madeHere(adapter)) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the adapter for source ${source} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S308)`);
+    if (adapter.kind !== pin.adapter) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: source ${source} declares adapter ${pin.adapter}, and this is a ${adapter.kind} adapter (S308)`);
+    this.memory.connect(source, adapter);
+  }
+
   connectChannel(channel: string, adapter: ChannelAdapter, transports: ChannelTransports): void {
     const d = this.verified.channels.find((c) => c.channel === channel);
     if (!d) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
@@ -856,6 +877,8 @@ export class PolyRuntime {
     // Review B2: a decision's handler is the provider host's, which keeps the record its completion commits with.
     if (kind.startsWith('decision.')) throw new Error(`${kind} is a decision: register its provider with rt.provide, never rt.handle (PD2.2, K10)`);
     if (kind.startsWith('outcome.')) throw new Error(`${kind} is an adjudication's outcome, handled by the runtime itself (PD2.4)`);
+    // PS17.2, PS17.5: a retrieval and a remember are the runtime's own.
+    if (/^source\.[^.]+\.(retrieve|remember)$/.test(kind)) throw new Error(`${kind} reads or writes a source: the runtime runs it through the source's certified adapter, connected with rt.connectSource (PS17.2)`);
     // Review D-F3 (M8b): a channel's send runs only through its certified adapter (S182).
     if (/^channel\.[^.]+\.send$/.test(kind)) throw new Error(`${kind} is a channel's send: connect its certified adapter with rt.connectChannel, never rt.handle (PT21.5, S182)`);
     // S142: only an export of a certified handler file, as this runtime loaded it, by identity. The same file imported
@@ -1041,8 +1064,9 @@ export class PolyRuntime {
     // bytes of its own (each becomes U+FFFD), so two such bodies would share a digest; it is refused.
     if (typeof body !== 'string' || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(body)) throw new TypeError('putContent: a body is a well-formed string, with no lone surrogate (PS1.4a)');
     const d = `sha256:${createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex')}`;
-    // S205: a body is erasable, and an erased one is not stored again.
-    await this.store.txn(() => { this.store.keepErasable(d, body); });
+    // S205: a body is erasable, and an erased one is not stored again. PS17.4: a body that enters this way carries ⊥, and a
+    // program with memory keeps that record, so a body with no record is one the runtime never stored (fail closed).
+    await this.store.txn(() => { this.store.keepErasable(d, body); if (this.memory.flows.size) this.memory.taint(d, BOTTOM); });
     return d;
   }
 
@@ -1195,12 +1219,12 @@ export class PolyRuntime {
     }
   }
 
-  /** The actions a machine's decisions complete with, which only the worker dispatches (K10). */
+  /** The actions a machine's decisions and retrievals complete with, which only the worker dispatches (K10, PS17.4). */
   decisionCompletions(machineId: string): Set<string> {
     const m = this.verified.machines.find((x) => x.id === machineId);
     const out = new Set<string>();
     for (const e of Object.values(m?.manifest?.effects ?? {})) {
-      if (!e.decision) continue;
+      if (!e.decision && !e.retrieve) continue;
       for (const h of ['onSuccess', 'onFailure', 'onExhausted']) if (e[h]?.action) out.add(e[h].action);
     }
     return out;
@@ -1222,7 +1246,13 @@ export class PolyRuntime {
         if (c.points[i][1] < c.points[i - 1][1]) throw new Error(`the calibration map for ${decision} is not non-decreasing at point ${i}: ${c.points[i - 1][1]} then ${c.points[i][1]}`);
       }
     }
-    this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records));
+    // PS17.2: the decision reads its materials, and a Content answer is kept with the decision's taint.
+    const mem: DecisionMemory = {
+      materials: (payload) => this.memory.materials(payload, (d) => this.contentBody(d), (b) => this.putContent(b)),
+      answer: async (body, taint) => { const d = await this.putContent(body); await this.store.txn(() => this.memory.taint(d, taint as Taint)); return d; },
+      cite: (given, ids, run, intent) => this.memory.cite(given, ids, run, intent, this.now()),
+    };
+    this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records, { content: entry.decision?.result === 'content', cites: entry.decision?.cites ?? null, mem }));
   }
 
   /**
@@ -1590,7 +1620,8 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   // S182, plan step 10: the adapters are the ones admitted. The installed package is pinned again and compared.
   let ioPackage: { madeHere(a: unknown): boolean } | null = null;
   // PT10f: a credential's vault is pinned the same way.
-  const adapters = [...(verified.certificate.poly.adapters ?? []), ...(verified.certificate.poly.vaults ?? [])];
+  // S308: and each source's adapter.
+  const adapters = [...(verified.certificate.poly.adapters ?? []), ...(verified.certificate.poly.vaults ?? []), ...(verified.certificate.poly.memory?.sources ?? []).filter((s): s is typeof s & { package: string; version: string; digest: string } => s.adapter !== null)];
   if (adapters.length) {
     const now = adapterPackagePin();
     const other = adapters.find((x) => x.package !== now.package || x.version !== now.version || x.digest !== now.digest);

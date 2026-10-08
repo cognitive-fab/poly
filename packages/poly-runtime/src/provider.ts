@@ -17,9 +17,26 @@ export interface ProviderAnswer {
   reported?: string | null;
   latencyMs?: number;
   cost?: { units: number; unit: string };
+  /** PS17.6: the ids of the items the answer cites, for a decision with `cites`. */
+  cites?: string[];
 }
 
-export type Provider = (question: { decision: string; payload: unknown; intent: string }) => Promise<ProviderAnswer> | ProviderAnswer;
+/**
+ * PF13.3, PS17.2: what a decision reads, given to the provider and never recorded: each Content's body, and each Items'
+ * items with their bodies, by parameter.
+ */
+export interface Materials { bodies: Record<string, string | null>; items: Record<string, { id: string; body: string | null }[]> }
+
+export type Provider = (question: { decision: string; payload: unknown; intent: string }, materials?: Materials) => Promise<ProviderAnswer> | ProviderAnswer;
+
+/** PS17.2: how the runtime gives a decision its materials, and keeps a Content answer as a body with the decision's taint. */
+export interface DecisionMemory {
+  materials(payload: Record<string, unknown>): Promise<Materials & { taint: unknown }>;
+  /** Stores the answer's body with the taint, and gives its Content. */
+  answer(body: string, taint: unknown): Promise<string>;
+  /** PS17.6: the item set the answer cites, from the ids the provider gave, or a refusal, uncited. */
+  cite(given: unknown, ids: unknown, run: string, intent: string): Promise<{ ref: string; count: number }>;
+}
 
 /** PD1.6: a monotone map from raw to calibrated confidence, in thousandths, fitted for one model of one decision. */
 export interface CalibrationMap {
@@ -77,11 +94,16 @@ export function answerProbability(distribution: [unknown, number][], answer: unk
 }
 
 /** The adapter: the effect handler for `decision.<d>`, recording the full record for the ledger by intent id. */
-export function decisionHandler(decision: string, providerKind: string | null, config: ProviderConfig, records: Map<string, DecisionRecord>) {
-  return async (payload: unknown, _caps: unknown, ctx: { idempotencyKey: string }) => {
+export function decisionHandler(decision: string, providerKind: string | null, config: ProviderConfig, records: Map<string, DecisionRecord>, memory?: { content: boolean; cites: string | null; mem: DecisionMemory }) {
+  return async (payload: unknown, _caps: unknown, ctx: { idempotencyKey: string; instanceId?: string }) => {
     const question = { decision, payload, intent: ctx.idempotencyKey };
     const t0 = Date.now();
-    const a = await config.provider(question);
+    // PS17.2: a decision of a program with memory reads its materials; the question recorded holds digests only (S310).
+    const m = memory ? await memory.mem.materials((payload ?? {}) as Record<string, unknown>) : null;
+    const raw = await config.provider(question, m ? { bodies: m.bodies, items: m.items } : undefined);
+    // PS17.2: an answer that is a body is kept in the content store with the decision's taint, and the decision gives
+    // its Content; the record and the distribution hold digests, never the body (S310).
+    const a = memory?.content ? await (async () => { if (typeof raw.answer !== 'string') throw Object.assign(new Error(`decision ${decision} answers a Content, and the provider gave no text`), { permanent: true }); const d = await memory.mem.answer(raw.answer, m!.taint); return { ...raw, answer: d, distribution: raw.distribution.map(([x, p]): [unknown, number] => [x === raw.answer ? d : digest(x ?? null), p]) }; })() : raw;
     const dist = [...a.distribution].sort((x, y) => y[1] - x[1]);
     // Review B3: conf is the calibrated probability of the answer returned, and margin that probability minus the
     // highest of any other answer, floored at 0; an answer the distribution does not list has probability 0.
@@ -98,7 +120,9 @@ export function decisionHandler(decision: string, providerKind: string | null, c
       answer: a.answer, raw: first, conf, margin, distribution: dist,
       latencyMs: a.latencyMs ?? Date.now() - t0, cost: a.cost ?? null,
     };
+    // PS17.6: the citations are checked before the completion; an uncited answer is refused and its failed outcome runs.
+    const cited = memory?.cites ? await memory.mem.cite((payload as Record<string, unknown>)?.[memory.cites], raw.cites, ctx.instanceId ?? '', ctx.idempotencyKey) : null;
     records.set(ctx.idempotencyKey, record);
-    return { answer: a.answer, conf, margin };
+    return { answer: a.answer, conf, margin, ...(cited ? { cites: cited } : {}) };
   };
 }

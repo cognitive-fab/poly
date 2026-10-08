@@ -10,6 +10,7 @@ import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
 import { nextEvent, runOf, type LedgerEvent, type Run } from './ledger.js';
 import { initJournalTables } from './journal.js';
+import { MEMORY_SCHEMA } from './memory.js';
 import { createHmac, randomBytes } from 'node:crypto';
 
 const LEDGER_SCHEMA = `
@@ -202,6 +203,8 @@ export class LedgerStore extends Store {
   override initSync(): this {
     super.initSync();
     this.db.exec(LEDGER_SCHEMA);
+    // PS17.4: the content store's taint metadata and the item sets retrievals return (M10).
+    this.db.exec(MEMORY_SCHEMA);
     initJournalTables(this);
     // Ruled on step 9: the store's own key, made when the store is, for keyed digests of addresses. It is read only by
     // recipientDigest, and never exported, logged, journaled or certified.
@@ -291,7 +294,8 @@ export class LedgerStore extends Store {
       if (machine && this.decisionCompletions(machine).has(row.action)) {
         const m = /^(.+):(done|failed|exhausted)$/.exec(row.actionId);
         const intent = m ? this.db.prepare('SELECT kind FROM pr_outbox WHERE intent_id = ? AND instance_id = ?').get(m[1], row.instanceId) : null;
-        const byWorker = typeof intent?.kind === 'string' && intent.kind.startsWith('decision.');
+        // PS17.4: and a retrieval's, which only the runtime runs.
+        const byWorker = typeof intent?.kind === 'string' && (intent.kind.startsWith('decision.') || /^source\.[^.]+\.retrieve$/.test(intent.kind));
         const byWitness = this.allowWitnessCompletions && row.actionId.startsWith('witness:');
         if (!byWorker && !byWitness) {
           const e = new DecisionCompletionRefused(`K10: '${row.action}' completes a decision of '${row.instanceId}', and only the outbox worker delivers it (action id ${row.actionId})`, row.instanceId, row.action, row.actionId);

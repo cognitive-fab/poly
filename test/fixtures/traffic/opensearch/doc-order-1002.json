@@ -1,0 +1,9 @@
+{
+  "_index": "orders",
+  "_id": "order-1002",
+  "_version": 1,
+  "_seq_no": 4,
+  "_primary_term": 1,
+  "found": true,
+  "_source": { "customer_id": "cust-a", "updated_at": "2026-10-06T12:00:00Z", "summary": "Order 1002: two lamps, shipped 6 October." }
+}

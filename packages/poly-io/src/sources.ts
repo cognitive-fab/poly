@@ -1,0 +1,134 @@
+// PT20.2, PS17.2, S308: the source adapters. Each returns items by reference, with their owner and `asOf` (K14),
+// resolves an item to its body only when a decision reads it, and forgets a subject's items. Neither builds a query from
+// text: the owner is a typed parameter, and every name the adapter writes into a query is checked at construction.
+//
+//   postgres:   over the host's query function, parameterized SQL only, so no driver enters poly.
+//   opensearch: the OpenSearch REST API (_search, _doc, _delete_by_query), as its documentation gives it, over an HTTP
+//               transport the host or a test gives, so a test replays recorded traffic.
+import type { HttpTransport, ItemRef, PgQuery, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
+import { made } from './util.js';
+
+/** A SQL identifier or an OpenSearch field name written into a query: letters, digits and underscores only. */
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const name = (adapter: string, what: string, v: string): string => {
+  if (typeof v !== 'string' || !NAME.test(v)) throw new Error(`${adapter}: ${what} ${JSON.stringify(v)} is not a plain name (letters, digits, underscores)`);
+  return v;
+};
+
+/** A limit as the runtime gives it: a positive integer, never above the declared one. */
+const limitOf = (q: SourceQuery): number => {
+  if (!Number.isInteger(q.limit) || q.limit < 1) throw new Error(`a retrieval's limit is a positive integer, not ${JSON.stringify(q.limit)}`);
+  return q.limit;
+};
+
+/** An `asOf` in milliseconds from a number of ms or an ISO 8601 date; an item with none is refused (K14). */
+const asOfMs = (adapter: string, v: unknown): number => {
+  const ms = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : v instanceof Date ? v.getTime() : NaN;
+  if (!Number.isFinite(ms)) throw new Error(`${adapter}: an item has no asOf (K14)`);
+  return ms;
+};
+
+export interface PostgresSourceConfig {
+  /** The host's query function: parameterized text and values (S308). */
+  query: PgQuery;
+  table: string;
+  /** The columns of the item's id, owner (absent for a source that is not owned), asOf and body. */
+  id: string;
+  owner?: string;
+  asOf: string;
+  body: string;
+}
+
+/** S308: a Postgres source over the host's query function. Every query is parameterized; only checked names are written. */
+export function postgresSource(c: PostgresSourceConfig): SourceAdapter {
+  const A = 'postgres source';
+  const table = name(A, 'table', c.table);
+  const id = name(A, 'id column', c.id);
+  const owner = c.owner === undefined ? null : name(A, 'owner column', c.owner);
+  const asOf = name(A, 'asOf column', c.asOf);
+  const body = name(A, 'body column', c.body);
+  if (typeof c.query !== 'function') throw new Error(`${A}: query is the host's function (text, params) (S308)`);
+  const q = (s: string) => `"${s}"`;
+  return made({
+    kind: 'postgres' as const,
+    async retrieve(query: SourceQuery): Promise<ItemRef[]> {
+      const limit = limitOf(query);
+      const cols = `${q(id)} AS id, ${owner ? `${q(owner)} AS owner` : 'NULL AS owner'}, ${q(asOf)} AS as_of`;
+      const where = query.owner !== undefined ? (owner ? `WHERE ${q(owner)} = $1 ` : null) : '';
+      if (where === null) throw new Error(`${A}: a retrieval by owner from a table with no owner column (PL6835 at run time)`);
+      const params = query.owner !== undefined ? [query.owner, limit] : [limit];
+      const text = `SELECT ${cols} FROM ${q(table)} ${where}ORDER BY ${q(asOf)} DESC LIMIT $${params.length}`;
+      const r = await c.query(text, params);
+      return r.rows.map((row) => ({ id: String(row.id), owner: owner ? (row.owner === null || row.owner === undefined ? null : String(row.owner)) : null, asOf: asOfMs(A, row.as_of) }));
+    },
+    async resolve(item: string): Promise<string | null> {
+      const r = await c.query(`SELECT ${q(body)} AS body FROM ${q(table)} WHERE ${q(id)} = $1`, [item]);
+      const b = r.rows[0]?.body;
+      return b === undefined || b === null ? null : String(b);
+    },
+    async forget(subject: string): Promise<{ removed: number }> {
+      if (!owner) return { removed: 0 };
+      const r = await c.query(`DELETE FROM ${q(table)} WHERE ${q(owner)} = $1 RETURNING ${q(id)} AS id`, [subject]);
+      return { removed: r.rows.length };
+    },
+  });
+}
+
+export interface OpenSearchSourceConfig {
+  /** The cluster's base URL, https, with no path beyond the root. */
+  base: string;
+  index: string;
+  transport: HttpTransport;
+  /** The fields of the owner (absent when not owned), the asOf and the body; the id is the document's _id. */
+  owner?: string;
+  asOf: string;
+  body: string;
+  /** An Authorization header value the host gives, from its vault or environment at run time (PL6825); never written to a file. */
+  authorization?: string;
+}
+
+/** S308: an OpenSearch index as a source, through the REST API: _search to retrieve, _doc to resolve, _delete_by_query to forget. */
+export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
+  const A = 'opensearch source';
+  let base: URL;
+  try { base = new URL(c.base); } catch { throw new Error(`${A}: base is a URL`); }
+  if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash || base.username) throw new Error(`${A}: base is an https origin with no path, query or user`);
+  const index = c.index;
+  if (typeof index !== 'string' || !/^[a-z0-9][a-z0-9_-]*$/.test(index)) throw new Error(`${A}: index ${JSON.stringify(index)} is not an index name`);
+  const owner = c.owner === undefined ? null : name(A, 'owner field', c.owner);
+  const asOf = name(A, 'asOf field', c.asOf);
+  const body = name(A, 'body field', c.body);
+  const headers = { 'content-type': 'application/json', accept: 'application/json', ...(c.authorization ? { authorization: c.authorization } : {}) };
+  const url = (path: string) => `${base.origin}/${index}/${path}`;
+  const call = async (method: string, path: string, payload?: unknown) => {
+    const r = await c.transport.request({ method, url: url(path), headers, body: payload === undefined ? '' : JSON.stringify(payload) });
+    let json: unknown = null;
+    try { json = r.body ? JSON.parse(r.body) : null; } catch { json = null; }
+    return { status: r.status, json: json as Record<string, any> | null };
+  };
+  return made({
+    kind: 'opensearch' as const,
+    async retrieve(query: SourceQuery): Promise<ItemRef[]> {
+      const limit = limitOf(query);
+      if (query.owner !== undefined && !owner) throw new Error(`${A}: a retrieval by owner from an index with no owner field (PL6835 at run time)`);
+      // A term query on the owner field: the owner is a value in the request's JSON, never query text.
+      const search = { size: limit, query: query.owner !== undefined ? { bool: { filter: [{ term: { [owner!]: query.owner } }] } } : { match_all: {} }, sort: [{ [asOf]: { order: 'desc' } }], _source: [...(owner ? [owner] : []), asOf] };
+      const r = await call('POST', '_search', search);
+      if (r.status !== 200 || !Array.isArray(r.json?.hits?.hits)) throw new Error(`${A}: _search answered ${r.status}`);
+      return r.json!.hits.hits.map((h: any) => ({ id: String(h._id), owner: owner ? (h._source?.[owner] === undefined || h._source?.[owner] === null ? null : String(h._source[owner])) : null, asOf: asOfMs(A, h._source?.[asOf]) }));
+    },
+    async resolve(item: string): Promise<string | null> {
+      const r = await call('GET', `_doc/${encodeURIComponent(item)}`);
+      if (r.status === 404 || r.json?.found === false) return null;
+      if (r.status !== 200) throw new Error(`${A}: _doc answered ${r.status}`);
+      const b = r.json?._source?.[body];
+      return b === undefined || b === null ? null : String(b);
+    },
+    async forget(subject: string): Promise<{ removed: number }> {
+      if (!owner) return { removed: 0 };
+      const r = await call('POST', '_delete_by_query?refresh=true', { query: { term: { [owner]: subject } } });
+      if (r.status !== 200) throw new Error(`${A}: _delete_by_query answered ${r.status}`);
+      return { removed: Number(r.json?.deleted ?? 0) };
+    },
+  });
+}

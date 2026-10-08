@@ -14,6 +14,8 @@ export type TypeNode =
   | { k: 'address'; machine: string }
   /** PS1.4a, S180: a body's digest, sha256:<64 hex>. */
   | { k: 'content' }
+  /** PS1.4b: the runtime's reference to retrieved items, { ref, count }. */
+  | { k: 'items' }
   | { k: 'record'; fields: [string, TypeNode][] }
   | { k: 'union'; alts: TypeNode[] };
 
@@ -45,6 +47,7 @@ export function parseType(text: string): TypeNode {
   if (t === 'conf') return { k: 'range', lo: 0, hi: 1000 };
   // PS1.4a, S180: a Content is a body's digest; none is null.
   if (t === 'content') return { k: 'content' };
+  if (t === 'items') return { k: 'items' };
   if (t === 'string') return { k: 'string' };
   if (t === 'boolean') return { k: 'bool' };
   if (t === 'null') return { k: 'null' };
@@ -75,6 +78,8 @@ export function outside(t: TypeNode, v: unknown, at = 'the value', exists?: Inst
     case 'bool': return typeof v === 'boolean' ? null : `${at} is ${JSON.stringify(v)}, not a boolean`;
     case 'null': return v === null ? null : `${at} is ${JSON.stringify(v)}, not none`;
     case 'content': return typeof v === 'string' && /^sha256:[0-9a-f]{64}$/.test(v) ? null : `${at} is ${JSON.stringify(v)}, not a body's digest (sha256:<64 hex digits>)`;
+    // PS1.4b: an Items is the runtime's reference, with its count; nothing else gives one.
+    case 'items': return v !== null && typeof v === 'object' && !Array.isArray(v) && typeof (v as { ref?: unknown }).ref === 'string' && (v as { ref: string }).ref.startsWith('items:') && Number.isInteger((v as { count?: unknown }).count) && ((v as { count: number }).count >= 0) ? null : `${at} is ${JSON.stringify(v)}, not the runtime's reference to retrieved items`;
     case 'address': {
       if (typeof v !== 'string' || v === '') return `${at} is ${JSON.stringify(v)}, not an address of ${t.machine}`;
       // Review C9, PS2.1: Ref<M> holds the addresses of instances of M, so an id naming no instance of M is outside it.

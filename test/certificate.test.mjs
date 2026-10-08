@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { admit, AdmitError, CERTIFICATE_FAULTS } from '@poly/check';
 import { certificateProblems, certificateDigest, publicKeyOf } from '@poly/core';
 import { ROOT } from './helpers.mjs';
-import { ADAPTER_CERTIFICATE_FAULTS, CERTIFICATE_FAULT_LIST, PACKAGE_CERTIFICATE_FAULTS, POLICY_CERTIFICATE_FAULTS, VAULT_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
+import { ADAPTER_CERTIFICATE_FAULTS, CERTIFICATE_FAULT_LIST, PACKAGE_CERTIFICATE_FAULTS, POLICY_CERTIFICATE_FAULTS, VAULT_CERTIFICATE_FAULTS, MEMORY_CERTIFICATE_FAULTS } from './toolchain-faults.mjs';
 import { polyaxionPeer } from '@poly/runtime';
 import { makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
@@ -83,7 +83,7 @@ test('each broken certificate writer is caught by the read-back, and nothing is 
   for (const fault of CERTIFICATE_FAULTS) {
     // A policy fault acts on a lowered policy, which needs the gate engine to admit (S145): not run without it.
     if (POLICY_CERTIFICATE_FAULTS.includes(fault) && !polyaxionPeer().ok) continue;
-    const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ADAPTER_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/text-desk.poly'] : VAULT_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/stripe-refund.poly'] : ['conformance/m1/effects.poly'], key);
+    const dir = project(`fault-${fault}`, POLICY_CERTIFICATE_FAULTS.includes(fault) ? ['conformance/m5/orders.poly', 'conformance/m5/orders.policy.poly'] : ADAPTER_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/text-desk.poly'] : VAULT_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m9/stripe-refund.poly'] : MEMORY_CERTIFICATE_FAULTS.includes(fault) ? ['test/fixtures/m10/concierge-memory.poly'] : ['conformance/m1/effects.poly'], key);
     // PT10f: a vault fault acts on a credential whose store poly.json names.
     if (VAULT_CERTIFICATE_FAULTS.includes(fault)) writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8')), credentials: { payments: { store: 'kms' } } }, null, 2));
     if (PACKAGE_CERTIFICATE_FAULTS.includes(fault)) withPackage(dir);

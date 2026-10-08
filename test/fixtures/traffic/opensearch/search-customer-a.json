@@ -1,0 +1,13 @@
+{
+  "took": 3,
+  "timed_out": false,
+  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+  "hits": {
+    "total": { "value": 2, "relation": "eq" },
+    "max_score": null,
+    "hits": [
+      { "_index": "orders", "_id": "order-1002", "_score": null, "_source": { "customer_id": "cust-a", "updated_at": "2026-10-06T12:00:00Z" }, "sort": [1791374400000] },
+      { "_index": "orders", "_id": "order-1001", "_score": null, "_source": { "customer_id": "cust-a", "updated_at": "2026-10-01T09:30:00Z" }, "sort": [1790933400000] }
+    ]
+  }
+}

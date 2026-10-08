@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 /** S190: the repository's std/, where a certificate's `std:` paths are read. */
 const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
 import { actionTypes, type TypeNode } from './types.js';
+import type { FlowDescriptor, SourceDescriptor } from './memory.js';
 import { CERTIFIED_ARTEFACTS, certificateProblems, sha256OfBytes, parseManifest, keyringsOf, sameKeyrings, EMPTY_KEYRINGS, policySubject, verifyRecord, verifyChain, KeyringError, type Anchor, type Certificate, type CertificateProblem } from '@poly/core';
 
 export class LoadError extends Error {
@@ -35,6 +36,8 @@ export interface VerifiedBuild {
   credentials: VerifiedCredential[];
   /** PT12.5, S210 (D9): whether the project's keyring anchor says it is production. */
   production: boolean;
+  /** PT10i, PS17: each source's and each module's flow descriptor, from the verified bytes. */
+  memory: { sources: SourceDescriptor[]; flows: FlowDescriptor[] };
 }
 
 /** PS16.1, PT10e: what the runtime needs of a credential: its Grant machine, provider, scopes and whether it has a holder. */
@@ -95,6 +98,11 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   for (const c of certificate.poly?.channels ?? []) {
     const f = join(root, c.descriptor);
     if (existsSync(f)) bytes.set(c.descriptor, readFileSync(f));
+  }
+  // PT10i: each memory descriptor, read once like any artefact.
+  for (const d of [...(certificate.poly?.memory?.sources ?? []), ...(certificate.poly?.memory?.flows ?? [])]) {
+    const f = join(root, d.descriptor);
+    if (existsSync(f)) bytes.set(d.descriptor, readFileSync(f));
   }
   // PT10e: each credential's descriptor, read once like any artefact.
   for (const c of certificate.poly?.credentials ?? []) {
@@ -258,7 +266,20 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (typeof d.provider !== 'string' || !Array.isArray(d.scopes) || typeof d.holder !== 'boolean') throw new LoadError(`refused at load: the descriptor of credential ${c.name} is not a credential's (PT10e)`);
     credentials.push({ name: c.name, machine: m.id, provider: d.provider, scopes: d.scopes as string[], holder: d.holder });
   }
-  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true };
+  // PT10i: each source's descriptor is the certificate entry's own, by name; each flow descriptor its module's.
+  const memorySources: SourceDescriptor[] = [];
+  for (const s of certificate.poly?.memory?.sources ?? []) {
+    const d = JSON.parse(bytes.get(s.descriptor)!.toString('utf8')) as SourceDescriptor;
+    if (d.source !== s.name || d.adapter !== s.adapter) throw new LoadError(`refused at load: the certificate's source ${s.name} has the descriptor of source ${String(d.source)} (PT10i)`);
+    memorySources.push(d);
+  }
+  const memoryFlows: FlowDescriptor[] = [];
+  for (const f of certificate.poly?.memory?.flows ?? []) {
+    const d = JSON.parse(bytes.get(f.descriptor)!.toString('utf8')) as FlowDescriptor;
+    if (d.module !== f.module) throw new LoadError(`refused at load: the certificate's flow of ${f.module} has the descriptor of ${String(d.module)} (PT10i)`);
+    memoryFlows.push(d);
+  }
+  return { certificate, root, runDir, machines, handlers, policies, workflows, channels, credentials, production: anchor?.production === true, memory: { sources: memorySources, flows: memoryFlows } };
 }
 
 /**

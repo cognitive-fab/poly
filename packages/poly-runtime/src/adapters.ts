@@ -169,3 +169,25 @@ export interface CredentialHost {
    */
   grantCallback(credential: string, grantId: string, scopes: string[]): Promise<boolean>;
 }
+
+// ── Source adapters (PT20.2, PS17.2, S308) ──────────────────────────────────────────────────────────────────────────
+
+/** One item a source holds, by reference: its id, its owner when the source is owned, and when it was true (ms). */
+export interface ItemRef { id: string; owner: string | null; asOf: number }
+
+/** A retrieval's query: `owner == p` is a typed parameter, never text, and the limit bounds what comes back. */
+export interface SourceQuery { owner?: string; limit: number }
+
+/**
+ * PT20.2, K14: a source adapter. It returns items with their true owner and `asOf`, resolves an item to its body when a
+ * decision reads it, and removes every body it holds about a subject. It never receives a policy, a snapshot or a key.
+ */
+export interface SourceAdapter {
+  readonly kind: 'postgres' | 'opensearch';
+  retrieve(q: SourceQuery): Promise<ItemRef[]>;
+  resolve(id: string): Promise<string | null>;
+  forget(subject: string): Promise<{ removed: number }>;
+}
+
+/** The host's query function for Postgres (S308): parameterized text and its values; no driver enters poly. */
+export type PgQuery = (text: string, params: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;

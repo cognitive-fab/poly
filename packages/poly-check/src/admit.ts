@@ -26,7 +26,7 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source'] as const;
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -303,6 +303,9 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const channels: NonNullable<Certificate['poly']['channels']> = [];
   // PT10e: each credential's descriptor, by its path and the digest the check wrote, which the vault adapter will read.
   const credentials: { name: string; descriptor: string; want: string }[] = [];
+  // PT10i: each source's and each module's flow descriptor, by its path and the digest the check wrote.
+  const memorySources: { name: string; descriptor: string; want: string }[] = [];
+  const memoryFlows: { module: string; descriptor: string; want: string }[] = [];
   for (const r of report.files) {
     if (!r.module || !r.moduleDigest) throw new AdmitError(`${r.file}: no module digest`);
     moduleDigests[r.module] = r.moduleDigest;
@@ -326,6 +329,12 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
         if (!k.startsWith('../credentials/') || !m.buildDir) continue;
         const descriptor = rel(dir, join(m.buildDir, k));
         if (!credentials.some((c) => c.descriptor === descriptor)) credentials.push({ name: k.slice('../credentials/'.length, -'.json'.length), descriptor, want });
+      }
+      for (const [k, want] of Object.entries(m.artefactDigests ?? {})) {
+        if (!m.buildDir) continue;
+        const descriptor = rel(dir, join(m.buildDir, k));
+        if (k.startsWith('../sources/') && !memorySources.some((c) => c.descriptor === descriptor)) memorySources.push({ name: k.slice('../sources/'.length, -'.json'.length), descriptor, want });
+        if (k.startsWith('../flow/') && !memoryFlows.some((c) => c.descriptor === descriptor)) memoryFlows.push({ module: k.slice('../flow/'.length, -'.json'.length), descriptor, want });
       }
     }
     for (const m of r.machines) {
@@ -411,7 +420,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   }
   if (policyEngine && opts.fault === 'wrong-policy-engine') policyEngine = { name: 'polyaxion', commit: '0000000' };
   // The workflow descriptors are artefacts poly-runtime reads, certified with the policies (PT10, S164, S173).
-  const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor), ...credentials.map((c) => c.descriptor)];
+  const policyPaths = [...policyReports.map((p) => p.artefact!.path), ...workflows.map((w) => w.descriptor), ...channels.map((c) => c.descriptor), ...credentials.map((c) => c.descriptor), ...memorySources.map((c) => c.descriptor), ...memoryFlows.map((c) => c.descriptor)];
   const artefacts = artefactsOf(dir, machines, opts.fault, policyPaths);
   for (const p of policyReports) {
     if (!opts.fault && artefacts[p.artefact!.path] !== p.artefact!.digest) throw new AdmitError(`not admitted: ${p.artefact!.path} on disk is not the policy the check checked (certified bytes must be the checked bytes)`);
@@ -421,6 +430,9 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     const m = report.files.flatMap((r) => r.machines.map((x) => ({ r, x }))).find(({ r, x }) => `${r.module}.${x.machine}` === ch.application)?.x;
     const want = m?.artefactDigests?.[`../channels/${ch.name}.json`];
     if (!opts.fault && (want === undefined || artefacts[ch.descriptor] !== want)) throw new AdmitError(`not admitted: ${ch.descriptor} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
+  }
+  for (const c of [...memorySources, ...memoryFlows]) {
+    if (!opts.fault && artefacts[c.descriptor] !== c.want) throw new AdmitError(`not admitted: ${c.descriptor} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
   }
   for (const c of credentials) {
     if (!opts.fault && artefacts[c.descriptor] !== c.want) throw new AdmitError(`not admitted: ${c.descriptor} on disk is not the bytes the check checked (certified bytes must be the checked bytes)`);
@@ -506,6 +518,12 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // PT10f, S200: each credential's vault, by its store and the adapter package; the development keychain is refused in a
   // build for production, and a credential whose store poly.json does not name is refused (fail closed).
   const vaults: NonNullable<Certificate['poly']['vaults']> = [];
+  // S308: each source's adapter is bound by package, version and digest, as a channel's is; the project's memory has none.
+  const sourceAdapter = (s: { descriptor: string }) => { try { return (JSON.parse(readFileSync(join(dir, s.descriptor), 'utf8')) as { adapter?: string | null }).adapter ?? null; } catch { return null; } };
+  const memory: NonNullable<Certificate['poly']['memory']> = { sources: memorySources.map((s) => { const a = sourceAdapter(s); if (a === null) return { name: s.name, descriptor: s.descriptor, adapter: null }; adapterPin ??= adapterPackagePin(); return { name: s.name, descriptor: s.descriptor, adapter: a, ...adapterPin }; }), flows: memoryFlows.map((f) => ({ module: f.module, descriptor: f.descriptor })) };
+  // PT10i: the broken writers rename a source's entry, and pin its adapter to another digest.
+  if (opts.fault === 'rename-source' && memory.sources.length) memory.sources[0] = { ...memory.sources[0], name: `${memory.sources[0].name}x` };
+  if (opts.fault === 'stale-source-pin' && memory.sources.length) memory.sources[0] = { ...memory.sources[0], digest: `sha256:${'0'.repeat(64)}` };
   for (const cr of credentials) {
     const named = c.credentials?.[cr.name]?.store;
     if (!named) throw new AdmitError(`not admitted: credential ${cr.name} names no store in poly.json's "credentials" (dev-keychain or kms, PT10f)`);
@@ -529,7 +547,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -562,6 +580,10 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // Review D5 (M9): the credentials read back are each descriptor the build wrote, under the name it carries.
   const credentialsNow = credentials.map((c) => { let named: unknown = null; try { named = (JSON.parse(readFileSync(join(dir, c.descriptor), 'utf8')) as { credential?: unknown }).credential; } catch { /* named null: refused below */ } return { name: named, descriptor: c.descriptor }; });
   if (JSON.stringify(back.poly.credentials ?? []) !== JSON.stringify(credentialsNow)) problems.push({ name: 'credentials', problem: `the certificate binds ${JSON.stringify(back.poly.credentials ?? [])}, and the build's descriptors are ${JSON.stringify(credentialsNow)}` });
+  // PT10i: the memory descriptors read back are the build's, each source's adapter the installed package (S308).
+  if (JSON.stringify(back.poly.memory?.sources.map((s) => [s.name, s.descriptor, s.adapter]) ?? []) !== JSON.stringify(memorySources.map((s) => [s.name, s.descriptor, sourceAdapter(s)]))) problems.push({ name: 'memory', problem: 'the certified sources are not the build\'s source descriptors' });
+  if (JSON.stringify(back.poly.memory?.flows.map((f) => [f.module, f.descriptor]) ?? []) !== JSON.stringify(memoryFlows.map((f) => [f.module, f.descriptor]))) problems.push({ name: 'memory', problem: 'the certified flow descriptors are not the build\'s' });
+  for (const x of back.poly.memory?.sources ?? []) if (x.adapter !== null && (!adapterPin || x.package !== adapterPin.package || x.version !== adapterPin.version || x.digest !== adapterPin.digest)) problems.push({ name: 'memory', problem: `source ${x.name}'s adapter is bound to ${x.package} ${x.version} ${x.digest}, and the installed package is not that` });
   // Review D8 (M9): each scope's source read back is the file that declares it, which load verifies its signature over.
   for (const q of back.poly.policies) if (q.source !== policyFile.get(q.scope)) problems.push({ name: 'policies', problem: `scope ${q.scope} is certified as written in ${q.source}, and ${policyFile.get(q.scope) ?? 'no file'} declares it` });
   // S194, Q8: each scope's signature read back verifies over the document on disk, the certified source and engine.

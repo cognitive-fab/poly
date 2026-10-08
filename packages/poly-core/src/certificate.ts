@@ -81,6 +81,11 @@ export interface Certificate {
     workflows?: { name: string; machine: string; runtime: 'poly-runtime'; gated: true; descriptor: string }[];
     /** PS15: each channel, its application's machine id and its descriptor, whose digest is under `artefacts`. */
     channels?: { name: string; application: string; descriptor: string }[];
+    /**
+     * PT10i, PS17 (M10): each source's descriptor, with its adapter bound by package, version and digest (S308), and each
+     * module's flow descriptor, whose digests are under `artefacts`.
+     */
+    memory?: { sources: { name: string; descriptor: string; adapter: string | null; package?: string; version?: string; digest?: string }[]; flows: { module: string; descriptor: string }[] };
     /** PT10e: each credential an effect uses, by name, and its descriptor, whose digest is under `artefacts`. */
     credentials?: { name: string; descriptor: string }[];
     /** PT10f, S200: each credential's vault: its store, and the adapter package by name, version and digest. */
