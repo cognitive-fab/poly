@@ -171,6 +171,10 @@ At 7175e4f0, with no M10 work on the machine when it started, the full suite and
 
 **Accepted by the owner (2026-10-08): a timing failure from load.** The one failure is m3-isolation's 60 s limit on its CLI child, hit under the suite's load: 108 s in the suite (`.poly/logs/7175e4f0-2026-10-08T15-04-39-208Z-f1.log`), and 5 of 5 when the file ran alone at the same commit, the marker test in 38 s. It is no defect of M11. For the v1 gate, `decisions-v1.md` lists moving the file to the serial after-suite group, and the v1 gate must have no failure.
 
+## Merged into m4
+
+m4 was fast-forwarded from dcce5fc6 (M10's merge) to 2e7f69c0 with `--ff-only`, as ruled: M11 rebased on M10, its review's F1 to F3 fixed or ruled, the suite's one failure accepted as a timing failure from load, and the 160 measured files identical to M10's close. This record is the one commit after it, and m4 is fast-forwarded again to carry it. Nothing was pushed.
+
 ## Conclusion
 
-M11 is ruled and built. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains: sixty-four concurrent runs never pass a cap, and a crash never loses or doubles a reservation. A route is a checked machine whose every tier choice replays from the ledger with no model call, and `poly cost` sums every answered call from the ledger alone. The review's findings are fixed, the owner's rulings on them are built (an input limit in every reservation, an unpriceable report charged in full, `poly try`), and the gate passed again from a clean build on a quiet machine. M11 waits only for M10 to merge first.
+M11 is ruled and built. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains: sixty-four concurrent runs never pass a cap, and a crash never loses or doubles a reservation. A route is a checked machine whose every tier choice replays from the ledger with no model call, and `poly cost` sums every answered call from the ledger alone. The review's findings are fixed, the owner's rulings on them are built (an input limit in every reservation, an unpriceable report charged in full, `poly try`), and the gate passed again from a clean build on a quiet machine. M11 is rebased on M10 and merged into m4.
