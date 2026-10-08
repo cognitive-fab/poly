@@ -21,6 +21,7 @@ export const TASKS = ['T3', 'T7'];
 export const ARMS = [3, 4];
 export const CAPS = { tokens: 15_000_000, wallSeconds: 3600, usd: 15 };
 const MODEL = 'claude-opus-5-5';
+const STAGGER_MS = 90_000;
 const id = (task, arm, run) => `${task}-arm${arm}-run${run}`;
 
 const order = [];
@@ -43,6 +44,10 @@ function problems(b, exits = {}) {
     else if (r.unreadable) out.push(`${name}: run.json is unreadable (${r.unreadable})`);
     else if (!r.finished) out.push(`${name}: run.json is not finished`);
     else if (r.unscored) out.push(`${name}: unscored (${r.unscored})`);
+    // The first attempt of block 1 (void/block1-oauth): a turn whose CLI could not refresh its login exits 1 having
+    // spent no token, which the frozen runner does not mark unscored. Such a turn measured nothing, so the run stops
+    // the batch, as a failed login does (4210fa6).
+    else if ((r.versions ?? []).some((v) => v.attempted && v.exitCode !== 0 && !v.tokens)) out.push(`${name}: a turn exited ${(r.versions ?? []).find((v) => v.attempted && v.exitCode !== 0 && !v.tokens).exitCode} having spent no token (a failed login, unscored)`);
     else {
       const cap = (r.versions ?? []).find((v) => ['budget', 'wall', 'usd'].includes(v.stopped));
       if (cap) out.push(`${name}: stopped by a cap (${cap.stopped}, version ${cap.n})`);
@@ -59,13 +64,15 @@ for (const b of todo) {
   const started = new Date().toISOString();
   console.log(`block ${b.n}: ${b.task} run ${b.run}, started ${started}`);
   const exits = {};
-  await Promise.all(ARMS.map((arm) => new Promise((done) => {
+  // The two arms share the arms' login folder; started at once, their CLIs refreshed one OAuth token together and the
+  // first turns of both failed (void/block1-oauth). Arm 4 starts 90 s after arm 3; both still run in parallel.
+  await Promise.all(ARMS.map((arm, k) => new Promise((r) => setTimeout(r, k * STAGGER_MS)).then(() => new Promise((done) => {
     const args = [RUNNER, '--arm', String(arm), '--task', b.task, '--run', String(b.run), '--model', MODEL, '--tokens', String(CAPS.tokens), '--wall', String(CAPS.wallSeconds), '--max-budget-usd', String(CAPS.usd), '--out', RUNS];
     const child = spawn(process.execPath, args, { cwd: toolchain, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', (d) => process.stdout.write(`[${b.task} arm ${arm}] ${d}`));
     child.stderr.on('data', (d) => process.stderr.write(`[${b.task} arm ${arm}] ${d}`));
     child.on('close', (code) => { exits[arm] = code; done(); });
-  })));
+  }))));
   const found = problems(b, exits);
   appendFileSync(join(RUNS, 'blocks.jsonl'), JSON.stringify({ block: b.n, task: b.task, run: b.run, started, finished: new Date().toISOString(), exits, problems: found }) + '\n');
   if (found.length) { for (const p of found) console.error(`stopped after block ${b.n}: ${p}`); process.exit(1); }
