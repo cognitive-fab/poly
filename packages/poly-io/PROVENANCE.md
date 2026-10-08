@@ -84,6 +84,39 @@ Written from the RFCs, and built and tested against the generic provider `test-o
 | Revokes the refresh token with `token_type_hint=refresh_token` | https://www.rfc-editor.org/rfc/rfc7009#section-2.1 |
 | Uses the state once, and keeps it ten minutes (poly's own bound) | https://www.rfc-editor.org/rfc/rfc6749#section-10.12 (the state against cross-site request forgery) |
 
+## The Gmail source (`gmail`, the examples branch, S452)
+
+Written from the Gmail API reference, read on 2026-10-08, and tested against recorded traffic only (`test/fixtures/traffic/gmail`, built from the synthetic corpus in `test/fixtures/inbox`). Each item is one message of the inbox, owned by its account's principal (S451); its id is `<account label>/<message id>`, so no id names an address.
+
+| What the adapter does | Source |
+|---|---|
+| A first sync reads `GET users/me/profile` for its `historyId`, then lists `GET users/me/messages?labelIds=INBOX&maxResults=100` once, so the first sync is bounded | https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/getProfile and https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list |
+| A poll reads `GET users/me/history?startHistoryId=<h>&historyTypes=messageAdded&labelId=INBOX&maxResults=100`, page by page through `nextPageToken`, at most twenty pages, and takes each `messagesAdded[].message.id` once | https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list |
+| Reads a 404 on the history as an expired cursor ("typically valid for at least a week, but in some rare circumstances ... only a few hours"), and syncs again by a list with `q=after:<seconds>` since the newest message kept | the same page |
+| Fetches each message with `GET users/me/messages/<id>?format=raw` and reads `raw`, the whole message in base64url, with the MIME reader below; `internalDate` is the item's `asOf` | https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get |
+| Moves the cursor only after every message it covers is kept, and fetches no message it holds, so a sync cut short is taken again on the next with nothing twice and nothing missed (IT2.3) | poly's own rule |
+| Sends only GETs under `https://gmail.googleapis.com/gmail/v1/users/me/`, through the host's request function for the account, which the vault binds to the read credential (`gmail.readonly`, which every method above accepts); it sets no credential header of its own | S455, part a |
+
+**Poly's own bounds.** A message's text is kept to 32,768 characters by default and marked `[truncated]` beyond. A mail store keeps each record under the SHA-256 of its key, so no file name holds an id.
+
+**Not handled.** Labels other than `INBOX`, messages removed from the inbox after they were kept (`messageDeleted`, `labelRemoved`), rate limits (429, 403 `rateLimitExceeded`), which fail the sync for the host to retry, and Gmail's batch endpoint.
+
+## The MIME reader (`readMime`)
+
+Mail is untrusted input, so the reader never throws on a message's content and names what it could not take as written (`problems`).
+
+| What the reader does | Source |
+|---|---|
+| Unfolds headers, a run of folding white space read as one space | https://www.rfc-editor.org/rfc/rfc5322#section-2.2.3 |
+| Decodes encoded words, B and Q, dropping the white space between two adjacent ones | https://www.rfc-editor.org/rfc/rfc2047#section-4 and section 6.2 |
+| Reads a message with no `Content-Type` as `text/plain` in US-ASCII | https://www.rfc-editor.org/rfc/rfc2045#section-5.2 |
+| Decodes `base64` and `quoted-printable`, a `=` at a line's end being a soft break | https://www.rfc-editor.org/rfc/rfc2045#section-6.7 and section 6.8 |
+| Splits a multipart body on its boundary, the preamble and epilogue left out; takes the plain part of a `multipart/alternative` | https://www.rfc-editor.org/rfc/rfc2046#section-5.1.1 and section 5.1.4 |
+| Reads a parameter in RFC 2231's `name*=charset''value` form | https://www.rfc-editor.org/rfc/rfc2231#section-4 |
+| Decodes a charset by the WHATWG Encoding Standard's labels (`TextDecoder`); an unknown one is read as UTF-8 and named | https://encoding.spec.whatwg.org/#names-and-labels |
+
+**Poly's own bounds.** At most 8 levels of multipart and 200 parts are read. An attachment is listed by name, type and decoded size, never read. HTML is used only when a message has no plain text: its script, style and head are dropped, block ends become line ends, tags are removed and entities decoded.
+
 ## Conclusion
 
 Every rule the adapters apply to a provider's traffic is listed here with its source, and the tests replay that traffic from the documented payloads, forged variants included. What is not listed is not handled.

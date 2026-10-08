@@ -187,7 +187,7 @@ export interface SourceQuery { owner?: string; key?: { name: string; value: stri
  * decision reads it, and removes every body it holds about a subject. It never receives a policy, a snapshot or a key.
  */
 export interface SourceAdapter {
-  readonly kind: 'postgres' | 'opensearch';
+  readonly kind: 'postgres' | 'opensearch' | 'gmail';
   retrieve(q: SourceQuery): Promise<ItemRef[]>;
   resolve(id: string): Promise<string | null>;
   forget(subject: string): Promise<{ removed: number }>;
