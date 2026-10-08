@@ -110,9 +110,54 @@ Numbered S300 to S349. Each has a proposal and waits for the owner's ruling.
 2. **Merge with M11.** Both touch the decision clause, the reserved reasons, the completion path and the proposal fields; section 6 lists each, to be ruled with M11's plan.
 3. **Recorded traffic only.** A source whose behaviour differs from its documentation is not caught by the tests; K14 states the assumption.
 
+## 9. Record of M10
+
+| Step | What | Commits |
+|---|---|---|
+| 0 | Generated host types and `poly edit-check` (PT28.1, PT28.4, Q9, S311 to S313), before the memory plan | 5ef9666d, f39ba05d |
+| 1 | The taint state space measured with steps 3 and 4: the concierge 28 of 28 states, the SMS help desk alone 72 of 72, its channel configuration 172 to 29,444 flow states | dfd50070 |
+| 2 | PS17 written into the semantics before the code (S314 to S319) | 15fb2967 |
+| 3, 4 | Memory on both surfaces, its descriptors, and taint and the flow rule in poly-ref, with AC22's seeded control | 495b1222, 0aa17a2f, dfd50070 |
+| 7, 5, 8 (first part) | Sources at run time, retrieval, what a decision reads, and citations | aae977b1, 4249edf4, 83e6b891 |
+| 6, 8 | The flow check and freshness at run time, and the proposal fields `taint` and `items` | 69cf1df9, 7dfda397 |
+| 9, 10 | Remembering, verifying and forgetting, and forgotten steps on replay | cacba77e, 0cd35ef0 |
+| 11 | The review: 13 findings fixed within the semantics, each with a test that failed first; eight raised as S320 to S327 | 6de0c758, b7fa978a |
+| (ruled) | S320 to S327 built as ruled, the semantics first | af5f4823, 3ba8b571 |
+
+**Where each gate item is tested.**
+
+| Gate item | Tests |
+|---|---|
+| AC22 | `memory-flow` (the concierge CLEAN, and `PL6831` with its shortest witness without `where owner == customer`) and `memory-enforce` (the same variant's reply denied `audience` at run time before its handler runs); `rulings-m10` (S326: denied even when the orders are the asker's) |
+| AC23 | `memory-runtime` (an answer citing an item it was not given is refused `uncited` and the failed path runs) and `memory-enforce` (stale items escalated, or denied with `stale deny`) |
+| AC24 | `memory-forget` (after a forget no body about the subject is readable, the source forgot it, every chain verifies, and replay lists the forgotten steps with no divergence) |
+| Read-backs | `tv` and `certificate`, whose explicit faults include `source-unowned`, `flow-class-lowered`, `flow-recipient-dropped`, `types-widen-param`, `rename-source`, `stale-source-pin` and `drop-declassify` |
+| The canary | `memory-canary`, a standing test beside AC18's, with its seeded control |
+| Step 0 | `host-types` |
+| The review and the rulings | `review-m10` and `rulings-m10` |
+
+**The closing gate of M10, from a clean build.** It ran at 3ba8b571 from 02:35:34 to 02:49:04 on 8 October 2026, after `npm run clean`, as `node scripts/suite-summary.mjs` (build, boundary check, the suite, then `test/after/`). Before it started no test run and no simulation was on the machine: the process list held language servers, MCP servers and an idle `polyx serve`. A watcher listed every minute, 14 times, each node or python process started after the gate began, by command line. Apart from one polywatch review worker in the second and third listings (a Claude Code hook reviewing the last commit), every one was the gate's own: the test runner, its test files and the processes those tests start (the M3 frozen runner, its fake agent and its scorer, a sleeping fixture, the language server and MCP tests).
+
+| Gate | Commit | Tests (suite and `test/after/`) | Passed | Failed | Skipped | Waiting | Total |
+|---|---|---|---|---|---|---|---|
+| M11 closing after the rulings, from a clean build (branch m11) | 163fc0e3 | 2,006 | not in its times file | 0 | not in its times file | not in its times file | 13 min 41 s |
+| **M10 closing, from a clean build** | 3ba8b571 | 2,004 | 1,998 | 0 | 2 | 4 | 13 min 30 s |
+
+`check-memory` passed. The two skipped are S152's OpenShell enforcement (no gateway configured) and the test of `creation-unavailable`, as at M9's close; the four waiting are E1's one, E2's one and E5's two, as before. The 159 measured files are identical to the measurement at M9's close; the one file the measurement adds is the error case of `PL6837`, `REFUSED`, which S320 allows. Every file's time is in `docs/m10/gate-file-times.json`.
+
+**Compared file by file with M11's `docs/m11/gate2-file-times.json`**, the baseline measured with nothing else running, over the 160 files both share (M10 adds 9 files and M11 10): the suite took 728 s against 735 s, `test/after/` 74 s against 76 s, and the summed time of the shared files 7,501 s against 7,366 s. One file was faster and eight slower by more than 20% and 5 s, none by more than 22 s: `m3-o1r` 99 s to 121 s, `review-m6-c` 46 s to 55 s, `revocation` 25 s to 34 s, `runtime-replay` 27 s to 36 s, `workflow-runtime` 34 s to 42 s, `run-config` 28 s to 36 s, `m3-ranges` 14 s to 20 s and `workflow-ac5` 16 s to 21 s. The memory files are fast: `memory-flow`, which explores the channel configuration with its taints, is the slowest of them.
+
+**Limits M10 closes with.**
+- **Declassification points (S323, S325).** A decision with a finite answer, and a count, carry no taint. The certificate lists each over tainted data, and the release notes state both.
+- **The runtime may refuse more than the checker.** A body received on a channel is owned by its sender only at run time (S327), and `Ω` is a mark at run time (S326): each only narrows an audience, as PS17.4 allows.
+- **Freshness is judged when an intent is proposed.** A retried decision may read items past their freshness, and an adapter's `asOf` in the future gives an age of 0 (review B, answered as low).
+- **Recorded traffic only.** Every source adapter test replays documented Postgres statements and OpenSearch responses; a live database or index is not gated (K14).
+- **The canary scan** finds a body plain, in base64, base64url or URL-encoded; another encoding is not found.
+- **M11.** M10 merges first where it touches the same lines as M11 (the decision clause, the reserved reasons, the completion path and the proposal fields), before the v1 gate.
+
 ## Conclusion
 
-M10 checks that what an agent retrieves reaches only those allowed to see it: taint is a ghost value the checker follows on every path and the runtime enforces on every send, measured before it is ruled. It reuses M9's erasable store for forgetting and M9's clock for freshness, keeps every item body out of the records, and lists each shared change for a joint ruling with M11.
+M10 checks that what an agent retrieves reaches only those allowed to see it: taint is a ghost value the checker follows on every path and the runtime enforces on every send, measured before it is ruled. It reuses M9's erasable store for forgetting and M9's clock for freshness, keeps every item body out of the records, and lists each shared change for a joint ruling with M11. As built, every step is done, the review's findings are fixed or ruled and built, and the closing gate passed from a clean build with no failure and the measured verdicts unchanged (section 9).
 
 ## Glossary
 

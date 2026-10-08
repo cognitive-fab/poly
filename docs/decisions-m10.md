@@ -177,6 +177,10 @@ PS17, PS1.4b and PT10m were written first (af5f4823), with the release notes' tw
 - **A conformance case.** `conformance/m0/errors/PL6837-verified-by-person.poly`, since every error code a source raises has one; the first suite found it missing.
 - **Checked.** The 159 measured files are identical to the measurement at the M9 close; the one file the measurement adds is the new error case, `REFUSED` with `PL6837`, a change S320 allows. The full suite: 2,003 tests and one after the M3 runs, 1,998 pass, no failure, 2 skipped and 4 waiting; check-memory passed (`.poly/logs/af5f4823-2026-10-08T09-21-05-487Z-rulings2.log`).
 
+## The closing gate of M10 (2026-10-08)
+
+S320 to S327 are built (3ba8b571), and the closing gate ran from a clean build at 3ba8b571: 2,004 tests, 1,998 passed, none failed, 2 skipped and 4 waiting, `check-memory` passed, and the 159 measured files identical (the one file added is `PL6837`'s error case). Compared file by file with M11's `gate2-file-times.json` over the 160 files both share, the suite took 728 s against 735 s. The record is in `plan-m10.md`, section 9, and every file's time in `docs/m10/gate-file-times.json`. M10 merges first where it touches the same lines as M11.
+
 ## Conclusion
 
-M10 is ruled. Its one measured risk, the taint state space, is measured first and brought to the owner if it does not fit.
+M10 is ruled. Its one measured risk, the taint state space, was measured first and fit. Every step is built, the review's findings are fixed or ruled and built, and the closing gate passed from a clean build with no failure and the measured verdicts unchanged. M10 waits only for the owner to close it and for its merge with M11.
