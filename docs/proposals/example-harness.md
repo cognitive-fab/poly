@@ -2,7 +2,7 @@
 
 Status: proposed, for the owner's ruling. Built after the inbox assistant. Ids: functional `HF`, technical `HT`, acceptance `HAC`.
 
-A harness is the loop around a model that turns it into an agent: it sends the context, runs the tools, handles their output and decides when to compact. SoL-Pi (NVIDIA and MIT, arXiv 2609.20519) found four harness mechanisms that cut token cost: Action Fusion, Online Context Compact, ObservationPack and the Evidence-Preserving Reducer. Each one is a rule the harness must not break, and SoL-Pi tests these rules on benchmarks. This example writes the harness's control loop in poly, so the rules are proved for every run.
+A harness is the loop around a model that turns it into an agent: it sends the context, runs the tools, handles their output and decides when to compact. SoL-Pi (NVIDIA and MIT, arXiv 2609.20519) found four harness mechanisms that cut token cost: Action Fusion, Online Context Compact, ObservationPack and the Evidence-Preserving Reducer. Liu and Han (arXiv 2610.04433) found that a harness barely moves pass rate but sets the bill, up to three times on the same model, and that every harness effect they could measure is a way to lose a task. VERA (NVIDIA, arXiv 2610.05923) scores long tasks stage by stage and accepts a harness change only when paired reruns with the model frozen show a gain and no regression. Each one is a rule the harness must not break, and SoL-Pi tests these rules on benchmarks. This example writes the harness's control loop in poly, so the rules are proved for every run.
 
 # Part A. Functional specification
 
@@ -18,6 +18,8 @@ A harness tuned for cost can lose correctness without anyone seeing it: a compac
 - **HF2.4 Large outputs by handle.** A tool result over a threshold (10 KiB by default) is archived and sent in full for two requests, then replaced by a handle, its size and a head-and-tail excerpt. The agent can fetch any exact range through the handle.
 - **HF2.5 Logs read by a cheaper model, with evidence.** A build or test log over a threshold (4 KiB) is read by a cheaper model, which writes a receipt: status, exact quotes, source hash. A deterministic verifier checks the receipt against the original. The agent sees the receipt only if it passes; otherwise it sees the original log.
 - **HF2.6 Budget.** Each task has a cost budget; the harness stops at it with the reason shown.
+- **HF2.7 Stage scores.** Each plan step is a stage with its own checks. A run reports a score per stage, and the failing stage is the state where the journal shows the first failed check, read from the journal, not guessed by a model.
+- **HF2.8 One change at a time.** A change to the harness (a skill, a prompt, a threshold) is measured with the model frozen, on the same tasks, with and without the change. It is accepted only if its target stage improves and no stage regresses. A run of the model is measured with the harness frozen.
 
 ## HF3. What the harness must never do
 
@@ -27,6 +29,11 @@ A harness tuned for cost can lose correctness without anyone seeing it: a compac
 - **HF3.4** Fuse a command that needs to inspect the edit's result.
 - **HF3.5** Put a credential into the model's context.
 - **HF3.6** Exceed a task's budget.
+- **HF3.7** End a step on an output cutoff without re-prompting the model to continue (the largest measured harness loss in Liu and Han, arXiv 2610.04433).
+- **HF3.8** End a trial on a context overflow without one compaction attempt first.
+- **HF3.9** End a trial at the step cap or the wall clock without saving the work on disk and reporting the cap as the reason.
+- **HF3.10** Depend on a tool that needs the network when the run is offline: every tool the harness offers declares whether it needs the network, and an offline run offers none that do.
+- **HF3.11** Let a harness change touch the rules of HF3 or the gate policy. Skills and prompts can evolve; the rules and the signed policy (S194) cannot be changed by the loop they govern.
 
 ## HF4. Acceptance criteria
 
@@ -34,7 +41,10 @@ A harness tuned for cost can lose correctness without anyone seeing it: a compac
 |---|---|
 | HAC1 | Each rule of HF3 has a seeded variant that breaks it, and `poly check` gives a witness for each. |
 | HAC2 | Over a recorded set of tasks, the harness reproduces SoL-Pi's four mechanisms: each fires where the paper says it should, measured by trigger rate. |
-| HAC3 | Over the same recorded set, completion is at least the base harness's, and token traffic and cost are reported beside it. A cheaper run that completes fewer tasks fails this criterion. |
+| HAC3 | Over the same recorded set, completion is at least the base harness's, and token traffic and cost are reported beside it. A cheaper run that completes fewer tasks fails this criterion. The comparison is paired per task (McNemar's exact test), each configuration is run at least twice so its rerun spread is reported as the noise floor, the smallest gap the task set can detect at 80% power is stated, and every run is offline. |
+| HAC6 | The cost of each call is reported as the preamble (system prompt and tool schemas), the transcript and the output, and the step count per trial, so a cost change can be traced to the term that moved it. |
+| HAC7 | Each run reports a score per stage and names the failing stage from the journal; a seeded fault in stage k is reported as a failure of stage k. |
+| HAC8 | A harness change is accepted only by the paired rule of HF2.8, with the test of HAC3; a seeded change that improves one stage and regresses another is refused. |
 | HAC4 | A receipt whose quote is not in the original log is rejected and the original is shown, journaled. |
 | HAC5 | The journal replays every compaction decision, every handle, every receipt check and every tier choice. |
 
@@ -63,6 +73,12 @@ Model calls are decisions under `route` (M11): the main tier for the agent, the 
 | Full output exactly twice | an `Observation` moves to `handled` on its third send, and only then |
 | Fusion only for commands that need no inspection | the fusable commands are a declared set; fusion outside it is refused |
 | Budget | reservations before each model call (PT24.3) |
+| Output cutoff recovers | `never emit endStep while lastCall.stop == length and reprompts < 1` |
+| Overflow compacts first | `never emit endTrial(overflow) while compactions == 0` |
+| Caps are reported | every trial ending at a cap carries the cap as its reason, and the working tree is kept |
+| Stage scores come from the journal | a stage's score is computed from the checks journaled in that state; the failing stage is the first state with a failed check |
+| Rules stay out of reach | the set of editable harness parts is declared (skills, prompts, thresholds); a change outside it, or to the policy, is refused |
+| Offline means offline | an offline run's tool set contains no tool declared as needing the network (a check over the configuration) |
 
 ## HT3. The verifier
 
@@ -88,4 +104,7 @@ SoL-Pi found the rules that make a harness cheap and tested them on benchmarks. 
 - **Handle:** a stable reference to an archived output, with its size and an excerpt.
 - **Harness:** the control loop around a model that runs its tools and manages its context.
 - **Receipt:** a cheaper model's compact reading of a log, with exact quotes and the log's hash, checked before use.
+- **Paired acceptance:** keeping a change only when the same tasks, run with and without it, show a gain and no regression.
+- **Stage score:** the share of a stage's checks that pass, computed from the journal.
+- **VERA:** the stage-scored, verifier-gated training loop of arXiv 2610.05923.
 - **SoL-Pi:** the harness of arXiv 2609.20519, whose four mechanisms this example reproduces.

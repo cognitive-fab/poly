@@ -1,0 +1,355 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=4pt}
+
+\definecolor{kw}{RGB}{30,60,140}
+\definecolor{cm}{RGB}{110,110,110}
+\definecolor{st}{RGB}{140,40,40}
+\lstdefinelanguage{poly}{
+  morekeywords={module,type,machine,state,action,on,require,else,reject,invariant,step,property,path,effect,kind,labels,targets,class,irreversible,compensable,emit,decision,provider,timeout,ok,failed,exhausted,decide,match,if,policy,scope,obligation,rule,when,check,strict,disclosed,enum,is,implies,count},
+  sensitive=true, morecomment=[l]{//}, morestring=[b]"}
+\lstset{language=poly, basicstyle=\ttfamily\small, keywordstyle=\color{kw}\bfseries,
+  commentstyle=\color{cm}, stringstyle=\color{st}, columns=fullflexible,
+  frame=single, framerule=0.3pt, rulecolor=\color{black!30}, xleftmargin=6pt, xrightmargin=6pt,
+  aboveskip=6pt, belowskip=6pt, showstringspaces=false}
+
+\newcommand{\poly}{\textsf{poly}}
+\newcommand{\pending}[1]{\par\noindent\fbox{\parbox{0.96\linewidth}{\small\textbf{Pending.} #1}}\par}
+
+\title{\poly: Checked State Machines and a Governed Runtime\\for Code Written by Agents}
+\author{Jean-Jacques Dubray\\ Cognitive Fab\\ \texttt{jdubray@gmail.com}}
+\date{Draft, 7 October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Coding agents write correct code for local tasks and fail on stateful code, where defects live in sequences of steps rather than in lines. Formal verification catches such defects, but agents rarely produce verifiable specifications, and the runtimes and policy engines around AI applications check traces after the fact, not programs before they run. We present \poly, a language and runtime in which the program an agent writes is itself the model that is checked. A \poly{} program is a set of finite state machines with declared effects, properties and policies. The checker explores every reachable state over finite check domains before the program runs and returns witnesses and typed fixes. The runtime executes only certified programs, passes every effect through a fail-closed gate driven by signed policies, and journals every step so that each run replays with no outside call. A model's answer enters a program as a finite typed value whose every value the checker explores. In a pre-registered experiment of 200 runs on ten stateful tasks, a coding agent with no \poly{} in its training data delivered an admitted program in all 100 \poly{} runs. Escaped defects could not be compared, because the TypeScript baselines had none; every \poly{} defect traced to one language default, which a follow-up experiment changes.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Coding agents now write a large share of new software. They do well on self-contained tasks and poorly where state, composition and time are involved. A retry that charges a customer twice, a message sent after an opt-out, a cancel that arrives during a payment: each line of such code looks correct, so review misses the defect. The defect lives in the paths between the lines.
+
+Public benchmarks show the pattern. On SlopCodeBench, no agent solved a problem end to end across its iterative checkpoints \cite{orlanski2026slopcode}. On SWE-EVO, long-horizon software evolution scores fall far below single-issue benchmarks \cite{sweevo2026}. When agents are asked for formal artefacts instead of code, the gap moves rather than closes. Models reach 99\% syntactic correctness and 7\% verification on multi-function Dafny programs \cite{dafnycomp2026}. Across 30 models, 8.6\% of generated TLA+ specifications are semantically correct \cite{bisharat2026tla}. On SysMoBench, models write TLA+ models of real systems whose syntax passes while conformance to the systems' traces averages about 46\% \cite{sysmobench2026}.
+
+AI applications add a second difficulty. Some of their steps are model decisions, and some of their effects cannot be undone: a payment, a message to a customer, a change in another system. Durable runtimes such as Temporal and DBOS replay workflows but impose determinism by convention \cite{temporal,dbos}. Agent governance systems such as AgentSpec, Dogwood and CaMeL enforce rules on tool calls at run time \cite{wang2026agentspec,dogwood2026,debenedetti2025camel}. None of them checks the program against its policies before it runs, and none ties the policy to the program's own state.
+
+\poly{} starts from three observations. First, an agent can write formal properties, exhaustive domains and policies, which human authors avoid; the language can therefore ask more of its author. Second, the defects that matter in stateful code are reachable within small finite domains, so exhaustive exploration over declared domains is both feasible and useful. Third, if the checked text is also the executed text, there is no translation from a specification to code for the agent to get wrong.
+
+A \poly{} program is a set of state machines. One source is three things at once: the model the checker explores, the policy every effect must satisfy, and the code the runtime executes. The checker explores every reachable state and returns a witness for each violation. The runtime loads only what the checker admitted, gates every effect, and writes a hash-chained journal from which every state and every gate decision replays.
+
+\paragraph{Contributions.}
+\begin{itemize}
+\item A language for agent authors in which the program is the checked model: finite check domains with a strict or disclosed mode, declared effects with classes and labels, five kinds of property, and model decisions as finite typed values (Section~\ref{sec:lang}).
+\item A checker that folds several engines into one verdict out of five, never reports a bounded search as clean, and returns witnesses that export as host-language tests and typed fixes guarded by node digests (Section~\ref{sec:checker}).
+\item A runtime that executes only certified programs, validated per program against an independent reference interpreter, with a fail-closed effect gate driven by signed policies and a journal that replays with no outside call (Section~\ref{sec:runtime}).
+\item A pre-registered experiment of 200 runs comparing TypeScript, TypeScript with after-the-fact verification, and two \poly{} surfaces, with its full analysis and the one language default it exposed (Sections~\ref{sec:setup} and~\ref{sec:results}).
+\end{itemize}
+
+\section{The language}
+\label{sec:lang}
+
+\subsection{Machines and finite domains}
+
+A machine declares its state, the actions it accepts and a handler per action. A handler either accepts the action and writes the next state, or rejects it with a named reason. Rejection is a value, never an exception, and a rejected step leaves the state unchanged. Figure~\ref{fig:turnstile} shows a turnstile.
+
+\begin{figure}[t]
+\begin{lstlisting}
+module hello
+type Mode = Locked | Unlocked
+
+machine Gate {
+  state {
+    mode  : Mode = Locked
+    coins : 0..3 = 0
+  }
+  action Coin()
+  action Push()
+
+  on Coin {
+    require coins < 3 else reject "coin-box-full"
+    coins' = coins + 1
+    mode'  = Unlocked
+  }
+  on Push {
+    require mode is Unlocked else reject "locked"
+    mode' = Locked
+  }
+  invariant locked-when-empty: coins == 0 implies mode is Locked
+}
+\end{lstlisting}
+\caption{A turnstile. Each handler states its preconditions before any write. A primed name is the field's value after the step. \texttt{Push} does not write \texttt{coins}, so the compiler derives that it is unchanged.}
+\label{fig:turnstile}
+\end{figure}
+
+Three rules make the state space finite and the steps atomic. Every field and parameter has a finite check domain, such as \texttt{coins : 0..3} or \texttt{amount: int check \{10, 20, 500\}}. Every \texttt{require} comes before any write, so a handler cannot half-apply a step. The frame is derived: a handler writes only the fields it names. Machines lower to the strict profile of SAM v2 \cite{dubray2016sam,samlib2026}, in which actions propose, a model accepts or rejects, and the next state is computed from the accepted proposal.
+
+\subsection{Strict and disclosed domains}
+
+A check domain may be narrower than the runtime type: \texttt{amount: int check \{10, 20\}} checks two amounts. The domain has a mode. In \emph{strict} mode an input outside the domain is rejected at dispatch with the reason \texttt{outside-check-domain}, so the checked domain is the running domain. In \emph{disclosed} mode the input is accepted, journaled as drift and listed in the certificate. In the version measured in Section~\ref{sec:results}, the default is strict for every parameter and field whose value can flow into the payload of an irreversible or compensable effect, and disclosed elsewhere. An explicit \texttt{disclosed} on a value that reaches an irreversible effect is a finding that only a person can accept.
+
+\subsection{Effects}
+
+A machine changes the world only by emitting effects. An effect declares a kind, a class (reversible, compensable or irreversible), labels from a closed vocabulary, the targets its handler may call, and the actions dispatched back when it succeeds, fails or exhausts its retries:
+
+\begin{lstlisting}
+effect charge(amount: int) {
+  kind "payment.charge"
+  labels { egress:external }
+  targets { egress: "https://api.psp.example/v1/charges" }
+  class irreversible
+  ok -> PaymentOk()
+  failed -> PaymentFailed(code: "declined")
+  exhausted -> PaymentFailed(code: "exhausted")
+}
+\end{lstlisting}
+
+The host handler receives only the capabilities its labels and targets grant, here an \texttt{egress.post} bound to one URL prefix, in the object-capability style \cite{miller2006robust}. A lint pass refuses handlers that reach for ambient authority such as \texttt{fetch}, the file system or the process environment.
+
+\subsection{Properties}
+
+\poly{} has five kinds of property. An \emph{invariant} holds in every reachable state. A \emph{step property} holds over every accepted step, with \texttt{pre} and \texttt{post}. A \emph{reject property} holds over every step and its verdict, so a rejection for the wrong reason is a finding. A \emph{path property} holds over every sequence of effects, for example \texttt{count("payment.charge") <= 1}. A \emph{liveness} property holds over infinite runs under stated fairness. Deadlock freedom is checked for every machine without being written.
+
+\subsection{Model decisions as typed values}
+
+A model call is declared like an effect, and its answer must be finite: an enum, an integer range, a three-valued truth, or a record of these. A free-text answer is refused.
+
+\begin{lstlisting}
+enum Branch { Refund, Reschedule, Status, Complaint, Other }
+
+decision route(text: string) -> Branch {
+  provider "router"
+  timeout 800ms
+  ok(r) -> Routed(branch: r.answer, conf: r.conf, margin: r.margin)
+  failed -> RouteFailed()
+}
+\end{lstlisting}
+
+A timeout and a failure completion are required. The confidence and margin may only be compared with constants, so the checker splits each into the intervals the program can tell apart and explores one value per interval. A path property such as ``at most one refund'' is then proved against every answer the model could give, including a model that answers \texttt{Refund} with full confidence to every message. Each confidence threshold reads a per-decision calibration map fitted on adjudicated outcomes. This is a decision-level form of the constraint that type-constrained decoding applies to tokens \cite{mundler2025typeconstrained}.
+
+\subsection{Policies}
+
+Policies live in their own files, because different people read them:
+
+\begin{lstlisting}
+policy orders-safety {
+  scope "orders"
+  obligation orders-irreversible
+      "No irreversible effect on a cancelled order." rule {
+    when effect.class == "irreversible"
+         && machine("orders.Order").status == Cancelled
+    require false else deny
+  }
+}
+\end{lstlisting}
+
+Policy expressions are three-valued, because an input may be missing; an unknown never satisfies a requirement. A policy reads the program's state as of the step that emitted the effect. That is the link between governance and the program's meaning, and it is why every gate decision replays.
+
+\subsection{Two surfaces}
+
+A machine can be written in a standalone syntax or inside TypeScript through an embedded surface. Both produce the same syntax tree and pass the same checks. The experiment of Section~\ref{sec:results} selected the embedded surface as the primary one.
+
+\section{The checker}
+\label{sec:checker}
+
+\subsection{The pipeline}
+
+\texttt{poly check} lowers each module to the artefacts the engines of the Poly stack read: a contract, a SAM v2 module, invariant files, an effect manifest, path properties and a compiled policy. It then runs its stages in a fixed order: parse, type and domain checks; strict validation of the lowered module; translation validation against the reference semantics; a breadth-first model check of invariants, step and reject properties; deadlock freedom and liveness under stated fairness; path properties over effect sequences; the composition of attached child machines; configurations of communicating machines, with messages in any order within declared bounds; policy admission; obligation consistency, which reports the smallest set of conflicting rules when an obligation cannot be met; a capability proof over effect labels and agent tools; and, when given, a version gate and a replay of recorded traces.
+
+\subsection{Five verdicts}
+
+A check ends in exactly one verdict. \textsc{Clean}: every applicable check ran to completion and found nothing. \textsc{Findings}: at least one property fails, each with a witness. \textsc{Refused}: the program cannot be admitted, for example because a policy is malformed. \textsc{Underpowered}: the checks ran, but the evidence is too thin to support a verdict. \textsc{Inconclusive}: a search hit its bound, or a property was never exercised. The module verdict is the worst stage verdict, in the order \textsc{Refused}, \textsc{Findings}, \textsc{Inconclusive}, \textsc{Underpowered}, \textsc{Clean}. A stage that did not run does not lower the verdict; it is listed in the certificate with the reason. A bounded search is never reported clean, and every \textsc{Clean} is printed with the domains explored and the assumptions it relies on.
+
+\subsection{Witnesses and typed fixes}
+
+Every finding carries a witness: the shortest path to the violation. For the turnstile of Figure~\ref{fig:turnstile}, the checker reports a deadlock no one wrote a property for:
+
+\begin{lstlisting}[language={}]
+PL3201 DEADLOCK
+witness: Coin, Coin, Coin, Push
+state:   mode = Locked, coins = 3
+Coin is rejected (coin-box-full), Push is rejected (locked)
+\end{lstlisting}
+
+A witness exports as a trace of \texttt{\{pre, action, data, post\}} windows, and as a test in the host language that fails on the defective program and passes on the fixed one. A coding agent does not need to interpret the finding: it runs the test, fixes the program and checks again. Many diagnostics also carry typed fixes, addressed to a node of the syntax tree and guarded by a digest of that node, so a fix whose node an earlier edit changed is refused rather than misapplied. Diagnostics have stable codes and JSON output, and every command is served three ways from one definition: a command line, an MCP server with published schemas, and a language server. Two commands are never served to agents: accepting a finding and approving an escalation. Both require a person's signature.
+
+The loop is the one counterexample-guided synthesis uses, with the agent as the synthesiser \cite{jha2023cegis,tihanyi2023esbmcai}. Recent work finds that concrete counterexamples guide models better than scores \cite{pereira2026property}.
+
+\section{The runtime}
+\label{sec:runtime}
+
+\subsection{Admission and translation validation}
+
+\texttt{poly admit} writes a certificate: the digests of the source, of every lowered artefact and of every check result, signed. The runtime refuses to load an artefact whose digest, signature or toolchain range does not match. The checked program is therefore the running program.
+
+The lowering is not trusted. Every construct is validated per program against \texttt{poly-ref}, a reference interpreter of the written semantics that shares no code with the compiler \cite{pnueli1998tv}. A lowered module that disagrees with \texttt{poly-ref} is a toolchain fault, reported to the toolchain and never to the author. Liveness and deadlock, which no engine artefact covers, are checked by \texttt{poly-ref} itself. As a regression measure, the verdicts of a fixed set of 159 programs are recompiled and compared at every milestone; each comparison reported in the project record since the set reached 159 files found them identical.
+
+\subsection{One step}
+
+A host program creates instances and dispatches actions. \texttt{dispatch} runs one step atomically: the new state, the journal entry, the outgoing effects and the timers commit together. It is idempotent on a caller-supplied action identifier, so a request delivered twice is one step. Effects run at least once with a stable idempotency key and are emitted exactly once; an effect that exhausts its retries dispatches its declared failure action.
+
+\subsection{The gate}
+
+Before it runs, every effect crosses a gate that evaluates it against the policies and against the state of the step that emitted it, never a later one. The outcome is one of three. \emph{Allow}: the handler runs. \emph{Deny}: the handler never runs, and the effect's failure action is dispatched with the reason, so the machine handles a denial like any other failure. \emph{Escalate}: the effect waits for a person, whose approval must be signed with a key registered to a person; an agent's key cannot sign it, and without an approval in time the effect is denied. If the gate is unreachable the effect waits. The runtime never fails open.
+
+Policies are signed. A policy is admitted only with a signature from a keyring whose head, policy sequence numbers and production flag are anchored in a per-user record outside the project, so an agent working in the project cannot sign its own policy, roll a policy back, or move a signature across projects.
+
+On a laptop (Intel Core Ultra 7 155H, Node 24, in-memory SQLite, one worker), the gate's proposal step has a median latency of 0.67\,ms and a 99th percentile of 16.0\,ms over 146 proposals; the full path from proposal to settled effect has a median of 5.2\,ms and a 99th percentile of 21.7\,ms. With 64 instances in one trust scope, the runtime settles 128 effects at 111.6 per second.
+
+\subsection{Journal and replay}
+
+Every step and every gate decision is written as an event. Events are hash-chained per run, each run's head is signed, and a periodic anchor signs a root over all runs, so no run can be dropped from an audit period unnoticed. Only digests of payloads enter the chain; bodies live in a separate store under the operator's retention policy. \texttt{poly journal replay} reproduces every state, every gate decision and every model decision from the journal alone: model decisions replay from their recorded answers, and no model is called. Journals export as traces, and \texttt{poly check -{}-against} reports any divergence between what ran and what the program says. This is event sourcing \cite{fowler2005es} with a checker on both ends.
+
+\subsection{Four surfaces for AI applications}
+
+Four surfaces extend the same pattern to AI applications. In each, the unbounded part (a provider, a vault, an index, a model) stays in a host adapter, its result enters the program as a finite typed value, the checker explores every value, and the gate enforces the rest.
+
+\begin{itemize}
+\item \textbf{Channels.} Email, WhatsApp, SMS and Slack conversations are machines, so a channel's rules, such as the WhatsApp reply window and opt-outs, are checked on every path.
+\item \textbf{Delegated credentials.} OAuth tokens live in a vault and never reach state, the journal, a prompt or a log. An effect's authority is the overlap of the person's grant, the agent's mandate and the policy, and claims older than their stated age are denied.
+\item \textbf{Governed memory.} Message bodies and retrieved text never enter machine state; a machine holds them as \texttt{Content}, an opaque reference. Each body carries a taint (a class and its owners), and the gate refuses a send whose recipient lies outside the audience of what the body was built from. Forgetting a subject erases every body tainted with it, and replay lists the affected steps as forgotten rather than divergent.
+\item \textbf{Routing and budgets.} A cheap model answers first and a stronger one when the calibrated confidence is low. Before each call the gate reserves its worst-case token cost; if the provider reports no usage, the full reservation is charged. Every route ends, and spent plus reserved never exceeds a cap.
+\end{itemize}
+
+These surfaces are implemented on the development branch; their release follows the gates now in progress, and Section~\ref{sec:results} measures none of them.
+
+\section{Experimental setup}
+\label{sec:setup}
+
+\subsection{Question and arms}
+
+The experiment asks whether a coding agent that writes \poly{} delivers stateful features with fewer escaped defects than one that writes TypeScript, at an acceptable token cost. It was pre-registered: tasks, oracles, analysis script and decision rules were frozen, by digest, before the runs. One agent implemented the same features behind the same host interface in four arms:
+\begin{enumerate}
+\item TypeScript alone;
+\item TypeScript, then polygraph checking after the fact, with fixes allowed;
+\item \poly, standalone syntax;
+\item \poly, embedded TypeScript surface.
+\end{enumerate}
+The \poly{} arms received the language manual in their workspace. No \poly{} code exists in any model's training data.
+
+\subsection{Tasks, runs and oracles}
+
+There were ten stateful tasks (payments with timeouts and partial captures, leases, job retries, order workflows and others). Each task is a base version and three changes delivered in sequence to the same run, so a run delivers four versions. Each task and arm was run five times, in blocks of the four arms started together: 50 blocks and 200 runs. Every run used \texttt{claude-opus-5-5} through the Claude CLI, with caps of 15,000,000 tokens and 3,600\,s per run.
+
+The primary oracle (O1) is a suite of scenario tests written from the briefs by an independent session that saw no reference solution. Secondary oracles are hidden invariants (O2), reference traces (O3) and range-refusal tests (O1-R). An escaped defect is a failing O1 test in a delivered version.
+
+\subsection{Decision rules}
+
+\emph{Win}: a \poly{} arm reduces mean escaped defects per delivered task by at least 30\% against both arms 1 and 2, with tokens per delivered task at most twice arm 1's, and both Holm-corrected \cite{holm1979} comparisons below 0.05 (exact two-sided Wilcoxon signed-rank tests over the ten tasks \cite{wilcoxon1945}). \emph{Stop}: neither \poly{} arm delivers an admitted program (delivered, with verdict \textsc{Clean}) in 70\% of its runs within budget. Anything between is reported as it is. A \emph{surface rule} picks the embedded surface if its defects are within 10\% of the standalone surface's and its tokens are no higher.
+
+\section{Results}
+\label{sec:results}
+
+\subsection{Verdict and primary measure}
+
+All 200 runs were recorded and scored, and the frozen analysis returns \emph{between}: no win and no stop. Table~\ref{tab:m3} gives the measures.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Measure (mean over tasks of per-task means) & Arm 1 & Arm 2 & Arm 3 & Arm 4\\
+\midrule
+Escaped defects per delivered task (O1) & 0.00 & 0.00 & 1.04 & 1.08\\
+Tokens per delivered task & 496,146 & 4,267,380 & 1,746,467 & 1,737,013\\
+Runs delivered within budget & 50/50 & 47/50 & 50/50 & 50/50\\
+Admitted (delivered and \textsc{Clean}) & & & 50/50 & 50/50\\
+\bottomrule
+\end{tabular}
+\caption{The pre-registered measures of the experiment. Arms: 1 TypeScript; 2 TypeScript then polygraph; 3 \poly{} standalone; 4 \poly{} embedded.}
+\label{tab:m3}
+\end{table}
+
+Arms 1 and 2 had no failing O1 test in any delivered run. The primary measure therefore had no room to show a reduction, and the win rule, which requires a comparator mean above zero, could not be met. No escaped-defect comparison is significant (all Holm-corrected $p = 1.0$). Post hoc bootstrap intervals over tasks (10,000 resamples) for the differences between \poly{} arms and baselines run from 0.00 to about 3.1. With ten tasks the experiment detects only large differences, so the result is unresolved, not equal.
+
+\subsection{Learnability}
+
+Both \poly{} arms delivered an admitted program in 50 of 50 runs, so the stop rule did not fire. A coding agent learned a language absent from its training data from a manual in context and checker feedback, and every delivered program passed the full check. This matches recent evidence that agents can acquire an unfamiliar language at inference time from documentation and an execution environment \cite{shen2026ila}, here with a checker as the environment.
+
+\subsection{Tokens}
+
+Both \poly{} arms used about 3.5 times arm 1's tokens per delivered task, beyond the win rule's bound of twice, and about 0.41 times arm 2's (all four comparisons Holm-corrected $p = 0.0098$). Writing the properties and answering the checker costs tokens; verifying TypeScript after the fact cost more. The two \poly{} surfaces did not differ (0.5\%, Holm-corrected $p = 0.92$), and the surface rule selected the embedded surface.
+
+\subsection{Where the \poly{} defects came from}
+
+Every escaped defect of the \poly{} arms is in two tasks. In T3 (card payments), two of five runs in each \poly{} arm accepted a capture or refund of zero or of a negative amount, and a refund of 3 units, outside the range the brief states: the same 26 O1 tests failed in all four runs. In T7, one run of arm 4 accepted a timeout for a task index outside its range. In each case the parameter had a check domain, but its value did not reach an irreversible or compensable effect, so the default mode was disclosed: the checker explored the domain, and the runtime accepted values outside it. The checked domain was not the running domain. One default explains every \poly{} defect of the experiment.
+
+\pending{Strict by default (experiment SR, pre-registered). Part 1 recompiles the five defective deliveries with only the default changed to strict for every value with a check domain, and reruns O1 and O1-R. Part 2 reruns T3 and T7 in both \poly{} arms, five runs each, and compares runs with an escaped defect against the same cells of the experiment (5 of 20) with a one-sided Fisher exact test; zero of 20 gives $p = 0.024$. Results to be inserted here.}
+
+\subsection{Secondary observations}
+
+Two secondary findings are not escaped defects. In T1, both \poly{} arms emitted a refund that the brief says ``needs no answer'' as an effect, which then stayed pending; O3 flags 216 traces per run and O1 has no test of it. In T10, every arm of every run follows the third change of the brief where the reference follows the base brief; the brief says both. Arm 2 alone moved long-running checker commands to the background after its tool timeout, and its three runs that missed the budget all stopped at the wall-clock cap.
+
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Model-checked languages.} P models distributed systems as communicating state machines and checks them, and is used at scale at AWS \cite{desai2013p}. TLA+ and Alloy check specifications \cite{lamport2002tla,jackson2012alloy}, and Quint positions an executable specification as the validation point between English and code for LLM-written software \cite{quint2025llm}. In each, the checked model is separate from the production code. Stateright model-checks the Rust actor code it runs \cite{stateright}, which is the closest analogue to a checked program that is also the running program; it has no agent tooling or governance. \poly{} descends from explicit-state model checking \cite{clarke1981synthesis,holzmann1997spin} and statecharts \cite{harel1987statecharts}.
+
+\paragraph{Verified code written by models.} Dafny is the most model-friendly verification target \cite{loughridge2025dafnybench,bursuc2026vericoding}, with Verus and Lean behind it \cite{yang2025autoverus,ye2025verina}; success collapses under composition \cite{dafnycomp2026}. Lean has been proposed as the independent verification layer for AI-written code \cite{demoura2026lean}. \poly{} trades proof over unbounded domains for exhaustive exploration over declared finite ones, which an agent completes without proof engineering.
+
+\paragraph{Verifier feedback.} Lemur, Clover, Baldur and AlphaVerus use verifier or checker output to steer generation and repair \cite{wu2024lemur,sun2023clover,first2023baldur,aggarwal2024alphaverus}. ESBMC-AI feeds bounded model-checker counterexamples to a model and re-verifies each fix \cite{tihanyi2023esbmcai}, and agentic model checking leaves every soundness decision to the checker \cite{sun2026agenticmc}. \poly{} makes this loop the language's interface: witnesses as tests, typed fixes, and verdicts an agent can act on.
+
+\paragraph{Languages for models and agents.} BAML, DSPy and LMQL type or constrain model calls \cite{bamlweb,khattab2024dspy,beurerkellner2023lmql}; type-constrained decoding constrains generation itself \cite{mundler2025typeconstrained}. Zero and MoonBit design toolchains for agent authors, with structured diagnostics and typed repairs \cite{zero2026,moonbit}. Turn gates control flow on typed inference with confidence and keeps credentials out of agent memory \cite{kizito2026turn}; Pel constrains agent orchestration by syntax \cite{mohammadi2025pel}. None checks state machines before execution. Language choice affects model correctness \cite{cassano2023multiple,cassano2024multiplt,twist2026preferences}, which makes the learnability result of Section~\ref{sec:results} a precondition for everything else.
+
+\paragraph{Durable runtimes and replay.} Temporal, DBOS, Step Functions and LangGraph journal or checkpoint workflows \cite{temporal,dbos,stepfunctions,langgraph}; Step Functions alone declares a state machine, without invariants. Record and replay of agent traffic is studied at the network level and at cut points \cite{chen2015replay,mudasiru2026agrepl,chawla2026chronicle}. In \poly{} the journal is the replay log, the audit record and the input to the next check.
+
+\paragraph{Agent security and governance.} AgentSpec, Invariant Guardrails, Dogwood and PCAS enforce rules on agent traces at run time \cite{wang2026agentspec,invariantguardrails,dogwood2026,palumbo2026pcas}. CaMeL, FIDES, Progent, ACE and the design-pattern catalogue of Beurer-Kellner et al.\ separate trusted control from untrusted data and enforce capability or information-flow policies \cite{debenedetti2025camel,costa2025fides,shi2025progent,li2026ace,beurerkellner2025patterns}; MemLineage applies lineage to agent memory \cite{ouyang2026memlineage}. Tool-poisoning attacks succeed often enough that a gate outside the model is required \cite{wang2025mcptox}. \poly's governed memory follows the information-flow line, with taint checked on every path before the run and on every send during it.
+
+\paragraph{Nearest neighbours.} CaMeLoT models an agent's plan as a transition system, checks it against temporal policies before any tool runs and returns counterexamples \cite{nikolaou2026camelot}. Agentproof statically checks workflow graphs extracted from agent frameworks \cite{xavier2026agentproof}, Lean4Agent models workflows in Lean \cite{wang2026lean4agent}, and Agent-C enforces temporal constraints during generation \cite{kamath2025agentc}. These check a plan or a graph; \poly{} checks the whole program state space of the code that runs, and ties the runtime gate and the replay log to the same source.
+
+\paragraph{Evaluation.} Statistical practice for model evaluations \cite{miller2024errorbars}, cost-aware agent evaluation \cite{kapoor2024agents}, benchmark rigour \cite{zhu2025abc} and reliability metrics \cite{rabanser2026reliability} shaped the design of Section~\ref{sec:setup}. Harness studies find that, for a fixed model, the harness mostly moves token cost \cite{liuhan2026harness,liu2026solpi}, and VERA builds verifiable environments that restart at any stage and score each stage from evidence \cite{liu2026vera}; a \poly{} program provides stages, restarts and checks by construction.
+
+\section{Limitations}
+\label{sec:limits}
+
+\begin{itemize}
+\item \textbf{The floor.} The baselines had no escaped defects, so the experiment could not measure what \poly{} prevents. Harder tasks are needed, with the smallest detectable gap stated before the runs.
+\item \textbf{Ten tasks, one model.} Results hold for \texttt{claude-opus-5-5} on ten tasks; other models and harnesses are untested.
+\item \textbf{Finite domains.} Checks are exhaustive over declared domains only. A property that fails only outside them is not found; the domains are disclosed in every verdict, and strict mode makes them the running domains.
+\item \textbf{Tokens.} \poly{} cost 3.5 times the tokens of plain TypeScript per delivered task in this experiment.
+\item \textbf{Surfaces unmeasured.} Channels, credentials, memory and routing are not covered by the experiment.
+\item \textbf{One runtime.} \poly{} runs in TypeScript on Node; the checker engines and the reference interpreter are by the same author.
+\end{itemize}
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+\poly{} makes the program an agent writes the model that is checked, the policy that governs it and the code that runs. Its checker explores every reachable state over finite domains and answers with witnesses and typed fixes; its runtime executes only certified programs, gates every effect without failing open, and replays every run from its journal with no outside call. A model's answer is a finite typed value the checker has already explored.
+
+In a pre-registered experiment of 200 runs, a coding agent with no \poly{} in its training data delivered an admitted program in every \poly{} run. The baselines had no escaped defects on these tasks, so the experiment did not measure what \poly{} prevents; it did locate every \poly{} defect in one default, the mode of a check domain whose value reaches no irreversible effect. The next steps follow: strict domains by default and its pre-registered test, and a second experiment on tasks hard enough to separate the arms.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\section{Glossary}
+\begin{description}[style=nextline,leftmargin=1.2em]
+\item[Admitted] Delivered with a \textsc{Clean} verdict and bound to a signed certificate.
+\item[Certificate] The signed record binding a source to its lowered artefacts and check results.
+\item[Check domain] The finite set of values a field or parameter is checked over.
+\item[Content] An opaque reference to a message body or retrieved text, never read by a machine.
+\item[Decision] A model call whose answer is a finite typed value.
+\item[Disclosed] A domain mode in which out-of-domain inputs are accepted and journaled as drift.
+\item[Effect] A declared action on the outside world, emitted by an accepted step and passed through the gate.
+\item[Escaped defect] A failing scenario test (O1) in a delivered version.
+\item[Gate] The runtime component that allows, denies or escalates each effect, and never fails open.
+\item[Journal] The hash-chained, signed record of every step and gate decision.
+\item[Machine] A declared state machine: state, actions, handlers, effects and properties.
+\item[poly-ref] The reference interpreter of the written semantics, sharing no code with the compiler.
+\item[Strict] A domain mode in which out-of-domain inputs are rejected at dispatch.
+\item[Taint] The class and owners carried by content built from governed facts.
+\item[Translation validation] Checking each compiled program against the reference semantics, instead of trusting the compiler.
+\item[Witness] The shortest replayable sequence of steps that shows a finding.
+\end{description}
+
+\end{document}
