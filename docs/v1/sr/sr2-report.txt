@@ -1,0 +1,211 @@
+T3-arm3-run2 v0 O1: before 6/118 failed, after 0/118 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run2 v0 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm3-run2 v1 O1: before 8/142 failed, after 0/142 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 10 keeps money within the brief's limits
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run2 v1 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm3-run2 v2 O1: before 5/166 failed, after 0/166 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run2 v2 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm3-run2 v3 O1: before 7/186 failed, after 0/186 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a further capture of 0 units is refused
+  fail -> pass  a further capture of a negative amount is refused
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run2 v3 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm3-run4 v0 O1: before 6/118 failed, after 0/118 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run4 v0 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm3-run4 v1 O1: before 8/142 failed, after 0/142 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 10 keeps money within the brief's limits
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run4 v1 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm3-run4 v2 O1: before 5/166 failed, after 0/166 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run4 v2 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm3-run4 v3 O1: before 7/186 failed, after 0/186 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a further capture of 0 units is refused
+  fail -> pass  a further capture of a negative amount is refused
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm3-run4 v3 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run2 v0 O1: before 6/118 failed, after 0/118 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run2 v0 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run2 v1 O1: before 8/142 failed, after 0/142 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 10 keeps money within the brief's limits
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run2 v1 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run2 v2 O1: before 5/166 failed, after 0/166 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run2 v2 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run2 v3 O1: before 7/186 failed, after 0/186 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a further capture of 0 units is refused
+  fail -> pass  a further capture of a negative amount is refused
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run2 v3 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run5 v0 O1: before 6/118 failed, after 0/118 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run5 v0 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run5 v1 O1: before 8/142 failed, after 0/142 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  random command sequence 10 keeps money within the brief's limits
+  fail -> pass  random command sequence 14 keeps money within the brief's limits
+  fail -> pass  random command sequence 23 keeps money within the brief's limits
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run5 v1 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run5 v2 O1: before 5/166 failed, after 0/166 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run5 v2 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T3-arm4-run5 v3 O1: before 7/186 failed, after 0/186 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  a further capture of 0 units is refused
+  fail -> pass  a further capture of a negative amount is refused
+  fail -> pass  a single refund of 3 units is refused even when 3 were captured
+  fail -> pass  capture of 0 units is refused
+  fail -> pass  capture of a negative amount is refused
+  fail -> pass  refund of 0 units is refused
+  fail -> pass  refund of a negative amount is refused
+T3-arm4-run5 v3 O1R: before 4/9 failed, after 0/9 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  capture(-1) is refused and changes nothing
+  fail -> pass  capture(0) is refused and changes nothing
+  fail -> pass  refund(-1) is refused and changes nothing
+  fail -> pass  refund(0) is refused and changes nothing
+T7-arm4-run1 v2 O1: before 1/179 failed, after 0/179 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  taskTimeout refused for a task other than 0 or 1
+T7-arm4-run1 v2 O1R: before 2/2 failed, after 0/2 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  taskTimeout(-1) is refused and changes nothing
+  fail -> pass  taskTimeout(2) is refused and changes nothing
+T7-arm4-run1 v3 O1: before 1/198 failed, after 0/198 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  taskTimeout refused for a task other than 0 or 1
+T7-arm4-run1 v3 O1R: before 2/5 failed, after 0/5 failed (admitted true -> true, check CLEAN -> CLEAN)
+  fail -> pass  taskTimeout(-1) is refused and changes nothing
+  fail -> pass  taskTimeout(2) is refused and changes nothing
+20 runs, 80 delivered versions compared, 0 not scored, 0 test(s) from pass to fail

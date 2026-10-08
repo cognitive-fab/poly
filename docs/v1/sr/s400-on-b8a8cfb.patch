@@ -1,0 +1,104 @@
+diff --git a/packages/poly-core/src/check/check.ts b/packages/poly-core/src/check/check.ts
+index 60dbe04f..5841046d 100644
+--- a/packages/poly-core/src/check/check.ts
++++ b/packages/poly-core/src/check/check.ts
+@@ -1286,8 +1286,14 @@ class Checker {
+    * irreversible payload is PL1301, a finding a person must accept (PT12.5).
+    */
+   private strictFlow(m: A.Machine, facts: MachineFacts): void {
++    const handled = new Set(m.items.flatMap((h) => (h.kind === 'Handler' ? [h.action] : [])));
+     for (const it of m.items) {
+-      if (it.kind === 'Action') for (const p of it.params) if (p.check?.mode === 'strict') facts.strictParams.add(`${it.name}.${p.name}`);
++      if (it.kind !== 'Action') continue;
++      for (const p of it.params) {
++        if (p.check?.mode === 'strict') facts.strictParams.add(`${it.name}.${p.name}`);
++        // S400: every parameter of a handled action with a check domain is strict unless written disclosed.
++        else if (handled.has(it.name) && p.check?.mode !== 'disclosed' && this.hasCheckDomain(it, p)) facts.strictParams.add(`${it.name}.${p.name}`);
++      }
+     }
+     for (const h of m.items) {
+       if (h.kind !== 'Handler') continue;
+@@ -1328,6 +1334,28 @@ class Checker {
+     }
+   }
+ 
++  /**
++   * PT3.4a, S400: whether a parameter has a check domain the runtime can test at dispatch. A Principal, a Ref, a
++   * Content or an Items, or a type that holds one, is explored by representatives and has none (PS4.1c, PS4.1f);
++   * nor has a completion's childKey and childState, which the runtime supplies from the child (S44, S51).
++   */
++  private hasCheckDomain(act: A.Action, p: A.Param): boolean {
++    if (act.params.length === 2 && act.params[0].name === 'childKey' && act.params[1].name === 'childState') return false;
++    const ty = this.tyOf(p.type);
++    if ((ty.k === 'int' && !Number.isFinite(ty.lo)) || ty.k === 'string') return p.check !== null;
++    const seen = new Set<string>();
++    const opaque = (t: Ty): boolean => {
++      if (t.k === 'ref' || t.k === 'error' || t.k === 'action') return true;
++      if (t.k === 'string' || (t.k === 'int' && !Number.isFinite(t.lo))) return true;
++      if (t.k === 'map') return opaque(t.key) || opaque(t.value);
++      if ((t.k !== 'record' && t.k !== 'union') || seen.has(t.name)) return false;
++      seen.add(t.name);
++      const fields = t.k === 'record' ? this.env.records.get(t.name)!.fields : this.env.unions.get(t.name)!.ctors.flatMap((c) => c.fields);
++      return fields.some((f) => opaque(this.tyOf(f.type)));
++    };
++    return !opaque(ty);
++  }
++
+   private checkDomain(what: string, t: A.TypeExpr, ty: Ty, check: A.CheckClause | null, at: A.NodeBase): void {
+     if (check) {
+       if (ty.k !== 'int' && ty.k !== 'string') { this.err('PL1201', check, `a check clause applies to int and string, not ${tyToString(ty)}`); return; }
+diff --git a/packages/poly-lower/src/lower.ts b/packages/poly-lower/src/lower.ts
+index 3bb04006..b4a6ff41 100644
+--- a/packages/poly-lower/src/lower.ts
++++ b/packages/poly-lower/src/lower.ts
+@@ -90,7 +90,10 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName:
+     for (const s of strict) {
+       // PD1.4b: a Conf is explored by its intervals, and at runtime its domain is 0..1000 (PD1.3a).
+       const isConf = actions.find((a) => a.name === s.a)?.params.find((p) => p.name === s.p)?.type.kind === 'TConf';
+-      const test = isConf ? `!(Number.isInteger(proposal[${JSON.stringify(s.p)}]) && proposal[${JSON.stringify(s.p)}] >= 0 && proposal[${JSON.stringify(s.p)}] <= 1000)` : s.values.some((v) => v !== null && typeof v === 'object')
++      // S400: every range is strict now, so a long run of consecutive integers is tested by its bounds, not listed.
++      const ints = s.values.length > 16 && s.values.every((v, k) => Number.isInteger(v) && (k === 0 || v === (s.values[k - 1] as number) + 1));
++      const [lo, hi] = ints ? [s.values[0], s.values[s.values.length - 1]] : isConf ? [0, 1000] : [null, null];
++      const test = isConf || ints ? `!(Number.isInteger(proposal[${JSON.stringify(s.p)}]) && proposal[${JSON.stringify(s.p)}] >= ${lo} && proposal[${JSON.stringify(s.p)}] <= ${hi})` : s.values.some((v) => v !== null && typeof v === 'object')
+           // A record or a union with payloads is compared by value (review B1): `includes` compares objects by identity.
+           ? `!${JSON.stringify(s.values)}.some((v) => __eq(v, proposal[${JSON.stringify(s.p)}]))`
+           : `!${JSON.stringify(s.values)}.includes(proposal[${JSON.stringify(s.p)}])`;
+diff --git a/packages/poly-ref/src/model.ts b/packages/poly-ref/src/model.ts
+index 2e8fcb82..15782390 100644
+--- a/packages/poly-ref/src/model.ts
++++ b/packages/poly-ref/src/model.ts
+@@ -237,6 +237,25 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
+     decisions.set(it.name, { id: it.id, name: it.name, kind: `decision.${it.name}`, params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })), ok: ok ? { action: ok.action, answer: bound(['answer']), confidence: bound(['conf', 'margin']) } : null });
+   }
+   const guardedInputs = strictInputs(m, effects);
++  // PT3.4a, S400: a parameter of a handled action is strict unless written disclosed, when its type has a check domain
++  // the runtime can test: not a Principal, a Ref, a Content or an Items, nor a type holding one (PS4.1c, PS4.1f), and
++  // not a completion's childKey and childState, which the runtime supplies from the child (S44, S51).
++  const handledActions = new Set(m.items.flatMap((h) => (h.kind === 'Handler' ? [h.action] : [])));
++  const testable = (t: RType, seen = new Set<string>()): boolean => {
++    if (t.k === 'ref' || t.k === 'string') return false;
++    if (t.k === 'int') return Number.isFinite(t.lo) && Number.isFinite(t.hi);
++    if (t.k === 'map') return testable(t.key, seen) && testable(t.value, seen);
++    if (t.k !== 'record' && t.k !== 'union') return true;
++    if (seen.has(t.name)) return true;
++    seen.add(t.name);
++    const fs = t.k === 'record' ? records.get(t.name)?.fields ?? [] : (unions.get(t.name)?.ctors ?? []).flatMap((c) => c.fields);
++    return fs.every((x) => testable(x.type, seen));
++  };
++  const strictByDefault = (a: A.Action, p: A.Param): boolean => {
++    if (!handledActions.has(a.name) || p.check?.mode === 'disclosed') return false;
++    if (a.params.length === 2 && a.params[0].name === 'childKey' && a.params[1].name === 'childState') return false;
++    return p.check !== null || testable(typeOf(p.type));
++  };
+   const receivers = new Map(decls.filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [d.name, d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeOf(p.type) })) }))]));
+   // PT6.4: attached children, by the key their spawn names (declared by use, like timer keys).
+   const children = new Map<string, RChild>();
+@@ -300,7 +319,7 @@ export function buildMachine(module: A.Module, machineName: string): RMachine {
+         // an irreversible or compensable effect; `disclosed` written out keeps it disclosed.
+         params: it.params.map((p) => ({
+           name: p.name, type: typeOf(p.type), check: checkValues(p.check),
+-          strict: p.check?.mode === 'strict' || (p.check !== null && p.check.mode === null && guardedInputs.has(`${it.name}.${p.name}`)),
++          strict: p.check?.mode === 'strict' || (p.check !== null && p.check.mode === null && guardedInputs.has(`${it.name}.${p.name}`)) || strictByDefault(it, p),
+         })),
+       });
+     }
