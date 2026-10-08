@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXIT_CODES, digest, grantRequestSubject, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
+import { EXIT_CODES, fold, verdictOf, type Verdict, digest, grantRequestSubject, loadProject, revocationSubject, signRecord, toJson, type Certificate } from '@poly/core';
 import { format, parse } from '@poly/lang';
 import { handlerClosure } from './handlers.js';
 import { checkFile, checkProject, type CheckReport } from './pipeline.js';
@@ -23,6 +23,8 @@ import { signPolicy } from './policy-sign.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
 import { journalCommand } from './journal.js';
 import { benchGate } from './bench.js';
+import { checkHost, type HostCheck } from './host.js';
+import { editCheck } from './edit-check.js';
 
 /** A JSON Schema, in the subset the published schemas use: type, properties, required, items, enum, description. */
 export type Schema = { type?: string | string[]; description?: string; properties?: Record<string, Schema>; required?: string[]; items?: Schema; enum?: unknown[]; additionalProperties?: boolean | Schema };
@@ -62,6 +64,10 @@ const FILE_REPORT: Schema = obj({
 // Every diagnostic in the JSON form carries its schema, poly.diagnostic/1 (PT12.1).
 const asJson = (r: CheckReport) => ({ ...r, diagnostics: r.diagnostics.map(toJson), machines: r.machines.map((m) => ({ ...m, diagnostics: m.diagnostics.map(toJson) })), configurations: (r.configurations ?? []).map((c) => ({ ...c, diagnostics: c.diagnostics.map(toJson) })) });
 
+/** PT28.1d: the host check as JSON, each diagnostic with its schema, and as the text the command line prints. */
+const hostJson = (h: HostCheck) => (h.status === 'ran' ? { ...h, diagnostics: h.diagnostics.map(toJson) } : h);
+const hostText = (h: HostCheck) => (h.status === 'ran' ? `${h.diagnostics.map((d) => `${d.code} ${d.name}  ${d.message}\n`).join('')}host: ${h.diagnostics.length ? 'FINDINGS' : 'CLEAN'} over ${h.files} file${h.files === 1 ? '' : 's'} (PT28.1d)\n` : `host: not run (${h.reason})\n`);
+
 /** S69: the last report: .poly/report.json under the root. */
 function writeReport(root: string, report: unknown): void {
   mkdirSync(join(root, '.poly'), { recursive: true });
@@ -83,14 +89,15 @@ export const COMMANDS: Command[] = [
   {
     name: 'check', mcp: 'poly_check', lsp: true,
     summary: 'Runs the check pipeline over a module or a project and writes the report to <root>/.poly/report.json.',
-    input: obj({ target: str('a .poly, .policy.poly or .ts module, or a project directory'), root: str('where .poly/ lives (default: the project directory, or the working directory)') }, ['target']),
-    output: obj({ report: { type: 'object', description: 'a module\'s report, or a project\'s with its files' }, files: { type: 'array', items: FILE_REPORT, description: 'each module\'s report' }, verdict: { type: 'string' }, exit: { type: 'integer' } }, ['report', 'files', 'verdict', 'exit']),
+    input: obj({ target: str('a .poly, .policy.poly or .ts module, or a project directory'), root: str('where .poly/ lives (default: the project directory, or the working directory)'), host: str('a tsconfig naming host code to compile against the generated declarations (PT28.1d)') }, ['target']),
+    output: obj({ report: { type: 'object', description: 'a module\'s report, or a project\'s with its files' }, files: { type: 'array', items: FILE_REPORT, description: 'each module\'s report' }, host: { type: 'object', description: 'the host check of PT28.1d, when host was given: ran with its diagnostics, or not run with its reason' }, verdict: { type: 'string' }, exit: { type: 'integer' } }, ['report', 'files', 'verdict', 'exit']),
     async run(input) {
       const target = need(input, 'target');
       const root = opt(input, 'root');
+      const host = opt(input, 'host');
       if (!existsSync(target)) throw new CommandUsageError(`no such file or directory ${target}`);
       if (statSync(target).isDirectory()) {
-        const p = await checkProject(target, { root });
+        const p = await checkProject(target, { root, ...(host ? { host } : {}) });
         const report = { ...p, files: p.files.map(asJson) };
         writeReport(root ?? target, report);
         const lines: string[] = [];
@@ -99,13 +106,20 @@ export const COMMANDS: Command[] = [
           for (const d of p.handlers.diagnostics) lines.push(`${d.code} ${d.name}  ${d.message}\n`);
           lines.push(`handlers: lint ${p.handlers.diagnostics.length ? 'REFUSED' : 'CLEAN'} over ${p.handlers.files} file${p.handlers.files === 1 ? '' : 's'} (PT6.5)\n`);
         } else if (p.handlers) lines.push(`handlers: lint not run (${p.handlers.reason})\n`);
+        if (p.host) lines.push(hostText(p.host));
         lines.push(`project ${p.name}: ${p.verdict} (exit ${p.exit}) over ${p.files.length} module${p.files.length === 1 ? '' : 's'}\n`);
-        return { exit: p.exit, result: { report, files: report.files, verdict: p.verdict, exit: p.exit }, text: lines.join('') };
+        return { exit: p.exit, result: { report, files: report.files, ...(p.host ? { host: hostJson(p.host) } : {}), verdict: p.verdict, exit: p.exit }, text: lines.join('') };
       }
       const r = await checkFile(target, { root });
       const report = asJson(r);
       writeReport(root ?? process.cwd(), report);
-      return { exit: r.exit, result: { report, files: [report], verdict: r.verdict, exit: r.exit }, text: render(r) };
+      if (!host) return { exit: r.exit, result: { report, files: [report], verdict: r.verdict, exit: r.exit }, text: render(r) };
+      // PT28.1d, S312: after the check, which wrote the declarations; an ERROR or a NONDETERMINISM stands.
+      const h = await checkHost(host);
+      const special = r.verdict === 'ERROR' || r.verdict === 'NONDETERMINISM';
+      const verdict = special ? r.verdict : fold([r.verdict as Verdict, h.status === 'ran' ? verdictOf(h.diagnostics) : 'INCONCLUSIVE']);
+      const exit = special ? r.exit : EXIT_CODES[verdict as Verdict];
+      return { exit, result: { report, files: [report], host: hostJson(h), verdict, exit }, text: `${render(r)}${hostText(h)}verdict with the host check: ${verdict} (exit ${exit})\n` };
     },
   },
   {
@@ -160,6 +174,18 @@ export const COMMANDS: Command[] = [
       const r = applyFixById(readReport(base), id);
       if (r.status === 'applied') return { exit: 0, result: { status: 'applied', file: r.file }, text: `applied ${id} to ${r.file}; run poly check again (PT12.1)\n` };
       return { exit: r.code ? EXIT_CODES.REFUSED : EXIT_CODES.USAGE, result: { status: 'refused', ...(r.code ? { code: r.code } : {}), message: r.message }, text: `${r.code ?? 'poly'}: ${r.message}\n` };
+    },
+  },
+  {
+    name: 'edit-check', mcp: 'poly_edit_check', lsp: true,
+    summary: 'Checks a module with an edit applied in memory and returns the verdict, each finding with its line and witness, and the path of the full report; with apply, writes the edit after the check unless it is REFUSED (PT28.4, PT10h). Never admits, signs or runs anything.',
+    input: obj({ module: str('the module file'), old: str('the exact text to replace, which occurs once'), new: str('the text that replaces it'), text: str('the whole file, in place of old and new'), project: str('the project directory whose poly.json names the program'), apply: { type: 'boolean', description: 'write the edit to the module after the check, unless it is REFUSED, ERROR or NONDETERMINISM' } }, ['module']),
+    output: obj({ status: { type: 'string', enum: ['checked', 'refused'] }, module: str('the module'), reason: str('why the edit was refused before any check'), verdict: str('the verdict of the edited module'), exit: { type: 'integer' }, findings: { type: 'array', items: obj({ code: str('PLxxxx'), severity: str('error, finding, inconclusive or warning'), line: { type: ['integer', 'null'] }, col: { type: ['integer', 'null'] }, machine: { type: ['string', 'null'] }, witness: obj({ id: str('the witness id'), length: { type: 'integer' }, actions: { type: 'array', items: { type: 'string' } } }, ['id', 'length', 'actions']) }, ['code', 'severity', 'line', 'col', 'machine']) }, report: str('the full report, read only through this path'), written: { type: 'boolean', description: 'whether the edit was written to the module' } }, ['status', 'module', 'written']),
+    async run(input) {
+      const r = await editCheck({ module: need(input, 'module'), ...(typeof input.old === 'string' ? { old: input.old } : {}), ...(typeof input.new === 'string' ? { new: input.new } : {}), ...(typeof input.text === 'string' ? { text: input.text } : {}), ...(opt(input, 'project') ? { project: opt(input, 'project') } : {}), apply: input.apply === true });
+      if (r.status === 'refused') return { exit: EXIT_CODES.USAGE, result: r as unknown as Record<string, unknown>, text: `edit refused: ${r.reason}; nothing was checked or written\n` };
+      const lines = r.findings!.map((f) => `${f.code} ${f.machine ?? ''}${f.line ? ` line ${f.line}` : ''}${f.witness ? ` witness ${f.witness.id.slice(0, 12)} (${f.witness.actions.join(' ')})` : ''}\n`);
+      return { exit: r.exit!, result: r as unknown as Record<string, unknown>, text: `${lines.join('')}verdict: ${r.verdict} (exit ${r.exit}); ${r.written ? 'written to' : 'not written to'} ${r.module}\n  full report: ${r.report}\n` };
     },
   },
   {

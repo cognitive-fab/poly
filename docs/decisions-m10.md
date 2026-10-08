@@ -31,6 +31,16 @@ Spec issues S300 to S310 are the plan's, so step 0's are numbered from S311. Eac
 
 The PT text is PT10h, written first.
 
+### Step 0, built
+
+- **Host types.** `packages/poly-lower/src/host-types.ts` writes `types.d.ts` for every machine; poly-ref's `hostDeclarations` writes the declarations it expects from its own model, and translation validation compares them line for line, with the first line's digest against the contract's `machineVersion`. `types.d.ts` is in `CERTIFIED_ARTEFACTS`. The broken lowering `types-widen-param` is in the explicit list, caught on the router of `conformance/m4`.
+- **Typed dispatch.** `rt.dispatch<Action>(id, action, data)` takes its arguments as one tuple per action of `Action`, so the data must be the named action's; with no type argument it is untyped as before, and every existing call compiles unchanged.
+- **The host check.** `poly check --host <tsconfig>` (`packages/poly-check/src/host.ts`) compiles host code in process with the `typescript` package; each error is `PL6836 HOST_TYPE_ERROR` at its file, line and column. One that cannot run is listed as not run, and the verdict is `INCONCLUSIVE`.
+- **Edit and check.** `edit-check` (`poly_edit_check` over MCP, and through the language server) checks the edited text in memory with `checkFile`'s `text` option, writes its build and its full report under `.poly/edit-check/`, and writes the module only with `apply` and a verdict that is not `REFUSED`, `ERROR` or `NONDETERMINISM`. It calls the check alone.
+- **Tests first.** `test/host-types.test.mjs`, eight tests, failed before the code (no `types.d.ts`, no `host` option, no `edit-check`); they pass. One test first passed a wrong datum: a single generic with a defaulted action parameter let `{ text: 7 }` match another action's empty data, so the dispatch takes one argument tuple per action instead.
+- **The environment.** This worktree had no `poly` command under `node_modules/.bin`, which the install test launches; the three shims were copied from the main checkout's. They are not in the repository.
+- **Checked.** The 159 measured files are identical to the measurement at the M9 close (e62b7a5). The full suite: 1,939 tests, 1,931 pass, 2 failed, 2 skipped and 4 waiting; check-memory passed (`.poly/logs/5ef9666-2026-10-08T00-48-27-776Z-step0.log`). Both failures were the missing `poly` command above; after the shims both files pass (13 tests), and the after run passes (1 test).
+
 ## Conclusion
 
 M10 is ruled. Its one measured risk, the taint state space, is measured first and brought to the owner if it does not fit.

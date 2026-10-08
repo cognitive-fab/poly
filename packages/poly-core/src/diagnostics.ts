@@ -16,7 +16,9 @@ export type Stage =
   | 'lint'
   | 'policy'
   | 'runtime'
-  | 'replay';
+  | 'replay'
+  /** PT28.1d, PT10h: host code compiled against the generated declarations. */
+  | 'host';
 
 /** `error` refuses the program; `finding` is a defect in the program; `inconclusive` is a bound. */
 export type DiagSeverity = 'error' | 'finding' | 'inconclusive' | 'warning';
@@ -156,6 +158,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6824: { name: 'TOKEN_READ_IN_HANDLER', stage: 'lint', severity: 'error' },
   PL6825: { name: 'SECRET_IN_CONFIG', stage: 'runtime', severity: 'error' },
   // PT10f, S200 (M9): admission refuses the development keychain in a build for production.
+  // PT28.1d, PT10h, S312: a type error in host code compiled against the generated declarations.
+  PL6836: { name: 'HOST_TYPE_ERROR', stage: 'host', severity: 'finding' },
   PL6826: { name: 'VAULT_NOT_FOR_PRODUCTION', stage: 'runtime', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.

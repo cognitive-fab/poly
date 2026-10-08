@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, mkdirSync, writeFileSync, existsSync, rmSync
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { importArtefact } from './import-artefact.js';
+import { checkHost, type HostCheck } from './host.js';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
@@ -179,6 +180,8 @@ export interface CheckOptions {
   providers?: Record<string, import('@poly/core').ProviderEntry>;
   /** The language server's: the source as the editor holds it, checked instead of the file on disk (S168). */
   text?: string;
+  /** PT28.1d, PT10h: a tsconfig naming host code to compile against the generated declarations, after the check. */
+  host?: string;
   /**
    * PT14, S168: the language server checks stages 0 to 2 on every edit and the rest on save. With 2, the later stages,
    * the configurations and the policies are listed as not run, and a report that would be CLEAN is INCONCLUSIVE.
@@ -1033,6 +1036,8 @@ export interface ProjectReport {
   project: string;
   name: string;
   files: CheckReport[];
+  /** PT28.1d, PT10h: the host check, when --host named a tsconfig; null otherwise. */
+  host?: HostCheck | null;
   /**
    * S72: the handler lint (PT6.5), or not run, and why. S142: it runs over the files poly.json names and every file
    * they reach through relative imports, read once; admission certifies these digests.
@@ -1136,7 +1141,10 @@ export async function checkProject(dir: string, opts: CheckOptions = {}): Promis
   }
   else if (hasEffects) handlers = { status: 'not-run', reason: 'the project has effects, and poly.json names no handlers (S72)' };
   const lintVerdict: Verdict[] = handlers?.status === 'ran' ? [verdictOf(handlers.diagnostics)] : [];
+  // PT28.1d, S312: the host check runs after the check wrote the declarations; one that cannot run is not clean.
+  const host = opts.host ? await checkHost(opts.host) : null;
+  const hostVerdict: Verdict[] = host ? [host.status === 'ran' ? verdictOf(host.diagnostics) : 'INCONCLUSIVE'] : [];
   const special = reports.find((r) => r.verdict === 'ERROR') ?? reports.find((r) => r.verdict === 'NONDETERMINISM');
-  const verdict = special ? special.verdict : fold([...reports.map((r) => r.verdict as Verdict), ...lintVerdict]);
-  return { project: dir, name: manifest.name, files: reports, handlers, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict] };
+  const verdict = special ? special.verdict : fold([...reports.map((r) => r.verdict as Verdict), ...lintVerdict, ...hostVerdict]);
+  return { project: dir, name: manifest.name, files: reports, handlers, host, verdict, exit: special ? special.exit : EXIT_CODES[verdict as Verdict] };
 }

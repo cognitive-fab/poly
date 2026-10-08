@@ -167,6 +167,10 @@
       },
       "description": "each module's report"
     },
+    "host": {
+      "type": "object",
+      "description": "the host check of PT28.1d, when host was given: ran with its diagnostics, or not run with its reason"
+    },
     "verdict": {
       "type": "string"
     },

@@ -1,0 +1,104 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "checked",
+        "refused"
+      ]
+    },
+    "module": {
+      "type": "string",
+      "description": "the module"
+    },
+    "reason": {
+      "type": "string",
+      "description": "why the edit was refused before any check"
+    },
+    "verdict": {
+      "type": "string",
+      "description": "the verdict of the edited module"
+    },
+    "exit": {
+      "type": "integer"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "PLxxxx"
+          },
+          "severity": {
+            "type": "string",
+            "description": "error, finding, inconclusive or warning"
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "col": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "machine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "witness": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "the witness id"
+              },
+              "length": {
+                "type": "integer"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "length",
+              "actions"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "line",
+          "col",
+          "machine"
+        ]
+      }
+    },
+    "report": {
+      "type": "string",
+      "description": "the full report, read only through this path"
+    },
+    "written": {
+      "type": "boolean",
+      "description": "whether the edit was written to the module"
+    }
+  },
+  "required": [
+    "status",
+    "module",
+    "written"
+  ]
+}

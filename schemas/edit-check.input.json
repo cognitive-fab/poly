@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "properties": {
+    "module": {
+      "type": "string",
+      "description": "the module file"
+    },
+    "old": {
+      "type": "string",
+      "description": "the exact text to replace, which occurs once"
+    },
+    "new": {
+      "type": "string",
+      "description": "the text that replaces it"
+    },
+    "text": {
+      "type": "string",
+      "description": "the whole file, in place of old and new"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project directory whose poly.json names the program"
+    },
+    "apply": {
+      "type": "boolean",
+      "description": "write the edit to the module after the check, unless it is REFUSED, ERROR or NONDETERMINISM"
+    }
+  },
+  "required": [
+    "module"
+  ]
+}

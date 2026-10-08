@@ -117,6 +117,17 @@ export interface InboundResult {
   conversation: string;
 }
 
+/** PT28.1b: an action of a machine's generated declarations, `{ action, data }`. */
+export type HostAction = { action: string; data: unknown };
+/** The data of action K of T; unknown when T is the untyped default. */
+export type DataOf<T extends HostAction, K> = string extends T['action'] ? unknown : Extract<T, { action: K }>['data'];
+/**
+ * rt.dispatch's arguments after the instance: one tuple per action of T, so the data is the named action's; untyped when
+ * T is the default.
+ */
+export type DispatchArgs<T extends HostAction, O> = string extends T['action'] ? [action: string, data?: unknown, opts?: O] : T extends HostAction ? [action: T['action'], data: T['data'], opts?: O] : never;
+type DispatchOpts = { actionId?: string; credentials?: unknown; [SUPPLIED_CLAIMS]?: Record<string, unknown>; [GRANT_STEP]?: true };
+
 /** K11, PT21.4: the claims the runtime itself supplies for an Inbound (the adapter's verified output), never a caller. */
 const SUPPLIED_CLAIMS = Symbol('supplied claims');
 /** PS16.4, review B2 (M9): a dispatch the runtime makes to a grant, from its own sources. */
@@ -896,8 +907,12 @@ export class PolyRuntime {
    * PT15. polyrun refuses an outside dispatch of a live child's completion (K9); this refuses one of a decision's
    * completion (K10, S130), since only the worker delivers it with its decision event, and an input outside its
    * action's type (S140). Each comes before any step, with an audit row and no journal row.
+   *
+   * PT28.1b, PT10h: given a machine's Action from its types.d.ts, `rt.dispatch<Action>(id, 'A', data)` takes only one of
+   * its actions and that action's data; with no type argument the call is untyped, as before.
    */
-  async dispatch(instanceId: string, action: string, data: unknown = {}, opts: { actionId?: string; credentials?: unknown; [SUPPLIED_CLAIMS]?: Record<string, unknown>; [GRANT_STEP]?: true } = {}): Promise<DispatchResult> {
+  async dispatch<T extends HostAction = HostAction>(instanceId: string, ...args: DispatchArgs<T, DispatchOpts>): Promise<DispatchResult> {
+    const [action, data = {}, opts = {}] = args as [string, unknown?, DispatchOpts?];
     const actionId = opts.actionId ?? `${action}:${randomUUID()}`;
     const inst = await this.store.getInstance(instanceId);
     // S155: $claims and $lineage are the runtime's; a dispatch that supplies either is refused before any step.

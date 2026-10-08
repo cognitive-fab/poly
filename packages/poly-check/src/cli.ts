@@ -16,7 +16,8 @@ import { RecordUsageError } from './records.js';
 import { journalCommand, JournalUsageError } from './journal.js';
 import { commandNamed, CommandUsageError } from './commands.js';
 
-const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>]
+const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir>] [--host <tsconfig>]
+       poly edit-check <module> --old <text> --new <text> | --text <file text> [--project <dir>] [--apply] [--json]
        poly fmt <file.poly> [--write] [--json]
        poly mcp      (an MCP server over stdio: the registry's commands as tools)
        poly lsp      (the language server over stdio, on both surfaces)
@@ -85,7 +86,9 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
   const root = option(args, '--root') ?? undefined;
   const out = option(args, '--out') ?? undefined;
   const [cmd, a, b] = positional;
-  if (cmd === 'check' && positional.length === 2) return { name: 'check', input: { target: a, root } };
+  if (cmd === 'check' && positional.length === 2) return { name: 'check', input: { target: a, root, host: option(args, '--host') ?? undefined } };
+  // PT28.4, PT10h: an edit is --old and --new, or --text; it is written only with --apply, after the check.
+  if (cmd === 'edit-check' && positional.length === 2) return { name: 'edit-check', input: { module: a, old: option(args, '--old') ?? undefined, new: option(args, '--new') ?? undefined, text: option(args, '--text') ?? undefined, project: option(args, '--project') ?? undefined, apply: args.includes('--apply') } };
   if (cmd === 'fmt' && positional.length === 2) return { name: 'fmt', input: { file: a, write: args.includes('--write') } };
   if (cmd === 'witness' && positional.length === 2) {
     const trace = args.includes('--trace');
@@ -153,7 +156,7 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();

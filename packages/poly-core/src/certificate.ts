@@ -9,7 +9,7 @@ import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'nod
 import { canonicalize } from './jcs.js';
 
 /** The artefacts of one machine's build directory that a certificate covers (PT17, S74). */
-export const CERTIFIED_ARTEFACTS = ['contract.json', 'next.cjs', 'invariants.mjs', 'effects.cjs', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'migrate.cjs', 'openshell.policies.yaml'] as const;
+export const CERTIFIED_ARTEFACTS = ['contract.json', 'next.cjs', 'invariants.mjs', 'effects.cjs', 'effects.manifest.json', 'effect-invariants.mjs', 'invariants.compose.mjs', 'liveness.mjs', 'migrate.cjs', 'openshell.policies.yaml', 'types.d.ts'] as const;
 
 export interface CertifiedMachine {
   /** polyrun's machine id, `<module>.<Machine>`, which is also its build directory's name (PT1.5). */

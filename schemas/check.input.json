@@ -8,6 +8,10 @@
     "root": {
       "type": "string",
       "description": "where .poly/ lives (default: the project directory, or the working directory)"
+    },
+    "host": {
+      "type": "string",
+      "description": "a tsconfig naming host code to compile against the generated declarations (PT28.1d)"
     }
   },
   "required": [

@@ -66,6 +66,8 @@ export const FAULT_SOURCES = {
   'credential-scope-added': ['test/fixtures/m9/credentials.poly'],
   'credential-holder-dropped': ['test/fixtures/m9/credentials.poly'],
   'credential-base-widened': ['test/fixtures/m9/credentials.poly'],
+  // PT28.1, PT10h (M10 step 0): the host's declarations, with a parameter widened to unknown.
+  'types-widen-param': ['conformance/m4/router.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

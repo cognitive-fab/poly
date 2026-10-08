@@ -9,6 +9,7 @@ import { boundPath, diag, digest, effectKind, effectClass, durationMs, countBoun
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { emitsCall } from './emit.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
+import { hostTypes } from './host-types.js';
 
 export interface LowerOptions {
   /** Test-only fault injection; `poly check` never sets it (faults.ts). */
@@ -23,11 +24,11 @@ export interface LowerOptions {
   providers?: Readonly<Record<string, ProviderEntry>>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string; [credential: `../credentials/${string}.json`]: string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; 'types.d.ts'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string; [credential: `../credentials/${string}.json`]: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -249,6 +250,8 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   const invariants = invariantsModule(mutated, facts, env, layout, pre, actions.filter((a) => !handlers.has(a.name)).map((a) => a.name), opts.fault, mapperCopy);
 
   const files: Lowered['files'] = { 'contract.json': JSON.stringify(contract, null, 2) + '\n', 'next.cjs': next, 'invariants.mjs': invariants };
+  // PT28.1, PT10h: the host's declarations; the broken lowering types-widen-param widens one parameter to unknown.
+  files['types.d.ts'] = hostTypes({ module, machine: m, env, layout, version, program: opts.program ?? [], widen: opts.fault === 'types-widen-param' });
   // ── effects (PT6.1, PT5): the mapper and manifest when the machine declares effects, the path properties' module when it has any ──
   // A machine that arms timers needs the mapper too: a timer is an intent (PT6.3).
   // A machine that sends needs it too (S58): a send is an intent.
