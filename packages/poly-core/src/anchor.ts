@@ -8,7 +8,7 @@
 // (PT12.5): its first rings, the last rings admitted, the highest policy sequence admitted per scope, and whether the
 // project is production. Admission only moves `head` and `policies` forward (S210, D2, D7).
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { keyringDigest, keyringSubject, verifyRecord, type Keyrings, type SignedRecord } from './records.js';
@@ -98,18 +98,86 @@ export function readAnchor(dir: string, project: string, source?: AnchorSource):
   const location = Object.hasOwn(config.anchors, project) ? config.anchors[project] : undefined;
   if (location === undefined) return null;
   const file = anchorFile(dir, location);
-  let text: string;
+  let text = '';
   // Polywatch: a directory or an unreadable file is a refusal of the chain like any other, never a bare error.
-  try { text = readFileSync(file, 'utf8'); } catch (e) { throw new KeyringError(`the anchor ${file} cannot be read (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`); }
+  // S321 with c201ccf: every read of an anchor, the id a memory record names included, holds the anchor's lock.
+  withAnchorLock(file, () => { try { text = readFileSync(file, 'utf8'); } catch (e) { throw new KeyringError(`the anchor ${file} cannot be read (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`); } });
   return { anchor: parseAnchor(text, file, project), file, source: config.source };
 }
 
-/** Writes an anchor whole: to a file beside it, then renamed into place, so a reader never sees half of one. */
+/** Writes an anchor whole, under its lock: no write of an anchor bypasses it (c201ccf, S321). */
 export function writeAnchorFile(file: string, a: Anchor): void {
   mkdirSync(dirname(file), { recursive: true });
+  withAnchorLock(file, () => writeWhole(file, a));
+}
+
+/** Writes an anchor whole: to a file beside it, then renamed into place, so a reader never sees half of one. */
+function writeWhole(file: string, a: Anchor): void {
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(a, null, 2) + '\n');
   renameSync(tmp, file);
+}
+
+/** How long a change of the anchor waits for another to finish, and when a lock is taken to be a dead process's. */
+const LOCK_WAIT_MS = 5_000;
+const LOCK_STALE_MS = 60_000;
+
+/**
+ * Polywatch on S210: every read, change and write of an anchor holds its lock (`<anchor>.lock`, created exclusively),
+ * so two admissions, or an admission and `poly anchor production`, never write back what the other moved forward. A
+ * lock held past the wait is refused (fail closed); one older than a minute is a dead process's, and taken over.
+ */
+export function changeAnchor(file: string, project: string, change: (a: Anchor) => Anchor): Anchor {
+  return withAnchorLock(file, () => {
+    const next = change(parseAnchor(readFileSync(file, 'utf8'), file, project));
+    writeWhole(file, next);
+    return next;
+  });
+}
+
+/** A new anchor, written whole under its lock, so no reader or admission sees it half made. */
+export function createAnchor(file: string, a: Anchor): void {
+  mkdirSync(dirname(file), { recursive: true });
+  withAnchorLock(file, () => writeWhole(file, a));
+}
+
+/**
+ * Runs one read, change or write of an anchor holding `<anchor>.lock`, created exclusively, and lets it go after. The
+ * lock holds a token of its holder (polywatch): a holder removes only its own lock, and a stale lock is moved aside and
+ * removed only when it is still the one judged stale, so a lock another process has just taken is put back.
+ */
+export function withAnchorLock<T>(file: string, body: () => T): T {
+  const lock = `${file}.lock`;
+  const token = randomBytes(16).toString('hex');
+  const until = Date.now() + LOCK_WAIT_MS;
+  const take = (text: string): boolean => {
+    let fd: number;
+    try { fd = openSync(lock, 'wx'); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false; throw new KeyringError(`the anchor's lock ${lock} cannot be taken (${(e as NodeJS.ErrnoException).code ?? (e as Error).message})`); }
+    try { writeSync(fd, text); } finally { closeSync(fd); }
+    return true;
+  };
+  for (;;) {
+    if (take(token)) break;
+    let age = 0;
+    let held = '';
+    try { age = Date.now() - statSync(lock).mtimeMs; held = readFileSync(lock, 'utf8'); } catch { continue; }
+    if (age > LOCK_STALE_MS) {
+      const aside = `${lock}.${token}`;
+      try { renameSync(lock, aside); } catch { continue; }
+      const moved = readFileSync(aside, 'utf8');
+      // Another process took the lock between the look and the move: its lock goes back, unless a third took it.
+      if (moved !== held) take(moved);
+      rmSync(aside, { force: true });
+      continue;
+    }
+    if (Date.now() > until) throw new KeyringError(`the anchor ${file} is being changed by another process (${lock}); nothing was written`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+  try { return body(); } finally {
+    let mine = false;
+    try { mine = readFileSync(lock, 'utf8') === token; } catch { mine = false; }
+    if (mine) rmSync(lock, { force: true });
+  }
 }
 
 /** A new anchor for a project's first rings: `poly anchor keyrings`. */
@@ -185,14 +253,15 @@ export function verifyChain(dir: string, project: string, current: Keyrings, sou
 
 /**
  * S210, D2, D7: moves the anchor forward after an admission: its head to the rings admitted, and each scope's policy
- * sequence to the one admitted when that is higher. Read again first, so two admissions never move it back.
+ * sequence to the one admitted when that is higher. Read again under the anchor's lock, so two admissions never move
+ * it back.
  */
 export function advanceAnchor(file: string, project: string, chain: string[], policies: Record<string, number>): Anchor {
-  const a = parseAnchor(readFileSync(file, 'utf8'), file, project);
-  // The head moves to this chain's last rings only when the kept head lies on this chain, behind or at them.
-  const at = chain.indexOf(a.head);
-  const next: Anchor = { ...a, head: at >= 0 ? chain[chain.length - 1] : a.head, policies: { ...a.policies } };
-  for (const [scope, n] of Object.entries(policies)) if (!(next.policies[scope] >= n)) next.policies[scope] = n;
-  writeAnchorFile(file, next);
-  return next;
+  return changeAnchor(file, project, (a) => {
+    // The head moves to this chain's last rings only when the kept head lies on this chain, behind or at them.
+    const at = chain.indexOf(a.head);
+    const next: Anchor = { ...a, head: at >= 0 ? chain[chain.length - 1] : a.head, policies: { ...a.policies } };
+    for (const [scope, n] of Object.entries(policies)) if (!(next.policies[scope] >= n)) next.policies[scope] = n;
+    return next;
+  });
 }

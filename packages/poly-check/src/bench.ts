@@ -16,7 +16,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { cpus, platform, arch, totalmem, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { keyringDigest, newAnchor, writeAnchorFile } from '@poly/core';
+import { createAnchor, keyringDigest, newAnchor } from '@poly/core';
 import { admit } from './admit.js';
 import { useTestAnchors } from './keyrings.js';
 import { signPolicy } from './policy-sign.js';
@@ -57,7 +57,7 @@ async function project(root: string, name: string, sources: string[], repo: stri
   const people = sources.length > 1 ? [{ name: 'bench', keyId: 'bench-person', publicKey: person.publicKey.export({ type: 'spki', format: 'pem' }).toString() }] : [];
   writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name, modules: ['src/*.poly'], handlers: ['src/handlers.ts'], ...(people.length ? { people } : {}) }, null, 2));
   if (people.length) {
-    writeAnchorFile(join(root, `${name}.anchor`), newAnchor(name, keyringDigest({ people, agents: [] }), false));
+    createAnchor(join(root, `${name}.anchor`), newAnchor(name, keyringDigest({ people, agents: [] }), false));
     writeFileSync(join(root, 'anchors.json'), JSON.stringify({ anchors: { [name]: `file:${join(root, `${name}.anchor`)}` } }));
     (await import('@poly/runtime')).acceptTestAnchors();
   }

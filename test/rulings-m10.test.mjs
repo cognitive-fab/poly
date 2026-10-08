@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { admit, admitWitness, checkFile, checkProject } from '@poly/check';
 import { forgetSubject, memoryVerifySubject, signRecord } from '@poly/core';
 import { load } from '@poly/runtime';
@@ -178,4 +178,49 @@ test('S327: a body received on a channel is owned by its sender; the conversatio
     await rt.forget({ subject: SMS_FROM }, sign('forget', forgetSubject(rt.anchorId, { subject: SMS_FROM })));
     assert.equal(await rt.contentBody(q), null, 'the sender\'s message is erased');
   } finally { await rt.close(); }
+});
+
+test('S321 with the anchor lock (c201ccf): the anchor a record is bound to is read under the anchor\'s lock, and a lock held by another process refuses the read', { timeout: 120_000 }, async () => {
+  const { COMMANDS } = await import('@poly/check');
+  const { readAnchor } = await import('@poly/core');
+  const { ANCHORS } = await import('./runtime-helpers.mjs');
+  const { tmpdir } = await import('node:os');
+  const { rt, dir } = await build('rulings-s321-lock', REMEMBERING);
+  const tmp = join(tmpdir(), `poly-lock-${randomBytes(4).toString('hex')}`);
+  mkdirSync(tmp, { recursive: true });
+  try {
+    const keyFile = join(tmp, 'person.pem');
+    writeFileSync(keyFile, PERSON.privateKeyPem);
+    const file = JSON.parse(readFileSync(join(ANCHORS, 'anchors.json'), 'utf8')).anchors['rulings-s321-lock'].slice('file:'.length);
+    const forget = COMMANDS.find((c) => c.name === 'forget');
+    writeFileSync(`${file}.lock`, '');
+    await assert.rejects(forget.run({ project: dir, subject: 'cust-a', by: PERSON.keyId, key: keyFile }), /being changed by another process/);
+    assert.throws(() => readAnchor(dir, 'rulings-s321-lock'), /being changed by another process/);
+    rmSync(`${file}.lock`, { force: true });
+    const r = await forget.run({ project: dir, subject: 'cust-a', by: PERSON.keyId, key: keyFile });
+    assert.equal(r.result.record.subject.split(':sha256:')[0], rt.anchorId);
+    assert.ok(!readdirSync(dirname(file)).some((f) => f.endsWith('.lock')), 'the read leaves no lock behind');
+  } finally { await rt.close(); rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('The anchor lock (polywatch on the merge): a holder removes only its own lock, a stale lock is taken over, and writeAnchorFile writes under the lock', async () => {
+  const { withAnchorLock, writeAnchorFile, newAnchor } = await import('@poly/core');
+  const { tmpdir } = await import('node:os');
+  const { utimesSync, existsSync } = await import('node:fs');
+  const dir = join(tmpdir(), `poly-anchor-lock-${randomBytes(4).toString('hex')}`);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const file = join(dir, 'p.anchor');
+    writeAnchorFile(file, newAnchor('p', `sha256:${'1'.repeat(64)}`, false));
+    // A lock taken over while its first holder ran (it ran past a minute) is the new holder's: the first leaves it.
+    withAnchorLock(file, () => { writeFileSync(`${file}.lock`, 'another-holder'); });
+    assert.equal(readFileSync(`${file}.lock`, 'utf8'), 'another-holder');
+    // A fresh lock refuses a write; a lock older than a minute is a dead process's, and is taken over.
+    assert.throws(() => writeAnchorFile(file, newAnchor('p', `sha256:${'2'.repeat(64)}`, false)), /being changed by another process/);
+    const old = (Date.now() - 120_000) / 1000;
+    utimesSync(`${file}.lock`, old, old);
+    writeAnchorFile(file, newAnchor('p', `sha256:${'3'.repeat(64)}`, false));
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).first, `sha256:${'3'.repeat(64)}`);
+    assert.equal(existsSync(`${file}.lock`), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
