@@ -48,7 +48,7 @@ service machine Conversation {
   invariant queue-while-held: queued == 0 || !(slot is Free)
 
   action Open(app: Ref<Peer>)
-  action Inbound(from: string check { "sms-1", "sms-2" }, body: Content, keyword: Keyword)
+  action Inbound(from: string check { "sms-1", "sms-2" } disclosed, body: Content, keyword: Keyword)
   action Reply(body: Content)
   action Template(body: Content)
   action Sent()

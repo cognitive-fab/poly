@@ -44,7 +44,8 @@ test('M3-10: O1-R passes on the reference of every version, and runs no test whe
 });
 
 test('M3-10: O1-R fails on a reference that takes an out-of-range value', () => {
-  // T6 v0 with maxTries back to a disclosed range type: submit(j, 4) is accepted.
+  // T6 v0 with maxTries disclosed: submit(j, 4) is accepted. S400 makes a bare range strict, so the control writes
+  // disclosed on a check clause, the one place it can be written (PT3.4a).
   const v = versions('T6')[0];
   const dir = join(tmpdir(), 'poly-m3-o1r-test', 'T6-v0-disclosed-source');
   rmSync(dir, { recursive: true, force: true });
@@ -52,7 +53,7 @@ test('M3-10: O1-R fails on a reference that takes an out-of-range value', () => 
   const file = moduleOf(dir);
   const text = readFileSync(file, 'utf8');
   assert.ok(text.includes('maxTries: int check { 1, 2, 3 } strict'));
-  writeFileSync(file, text.replace('maxTries: int check { 1, 2, 3 } strict', 'maxTries: 1..3'));
+  writeFileSync(file, text.replace('maxTries: int check { 1, 2, 3 } strict', 'maxTries: int check { 1, 2, 3 } disclosed'));
   const r = runO1R('T6', 0, impl(v, 'reference', file, 'disclosed'), 10 * 60 * 1000);
   assert.equal(r.ran, true);
   assert.equal(r.failed, 3);

@@ -51,7 +51,7 @@ service machine Conversation {
   invariant queue-while-held: queued == 0 || !(slot is Free)
 
   action Open(app: Ref<Peer>)
-  action Inbound(from: string check { "mail-1", "mail-2" }, body: Content, event: Event)
+  action Inbound(from: string check { "mail-1", "mail-2" } disclosed, body: Content, event: Event)
   action Reply(body: Content)
   action Template(body: Content)
   action Sent()

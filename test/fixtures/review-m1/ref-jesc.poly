@@ -9,7 +9,8 @@ machine Kid {
     size : 0..1 = 0
   }
   terminal c == Fin
-  action Start(n: int check { 0, 1 })
+  // S400: disclosed, so the parent's Start(n: 2) reaches the handler and escapes size's type (PS4.2a).
+  action Start(n: int check { 0, 1 } disclosed)
   action Finish()
   on Start(n) { require c == Idle else reject "started"  c' = Set  size' = n }
   on Finish { c' = Fin }

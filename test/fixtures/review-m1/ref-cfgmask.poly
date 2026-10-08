@@ -2,7 +2,8 @@ module cfgmask
 
 service machine Recv {
   state { x : 0..1 = 0 }
-  action Set(v: int check { 0, 1 }, from: Ref<Send>)
+  // S400: disclosed, so Set(v: 2) reaches the handler and escapes x's type in the configuration.
+  action Set(v: int check { 0, 1 } disclosed, from: Ref<Send>)
   on Set(v, from) { x' = v  send from <- Ack()  send from <- Ack2() }
 }
 

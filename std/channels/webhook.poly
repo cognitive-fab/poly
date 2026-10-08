@@ -50,7 +50,7 @@ service machine Conversation {
   invariant disabled-at-three: enabled == failures < 3
 
   action Open(app: Ref<Peer>)
-  action Inbound(source: string check { "hook-1", "hook-2" }, body: Content)
+  action Inbound(source: string check { "hook-1", "hook-2" } disclosed, body: Content)
   action Reply(body: Content)
   action Template(body: Content)
   action Sent()

@@ -23,7 +23,7 @@ service machine Conversation {
   }
 
   action Open(app: Ref<Peer>)
-  action Inbound(from: string check { "alice", "bob" }, body: Content)
+  action Inbound(from: string check { "alice", "bob" } disclosed, body: Content)
   action Reply(body: Content)
   action Template()
   action Sent()
