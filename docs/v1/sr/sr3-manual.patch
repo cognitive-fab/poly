@@ -1,0 +1,35 @@
+diff --git a/experiments/m3/manual/README.md b/experiments/m3/manual/README.md
+index d769b233..38e4c05a 100644
+--- a/experiments/m3/manual/README.md
++++ b/experiments/m3/manual/README.md
+@@ -179,6 +179,8 @@ No per-machine check can see this. The defect lives in the arrival order between
+ 0b. **Machines talk only by messages.** Addresses are values, `send` is the only way to affect a peer, and interacting machines are checked together as configurations.
+ 1. **The engines check single machines; poly checks how machines relate.** Safety, governance, simulation and mining stay in the engines. poly's own model checker, poly-ref, checks the lowering, deadlock, liveness and configurations.
+ 2. **The checked program is the running program, over its check domains.** A certificate binds the source, the artefacts and the check results by digest. Out-of-domain inputs are rejected (`strict`) or journaled as drift (`disclosed`).
++
++   **Domains refuse by default (S400, PT3.4a).** A check domain on an action's parameter is a constraint: an integer range, an enum, a `bool` or a `check { … }` clause refuses a value outside it at dispatch, with the reason `outside-check-domain`, before the handler runs. Write `disclosed` after a `check` clause (`amount: int check { 1, 2 } disclosed`) to accept values outside the domain and only report them; such a value is then outside what was checked.
+ 3. **One source per machine.** Every engine artefact is derived.
+ 4. **No silent clean.** Every check reports clean, findings, refused, underpowered or inconclusive.
+ 5. **No model call on a check or decision path.**
+@@ -195,7 +197,7 @@ The Poly stack already holds the primitives a coding agent needs to write statef
+ | **SAM** | State-Action-Model. The pattern every poly machine lowers to, in its v2 strict profile. |
+ | **Machine** | A sealed state, a set of actions and one handler per action. The unit of checking and of execution. |
+ | **Handler** | `on Action { … }`. Requires first, then writes. It either accepts or rejects with a named reason. |
+-| **Check domain** | The finite set of values a field or parameter takes during checking. Narrower than the runtime type when declared so, and then disclosed. |
++| **Check domain** | The finite set of values a field or parameter takes during checking. Narrower than the runtime type when declared so, and strict unless written disclosed (S400). |
+ | **Invariant** | A predicate on states that holds in every reachable state. |
+ | **Step property** | A predicate on every accepted step `(pre, action, data, post)`. |
+ | **Reject property** | A predicate on every step, whatever its verdict. |
+diff --git a/experiments/m3/manual/docs/03-technical-spec.md b/experiments/m3/manual/docs/03-technical-spec.md
+index e24423dd..636073cc 100644
+--- a/experiments/m3/manual/docs/03-technical-spec.md
++++ b/experiments/m3/manual/docs/03-technical-spec.md
+@@ -226,7 +226,7 @@ The `Policy` production is in PT8, in its own file type. The `Workflow` producti
+ 
+   An explicit `strict` on a parameter of an action with no handler is `PL1302 STRICT_ON_UNHANDLED_ACTION`, at the declaration: such an action is not in the lowered module (S35), so the runtime answers it `unhandled` and never runs the check. The fixes are to remove `strict` or to add a handler (S53).
+ 
+-- **PT3.4a** The default mode is `strict` for every parameter and field whose value can flow into the payload of an `irreversible` or `compensable` effect. The compiler computes this flow from the handlers. It is `disclosed` elsewhere. An explicit `disclosed` on a field that flows into an irreversible effect is `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, `PL1302 STRICT_ON_UNHANDLED_ACTION`, and a person must accept it (PT12.5).
++- **PT3.4a** **Strict by default (S400).** The default mode is `strict` for every parameter of an action with a handler whose type has a check domain: a `bool`, an integer range, an enum, a union, a record, a map of such values, a `Conf`, and an `int` or a `string` with a `check` clause. `disclosed` applies only where it is written. It is written on a `check` clause, so a parameter of a range, an enum or another finite type is always `strict`: to accept a wider value, widen the type. A parameter of an action with no handler is never checked, since the runtime answers that action `unhandled`: an implicit `strict` there raises nothing, and only an explicit one is `PL1302 STRICT_ON_UNHANDLED_ACTION`. An explicit `disclosed` on a parameter or a field whose value can flow into the payload of an `irreversible` effect is `PL1301 DISCLOSED_IRREVERSIBLE_INPUT`, a finding a person must accept (PT12.5); the compiler computes this flow from the handlers.
+ - **PT3.5** An assignment that can produce a value outside a field's declared type (for example `items' = items + 1` with `items: 0..3`) is not a compile error. It lowers to an automatic state invariant, `domain:<field>`. The model check then reports the shortest path that overflows (`PL3102 DOMAIN_ESCAPE`) with a witness.
+ 
+ ## PT4. Handlers and step semantics
