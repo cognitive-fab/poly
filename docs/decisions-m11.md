@@ -123,6 +123,10 @@ At 514528a, after `npm run clean`: 1,995 tests and one after the M3 runs, 1,990 
 
 Then the closing gate runs again from a clean build, compared with M9's `gate-file-times.json`. If it passes with no failure and the measured verdicts unchanged, M11 is ready to merge. **Merge order:** M10 merges into m4 first; M11 then rebases on that, resolves the three expected conflicts (PS3.2's reserved reasons, the error-code exemption test, the worker's proposal path) and runs the full suite once more before its merge.
 
+## m4 merged: the keyring anchor under its lock (owner's instruction, 2026-10-07)
+
+m4's c201ccf (the anchor changes only under its lock and never extends a cut-back history, from polywatch on S210) is merged into m11 (fbc2e6e). It touches `anchor.ts`, `keyrings.ts` and the core index, none of which M11 changed, and merged with no conflict. `test/s210.test.mjs` was run before the next full suite: 8 tests, all pass.
+
 ## Conclusion
 
 M11 is ruled and built. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains: sixty-four concurrent runs never pass a cap, and a crash never loses or doubles a reservation. A route is a checked machine whose every tier choice replays from the ledger with no model call, and `poly cost` sums every answered call from the ledger alone. The review's findings are fixed, the gate passed from a clean build, and two questions about what a reservation and a cost mean wait for the owner.
