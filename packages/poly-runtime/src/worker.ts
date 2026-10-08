@@ -450,6 +450,9 @@ export class EffectWorker {
               : this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot, approval ? await this.laterOf(row, proposal) : undefined);
             // PS16.3, S147: the allow reads the grant as it reads a singleton, so a grant that steps makes it stale.
             if (grant && 'reads' in grant && g.decision === 'allow') g = { ...g, reads: { ...(g.reads ?? {}), ...grant.reads } };
+            // S401, probe B1: an approved allow read the emitter at later.seq, so the emitter stepping before the start
+            // makes the allow stale (S147) and it is rechecked, as an allow that read a singleton is.
+            if (proposal.later && g.decision === 'allow') g = { ...g, reads: { ...(g.reads ?? {}), [row.instance_id]: proposal.later.seq } };
           } catch (e) {
             // Review C6: a gate that fails holds only this intent, Proposed with a backoff, and never allows it (PT9.5).
             const held = (e as { record?: Record<string, unknown> })?.record;

@@ -6,7 +6,7 @@
 // program fault (PS11.4). Every divergence is PL9001. Kernel rows ($create, $undeliverable, a poisoned
 // instance's refusals) are checked as what they are. A decision's answer comes from the journal, never from a
 // model (K10).
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalize, costOf, diag, sha256OfBytes, type Diagnostic } from '@poly/core';
 import { parse } from '@poly/lang';
@@ -172,6 +172,8 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
   for (const [name, x] of Object.entries(rt.certificate.poly.typeModules ?? {})) {
     if (!name.startsWith('std.') || !x.path.startsWith('std:')) continue;
     const file = join(rt.verified.std ?? STD_ROOT, x.path.slice(4));
+    // Probe reviewer B on V4: a missing file is refused as load refuses it, naming the module, not with a bare ENOENT.
+    if (!existsSync(file)) throw new Error(`${x.path}: the std module changed since certification (certified ${x.file}, found nothing)`);
     const bytes = readFileSync(file);
     if (sha256OfBytes(bytes) !== x.file) throw new Error(`${x.path}: the std module changed since certification (certified ${x.file}, found ${sha256OfBytes(bytes)})`);
     const m = parse(bytes.toString('utf8')).module;

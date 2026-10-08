@@ -144,8 +144,8 @@ export interface ChannelMap extends NodeBase { kind: 'ChannelMap'; peer: string;
 
 /**
  * `workflow w runs M { input A  key "…" where f matches "…"  tool "kind" -> t target "…" why "…" }` (PT10): a machine
- * run by polyflow, whose effects become work orders for an agent's tools. Checked and lowered by poly, run by polyflow,
- * outside the gate (S164).
+ * whose effects become work orders for an agent's tools. Checked and lowered by poly, and run on poly-runtime under the
+ * gate since M8a (S173 to S175).
  */
 export interface Workflow extends NodeBase {
   kind: 'Workflow';

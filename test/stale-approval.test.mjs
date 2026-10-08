@@ -84,6 +84,32 @@ test('S401: a refund approved before Cancel is allowed and the handler runs once
   } finally { await rt.close(); }
 });
 
+// Probe reviewer B on V1 to V5: an approved allow read the emitter's latest state, but its reads did not name the
+// emitter, so a Cancel committed between the allow and the start was never rechecked (S147) and the refund ran on a
+// cancelled order. The allow now reads the emitter at later.seq, so the stale check rechecks it, and the
+// rechecked intent is proposed afresh and waits for a person again. The Cancel is dispatched where the worker checks for a stale allow, as a
+// concurrent dispatch or a recovery after a crash would land.
+test('S401, probe B1: a Cancel between an approved allow and the start is rechecked, and the refund never runs', { skip }, async () => {
+  const { rt, ran } = await started('s401-window', POLICY_A);
+  try {
+    const { row } = await escalated(rt, 'o5');
+    await approveAs(rt, row.intent_id);
+    const w = rt.worker;
+    const stale = w.stale.bind(w);
+    let cancelled = false;
+    w.stale = async (r) => { if (!cancelled) { cancelled = true; await rt.dispatch('o5', 'Cancel'); } return stale(r); };
+    for (let i = 0; i < 4; i++) await rt.worker.tick();
+    const vs = await verdicts(rt, 'o5');
+    assert.ok(cancelled, 'the Cancel landed after the allow');
+    assert.equal((await rt.getState('o5')).state.status, 'Cancelled');
+    assert.deepEqual(ran, [], `the refund never ran on the cancelled order: ${show(vs)}`);
+    assert.ok(vs.some((b) => b.outcome === 'rechecked'), `the allow was rechecked: ${show(vs)}`);
+    // A rechecked intent is proposed afresh (S147): the earlier approval is not reused, so it waits for a person again.
+    assert.equal(vs.at(-1).outcome, 'escalated', show(vs));
+    assert.ok(vs.at(-1).sseq > vs.find((b) => b.outcome === 'allowed').sseq, show(vs));
+  } finally { await rt.close(); }
+});
+
 test('S401: under the control policy, an approval after Cancel and one before Cancel are both allowed', { skip }, async () => {
   const { rt, ran } = await started('s401-control', POLICY_B);
   try {
