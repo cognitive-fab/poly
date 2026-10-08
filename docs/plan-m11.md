@@ -102,9 +102,44 @@ Numbered S350 to S399. Each has a proposal and waits for the owner's ruling.
 2. **Calibration drift.** A map holds on the traffic it was fitted on (PD1.6); the tier swap rule catches a model change, not a drift in traffic.
 3. **Merge with M10.** Section 6 lists every shared change, to be ruled with M10's plan.
 
+## 9. Record of M11
+
+| Step | What | Commits |
+|---|---|---|
+| 1 | PS18, routes and budgets, written into the semantics before the code | f579138 |
+| 2 | Money in integer micro-units, price tables with their source and date (S350, `PL6843`) | 71647d3 |
+| 3, 4 | `std.routing`: `Route` and `Budget`, each rule poly's own with a seeded mutant (S351, S352) | 07402d3 |
+| 5 | `route` and `budget` on both surfaces, `m.r` and `m.b`, the descriptors and their read-backs, `PL6841`, `PL6844`, `PL6845` | 3ce25fb |
+| 6 | Tiers as intents of their own; reservations before the policy, settled and released, crash recovery; AC26 (S351 to S354, S356) | 268a44a |
+| 7 | Records, `poly cost` from the ledger alone, replay of every tier choice; AC25's replay half (S358) | 023fddf |
+| 8 | The tier swap, `PL6842` (S355) | 7f5e37c |
+| 9 | The review: its findings fixed, each with a test that failed first; S360 and S361 raised; the gate | 514528a |
+
+**The closing gate of M11, from a clean build.** It ran at 514528a from 18:45:03 to 19:16:59 on 7 October 2026 (local time), after `npm run clean`, as `npm test` through `scripts/suite-summary.mjs` (build, boundary check, the suite, then `test/after/`). Before it started, no test run of either session was on the machine. A watcher listed every minute, 32 times, each node or python process started after the gate began whose command line did not name this worktree. Apart from the gate's own (the test runner and its files, named by relative path, the M3 frozen runner, its fake agent and a sleeping fixture), it saw the M10 session's own work for its first minutes: `.poly/m10/measure-flow.mjs` in six listings from 18:46 and `poly check` of an M10 fixture in five; no test run of M10. So the machine was quiet of test runs, not of all work. The machine is the one of M9's gate.
+
+| Gate | Commit | Tests (suite and `test/after/`) | Passed | Failed | Skipped | Waiting | Total |
+|---|---|---|---|---|---|---|---|
+| M9 closing, from a clean build | c0cfff1 | 1,925 | 1,919 | 0 | 2 | 4 | 33 min 40 s |
+| **M11 closing, from a clean build** | 514528a | 1,996 | 1,990 | 0 | 2 | 4 | 31 min 56 s |
+
+AC25 ran in `routing` (escalation, an answer on the small tier, a failure escalated, exhaustion with `route-exhausted`, a policy over the call's tier), `std-routing` (`route-ends` and the looping mutant) and `cost` (replay of every tier choice with no provider); AC26 in `budget` (64 concurrent runs within the cap at every step, the overrun recorded and the next reservation refused, the crash between reservation and completion); the tier swap in `routing-swap`; the read-backs in `tv` (four broken lowerings) and `certificate` (two broken writers); `poly cost` in `cost`; the review in `review-m11`. All passed. **Not run, by name:** E1's one, E2's one and E5's two, as at M9's close. The two skipped are S152's OpenShell enforcement and `creation-unavailable`'s, as at M9's close. `check-memory` passed. The 159 measured files are identical to M9's close. Every file's time is in `docs/m11/gate-file-times.json`.
+
+**Compared file by file with M9's `gate-file-times.json`.** The suite took 1,745 s against 1,837 s, `test/after/` 148 s against 163 s, and the summed time of the 158 files in both 19,663 s against 19,427 s; 40 were faster and 18 slower by more than 20% and 5 s. The slowest are the channel files again (`channels-whatsapp` 1,348 s to 1,370 s, `channels-adapter-pin` 1,243 s to 1,298 s). The largest change is `certificate`, 486 s to 802 s, with two more faults over a project that admits a route. M11's own files take 104 s (`review-m11`, `cost`), 72 s (`std-routing`), and 22 s or less for each of the rest.
+
+**M11 is built and gated; it closes on the owner's rulings.** Two review findings change what a reservation and a cost mean, and wait as S360 and S361 (`decisions-m11.md`, step 9); `poly try`, which Q9 placed at M11's start and this plan does not list, waits for the owner too.
+
+**Limits M11 closes with.**
+- **A reservation covers the token limit at the highest price.** A call that uses its full output limit with input tokens can cost more than its reservation, recorded as an overrun (S360).
+- **A usage report poly cannot price.** None costs nothing; a fractional or negative one fails the call after its provider answered, and its reservation is released (S361). The certificate lists both.
+- **A call with no answer** has no usage and its reservation is released, so what a provider bills for it is not counted (K15).
+- **A route that escalates on failure alone** has two vacuous rules in `r.Route`, and checks `INCONCLUSIVE`, never `CLEAN`.
+- **A channel's name** is not checked to be an identifier, as a route's, a budget's and a credential's are; outside M11.
+- **Replay of a credential's `Grant`** needs `std.credentials`, which no build records; listed for the v1 gate (AC27).
+- **The gate's time** depends on the machine's load, as at M9's close.
+
 ## Conclusion
 
-M11 makes a budget a checked invariant and a route a checked machine: a reservation is taken before every model call and settled after it, so spent plus reserved never passes a cap, and every tier choice replays from the ledger with no model call. Every provider call in the tests is recorded, nothing spends money, and each change shared with M10 is listed for a joint ruling.
+M11 makes a budget a checked invariant and a route a checked machine: a reservation is taken before every model call and settled after it, so spent plus reserved never passes a cap, and every tier choice replays from the ledger with no model call. Every provider call in the tests is recorded, nothing spends money, and each change shared with M10 is listed for a joint ruling. As built, every step is done, the review's findings are fixed or raised, and the closing gate passed from a clean build with no failure and the measured verdicts unchanged; M11 closes on the owner's rulings on S360 and S361.
 
 ## Glossary
 

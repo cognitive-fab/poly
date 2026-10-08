@@ -105,6 +105,12 @@ Three reviewers read M11's code with the plan, the specs and the rulings: A the 
 
 **For the owner, not blocking: `poly try`.** Q9 was ruled on 2026-10-06 to put `poly try` (PT28.2) at the start of M11. The M11 plan, ruled on 2026-10-07, does not list it, and its scope is PT27.3's row. The session follows the later ruled plan and does not build `poly try`; it is raised again at M11's close.
 
+## The closing gate, from a clean build
+
+At 514528a, after `npm run clean`: 1,995 tests and one after the M3 runs, 1,990 pass, no failure, 2 skipped and 4 waiting (E1's one, E2's one, E5's two, as at M9's close); `check-memory` passed (`.poly/logs/514528a-2026-10-08T01-45-06-851Z-gate.log`). The 159 measured files are identical to M9's close. The run, the machine's state during it (the M10 session measured and checked for its first minutes, and ran no test), and the comparison file by file with M9's gate are recorded in `plan-m11.md`, section 9, and every file's time in `docs/m11/gate-file-times.json`.
+
+**For the owner, at M11's close:** S360 and S361 (step 9), and `poly try` (step 1). M11 is built and gated; it closes on those rulings. A ruling that changes the code runs the gate again.
+
 ## Conclusion
 
-M11 is ruled. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains.
+M11 is ruled and built. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains: sixty-four concurrent runs never pass a cap, and a crash never loses or doubles a reservation. A route is a checked machine whose every tier choice replays from the ledger with no model call, and `poly cost` sums every answered call from the ledger alone. The review's findings are fixed, the gate passed from a clean build, and two questions about what a reservation and a cost mean wait for the owner.
