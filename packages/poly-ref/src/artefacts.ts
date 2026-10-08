@@ -129,7 +129,19 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const retry = e.items.find((x): x is A.EffectItem & { kind: 'EffRetry' } => x.kind === 'EffRetry');
         differ(`effects.manifest.json ${kind}.retry`, entry.retry ?? null, retry ? { maxAttempts: retry.attempts, baseMs: durationMs(retry.base), timeoutMs: durationMs(retry.timeout) } : { maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }); // PT6.1, S137
         const labels = e.items.find((x): x is A.EffectItem & { kind: 'EffLabels' } => x.kind === 'EffLabels');
-        differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, labels ? labels.labels : null);
+        // PS17.2, PS17.5: a retrieval's and a remember's labels, read from the source here.
+        const r = e.items.find((x): x is A.EffRetrieve => x.kind === 'EffRetrieve');
+        const w = e.items.find((x): x is A.EffRemember => x.kind === 'EffRemember');
+        const lowest = module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes[0];
+        const src = r ? module.decls.find((d): d is A.SourceDecl => d.kind === 'Source' && d.name === r.source) : undefined;
+        const memLabels = w ? ['write:store'] : r ? [src && (src.owned || src.audience !== lowest) ? 'read:private' : 'read:store'] : null;
+        differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, memLabels ?? (labels ? labels.labels : null));
+        differ(`effects.manifest.json ${kind}.retrieve`, entry.retrieve ?? null, r ? { source: r.source, owner: r.owner, limit: r.limit } : null);
+        differ(`effects.manifest.json ${kind}.remember`, entry.remember ?? null, w ? { source: w.source, provenance: w.provenance, about: w.about } : null);
+        // PS17.3: the recipient's field and class, which the runtime's flow check reads.
+        const to = e.items.find((x): x is A.EffectItem & { kind: 'EffTo'; param: string } => x.kind === 'EffTo');
+        const au = e.items.find((x): x is A.EffectItem & { kind: 'EffAudience'; cls: string } => x.kind === 'EffAudience');
+        differ(`effects.manifest.json ${kind}.recipient`, entry.recipient ?? null, to || au ? { to: to?.param ?? null, audience: au?.cls ?? null } : null);
         // S151: the capability bounds, read back exactly: a wider prefix in the manifest is a wider capability at run time.
         const targets = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
         differ(`effects.manifest.json ${kind}.targets`, entry.targets ?? null, targets ? Object.fromEntries(targets.targets.map((t) => [t.key, t.values])) : null);
@@ -156,8 +168,10 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         differ(`effects.manifest.json ${kind}.class`, entry.class, 'none');
         const provider = d.items.find((x) => x.kind === 'DecProvider') as { value: string } | undefined;
         const band = d.items.find((x) => x.kind === 'DecBand') as { lo: number; hi: number } | undefined;
-        const answers = (t: RType): unknown => (t.k === 'record' ? Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, answers(f.type)])) : valuesOf(t, M).map((v) => flatValue(v, t, M)));
-        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}) });
+        const answers = (t: RType): unknown => (t.k === 'content' ? 'content' : t.k === 'record' ? Object.fromEntries(M.records.get(t.name)!.fields.map((f) => [f.name, answers(f.type)])) : valuesOf(t, M).map((v) => flatValue(v, t, M)));
+        // PS17.6: the Items parameter an answer cites.
+        const cites = d.items.find((x) => x.kind === 'DecCites') as { param: string } | undefined;
+        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) });
       }
     }
   }
@@ -223,6 +237,22 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     let bases: unknown = null;
     try { bases = (JSON.parse(bytes.toString('utf8')) as { bases?: unknown }).bases ?? null; } catch { bases = null; }
     differ(`credentials/${name}.json`, got, { v: 1, credential: c.name, kind: c.credKind, provider: c.provider, profile: 'sha256:' + createHash('sha256').update(bytes).digest('hex'), grant: c.grant, pkce: c.pkce, scopes: c.scopes, holder: c.holder !== null, bases });
+  }
+
+  // ── sources/<s>.json and flow/<module>.json (PS17.0, PS17.3, S303): each source and the flow descriptor, read back
+  // against the source's declarations ──
+  const sourceDecls = module.decls.filter((d): d is A.SourceDecl => d.kind === 'Source');
+  if (sourceDecls.length || module.decls.some((d) => d.kind === 'Audience')) {
+    const classes = module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? [];
+    const cls = (c: string) => Math.max(0, classes.indexOf(c));
+    const read = (rel: string): unknown => { const f = join(dir, '..', rel); if (!existsSync(f)) { out.push(`${rel} is missing (PS17)`); return undefined; } try { return JSON.parse(readFileSync(f, 'utf8')); } catch { out.push(`${rel} is not JSON`); return undefined; } };
+    const ms = (d: string | null) => (d === null ? null : durationMs(d));
+    for (const s of sourceDecls) {
+      const got = read(`sources/${s.name}.json`);
+      if (got !== undefined) differ(`sources/${s.name}.json`, got, { v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: s.owned, freshnessMs: ms(s.freshness), stale: s.stale });
+    }
+    const got = read(`flow/${module.name}.json`);
+    if (got !== undefined) differ(`flow/${module.name}.json`, got, { v: 1, module: module.name, audience: classes, sources: Object.fromEntries(sourceDecls.map((s) => [s.name, { class: cls(s.audience), owned: s.owned }])) });
   }
 
   // ── polyflow.workflow.json (PT10, S165): each workflow that runs this machine, read back against its source ──
@@ -353,6 +383,7 @@ export function hostDeclarations(M: RMachine, decl: A.Machine): string {
       case 'ref': return 'string | null';
       case 'principal': return 'Principal | null';
       case 'content': return 'Content | null';
+      case 'items': return 'Items';
       case 'record': return `{ ${M.records.get(t.name)!.fields.map((f) => `${q(f.name)}: ${ts(f.type)}`).join('; ')} }`;
       case 'map': return t.key.k === 'int' ? `(${ts(t.value)})[]` : `{ ${M.unions.get((t.key as { name: string }).name)!.ctors.map((c) => `${q(c.name)}: ${ts(t.value)}`).join('; ')} }`;
       case 'union': {
@@ -363,7 +394,7 @@ export function hostDeclarations(M: RMachine, decl: A.Machine): string {
     }
   };
   const rec = (ps: { name: string; type: RType }[]) => (ps.length ? `{ ${ps.map((p) => `${q(p.name)}: ${ts(p.type)}`).join('; ')} }` : '{}');
-  const lines = ['export type Content = string & { readonly __poly: "Content" };', 'export type Principal = string & { readonly __poly: "Principal" };', 'export interface State {'];
+  const lines = ['export type Content = string & { readonly __poly: "Content" };', 'export type Principal = string & { readonly __poly: "Principal" };', 'export type Items = { readonly count: number; readonly __poly: "Items" };', 'export interface State {'];
   for (const f of M.fields) {
     const u = f.type.k === 'union' ? M.unions.get(f.type.name)! : null;
     if (u && u.ctors.some((c) => c.fields.length)) {
@@ -399,7 +430,8 @@ function resultType(t: A.TypeExpr, M: RMachine): RType {
   switch (t.kind) {
     case 'TRange': return { k: 'int', lo: t.lo, hi: t.hi };
     case 'TBool': return { k: 'bool' };
-    case 'TName': return M.records.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
+    // PS17.2: an answer that is a body.
+    case 'TName': return t.name === 'Content' && !M.unions.has('Content') && !M.records.has('Content') ? { k: 'content' } : M.records.has(t.name) ? { k: 'record', name: t.name } : { k: 'union', name: t.name };
     default: throw new Error(`poly-ref: a decision's result is finite, not ${t.kind} (PD1.2a)`);
   }
 }

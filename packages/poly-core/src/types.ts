@@ -27,6 +27,10 @@ export interface TypeEnv {
   ctorOwners: Map<string, string[]>;
   /** S176: the module these types are declared in, so a machine name in a type is spelled M here and m.M elsewhere. */
   module?: string;
+  /** PS17.4: whether the module declares an owned source, which adds one principal representative. */
+  owning?: boolean;
+  /** PS1.4b: the top of an Items count, the largest limit among the module's retrievals. */
+  itemsLimit?: number;
 }
 
 export function buildTypeEnv(module: Module): TypeEnv {
@@ -48,13 +52,24 @@ export function buildTypeEnv(module: Module): TypeEnv {
     unions.set(info.name, info);
     for (const c of info.ctors) ctorOwners.set(c.name, [...(ctorOwners.get(c.name) ?? []), info.name]);
   }
+  // PS1.4b, Q3: `audience { … }` declares the enum Audience, its members in their order; a second is PL1002 in the checker.
+  const aud = module.decls.find((d): d is import('./ast.js').AudienceDecl => d.kind === 'Audience');
+  if (aud && !unions.has('Audience')) {
+    const info: UnionInfo = { name: 'Audience', ctors: aud.classes.map((name) => ({ name, fields: [] })), isEnum: true };
+    unions.set('Audience', info);
+    for (const c of info.ctors) ctorOwners.set(c.name, [...(ctorOwners.get(c.name) ?? []), 'Audience']);
+  }
   // S76: Tri is usable in machines, as the enum True | False | Unknown, when the module names it and declares no Tri.
   if (!unions.has('Tri') && !records.has('Tri') && namesType(module.decls, 'Tri')) {
     const tri: UnionInfo = { name: 'Tri', ctors: ['True', 'False', 'Unknown'].map((name) => ({ name, fields: [] })), isEnum: true };
     unions.set('Tri', tri);
     for (const c of tri.ctors) ctorOwners.set(c.name, [...(ctorOwners.get(c.name) ?? []), 'Tri']);
   }
-  return { unions, ctorOwners, records, module: module.name };
+  // PS17.4, PS1.4b: read once here, for the lowering's domains.
+  const owning = module.decls.some((d) => d.kind === 'Source' && d.owned);
+  let itemsLimit = 0;
+  for (const d of module.decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl') for (const x of it.items) if (x.kind === 'EffRetrieve') itemsLimit = Math.max(itemsLimit, x.limit);
+  return { unions, ctorOwners, records, module: module.name, owning, itemsLimit };
 }
 
 export function typeToString(t: TypeExpr): string {
@@ -108,6 +123,8 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
       if (t.name === 'Principal' && !env.unions.has(t.name) && !env.records.has(t.name)) return 2;
       // PS4.1f: and so is a Content, by its representatives, plus none.
       if (t.name === 'Content' && !env.unions.has(t.name) && !env.records.has(t.name)) return 3;
+      // PS1.4b: an Items is explored by its count; its taint is the checker's ghost (PS17.1).
+      if (t.name === 'Items' && !env.unions.has(t.name) && !env.records.has(t.name)) return 1;
       visiting = new Set([...visiting, t.name]);
       const r = env.records.get(t.name);
       if (r) {

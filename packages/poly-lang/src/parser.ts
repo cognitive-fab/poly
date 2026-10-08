@@ -205,6 +205,8 @@ class Parser {
     if (this.at('workflow') && this.peek(1).kind === 'ident') return this.workflow();
     if (this.at('channel') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.channel();
     if (this.at('credential') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.credential();
+    if (this.at('audience') && this.atPunct('{', 1)) return this.audience();
+    if (this.at('source') && this.peek(1).kind === 'ident' && this.atPunct(':', 2)) return this.source();
     if (this.at('use')) {
       this.next();
       return this.node<A.UseDecl>(start, { kind: 'Use', path: this.qualName() }, true);
@@ -214,7 +216,52 @@ class Parser {
       this.laterDiagnostics.push(diag('PL0901', { line: start.line, col: start.col }, `'${start.text}' is not lowered in milestone M0`));
       return null;
     }
-    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, channel, credential, use)');
+    this.fail('expected a declaration (type, enum, claims, machine, configuration, policy, workflow, channel, credential, audience, source, use)');
+  }
+
+  /** `audience { a1 < a2 < … }` (PS1.4b, Q3): a total order of classes, the lowest first. */
+  private audience(): A.AudienceDecl {
+    const start = this.next();
+    this.expect('{');
+    const classes = [this.ident('an audience class')];
+    while (this.atPunct('<')) { this.next(); classes.push(this.ident('an audience class')); }
+    this.expect('}');
+    return this.node<A.AudienceDecl>(start, { kind: 'Audience', classes }, true);
+  }
+
+  /** `source s: k { adapter "a"  audience c [owned]  freshness d [stale escalate | stale deny] }` (PS17.0). */
+  private source(): A.SourceDecl {
+    const start = this.next();
+    const name = this.ident('a source name');
+    this.expect(':');
+    const sourceKind = this.ident('a source kind');
+    this.expect('{');
+    let adapter: string | null = null;
+    let audience: string | null = null;
+    let owned = false;
+    let freshness: string | null = null;
+    let stale: A.SourceDecl['stale'] = 'escalate';
+    const seen = new Set<string>();
+    while (!this.atPunct('}')) {
+      const is = this.peek();
+      const w = this.ident('adapter, audience, freshness or stale');
+      // As for a channel's and a credential's clauses: each is written once.
+      if (seen.has(w)) this.fail(`a source states its ${w} once`, is);
+      seen.add(w);
+      if (w === 'adapter') adapter = this.str('an adapter name');
+      else if (w === 'audience') {
+        audience = this.ident('an audience class');
+        if (this.at('owned')) { this.next(); owned = true; }
+      } else if (w === 'freshness') freshness = this.duration();
+      else if (w === 'stale') {
+        const s = this.ident('escalate or deny');
+        if (s !== 'escalate' && s !== 'deny') this.fail('expected escalate or deny', is);
+        stale = s;
+      } else this.fail('expected adapter, audience, freshness or stale', is);
+    }
+    if (audience === null) this.fail('a source names its audience (PS17.0)');
+    this.next();
+    return this.node<A.SourceDecl>(start, { kind: 'Source', name, sourceKind, adapter, audience, owned, freshness, stale }, true);
   }
 
   /** `credential c: oauth2 { provider "p"  grant authorization_code [pkce] | client_credentials  scopes { … }  holder T }` (PT10e). */
@@ -273,9 +320,12 @@ class Parser {
     let adapter: string | null = null;
     let thread = '';
     let starts: A.Channel['starts'] = null;
+    let audience: string | null = null;
     const maps: A.ChannelMap[] = [];
     const seen = new Set<string>();
     while (!this.atPunct('}')) {
+      // PS15, S305: the class of the channel's recipients.
+      if (this.at('audience') && !this.atPunct('->', 1)) { if (seen.has('audience')) this.fail('a channel names its audience once'); seen.add('audience'); this.next(); audience = this.ident('an audience class'); continue; }
       // Review A-F6 (M8b): each clause is written once; a second would silently replace the first.
       if (this.at('adapter')) { if (seen.has('adapter')) this.fail('a channel names its adapter once'); seen.add('adapter'); this.next(); adapter = this.str('an adapter name'); continue; }
       if (this.at('thread')) { if (seen.has('thread')) this.fail('a channel names its thread key once'); seen.add('thread'); this.next(); thread = this.str('a thread template'); continue; }
@@ -300,7 +350,7 @@ class Parser {
       maps.push(this.node<A.ChannelMap>(ms, { kind: 'ChannelMap', peer, machine, action }, true));
     }
     this.next();
-    return this.node<A.Channel>(start, { kind: 'Channel', name, channelKind, adapter, thread, starts, maps }, true);
+    return this.node<A.Channel>(start, { kind: 'Channel', name, channelKind, adapter, thread, starts, maps, ...(audience !== null ? { audience } : {}) }, true);
   }
 
   /** `workflow w runs M { input A  key "…" where f matches "…", …  tool "kind" -> t target "…" why "…" … }` (PT10, S166). */
@@ -1002,9 +1052,37 @@ class Parser {
         let holder: string | null = null;
         if (this.at('for')) { this.next(); holder = this.ident('the holder parameter'); }
         items.push(this.effItem(is, { kind: 'EffUses', credential, scopes, holder }));
+      } else if (w === 'retrieve') {
+        // PS17.2: `retrieve s [where owner == p] limit n`.
+        const source = this.ident('a source');
+        let owner: string | null = null;
+        if (this.at('where')) {
+          this.next();
+          this.expect('owner');
+          this.expect('==');
+          owner = this.ident('a Principal parameter');
+        }
+        this.expect('limit');
+        const limit = this.int();
+        items.push(this.effItem(is, { kind: 'EffRetrieve', source, owner, limit }));
+      } else if (w === 'remember') {
+        // PS17.5: `remember s as k about p`.
+        const source = this.ident('a memory source');
+        this.expect('as');
+        const at = this.peek();
+        const provenance = this.ident('observed, derived or verified');
+        if (provenance !== 'observed' && provenance !== 'derived' && provenance !== 'verified') this.fail('expected observed, derived or verified', at);
+        this.expect('about');
+        const about = this.ident('the subject parameter');
+        items.push(this.effItem(is, { kind: 'EffRemember', source, provenance, about }));
+      } else if (w === 'to') {
+        // PS17.3: the payload field that names the recipient.
+        items.push(this.effItem(is, { kind: 'EffTo', param: this.ident('the recipient parameter') }));
+      } else if (w === 'audience') {
+        items.push(this.effItem(is, { kind: 'EffAudience', cls: this.ident('an audience class') }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
         items.push(this.outcome(is, w));
-      } else this.fail('expected kind, labels, targets, uses, class, retry, ok, failed or exhausted', is);
+      } else this.fail('expected kind, labels, targets, uses, retrieve, remember, to, audience, class, retry, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);
@@ -1050,8 +1128,9 @@ class Parser {
         this.expect('..');
         const hi = this.decimal();
         items.push(this.effItem(is, { kind: 'DecBand', lo, hi }) as unknown as A.DecisionItem);
-      } else if (w === 'ok' || w === 'failed' || w === 'exhausted') items.push(this.outcome(is, w));
-      else this.fail('expected provider, labels, timeout, band, ok or failed', is);
+      } else if (w === 'cites') items.push(this.effItem(is, { kind: 'DecCites', param: this.ident('an Items parameter') }) as unknown as A.DecisionItem);
+      else if (w === 'ok' || w === 'failed' || w === 'exhausted') items.push(this.outcome(is, w));
+      else this.fail('expected provider, labels, timeout, band, cites, ok or failed', is);
     }
     this.next();
     return this.node<A.Decision>(start, { kind: 'Decision', name, params, result, items }, true);

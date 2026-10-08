@@ -158,6 +158,16 @@ export const CODES: Record<string, CodeInfo> = {
   PL6824: { name: 'TOKEN_READ_IN_HANDLER', stage: 'lint', severity: 'error' },
   PL6825: { name: 'SECRET_IN_CONFIG', stage: 'runtime', severity: 'error' },
   // PT10f, S200 (M9): admission refuses the development keychain in a build for production.
+  // PS17.3 (S301): tainted content can reach a recipient outside its audience, with the shortest witness.
+  PL6831: { name: 'AUDIENCE_LEAK', stage: 'model-check', severity: 'finding' },
+  // PS17.5 (S309): a memory item written with a wider audience than its content's taint.
+  PL6832: { name: 'TAINT_DOWNGRADE', stage: 'model-check', severity: 'finding' },
+  // PS1.4b, PS17.0 (S303): a source, channel or effect names a class the audience does not declare.
+  PL6833: { name: 'AUDIENCE_UNDECLARED', stage: 'types', severity: 'error' },
+  // PS17.0 (S303): a source names an adapter poly-io does not make.
+  PL6834: { name: 'SOURCE_ADAPTER_UNKNOWN', stage: 'types', severity: 'error' },
+  // PS17.2 (S303): where owner == p on a source that is not owned.
+  PL6835: { name: 'OWNER_ON_UNOWNED', stage: 'types', severity: 'error' },
   // PT28.1d, PT10h, S312: a type error in host code compiled against the generated declarations.
   PL6836: { name: 'HOST_TYPE_ERROR', stage: 'host', severity: 'finding' },
   PL6826: { name: 'VAULT_NOT_FOR_PRODUCTION', stage: 'runtime', severity: 'error' },

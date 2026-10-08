@@ -7,7 +7,7 @@
 // name, an enum-keyed map is an object keyed by constructor name, and a map
 // keyed by 0..n is an array.
 import type { RMachine, RType } from './model.js';
-import { isMap, isRecord, isUnion, type State, type Value } from './values.js';
+import { bare, isMap, isRecord, isUnion, type State, type Value } from './values.js';
 import { valuesOf } from './model.js';
 
 type Flat = Record<string, unknown>;
@@ -30,6 +30,9 @@ function ctorOf(t: RType, M: RMachine, name: string) {
 }
 
 export function flatValue(v: Value, t: RType, M: RMachine): unknown {
+  // PS1.4b: an Items is its count as the lowered module reads it; PS17.1: a taint is a ghost the module never sees.
+  if (t.k === 'items') return isRecord(v) ? { ...v.fields } : v;
+  if (t.k === 'content') return bare(v);
   // S65: below the top of a field, a union with payloads is one object { $: C, payloads }.
   if (t.k === 'union' && hasPayloads(t, M) && isUnion(v)) {
     const c = ctorOf(t, M, v.ctor)!;

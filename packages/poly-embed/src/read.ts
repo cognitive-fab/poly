@@ -171,7 +171,7 @@ class Reader {
 
   // ── declarations ─────────────────────────────────────────────────────────
   private decl(node: ts.Expression): A.Decl {
-    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow', 'channel', 'credential');
+    const c = this.call(node, 'enumType', 'union', 'record', 'claims', 'use', 'machine', 'configuration', 'workflow', 'channel', 'credential', 'audience', 'source');
     switch (c.name) {
       case 'enumType': {
         const [name, members] = this.argsOf(c, 2, 2);
@@ -195,13 +195,13 @@ class Reader {
       case 'channel': {
         // PT21.1, S186: channel(name, { kind, adapter?, thread, starts?, onInbound?, peer: { P: 'A.X' } }).
         const [name, body] = this.argsOf(c, 2, 2);
-        const o = this.opts(body, ['kind', 'adapter', 'thread', 'starts', 'onInbound', 'peer']);
+        const o = this.opts(body, ['kind', 'adapter', 'thread', 'starts', 'onInbound', 'peer', 'audience']);
         const dotted = (node: ts.Expression) => { const s = this.str(node); const i = s.indexOf('.'); if (i < 1) this.fail(node, 'expected Machine.Action'); return [s.slice(0, i), s.slice(i + 1)]; };
         const onIn = o.get('onInbound');
         const st = o.get('starts');
         const starts = st ? { machine: dotted(st)[0], action: dotted(st)[1], onInbound: !!onIn && this.unparen(onIn).kind === ts.SyntaxKind.TrueKeyword } : null;
         const maps = this.obj(o.get('peer')!).map(([peer, v, kn]) => { const [machine, action] = dotted(v); return this.mk<A.ChannelMap>(kn, { kind: 'ChannelMap', peer, machine, action }); });
-        return this.mk<A.Channel>(c.node, { kind: 'Channel', name: this.str(name), channelKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, thread: this.str(o.get('thread')!), starts, maps });
+        return this.mk<A.Channel>(c.node, { kind: 'Channel', name: this.str(name), channelKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, thread: this.str(o.get('thread')!), starts, maps, ...(o.has('audience') ? { audience: this.str(o.get('audience')!) } : {}) });
       }
       case 'credential': {
         // PT10e: credential(name, { kind, provider, grant, pkce?, scopes, holder? }).
@@ -215,6 +215,23 @@ class Reader {
         if (pk && !pkce) this.fail(pk, 'pkce is written true, or left out');
         if (pkce && grant !== 'authorization_code') this.fail(pk!, 'pkce goes with authorization_code (PT10e)');
         return this.mk<A.Credential>(c.node, { kind: 'Credential', name: this.str(name), credKind: this.str(o.get('kind')!), provider: this.str(o.get('provider')!), grant, pkce, scopes: this.arr(o.get('scopes')!).map((s) => this.str(s)), holder: o.has('holder') ? this.str(o.get('holder')!) : null });
+      }
+      case 'audience': {
+        // PS1.4b: audience([a1, a2, …]), the lowest first.
+        const [classes] = this.argsOf(c, 1, 1);
+        return this.mk<A.AudienceDecl>(c.node, { kind: 'Audience', classes: this.arr(classes).map((s) => this.str(s)) });
+      }
+      case 'source': {
+        // PS17.0: source(name, { kind, adapter?, audience, owned?, freshness?, stale? }).
+        const [name, body] = this.argsOf(c, 2, 2);
+        const o = this.opts(body, ['kind', 'adapter', 'audience', 'owned', 'freshness', 'stale']);
+        if (!o.has('kind') || !o.has('audience')) this.fail(body, 'a source names its kind and audience (PS17.0)');
+        const ow = o.get('owned');
+        const owned = !!ow && this.unparen(ow).kind === ts.SyntaxKind.TrueKeyword;
+        if (ow && !owned) this.fail(ow, 'owned is written true, or left out');
+        const stale = o.has('stale') ? this.str(o.get('stale')!) : 'escalate';
+        if (stale !== 'escalate' && stale !== 'deny') this.fail(o.get('stale')!, 'expected escalate or deny');
+        return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale });
       }
       default: return this.configuration(c);
     }
@@ -439,16 +456,18 @@ class Reader {
   }
 
   private decisionItem(node: ts.Expression): A.DecisionItem {
-    const c = this.call(node, 'provider', 'labels', 'timeout', 'band', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'provider', 'labels', 'timeout', 'band', 'cites', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.DecisionItem;
     if (c.name === 'provider') return mk({ kind: 'DecProvider', value: this.str(this.argsOf(c, 1, 1)[0]) });
     if (c.name === 'timeout') return mk({ kind: 'DecTimeout', value: this.str(this.argsOf(c, 1, 1)[0]) });
     if (c.name === 'band') { const [lo, hi] = this.argsOf(c, 2, 2); return mk({ kind: 'DecBand', lo: this.decimal(lo), hi: this.decimal(hi) }); }
+    // PS17.6: cites(param).
+    if (c.name === 'cites') return mk({ kind: 'DecCites', param: this.str(this.argsOf(c, 1, 1)[0]) });
     return this.effItem(node) as A.DecisionItem;
   }
 
   private effItem(node: ts.Expression): A.EffectItem {
-    const c = this.call(node, 'kind', 'labels', 'targets', 'uses', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'kind', 'labels', 'targets', 'uses', 'retrieve', 'remember', 'to', 'audience', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.EffectItem;
     switch (c.name) {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
@@ -460,6 +479,23 @@ class Reader {
         const [cred, scopes, holder] = this.argsOf(c, 2, 3);
         return mk({ kind: 'EffUses', credential: this.str(cred), scopes: this.arr(scopes).map((s) => this.str(s)), holder: holder ? this.str(holder) : null });
       }
+      case 'retrieve': {
+        // PS17.2: retrieve(source, { owner?, limit }).
+        const [src, body] = this.argsOf(c, 2, 2);
+        const o = this.opts(body, ['owner', 'limit']);
+        if (!o.has('limit')) this.fail(body, 'a retrieval names its limit (PS17.2)');
+        return mk({ kind: 'EffRetrieve', source: this.str(src), owner: o.has('owner') ? this.str(o.get('owner')!) : null, limit: this.int(o.get('limit')!) });
+      }
+      case 'remember': {
+        // PS17.5: remember(source, provenance, about).
+        const [src, prov, about] = this.argsOf(c, 3, 3);
+        const provenance = this.str(prov);
+        if (provenance !== 'observed' && provenance !== 'derived' && provenance !== 'verified') this.fail(prov, 'expected observed, derived or verified');
+        return mk({ kind: 'EffRemember', source: this.str(src), provenance, about: this.str(about) });
+      }
+      // PS17.3: to(param) and audience(class), an effect's recipient.
+      case 'to': return mk({ kind: 'EffTo', param: this.str(this.argsOf(c, 1, 1)[0]) });
+      case 'audience': return mk({ kind: 'EffAudience', cls: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'retry': {
         const [n, base, timeout] = this.argsOf(c, 3, 3);
         return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });

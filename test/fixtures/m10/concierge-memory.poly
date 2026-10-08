@@ -1,0 +1,84 @@
+// M10 (AC22 to AC24): the concierge with memory. A customer asks with claims; the desk retrieves that customer's orders,
+// and only that customer's, asks a decision that cites them, and replies to the customer who asked. The flow rule
+// (PS17.3) holds: the reply is tainted with the customer's own orders, and goes to that customer.
+module concierge_memory
+
+audience { public < customer < staff }
+
+claims Customer {
+  principal: Principal
+}
+
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+}
+
+enum Phase { Idle, Looking, Answering }
+
+machine Desk {
+  state {
+    phase    : Phase     = Idle
+    customer : Principal = none
+    question : Content   = none
+  }
+
+  action Ask(question: Content)
+  action Found(items: Items)
+  action LookupFailed()
+  action Answered(text: Content, cites: Items)
+  action AnswerFailed()
+
+  on Ask(question) by c: Customer {
+    require phase == Idle else reject "busy"
+    phase' = Looking
+    customer' = c.principal
+    question' = question
+    emit lookup(customer: c.principal)
+  }
+
+  on Found(items) {
+    require phase == Looking else reject "not-looking"
+    phase' = Answering
+    decide answer(question: question, context: items)
+  }
+
+  on LookupFailed {
+    require phase == Looking else reject "not-looking"
+    phase' = Idle
+  }
+
+  on Answered(text, cites) {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    emit reply(customer: customer, body: text)
+  }
+
+  on AnswerFailed {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+  }
+
+  effect lookup(customer: Principal) {
+    retrieve orders where owner == customer limit 2
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision answer(question: Content, context: Items) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    cites context
+    ok(r) -> Answered(text: r.answer, cites: r.cites)
+    failed -> AnswerFailed()
+  }
+
+  effect reply(customer: Principal, body: Content) {
+    kind "support.reply"
+    labels { egress:external }
+    to customer
+    audience public
+  }
+}

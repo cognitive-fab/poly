@@ -48,10 +48,13 @@ class Printer {
       case 'Channel': {
         const peer = d.maps.map((m) => `${ind}  ${this.key(m.peer)}: ${q(`${m.machine}.${m.action}`)},\n`).join('');
         const starts = d.starts ? `, starts: ${q(`${d.starts.machine}.${d.starts.action}`)}${d.starts.onInbound ? ', onInbound: true' : ''}` : '';
-        return `${this.use('channel')}(${q(d.name)}, { kind: ${q(d.channelKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, thread: ${q(d.thread)}${starts}, peer: {\n${peer}${ind}} })`;
+        return `${this.use('channel')}(${q(d.name)}, { kind: ${q(d.channelKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, thread: ${q(d.thread)}${starts}${d.audience ? `, audience: ${q(d.audience)}` : ''}, peer: {\n${peer}${ind}} })`;
       }
       // PT10e: credential(name, { kind, provider, grant, pkce?, scopes, holder? }).
       case 'Credential': return `${this.use('credential')}(${q(d.name)}, { kind: ${q(d.credKind)}, provider: ${q(d.provider)}, grant: ${q(d.grant)}${d.pkce ? ', pkce: true' : ''}, scopes: [${d.scopes.map(q).join(', ')}]${d.holder === null ? '' : `, holder: ${q(d.holder)}`} })`;
+      // PS1.4b, PS17.0: audience([…]) and source(name, { … }).
+      case 'Audience': return `${this.use('audience')}([${d.classes.map(q).join(', ')}])`;
+      case 'Source': return `${this.use('source')}(${q(d.name)}, { kind: ${q(d.sourceKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, audience: ${q(d.audience)}${d.owned ? ', owned: true' : ''}${d.freshness === null ? '' : `, freshness: ${q(d.freshness)}`}${d.stale === 'escalate' ? '' : `, stale: ${q(d.stale)}`} })`;
       case 'Workflow': {
         const key = d.key ? `, key: { template: ${q(d.key.template)}${d.key.fields.length ? `, where: { ${d.key.fields.map((f) => `${this.key(f.name)}: ${q(f.pattern)}`).join(', ')} }` : ''} }` : '';
         const tools = d.tools.map((t) => `${ind}  ${q(t.effect)}: { tool: ${q(t.tool)}${t.target === null ? '' : `, target: ${q(t.target)}`}, why: ${q(t.why)} },\n`).join('');
@@ -168,6 +171,11 @@ class Printer {
       case 'EffTargets': return `${this.use('targets')}([${x.targets.map((t) => `[${q(t.key)}, [${t.values.map(q).join(', ')}]]`).join(', ')}])`;
       // PT10e: uses(credential, [scopes], holder?).
       case 'EffUses': return `${this.use('uses')}(${q(x.credential)}, [${x.scopes.map(q).join(', ')}]${x.holder === null ? '' : `, ${q(x.holder)}`})`;
+      // PS17.2, PS17.3, PS17.5.
+      case 'EffRetrieve': return `${this.use('retrieve')}(${q(x.source)}, { ${x.owner === null ? '' : `owner: ${q(x.owner)}, `}limit: ${x.limit} })`;
+      case 'EffRemember': return `${this.use('remember')}(${q(x.source)}, ${q(x.provenance)}, ${q(x.about)})`;
+      case 'EffTo': return `${this.use('to')}(${q(x.param)})`;
+      case 'EffAudience': return `${this.use('audience')}(${q(x.cls)})`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
       case 'EffOutcome': {
         const args = x.args.some((a) => readsName(a.value)) ? `(${this.p}) => (${this.args(x.args)})` : this.args(x.args);
@@ -182,6 +190,7 @@ class Printer {
       case 'DecProvider': return `${this.use('provider')}(${q(x.value)})`;
       case 'DecTimeout': return `${this.use('timeout')}(${q(x.value)})`;
       case 'DecBand': return `${this.use('band')}(${decimal(x.lo)}, ${decimal(x.hi)})`;
+      case 'DecCites': return `${this.use('cites')}(${q(x.param)})`;
       default: return this.effItem(x);
     }
   }

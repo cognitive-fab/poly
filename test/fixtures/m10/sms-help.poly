@@ -1,0 +1,96 @@
+// M10 (PS17.3): a help desk on one SMS channel that answers from staff documents. The flow rule is judged in the
+// channel's configuration, where the conversation sends the answer: documents of class staff may go to recipients of
+// class staff, and the tests lower the channel's class to customer to see the leak.
+module helpdesk
+
+audience { public < customer < staff }
+
+source help: documents {
+  adapter "opensearch"
+  audience staff
+}
+
+enum Last { Nothing, Sent, Refused, Lost }
+enum Phase { Idle, Searching, Answering }
+
+channel text: sms {
+  adapter "sms"
+  thread "{from}"
+  starts Agent.Start on inbound
+  audience staff
+  Message -> Agent.Got
+  Delivered -> Agent.Delivered
+  Rejected -> Agent.SendRejected
+  Failed -> Agent.SendFailed
+}
+
+service machine Agent {
+  state {
+    started  : bool    = false
+    phase    : Phase   = Idle
+    question : Content = none
+    last     : Last    = Nothing
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Found(items: Items)
+  action SearchFailed()
+  action Answered(answer: Content)
+  action AnswerFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "opted-out" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    require phase == Idle else reject "busy"
+    phase' = Searching
+    question' = body
+    emit search()
+  }
+  on Found(items) {
+    require phase == Searching else reject "not-searching"
+    phase' = Answering
+    decide answer(question: question, context: items)
+  }
+  on SearchFailed {
+    require phase == Searching else reject "not-searching"
+    phase' = Idle
+  }
+  on Answered(answer) {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    emit text.reply(body: answer)
+  }
+  on AnswerFailed {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+  }
+  on Delivered {
+    last' = Sent
+  }
+  on SendRejected(reason) {
+    last' = Refused
+  }
+  on SendFailed {
+    last' = Lost
+  }
+
+  effect search() {
+    retrieve help limit 1
+    ok(r) -> Found(items: r.items)
+    failed -> SearchFailed()
+  }
+
+  decision answer(question: Content, context: Items) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Answered(answer: r.answer)
+    failed -> AnswerFailed()
+  }
+}

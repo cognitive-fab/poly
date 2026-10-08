@@ -6,7 +6,7 @@
 import type * as A from '@poly/core';
 import { machineHome } from './channels.js';
 import type { MapValue, RecordValue, UnionValue, Value } from './values.js';
-import { keyOf, isUnion, isMap, isRecord } from './values.js';
+import { keyOf, isUnion, isMap, isRecord, bare } from './values.js';
 
 /** Types as PS1.4 lists them. */
 export type RType =
@@ -23,7 +23,9 @@ export type RType =
   /** `Principal` (PD5.1.2b): an opaque identity, a string at run time, or null for `none`. */
   | { k: 'principal' }
   /** PS1.4a (S180): an opaque reference to a body, or none. */
-  | { k: 'content' };
+  | { k: 'content' }
+  /** PS1.4b: an opaque reference to retrieved items, of which a module reads the count. */
+  | { k: 'items' };
 
 export interface RUnion {
   name: string;
@@ -181,6 +183,25 @@ export interface RMachine {
   contents: number;
   /** PS15.3: the keys of the channels whose application this machine is; each names its conversation's address. */
   channelKeys: string[];
+  /** PS1.4b: the top of an Items count, the largest limit among the program's retrievals. */
+  itemsLimit: number;
+  /** PS17: what the flow rule reads, when the program declares a source; null otherwise, and then no taint but ⊥ exists. */
+  memory: RMemory | null;
+}
+
+/** PS17, read from the source by poly-ref itself: the audience order, the intents that taint, and each effect's recipient. */
+export interface RMemory {
+  classes: string[];
+  /** Each retrieval effect's kind: its source's class, whether it is owned, and the payload field its owner predicate names. */
+  retrievals: Map<string, { source: string; cls: number; owned: boolean; owner: string | null }>;
+  /** Each remember effect's kind: its memory source's class, whether it is owned, and the subject's payload field. */
+  remembers: Map<string, { source: string; cls: number; owned: boolean; about: string }>;
+  /** Each decision's kind. */
+  decisions: Set<string>;
+  /** Each other effect's kind: the payload field `to` names, and the class `audience` declares. */
+  recipients: Map<string, { to: string | null; cls: number | null }>;
+  /** PS17.2: the kinds whose pending taints each action completes (an outcome of a retrieval or a decision names it). */
+  completes: Map<string, string[]>;
 }
 
 /**
@@ -225,6 +246,8 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
         if (t.name === 'Principal' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Principal')) return { k: 'principal' };
         // PS1.4a: Content is built in, unless the module declares a type of that name.
         if (t.name === 'Content' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Content')) return { k: 'content' };
+        // PS1.4b: Items is built in, unless the module declares a type of that name.
+        if (t.name === 'Items' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl' || d.kind === 'RecordDecl') && d.name === 'Items')) return { k: 'items' };
         // PS1.0, S190: m.E, an enum of another module, read from the declaring module's own source.
         if (t.name.includes('.')) return foreignEnum(t.name);
         return { k: 'union', name: t.name };
@@ -252,11 +275,14 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
   };
   // A parameter of a used module's action: its addresses and its enums are that module's, spelled from the view (S176,
   // S190); Principal and Content are builtins.
-  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : t.kind === 'TName' && t.name === 'Content' ? { k: 'content' } : t.kind === 'TName' ? foreignEnum(t.name.includes('.') ? t.name : `${mod}.${t.name}`) : typeOf(t));
+  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : t.kind === 'TName' && t.name === 'Content' ? { k: 'content' } : t.kind === 'TName' && t.name === 'Items' ? { k: 'items' } : t.kind === 'TName' ? foreignEnum(t.name.includes('.') ? t.name : `${mod}.${t.name}`) : typeOf(t));
   for (const d of decls) {
     if (d.kind === 'EnumDecl') unions.set(d.name, { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })) });
     if (d.kind === 'TypeDecl') unions.set(d.name, { name: d.name, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) })) });
   }
+  // PS1.4b: `audience { … }` is the enum Audience, its members in their order.
+  const audienceDecl = decls.find((d): d is A.AudienceDecl => d.kind === 'Audience');
+  if (audienceDecl && !unions.has('Audience')) unions.set('Audience', { name: 'Audience', ctors: audienceDecl.classes.map((c) => ({ name: c, fields: [] })) });
   // S76: Tri, the enum True | False | Unknown, when a machine names it and the module declares none.
   if (!unions.has('Tri') && !recordNames.has('Tri') && mentionsType(decls, 'Tri')) unions.set('Tri', { name: 'Tri', ctors: ['True', 'False', 'Unknown'].map((name) => ({ name, fields: [] })) });
   for (const d of decls) if (d.kind === 'RecordDecl') records.set(d.name, { name: d.name, fields: d.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) });
@@ -291,7 +317,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
     effects.set(it.name, {
       name: it.name,
       // PT6.1: the manifest is keyed by kind; S41 makes the name the kind when none is given.
-      kind: kind && kind.kind === 'EffKind' ? kind.value : it.name,
+      kind: retrieveOf(it) ? `source.${retrieveOf(it)!.source}.retrieve` : rememberOf(it) ? `source.${rememberOf(it)!.source}.remember` : kind && kind.kind === 'EffKind' ? kind.value : it.name,
       cls: cls && cls.kind === 'EffClass' ? cls.value : 'none',
       params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })),
     });
@@ -407,7 +433,8 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
         if (replyPath(a.value, o.bind) === null) continue;
         const p = act?.params.find((x) => x.name === a.name);
         if (!p) continue;
-        if (decl?.params.find((x) => x.name === a.name)?.check?.mode !== 'disclosed') p.strict = true;
+        // PS4.1f, PS1.4b: a Content or an Items bound from a reply has no check domain; the runtime gives it.
+        if (decl?.params.find((x) => x.name === a.name)?.check?.mode !== 'disclosed' && p.type.k !== 'content' && p.type.k !== 'items') p.strict = true;
         if (p.type.k === 'conf') p.check = confPartition(m, o.action, p.name);
       }
     }
@@ -429,7 +456,9 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
   // PS4.1c: the Principal positions of the state plus the most principals one label carries (at least one), and never
   // fewer than 2 (S102, review A-F3).
   const label = Math.max(1, ...actions.map((a) => a.params.reduce((n, p) => n + positions(p.type, new Set()), 0) + (a.claims ? positions(a.claims.type, new Set()) : 0)));
-  const principals = opts.principals ?? Math.max(2, fields.reduce((n, f) => n + positions(f.type, new Set()), 0) + label);
+  // PS17.4: one more when the program declares an owned source, so an owner can stay apart from every recipient.
+  const owning = decls.some((d) => d.kind === 'Source' && d.owned);
+  const principals = opts.principals ?? Math.max(2, fields.reduce((n, f) => n + positions(f.type, new Set()), 0) + label) + (owning ? 1 : 0);
   // PS4.1f: the same rule applied to Content apart: its positions in the state, plus the most Content values one label
   // carries (at least one), and never fewer than 2. Content is never a record field or a payload (PS1.4a).
   const contentPositions = (t: RType): number => (t.k === 'content' ? 1 : t.k === 'map' ? contentPositions(t.value) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? (unions.get(t.key.name)?.ctors.length ?? 1) : 1) : 0);
@@ -440,8 +469,59 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
     contents,
     name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness, channelKeys: (m.channelKeys ?? []).map((c) => c.key),
+    itemsLimit: itemsLimitOf(decls),
+    memory: memoryOf(decls, m, effects, decisions),
   };
 }
+
+/** PS1.4b: the largest limit among the module's retrievals. */
+function itemsLimitOf(decls: A.Decl[]): number {
+  let n = 0;
+  for (const d of decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl') for (const x of it.items) if (x.kind === 'EffRetrieve') n = Math.max(n, x.limit);
+  return n;
+}
+
+/** PS17: the flow rule's reading of a machine, read from its module's source; null when the module declares no source. */
+function memoryOf(decls: A.Decl[], m: A.Machine, effects: Map<string, REffect>, decisions: Map<string, RDecision>): RMemory | null {
+  const sources = decls.filter((d): d is A.SourceDecl => d.kind === 'Source');
+  if (!sources.length) return null;
+  const classes = decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? [];
+  const cls = (c: string) => Math.max(0, classes.indexOf(c));
+  const retrievals: RMemory['retrievals'] = new Map();
+  const remembers: RMemory['remembers'] = new Map();
+  const recipients: RMemory['recipients'] = new Map();
+  const completes = new Map<string, string[]>();
+  const completing = (action: string, kind: string) => completes.set(action, [...(completes.get(action) ?? []), kind]);
+  for (const it of m.items) {
+    if (it.kind === 'Decision') {
+      for (const o of it.items) if (o.kind === 'EffOutcome') completing(o.action, decisions.get(it.name)!.kind);
+      continue;
+    }
+    if (it.kind !== 'EffectDecl') continue;
+    const r = retrieveOf(it);
+    const w = rememberOf(it);
+    // PS17.2, PS17.5: their kinds are source.<s>.retrieve and source.<s>.remember, whatever the effect is called.
+    if (r) {
+      const s = sources.find((x) => x.name === r.source);
+      const kind = `source.${r.source}.retrieve`;
+      retrievals.set(kind, { source: r.source, cls: s ? cls(s.audience) : 0, owned: s?.owned ?? false, owner: r.owner });
+      for (const o of it.items) if (o.kind === 'EffOutcome') completing(o.action, kind);
+      continue;
+    }
+    if (w) {
+      const s = sources.find((x) => x.name === w.source);
+      remembers.set(`source.${w.source}.remember`, { source: w.source, cls: s ? cls(s.audience) : 0, owned: s?.owned ?? false, about: w.about });
+      continue;
+    }
+    const to = it.items.find((x): x is A.EffectItem & { kind: 'EffTo'; param: string } => x.kind === 'EffTo');
+    const au = it.items.find((x): x is A.EffectItem & { kind: 'EffAudience'; cls: string } => x.kind === 'EffAudience');
+    recipients.set(effects.get(it.name)!.kind, { to: to?.param ?? null, cls: au ? cls(au.cls) : null });
+  }
+  return { classes, retrievals, remembers, decisions: new Set([...decisions.values()].map((d) => d.kind)), recipients, completes };
+}
+
+const retrieveOf = (e: A.EffectDecl) => e.items.find((x): x is A.EffRetrieve => x.kind === 'EffRetrieve');
+const rememberOf = (e: A.EffectDecl) => e.items.find((x): x is A.EffRemember => x.kind === 'EffRemember');
 
 /** The indices of a key's index: the loop variable, it plus or minus a constant, or a constant (S49). */
 function indexRange(e: A.Expr, loops: { v: string; lo: number; hi: number }[]): { lo: number; hi: number } | null {
@@ -523,6 +603,8 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
     // PS4.1f: a Content ranges over none and the representatives c1..cn, ci written as the digest of i (PT: Content lowers
     // to sha256:<hex>), so a representative is a value of the runtime's type.
     case 'content': return [null, ...Array.from({ length: M.contents }, (_, i) => `sha256:${(i + 1).toString(16).padStart(64, '0')}`)];
+    // PS1.4b: an Items by its count, 0 to the largest limit; its taint is a ghost (PS17.1).
+    case 'items': return Array.from({ length: M.itemsLimit + 1 }, (_, n) => ({ fields: { count: n } }) satisfies RecordValue);
     case 'ref': {
       // S57, PS1.6: alone, none and one address per Ref<M> field plus the most Ref<M> parameters of one action, and
       // self when M is the machine's own type. Addresses are only compared and passed on, so these realise every
@@ -623,7 +705,8 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     case 'string': return typeof v === 'string';
     case 'ref': return v === null || typeof v === 'string';
     case 'principal': return v === null || (typeof v === 'string' && v.length > 0);
-    case 'content': return v === null || (typeof v === 'string' && v.length > 0);
+    case 'content': { const b = bare(v); return b === null || (typeof b === 'string' && b.length > 0); }
+    case 'items': return isRecord(v) && Object.keys(v.fields).length === 1 && typeof v.fields.count === 'number' && Number.isInteger(v.fields.count) && v.fields.count >= 0 && v.fields.count <= M.itemsLimit;
     case 'conf': return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1000;
     case 'record': {
       if (!isRecord(v)) return false;

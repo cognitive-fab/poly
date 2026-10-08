@@ -295,7 +295,8 @@ export async function translationValidate(module: Module, machineName: string, b
     // Review A-F1 (M8b): the runtime routes by the thread key and binds the adapter by kind, so each is read back too,
     // with the digest of the library the conversation was instantiated from (PT1.4).
     if ((got.library as { digest?: string } | undefined)?.digest !== want.libraryDigest) mismatch(`channels/${name}.json library digest: the artefact has ${JSON.stringify((got.library as { digest?: string } | undefined)?.digest)}, the library ${want.library} is ${want.libraryDigest}`, []);
-    for (const k of ['kind', 'adapter', 'thread'] as const) {
+    // PS15.0a: the class of the channel's recipients, which the runtime's flow check reads.
+    for (const k of ['kind', 'adapter', 'thread', 'audience'] as const) {
       if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) mismatch(`channels/${name}.json ${k}: the artefact has ${JSON.stringify(got[k])}, the source gives ${JSON.stringify(want[k])}`, []);
     }
   }

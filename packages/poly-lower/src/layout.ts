@@ -48,6 +48,8 @@ export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
       if (t.name === 'Principal' && !env?.unions.has(t.name)) return { k: 'principal' };
       // PS1.4a, S180: Content is built in, unless the module declares a type of that name.
       if (t.name === 'Content' && !env?.unions.has(t.name)) return { k: 'content' };
+      // PS1.4b: Items is built in, unless the module declares a type of that name.
+      if (t.name === 'Items' && !env?.unions.has(t.name) && !env?.records.has(t.name)) return { k: 'items' };
       return { k: 'union', name: t.name };
     // S176: spelled as the checker spells it: M for this module's machine, m.M for a used module's.
     case 'TRef': return { k: 'ref', machine: t.machine.length > 1 && env?.module !== undefined && t.machine.slice(0, -1).join('.') !== env.module ? t.machine.join('.') : t.machine[t.machine.length - 1] };

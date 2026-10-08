@@ -71,7 +71,7 @@ export declare function pathProperty(name: string, e: Arrow): Item;
 export declare function composeInvariant(name: string, e: Arrow): Item;
 /** PS5.2a, S178: `never n: emit k(f: v) while P`; the field filter is an arrow to its constants, P an arrow. */
 /** PT21.1, S186: `channel c: k { … }`; each Peer action is bound to 'Machine.Action'. */
-export declare function channel(name: string, body: { kind: string; adapter?: string; thread: string; starts?: string; onInbound?: true; peer: { [peerAction: string]: string } }): Decl;
+export declare function channel(name: string, body: { kind: string; adapter?: string; thread: string; starts?: string; onInbound?: true; audience?: string; peer: { [peerAction: string]: string } }): Decl;
 export declare function never(name: string, effect: string, fields: Arrow<{ [field: string]: Expr }>, cond?: Arrow): Item;
 export declare function liveness(name: string, goal: { eventually: Arrow } | { from: Arrow; to: Arrow }, opts?: { forall?: [string, string]; exists?: [string, string]; fair?: string[][] }): Item;
 export declare function effect(name: string, params: { [param: string]: Type }, items: EffItem[]): Item;
@@ -82,6 +82,17 @@ export declare function cls(value: 'none' | 'reversible' | 'compensable' | 'irre
 export declare function credential(name: string, body: { kind: 'oauth2'; provider: string; grant: 'authorization_code' | 'client_credentials'; pkce?: true; scopes: string[]; holder?: string }): Decl;
 /** PT10e: `uses c { s, … } for p` in an effect. */
 export declare function uses(credential: string, scopes: string[], holder?: string): EffItem;
+/** PS1.4b: `audience { a1 < a2 < … }`, the lowest first; in an effect, `audience c`, its recipient's class (PS17.3). */
+export declare function audience(classes: string[]): Decl;
+export declare function audience(cls: string): EffItem;
+/** PS17.0: `source s: k { adapter "a"  audience c [owned]  freshness d [stale deny] }`. */
+export declare function source(name: string, body: { kind: 'records' | 'documents' | 'memory'; adapter?: string; audience: string; owned?: true; freshness?: string; stale?: 'escalate' | 'deny' }): Decl;
+/** PS17.2: `retrieve s [where owner == p] limit n` in an effect. */
+export declare function retrieve(source: string, body: { owner?: string; limit: number }): EffItem;
+/** PS17.5: `remember s as k about p` in an effect. */
+export declare function remember(source: string, provenance: 'observed' | 'derived' | 'verified', about: string): EffItem;
+/** PS17.3: `to p`, the payload field that names an effect's recipient. */
+export declare function to(param: string): EffItem;
 /** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target. */
 export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: string[]][]): EffItem;
 export declare function retry(attempts: number, base: string, timeout: string): EffItem;
@@ -97,6 +108,8 @@ export declare function decision(name: string, params: { [param: string]: Type }
 export declare function provider(kind: string): DecisionItem;
 export declare function timeout(duration: string): DecisionItem;
 export declare function band(lo: number, hi: number): DecisionItem;
+/** PS17.6: `cites x`, an Items parameter the answer's citations are a subset of. */
+export declare function cites(param: string): DecisionItem;
 export declare function decide(decision: string, args: Args): Stmt;
 /** `adjudicate d as Correct | Wrong` (PD2.4, S129). */
 export declare function adjudicate(decision: string, outcome: 'Correct' | 'Wrong'): Stmt;

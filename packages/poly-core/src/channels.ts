@@ -21,6 +21,8 @@ export interface ChannelPlan {
   peer: Record<string, string>;
   effectKind: string;
   pending: number;
+  /** PS15.0a: the class of the channel's recipients, when it declares one. */
+  audience?: string;
 }
 
 export interface ChannelExpansion {
@@ -231,7 +233,7 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
       bounds: { kind: 'ConfigBounds', id: `${c.id}:bounds`, transit: N + bound - 1, instances: 1 + bound } as A.ConfigBounds,
       properties: [],
     } as A.Configuration);
-    plans.push({ name: c.name, kind: c.channelKind, library: libName, adapter: c.adapter, thread: { template: c.thread, fields }, application: appName, starts: { action: c.starts.action, onInbound: c.starts.onInbound }, module: synth, peer: binding, effectKind, pending: N });
+    plans.push({ name: c.name, kind: c.channelKind, library: libName, adapter: c.adapter, thread: { template: c.thread, fields }, application: appName, starts: { action: c.starts.action, onInbound: c.starts.onInbound }, module: synth, peer: binding, effectKind, pending: N, ...(c.audience ? { audience: c.audience } : {}) });
   }
   // PS15.5 (S207, as ruled): an application that answers a message from one channel on another gets, beside the
   // configuration of each channel, one more named after it: every conversation live, the instance bound 1 + n and the

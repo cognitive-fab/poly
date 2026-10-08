@@ -5,7 +5,7 @@
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
 import type { ChannelPlan, ProviderEntry, ProviderProfile } from '@poly/core';
-import { boundPath, diag, digest, effectKind, effectClass, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
+import { boundPath, diag, digest, effectKind, effectClass, effectLabels, durationMs, countBound, beforeKinds, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { emitsCall } from './emit.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
@@ -24,11 +24,11 @@ export interface LowerOptions {
   providers?: Readonly<Record<string, ProviderEntry>>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'flow-class-lowered' | 'flow-recipient-dropped';
 
 export interface Lowered {
   machine: string;
-  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; 'types.d.ts'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string; [credential: `../credentials/${string}.json`]: string };
+  files: { 'contract.json': string; 'next.cjs': string; 'invariants.mjs': string; 'effects.cjs'?: string; 'effects.manifest.json'?: string; 'effect-invariants.mjs'?: string; 'invariants.compose.mjs'?: string; 'liveness.mjs'?: string; 'openshell.policies.yaml'?: string; 'types.d.ts'?: string; [workflow: `../workflows/${string}/polyflow.workflow.json`]: string; [channel: `../channels/${string}.json`]: string; [credential: `../credentials/${string}.json`]: string; [source: `../sources/${string}.json`]: string; [flow: `../flow/${string}.json`]: string };
   contract: Record<string, unknown>;
   layout: Layout;
 }
@@ -257,7 +257,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // A machine that sends needs it too (S58): a send is an intent.
   if (facts.effects.size || facts.decisions.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls, program: opts.program }, pre, opts.fault);
-    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data', fault: opts.fault }), null, 2) + '\n';
+    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data', fault: opts.fault }, module), null, 2) + '\n';
     // PT6.5, S152: the opt-in sandbox, one OpenShell policy per effect kind, from its labels and targets.
     // The broken variant widen-sandbox generates it too, so translation validation has a policy to catch.
     if (opts.isolation === 'openshell' || opts.fault === 'widen-sandbox') files['openshell.policies.yaml'] = JSON.stringify(sandboxPolicies(facts, opts.fault), null, 2) + '\n';
@@ -276,7 +276,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const inbound = opts.fault === 'channel-inbound-to-app' ? { to: 'application', action: p.peer.Message ?? Object.values(p.peer)[0] } : { to: 'conversation', action: 'Inbound' };
     // Review A-F1 (M8b): the fault channel-thread writes a thread key that reads one field fewer.
     const thread = opts.fault === 'channel-thread' ? { template: p.thread.fields.length > 1 ? `{${p.thread.fields[0]}}` : 'fixed', fields: p.thread.fields.slice(0, -1) } : p.thread;
-    files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending }, null, 2) + '\n';
+    files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending, ...(p.audience ? { audience: p.audience } : {}) }, null, 2) + '\n';
   }
   // PT10e: each credential an effect of this machine uses has its descriptor, which the vault adapter reads: what to ask
   // the provider for, and the base addresses the credential may be sent to. The broken lowerings add a scope the source
@@ -292,6 +292,22 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
       scopes: opts.fault === 'credential-scope-added' ? [...c.scopes, 'added.by.fault'] : c.scopes,
       holder: c.holder !== null,
       bases: opts.fault === 'credential-base-widened' ? [...bases, ...bases.map((b) => b.replace(/^https:/, 'http:'))] : bases,
+    }, null, 2) + '\n';
+  }
+  // PS17.0, PS17.3 (S303): the module's sources, each the descriptor its adapter is bound by, and the flow descriptor, the
+  // audience order and each channel's declared class, which the runtime's flow check reads. The broken lowerings make an
+  // owned source unowned and lower a source's class.
+  const sources = module.decls.filter((d): d is A.SourceDecl => d.kind === 'Source');
+  if (sources.length || module.decls.some((d) => d.kind === 'Audience')) {
+    const classes = module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? [];
+    const cls = (c: string) => Math.max(0, classes.indexOf(c));
+    for (const s of sources) {
+      files[`../sources/${s.name}.json`] = JSON.stringify({ v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: opts.fault === 'source-unowned' ? false : s.owned, freshnessMs: s.freshness === null ? null : durationMs(s.freshness), stale: s.stale }, null, 2) + '\n';
+    }
+    const lowered = (k: number, first: boolean) => (opts.fault === 'flow-class-lowered' && first ? 0 : k);
+    files[`../flow/${module.name}.json`] = JSON.stringify({
+      v: 1, module: module.name, audience: classes,
+      sources: Object.fromEntries(sources.map((s, i) => [s.name, { class: lowered(cls(s.audience), i === 0), owned: s.owned }])),
     }, null, 2) + '\n';
   }
   // S74: each liveness property's goal (and, for leads to, its start) as a state predicate, for exported witness
@@ -432,7 +448,7 @@ function emitsAny(body: A.Stmt[]): boolean {
 export const DEFAULT_RETRY = { maxAttempts: 5, baseMs: 500, timeoutMs: 30_000 } as const;
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels, targets (S151) and class. */
-function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault }): { effects: Record<string, unknown>; timerTargets?: string[] } {
+function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault }, module?: A.Module): { effects: Record<string, unknown>; timerTargets?: string[] } {
   // Kinds are the author's strings, so the manifest is built from entries: an assignment to a key such
   // as "__proto__" would set a prototype instead of adding the kind.
   const out: [string, unknown][] = [];
@@ -450,7 +466,16 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
       // PT10e: the credential the runtime checks the grant of before the policy (S199), the scopes it needs and the
       // payload field that names the holder. The broken lowering credential-holder-dropped loses the holder.
       if (it.kind === 'EffUses') entry.uses = { credential: it.credential, scopes: it.scopes, holder: cx.fault === 'credential-holder-dropped' ? null : it.holder };
+      // PS17.2, PS17.5: what the runtime retrieves or remembers, which no handler performs.
+      if (it.kind === 'EffRetrieve') entry.retrieve = { source: it.source, owner: it.owner, limit: it.limit };
+      if (it.kind === 'EffRemember') entry.remember = { source: it.source, provenance: it.provenance, about: it.about };
     }
+    // PS17.2: a retrieval's and a remember's labels are the runtime's.
+    if (!entry.labels && module) { const l = effectLabels(e, module); if (l) entry.labels = l; }
+    // PS17.3: the payload field naming the recipient and its declared class, which the runtime's flow check reads.
+    const to = e.items.find((x) => x.kind === 'EffTo') as { param: string } | undefined;
+    const au = e.items.find((x) => x.kind === 'EffAudience') as { cls: string } | undefined;
+    if (to || au) entry.recipient = { to: to?.param ?? null, audience: cx.fault === 'flow-recipient-dropped' ? null : au?.cls ?? null };
     // S137: an effect with no retry clause declares polyrun's default bound, so every manifest entry has its maxAttempts (S120).
     if (!entry.retry) entry.retry = { ...DEFAULT_RETRY };
     // polyrun ignores fields it does not read, so labels and class stay in the manifest (PT6.1).
@@ -477,7 +502,8 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
     entry.class = 'none';
     const provider = d.items.find((i) => i.kind === 'DecProvider') as { value: string } | undefined;
     const band = d.items.find((i) => i.kind === 'DecBand') as { lo: number; hi: number } | undefined;
-    entry.decision = { provider: provider?.value ?? null, result: resultValues(tyOfTypeExpr(d.result, env), env, facts), ...(band ? { band: [band.lo, band.hi] } : {}) };
+    const cites = d.items.find((i) => i.kind === 'DecCites') as { param: string } | undefined;
+    entry.decision = { provider: provider?.value ?? null, result: resultValues(tyOfTypeExpr(d.result, env), env, facts), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) };
     out.push([`decision.${d.name}`, entry]);
   }
   // PD2.4, S129: each adjudicated decision's outcome kind, class none, tried once, with no completion; its handler is
@@ -537,6 +563,8 @@ function outcomeEntry(it: A.EffOutcomeItem, cx: Cx): Record<string, unknown> {
 
 /** The answers a decision can give (PD1.7): an enum's constructors, a range's values, or each field's for a record. */
 function resultValues(t: Ty, env: TypeEnv, facts: MachineFacts): unknown {
+  // PS17.2: an answer that is a body has no finite set of values; the manifest says so.
+  if (t.k === 'content') return 'content';
   if (t.k === 'record') return Object.fromEntries(env.records.get(t.name)!.fields.map((f) => [f.name, valuesOfTy(tyOfTypeExpr(f.type, env), env, facts.machine)]));
   return valuesOfTy(t, env, facts.machine);
 }
@@ -756,7 +784,8 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
     // Review A-F3: plus the most principals one label carries (its parameters and its claims), at least one.
     const handlers = m.items.filter((i): i is A.Handler => i.kind === 'Handler');
     const label = Math.max(1, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.reduce((k, p) => k + principalPositions(tyOfTypeExpr(p.type, env), env, new Set()), 0) + (handlers.find((h) => h.action === a.name)?.by ? principalPositions({ k: 'record', name: handlers.find((h) => h.action === a.name)!.by!.type }, env, new Set()) : 0)));
-    const n = Math.max(2, state + label);
+    // PS17.4: one more when the module declares an owned source.
+    const n = Math.max(2, state + label) + (env.owning ? 1 : 0);
     return Array.from({ length: n }, (_, i) => `p${i + 1}`);
   }
   // PS4.1f, S180: the content representatives c1..cn and none, n by PS4.1c's rule applied to Content apart. Each ci is
@@ -766,6 +795,8 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
     if (!m) throw new Error('poly-lower: a content domain needs its machine (PS4.1f)');
     return [null, ...Array.from({ length: contentCount(m, env) }, (_, i) => `sha256:${(i + 1).toString(16).padStart(64, '0')}`)];
   }
+  // PS1.4b: an Items by its count, 0 to the largest limit; the runtime's carries more, which no handler reads.
+  if (t.k === 'items') return Array.from({ length: (env.itemsLimit ?? 0) + 1 }, (_, n) => ({ count: n }));
   if (t.k === 'ref') {
     if (!m || t.machine === null) throw new Error('poly-lower: an address domain needs its machine (S57)');
     return refDomain(m, t.machine, env.module ?? '');
@@ -887,7 +918,7 @@ function controlValues(f: A.Field, facts: MachineFacts, env: TypeEnv): unknown[]
 }
 
 function jsType(t: Ty, env: TypeEnv): string {
-  return t.k === 'bool' ? 'boolean' : t.k === 'int' || t.k === 'conf' ? 'number' : t.k === 'record' || isPayloadUnion(env, t) ? 'object' : 'string';
+  return t.k === 'bool' ? 'boolean' : t.k === 'int' || t.k === 'conf' ? 'number' : t.k === 'record' || t.k === 'items' || isPayloadUnion(env, t) ? 'object' : 'string';
   // A principal (PD5.1.2b) is a string, like an address.
 }
 
@@ -902,6 +933,7 @@ function typeText(t: Ty, env: TypeEnv): string {
     case 'ref': return `address of ${t.machine} | null`;
     case 'principal': return 'principal | null';
     case 'content': return 'content | null';
+    case 'items': return 'items';
     default: return t.k;
   }
 }

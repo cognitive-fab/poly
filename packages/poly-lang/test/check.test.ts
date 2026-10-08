@@ -60,7 +60,8 @@ test('each error source raises exactly the code it names', () => {
   // handler lint and PL6825 by admission over poly.json (PT10g), tested by test/grants.test.mjs.
   // PL6821 to PL6823 are raised over a credential, whose provider profile poly-check finds under std/ (PT10e); a source
   // checked here has no profile, so it would raise PL1001 beside them. They are tested by test/credentials.test.mjs.
-  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404' && c !== 'PL6302' && c !== 'PL6405' && c !== 'PL6406' && c !== 'PL6407' && c !== 'PL6408' && c !== 'PL6409' && c !== 'PL6410' && !/^PL681[1-5]$/.test(c) && !/^PL682[1-3]$/.test(c) && c !== 'PL6826' && c !== 'PL6824' && c !== 'PL6825' && c !== 'PL6001').map(([c]) => c);
+  // PL6833 to PL6835 are raised over an audience and the sources of PS17 (PT10i, M10), tested by test/memory-flow.test.mjs.
+  const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404' && c !== 'PL6302' && c !== 'PL6405' && c !== 'PL6406' && c !== 'PL6407' && c !== 'PL6408' && c !== 'PL6409' && c !== 'PL6410' && !/^PL681[1-5]$/.test(c) && !/^PL682[1-3]$/.test(c) && !/^PL683[3-5]$/.test(c) && c !== 'PL6826' && c !== 'PL6824' && c !== 'PL6825' && c !== 'PL6001').map(([c]) => c);
   assert.deepEqual(compileErrors.filter((c) => !seen.has(c)), []);
 });
 

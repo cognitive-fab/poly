@@ -14,6 +14,7 @@ import { machineHome } from './channels.js';
 import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
+import { taintSystem, firstBreaks, PENDING_BOUND, type TaintState } from './taint.js';
 import { antecedents, emittingActions, judge, neverParts, type Members, type RefFault, type Vacuous } from './vacuity.js';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
@@ -29,6 +30,8 @@ const CODE = {
   PL4002: ['EMIT_WITHOUT_STATE_CHANGE', 'finding', 'effects'],
   PL6201: ['UNGATED_DECISION', 'finding', 'effects'],
   PL6203: ['ADJUDICATION_WITHOUT_DECISION', 'finding', 'effects'],
+  PL6831: ['AUDIENCE_LEAK', 'finding', 'model-check'],
+  PL6832: ['TAINT_DOWNGRADE', 'finding', 'model-check'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -60,6 +63,10 @@ export interface MachineReport {
   identityEmits: Edge<State>[];
   /** PT12.3, S128: properties whose antecedent is never true where they are judged. */
   vacuous: Vacuous[];
+  /** PS17.3: the states the flow rule explored, with their taints; absent when the program declares no source. */
+  flowStates?: number;
+  /** PS17.3, PS17.5: the flow rule's findings (PL6831, PL6832, and its bound hits), reported in a stage of their own. */
+  flowFindings?: Diagnostic[];
 }
 
 export interface CheckOptions {
@@ -324,8 +331,29 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
 
   const vacuous = machineVacuity(M, g, opts.fault);
 
+  // PS17.3, PS17.5 (S301): the flow rule, over the machine with its taints, when the program declares a source.
+  let flowStates: number | undefined;
+  const flowFindings: Diagnostic[] = [];
+  if (M.memory) {
+    const tg = explore(taintSystem(M), opts.maxStates);
+    flowStates = tg.states.length;
+    const ttrace = (edges: Edge<TaintState>[]): WitnessStep[] => edges.map((e) => ({
+      pre: statePlain(tg.states[e.from].s),
+      action: e.label.action,
+      data: Object.fromEntries(Object.entries(e.label.data).map(([k, v]) => [k, toPlain(v)])),
+      post: statePlain(e.to !== null ? tg.states[e.to].s : e.outcome.state.s),
+      verdict: e.label.verdict.kind === 'rejected' ? `rejected(${e.label.verdict.reason})` : e.label.verdict.kind,
+      ...(e.label.effects.length ? { effects: e.label.effects.map((x) => x.kind) } : {}),
+    }));
+    for (const { edge, brk } of firstBreaks(M, tg)) flowFindings.push(finding(brk.code, M.handlers.get(edge.label.action)?.id, `${edge.label.action} breaks the flow rule: ${brk.text}`, ttrace([...pathTo(tg, edge.from), edge]), { property: brk.code === 'PL6831' ? 'flow' : 'remember', state: tg.states[edge.from].s }));
+    const cut = tg.edges.find((e) => e.outcome.kind === 'bound' && e.outcome.field.startsWith('pending '));
+    if (cut && cut.outcome.kind === 'bound') flowFindings.push(finding('PL3901', undefined, `the flow rule's exploration stopped: ${cut.outcome.field.slice(8)} would hold more than ${PENDING_BOUND} pending intents (PS17.2)`, ttrace([...pathTo(tg, cut.from), cut])));
+    if (tg.capHit) flowFindings.push(finding('PL3901', undefined, `the flow rule's exploration stopped at ${tg.states.length} states`, []));
+  }
+
   return {
     vacuous,
+    ...(flowStates !== undefined ? { flowStates, flowFindings } : {}),
     machine: M.name,
     states: g.states.length,
     transitions: g.edges.length,
@@ -421,6 +449,8 @@ function typeText(t: RType, M: RMachine): string {
 }
 
 function domainText(check: unknown[] | null, t: RType, M: RMachine): string {
+  // PS1.4b: an Items by its count.
+  if (t.k === 'items') return `Items count 0..${M.itemsLimit}`;
   if (!check) return typeText(t, M);
   // S57: the addresses a Ref ranges over, and none.
   if (t.k === 'ref') return `{${check.map((v) => (v === null ? 'none' : String(v))).join(', ')}}`;

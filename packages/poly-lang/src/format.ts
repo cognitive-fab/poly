@@ -57,6 +57,7 @@ class Printer {
     if (c.adapter !== null) this.out.push(`${INDENT}adapter ${q(c.adapter)}`);
     this.out.push(`${INDENT}thread ${q(c.thread)}`);
     if (c.starts) this.out.push(`${INDENT}starts ${c.starts.machine}.${c.starts.action}${c.starts.onInbound ? ' on inbound' : ''}`);
+    if (c.audience) this.out.push(`${INDENT}audience ${c.audience}`);
     for (const m of c.maps) this.emit(m, INDENT, [`${m.peer} -> ${m.machine}.${m.action}`]);
     this.out.push(`}${this.trail(c)}`);
   }
@@ -70,6 +71,17 @@ class Printer {
     this.out.push(`${INDENT}scopes ${scopeSet(c.scopes)}`);
     if (c.holder !== null) this.out.push(`${INDENT}holder ${c.holder}`);
     this.out.push(`}${this.trail(c)}`);
+  }
+
+  /** PS17.0: one clause per line, in a fixed order; stale only when it is not the default. */
+  private source(s: A.SourceDecl): void {
+    this.lead(s, '');
+    this.out.push(`source ${s.name}: ${s.sourceKind} {`);
+    if (s.adapter !== null) this.out.push(`${INDENT}adapter ${JSON.stringify(s.adapter)}`);
+    this.out.push(`${INDENT}audience ${s.audience}${s.owned ? ' owned' : ''}`);
+    if (s.freshness !== null) this.out.push(`${INDENT}freshness ${s.freshness}`);
+    if (s.stale !== 'escalate') this.out.push(`${INDENT}stale ${s.stale}`);
+    this.out.push(`}${this.trail(s)}`);
   }
 
   private workflow(w: A.Workflow): void {
@@ -131,6 +143,11 @@ class Printer {
         return this.channel(d);
       case 'Credential':
         return this.credential(d);
+      // PS1.4b, PS17.0: one canonical text each.
+      case 'Audience':
+        return this.emit(d, '', [`audience { ${d.classes.join(' < ')} }`]);
+      case 'Source':
+        return this.source(d);
     }
   }
 
@@ -301,6 +318,10 @@ class Printer {
       case 'EffTargets': return `targets { ${e.targets.map((t) => `${t.key}: ${t.key === 'egress' && t.values.length === 1 ? JSON.stringify(t.values[0]) : `[${t.values.map((v) => JSON.stringify(v)).join(', ')}]`}`).join(', ')} }`;
       case 'EffUses': return `uses ${e.credential} ${scopeSet(e.scopes)}${e.holder === null ? '' : ` for ${e.holder}`}`;
       case 'EffOutcome': return `${e.outcome}${e.bind !== undefined ? `(${e.bind})` : ''} -> ${e.action}(${this.args(e.args)})`;
+      case 'EffRetrieve': return `retrieve ${e.source}${e.owner !== null ? ` where owner == ${e.owner}` : ''} limit ${e.limit}`;
+      case 'EffRemember': return `remember ${e.source} as ${e.provenance} about ${e.about}`;
+      case 'EffTo': return `to ${e.param}`;
+      case 'EffAudience': return `audience ${e.cls}`;
     }
   }
 
@@ -309,6 +330,7 @@ class Printer {
       case 'DecProvider': return `provider ${JSON.stringify(e.value)}`;
       case 'DecTimeout': return `timeout ${e.value}`;
       case 'DecBand': return `band ${decimalText(e.lo)}..${decimalText(e.hi)}`;
+      case 'DecCites': return `cites ${e.param}`;
       default: return this.effectItem(e);
     }
   }

@@ -68,6 +68,11 @@ export const FAULT_SOURCES = {
   'credential-base-widened': ['test/fixtures/m9/credentials.poly'],
   // PT28.1, PT10h (M10 step 0): the host's declarations, with a parameter widened to unknown.
   'types-widen-param': ['conformance/m4/router.poly'],
+  // PT10i (M10 step 3): the memory descriptors the runtime reads, an owned source made unowned and a source's class
+  // lowered, and the manifest's recipient class dropped.
+  'source-unowned': ['test/fixtures/m10/concierge-memory.poly'],
+  'flow-class-lowered': ['test/fixtures/m10/concierge-memory.poly'],
+  'flow-recipient-dropped': ['test/fixtures/m10/concierge-memory.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

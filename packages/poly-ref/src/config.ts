@@ -34,7 +34,9 @@ import { antecedents, judge, neverParts, type Members, type RefFault, type Vacuo
 import { transition, initialState, isTerminal } from './step.js';
 import { AbsentInstance, evaluate, evaluateAt, type GlobalView } from './eval.js';
 import { explore, pathTo, type Edge, type Graph, type Label, type Outcome, type System } from './explore.js';
-import { keyOf, stateKey, statePlain, toPlain, type State, type Value } from './values.js';
+import { keyOf, stateKey, statePlain, toPlain, taintText, taintsKey, type State, type Taint, type Value } from './values.js';
+import { PENDING_BOUND, taintData, intentTaint, flowBreaks, claimsClass } from './taint.js';
+import type { RMemory } from './model.js';
 import { ENGINE, untested } from './check.js';
 import { readChannels } from './channels.js';
 
@@ -69,6 +71,8 @@ export interface GlobalState {
    * and key, with the action and data each will deliver; one per key. Absent elsewhere.
    */
   timers?: ArmedTimer[];
+  /** PS17.2: with taints, each instance's pending taints, by the kind of the intent; absent elsewhere. */
+  pending?: { instance: number; kind: string; t: Taint }[];
 }
 
 export interface ArmedTimer { instance: number; key: string; action: string; data: Record<string, Value> }
@@ -118,6 +122,8 @@ const CODE = {
   PL5406: ['RECEIPT_REJECTED', 'finding'],
   PL5407: ['REPLY_REFUSED', 'finding'],
   PL3301: ['LIVENESS_LASSO', 'finding'],
+  PL6831: ['AUDIENCE_LEAK', 'finding'],
+  PL6832: ['TAINT_DOWNGRADE', 'finding'],
 } as const;
 
 export interface ConfigReport {
@@ -138,6 +144,8 @@ export interface ConfigReport {
   nevers: { instance: string; machine: string; property: string; violated: boolean }[];
   /** PS15.5 (A-F2, as ruled): the instances whose never statements were checked here, and those left to their own channel's configuration. */
   neverInstances: { checked: string[]; elsewhere: { instance: string; configuration: string }[] };
+  /** PS17.3: the global states the flow rule explored, with their taints; absent when no instance's program declares a source. */
+  flowStates?: number;
 }
 
 const msgKey = (m: Message) => `${m.creation ? '+' : ''}${m.gate ? `${m.gate}<${m.from}>` : ''}${m.origin ? `{${keyOf(m.origin.claims)}@${m.origin.intent}}` : ''}${m.target}:${m.action}:${Object.keys(m.data).sort().map((k) => `${k}=${keyOf(m.data[k])}`).join(',')}`;
@@ -246,7 +254,13 @@ export function globalView(instances: ConfigInstance[], sigma: (State | null)[],
 }
 
 /** The configuration as a System over global states (PS13.2, PS13.3). */
-export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[], opts: { timed?: Set<number>; fault?: RefFault } = {}): System<GlobalState> {
+/** PS17: what a configuration's flow check gives its system: which pending kinds an instance's action completes, and an intent's taint. */
+export interface TaintRules { completes(instance: number, action: string): string[]; intentTaint(instance: number, i: import('./step.js').Intent): Taint | null; completions(instance: number): string[] }
+
+export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[], opts: { timed?: Set<number>; fault?: RefFault; taint?: TaintRules } = {}): System<GlobalState> {
+  const taint = opts.taint;
+  const pKey = (p: { instance: number; kind: string; t: Taint }) => `${p.instance}:${p.kind}=${taintText(p.t)}`;
+  const sortPending = (ps: { instance: number; kind: string; t: Taint }[]) => [...ps].sort((a, b) => (pKey(a) < pKey(b) ? -1 : pKey(a) > pKey(b) ? 1 : 0));
   const timed = opts.timed ?? new Set<number>();
   const B = decl.bounds?.transit ?? Infinity;
   const index = new Map(instances.map((x, k) => [x.name, k]));
@@ -264,7 +278,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       inputs.push({ instance: k, action: r.action, data: dataOf(instances[k].machine, r.action) });
     }
   }
-  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin'], firing?: string): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
+  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin'], firing?: string, pendingIn?: GlobalState['pending']): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
     const inst = instances[k];
     // PD5.2.2a: an input with claims starts a chain whose origin class is its claims and its intent; a delivered message's
     // step inherits the message's origin class.
@@ -309,7 +323,13 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       if (x.type === 'cancel') timers = timers.filter((t) => !(t.instance === k && t.key === x.key));
       if (x.type === 'timer') timers = [...timers.filter((t) => !(t.instance === k && t.key === x.key)), { instance: k, key: x.key, action: x.action, data: x.data }];
     }
-    const g: GlobalState = { sigma, mu: sortMu(next), ...(timed.size ? { timers: sortTimers(timers) } : {}) };
+    // PS17.2: an accepted step adds the taint of each intent that taints its completion.
+    const pending = taint ? sortPending([...(pendingIn ?? s.pending ?? []), ...(st.verdict.kind === 'accepted' ? st.effects.flatMap((i) => { const t = taint.intentTaint(k, i); return t ? [{ instance: k, kind: i.kind, t }] : []; }) : [])]) : undefined;
+    const g: GlobalState = { sigma, mu: sortMu(next), ...(timed.size ? { timers: sortTimers(timers) } : {}), ...(pending ? { pending } : {}) };
+    if (pending) {
+      const over = [...new Set(pending.map(pKey).map((x) => x.slice(0, x.indexOf('='))))].find((x) => pending.filter((q) => `${q.instance}:${q.kind}` === x).length > PENDING_BOUND);
+      if (over) return { label, outcome: { kind: 'bound', state: g, field: `pending ${instances[k].name}.${over.slice(over.indexOf(':') + 1)}`, value: PENDING_BOUND + 1 } };
+    }
     if (collision) return { label, outcome: { kind: 'collision', state: g, field: collision.address, value: collision.key } };
     if (over) return { label, outcome: { kind: 'bound', state: g, field: 'instances', value: N + 1 } };
     // PS13.5: a step that would exceed B messages in transit is not explored.
@@ -325,14 +345,37 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
   };
   return {
     initial: () => ({ sigma: instances.map((x) => (x.spawned ? null : x.init)), mu: [], ...(timed.size ? { timers: [] } : {}) }),
-    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}${s.timers?.length ? `||${s.timers.map((t) => `${timerKey(t)}>${t.action}(${Object.keys(t.data).sort().map((f) => `${f}=${keyOf(t.data[f])}`).join(',')})`).join(';')}` : ''}`,
+    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}${s.timers?.length ? `||${s.timers.map((t) => `${timerKey(t)}>${t.action}(${Object.keys(t.data).sort().map((f) => `${f}=${keyOf(t.data[f])}`).join(',')})`).join(';')}` : ''}${taint ? `##${s.sigma.map((x, k) => (x === null ? '' : instances[k].machine.fieldNames.map((f) => taintsKey(x[f])).join('|'))).join('/')}#${s.mu.map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.timers ?? []).map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.pending ?? []).map(pKey).join(';')}` : ''}`,
     successors: (s) => {
       const out: { label: GlobalLabel; outcome: Outcome<GlobalState> }[] = [];
       // S60: a spawned child takes its creation action first, so no input reaches it while that waits (review C3).
       const creating = new Set(s.mu.filter((m) => m.creation).map((m) => m.target));
       for (const inp of inputs) {
         if (s.sigma[inp.instance] === null || creating.has(inp.instance)) continue;
-        for (const d of inp.data) if (refsExist(instances[inp.instance].machine, inp.action, d, s)) out.push(step(s, inp.instance, inp.action, d, s.mu, 'input'));
+        for (const d of inp.data) {
+          if (!refsExist(instances[inp.instance].machine, inp.action, d, s)) continue;
+          // PS17.2: a completion takes one pending taint of a kind it completes, as one choice per distinct taint.
+          const kinds = taint ? taint.completes(inp.instance, inp.action) : [];
+          const seen = new Set<string>();
+          const choices = (s.pending ?? []).map((q, j) => [q, j] as const).filter(([q]) => q.instance === inp.instance && kinds.includes(q.kind) && !seen.has(pKey(q)) && seen.add(pKey(q)));
+          if (!choices.length) { out.push(step(s, inp.instance, inp.action, d, s.mu, 'input')); continue; }
+          for (const [q, j] of choices) out.push(step(s, inp.instance, inp.action, taintData(instances[inp.instance].machine, inp.action, d, q.t), s.mu, 'input', false, undefined, undefined, s.pending!.filter((_, x) => x !== j)));
+        }
+      }
+      // PS17.3: while a taint of an instance's retrieval or decision is pending, its completions are inputs of that
+      // instance, as an armed timer's firing is, so a value a completion taints can leave in the configuration.
+      if (taint) {
+        const declared = new Set(inputs.map((i) => `${i.instance}:${i.action}`));
+        for (const k of [...new Set((s.pending ?? []).map((q) => q.instance))]) {
+          if (s.sigma[k] === null || creating.has(k)) continue;
+          for (const a of taint.completions(k)) {
+            if (declared.has(`${k}:${a}`)) continue;
+            const kinds = taint.completes(k, a);
+            const seen = new Set<string>();
+            const choices = s.pending!.map((q, j) => [q, j] as const).filter(([q]) => q.instance === k && kinds.includes(q.kind) && !seen.has(pKey(q)) && seen.add(pKey(q)));
+            for (const d of dataOf(instances[k].machine, a)) for (const [q, j] of choices) out.push(step(s, k, a, taintData(instances[k].machine, a, d, q.t), s.mu, 'input', false, undefined, undefined, s.pending!.filter((_, x) => x !== j)));
+          }
+        }
       }
       // PS15.5: the provider's clock may fire any armed timer of a channel's conversation (the fault no-timer-firing
       // offers none; the fault fire-disarmed offers each timer's target whether or not it is armed).
@@ -358,7 +401,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
           // ordinary message; escalate holds the message, which is then approved (delivered) or timed out (denied).
           const reason = m.gate === 'held' ? 'escalation-timeout' : 'denied';
           const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason }, ...(m.origin ? { origin: m.origin } : {}) };
-          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}) } }) as Outcome<GlobalState> });
+          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}) } }) as Outcome<GlobalState> });
           out.push(gateStep('deny', [...rest, denied]));
           if (m.gate === 'pending') out.push(gateStep('escalate', [...rest, { ...m, gate: 'held' }]));
         }
@@ -397,9 +440,10 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, ...(node ? { node } : {}) });
   const digestOf = (s: GlobalState) => 'sha256:' + createHash('sha256').update(sys.key(s)).digest('hex');
-  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, edges: Edge<GlobalState>[], about: { property?: string; field?: string; state?: GlobalState; cycle?: number } = {}): Diagnostic => {
+  const finding = (code: keyof typeof CODE, node: string | undefined, message: string, edges: Edge<GlobalState>[], about: { property?: string; field?: string; state?: GlobalState; cycle?: number; graph?: Graph<GlobalState> } = {}): Diagnostic => {
     const [cname, severity] = CODE[code];
-    const witness: Witness = { id: '', length: edges.length, trace: trace(edges), ...(about.cycle !== undefined ? { cycle: about.cycle } : {}) };
+    // PS17.3: the flow rule's witness is a path of its own graph, with the taints.
+    const witness: Witness = { id: '', length: edges.length, trace: about.graph ? traceIn(about.graph, edges) : trace(edges), ...(about.cycle !== undefined ? { cycle: about.cycle } : {}) };
     return {
       code, name: cname, severity, stage: 'configuration', engine: ENGINE, at: at(node), message, witness,
       ...(about.property ? { property: about.property } : {}),
@@ -408,7 +452,8 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     };
   };
   const plainData = (d: Record<string, Value>) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, toPlain(v)]));
-  const trace = (edges: Edge<GlobalState>[]): WitnessStep[] => edges.map((e) => {
+  const trace = (edges: Edge<GlobalState>[]): WitnessStep[] => traceIn(g, edges);
+  const traceIn = (g: Graph<GlobalState>, edges: Edge<GlobalState>[]): WitnessStep[] => edges.map((e) => {
     const l = e.label as GlobalLabel;
     const inst = instances[l.instance];
     const vals = Object.values(l.data).map((v) => (v === null ? 'none' : typeof v === 'object' ? keyOf(v) : String(v)));
@@ -555,6 +600,41 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   }
   if (g.capHit) findings.push(finding('PL3901', undefined, `exploration stopped at ${g.states.length} global states`, []));
 
+  // PS17.3, PS17.5 (S301): the flow rule over every instance's steps, with the taints carried by values and messages,
+  // when the program declares a source. An instance whose own module declares none (a channel's conversation) is
+  // judged with the configuration module's audience, and a channel's provider effect has the channel's class.
+  let flowStates: number | undefined;
+  const flowModule = readChannels(module, opts.program ?? []).module;
+  const classes = flowModule.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? [];
+  if (instances.some((x) => x.machine.memory)) {
+    const memOf = (k: number): RMemory => instances[k].machine.memory ?? { classes, retrievals: new Map(), remembers: new Map(), decisions: new Set(), recipients: new Map(), completes: new Map() };
+    const reps = (k: number) => Array.from({ length: instances[k].machine.principals }, (_, i) => `p${i + 1}`);
+    const rules: TaintRules = { completes: (k, a) => memOf(k).completes.get(a) ?? [], intentTaint: (k, i) => intentTaint(memOf(k), i, reps(k)), completions: (k) => [...memOf(k).completes.keys()] };
+    // PS15.0a: a channel's class, from its descriptor as poly-ref reads the channel.
+    const descriptors = readChannels(module, opts.program ?? []).descriptors;
+    const channelClass = (kind: string): number | null => {
+      const m = /^channel\.(.+)\.send$/.exec(kind);
+      const c = m ? descriptors.get(m[1])?.audience : undefined;
+      return c ? Math.max(0, classes.indexOf(c)) : null;
+    };
+    const tsys = configurationSystem(decl, instances, { timed, fault: opts.fault, taint: rules });
+    const tg = explore(tsys, decl.joint ? Math.min(opts.maxStates ?? JOINT_CAP, JOINT_CAP) : opts.maxStates);
+    flowStates = tg.states.length;
+    const seenCodes = new Set<string>();
+    for (const e of tg.edges) {
+      const l = e.label as GlobalLabel;
+      if (l.via === 'gate' || l.verdict.kind !== 'accepted') continue;
+      for (const brk of flowBreaks(memOf(l.instance), l.effects, claimsClass(instances[l.instance].machine, l.action, l.data), channelClass)) {
+        if (seenCodes.has(brk.code)) continue;
+        seenCodes.add(brk.code);
+        findings.push(finding(brk.code, instances[l.instance].machine.handlers.get(l.action)?.id, `${instances[l.instance].name}: ${l.action} breaks the flow rule: ${brk.text}`, [...pathTo(tg, e.from), e], { property: brk.code === 'PL6831' ? 'flow' : 'remember', graph: tg }));
+      }
+    }
+    const cut = tg.edges.find((e) => e.outcome.kind === 'bound' && e.outcome.field.startsWith('pending '));
+    if (cut && cut.outcome.kind === 'bound') findings.push(finding('PL3901', undefined, `the flow rule's exploration stopped: ${cut.outcome.field.slice(8)} would hold more than ${PENDING_BOUND} pending intents (PS17.2)`, []));
+    if (tg.capHit) findings.push(finding('PL3901', undefined, `the flow rule's exploration stopped at ${tg.states.length} global states`, []));
+  }
+
   // PT12.3, S128: a configuration property is judged over the global states, and under a quantifier for every
   // member of its group that exists (S60).
   const groupMembers: Members = (env, group) => env.global?.groups.get(group) ?? [];
@@ -571,6 +651,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   }
   return {
     vacuous,
+    ...(flowStates !== undefined ? { flowStates } : {}),
     nevers,
     neverInstances: {
       checked: instances.filter((i) => !elsewhere(i)).map((i) => i.name),

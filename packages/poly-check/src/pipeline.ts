@@ -34,7 +34,7 @@ import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product
 import { resolveUses, STD } from './uses.js';
 import { resolveProviders } from './providers.js';
 
-export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration';
+export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration' | 'flow';
 
 export interface StageRecord {
   stage: StageName;
@@ -439,8 +439,8 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
       mkdirSync(wdir, { recursive: true });
     }
     // PS15: a channel's descriptor sits in .poly/build/channels/, beside the machines' directories; PT10e: a
-    // credential's in .poly/build/credentials/.
-    if (f.startsWith('../channels/') || f.startsWith('../credentials/')) mkdirSync(dirname(join(dir, f)), { recursive: true });
+    // credential's in .poly/build/credentials/; PS17: a source's in .poly/build/sources/, a module's flow in .poly/build/flow/.
+    if (f.startsWith('../channels/') || f.startsWith('../credentials/') || f.startsWith('../sources/') || f.startsWith('../flow/')) mkdirSync(dirname(join(dir, f)), { recursive: true });
     writeFileSync(join(dir, f), text);
   }
   mc.buildDir = dir;
@@ -541,6 +541,13 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   const dead = ref.findings.filter((f) => f.code === 'PL3201');
   mc.diagnostics.push(...dead);
   mc.stages.push({ stage: 'deadlock', status: 'ran', engine: 'poly-ref', verdict: verdictOf(dead), ms: performance.now() - t0, note: ref.model.service ? 'service: exempt (PS1.7)' : `${ref.states} states` });
+
+  // ── stage 2d: the flow rule (PS17.3, PS17.5, S301), poly-ref's, when the program declares a source ──
+  if (ref.flowStates !== undefined) {
+    const flow = ref.flowFindings ?? [];
+    mc.diagnostics.push(...flow);
+    mc.stages.push({ stage: 'flow', status: 'ran', engine: 'poly-ref', verdict: verdictOf(flow), ms: 0, note: `${ref.flowStates} states with their taints (PS17.3)` });
+  }
 
   // ── stage 2c: liveness (PS6) ──────────────────────────────────────────
   if (ref.model.liveness.length) {
@@ -795,7 +802,7 @@ function configurationStage(module: Module, decl: A.Configuration, refused: bool
   const missing = [...new Set(r.instances.flatMap((i) => missingIntents(module.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === i.machine.name))))].sort().reverse();
   cc.stages.push({
     stage: 'configuration', status: 'ran', engine: 'poly-ref', verdict: verdictOf(r.findings), ms: performance.now() - t0,
-    note: `${r.states} global states, ${r.transitions} global steps${r.liveness.length ? `; liveness under delivery fairness per message value (PS13.2b, PS14.2)` : ''}`,
+    note: `${r.states} global states, ${r.transitions} global steps${r.liveness.length ? `; liveness under delivery fairness per message value (PS13.2b, PS14.2)` : ''}${r.flowStates !== undefined ? `; the flow rule over ${r.flowStates} global states with their taints (PS17.3)` : ''}`,
     notes: missing.length ? [`${missingText(missing)}: the configuration is checked from the semantics, and its machines do not run under polyrun until it has`] : undefined,
   });
   return cc;

@@ -27,7 +27,31 @@ export interface Module extends NodeBase {
   decls: Decl[];
 }
 
-export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow | Channel | Credential;
+export type Decl = TypeDecl | EnumDecl | RecordDecl | Machine | UseDecl | Configuration | Policy | Workflow | Channel | Credential | AudienceDecl | SourceDecl;
+
+// ── Memory (PT23, PS17, M10) ───────────────────────────────────────────────
+
+/** `audience { a1 < a2 < … }` (PS1.4b, Q3): the enum Audience, its members in a total order, the first the lowest. */
+export interface AudienceDecl extends NodeBase {
+  kind: 'Audience';
+  classes: string[];
+}
+
+/**
+ * `source s: k { adapter "a"  audience c [owned]  freshness d [stale escalate | stale deny] }` (PS17.0): where items
+ * come from, the class every item has, whether each has an owner, and how old an item may be.
+ */
+export interface SourceDecl extends NodeBase {
+  kind: 'Source';
+  name: string;
+  /** records, documents or memory. */
+  sourceKind: string;
+  adapter: string | null;
+  audience: string;
+  owned: boolean;
+  freshness: string | null;
+  stale: 'escalate' | 'deny';
+}
 
 // ── Credentials (PT10e, S203) ──────────────────────────────────────────────
 
@@ -62,6 +86,8 @@ export interface Channel extends NodeBase {
   thread: string;
   starts: { machine: string; action: string; onInbound: boolean } | null;
   maps: ChannelMap[];
+  /** PS15, PS17.3 (S305): the class of the channel's recipients, when written. */
+  audience?: string | null;
 }
 export interface ChannelMap extends NodeBase { kind: 'ChannelMap'; peer: string; machine: string; action: string }
 
@@ -327,6 +353,8 @@ export type DecisionItem =
   | (NodeBase & { kind: 'DecTimeout'; value: string })
   /** `band 0.3..0.7` for a Tri result (PD1.2d), in thousandths. */
   | (NodeBase & { kind: 'DecBand'; lo: number; hi: number })
+  /** PS17.6 (S304): `cites x`, an Items parameter the answer's citations are a subset of. */
+  | (NodeBase & { kind: 'DecCites'; param: string })
   | EffOutcomeItem;
 
 export interface Terminal extends NodeBase {
@@ -406,7 +434,17 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffRetry'; attempts: number; base: string; timeout: string })
   | EffTargets
   | EffUses
+  | EffRetrieve
+  | EffRemember
+  | (NodeBase & { kind: 'EffTo'; param: string })
+  | (NodeBase & { kind: 'EffAudience'; cls: string })
   | EffOutcomeItem;
+
+/** PS17.2: `retrieve s [where owner == p] limit n`, the body of a retrieval effect; `p` a Principal parameter. */
+export type EffRetrieve = NodeBase & { kind: 'EffRetrieve'; source: string; owner: string | null; limit: number };
+
+/** PS17.5: `remember s as k about p`, which writes the payload's Content to the memory source s, owned by p. */
+export type EffRemember = NodeBase & { kind: 'EffRemember'; source: string; provenance: 'observed' | 'derived' | 'verified'; about: string };
 
 /** PT10e: `uses c { s, ... } for p`, the credential an effect runs with, the scopes it needs and its holder parameter. */
 export type EffUses = NodeBase & { kind: 'EffUses'; credential: string; scopes: string[]; holder: string | null };

@@ -11,11 +11,55 @@ export type Value =
   | UnionValue
   | MapValue
   | RecordValue
+  | TaintedContent
   | null; // `none`, the empty address (PS1.6)
 
-/** A record value (S25): every field of its type, no tag. */
+/** A record value (S25): every field of its type, no tag. PS17.1: an Items value carries its taint beside its count. */
 export interface RecordValue {
   fields: Record<string, Value>;
+  $taint?: Taint;
+}
+
+/**
+ * PS17.1 (S300): a taint, the class's index in the audience order and the owners, sorted principal representatives.
+ * No taint, or ⊥, is the lowest class and no owner; a value that carries ⊥ is written without one.
+ */
+export interface Taint { c: number; o: string[] }
+
+/** PS17.1: a Content carrying a taint above ⊥, a ghost no handler reads; equality and keys see the digest alone. */
+export interface TaintedContent { $content: string | null; $taint: Taint }
+
+export const isTainted = (v: Value): v is TaintedContent => v !== null && typeof v === 'object' && '$content' in v;
+/** A value as a handler sees it: a Content's digest without its taint. */
+export const bare = (v: Value): Value => (isTainted(v) ? v.$content : v);
+export const BOTTOM: Taint = { c: 0, o: [] };
+export const isBottom = (t: Taint) => t.c === 0 && t.o.length === 0;
+/** PS17.1: the join, the higher class and the union of the owners. */
+export function join(a: Taint, b: Taint): Taint {
+  return { c: Math.max(a.c, b.c), o: [...new Set([...a.o, ...b.o])].sort() };
+}
+export const taintText = (t: Taint) => `${t.c}/${t.o.join('+')}`;
+/** The taint a value carries: its own for a tainted Content or an Items, ⊥ otherwise. */
+export function taintOf(v: Value): Taint {
+  if (isTainted(v)) return v.$taint;
+  if (v !== null && typeof v === 'object' && 'fields' in v && v.$taint) return v.$taint;
+  return BOTTOM;
+}
+/** A value carrying the taint t joined with its own: a Content is wrapped, an Items record copied; ⊥ changes nothing. */
+export function withTaint(v: Value, t: Taint, kind: 'content' | 'items'): Value {
+  const tt = join(taintOf(v), t);
+  // PS17.1: none names no body, so it carries ⊥ whatever it is given.
+  if (isBottom(tt) || (kind === 'content' && bare(v) === null)) return bare(v);
+  if (kind === 'content') return { $content: bare(v) as string | null, $taint: tt };
+  return { ...(v as RecordValue), $taint: tt };
+}
+/** PS17.1: every taint a value holds, in a fixed order, for the key of a state with its ghost. */
+export function taintsKey(v: Value): string {
+  if (v === null || typeof v !== 'object') return '';
+  if (isTainted(v)) return `<${taintText(v.$taint)}>`;
+  if ('fields' in v) return `${v.$taint ? `<${taintText(v.$taint)}>` : ''}${Object.keys(v.fields).sort().map((k) => taintsKey(v.fields[k])).join('')}`;
+  if ('ctor' in v) return Object.keys(v.payload).sort().map((k) => taintsKey(v.payload[k])).join('');
+  return v.entries.map(([, x]) => taintsKey(x)).join(',');
 }
 
 /** `(C, r)`: a constructor and the record of its payload (PS1.4). An enum member has an empty record. */
@@ -38,6 +82,8 @@ export const isRecord = (v: Value): v is RecordValue => v !== null && typeof v =
 /** A canonical text for a value: equal values, equal keys. */
 export function keyOf(v: Value): string {
   if (v === null) return 'none';
+  // PS17.1: a taint is a ghost; equal digests are equal values.
+  if (isTainted(v)) return keyOf(v.$content);
   if (typeof v === 'number') return String(v);
   if (typeof v === 'boolean') return v ? 'T' : 'F';
   if (typeof v === 'string') return JSON.stringify(v);
@@ -75,6 +121,7 @@ export function mapSet(m: MapValue, k: Value, v: Value): MapValue {
 /** Plain JSON for witnesses and reports: enum members as names, unions as { Ctor: payload }, maps as objects. */
 export function toPlain(v: Value): unknown {
   if (v === null || typeof v !== 'object') return v;
+  if (isTainted(v)) return v.$content;
   if (isUnion(v)) {
     const names = Object.keys(v.payload);
     if (!names.length) return v.ctor;

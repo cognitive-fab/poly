@@ -31,13 +31,15 @@ export type Ty =
   | { k: 'principal' }
   /** `Content` (PS1.4a, S180): an opaque reference to a body by its digest, or `none`. */
   | { k: 'content' }
+  /** `Items` (PS1.4b, S303): an opaque reference to retrieved items, of which a module reads only the count. */
+  | { k: 'items' }
   | { k: 'error' };
 
 const BOOL: Ty = { k: 'bool' };
 const INT: Ty = { k: 'int', lo: -Infinity, hi: Infinity };
 const ERR: Ty = { k: 'error' };
 /** The reasons the runtime gives (PS3.2, S101, S127), which a module may not use (PL1207). */
-export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing', 'unknown-thread', 'thread-not-started', 'creation-unavailable'];
+export const RESERVED_REASONS: readonly string[] = ['terminal', 'outside-check-domain', 'poisoned', 'archived', 'claims-unverified', 'content-missing', 'unknown-thread', 'thread-not-started', 'creation-unavailable', 'uncited'];
 
 export function tyToString(t: Ty): string {
   switch (t.k) {
@@ -47,13 +49,16 @@ export function tyToString(t: Ty): string {
     case 'map': return `map<${tyToString(t.key)}, ${tyToString(t.value)}>`;
     case 'ref': return t.machine === null ? 'none' : `Ref<${t.machine}>`;
     case 'content': return 'Content';
+    case 'items': return 'Items';
     default: return t.k;
   }
 }
 
 /** Review C-F5, PS1.4a: a Content where another type is expected, or the reverse, is PL1209; any other mismatch PL1201. */
 function opaqueCode(a: Ty, b: Ty): 'PL1209' | 'PL1201' {
-  return (a.k === 'content') !== (b.k === 'content') && a.k !== 'error' && b.k !== 'error' ? 'PL1209' : 'PL1201';
+  // PS1.4b: an Items is opaque as a Content is.
+  const opaque = (t: Ty) => t.k === 'content' || t.k === 'items';
+  return opaque(a) !== opaque(b) && a.k !== 'error' && b.k !== 'error' ? 'PL1209' : 'PL1201';
 }
 
 function same(a: Ty, b: Ty): boolean {
@@ -363,6 +368,7 @@ class Checker {
     }
     this.sharedCompletions(machines);
     this.credentials();
+    this.memory();
     const configs = new Set<string>();
     for (const d of this.module.decls) {
       if (d.kind !== 'Configuration') continue;
@@ -402,6 +408,82 @@ class Checker {
       }
     }
     return { diagnostics: this.diags, env: this.env, machines };
+  }
+
+  // ── memory (PS1.4b, PS17, M10) ───────────────────────────────────────────
+  /** The declared audience classes, in order, or null when the module declares none. */
+  private audienceClasses(): string[] | null {
+    return this.module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? null;
+  }
+
+  /** PL6833: a class the audience declaration does not declare. */
+  private audienceClass(c: string, at: A.NodeBase, what: string): void {
+    const classes = this.audienceClasses();
+    if (!classes) this.err('PL6833', at, `${what} names the class ${c}, and the module declares no audience (PS1.4b)`);
+    else if (!classes.includes(c)) this.err('PL6833', at, `${what} names the class ${c}, which audience does not declare: ${classes.join(' < ')} (PS1.4b)`);
+  }
+
+  /** PS1.4b: the largest limit among the module's retrievals, the top of an Items count. */
+  private itemsLimit(): number {
+    let n = 0;
+    for (const d of this.module.decls) if (d.kind === 'Machine') for (const it of d.items) if (it.kind === 'EffectDecl') for (const x of it.items) if (x.kind === 'EffRetrieve') n = Math.max(n, x.limit);
+    return n;
+  }
+
+  private memory(): void {
+    const audiences = this.module.decls.filter((d): d is A.AudienceDecl => d.kind === 'Audience');
+    for (const a of audiences.slice(1)) this.err('PL1002', a, 'a program declares one audience (PS1.4b)');
+    for (const a of audiences.slice(0, 1)) {
+      const dup = a.classes.find((c, i) => a.classes.indexOf(c) !== i);
+      if (dup) this.err('PL1002', a, `audience class ${dup} is declared twice`);
+      if (this.module.decls.some((d) => (d.kind === 'EnumDecl' || d.kind === 'TypeDecl' || d.kind === 'RecordDecl') && d.name === 'Audience')) this.err('PL1002', a, 'audience declares the type Audience, which the module also declares');
+    }
+    const names = new Set<string>();
+    for (const d of this.module.decls) {
+      if (d.kind === 'Channel' && d.audience) this.audienceClass(d.audience, d, `channel ${d.name}`);
+      if (d.kind !== 'Source') continue;
+      if (names.has(d.name)) { this.err('PL1002', d, `source ${d.name} is declared twice`); continue; }
+      names.add(d.name);
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(d.name)) this.err('PL1201', d, `${JSON.stringify(d.name)} is not a source name: a source is named by an identifier (PS17.0)`);
+      if (!SOURCE_KINDS.has(d.sourceKind)) this.err('PL1001', d, `${d.sourceKind} is not a kind of source: records, documents or memory (PS17.0)`);
+      this.audienceClass(d.audience, d, `source ${d.name}`);
+      // PS17.0: a memory source is the runtime's own store; any other is read through an adapter poly-io makes.
+      if (d.sourceKind === 'memory' && d.adapter !== null) this.err('PL6834', d, `source ${d.name} is the project's memory, which the runtime keeps in its own store, so it names no adapter (PS17.5)`);
+      if (d.sourceKind !== 'memory' && d.adapter === null) this.err('PL6834', d, `source ${d.name} names no adapter: one of ${[...SOURCE_ADAPTERS].join(', ')} (PS17.0)`);
+      if (d.adapter !== null && d.sourceKind !== 'memory' && !SOURCE_ADAPTERS.has(d.adapter)) this.err('PL6834', d, `source ${d.name} names the adapter "${d.adapter}", which poly-io does not make: one of ${[...SOURCE_ADAPTERS].join(', ')} (PS17.0)`);
+      if (d.freshness !== null && durationMs(d.freshness) === null) this.err('PL1201', d, `${d.freshness} is not a duration`);
+    }
+  }
+
+  /** PS17.2, PS17.5: a retrieval's or a remember's source, and their parameters. */
+  private memoryEffect(e: A.EffectDecl, r: A.EffRetrieve | null, m: A.EffRemember | null): void {
+    const src = (name: string, at: A.NodeBase) => {
+      const s = this.module.decls.find((d): d is A.SourceDecl => d.kind === 'Source' && d.name === name);
+      if (!s) this.err('PL1001', at, `effect ${e.name} names the source ${name}, and the module declares no source ${name} (PS17.0)`);
+      return s ?? null;
+    };
+    const principal = (name: string, at: A.NodeBase, role: string) => {
+      const p = e.params.find((x) => x.name === name);
+      if (!p) this.err('PL1001', at, `effect ${e.name} has no parameter ${name} to be ${role}`);
+      else if (this.tyOf(p.type).k !== 'principal') this.err('PL1201', at, `${role} ${name} is ${tyToString(this.tyOf(p.type))}; it is a Principal parameter of the effect (PS17.2)`);
+    };
+    if (r && m) this.err('PL1201', m, `effect ${e.name} both retrieves and remembers; each is an effect of its own (PS17.2, PS17.5)`);
+    // One meaning per effect: a retrieval's and a remember's kind and labels are fixed (PS17.2), and they name nothing else.
+    for (const it of e.items) if ((r || m) && (it.kind === 'EffKind' || it.kind === 'EffLabels' || it.kind === 'EffTargets' || it.kind === 'EffUses' || it.kind === 'EffTo' || it.kind === 'EffAudience')) this.err('PL1201', it, `effect ${e.name} ${r ? 'retrieves' : 'remembers'}, so its kind and labels are the runtime's and it names no target, credential or recipient (PS17.2)`);
+    if (r) {
+      const s = src(r.source, r);
+      if (r.limit < 1) this.err('PL1201', r, 'a retrieval is limited to at least one item');
+      if (r.owner !== null) {
+        principal(r.owner, r, 'the owner');
+        if (s && !s.owned) this.err('PL6835', r, `effect ${e.name} retrieves where owner == ${r.owner} from source ${s.name}, which is not owned (PS17.2)`);
+      }
+    }
+    if (m) {
+      const s = src(m.source, m);
+      if (s && s.sourceKind !== 'memory') this.err('PL1201', m, `effect ${e.name} remembers into source ${s.name}, which is not a memory source (PS17.5)`);
+      principal(m.about, m, 'the subject');
+      if (!e.params.some((p) => this.tyOf(p.type).k === 'content')) this.err('PL1201', m, `effect ${e.name} remembers, and its payload holds no Content to remember (PS17.5)`);
+    }
   }
 
   // ── credentials (PT10e, S203) ──────────────────────────────────────────
@@ -744,7 +826,7 @@ class Checker {
           // Review A-F4, PD5.1.2a: an enum without payloads, an integer range or a Principal; int and string are PL1101 below.
           if (d.claims && f.type.kind !== 'TInt' && f.type.kind !== 'TString' && f.type.kind !== 'TRange' && !(f.type.kind === 'TName' && (f.type.name === 'Principal' || this.env.unions.get(f.type.name)?.isEnum))) { this.err('PL1201', f, `claims field ${d.name}.${f.name} is ${f.type.kind === 'TName' ? f.type.name : f.type.kind.slice(1).toLowerCase()}; a claims field is an enum, an integer range or a Principal (PD5.1.2a, S103)`); continue; }
           if (this.tyOf(f.type).k === 'ref') this.err('PL0901', f, `an address inside a record is lowered after milestone M1: ${d.name}.${f.name}`);
-          if (this.holds(this.tyOf(f.type), (x) => x.k === 'content')) this.err('PL1209', f, `a Content is opaque and is no record field: ${d.name}.${f.name} (PS1.4a)`);
+          if (this.holds(this.tyOf(f.type), (x) => x.k === 'content' || x.k === 'items')) this.err('PL1209', f, `a Content or an Items is opaque and is no record field: ${d.name}.${f.name} (PS1.4a, PS1.4b)`);
           if (cardinality(f.type, this.env) === null) this.err('PL1101', f, `field ${d.name}.${f.name} has no finite domain; give it a range or an enum type`);
         }
         continue;
@@ -769,7 +851,7 @@ class Checker {
             byName.set(f.name, key);
             // A payload through a recursive record was reported at the record (S25).
             if (cardinality(f.type, this.env) === null && ![...this.recursive].some((r) => this.refersTo(r, [f.type], new Set()))) this.err('PL1101', f, `payload ${c.name}.${f.name} has no finite domain; give it a range or an enum type`);
-            if (this.holds(this.tyOf(f.type), (x) => x.k === 'content')) this.err('PL1209', f, `a Content is opaque and is no payload field: ${c.name}.${f.name} (PS1.4a)`);
+            if (this.holds(this.tyOf(f.type), (x) => x.k === 'content' || x.k === 'items')) this.err('PL1209', f, `a Content or an Items is opaque and is no payload field: ${c.name}.${f.name} (PS1.4a, PS1.4b)`);
           }
         }
       }
@@ -814,6 +896,8 @@ class Checker {
         if (t.name === 'Principal' && !this.env.unions.has(t.name)) return { k: 'principal' };
         // PS1.4a, S180: Content is built in, unless the module declares a type of that name.
         if (t.name === 'Content' && !this.env.unions.has(t.name)) return { k: 'content' };
+        // PS1.4b, S303: Items is built in, unless the module declares a type of that name.
+        if (t.name === 'Items' && !this.env.unions.has(t.name) && !this.env.records.has(t.name)) return { k: 'items' };
         // S190: m.E, an enum of a used module, nameable where a use admits it.
         if (t.name.includes('.')) {
           const i = t.name.lastIndexOf('.');
@@ -836,6 +920,7 @@ class Checker {
         const key = this.tyOf(t.key);
         if (key.k === 'principal') this.errOnce('PL1206', t.key, 'a Principal is opaque, so it cannot key a map: it is compared by equality, stored or passed (PD5.1.2b)');
         if (key.k === 'content') this.errOnce('PL1209', t.key, 'a Content is opaque, so it cannot key a map: it is stored, passed or compared for equality (PS1.4a)');
+        if (key.k === 'items' || value.k === 'items') this.errOnce('PL1209', t, 'an Items is passed, never stored in a map (PS1.4b)');
         if (key.k === 'union' && !this.env.unions.get(key.name)!.isEnum) this.errOnce('PL1201', t.key, `map key ${key.name} must be an enum (constructors without payload)`);
         // PT3.1: an enum or an integer range 0..n; a record has no key form in JSON.
         if (key.k === 'record') this.errOnce('PL1201', t.key, `map key ${key.name} is a record; a map is keyed by an enum or a range 0..n (PT3.1)`);
@@ -859,6 +944,8 @@ class Checker {
       if (facts.fieldTypes.has(f.name)) { this.err('PL1002', f, `field ${f.name} is declared twice`); continue; }
       const ty = this.tyOf(f.type);
       facts.fieldTypes.set(f.name, ty);
+      // PS1.4b: an Items is a reference for one step's use: passed to a decision or an effect, never kept in the state.
+      if (ty.k === 'items') this.err('PL1209', f, `an Items is passed, never stored: field ${f.name} (PS1.4b)`);
       if (f.flag) this.err('PL0901', f, `\`${f.flag}\` fields are not lowered in milestone M0`);
       this.checkDomain(f.name, f.type, ty, f.check, f);
       this.checkInit(f, ty);
@@ -1055,6 +1142,8 @@ class Checker {
     let labelled = false;
     const targets: (A.EffectItem & { kind: 'EffTargets' })[] = [];
     const uses: A.EffUses[] = [];
+    const retrieve = e.items.find((x): x is A.EffRetrieve => x.kind === 'EffRetrieve') ?? null;
+    const remember = e.items.find((x): x is A.EffRemember => x.kind === 'EffRemember') ?? null;
     for (const it of e.items) {
       const key = it.kind === 'EffOutcome' ? it.outcome : it.kind.slice(3).toLowerCase();
       if (seen.has(key)) this.err('PL1002', it, `effect ${e.name} states ${key} twice`);
@@ -1073,18 +1162,31 @@ class Checker {
         case 'EffUses':
           uses.push(it);
           break;
+        case 'EffTo': {
+          // PS17.3: the recipient is a Principal parameter of the effect.
+          const p = e.params.find((x) => x.name === it.param);
+          if (!p) this.err('PL1001', it, `effect ${e.name} has no parameter ${it.param} to name its recipient`);
+          else if (this.tyOf(p.type).k !== 'principal') this.err('PL1201', it, `the recipient ${it.param} is ${tyToString(this.tyOf(p.type))}; it is a Principal parameter of the effect (PS17.3)`);
+          break;
+        }
+        case 'EffAudience':
+          this.audienceClass(it.cls, it, `effect ${e.name}`);
+          break;
         case 'EffRetry':
           if (it.attempts < 1) this.err('PL1201', it, 'retry needs at least one attempt');
           for (const d of [it.base, it.timeout]) if (durationMs(d) === null) this.err('PL1201', it, `${d} is not a duration`);
           break;
         case 'EffOutcome':
-          this.completion(it, handlers);
+          // PS17.2: a retrieval's ok(r) binds r.items, an Items.
+          this.completion(it, handlers, retrieve && it.outcome === 'ok' ? (path) => (path.length === 1 && path[0] === 'items' ? { k: 'items' } : null) : null);
           break;
         default:
           break;
       }
     }
-    if (!labelled) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
+    if (retrieve || remember) this.memoryEffect(e, retrieve, remember);
+    // PS17.2: a retrieval's and a remember's labels are the runtime's.
+    if (!labelled && !retrieve && !remember) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
     const labels = new Set(e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])));
     for (const t of targets) this.targets(e, t, labels);
     for (const u of uses) this.usesCredential(e, u, targets);
@@ -1169,7 +1271,7 @@ class Checker {
         if (!same(bt, pt) || (bt.k === 'conf') !== (pt.k === 'conf')) { this.err('PL1201', p, `${it.action}.${a.name} is ${tyToString(pt)}, and ${[it.bind, ...path].join('.')} is ${tyToString(bt)} (PD1.2f)`); continue; }
         if (pt.k === 'conf' && p.check) this.err('PL1201', p.check, `a Conf takes no check clause: it is explored by the intervals the program uses (PD1.4b)`);
         // PS4.1f, S180: a Content has no check domain; its representatives are the check's, never a run-time domain.
-        if (p.check?.mode !== 'disclosed' && pt.k !== 'content') this.facts!.strictParams.add(`${it.action}.${a.name}`);
+        if (p.check?.mode !== 'disclosed' && pt.k !== 'content' && pt.k !== 'items') this.facts!.strictParams.add(`${it.action}.${a.name}`);
         continue;
       }
       const t = this.typeOf(a.value, this.scope('init'), pt);
@@ -1223,14 +1325,21 @@ class Checker {
       const ty = this.tyOf(p.type);
       if (ty.k === 'conf' || this.holds(ty, (x) => x.k === 'map' || x.k === 'ref' || (x.k === 'union' && !this.env.unions.get(x.name)!.isEnum))) this.err('PL0901', p, `a decision parameter of type ${tyToString(ty)} is not lowered in M2`);
       // S180: a decision that reads a body comes with the channels (M8b), not in M8a.
-      else if (this.holds(ty, (x) => x.k === 'content')) this.err('PL0901', p, `a decision over a Content reads a body, which comes with the channels (M8b, S180)`);
       if (p.check) this.err('PL1201', p.check, 'a decision parameter takes its value from the handler; it has no check domain');
     }
     // PD1.2a: a finite result: an enum, a range, Tri, or a record of these.
     const result = this.tyOf(d.result);
     const finite = (t: Ty): boolean => (t.k === 'union' && this.env.unions.get(t.name)!.isEnum) || (t.k === 'int' && Number.isFinite(t.lo) && Number.isFinite(t.hi));
     const recordOk = result.k === 'record' && this.env.records.get(result.name)!.fields.every((f) => finite(this.tyOf(f.type)));
-    if (result.k !== 'error' && !finite(result) && !recordOk) this.err('PL1101', d.result, `a decision's result is finite: an enum, a range, Tri, or a record of these, not ${tyToString(result)} (PD1.2a)`);
+    // PS17.2 (M10): an answer that is a body, a Content, explored by its representatives with its taint.
+    if (result.k !== 'error' && result.k !== 'content' && !finite(result) && !recordOk) this.err('PL1101', d.result, `a decision's result is finite: an enum, a range, Tri, or a record of these, or a Content, not ${tyToString(result)} (PD1.2a, PS17.2)`);
+    // PS17.6, S304: `cites x`, x an Items parameter of the decision.
+    const cites = d.items.find((x): x is A.DecisionItem & { kind: 'DecCites'; param: string } => x.kind === 'DecCites');
+    if (cites) {
+      const p = d.params.find((x) => x.name === cites.param);
+      if (!p) this.err('PL1001', cites, `decision ${d.name} has no parameter ${cites.param} to cite`);
+      else if (this.tyOf(p.type).k !== 'items') this.err('PL1201', cites, `decision ${d.name} cites ${cites.param}, which is ${tyToString(this.tyOf(p.type))}; it cites an Items parameter (PS17.6)`);
+    }
     const tri = result.k === 'union' && result.name === 'Tri';
     const seen = new Set<string>();
     let labelled = false;
@@ -1246,7 +1355,7 @@ class Checker {
       }
       if (it.kind === 'EffOutcome') {
         if (it.outcome === 'exhausted') { this.err('PL1201', it, 'a decision is tried once: its completions are ok and failed (PD1.7)'); continue; }
-        this.completion(it, handlers, it.outcome === 'ok' ? (path) => this.replyType(result, path) : null);
+        this.completion(it, handlers, it.outcome === 'ok' ? (path) => (cites && path.length === 1 && path[0] === 'cites' ? { k: 'items' } : this.replyType(result, path)) : null);
       }
     }
     if (tri && !seen.has('DecBand')) this.err('PL1201', d, `decision ${d.name} returns Tri, so it declares its band: band lo..hi (PD1.2d)`);
@@ -1761,6 +1870,7 @@ class Checker {
   }
 
   private checkDomain(what: string, t: A.TypeExpr, ty: Ty, check: A.CheckClause | null, at: A.NodeBase): void {
+    if (check && ty.k === 'items') { this.err('PL1209', check, 'an Items has no check domain: its count is explored from 0 to the largest limit (PS1.4b)'); return; }
     if (check && ty.k === 'content') { this.err('PL1209', check, `a Content has no check domain: its only constant is none, and check explores it by representatives (PS1.4a, PS4.1f)`); return; }
     if (check) {
       if (ty.k !== 'int' && ty.k !== 'string') { this.err('PL1201', check, `a check clause applies to int and string, not ${tyToString(ty)}`); return; }
@@ -2356,6 +2466,12 @@ class Checker {
         }
         // S25: `r.f` reads a field of a record value.
         const ot = this.typeOf(e.object, scope);
+        // PS1.4b: `x.count` is the one field of an Items a module reads.
+        if (ot.k === 'items') {
+          if (e.prop !== 'count') { this.err('PL1209', e, `an Items is opaque: a module reads only its count, not ${e.prop} (PS1.4b)`); return ERR; }
+          this.resolve(e, { k: 'recordField', field: 'count' });
+          return { k: 'int', lo: 0, hi: this.itemsLimit() };
+        }
         if (ot.k === 'record') {
           const f = this.env.records.get(ot.name)!.fields.find((x) => x.name === e.prop);
           if (!f) { this.err('PL1001', e, `${ot.name} has no field ${e.prop}`); return ERR; }
@@ -2699,6 +2815,8 @@ class Checker {
         // PD5.1.2b: a Principal is compared only with a Principal (or none).
         if ((l.k === 'principal' || r.k === 'principal') && !same(l, r)) { this.err('PL1206', e, `a Principal is opaque: it is compared only with another Principal, not with ${tyToString(l.k === 'principal' ? r : l)} (PD5.1.2b)`); return BOOL; }
         if ((l.k === 'content' || r.k === 'content') && !same(l, r)) { this.err('PL1209', e, `a Content is opaque: it is compared only with another Content or none, not with ${tyToString(l.k === 'content' ? r : l)} (PS1.4a)`); return BOOL; }
+        // PS1.4b: an Items is passed and its count read; it is never compared.
+        if (l.k === 'items' || r.k === 'items') { this.err('PL1209', e, 'an Items is opaque: it is passed and its count read, never compared (PS1.4b)'); return BOOL; }
         if (!same(l, r)) this.err('PL1201', e, `cannot compare ${tyToString(l)} with ${tyToString(r)}`);
         return BOOL;
       }
@@ -2710,7 +2828,7 @@ class Checker {
         const r = this.typeOf(e.right, scope);
         if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
         if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque and has no order: ${e.op} is not defined on it (PD5.1.2b)`); return BOOL; }
-        if (l.k === 'content' || r.k === 'content') { this.err('PL1209', e, `a Content is opaque and has no order: ${e.op} is not defined on it (PS1.4a)`); return BOOL; }
+        if (l.k === 'content' || r.k === 'content' || l.k === 'items' || r.k === 'items') { this.err('PL1209', e, `a ${l.k === 'items' || r.k === 'items' ? 'Items' : 'Content'} is opaque and has no order: ${e.op} is not defined on it (PS1.4a, PS1.4b)`); return BOOL; }
         if ((l.k !== 'int' && l.k !== 'error') || (r.k !== 'int' && r.k !== 'error')) this.err('PL1201', e, `${e.op} compares ints, not ${tyToString(l)} and ${tyToString(r)}`);
         return BOOL;
       }
@@ -2720,7 +2838,7 @@ class Checker {
         // PD1.3b: arithmetic on a Conf is PL1205, reported once at the Conf by confUses.
         if (l.k === 'conf' || r.k === 'conf') return ERR;
         if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque: ${e.op} is not defined on it (PD5.1.2b)`); return ERR; }
-        if (l.k === 'content' || r.k === 'content') { this.err('PL1209', e, `a Content is opaque: ${e.op} is not defined on it (PS1.4a)`); return ERR; }
+        if (l.k === 'content' || r.k === 'content' || l.k === 'items' || r.k === 'items') { this.err('PL1209', e, `a ${l.k === 'items' || r.k === 'items' ? 'Items' : 'Content'} is opaque: ${e.op} is not defined on it (PS1.4a, PS1.4b)`); return ERR; }
         if (l.k !== 'int' || r.k !== 'int') {
           if (l.k !== 'error' && r.k !== 'error') this.err('PL1201', e, `${e.op} needs ints, not ${tyToString(l)} and ${tyToString(r)}`);
           return ERR;
@@ -2900,10 +3018,34 @@ const GRANTS: Record<string, string[]> = { egress: ['egress:external', 'egress:p
 export const LABELS = new Set(['read:repo', 'read:private', 'read:store', 'read:web', 'write:store', 'write:repo', 'write:workspace', 'egress:public', 'egress:external', 'exec', 'admin']);
 const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
 
-/** S41: an effect with no `kind` has its name as its kind. */
+/** PS17.0: the kinds of source, and the source adapters poly-io makes (PS17.0, S308). */
+export const SOURCE_KINDS = new Set(['records', 'documents', 'memory']);
+export const SOURCE_ADAPTERS = new Set(['postgres', 'opensearch']);
+
+/** S41: an effect with no `kind` has its name as its kind; PS17.2, PS17.5: a retrieval's and a remember's are the runtime's. */
 export function effectKind(e: A.EffectDecl): string {
+  for (const it of e.items) {
+    if (it.kind === 'EffRetrieve') return `source.${it.source}.retrieve`;
+    if (it.kind === 'EffRemember') return `source.${it.source}.remember`;
+  }
   for (const it of e.items) if (it.kind === 'EffKind') return it.value;
   return e.name;
+}
+
+/**
+ * PT6.2, PS17.2: an effect's labels: as written, or, for a retrieval, read:private when its source is owned or above the
+ * lowest class and read:store otherwise, and for a remember, write:store.
+ */
+export function effectLabels(e: A.EffectDecl, module: A.Module): string[] | null {
+  for (const it of e.items) {
+    if (it.kind !== 'EffRetrieve' && it.kind !== 'EffRemember') continue;
+    if (it.kind === 'EffRemember') return ['write:store'];
+    const s = module.decls.find((d): d is A.SourceDecl => d.kind === 'Source' && d.name === it.source);
+    const lowest = module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes[0];
+    return [s && (s.owned || s.audience !== lowest) ? 'read:private' : 'read:store'];
+  }
+  for (const it of e.items) if (it.kind === 'EffLabels') return it.labels;
+  return null;
 }
 
 /** An effect with no `class` is class `none` (PT2, `Class`). */
