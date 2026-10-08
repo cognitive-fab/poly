@@ -413,10 +413,10 @@ export class EffectWorker {
           // any other, a stale re-proposal escalates, which rule 2 of PT9.7 denies escalate-once.
           const mem = this.opts.memoryCheck?.(row, decl, d === 2 && this.lastEscalation(row) === 'stale-items') ?? null;
           if (mem && 'fields' in mem) Object.assign(proposal, mem.fields);
-          // PS16.3, S199: the grant check comes next, then the mandate's; each refusal is final whatever a policy says.
-          // PS18.4, S353: a tier's call is read against its budget first; its refusal is final whatever a policy says.
+          // PS18.4, S353: a tier's call is read against its budget next; its refusal is final whatever a policy says.
           const budget = this.opts.budgetCheck?.(row, d === 2) ?? null;
           if (budget) { proposal.route = budget.route; if (budget.budget) proposal.budget = budget.budget; }
+          // PS16.3, S199: the grant check comes next, then the mandate's; each refusal is final whatever a policy says.
           const grant = this.opts.grantCheck?.(row, decl) ?? null;
           if (grant && 'credential' in grant) proposal.credential = grant.credential;
           let g: GateDecision;
