@@ -111,6 +111,18 @@ At 514528a, after `npm run clean`: 1,995 tests and one after the M3 runs, 1,990 
 
 **For the owner, at M11's close:** S360 and S361 (step 9), and `poly try` (step 1). M11 is built and gated; it closes on those rulings. A ruling that changes the code runs the gate again.
 
+## S360, S361, poly try and the review notes ruled (owner, 2026-10-07)
+
+- **S360: accepted.** Each tier declares `max input tokens` beside `max tokens`. The reservation covers both limits at their own prices, so an overrun can only come from a provider reporting more than either limit it was given. Tests: a call that uses its full input and output limits records no overrun; one beyond either limit records an overrun and is charged as S352 rules.
+- **S361: accepted, fail closed.** A call that answers with no usage report, or with a fractional or negative count, is charged its full reservation, and the violation is recorded on the decision event (`usage-missing` or `usage-invalid`). The call is never released for free. Tests for all three cases, and the budget binds.
+- **poly try (PT28.2): built in M11, now.** S360 and S361 change the runtime, so the closing gate runs again anyway; build `poly try` before it, as Q9 ruled. It is a registry command over MCP and the language server that never admits, signs or runs anything (PT28.2), with its own spec issue and code from the M11 ranges.
+- **A route that escalates only on failure: change PS18.1.** A `std.routing` rule whose trigger the route does not declare is not instantiated for that route, so such a route checks CLEAN, not INCONCLUSIVE. A rule that is instantiated and never exercised is still vacuous, as now.
+- **Channel names: fix now.** A channel name must be an identifier, as credential names already must, with the same path-escape test. It is checked in M11 because the embedded form writes files by that name.
+- **Replaying a grant:** listed for the v1 gate, as recorded.
+- **The gate's quiet machine:** accepted as recorded. The re-run gate must not overlap with any M10 work.
+
+Then the closing gate runs again from a clean build, compared with M9's `gate-file-times.json`. If it passes with no failure and the measured verdicts unchanged, M11 is ready to merge. **Merge order:** M10 merges into m4 first; M11 then rebases on that, resolves the three expected conflicts (PS3.2's reserved reasons, the error-code exemption test, the worker's proposal path) and runs the full suite once more before its merge.
+
 ## Conclusion
 
 M11 is ruled and built. Budgets are reservations that cannot be overspent except by a provider's own overrun, which is recorded and charged against what remains: sixty-four concurrent runs never pass a cap, and a crash never loses or doubles a reservation. A route is a checked machine whose every tier choice replays from the ledger with no model call, and `poly cost` sums every answered call from the ledger alone. The review's findings are fixed, the gate passed from a clean build, and two questions about what a reservation and a cost mean wait for the owner.
