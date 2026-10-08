@@ -26,7 +26,10 @@ export class AdmitError extends Error {
 }
 
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
-export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin', 'drop-declassify'] as const;
+/** Review C8 (M11): what a route's cost does not count, listed in every certificate with a route (K15, PS18.3). */
+const ROUTING_LIMIT = "a call's cost is its provider's usage report at the certified prices (K15): a call whose provider gave no answer reports no usage and its reservation is released, so what a provider bills for such a call is not counted; a usage report that is not whole token counts fails the call; a reservation covers the token limit at the highest price, which a call over its input tokens may exceed, recorded as an overrun";
+
+export const CERTIFICATE_FAULTS = ['omit-artefact', 'stale-artefact-digest', 'digest-before-limits', 'sign-wrong-message', 'stale-handler-digest', 'omit-handler-file', 'stale-policy-digest', 'omit-policy', 'omit-package-file', 'stale-adapter-digest', 'swap-adapter-kind', 'omit-adapters', 'wrong-policy-engine', 'stale-keyring-chain', 'omit-policy-signature', 'stale-policy-signature', 'omit-vaults', 'swap-vault-store', 'rename-credential', 'swap-policy-source', 'rename-source', 'stale-source-pin', 'drop-declassify', 'swap-tier-model', 'rename-route'] as const;
 export type CertificateFault = (typeof CERTIFICATE_FAULTS)[number];
 
 /** PT19, S120, S137: the most attempts a manifest entry may declare. */
@@ -309,6 +312,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   // PT10r: each route's and each budget's descriptor, which the runtime reads to run the tiers and hold the caps.
   const routes: { name: string; descriptor: string; want: string }[] = [];
   const budgets: { name: string; descriptor: string; want: string }[] = [];
+  const routingOwners = new Map<string, string>();
   for (const r of report.files) {
     if (!r.module || !r.moduleDigest) throw new AdmitError(`${r.file}: no module digest`);
     moduleDigests[r.module] = r.moduleDigest;
@@ -344,7 +348,13 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
         for (const [prefix, list] of [['../routes/', routes], ['../budgets/', budgets]] as const) {
           if (!k.startsWith(prefix)) continue;
           const descriptor = rel(dir, join(m.buildDir, k));
-          if (!list.some((c) => c.descriptor === descriptor)) list.push({ name: k.slice(prefix.length, -'.json'.length), descriptor, want });
+          // Review A3, C6 (M11): a route's and a budget's descriptor and call kind are named by the route or budget
+          // alone, so two modules of one project may not declare one name; refused with what clashes, not as stale bytes.
+          const name = k.slice(prefix.length, -'.json'.length);
+          const owner = routingOwners.get(`${prefix}${name}`);
+          if (owner !== undefined && owner !== r.module) throw new AdmitError(`not admitted: ${prefix === '../routes/' ? 'route' : 'budget'} ${name} is declared in modules ${owner} and ${r.module}; its name is unique in a project, since it names the descriptor ${prefix.slice(3)}${name}.json${prefix === '../routes/' ? ` and the kind route.${name}.call` : ''} (PT10r)`);
+          routingOwners.set(`${prefix}${name}`, r.module);
+          if (!list.some((c) => c.descriptor === descriptor)) list.push({ name, descriptor, want });
         }
       }
     }
@@ -378,7 +388,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
           // PT24.5, S355: a routed decision's tiers are certified, each with its provider, model and map digest.
           if (entry.decision?.route) {
             const route = JSON.parse(readFileSync(join(m.buildDir, '..', 'routes', `${entry.decision.route}.json`), 'utf8')) as { tiers: { name: string; provider: string; model: string; calibration: { mapDigest: string } | null }[] };
-            decisions.push({ machine: id, kind, provider: null, route: entry.decision.route, tiers: route.tiers.map((t) => ({ name: t.name, provider: t.provider, model: t.model, calibration: t.calibration?.mapDigest ?? null })), result: entry.decision.result, labels: entry.labels ?? [], modelBound: true, calibration: 'certified per tier' });
+            decisions.push({ machine: id, kind, provider: null, route: entry.decision.route, tiers: route.tiers.map((t, i) => ({ name: t.name, provider: t.provider, model: opts.fault === 'swap-tier-model' && i === 0 ? `${t.model}x` : t.model, calibration: t.calibration?.mapDigest ?? null })), result: entry.decision.result, labels: entry.labels ?? [], modelBound: true, calibration: 'certified per tier' });
             kernel.add('K15');
           }
         }
@@ -567,7 +577,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(routes.length ? { routes: routes.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(budgets.length ? { budgets: budgets.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(routes.length ? [ROUTING_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(routes.length ? { routes: routes.map((c, i) => ({ name: opts.fault === 'rename-route' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(budgets.length ? { budgets: budgets.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);
@@ -607,6 +617,20 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const want = declassifyOf(report);
   if (JSON.stringify(back.poly.memory?.declassify ?? { decisions: [], counts: [] }) !== JSON.stringify(want)) problems.push({ name: 'memory', problem: 'the certified declassification points are not the flow rule\'s (S323, S325)' });
   for (const x of back.poly.memory?.sources ?? []) if (x.adapter !== null && (!adapterPin || x.package !== adapterPin.package || x.version !== adapterPin.version || x.digest !== adapterPin.digest)) problems.push({ name: 'memory', problem: `source ${x.name}'s adapter is bound to ${x.package} ${x.version} ${x.digest}, and the installed package is not that` });
+  // Review C7 (M11): the routes and budgets read back are each descriptor the build wrote, under the name it carries, and
+  // each routed decision binds the tiers its route's descriptor runs: provider, model and map (PT24.5).
+  const named = (list: { descriptor: string }[], key: string) => list.map((c) => { let n: unknown = null; try { n = (JSON.parse(readFileSync(join(dir, c.descriptor), 'utf8')) as Record<string, unknown>)[key]; } catch { /* null: refused below */ } return { name: n, descriptor: c.descriptor }; });
+  for (const [what, list, key] of [['routes', routes, 'route'], ['budgets', budgets, 'budget']] as const) {
+    const now = named(list, key);
+    if (JSON.stringify(back.poly[what] ?? []) !== JSON.stringify(now)) problems.push({ name: what, problem: `the certificate binds ${JSON.stringify(back.poly[what] ?? [])}, and the build's descriptors are ${JSON.stringify(now)}` });
+  }
+  for (const d of back.poly.decisions) {
+    if (!('route' in d)) continue;
+    const r = routes.find((x) => x.name === d.route);
+    let tiers: unknown = null;
+    try { tiers = (JSON.parse(readFileSync(join(dir, r!.descriptor), 'utf8')) as { tiers: { name: string; provider: string; model: string; calibration: { mapDigest: string } | null }[] }).tiers.map((t) => ({ name: t.name, provider: t.provider, model: t.model, calibration: t.calibration?.mapDigest ?? null })); } catch { tiers = null; }
+    if (JSON.stringify(d.tiers) !== JSON.stringify(tiers)) problems.push({ name: 'decisions', problem: `${d.kind} of ${d.machine} binds the tiers ${JSON.stringify(d.tiers)}, and its route's descriptor runs ${JSON.stringify(tiers)}` });
+  }
   // Review D8 (M9): each scope's source read back is the file that declares it, which load verifies its signature over.
   for (const q of back.poly.policies) if (q.source !== policyFile.get(q.scope)) problems.push({ name: 'policies', problem: `scope ${q.scope} is certified as written in ${q.source}, and ${policyFile.get(q.scope) ?? 'no file'} declares it` });
   // S194, Q8: each scope's signature read back verifies over the document on disk, the certified source and engine.

@@ -8,7 +8,7 @@
 // model (K10).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalize, diag, sha256OfBytes, type Diagnostic } from '@poly/core';
+import { canonicalize, costOf, diag, sha256OfBytes, type Diagnostic } from '@poly/core';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
 import type { PolyRuntime } from '@poly/runtime';
@@ -117,6 +117,31 @@ export function replayRun(module: A.Module, machineId: string, instanceId: strin
   return { run: instanceId, machine: machineId, rows: rows.length, folded, windows: opts.modulePath ? windows.length : 0, gateNotRun, diagnostics: out, ...(forgotten.length ? { forgotten } : {}) };
 }
 
+/** Review C3 (M11): what is wrong with a route run's call records, against its journal and its certified tiers. */
+async function routeRecordProblems(rt: PolyRuntime, run: string, rows: JournalRowLike[], route: PolyRuntime['verified']['routes'][number]): Promise<string[]> {
+  const out: string[] = [];
+  const events = (await rt.chain(run)).filter((e) => e.kind === 'decision').map((e) => e.body as Record<string, any>);
+  const answers = rows.filter((x) => x.action === 'Answer' && x.step_kind === 'accepted');
+  const answered = events.filter((b) => b.completed !== false);
+  if (answered.length !== answers.length) out.push(`${answers.length} Answer steps and ${answered.length} answered calls' decision events`);
+  answers.forEach((row, i) => {
+    const b = answered[i];
+    if (!b) return;
+    const tier = (row.pre as { tier?: unknown }).tier;
+    if (b.tierIndex !== tier || route.tiers[tier as number]?.name !== b.tier) out.push(`the call answered at seq ${row.seq} was on tier ${String(tier)}, and its decision event names tier ${String(b.tier)} (${String(b.tierIndex)})`);
+    if (b.conf !== (row.data as { conf?: unknown }).conf || b.margin !== (row.data as { margin?: unknown }).margin) out.push(`the call answered at seq ${row.seq}: its decision event's conf and margin are not the Answer step's`);
+  });
+  for (const b of events) {
+    const t = route.tiers[b.tierIndex as number];
+    if (!t) { out.push(`a decision event names tier ${String(b.tierIndex)}, which route ${route.name} does not have`); continue; }
+    if (b.prices !== t.prices.digest) out.push(`a call on tier ${t.name} names the prices ${String(b.prices)}, and the certificate's are ${t.prices.digest}`);
+    let want: number | null = null;
+    try { want = costOf(b.usage ?? {}, t.prices).cost; } catch { want = null; }
+    if (b.cost?.units !== want || b.cost?.unit !== `micro-${t.prices.currency}`) out.push(`a call on tier ${t.name} records the cost ${JSON.stringify(b.cost)}, and its usage at the certified prices is ${String(want)} micro-${t.prices.currency}`);
+  }
+  return out;
+}
+
 /** The certified sources of a build, read and checked against the certificate's digests, parsed, by module name. */
 export function certifiedModules(root: string, sources: Record<string, string>): Map<string, A.Module> {
   const out = new Map<string, A.Module>();
@@ -175,6 +200,10 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
     const r = replayRun(module, inst.machineId, inst.id, rows, { modulePath: rt.modulePath(inst.machineId), snapshot: inst.state, gate: await rt.gateReplays(inst.id), erased: rt.forgottenBodies(), program });
     // PD5-A11: the claims and lineage digests each step event records are reproduced.
     for (const p of await rt.verifyAttribution(inst.id)) r.diagnostics.push(diag('PL9001', { machine: inst.machineId }, `run ${inst.id}: ${p}`));
+    // Review C3 (M11): a route's tier choices are its Answer steps, so each call's decision event is checked against
+    // them, and its cost against its usage under the certified tier's prices (PS18.3, PS18.6).
+    const route = rt.verified.routes.find((x) => x.machine === inst.machineId);
+    if (route) for (const p of await routeRecordProblems(rt, inst.id, rows, route)) r.diagnostics.push(diag('PL9001', { machine: inst.machineId }, `run ${inst.id}: ${p}`));
     out.push(r);
   }
   return out;

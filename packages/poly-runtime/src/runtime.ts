@@ -279,10 +279,7 @@ export class PolyRuntime {
       // PS18.4, S353: a tier's call is read against its budget before any policy, and reserved with its allow.
       budgetCheck: (row, approved) => this.#routing.budgetCheck(row, approved),
       reserve: (row, plan) => this.#routing.reserve(row, plan),
-      onTerminal: async (row, action) => {
-        const record = action === 'SettleOk' ? (this.records.get(row.intent_id) as { cost?: { units?: number } | null } | undefined) : undefined;
-        await this.#routing.settle(row, typeof record?.cost?.units === 'number' ? record.cost.units : null);
-      },
+      onTerminal: (row, action) => this.#routing.settle(row, action),
       issueRoute: (row, decl) => this.#issueRoute(row, decl),
       sweep: () => this.#sweepRoutes(),
       channelOf: (row) => {
@@ -1033,10 +1030,9 @@ export class PolyRuntime {
         if (!e) throw new Error(`route ${r.instance} is Answered with no decision event for its answer (PS18.6)`);
         const body = JSON.parse(e.event).body as Record<string, unknown>;
         this.records.set(r.intent, { ...body, intent: r.intent, via: e.hash } as unknown as DecisionRecord);
-        await this.worker.completeRoute(r.intent, { ok: true, result: { answer: body.answer, conf: body.conf, margin: body.margin } });
-      } else {
-        await this.worker.completeRoute(r.intent, { ok: false, reason: 'route-exhausted' });
-      }
+        if (!(await this.worker.completeRoute(r.intent, { ok: true, result: { answer: body.answer, conf: body.conf, margin: body.margin } }))) continue;
+      } else if (!(await this.worker.completeRoute(r.intent, { ok: false, reason: 'route-exhausted' }))) continue;
+      // Review B1 (M11): the route is done only once its decision's intent is terminal, so a lost completion is taken again.
       await this.store.txn(() => { this.store.db.prepare("UPDATE poly_route SET status = 'done' WHERE intent = ?").run(r.intent); });
     }
   }

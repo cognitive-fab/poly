@@ -323,6 +323,13 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     if (!Array.isArray(d.tiers) || !d.tiers.length) throw new LoadError(`refused at load: the descriptor of route ${c.name} has no tier (PT10r)`);
     routes.push({ name: c.name, module: d.module, machine: d.machine, effectKind: d.effectKind, decision: d.decision, tiers: d.tiers, escalate: d.escalate, budget: d.budget ?? null });
   }
+  // Review C7 (M11): each routed decision's certified tiers are the ones its route's descriptor runs (PT24.5).
+  for (const d of certificate.poly?.decisions ?? []) {
+    if (!('route' in d)) continue;
+    const r = routes.find((x) => x.name === d.route);
+    const runs = r ? r.tiers.map((t) => ({ name: t.name, provider: t.provider, model: t.model, calibration: t.calibration?.mapDigest ?? null })) : null;
+    if (JSON.stringify(d.tiers) !== JSON.stringify(runs)) throw new LoadError(`refused at load: ${d.kind} of ${d.machine} is certified with the tiers ${JSON.stringify(d.tiers)}, and its route's descriptor runs ${JSON.stringify(runs)} (PT24.5)`);
+  }
   const budgets: VerifiedBudget[] = [];
   for (const c of certificate.poly?.budgets ?? []) {
     const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as VerifiedBudget & { budget?: unknown };

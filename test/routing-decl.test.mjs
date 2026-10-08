@@ -109,12 +109,12 @@ test('PL6841: a route that escalates on conf or margin has a calibration map for
   assert.equal(r.verdict, 'REFUSED');
   assert.ok(all(r).some((d) => d.code === 'PL6841' && /tier large/.test(d.message)), text(r));
   // Escalating on failure alone reads no confidence, so a tier with no map is allowed. Its condition is false, so the
-  // rule that an answer below the thresholds escalates holds vacuously, and the check says so rather than read CLEAN.
+  // rules over an answer below the thresholds hold vacuously, and the check says so rather than read CLEAN.
   const ok = await check(swap(swap(SRC, ' calibration "maps/opus.json"', ''), 'escalate when conf < 0.8 or margin < 0.1 or failed', 'escalate when failed'));
   assert.ok(!codes(ok.r).includes('PL6841'), text(ok.r));
   assert.equal(ok.r.verdict, 'INCONCLUSIVE', text(ok.r));
   const route = ok.r.machines.find((m) => m.machine === 'triage.Route');
-  assert.deepEqual(route.vacuous.map((v) => v.property), ['below-thresholds-escalates']);
+  assert.deepEqual(route.vacuous.map((v) => v.property).sort(), ['below-thresholds-escalates', 'exhausted-after-the-last']);
   assert.ok(ok.r.machines.filter((m) => m !== route).every((m) => m.verdict === 'CLEAN'));
 });
 

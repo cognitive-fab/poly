@@ -101,7 +101,8 @@ export function costOf(usage: Record<string, number>, table: Pick<PriceTable, 'p
   const unpriced: string[] = [];
   for (const [k, n] of Object.entries(usage).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (!isAmount(n)) throw new Error(`the usage of ${k} is ${JSON.stringify(n)}, not a whole number of tokens (K15)`);
-    const price = table.perMillionTokens[k];
+    // Review C1 (M11): a class is priced only by the table's own entry, never an inherited property's.
+    const price = Object.hasOwn(table.perMillionTokens, k) ? table.perMillionTokens[k] : undefined;
     if (price === undefined) unpriced.push(k);
     sum += BigInt(n) * BigInt(price ?? top);
   }

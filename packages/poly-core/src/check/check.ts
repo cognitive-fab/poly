@@ -511,6 +511,10 @@ class Checker {
     const routes = this.module.decls.filter((d): d is A.Route => d.kind === 'Route');
     const budgets = this.module.decls.filter((d): d is A.Budget => d.kind === 'Budget');
     const names = new Set<string>();
+    // Review A1 (M11): each name of a route, a tier and a budget is an identifier: a route's and a budget's name a
+    // module and files of the build, so no name may reach outside it.
+    const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    for (const d of [...routes, ...budgets, ...routes.flatMap((r) => r.tiers)]) if (!IDENT.test(d.name)) this.err('PL1201', d, `${d.kind === 'Route' ? 'a route' : d.kind === 'Budget' ? 'a budget' : 'a tier'}'s name is an identifier, and ${JSON.stringify(d.name)} is not one (PT10r)`);
     for (const d of [...routes, ...budgets]) {
       if (names.has(d.name)) this.err('PL1002', d, `${d.kind === 'Route' ? 'route' : 'budget'} ${d.name} is declared twice, or shares its name with a route or a budget`);
       names.add(d.name);
@@ -540,6 +544,8 @@ class Checker {
         tierNames.add(t.name);
         if (!/^[a-z0-9][a-z0-9-]*$/.test(t.provider)) this.err('PL1201', t, `tier ${t.name}: the provider "${t.provider}" is not a plain name (lower-case letters, digits and -)`);
         if (t.maxTokens < 1) this.err('PL1201', t, `tier ${t.name}: its token limit is at least 1 (PS18.3)`);
+        // Review A5 (M11): every amount is a safe integer of micro-units, so no reservation is rounded.
+        if (!Number.isSafeInteger(t.maxTokens)) this.err('PL1201', t, `tier ${t.name}: its token limit ${t.maxTokens} is beyond the integers an amount holds exactly (PS18.3)`);
         for (const [what, p] of [['price table', t.prices], ['calibration map', t.calibration]] as const) {
           if (p !== null && !routePathOk(p)) this.err('PL1201', t, `tier ${t.name}: the ${what} "${p}" is not a relative path to a .json file under the source's directory, with no . or .. segment (PS18.3)`);
         }
@@ -550,7 +556,12 @@ class Checker {
           if (problem) this.err(problem.code, t, `tier ${t.name}: the price table ${t.prices} ${problem.message} (PS18.3, S350)`);
         }
         const table = this.priceTable(t.prices, t.provider);
-        if (table) { currencies.add(table.currency); reservations.push({ tier: t, r: reservationOf(t.maxTokens, table) }); }
+        if (table && Number.isSafeInteger(t.maxTokens)) {
+          const r0 = reservationOf(t.maxTokens, table);
+          if (!Number.isSafeInteger(r0)) this.err('PL1201', t, `tier ${t.name}: its reservation is beyond the integers an amount holds exactly (PS18.3)`);
+          currencies.add(table.currency);
+          reservations.push({ tier: t, r: r0 });
+        }
         if (t.calibration !== null && routePathOk(t.calibration)) {
           const m = this.opts.routing?.maps[t.calibration];
           if (!m) this.err('PL1001', t, `tier ${t.name}: no calibration map at ${t.calibration} beside the source (PS18.1)`);

@@ -116,7 +116,10 @@ export function expandRoutes(module: A.Module, program: A.Module[]): { extra: A.
   const decisions = routedDecisions(module);
   const extra: A.Module[] = [];
   const without = (name: string): A.Module => ({ ...structuredClone(lib), decls: structuredClone(lib.decls).filter((d) => !(d.kind === 'Machine' && d.name === name)) });
+  // Review A1 (M11): a route's and a budget's names name a module and files of the build, so each is an identifier.
+  const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
   for (const r of routes) {
+    if (!IDENT.test(r.name)) { diagnostics.push(diag('PL1201', at(r), `a route's name is an identifier, and ${JSON.stringify(r.name)} is not one (PT10r)`)); continue; }
     if (taken.has(r.name)) { diagnostics.push(diag('PL1002', at(r), `route ${r.name} has the name of another declaration that means a module ${module.name}.${r.name} (PS15, PS16, PS18)`)); continue; }
     taken.add(r.name);
     const T = Math.max(1, r.tiers.length);
@@ -144,6 +147,7 @@ export function expandRoutes(module: A.Module, program: A.Module[]): { extra: A.
     extra.push({ ...mod, name: `${module.name}.${r.name}`, id: `${r.id}:module` });
   }
   for (const b of budgets) {
+    if (!IDENT.test(b.name)) { diagnostics.push(diag('PL1201', at(b), `a budget's name is an identifier, and ${JSON.stringify(b.name)} is not one (PT10r)`)); continue; }
     if (taken.has(b.name)) { diagnostics.push(diag('PL1002', at(b), `budget ${b.name} has the name of another declaration that means a module ${module.name}.${b.name} (PS15, PS16, PS18)`)); continue; }
     taken.add(b.name);
     extra.push({ ...without('Route'), name: `${module.name}.${b.name}`, id: `${b.id}:module` });

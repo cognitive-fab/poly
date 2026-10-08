@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS poly_reservation (
   status TEXT NOT NULL,
   PRIMARY KEY (intent, budget)
 );
+CREATE TABLE IF NOT EXISTS poly_route_call (
+  intent TEXT PRIMARY KEY,
+  record TEXT NOT NULL
+);
 `;
 
 /** One instance a tier's call reserves on: its address, the cap it is opened with, and the reservation. */
@@ -131,7 +135,9 @@ export class RoutingHost {
     if (!t) return null;
     const route = { route: t.route.name, tier: t.tier.name, reservation: t.tier.reservation };
     const b = t.route.budget === null ? null : this.budgets.find((x) => x.name === t.route.budget);
-    if (!b) return { route, budget: null, plan: [], held: false };
+    if (t.route.budget === null) return { route, budget: null, plan: [], held: false };
+    // Review B5 (M11): a route that names a budget the runtime did not load is refused, fail closed (S353).
+    if (!b) return { refuse: 'deny', route, budget: null };
     const held = !!this.store.db.prepare("SELECT 1 FROM poly_reservation WHERE intent = ? AND status = 'held'").get(row.intent_id);
     const plan = this.addresses(b, t.decision.run, this.now()).map((p) => ({ ...p, amount: t.tier.reservation }));
     const scope = plan.find((p) => p.instance.includes(':scope:'))?.instance.split(':scope:')[1]?.split(':')[0] ?? null;
@@ -162,13 +168,20 @@ export class RoutingHost {
   }
 
   /**
-   * PS18.4: settles (with the call's cost) or releases (with null) every reservation the intent holds, in the caller's
-   * transaction, once: a reservation already settled or released is passed over.
+   * PS18.4: settles with the call's cost, when its provider answered, or else releases, every reservation the intent
+   * holds, in the caller's transaction, once: a reservation already settled or released is passed over.
    */
-  async settle(row: OutboxRow, cost: number | null): Promise<void> {
+  async settle(row: OutboxRow, action: string): Promise<void> {
     const intent = row.intent_id;
     const held = this.store.db.prepare("SELECT budget, amount FROM poly_reservation WHERE intent = ? AND status = 'held'").all(intent) as { budget: string; amount: number }[];
     if (!held.length) return;
+    // Review B2, C1 (M11): a call whose provider answered is settled with its cost whatever ends its intent (a lost
+    // completion, a refused settle, a completion outside its type), and only a call with no answer is released. Its
+    // record was kept when the provider answered; when no completion wrote it, it is written here (PS18.6).
+    const kept = this.store.db.prepare('SELECT record FROM poly_route_call WHERE intent = ?').get(intent) as { record: string } | undefined;
+    const record = kept ? (JSON.parse(kept.record) as Record<string, any>) : null;
+    const cost: number | null = record && typeof record.cost?.units === 'number' ? record.cost.units : null;
+    if (record && action !== 'SettleOk') this.store.appendEvent(row.instance_id, 'decision', { ...record, completed: false, ended: action }, this.now());
     // S352 as ruled, PT24.3: each settlement is journaled on the call's run, an overrun named in it, never hidden.
     this.store.appendEvent(row.instance_id, 'verdict', { stage: 'budget', intent, outcome: cost === null ? 'released' : 'settled', budgets: held.map((h) => (cost === null ? { instance: h.budget, reserved: h.amount, released: true } : { instance: h.budget, reserved: h.amount, actual: cost, overrun: Math.max(0, cost - h.amount) })) }, this.now());
     for (const h of held) {
@@ -216,6 +229,9 @@ export class RoutingHost {
         run: t.decision.run, scope: machine.slice(0, machine.lastIndexOf('.')),
       };
       this.records.set(ctx.idempotencyKey, record);
+      // Review B2 (M11): kept as soon as the provider answered, so a call that ran is charged however its intent ends.
+      const { question: q, ...kept } = record;
+      await this.store.txn(() => { this.store.db.prepare('INSERT OR REPLACE INTO poly_route_call (intent, record) VALUES (?, ?)').run(ctx.idempotencyKey, JSON.stringify({ ...kept, request: this.store.keep(q) })); });
       return { conf, margin };
     };
   }

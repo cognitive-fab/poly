@@ -25,7 +25,7 @@ import { journalCommand } from './journal.js';
 import { benchGate } from './bench.js';
 import { checkHost, type HostCheck } from './host.js';
 import { editCheck } from './edit-check.js';
-import { costCalls, costReport, readPriceTable } from './cost.js';
+import { costCalls, costReport, periodProblem, readPriceTable } from './cost.js';
 
 /** A JSON Schema, in the subset the published schemas use: type, properties, required, items, enum, description. */
 export type Schema = { type?: string | string[]; description?: string; properties?: Record<string, Schema>; required?: string[]; items?: Schema; enum?: unknown[]; additionalProperties?: boolean | Schema };
@@ -397,14 +397,22 @@ export const COMMANDS: Command[] = [
     output: obj({ calls: { type: 'integer' }, total: { type: 'object', description: 'micro-units per currency' }, byRun: { type: 'object' }, byScope: { type: 'object' }, byDay: { type: 'object' }, repriced: { type: 'object', description: 'the prices\' digest, the model, the calls priced again and their total' } }, ['calls', 'total', 'byRun', 'byScope', 'byDay']),
     async run(input) {
       // The runtime is loaded only here, as for the journal, so poly check runs without it.
-      const { openJournal } = await import('@poly/runtime');
-      const store = openJournal(need(input, 'db'));
+      const { openJournal, verifyRunChain } = await import('@poly/runtime');
+      // Review C4, C5 (M11): poly cost writes nothing, so a store that does not exist is refused, never created; and a
+      // period that names no month or day is refused.
+      const db = need(input, 'db');
+      if (!existsSync(db) || !statSync(db).isFile()) throw new CommandUsageError(`no store at ${db}`);
+      const period = opt(input, 'period');
+      const bad = period === undefined ? null : periodProblem(period);
+      if (bad) throw new CommandUsageError(bad);
+      const store = openJournal(db);
       try {
-        const calls = await costCalls(store, { run: opt(input, 'run'), scope: opt(input, 'scope'), period: opt(input, 'period') });
+        const refused: { run: string; reason: string }[] = [];
+        const calls = await costCalls(store, { run: opt(input, 'run'), scope: opt(input, 'scope'), period }, (events) => verifyRunChain(events as never), refused);
         const prices = opt(input, 'prices');
-        const report = costReport(calls, prices ? readPriceTable(prices) : undefined);
-        const lines = [`${report.calls} call${report.calls === 1 ? '' : 's'}`, ...Object.entries(report.total).map(([c, v]) => `total ${(v / 1_000_000).toFixed(6)} ${c}`), ...(report.repriced ? Object.entries(report.repriced.total).map(([c, v]) => `priced again under ${report.repriced!.prices}: ${(v / 1_000_000).toFixed(6)} ${c} over ${report.repriced!.calls} call(s) of ${report.repriced!.model}`) : [])];
-        return { exit: EXIT_CODES.CLEAN, result: report as unknown as Record<string, unknown>, text: lines.join('\n') + '\n' };
+        const report = costReport(calls, prices ? readPriceTable(prices) : undefined, refused);
+        const lines = [`${report.calls} call${report.calls === 1 ? '' : 's'}`, ...report.refused.map((x) => `not summed: run ${x.run}, whose chain does not verify (${x.reason})`), ...Object.entries(report.total).map(([c, v]) => `total ${(v / 1_000_000).toFixed(6)} ${c}`), ...(report.repriced ? Object.entries(report.repriced.total).map(([c, v]) => `priced again under ${report.repriced!.prices}: ${(v / 1_000_000).toFixed(6)} ${c} over ${report.repriced!.calls} call(s) of ${report.repriced!.model}`) : [])];
+        return { exit: report.refused.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN, result: report as unknown as Record<string, unknown>, text: lines.join('\n') + '\n' };
       } finally { await store.close(); }
     },
   },

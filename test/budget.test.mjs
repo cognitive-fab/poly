@@ -108,7 +108,7 @@ test('AC26, S352 as ruled: an overrun is recorded in the verdict and the budget,
   } finally { await rt.close(); }
 });
 
-test('S352: a crash between the reservation and the completion leaves the reservation held; it is released once when the intent dies', { timeout: 300_000 }, async () => {
+test('S352: a crash between the reservation and the completion leaves the reservation held; it is settled once when the intent dies', { timeout: 300_000 }, async () => {
   const a = await admittedDesk('budget-crash');
   const { rt, clock } = await loaded(a);
   try {
@@ -128,16 +128,17 @@ test('S352: a crash between the reservation and the completion leaves the reserv
     assert.equal(held.length, 2, 'one reservation per cap');
     assert.ok(held.every((h) => h.status === 'held'), JSON.stringify(held));
     for (const b of budgetsOf(rt)) assert.equal((await states(rt, b)).at(-1).post.reserved, 1600);
-    // After the lease, the worker finds the call lost: the intent dies, its reservation is released, and the route goes on.
+    // After the lease, the worker finds the call's completion lost: the intent dies, and since its provider answered,
+    // its reservation is settled with the call's cost, once (review B2); the route goes on.
     clock.advance(61_000);
     for (let i = 0; i < 6; i++) await rt.worker.tick();
     assert.ok(rt.store.db.prepare("SELECT status FROM poly_reservation").all().every((h) => h.status !== 'held'));
     for (const b of budgetsOf(rt)) {
       const s = await states(rt, b);
-      assert.equal(s.filter((x) => x.action === 'Release' && x.post).length, s.filter((x) => x.action === 'Release').length);
       assert.equal(s.at(-1).post.reserved, 0, `${b}: nothing stays reserved`);
-      const small = s.filter((x) => x.action === 'Release').length;
-      assert.equal(small, 1, `${b}: the lost call is released once`);
+      assert.equal(s.filter((x) => x.action === 'Release').length, 0, `${b}: an answered call is not released`);
+      // Two calls settled, each once: the lost small call (1000 input tokens, 100 micro-units) and the large one.
+      assert.deepEqual(s.filter((x) => x.action === 'Settle').map((x) => x.post.spent), [100, 3100], b);
     }
   } finally { await rt.close(); }
 });

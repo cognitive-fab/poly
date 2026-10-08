@@ -11,7 +11,7 @@ The rules of `std/routing/routing.poly` are poly's own (PT24, PS18, S351, S352).
 | `calls-only-while-trying` (step property) | A tier's call is emitted only while the route is trying, so an answered or exhausted route calls no provider (PT24.2). |
 | `answered-meets-thresholds` (step property) | An answer is taken only when it meets every threshold of the escalation condition (PF14.2). |
 | `below-thresholds-escalates` (step property) | An answer below a threshold is never taken: the route escalates or is exhausted (PF14.2). |
-| `exhausted-after-the-last` (step property) | A route is exhausted only after its last tier (PT24.2). |
+| `exhausted-after-the-last` (step property) | An answer below the thresholds exhausts a route only at its last tier (PT24.2). A failure the escalation does not name exhausts it at any tier (PS18.1), so the rule reads `Answer`'s steps. |
 | `route-ends` (liveness, under fairness of `Answer` or `Fail`) | AC25: every path reaches `Answered` or `Exhausted` when each provider call eventually completes; the number of tiers bounds the escalation (PF14.2). |
 | `within-cap` (invariant) | AC26, S352 as ruled: spent plus reserved never exceeds the cap, except by an overrun, which is a provider reporting more than the limit it was given (K15). |
 | `spent-is-final` (invariant) | A budget is spent only when nothing is reserved and no reservation can fit, so its terminal state refuses nothing it could have taken. |

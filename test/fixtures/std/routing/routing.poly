@@ -69,7 +69,7 @@ machine Route {
   step property calls-only-while-trying: emits(call) implies post.r == Trying
   step property answered-meets-thresholds: (action == Answer && post.r == Answered) implies !(conf < 0.8 || margin < 0.1)
   step property below-thresholds-escalates: (action == Answer && pre.r == Trying && (conf < 0.8 || margin < 0.1)) implies post.r != Answered
-  step property exhausted-after-the-last: (post.r == Exhausted && pre.r != Exhausted) implies pre.left == 0
+  step property exhausted-after-the-last: (action == Answer && post.r == Exhausted && pre.r != Exhausted) implies pre.left == 0
 
   liveness route-ends: r == Trying leads to r == Answered || r == Exhausted
     under fair { Answer | Fail }

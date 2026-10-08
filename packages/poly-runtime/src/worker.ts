@@ -396,6 +396,9 @@ export class EffectWorker {
               await this.dispatchCompletion(row, decl.onFailure, ':failed', mapCompletion(decl.onFailure ?? {}, { error: { message: 'escalation-timeout', reason: 'escalation-timeout' } }, { reason: 'escalation-timeout' }));
               this.verdict(row, { outcome: 'denied', reason: 'escalation-timeout' });
               await this.store.markEffectDead(row.intent_id, row.attempts, 'denied: escalation-timeout');
+              // Review B3 (M11): a call rechecked while holding its reservation can be escalated; its timeout
+              // is a terminal transition too, so the reservation is released here.
+              await this.opts.onTerminal?.(row, 'EscalationTimeout');
               return true;
             });
             if (won) return;
@@ -658,15 +661,24 @@ export class EffectWorker {
   async completeRoute(intentId: string, end: { ok: true; result: unknown } | { ok: false; reason: string }): Promise<boolean> {
     const now = this.now;
     const raw = this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(intentId) as (OutboxRow & { claimed_until: number | null; status: string; payload: string }) | undefined;
-    if (!raw || raw.status !== 'inflight') return false;
+    // An intent already terminal (done or dead) needs nothing more: its route's end was taken.
+    if (!raw || raw.status !== 'inflight') return true;
     const row = { ...raw, payload: JSON.parse(raw.payload) } as OutboxRow;
     const st = await this.intentState(row);
-    if (st?.intent !== 'Running') return false;
     (row as Fenced).fence = raw.claimed_until ?? undefined;
     const decl = this.decl(row);
-    if (decl === null) return false;
+    if (decl === null || !st) return false;
     const n = st.intent_attempt!;
     const m = await this.boundOf(row);
+    // Review B1 (M11): a crash after HandlerOk and before SettleOk leaves the intent Settled; the route's end is
+    // taken again, as run() takes a recovered Settled: done when its completion is journaled, settled again otherwise.
+    if (st.intent === 'Settled') {
+      if (this.journaled(row, ':done')) await this.settled(row);
+      else if (end.ok) await this.settle(row, decl, n, end.result, now, m);
+      else await this.settleFailed(row, decl, n, end.reason, now, m);
+      return true;
+    }
+    if (st.intent !== 'Running') return st.intent === 'Done' || st.intent === 'Dead' || st.intent === 'Denied';
     if (!end.ok) { await this.permanent(row, decl, n, end.reason); return true; }
     await this.store.txn(async () => { await this.transition(row, 'HandlerOk'); this.observed(row, n, 'ok'); });
     await this.settle(row, decl, n, end.result, now, m);

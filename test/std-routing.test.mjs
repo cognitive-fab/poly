@@ -31,7 +31,9 @@ const RULES = {
   'calls-only-while-trying': ['Answer', "        r' = Exhausted\n", "        r' = Exhausted\n        emit call(tier)\n"],
   'answered-meets-thresholds': ['Answer', 'if conf < 0.8 || margin < 0.1 {', 'if margin < 0.1 {'],
   'below-thresholds-escalates': ['Answer', 'if conf < 0.8 || margin < 0.1 {', 'if conf < 0.5 || margin < 0.1 {'],
-  'exhausted-after-the-last': ['Fail', 'if left > 0 {', 'if left > 1 {'],
+  // Review A2 (M11): an answer below the thresholds exhausts only at the last tier; a failure the route does not name
+  // exhausts at any tier (PS18.1), so the rule reads Answer's steps.
+  'exhausted-after-the-last': ['Answer', 'if left > 0 {', 'if left > 1 {'],
   // AC25's seeded mutant: a failed tier is called again instead of escalated, so a route can loop forever.
   'route-ends': ['Fail', "      tier' = tier + 1\n      left' = left - 1\n      emit call(tier + 1)\n", '      emit call(tier)\n'],
   'within-cap': ['Reserve', 'require spent + reserved + r <= cap', 'require spent + r <= cap'],
