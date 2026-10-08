@@ -64,7 +64,8 @@ test('each error source raises exactly the code it names', () => {
   const compileErrors = Object.entries(CODES).filter(([c, i]) => i.severity === 'error' && c !== 'PL1203' && c !== 'PL2501' && c !== 'PL2001' && c !== 'PL0201' && c !== 'PL0301' && c !== 'PL6401' && c !== 'PL5405' && c !== 'PL6402' && c !== 'PL6403' && c !== 'PL6404' && c !== 'PL6302' && c !== 'PL6405' && c !== 'PL6406' && c !== 'PL6407' && c !== 'PL6408' && c !== 'PL6409' && c !== 'PL6410' && !/^PL681[1-5]$/.test(c) && !/^PL682[1-3]$/.test(c) && !/^PL683[3-5]$/.test(c) && c !== 'PL6826' && c !== 'PL6824' && c !== 'PL6825' && c !== 'PL6001').map(([c]) => c);
   // PL6841 to PL6849 are raised over a route or a budget, whose price tables and calibration maps poly-check reads from
   // the project (PS18.3, PT10r); a source checked here has none. They are tested by test/routing*.test.mjs.
-  const routed = compileErrors.filter((c) => !/^PL684[1-9]$/.test(c));
+  // PL6839 is raised over a routed decision, whose route names those files too; tested by test/routed-materials.test.mjs.
+  const routed = compileErrors.filter((c) => !/^PL684[1-9]$/.test(c) && c !== 'PL6839');
   assert.deepEqual(routed.filter((c) => !seen.has(c)), []);
 });
 

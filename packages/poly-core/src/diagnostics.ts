@@ -174,6 +174,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6837: { name: 'VERIFIED_BY_PERSON', stage: 'types', severity: 'error' },
   // PS17.3, S322: a tainted message between machines that no configuration follows.
   PL6838: { name: 'FLOW_NOT_FOLLOWED', stage: 'model-check', severity: 'inconclusive' },
+  // PS18.2, F1 of the review of the M10 and M11 merge: a routed decision that reads or answers a body, or cites.
+  PL6839: { name: 'ROUTED_DECISION_MATERIALS', stage: 'types', severity: 'error' },
   PL6826: { name: 'VAULT_NOT_FOR_PRODUCTION', stage: 'runtime', severity: 'error' },
   PL6501: { name: 'UNDISCHARGEABLE_MANDATE', stage: 'policy', severity: 'finding' },
   // S147: a machine("m.M") read no proposal can carry: the policy form of a vacuous property.
