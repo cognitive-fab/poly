@@ -1,0 +1,12 @@
+// S402 (PS18.2, PT10k): a policy of the route's scope that reads a tier call's taint. A call over a body of class
+// customer is denied on every tier, so the route is exhausted with no provider called.
+module taint_policy
+
+policy taint {
+  scope "desk.triage"
+  obligation no-customer-bodies "No tier is asked over a customer's body." rule {
+    when effect.kind == "route.triage.call" && effect.taint.class == "customer"
+    require false else deny
+    on unknown deny
+  }
+}

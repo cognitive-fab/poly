@@ -1,8 +1,8 @@
-// F1 of the review of the M10 and M11 merge, as ruled (PS18.2, PL6839, S402). A routed decision's tiers are asked
-// through the route, not through M10's decision handler, so they get no materials, store no Content answer with its
-// taint and check no citation: a routed decision with a Content or Items parameter, a Content result or cites is
-// refused at check. And whatever a tier answers, an answer outside the decision's type is recorded by its digest only,
-// in the ledger and in poly_route_call, never in clear (S310, PS18.6).
+// F1 of the review of the M10 and M11 merge, as ruled (PS18.2, PL6839, S402). A routed decision's tiers are given the
+// decision's materials and proposed with its taint since S402, so a routed decision may read a Content or an Items
+// parameter; no tier's answer is kept with its taint and no tier's citation is checked, so a Content result or cites
+// is still refused at check. And whatever a tier answers, an answer outside the decision's type is recorded by its
+// digest only, in the ledger and in poly_route_call, never in clear (S310, PS18.6).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,14 +38,19 @@ function withParam(name, type) {
   return swap(src, '  decision classify(text: string) -> Branch {', `  decision classify(text: string, ${name}: ${type}) -> Branch {`);
 }
 
-test('PS18.2, PL6839: a routed decision with a Content or Items parameter, a Content result or cites is refused', { timeout: 300_000 }, async () => {
+test('PS18.2, PL6839, S402: a routed decision with a Content or Items parameter is allowed; a Content result or cites is refused', { timeout: 300_000 }, async () => {
   const content = withParam('note', 'Content');
   const items = withParam('context', 'Items');
   const cites = swap(items, '    route triage\n', '    route triage\n    cites context\n');
   let result = swap(DESK, 'enum Branch', 'audience { public < customer }\n\nenum Branch');
   result = swap(result, '  action Classified(branch: Branch, conf: Conf, margin: Conf)', '  action Classified(branch: Content, conf: Conf, margin: Conf)');
   result = swap(result, '  decision classify(text: string) -> Branch {', '  decision classify(text: string) -> Content {');
-  for (const [what, src, re] of [['a Content parameter', content, /parameter note/], ['an Items parameter', items, /parameter context/], ['cites', cites, /cites/], ['a Content result', result, /Content/]]) {
+  // S402: a Content or an Items parameter is read by the tiers as materials, not refused.
+  for (const [what, src] of [['a Content parameter', content], ['an Items parameter', items]]) {
+    const r = await check(src);
+    assert.ok(!all(r).some((d) => d.code === 'PL6839'), `${what}: ${text(r)}`);
+  }
+  for (const [what, src, re] of [['cites', cites, /cites/], ['a Content result', result, /Content/]]) {
     const r = await check(src);
     assert.equal(r.verdict, 'REFUSED', `${what}: ${text(r)}`);
     assert.ok(all(r).some((d) => d.code === 'PL6839' && re.test(d.message)), `${what}: ${text(r)}`);

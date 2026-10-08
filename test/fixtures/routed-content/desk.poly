@@ -1,0 +1,61 @@
+// S402 (PS18.2, PT10r): the M11 desk whose routed classification reads the message body itself, a Content, through
+// the triage route. Each tier is given the body as the decision's materials, and each tier's call is proposed with the
+// body's taint. The answer stays a Branch, a finite type, so it carries no taint (S323).
+module desk
+
+audience { public < customer }
+
+enum Branch { Refund, Status, Other }
+
+enum TicketStatus { New, Classifying, Routed, NeedsHuman }
+
+machine Ticket {
+  state {
+    status : TicketStatus = New
+  }
+
+  terminal status in { Routed, NeedsHuman }
+
+  action Received(body: Content)
+  action Classified(branch: Branch, conf: Conf, margin: Conf)
+  action Unclassified()
+
+  on Received(body) {
+    require status == New else reject "not-new"
+    status' = Classifying
+    decide classify(body)
+  }
+
+  on Classified(branch, conf, margin) {
+    require status == Classifying else reject "not-classifying"
+    status' = Routed
+  }
+
+  on Unclassified {
+    require status == Classifying else reject "not-classifying"
+    status' = NeedsHuman
+  }
+
+  decision classify(body: Content) -> Branch {
+    route triage
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Classified(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Unclassified()
+  }
+
+  path property one-classification: count("decision.classify") <= 1
+}
+
+route triage {
+  tier small provider "flash" prices "prices/flash.json" calibration "maps/flash.json" max input tokens 2000 max tokens 4000
+  tier large provider "opus" prices "prices/opus.json" calibration "maps/opus.json" max input tokens 2000 max tokens 8000
+  escalate when conf < 0.8 or margin < 0.1 or failed
+  budget support
+}
+
+budget support {
+  cap usd 0.5 per run
+  cap usd 20 per day per scope
+  on exhausted escalate
+}
