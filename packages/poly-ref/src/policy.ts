@@ -53,8 +53,15 @@ export function policyFacts(modules: Module[]): PolicyFacts {
     for (const d of m.decls) {
       if (d.kind !== 'Route') continue;
       let labels: string[] = ['egress:external'];
-      for (const x of m.decls) if (x.kind === 'Machine') for (const i of x.items) if (i.kind === 'Decision' && i.items.some((y) => y.kind === 'DecRoute' && y.route === d.name)) labels = i.items.flatMap((y) => (y.kind === 'EffLabels' ? y.labels : []));
-      machines.set(`${m.name}.${d.name}.Route`, { service: false, fields: new Map(), effects: d.tiers.map((t) => ({ kind: `route.${d.name}.call`, class: 'none', labels, route: { route: d.name, tier: t.name }, ...(d.budget ? { budget: { budget: d.budget } } : {}) })), claims: [] });
+      // S402: a call is proposed with its decision's taint and items, so the table gives it what it gives the decision.
+      let reads: { content?: boolean; items?: number } = {};
+      for (const x of m.decls) if (x.kind === 'Machine') for (const i of x.items) if (i.kind === 'Decision' && i.items.some((y) => y.kind === 'DecRoute' && y.route === d.name)) {
+        labels = i.items.flatMap((y) => (y.kind === 'EffLabels' ? y.labels : []));
+        const isC = (t: TypeExpr) => t.kind === 'TName' && t.name === 'Content';
+        const isI = (t: TypeExpr) => t.kind === 'TName' && t.name === 'Items';
+        reads = { ...(i.params.some((p) => isI(p.type)) ? { items: i.params.filter((p) => isI(p.type)).length } : {}), ...(i.params.some((p) => isC(p.type) || isI(p.type)) ? { content: true } : {}) };
+      }
+      machines.set(`${m.name}.${d.name}.Route`, { service: false, fields: new Map(), effects: d.tiers.map((t) => ({ kind: `route.${d.name}.call`, class: 'none', labels, ...reads, route: { route: d.name, tier: t.name }, ...(d.budget ? { budget: { budget: d.budget } } : {}) })), claims: [] });
     }
     for (const d of m.decls) {
       if (d.kind !== 'Machine') continue;

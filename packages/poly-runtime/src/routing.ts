@@ -10,6 +10,7 @@
 import { costOf, digest } from '@poly/core';
 import type { OutboxRow, Runtime } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import type { LedgerStore } from './ledger-store.js';
+import { isItems } from './memory.js';
 import { answerProbability, calibrate, type DecisionRecord, type Provider } from './provider.js';
 import type { VerifiedBudget, VerifiedRoute, VerifiedTier } from './load.js';
 import type { Proposal } from './worker.js';
@@ -52,6 +53,9 @@ export function periodKey(period: 'hour' | 'day' | 'month', at: number): string 
 }
 
 export class RoutingHost {
+  /** S402, PS18.2: the decision's materials for a tier's call, as an unrouted decision's provider gets them; the runtime sets it. */
+  materials: ((payload: Record<string, unknown>) => Promise<{ bodies: Record<string, string | null>; items: Record<string, { id: string; body: string | null }[]> }>) | null = null;
+
   /** The tier providers, by the provider name a tier gives (S356): host code, never certified, recorded in tests. */
   readonly providers = new Map<string, Provider>();
 
@@ -209,7 +213,11 @@ export class RoutingHost {
       if (!provider) throw new Error(`no provider ${t.tier.provider} is registered for tier ${t.tier.name} of route ${route.name} (rt.provideTier, S356)`);
       const question = { decision: route.decision.name, payload: t.decision.payload, intent: t.decision.intent, tier: t.tier.name, limits: { maxInputTokens: t.tier.maxInputTokens, maxTokens: t.tier.maxTokens } };
       const t0 = this.now();
-      const a = await provider(question);
+      // S402: a decision that reads a Content or an Items gives each tier its materials; the question keeps digests only.
+      const payload = (t.decision.payload ?? {}) as Record<string, unknown>;
+      const reads = Object.values(payload).some((v) => (typeof v === 'string' && /^sha256:[0-9a-f]{64}$/.test(v)) || isItems(v));
+      const m = reads && this.materials ? await this.materials(payload) : null;
+      const a = await (m ? provider(question, { bodies: m.bodies, items: m.items }) : provider(question));
       const dist = [...a.distribution].sort((x, y) => y[1] - x[1]);
       const map = t.tier.calibration ? { decision: t.tier.calibration.decision, version: t.tier.calibration.version, fittedFor: t.tier.calibration.fittedFor, digest: t.tier.calibration.mapDigest, points: t.tier.calibration.points } : null;
       const first = answerProbability(dist, a.answer);

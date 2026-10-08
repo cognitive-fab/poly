@@ -1472,7 +1472,7 @@ class Checker {
         if (result.k === 'record') this.err('PL1201', it, `decision ${d.name} returns a record, with a confidence per field; a routed decision has one answer and one confidence for its route to read (PS18.1)`);
         // PS18.2, F1 as ruled: a route's tiers get no materials, keep no Content answer with its taint and check no
         // citation, so a routed decision reads no body and no item set, answers no body and cites nothing (S402 lifts the parameters in v1).
-        for (const p of d.params) if (this.holds(this.tyOf(p.type), (x) => x.k === 'content' || x.k === 'items')) this.err('PL6839', p, `decision ${d.name} names route ${it.route}, and its parameter ${p.name} is ${tyToString(this.tyOf(p.type))}; a routed decision reads no Content and no Items, since its tiers are given no materials (PS18.2)`);
+        // S402: a routed decision reads Content and Items; its tiers are given the decision's materials (PS18.2).
         if (result.k === 'content') this.err('PL6839', d.result, `decision ${d.name} names route ${it.route}, and its result is a Content; a routed decision answers a finite value, since no tier's answer is kept with its taint (PS18.2)`);
         if (cites) this.err('PL6839', cites, `decision ${d.name} names route ${it.route}, and cites ${cites.param}; a routed decision cites nothing, since no tier's citations are checked (PS18.2)`);
       }

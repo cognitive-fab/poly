@@ -243,6 +243,8 @@ export class PolyRuntime {
     // PS18.2: a route's call runs its tier's provider, through the runtime's own handler.
     this.#routing = new RoutingHost(kernel, store, verified.routes, verified.budgets, () => this.now(), this.records, (r) => verified.machines.find((x) => x.id === r.decision.machine)?.manifest?.effects?.[`decision.${r.decision.name}`]?.decision?.result ?? null);
     for (const r of verified.routes) builtins[r.effectKind] = this.#routing.handler(r);
+    // S402: a tier's call reads its decision's materials, as the decision's own provider would (PS17.2).
+    this.#routing.materials = async (payload) => { const m = await this.memory.materials(payload, (d) => this.contentBody(d), (b, t, s) => this.#putTainted(b, t, s)); return { bodies: m.bodies, items: m.items }; };
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
@@ -269,6 +271,16 @@ export class PolyRuntime {
       // PT10k (S302, S307): the flow rule and freshness, before the grant check and the policy.
       memoryCheck: (row, decl, approved) => {
         if (!this.memory.flows.size) return null;
+        // S402, PT10r: a tier's call is judged as its decision is, over the decision's payload: its taint and items.
+        const tier = this.#routing.tierOf(row as never);
+        if (tier) {
+          const d = this.store.db.prepare('SELECT instance_id, seq, kind FROM pr_outbox WHERE intent_id = ?').get(tier.decision.intent) as { instance_id: string; seq: number; kind: string } | undefined;
+          const dm = d ? this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(d.instance_id)?.machine_id as string | undefined : undefined;
+          if (!d || !dm) return null;
+          const dj = this.store.db.prepare('SELECT action, data FROM pr_journal WHERE instance_id = ? AND seq = ?').get(d.instance_id, d.seq) as { action: string; data: string } | undefined;
+          const dc = dj ? JSON.parse(dj.data)?.$claims : null;
+          return this.memory.check({ instance: d.instance_id, machineId: dm, kind: d.kind, payload: (tier.decision.payload ?? {}) as Record<string, unknown>, decl: { decision: true }, step: { action: dj?.action ?? null, claims: dc && typeof dc === 'object' ? dc : null }, channelAudience: null, approved, now: this.now(), keyed: (s) => store.recipientDigest(`principal:${s}`) });
+        }
         const machineId = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(row.instance_id)?.machine_id as string | undefined;
         if (!machineId) return null;
         const j = this.store.db.prepare('SELECT action, data FROM pr_journal WHERE instance_id = ? AND seq = ?').get(row.instance_id, row.seq) as { action: string; data: string } | undefined;
