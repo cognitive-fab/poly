@@ -1,6 +1,7 @@
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{booktabs}
+\usepackage{amssymb}
 \usepackage{tabularx}
 \usepackage{listings}
 \usepackage{xcolor}
@@ -49,7 +50,7 @@ A \poly{} program is a set of state machines. One source is three things at once
 
 \paragraph{Contributions.}
 \begin{itemize}
-\item A language for agent authors in which the program is the checked model: finite check domains with a strict or disclosed mode, declared effects with classes and labels, five kinds of property, and model decisions as finite typed values (Section~\ref{sec:lang}).
+\item A language for agent authors in which the program is the checked model: finite check domains with a strict or disclosed mode, declared effects with classes and labels, five kinds of property, and model decisions as finite typed values (Section~\ref{sec:lang}), with a semantics that states what every verdict asserts (Section~\ref{sec:sem}).
 \item A checker that folds several engines into one verdict out of five, never reports a bounded search as clean, and returns witnesses that export as host-language tests and typed fixes guarded by node digests (Section~\ref{sec:checker}).
 \item A runtime that executes only certified programs, validated per program against an independent reference interpreter, with a fail-closed effect gate driven by signed policies and a journal that replays with no outside call (Section~\ref{sec:runtime}).
 \item A pre-registered experiment of 200 runs comparing TypeScript, TypeScript with after-the-fact verification, and two \poly{} surfaces, with its full analysis and the one language default it exposed (Sections~\ref{sec:setup} and~\ref{sec:results}).
@@ -158,6 +159,80 @@ Policy expressions are three-valued, because an input may be missing; an unknown
 
 A machine can be written in a standalone syntax or inside TypeScript through an embedded surface. Both produce the same syntax tree and pass the same checks. The experiment of Section~\ref{sec:results} selected the embedded surface as the primary one.
 
+\section{Semantics}
+\label{sec:sem}
+
+This section states what a verdict asserts. It summarises the written semantics of \poly{}, from which both the compiler and the reference interpreter \texttt{poly-ref} are built.
+
+\subsection{Machines, states and steps}
+
+A machine is a tuple $M = (F, \mathit{init}, A, H, G, \mathit{term})$. $F$ is a finite set of fields; each field $f$ has a type $T(f)$ and a check domain $D(f) \subseteq T(f)$. $A$ is a finite set of actions; each action $a$ has a parameter type $T(a)$ and a check domain $D(a) \subseteq T(a)$. $H$ maps each handled action to its handler, $G$ is a list of guards, and $\mathit{term}$ is the terminal predicate, which reads only the first (control) field. A \emph{state} is a function $s$ from $F$ to values with $s(f) \in T(f)$; $S$ is the set of states. A state holds the declared fields and nothing else: no pending effects, timers or verdicts.
+
+A handler denotes a function $h_a : S \times T(a) \to \mathit{accept}(w, E) \mid \mathit{reject}(r)$, where $w$ is a partial function from fields to values (the writes), $E$ is the finite sequence of intents the step emits (effects, timer sets and cancels, spawns, signals), and $r$ is a reason. Handler expressions read the pre-state only, and every expression is total.
+
+A \emph{label} is a triple $(a, d, v)$ whose verdict $v$ is $\mathit{accepted}(E)$, $\mathit{rejected}(r)$ or $\mathit{unhandled}$. The transition relation $R_M \subseteq S \times \mathit{Label} \times S$ contains, for every $s \in S$, $a \in A$ and $d \in T(a)$, exactly one triple, given by the first row that applies:
+
+\begin{center}
+\small
+\begin{tabular}{lll}
+\toprule
+Condition & Verdict & Next state\\
+\midrule
+$\mathit{term}(s)$ & $\mathit{rejected}(\texttt{terminal})$ & $s$\\
+$d$ violates a strict check domain of $a$ & $\mathit{rejected}(\texttt{outside-check-domain})$ & $s$\\
+$a \notin \mathrm{dom}(H)$ & $\mathit{unhandled}$ & $s$\\
+required claims missing or malformed & $\mathit{rejected}(\texttt{claims-unverified})$ & $s$\\
+$h_a(s, d) = \mathit{reject}(r)$ & $\mathit{rejected}(r)$ & $s$\\
+$h_a(s, d) = \mathit{accept}(w, E)$ & $\mathit{accepted}(E)$ & $s \oplus w$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent where $(s \oplus w)(f) = w(f)$ if $f \in \mathrm{dom}(w)$ and $s(f)$ otherwise. This is the frame: a field a step does not write is unchanged. Reasons used by the runtime are reserved, so a rejection always says whether the runtime or the module refused the step. A completion of an effect is an ordinary action.
+
+\subsection{Behaviours, the environment and the checked instance}
+
+A \emph{path} is a finite sequence $s_0\, l_0\, s_1 \ldots s_n$ with $s_0 = \mathit{init}$ and $(s_i, l_i, s_{i+1}) \in R_M$; a \emph{behaviour} is an infinite one. The environment chooses each action, its data and each completion. Checking and running are two interpretations of the same environment interface applied to the same $R_M$. In \textbf{check}, every action with every data value in its check domain, and every completion of every intent, is offered in every state. In \textbf{run}, the environment is whatever the world sends.
+
+The \emph{checked instance} $I$ restricts inputs to their check domains and states to theirs. $\mathit{Reach}(I)$ is the set of states, every field in its domain, on paths of $I$ that stay in the instance. It is finite. A transition from $\mathit{Reach}(I)$ can leave the instance in two ways. A value outside a field's declared type is a program error (\texttt{PL3102}, a finding with its path). A value inside the type but outside the check domain is a \emph{bound hit} (\texttt{PL3901}): the post-state is not explored, and the verdict is at best \textsc{Inconclusive}. A counter that grows without limit is therefore checked up to its declared bound, and the verdict says so.
+
+\paragraph{Theorem 1 (checked is running).} Every path produced by \textbf{run} whose inputs lie in the check domains is a path of \textbf{check}.
+
+\noindent\emph{Proof.} Both interpretations apply the same $R_M$; for the lowered module, Section~\ref{sec:sem-tv} reduces this to a checked fact. \textbf{Check} offers every input of $D(a)$ in every state and every completion of every intent, so it offers whatever \textbf{run} offers on such a path. $\square$
+
+For a strict parameter, \textbf{run} cannot offer an input outside $D(a)$: the runtime rejects it before the handler (second row of the table). For a disclosed parameter, the theorem covers exactly the paths whose inputs stayed in the domain; the other paths are journaled as drift. Every safety property that is \textsc{Clean} on \textbf{check} therefore holds on every \textbf{run} path the theorem covers, and on no other path. The defects of Section~\ref{sec:results} lie on paths it does not cover.
+
+\paragraph{Lemma 2 (renaming invariance).} The types \texttt{Principal} and \texttt{Content} are opaque: a module may compare their values only for equality, store them and pass them. For every bijection $\pi$ on such values, $(s, l, s') \in R_M$ iff $(\pi s, \pi l, \pi s') \in R_M$, since nothing in a module can tell two values apart except by equality. So every \textbf{run} path, whatever identities and bodies it carries, is the renaming of a \textbf{check} path over a finite set of representatives, provided there are enough of them: one per position of that type in the state, plus the most a single label carries, and never fewer than two. This is data independence in the sense of Wolper \cite{wolper1986data}. For these two types the finite instance loses nothing. For integers and strings it does, and the instance is printed with every verdict.
+
+\subsection{Properties}
+
+Each kind of property is a formula over $I$, and a \textsc{Clean} verdict asserts the formula.
+\begin{itemize}
+\item An \emph{invariant} $P$ holds iff $P(s)$ for every $s \in \mathit{Reach}(I)$.
+\item A \emph{step property} $Q(s, a, d, s', E)$ holds iff $Q$ holds for every accepted transition from a state of $\mathit{Reach}(I)$. It reads $E$ only through $\mathit{emits}(k, f_1{:}\,v_1, \ldots)$, true iff some intent of $E$ is of effect $k$ with those constant field values. \texttt{never emit $k$ while $P$} abbreviates $P(s) \Rightarrow \neg\mathit{emits}(k)$.
+\item A \emph{reject property} $J(s, a, d, v)$ holds iff $J$ holds for every transition from a state of $\mathit{Reach}(I)$, whatever its verdict.
+\item A \emph{path property} $\Phi$ holds iff $\Phi(\mathit{emitted}(\pi))$ for every path $\pi$ of $I$, where $\mathit{emitted}(\pi)$ is the concatenation of the intent sequences of the accepted labels of $\pi$. Only prefix-closed forms are accepted: $\mathit{count}(k) \le n$, $\mathit{before}(k_1, k_2)$ and their conjunctions. A path property is therefore a safety property, with a finite witness. It counts intents emitted by one instance, not executions of their handlers.
+\item A \emph{liveness property} is \texttt{eventually $P$} or \texttt{$P$ leads to $Q$}, always stated with a list of action groups $g_1, \ldots, g_k$ and checked over the behaviours of $I$ that are weakly fair for each: a behaviour is $\mathit{WF}(g)$ iff $g$ is not continuously enabled from some point on without a step of $g$ being taken infinitely often. Actions not listed carry no assumption; a person's approval is never listed. A counterexample is a lasso: a path to a cycle that the environment can repeat forever. It is found as a strongly connected component of the states reached without $P$ in which no listed group is starved.
+\item A \emph{deadlock} is a state $s \in \mathit{Reach}(I)$ with $\neg\mathit{term}(s)$ in which no action with data in its domain is accepted. Deadlock freedom, $\forall s \in \mathit{Reach}(I).\ \mathit{term}(s) \vee \exists a, d.\ \mathit{accepted}$, is checked for every machine. It is a state predicate over the closed instance; the liveness it protects (that progress is possible) is stated separately when it matters.
+\end{itemize}
+
+A witness to a safety violation is a shortest path to it, found by breadth-first search. A verdict always refers to $I$, and $I$ is printed with it.
+
+\subsection{Lowering correctness}
+\label{sec:sem-tv}
+
+Let $R_L$ be the transition relation of the lowered module, read back through an abstraction function $\alpha$ from its flat state. \emph{The lowering is correct for $M$ on $I$} iff $R_L$ and $R_M$ agree on every $(s, a, d)$ with $s \in \mathit{Reach}(I)$ and $d \in D(a)$: the same verdict kind, the same reason, the same next state and the same intent sequence. \texttt{poly check} decides this per program: \texttt{poly-ref} explores $I$ and compares every transition with the lowered module's. A difference is \texttt{PL2501} and the verdict is \textsc{Refused}. The relation is checked on $\mathit{Reach}(I)$ only, which is where Theorem 1 needs it.
+
+\subsection{Policies and the gate}
+
+Policy inputs may be missing, so policy expressions take values in $\{T, F, U\}$ under Kleene's strong three-valued logic: $\neg U = U$, $F \wedge U = F$, $T \wedge U = U$, $T \vee U = T$, $F \vee U = U$, and a comparison with an unknown operand is $U$. Machine expressions are two-valued, and the type system keeps the two logics apart. An obligation \texttt{when $W$ require $Q$ else $s$ on unknown $u$} is not applicable if $W = F$, satisfied if $W = Q = T$, gives $s$ if $W = T$ and $Q \ne T$, and gives $u$ if $W = U$. The default $u$ of a deny rule is \emph{escalate}, so a deny rule whose condition cannot be evaluated never passes silently. The gate's decision is \emph{deny} if any obligation denies, otherwise \emph{escalate} if any escalates, otherwise \emph{allow}.
+
+The gate is an actor with its own state $\Sigma$ per session, and it processes one proposal at a time per session. A decision is a function of three inputs: the policy's digest, $\Sigma$ at the proposal, and the snapshot under evaluation (Section~\ref{sec:runtime}). Replay of a session re-applies its events in the gate's own arrival order and reproduces every decision.
+
+\subsection{Configurations}
+
+A configuration is a finite set of named instances whose machines exchange messages. A global state pairs the instances' states with the multiset of messages in transit, and any message in transit may be delivered next, whatever order the messages were sent in. Bounds on messages in transit and on instances are declared; a step that would exceed one is not explored, and the verdict is \textsc{Inconclusive}, never \textsc{Clean}. Delivery is weakly fair per identified message.
+
 \section{The checker}
 \label{sec:checker}
 
@@ -191,7 +266,7 @@ The loop is the one counterexample-guided synthesis uses, with the agent as the 
 
 \texttt{poly admit} writes a certificate: the digests of the source, of every lowered artefact and of every check result, signed. The runtime refuses to load an artefact whose digest, signature or toolchain range does not match. The checked program is therefore the running program.
 
-The lowering is not trusted. Every construct is validated per program against \texttt{poly-ref}, a reference interpreter of the written semantics that shares no code with the compiler \cite{pnueli1998tv}. A lowered module that disagrees with \texttt{poly-ref} is a toolchain fault, reported to the toolchain and never to the author. Liveness and deadlock, which no engine artefact covers, are checked by \texttt{poly-ref} itself. As a regression measure, the verdicts of a fixed set of 159 programs are recompiled and compared at every milestone; each comparison reported in the project record since the set reached 159 files found them identical.
+The lowering is not trusted. Each program is validated against \texttt{poly-ref}, a reference interpreter of the written semantics that shares no code with the compiler, by the relation of Section~\ref{sec:sem-tv} \cite{pnueli1998tv}. The two are written from the same semantics, so a misreading of that text common to both would not be caught; the relation guards against errors of implementation, not of understanding. A lowered module that disagrees with \texttt{poly-ref} is a toolchain fault, reported to the toolchain and never to the author. Liveness and deadlock, which no engine artefact covers, are checked by \texttt{poly-ref} itself. As a regression measure, the verdicts of a fixed set of 159 programs are recompiled and compared at every milestone; each comparison reported in the project record since the set reached 159 files found them identical.
 
 \subsection{One step}
 
@@ -199,7 +274,9 @@ A host program creates instances and dispatches actions. \texttt{dispatch} runs 
 
 \subsection{The gate}
 
-Before it runs, every effect crosses a gate that evaluates it against the policies and against the state of the step that emitted it, never a later one. The outcome is one of three. \emph{Allow}: the handler runs. \emph{Deny}: the handler never runs, and the effect's failure action is dispatched with the reason, so the machine handles a denial like any other failure. \emph{Escalate}: the effect waits for a person, whose approval must be signed with a key registered to a person; an agent's key cannot sign it, and without an approval in time the effect is denied. If the gate is unreachable the effect waits. The runtime never fails open.
+Before it runs, every effect crosses a gate that evaluates it against the policies and against one snapshot: the post-state of the step that emitted it, identified by its sequence number and digest. The gate keeps no copy of application state, so nothing in it can go stale. The outcome is one of three. \emph{Allow}: the handler runs, and a retry after a timeout does not ask the gate again. \emph{Deny}: the handler never runs, and the effect's failure action is dispatched with the reason, so the machine handles a denial like any other failure. \emph{Escalate}: the effect waits for a person, whose approval must be signed with a key registered to a person; an agent's key cannot sign it, and without an approval in time the effect is denied. If the gate is unreachable the effect waits. The runtime never fails open.
+
+An escalated effect can wait while its instance moves on. A refund escalated while its order is open may be approved after the order is cancelled. The re-proposal that an approval triggers is therefore evaluated twice: against the emitting snapshot, and against the instance's post-state at the time of the approval, whose sequence number the proposal records. It is allowed only if both evaluations allow, so a rule such as ``no irreversible effect on a cancelled order'' denies the late refund, and replay reproduces the denial from the recorded sequence number. The checker evaluates an approved re-proposal against every state reachable from the emitting state. An approved effect is never escalated again. An allowed effect whose decision read a shared service machine that has since changed is re-proposed, at most twice, and then denied as stale.
 
 Policies are signed. A policy is admitted only with a signature from a keyring whose head, policy sequence numbers and production flag are anchored in a per-user record outside the project, so an agent working in the project cannot sign its own policy, roll a policy back, or move a signature across projects.
 
@@ -293,7 +370,7 @@ Two secondary findings are not escaped defects. In T1, both \poly{} arms emitted
 \section{Related work}
 \label{sec:related}
 
-\paragraph{Model-checked languages.} P models distributed systems as communicating state machines and checks them, and is used at scale at AWS \cite{desai2013p}. TLA+ and Alloy check specifications \cite{lamport2002tla,jackson2012alloy}, and Quint positions an executable specification as the validation point between English and code for LLM-written software \cite{quint2025llm}. In each, the checked model is separate from the production code. Stateright model-checks the Rust actor code it runs \cite{stateright}, which is the closest analogue to a checked program that is also the running program; it has no agent tooling or governance. \poly{} descends from explicit-state model checking \cite{clarke1981synthesis,holzmann1997spin} and statecharts \cite{harel1987statecharts}.
+\paragraph{Model-checked languages.} P models systems as communicating state machines, checks them, and compiles the checked program to executable code: P code shipped in the USB 3.0 drivers of Windows 8, and P is used at scale at AWS \cite{desai2013p}. P is therefore the closest precedent for a checked program that is also the running program. \poly{} differs from P in its target authors (agents), in its effect gate and policies, in the journal shared by replay and checking, and in its typed model decisions. PlusCal translates an algorithm written in a programming-language syntax into a TLA+ specification that TLC checks \cite{lamport2009pluscal}; it is the closest precedent for one text that is both readable code and a checked model, although the algorithm is not itself deployed. TLA+ and Alloy check specifications separate from the code \cite{lamport2002tla,jackson2012alloy}, and Quint positions an executable specification as the validation point between English and code for LLM-written software \cite{quint2025llm}. Event-B derives code from models through proved refinement steps \cite{abrial2010eventb}, and IronFleet and Verdi verify distributed implementations against their specifications by proof \cite{hawblitzel2015ironfleet,wilcox2015verdi}; both establish refinement, which \poly{} does not attempt. Stateright model-checks the Rust actor code it runs \cite{stateright}; it has no agent tooling or governance. \poly{} descends from explicit-state model checking \cite{clarke1981synthesis,holzmann1997spin} and statecharts \cite{harel1987statecharts}.
 
 \paragraph{Verified code written by models.} Dafny is the most model-friendly verification target \cite{loughridge2025dafnybench,bursuc2026vericoding}, with Verus and Lean behind it \cite{yang2025autoverus,ye2025verina}; success collapses under composition \cite{dafnycomp2026}. Lean has been proposed as the independent verification layer for AI-written code \cite{demoura2026lean}. \poly{} trades proof over unbounded domains for exhaustive exploration over declared finite ones, which an agent completes without proof engineering.
 
