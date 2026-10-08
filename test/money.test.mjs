@@ -46,12 +46,23 @@ test('PL6843: a price table without its https source or the date it was read is 
   assert.ok(source && readOn);
 });
 
-test('PS18.3: a reservation is the token limit at the highest price, rounded up', () => {
-  // 4000 tokens at 2.5 per million: 0.01, exactly 10,000 micro-units.
-  assert.equal(reservationOf(4000, TABLE), 10_000);
+test('PS18.3, S360: a reservation is the input limit at the input price and the output limit at the highest other price, rounded up', () => {
+  // 4000 output tokens at 2.5 per million: 0.01, exactly 10,000 micro-units.
+  assert.equal(reservationOf(0, 4000, TABLE), 10_000);
+  // 1000 input tokens at 0.3 per million, beside them: 300 more.
+  assert.equal(reservationOf(1000, 4000, TABLE), 10_300);
   // 1 token at 2.5 per million is 2.5 micro-units, rounded up to 3: a reservation never falls short of the price.
-  assert.equal(reservationOf(1, TABLE), 3);
-  assert.equal(reservationOf(0, TABLE), 0);
+  assert.equal(reservationOf(0, 1, TABLE), 3);
+  assert.equal(reservationOf(0, 0, TABLE), 0);
+  // A table with no input class reserves the input at its highest price, so the reservation never falls short.
+  assert.equal(reservationOf(1000, 0, { perMillionTokens: { output: 2_500_000 } }), 2_500);
+});
+
+test('S360, ruled: a call within both its limits records no overrun; beyond either, it does', () => {
+  const r = reservationOf(1000, 4000, TABLE);
+  assert.ok(costOf({ input: 1000, output: 4000 }, TABLE).cost <= r, 'both limits used in full');
+  assert.ok(costOf({ input: 1001, output: 4000 }, TABLE).cost > r, 'beyond the input limit');
+  assert.ok(costOf({ input: 1000, output: 4001 }, TABLE).cost > r, 'beyond the output limit');
 });
 
 test('PS18.3: a cost is each class at its price, rounded up once, and an unpriced class takes the highest price', () => {
@@ -63,6 +74,4 @@ test('PS18.3: a cost is each class at its price, rounded up once, and an unprice
   assert.deepEqual(costOf({}, TABLE), { cost: 0, unpriced: [] });
   assert.throws(() => costOf({ input: -1 }, TABLE), /K15/);
   assert.throws(() => costOf({ input: 1.5 }, TABLE), /K15/);
-  // A cost above the reservation is an overrun: here 4000 output tokens and 100 input exceed the 4000-token reservation.
-  assert.ok(costOf({ input: 100, output: 4000 }, TABLE).cost > reservationOf(4000, TABLE));
 });

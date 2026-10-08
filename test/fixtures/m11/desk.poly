@@ -46,8 +46,8 @@ machine Ticket {
 }
 
 route triage {
-  tier small provider "flash" prices "prices/flash.json" calibration "maps/flash.json" max tokens 4000
-  tier large provider "opus" prices "prices/opus.json" calibration "maps/opus.json" max tokens 8000
+  tier small provider "flash" prices "prices/flash.json" calibration "maps/flash.json" max input tokens 2000 max tokens 4000
+  tier large provider "opus" prices "prices/opus.json" calibration "maps/opus.json" max input tokens 2000 max tokens 8000
   escalate when conf < 0.8 or margin < 0.1 or failed
   budget support
 }

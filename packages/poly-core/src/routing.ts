@@ -72,6 +72,9 @@ export function routedDecisions(module: A.Module): Map<string, { machine: A.Mach
   return out;
 }
 
+/** PS18.1: the rules of Route whose trigger is an answer below the thresholds. */
+const BELOW_RULES = new Set(['below-thresholds-escalates', 'exhausted-after-the-last']);
+
 const STD_CONDITION = (e: unknown): boolean => {
   // `conf < 0.8 || margin < 0.1`, as std.routing writes it, compared with no ids or spans.
   const n = e as A.Expr;
@@ -143,7 +146,11 @@ export function expandRoutes(module: A.Module, program: A.Module[]): { extra: A.
       const fail = inFail || (n.kind === 'Handler' && n.action === 'Fail');
       return Object.fromEntries(Object.entries(n).map(([k, v]) => [k, rewrite(v, fail)]));
     };
-    mod.decls[mod.decls.indexOf(route)] = rewrite(route, false) as A.Machine;
+    const instantiated = rewrite(route, false) as A.Machine;
+    // PS18.1, ruled on the review of M11: with no conf or margin term, the rules whose trigger is an answer below the
+    // thresholds are not instantiated for the route.
+    if (!r.escalate.some((t) => t.on !== 'failed')) instantiated.items = instantiated.items.filter((i) => !(i.kind === 'Property' && BELOW_RULES.has(i.name)));
+    mod.decls[mod.decls.indexOf(route)] = instantiated;
     extra.push({ ...mod, name: `${module.name}.${r.name}`, id: `${r.id}:module` });
   }
   for (const b of budgets) {

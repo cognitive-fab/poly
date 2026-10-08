@@ -30,7 +30,7 @@ export interface ProviderAnswer {
 export interface Materials { bodies: Record<string, string | null>; items: Record<string, { id: string; body: string | null }[]> }
 
 /** The question a provider is asked; a route's tier is also given its name and its token limit (PS18.3, K15). */
-export interface ProviderQuestion { decision: string; payload: unknown; intent: string; tier?: string; limits?: { maxTokens: number } }
+export interface ProviderQuestion { decision: string; payload: unknown; intent: string; tier?: string; limits?: { maxTokens: number; maxInputTokens: number } }
 
 export type Provider = (question: ProviderQuestion, materials?: Materials) => Promise<ProviderAnswer> | ProviderAnswer;
 

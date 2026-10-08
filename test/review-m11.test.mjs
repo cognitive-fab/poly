@@ -77,7 +77,7 @@ test('review B2, C1: a call whose provider answered is settled with its cost and
     rt.store.commitStep = commit;
     clock.advance(61_000);
     for (let i = 0; i < 6; i++) await rt.worker.tick();
-    const small = reservations(rt).filter((x) => x.amount === 1600);
+    const small = reservations(rt).filter((x) => x.amount === 1800);
     assert.ok(small.length === 2 && small.every((x) => x.status === 'settled'), JSON.stringify(small));
     // 1000 input and 3000 output tokens on the small tier: 100 + 1200 micro-units, charged though no completion came.
     const route = rt.store.db.prepare("SELECT instance FROM poly_route WHERE run = 'b2'").get().instance;

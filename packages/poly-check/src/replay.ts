@@ -136,7 +136,9 @@ async function routeRecordProblems(rt: PolyRuntime, run: string, rows: JournalRo
     if (!t) { out.push(`a decision event names tier ${String(b.tierIndex)}, which route ${route.name} does not have`); continue; }
     if (b.prices !== t.prices.digest) out.push(`a call on tier ${t.name} names the prices ${String(b.prices)}, and the certificate's are ${t.prices.digest}`);
     let want: number | null = null;
-    try { want = costOf(b.usage ?? {}, t.prices).cost; } catch { want = null; }
+    // S361: a call whose usage poly could not price is charged its tier's reservation.
+    if (b.usageViolation) want = t.reservation;
+    else try { want = costOf(b.usage ?? {}, t.prices).cost; } catch { want = null; }
     if (b.cost?.units !== want || b.cost?.unit !== `micro-${t.prices.currency}`) out.push(`a call on tier ${t.name} records the cost ${JSON.stringify(b.cost)}, and its usage at the certified prices is ${String(want)} micro-${t.prices.currency}`);
   }
   return out;

@@ -104,7 +104,14 @@ function routingModules(module: A.Module, program: A.Module[]): A.Module[] {
       return Object.fromEntries(Object.entries(n).map(([k, v]) => [k, read(v, inFail || (n.kind === 'Handler' && n.action === 'Fail'))]));
     };
     const mod = drop('Budget');
-    mod.decls = mod.decls.map((d) => (d.kind === 'Machine' && d.name === 'Route' ? (read(d, false) as A.Machine) : d));
+    // PS18.1: a route with no conf or margin term declares no trigger for below-thresholds-escalates and
+    // exhausted-after-the-last, so neither is instantiated for it.
+    const below = new Set(['below-thresholds-escalates', 'exhausted-after-the-last']);
+    mod.decls = mod.decls.map((d) => {
+      if (d.kind !== 'Machine' || d.name !== 'Route') return d;
+      const m = read(d, false) as A.Machine;
+      return terms.length ? m : { ...m, items: m.items.filter((i) => !(i.kind === 'Property' && below.has(i.name))) };
+    });
     out.push({ ...mod, name: `${module.name}.${r.name}` });
   }
   for (const b of module.decls.filter((d): d is A.Budget => d.kind === 'Budget')) out.push({ ...drop('Route'), name: `${module.name}.${b.name}` });

@@ -26,6 +26,7 @@ import { benchGate } from './bench.js';
 import { checkHost, type HostCheck } from './host.js';
 import { editCheck } from './edit-check.js';
 import { costCalls, costReport, periodProblem, readPriceTable } from './cost.js';
+import { trySession, type TryOp } from './try.js';
 
 /** A JSON Schema, in the subset the published schemas use: type, properties, required, items, enum, description. */
 export type Schema = { type?: string | string[]; description?: string; properties?: Record<string, Schema>; required?: string[]; items?: Schema; enum?: unknown[]; additionalProperties?: boolean | Schema };
@@ -388,6 +389,23 @@ export const COMMANDS: Command[] = [
       const files = (t.files ?? []).map((f) => ({ path: fill(f.path), content: fill(JSON.stringify(f.json, null, 2)) + '\n' }));
       const notes = (t.notes ?? []).map(fill);
       return { exit: EXIT_CODES.CLEAN, result: { host, description: t.description ?? '', files, notes }, text: `${files.map((f) => `── ${f.path}\n${f.content}`).join('')}${notes.map((n) => `  ${n}\n`).join('')}` };
+    },
+  },
+  {
+    name: 'try', mcp: 'poly_try', lsp: true,
+    summary: 'A playground over one machine (PT28.2): its operations (dispatch, state, intents, gate, witness, reset) replayed from the start, each step by the runtime kernel over the lowered module; no handler runs, no model is called, and nothing is admitted, signed or written to a store or a ledger.',
+    input: obj({ file: str('the source file'), machine: str('the machine'), ops: { type: 'array', items: { type: 'object', description: '{ op: "dispatch", action, data? } | { op: "state" } | { op: "intents" } | { op: "gate", policy } | { op: "witness", predicate } | { op: "reset" }' }, description: 'the session, in order' }, out: str('where to write the session as a trace of {pre, action, data, post} windows') }, ['file', 'machine', 'ops']),
+    output: obj({ machine: str('the machine'), results: { type: 'array', items: { type: 'object' } }, trace: { type: 'array', items: { type: 'object' } }, diagnostics: { type: 'array', items: DIAGNOSTIC } }, ['machine', 'results', 'trace', 'diagnostics']),
+    async run(input) {
+      const ops = input.ops;
+      if (!Array.isArray(ops)) throw new CommandUsageError('ops is a list of operations');
+      const r = await trySession({ file: need(input, 'file'), machine: need(input, 'machine'), ops: ops as TryOp[] });
+      const out = opt(input, 'out');
+      // PT28.2d: a session saved as a trace, the one file poly try writes, where it is asked to.
+      if (out) writeFileSync(out, JSON.stringify(r.trace, null, 2) + '\n');
+      const lines = r.results.map((x, i) => `${i} ${String(x.op)}${x.op === 'dispatch' ? ` ${String(x.action)}: ${String(x.stepKind)}${x.rejectReason ? ` (${String(x.rejectReason)})` : ''}` : ''} ${JSON.stringify(x.state ?? x.intents ?? x.decisions ?? x.path ?? '')}`);
+      for (const d of r.diagnostics) lines.push(`${d.code} ${d.message}`);
+      return { exit: r.diagnostics.some((d) => d.severity === 'error') ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN, result: { ...r, diagnostics: r.diagnostics.map(toJson) } as unknown as Record<string, unknown>, text: lines.join('\n') + '\n' };
     },
   },
   {

@@ -546,6 +546,8 @@ class Checker {
         if (t.maxTokens < 1) this.err('PL1201', t, `tier ${t.name}: its token limit is at least 1 (PS18.3)`);
         // Review A5 (M11): every amount is a safe integer of micro-units, so no reservation is rounded.
         if (!Number.isSafeInteger(t.maxTokens)) this.err('PL1201', t, `tier ${t.name}: its token limit ${t.maxTokens} is beyond the integers an amount holds exactly (PS18.3)`);
+        // S360: the input limit is a whole number of tokens, at the table's input price.
+        if (!(Number.isSafeInteger(t.maxInputTokens) && t.maxInputTokens >= 0)) this.err('PL1201', t, `tier ${t.name}: its input token limit ${t.maxInputTokens} is not a whole number of tokens (S360)`);
         for (const [what, p] of [['price table', t.prices], ['calibration map', t.calibration]] as const) {
           if (p !== null && !routePathOk(p)) this.err('PL1201', t, `tier ${t.name}: the ${what} "${p}" is not a relative path to a .json file under the source's directory, with no . or .. segment (PS18.3)`);
         }
@@ -556,8 +558,10 @@ class Checker {
           if (problem) this.err(problem.code, t, `tier ${t.name}: the price table ${t.prices} ${problem.message} (PS18.3, S350)`);
         }
         const table = this.priceTable(t.prices, t.provider);
-        if (table && Number.isSafeInteger(t.maxTokens)) {
-          const r0 = reservationOf(t.maxTokens, table);
+        // S360: the input limit is priced by the table's class input, which a route's table therefore names.
+        if (table && !Object.hasOwn(table.perMillionTokens, 'input')) this.err('PL1201', t, `tier ${t.name}: the price table ${t.prices} has no class input, at which the tier's input token limit is reserved (S360)`);
+        if (table && Number.isSafeInteger(t.maxTokens) && Number.isSafeInteger(t.maxInputTokens) && t.maxInputTokens >= 0) {
+          const r0 = reservationOf(t.maxInputTokens, t.maxTokens, table);
           if (!Number.isSafeInteger(r0)) this.err('PL1201', t, `tier ${t.name}: its reservation is beyond the integers an amount holds exactly (PS18.3)`);
           currencies.add(table.currency);
           reservations.push({ tier: t, r: r0 });

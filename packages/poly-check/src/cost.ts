@@ -58,7 +58,8 @@ export async function costCalls(reader: Reader, filter: { run?: string; scope?: 
       if (e.kind !== 'decision') continue;
       const b = e.body as Record<string, any>;
       // Only a tier's call carries usage; the decision's own event links it with `via`, and is not counted again.
-      if (b.via !== undefined || !b.usage || typeof b.cost?.units !== 'number' || typeof b.cost?.unit !== 'string' || !b.cost.unit.startsWith('micro-')) continue;
+      // S361: a call whose usage could not be priced has none, and its violation; it is charged its reservation.
+      if (b.via !== undefined || (!b.usage && !b.usageViolation) || typeof b.cost?.units !== 'number' || typeof b.cost?.unit !== 'string' || !b.cost.unit.startsWith('micro-')) continue;
       const call: CostCall = { provider: b.provider, run: b.run, scope: b.scope, at: e.at, route: b.route, tier: b.tier, model: b.model?.id, usage: b.usage, cost: b.cost.units, currency: b.cost.unit.slice('micro-'.length), prices: b.prices };
       if (filter.run && call.run !== filter.run) continue;
       if (filter.scope && call.scope !== filter.scope) continue;
@@ -83,7 +84,8 @@ export function costReport(calls: CostCall[], table?: { table: PriceTable; diges
   const report: CostReport = { calls: calls.length, total, byRun, byScope, byDay, refused };
   if (table) {
     // Review C2 (M11): a table prices its own provider's model, so a call of another provider is not priced again.
-    const mine = calls.filter((c) => c.model === table.table.model && c.provider === table.table.provider);
+    // S361: a call with no usage to price again keeps its recorded charge, and is not counted among those priced again.
+    const mine = calls.filter((c) => c.model === table.table.model && c.provider === table.table.provider && c.usage);
     const t: Record<string, number> = {};
     for (const c of mine) t[table.table.currency] = (t[table.table.currency] ?? 0) + costOf(c.usage, table.table).cost;
     report.repriced = { prices: table.digest, model: table.table.model, calls: mine.length, total: t };

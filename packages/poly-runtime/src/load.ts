@@ -60,6 +60,7 @@ export interface VerifiedTier {
   name: string;
   provider: string;
   model: string;
+  maxInputTokens: number;
   maxTokens: number;
   reservation: number;
   prices: { path: string; digest: string; currency: string; perMillionTokens: Record<string, number> };

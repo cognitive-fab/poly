@@ -239,9 +239,9 @@ class Reader {
         const o = this.opts(body, ['tiers', 'escalate', 'budget']);
         if (!o.has('tiers') || !o.has('escalate')) this.fail(body, 'a route names its tiers and when it escalates (PT10r)');
         const tiers = this.arr(o.get('tiers')!).map((t) => {
-          const to = this.opts(t, ['name', 'provider', 'prices', 'calibration', 'maxTokens']);
-          if (!to.has('name') || !to.has('provider') || !to.has('prices') || !to.has('maxTokens')) this.fail(t, 'a tier names its name, provider, prices and maxTokens (PT10r)');
-          return this.mk<A.RouteTier>(t, { kind: 'RouteTier', name: this.str(to.get('name')!), provider: this.str(to.get('provider')!), prices: this.str(to.get('prices')!), calibration: to.has('calibration') ? this.str(to.get('calibration')!) : null, maxTokens: this.int(to.get('maxTokens')!) });
+          const to = this.opts(t, ['name', 'provider', 'prices', 'calibration', 'maxInputTokens', 'maxTokens']);
+          if (!to.has('name') || !to.has('provider') || !to.has('prices') || !to.has('maxInputTokens') || !to.has('maxTokens')) this.fail(t, 'a tier names its name, provider, prices, maxInputTokens and maxTokens (PT10r, S360)');
+          return this.mk<A.RouteTier>(t, { kind: 'RouteTier', name: this.str(to.get('name')!), provider: this.str(to.get('provider')!), prices: this.str(to.get('prices')!), calibration: to.has('calibration') ? this.str(to.get('calibration')!) : null, maxInputTokens: this.int(to.get('maxInputTokens')!), maxTokens: this.int(to.get('maxTokens')!) });
         });
         const escalate = this.arr(o.get('escalate')!).map((e): A.RouteTerm => {
           const parts = this.arr(e);

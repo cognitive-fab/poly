@@ -295,7 +295,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
       if (t.calibration !== null && !mf) throw new Error(`poly-lower: no calibration map ${t.calibration} for tier ${t.name} of route ${r.name}`);
       const map = mf ? (mf.map as CalibrationFile) : null;
       return {
-        name: t.name, provider: t.provider, model: table.model, maxTokens: t.maxTokens, reservation: reservationOf(t.maxTokens, table),
+        name: t.name, provider: t.provider, model: table.model, maxInputTokens: t.maxInputTokens, maxTokens: t.maxTokens, reservation: reservationOf(t.maxInputTokens, t.maxTokens, table),
         prices: { path: t.prices, digest: opts.fault === 'route-price-stale' ? `sha256:${'0'.repeat(64)}` : p.digest, currency: table.currency, perMillionTokens: table.perMillionTokens },
         calibration: map && mf ? { path: t.calibration, digest: mf.digest, decision: map.decision, version: map.version, fittedFor: map.fittedFor, points: map.points, mapDigest: map.digest } : null,
       };

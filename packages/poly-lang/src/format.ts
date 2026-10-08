@@ -88,7 +88,7 @@ class Printer {
   private route(r: A.Route): void {
     this.lead(r, '');
     this.out.push(`route ${r.name} {`);
-    for (const t of r.tiers) this.out.push(`${INDENT}tier ${t.name} provider ${JSON.stringify(t.provider)} prices ${JSON.stringify(t.prices)}${t.calibration === null ? '' : ` calibration ${JSON.stringify(t.calibration)}`} max tokens ${t.maxTokens}`);
+    for (const t of r.tiers) this.out.push(`${INDENT}tier ${t.name} provider ${JSON.stringify(t.provider)} prices ${JSON.stringify(t.prices)}${t.calibration === null ? '' : ` calibration ${JSON.stringify(t.calibration)}`} max input tokens ${t.maxInputTokens} max tokens ${t.maxTokens}`);
     this.out.push(`${INDENT}escalate when ${r.escalate.map((e) => (e.on === 'failed' ? 'failed' : `${e.on} < ${decimalText(e.below)}`)).join(' or ')}`);
     if (r.budget !== null) this.out.push(`${INDENT}budget ${r.budget}`);
     this.out.push(`}${this.trail(r)}`);

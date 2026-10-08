@@ -85,10 +85,23 @@ export function priceTableProblem(t: unknown, provider: string): { code: 'PL6843
 /** `ceil(a / b)` for non-negative bigints. */
 const ceilDiv = (a: bigint, b: bigint): bigint => (a + b - 1n) / b;
 
-/** PS18.3: a tier's reservation, its token limit at its table's highest price, in micro-units. */
-export function reservationOf(maxTokens: number, table: Pick<PriceTable, 'perMillionTokens'>): number {
+/** S360: the price of the class `input`, and the highest price of any other class (the input price when there is none). */
+export function limitPrices(table: Pick<PriceTable, 'perMillionTokens'>): { input: number | null; output: number } {
+  const p = table.perMillionTokens;
+  const input = Object.hasOwn(p, 'input') ? p.input : null;
+  const others = Object.entries(p).filter(([k]) => k !== 'input').map(([, v]) => v);
+  return { input, output: others.length ? Math.max(...others) : input ?? 0 };
+}
+
+/**
+ * PS18.3, S360: a tier's reservation in micro-units: its input token limit at the table's `input` price and its output
+ * limit at the highest price of any other class, rounded up once. A table with no `input` class prices the input at its
+ * highest price, so the reservation never falls short; the checker refuses such a table for a route (PL1201).
+ */
+export function reservationOf(maxInputTokens: number, maxTokens: number, table: Pick<PriceTable, 'perMillionTokens'>): number {
+  const { input, output } = limitPrices(table);
   const top = Math.max(0, ...Object.values(table.perMillionTokens));
-  return Number(ceilDiv(BigInt(maxTokens) * BigInt(top), BigInt(MICRO)));
+  return Number(ceilDiv(BigInt(maxInputTokens) * BigInt(input ?? top) + BigInt(maxTokens) * BigInt(output), BigInt(MICRO)));
 }
 
 /**

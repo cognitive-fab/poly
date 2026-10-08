@@ -94,7 +94,7 @@ export declare function remember(source: string, provenance: 'observed' | 'deriv
 /** PS17.3: `to p`, the payload field that names an effect's recipient. */
 export declare function to(param: string): EffItem;
 /** PT10r: `route r { tier t provider "p" prices "f" [calibration "f"] max tokens n …  escalate when …  budget b }`. */
-export declare function route(name: string, body: { tiers: { name: string; provider: string; prices: string; calibration?: string; maxTokens: number }[]; escalate: (['conf' | 'margin', number] | ['failed'])[]; budget?: string }): Decl;
+export declare function route(name: string, body: { tiers: { name: string; provider: string; prices: string; calibration?: string; maxInputTokens: number; maxTokens: number }[]; escalate: (['conf' | 'margin', number] | ['failed'])[]; budget?: string }): Decl;
 /** PT24.1c: `route r` in a decision, its tiers in place of a provider. */
 export declare function route(name: string): DecisionItem;
 /** PT10r: `budget b { cap <currency> <amount> per … }`, each amount a decimal as written. */

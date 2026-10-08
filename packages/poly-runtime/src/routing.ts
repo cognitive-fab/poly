@@ -205,7 +205,7 @@ export class RoutingHost {
       if (!t) throw new Error(`${ctx.idempotencyKey} is not a call of route ${route.name}`);
       const provider = this.providers.get(t.tier.provider);
       if (!provider) throw new Error(`no provider ${t.tier.provider} is registered for tier ${t.tier.name} of route ${route.name} (rt.provideTier, S356)`);
-      const question = { decision: route.decision.name, payload: t.decision.payload, intent: t.decision.intent, tier: t.tier.name, limits: { maxTokens: t.tier.maxTokens } };
+      const question = { decision: route.decision.name, payload: t.decision.payload, intent: t.decision.intent, tier: t.tier.name, limits: { maxInputTokens: t.tier.maxInputTokens, maxTokens: t.tier.maxTokens } };
       const t0 = this.now();
       const a = await provider(question);
       const dist = [...a.distribution].sort((x, y) => y[1] - x[1]);
@@ -215,8 +215,14 @@ export class RoutingHost {
       const second = Math.max(0, ...dist.filter(([x]) => !sameAnswer(x)).map(([, p]) => p));
       const conf = calibrate(map, first);
       const margin = Math.max(0, conf - calibrate(map, second));
-      const usage = a.usage ?? {};
-      const { cost, unpriced } = costOf(usage, t.tier.prices);
+      // S361, ruled: a call that answered with no usage report, or with a count that is not a whole number of tokens, is
+      // charged its full reservation, the violation recorded and its counts not; it is never released for free.
+      const raw = a.usage;
+      const missing = raw === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw) || !Object.keys(raw).length;
+      const invalid = !missing && Object.values(raw as Record<string, unknown>).some((n) => !(typeof n === 'number' && Number.isSafeInteger(n) && n >= 0));
+      const violation = missing ? 'usage-missing' : invalid ? 'usage-invalid' : null;
+      const usage = violation ? null : (raw as Record<string, number>);
+      const { cost, unpriced } = usage ? costOf(usage, t.tier.prices) : { cost: t.tier.reservation, unpriced: [] as string[] };
       const machine = this.machineOf(t.decision.run) ?? '';
       const record: DecisionRecord & Record<string, unknown> = {
         decision: route.decision.name, intent: ctx.idempotencyKey, provider: t.tier.provider,
@@ -224,7 +230,7 @@ export class RoutingHost {
         calibration: map ? { version: map.version, fittedFor: map.fittedFor, digest: map.digest } : { uncalibrated: true },
         question, inputs: [], answer: a.answer, raw: first, conf, margin, distribution: dist,
         latencyMs: a.latencyMs ?? this.now() - t0, cost: { units: cost, unit: `micro-${t.tier.prices.currency}` },
-        route: route.name, tier: t.tier.name, tierIndex: t.index, usage, ...(unpriced.length ? { unpriced } : {}),
+        route: route.name, tier: t.tier.name, tierIndex: t.index, usage, ...(violation ? { usageViolation: violation } : {}), ...(unpriced.length ? { unpriced } : {}),
         reservation: t.tier.reservation, prices: t.tier.prices.digest,
         run: t.decision.run, scope: machine.slice(0, machine.lastIndexOf('.')),
       };

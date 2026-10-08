@@ -57,7 +57,7 @@ class Printer {
       case 'Source': return `${this.use('source')}(${q(d.name)}, { kind: ${q(d.sourceKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, audience: ${q(d.audience)}${d.owned ? ', owned: true' : ''}${d.freshness === null ? '' : `, freshness: ${q(d.freshness)}`}${d.stale === 'escalate' ? '' : `, stale: ${q(d.stale)}`} })`;
       // PT10r: route(name, { tiers: [{ … }], escalate: [[…]], budget? }) and budget(name, { caps: [{ … }], onExhausted? }).
       case 'Route': {
-        const tiers = d.tiers.map((t) => `${ind}  { name: ${q(t.name)}, provider: ${q(t.provider)}, prices: ${q(t.prices)}${t.calibration === null ? '' : `, calibration: ${q(t.calibration)}`}, maxTokens: ${t.maxTokens} },\n`).join('');
+        const tiers = d.tiers.map((t) => `${ind}  { name: ${q(t.name)}, provider: ${q(t.provider)}, prices: ${q(t.prices)}${t.calibration === null ? '' : `, calibration: ${q(t.calibration)}`}, maxInputTokens: ${t.maxInputTokens}, maxTokens: ${t.maxTokens} },\n`).join('');
         const escalate = d.escalate.map((e) => (e.on === 'failed' ? "['failed']" : `[${q(e.on)}, ${decimal(e.below)}]`)).join(', ');
         return `${this.use('route')}(${q(d.name)}, { tiers: [\n${tiers}${ind}], escalate: [${escalate}]${d.budget === null ? '' : `, budget: ${q(d.budget)}`} })`;
       }

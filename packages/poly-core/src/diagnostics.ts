@@ -200,6 +200,9 @@ export const CODES: Record<string, CodeInfo> = {
   PL6844: { name: 'BUDGET_CURRENCY_MISMATCH', stage: 'types', severity: 'error' },
   // PS18.4 (M11): a tier whose reservation is above a cap of its route's budget, so it could never be called.
   PL6845: { name: 'RESERVATION_ABOVE_CAP', stage: 'types', severity: 'error' },
+  // PT28.2, S362 (M11): a poly try operation that is no step of the machine: an action it does not declare, or data the
+  // kernel refuses; the session stops there.
+  PL6846: { name: 'TRY_OPERATION_REFUSED', stage: 'runtime', severity: 'error' },
   // M4 review C5, K10: a send of an action that completes one of the receiver's decisions.
   PL6204: { name: 'DECISION_COMPLETION_SENT', stage: 'types', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.

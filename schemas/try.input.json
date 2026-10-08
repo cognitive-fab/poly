@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "the source file"
+    },
+    "machine": {
+      "type": "string",
+      "description": "the machine"
+    },
+    "ops": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "{ op: \"dispatch\", action, data? } | { op: \"state\" } | { op: \"intents\" } | { op: \"gate\", policy } | { op: \"witness\", predicate } | { op: \"reset\" }"
+      },
+      "description": "the session, in order"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the session as a trace of {pre, action, data, post} windows"
+    }
+  },
+  "required": [
+    "file",
+    "machine",
+    "ops"
+  ]
+}

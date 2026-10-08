@@ -1,0 +1,64 @@
+{
+  "type": "object",
+  "properties": {
+    "machine": {
+      "type": "string",
+      "description": "the machine"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "schema": {
+            "type": "string",
+            "description": "poly.diagnostic/1"
+          },
+          "code": {
+            "type": "string",
+            "description": "PLxxxx"
+          },
+          "name": {
+            "type": "string",
+            "description": "the code's name"
+          },
+          "severity": {
+            "type": "string",
+            "description": "error, finding, warning or note"
+          },
+          "message": {
+            "type": "string",
+            "description": "the diagnostic in words"
+          },
+          "at": {
+            "type": "object",
+            "description": "where: module, machine, node, line, col"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ]
+      }
+    }
+  },
+  "required": [
+    "machine",
+    "results",
+    "trace",
+    "diagnostics"
+  ]
+}

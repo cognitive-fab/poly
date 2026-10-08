@@ -88,3 +88,9 @@ declare module '@cognitive-fab/polygraph/scripts/replay.mjs' {
   export function replaySpecResults(specPath: string, windows: { action: string; data: unknown; pre: unknown; post: unknown }[]): { ok: boolean; error?: string; results: { status: string; rejectionReason?: string }[] };
 }
 
+
+// polyrun's kernel and store, for poly try (PT28.2c): the step the runtime takes, in a store that nothing keeps.
+declare module '@cognitive-fab/polygraph/polyrun/src/index.mjs' {
+  export class Store { constructor(dbPath: string); initSync(): Store; db: { prepare(sql: string): { all(...a: unknown[]): unknown[]; get(...a: unknown[]): unknown } } }
+  export function createRuntime(config: { store: Store; machines: { machineId: string; module: string; contract?: string; effects?: { mapper: string; manifest: string } }[] }): Promise<{ create(machineId: string, id?: string): Promise<unknown>; dispatch(id: string, action: string, data?: unknown, actionId?: string): Promise<{ seq: number; stepKind: string; rejectReason?: string; state: Record<string, unknown> }>; getState(id: string): Promise<{ state: Record<string, unknown> }>; close?(): Promise<void> }>;
+}

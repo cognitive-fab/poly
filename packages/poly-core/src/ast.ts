@@ -75,6 +75,8 @@ export interface RouteTier extends NodeBase {
   prices: string;
   /** The calibration map's path, or null for a tier with none (PL6841 when the condition reads conf or margin). */
   calibration: string | null;
+  /** S360: the input token limit, at the table's `input` price; `maxTokens` is the output limit. */
+  maxInputTokens: number;
   maxTokens: number;
 }
 /** `conf < c` or `margin < c`, `c` in thousandths (PD1.3a), or `failed`. */

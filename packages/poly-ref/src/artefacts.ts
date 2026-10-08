@@ -293,13 +293,18 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
       const p = fileOf(t.prices);
       if (!p) { missing = t.prices; return null; }
       const prices = p.json.perMillionTokens as Record<string, number>;
-      // PS18.3: the reservation is ceil(N x P / 10^6), P the table's highest price.
+      // PS18.3, S360: the reservation is ceil((I x P_in + N x P_out) / 10^6), P_in the price of the class input and P_out
+      // the highest price of any other class.
+      const own = Object.prototype.hasOwnProperty.call(prices, 'input');
       const top = Math.max(0, ...Object.values(prices));
-      const reservation = Number((BigInt(t.maxTokens) * BigInt(top) + 999_999n) / 1_000_000n);
+      const others = Object.entries(prices).filter(([k]) => k !== 'input').map(([, v]) => v);
+      const pIn = own ? prices.input : top;
+      const pOut = others.length ? Math.max(...others) : (own ? prices.input : 0);
+      const reservation = Number((BigInt(t.maxInputTokens) * BigInt(pIn) + BigInt(t.maxTokens) * BigInt(pOut) + 999_999n) / 1_000_000n);
       const c = t.calibration === null ? null : fileOf(t.calibration);
       if (t.calibration !== null && !c) { missing = t.calibration; return null; }
       return {
-        name: t.name, provider: t.provider, model: p.json.model, maxTokens: t.maxTokens, reservation,
+        name: t.name, provider: t.provider, model: p.json.model, maxInputTokens: t.maxInputTokens, maxTokens: t.maxTokens, reservation,
         prices: { path: t.prices, digest: sha(p.bytes), currency: p.json.currency, perMillionTokens: prices },
         calibration: c ? { path: t.calibration, digest: sha(c.bytes), decision: c.json.decision, version: c.json.version, fittedFor: c.json.fittedFor, points: c.json.points, mapDigest: c.json.digest } : null,
       };

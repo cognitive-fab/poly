@@ -36,7 +36,7 @@ test('AC25: a low-confidence answer from the small tier escalates to the large o
     assert.equal((await rt.getState('t-1')).state.status, 'Routed');
     assert.deepEqual([flash.asked.length, opus.asked.length], [1, 1]);
     // The provider is given the decision's question and the tier's token limit (K15), never a model's name.
-    assert.deepEqual(flash.asked[0].limits, { maxTokens: 4000 });
+    assert.deepEqual(flash.asked[0].limits, { maxInputTokens: 2000, maxTokens: 4000 });
     assert.deepEqual(flash.asked[0].payload, TEXT);
     const route = routeOf(rt, 't-1');
     assert.deepEqual(await steps(rt, route), ['Start', 'Answer', 'Answer']);
@@ -48,7 +48,7 @@ test('AC25: a low-confidence answer from the small tier escalates to the large o
     assert.deepEqual(verdicts.map((v) => v.body.effectKind), ['route.triage.call', 'route.triage.call']);
     // Each answered call has its decision event, with its tier, model, usage, cost and reservation (PS18.6).
     const calls = (await rt.chain(route)).filter((e) => e.kind === 'decision').map((e) => e.body);
-    assert.deepEqual(calls.map((c) => [c.tier, c.model.id, c.conf, c.reservation]), [['small', 'flash-2026-09', 400, 1600], ['large', 'opus-2026-08', 940, 120_000]]);
+    assert.deepEqual(calls.map((c) => [c.tier, c.model.id, c.conf, c.reservation]), [['small', 'flash-2026-09', 400, 1800], ['large', 'opus-2026-08', 940, 126_000]]);
     // 1000 input and 200 output tokens: 100 + 80 micro-units on the small tier, 3000 + 3000 on the large one.
     assert.deepEqual(calls.map((c) => c.cost), [{ units: 180, unit: 'micro-usd' }, { units: 6000, unit: 'micro-usd' }]);
     // The decision's own event repeats the answering tier's and links it; its completion carries that answer.
@@ -139,6 +139,6 @@ test('PT25.1, S353: a policy of the route\'s scope reads a call\'s route and tie
     assert.deepEqual(verdicts.map((v) => v.body.outcome), ['allowed', 'denied']);
     // The proposal carried the call's route and budget (PT25.1).
     const proposal = await rt.store.body(verdicts[1].body.proposal);
-    assert.deepEqual([proposal.route, proposal.budget.budget], [{ route: 'triage', tier: 'large', reservation: 120_000 }, 'support']);
+    assert.deepEqual([proposal.route, proposal.budget.budget], [{ route: 'triage', tier: 'large', reservation: 126_000 }, 'support']);
   } finally { await rt.close(); }
 });

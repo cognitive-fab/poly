@@ -9,6 +9,7 @@
 //   poly bench gate [--sizes 1,8,64] [--out <file>]
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
+import { readFileSync } from 'node:fs';
 import { EXIT_CODES, ManifestError } from '@poly/core';
 import { WitnessExportError } from './witness.js';
 import { AdmitError } from './admit.js';
@@ -43,6 +44,7 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly bench gate [--sizes 1,8,64] [--out <file>]
        poly journal eval --db <store> --decision <d> --candidate <provider module>
        poly journal fit --db <store> --decision <d> --model <id> [--version <n>] [--out <file>]
+       poly try <file> --machine <M> --ops <file.json> [--out <trace.json>]   (a playground: nothing is admitted, run or written)
        poly cost --db <store> [--run <id>] [--scope <module>] [--period YYYY-MM-DD | YYYY-MM] [--prices <file>]
 
   check    Parses, types and lowers each module; runs strict validate(), translation
@@ -99,6 +101,13 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
     return { name: 'witness', input: { id: a, kind: trace ? 'trace' : 'test', root, out } };
   }
   if (cmd === 'lint' && a === 'handlers' && positional.length <= 3) return { name: 'lint', input: { project: b } };
+  // PT28.2: poly try <file> --machine M --ops <ops.json> [--out <trace.json>].
+  if (cmd === 'try' && positional.length === 2) {
+    const machine = option(args, '--machine');
+    const opsFile = option(args, '--ops');
+    if (!machine || !opsFile) throw new UsageError('try needs --machine <M> and --ops <file of operations>');
+    return { name: 'try', input: { file: a, machine, ops: JSON.parse(readFileSync(opsFile, 'utf8')), out } };
+  }
   // PT24.4: poly cost --db <store> [--run r] [--scope s] [--period p] [--prices file].
   if (cmd === 'cost' && positional.length === 1) {
     const db = option(args, '--db');
@@ -181,7 +190,7 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();

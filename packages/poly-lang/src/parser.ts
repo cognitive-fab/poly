@@ -289,10 +289,16 @@ class Parser {
         const prices = this.str('a price table');
         let calibration: string | null = null;
         if (this.at('calibration')) { this.next(); calibration = this.str('a calibration map'); }
+        // S360: the input limit first, then the output limit.
+        this.word('max');
+        if (!this.at('input')) this.fail('a tier states its input token limit: max input tokens n max tokens n (S360)');
+        this.next();
+        this.word('tokens');
+        const maxInputTokens = this.int();
         this.word('max');
         this.word('tokens');
         const maxTokens = this.int();
-        tiers.push(this.node<A.RouteTier>(is, { kind: 'RouteTier', name: tier, provider, prices, calibration, maxTokens }));
+        tiers.push(this.node<A.RouteTier>(is, { kind: 'RouteTier', name: tier, provider, prices, calibration, maxInputTokens, maxTokens }));
       } else if (w === 'escalate') {
         // As for a credential's clauses: each is written once, since a second would silently replace the first.
         if (escalate !== null) this.fail('a route states its escalation once', is);

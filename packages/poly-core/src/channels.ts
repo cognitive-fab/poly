@@ -99,6 +99,9 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
   const plans: ChannelPlan[] = [];
   const names = new Set<string>();
   for (const c of channels) {
+    // Ruled on the review of M11: a channel's name names its descriptor and its module, so it is an identifier, as a
+    // credential's and a route's are.
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(c.name)) { err('PL1201', c, `a channel's name is an identifier, and ${JSON.stringify(c.name)} is not one (PS15)`); continue; }
     if (names.has(c.name)) { err('PL1002', c, `channel ${c.name} is declared twice`); continue; }
     names.add(c.name);
     const libName = `std.channels.${c.channelKind}`;

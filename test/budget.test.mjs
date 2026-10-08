@@ -21,7 +21,7 @@ async function states(rt, instance) {
 const budgetsOf = (rt) => rt.store.db.prepare("SELECT instance_id FROM pr_instance WHERE machine_id = 'desk.support.Budget' ORDER BY instance_id").all().map((r) => r.instance_id);
 
 test('AC26: 64 concurrent runs in one scope: spent plus reserved never exceeds the cap at any step of the budget', { timeout: 600_000 }, async () => {
-  // One cap, per day per scope, of 1 usd: eight large reservations of 0.12 fit in it at once, and each large call
+  // One cap, per day per scope, of 1 usd: seven large reservations of 0.126 fit in it at once, and each large call
   // costs 0.096, so about ten are answered before the remainder is spent and the rest are refused `budget`.
   const src = swap(swap(swap(DESK, '  cap usd 0.5 per run\n', ''), 'cap usd 20 per day per scope', 'cap usd 1 per day per scope'), '  on exhausted escalate\n', '');
   const a = await admittedDesk('budget-64', src);
@@ -77,7 +77,7 @@ test('AC26, S352 as ruled: an overrun is recorded in the verdict and the budget,
   const a = await admittedDesk('budget-overrun');
   const { rt } = await loaded(a);
   try {
-    // The small tier reserves 1,600 micro-units and reports 2,000,000 output tokens: 800,000, above the run's cap of
+    // The small tier reserves 1,800 micro-units and reports 2,000,000 output tokens: 800,000, above the run's cap of
     // 500,000. Its answer is below the thresholds, so the route asks the large tier, whose reservation must now fail.
     rt.provideTier('flash', recordedProvider([{ answer: 'Refund', distribution: [['Refund', 0.6], ['Other', 0.4]], usage: { output: 2_000_000 } }]));
     const opus = recordedProvider([{ answer: 'Refund', distribution: [['Refund', 0.96]], usage: { input: 10 } }]);
@@ -87,11 +87,11 @@ test('AC26, S352 as ruled: an overrun is recorded in the verdict and the budget,
     for (let i = 0; i < 6; i++) await rt.worker.tick();
     const run = budgetsOf(rt).find((b) => b.includes(':run:'));
     const after = (await states(rt, run)).at(-1).post;
-    assert.deepEqual([after.spent, after.reserved, after.overrun, after.b], [800_000, 0, 798_400, 'Spent']);
+    assert.deepEqual([after.spent, after.reserved, after.overrun, after.b], [800_000, 0, 798_200, 'Spent']);
     // The settlement's verdict names the overrun.
     const route = rt.store.db.prepare("SELECT instance FROM poly_route WHERE run = 'o-1'").get().instance;
     const settled = (await rt.chain(route)).filter((e) => e.kind === 'verdict' && e.body.stage === 'budget');
-    assert.deepEqual(settled[0].body.budgets.find((b) => b.instance === run), { instance: run, reserved: 1600, actual: 800_000, overrun: 798_400 });
+    assert.deepEqual(settled[0].body.budgets.find((b) => b.instance === run), { instance: run, reserved: 1800, actual: 800_000, overrun: 798_200 });
     // The large tier's reservation does not fit, so before any policy the call is escalated, as the budget says
     // (on exhausted escalate), and nothing called opus.
     const escalated = (await rt.chain(route)).filter((e) => e.kind === 'verdict' && e.body.outcome === 'escalated');
@@ -127,7 +127,7 @@ test('S352: a crash between the reservation and the completion leaves the reserv
     const held = rt.store.db.prepare("SELECT budget, status FROM poly_reservation").all();
     assert.equal(held.length, 2, 'one reservation per cap');
     assert.ok(held.every((h) => h.status === 'held'), JSON.stringify(held));
-    for (const b of budgetsOf(rt)) assert.equal((await states(rt, b)).at(-1).post.reserved, 1600);
+    for (const b of budgetsOf(rt)) assert.equal((await states(rt, b)).at(-1).post.reserved, 1800);
     // After the lease, the worker finds the call's completion lost: the intent dies, and since its provider answered,
     // its reservation is settled with the call's cost, once (review B2); the route goes on.
     clock.advance(61_000);

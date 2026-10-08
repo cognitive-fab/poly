@@ -92,9 +92,10 @@ test('PT10r: the route\'s and the budget\'s descriptors hold the tiers, prices, 
   assert.deepEqual([d.v, d.route, d.module, d.machine, d.effectKind, d.decision, d.budget], [1, 'triage', 'desk', 'desk.triage.Route', 'route.triage.call', { machine: 'desk.Ticket', name: 'classify' }, 'support']);
   assert.deepEqual(d.escalate, [{ on: 'conf', below: 800 }, { on: 'margin', below: 100 }, { on: 'failed' }]);
   const [small, large] = d.tiers;
-  // 4000 tokens at 0.40 per million: 1,600 micro-units; 8000 at 15 per million: 120,000 (PS18.3).
-  assert.deepEqual([small.name, small.provider, small.model, small.maxTokens, small.reservation], ['small', 'flash', 'flash-2026-09', 4000, 1600]);
-  assert.deepEqual([large.name, large.provider, large.model, large.maxTokens, large.reservation], ['large', 'opus', 'opus-2026-08', 8000, 120_000]);
+  // S360: 2000 input tokens at 0.10 and 4000 output at 0.40 per million: 200 + 1,600 micro-units; 2000 input at 3 and
+  // 8000 output at 15 per million: 6,000 + 120,000 (PS18.3).
+  assert.deepEqual([small.name, small.provider, small.model, small.maxInputTokens, small.maxTokens, small.reservation], ['small', 'flash', 'flash-2026-09', 2000, 4000, 1800]);
+  assert.deepEqual([large.name, large.provider, large.model, large.maxInputTokens, large.maxTokens, large.reservation], ['large', 'opus', 'opus-2026-08', 2000, 8000, 126_000]);
   assert.equal(small.prices.digest, sha(join(dir, 'prices', 'flash.json')));
   assert.deepEqual(small.prices.perMillionTokens, { input: 100_000, output: 400_000 });
   assert.equal(large.calibration.digest, sha(join(dir, 'maps', 'opus.json')));
@@ -108,13 +109,14 @@ test('PL6841: a route that escalates on conf or margin has a calibration map for
   const { r } = await check(swap(SRC, ' calibration "maps/opus.json"', ''));
   assert.equal(r.verdict, 'REFUSED');
   assert.ok(all(r).some((d) => d.code === 'PL6841' && /tier large/.test(d.message)), text(r));
-  // Escalating on failure alone reads no confidence, so a tier with no map is allowed. Its condition is false, so the
-  // rules over an answer below the thresholds hold vacuously, and the check says so rather than read CLEAN.
+  // Escalating on failure alone reads no confidence, so a tier with no map is allowed. As ruled (PS18.1), the rules over
+  // an answer below the thresholds are not instantiated for a route with no threshold, so it checks CLEAN.
   const ok = await check(swap(swap(SRC, ' calibration "maps/opus.json"', ''), 'escalate when conf < 0.8 or margin < 0.1 or failed', 'escalate when failed'));
   assert.ok(!codes(ok.r).includes('PL6841'), text(ok.r));
-  assert.equal(ok.r.verdict, 'INCONCLUSIVE', text(ok.r));
+  assert.equal(ok.r.verdict, 'CLEAN', text(ok.r));
   const route = ok.r.machines.find((m) => m.machine === 'triage.Route');
-  assert.deepEqual(route.vacuous.map((v) => v.property).sort(), ['below-thresholds-escalates', 'exhausted-after-the-last']);
+  assert.deepEqual(route.vacuous, []);
+  assert.ok(!readFileSync(join(route.buildDir, 'invariants.mjs'), 'utf8').includes('below-thresholds-escalates'), 'the rule is not instantiated');
   assert.ok(ok.r.machines.filter((m) => m !== route).every((m) => m.verdict === 'CLEAN'));
 });
 
