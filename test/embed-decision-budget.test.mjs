@@ -2,7 +2,7 @@
 // `prices "f" max input tokens I max tokens N budget b` is the decision item budget(b, { prices, maxInputTokens,
 // maxTokens }), written after provider(...). A key left out reads as the part left out, so the checker gives the
 // same PL1201 in either surface; an unknown key, a key written twice, a prices that is not a string literal or a limit
-// that is not an integer literal is PL0001. The printer writes the item for a clause that names its budget, and says a
+// that is not an integer literal is PL0301. The printer writes the item for a clause that names its budget, and says a
 // clause with no budget name has no embedded form. In a declaration list, budget(name, { caps }) is still the budget.
 // Written from the specification text alone; the text-form twin is test/fixtures/decision-budget/writer.poly.
 import { test } from 'node:test';
@@ -129,7 +129,7 @@ test('S454, PT10r: a key left out is PL1201 at check, as the text form with that
   assert.deepEqual(codes(b.r), codes(a.r));
 });
 
-test('S454, PT10r: an unknown key, a key written twice, a prices that is not a string or a limit that is not an integer is PL0001', () => {
+test('S454, PT10r: an unknown key, a key written twice, a prices that is not a string or a limit that is not an integer is PL0301', () => {
   const cases = [
     ['unknown key', 'budget("monthly", { prices: "prices/flash.json", maxInputTokens: 2000, maxTokens: 4000, cap: 1 })'],
     ['caps in a decision', 'budget("monthly", { caps: [{ currency: "usd", amount: 0.004, per: "month" }] })'],
@@ -143,7 +143,7 @@ test('S454, PT10r: an unknown key, a key written twice, a prices that is not a s
   for (const [why, item] of cases) {
     const r = readEmbedded(swap(TS, ITEM, item), 'writer.ts');
     assert.equal(r.module, null, why);
-    assert.equal(r.diagnostics[0]?.code, 'PL0001', `${why}: ${JSON.stringify(r.diagnostics)}`);
+    assert.equal(r.diagnostics[0]?.code, 'PL0301', `${why}: ${JSON.stringify(r.diagnostics)}`);
   }
 });
 
