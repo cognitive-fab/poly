@@ -80,6 +80,8 @@ export const FAULT_SOURCES = {
   'route-tier-dropped': ['test/fixtures/m11/desk.poly'],
   'route-price-stale': ['test/fixtures/m11/desk.poly'],
   'budget-cap-raised': ['test/fixtures/m11/desk.poly'],
+  // PS18.4a, PT10r (S454): an unrouted decision's budget in its manifest entry, which the runtime reserves on, dropped.
+  'decision-budget-dropped': ['test/fixtures/decision-budget/writer.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

@@ -243,6 +243,10 @@ export class PolyRuntime {
     // PS18.2: a route's call runs its tier's provider, through the runtime's own handler.
     this.#routing = new RoutingHost(kernel, store, verified.routes, verified.budgets, () => this.now(), this.records, (r) => verified.machines.find((x) => x.id === r.decision.machine)?.manifest?.effects?.[`decision.${r.decision.name}`]?.decision?.result ?? null);
     for (const r of verified.routes) builtins[r.effectKind] = this.#routing.handler(r);
+    // PS18.4a (S454): each unrouted decision's budget, as its certified manifest entry gives it.
+    for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
+      if (e?.decision?.budget && !e.decision.route) this.#routing.decisionBudgets.set(`${m.id}\u0000${kind}`, e.decision.budget);
+    }
     // S402: a tier's call reads its decision's materials, as the decision's own provider would (PS17.2).
     this.#routing.materials = async (payload) => { const m = await this.memory.materials(payload, (d) => this.contentBody(d), (b, t, s) => this.#putTainted(b, t, s)); return { bodies: m.bodies, items: m.items }; };
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
@@ -1513,7 +1517,14 @@ export class PolyRuntime {
       answer: async (body, taint) => this.#putTainted(body, taint as Taint, null),
       cite: (given, ids, run, intent) => this.memory.cite(given, ids, run, intent, this.now()),
     };
-    this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records, { content: entry.decision?.result === 'content', cites: entry.decision?.cites ?? null, mem }));
+    // PS18.4a (S454): a decision under a budget is priced from its certified table, and its record kept for settlement.
+    const priced = entry.decision?.budget;
+    const budget = priced ? {
+      ...priced,
+      scope: (instance: string) => { const id = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instance)?.machine_id as string | undefined ?? ''; return id.slice(0, id.lastIndexOf('.')); },
+      keep: (intent: string, record: DecisionRecord & Record<string, unknown>) => this.#routing.keep(intent, record),
+    } : null;
+    this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records, { content: entry.decision?.result === 'content', cites: entry.decision?.cites ?? null, mem }, budget));
   }
 
   /**

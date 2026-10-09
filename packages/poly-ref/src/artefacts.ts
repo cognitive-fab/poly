@@ -28,6 +28,28 @@ const stable = (v: unknown): string => {
   return '{' + Object.keys(v as object).sort().map((k) => JSON.stringify(k) + ':' + stable((v as Record<string, unknown>)[k])).join(',') + '}';
 };
 
+/** A file a route or a budgeted decision names (PS18.3), read beside the source: its bytes and its JSON, or null. */
+function sourceFile(sourceDir: string, p: string): { bytes: Buffer; json: Record<string, any> } | null {
+  const f = join(sourceDir, ...p.split('/'));
+  if (!existsSync(f)) return null;
+  const bytes = readFileSync(f);
+  try { return { bytes, json: JSON.parse(bytes.toString('utf8')) }; } catch { return null; }
+}
+const sha256 = (b: Buffer): string => 'sha256:' + createHash('sha256').update(b).digest('hex');
+
+/**
+ * PS18.3, S360: the reservation is ceil((I x P_in + N x P_out) / 10^6), P_in the price of the class input and P_out the
+ * highest price of any other class.
+ */
+function reservationRef(prices: Record<string, number>, maxInputTokens: number, maxTokens: number): number {
+  const own = Object.prototype.hasOwnProperty.call(prices, 'input');
+  const top = Math.max(0, ...Object.values(prices));
+  const others = Object.entries(prices).filter(([k]) => k !== 'input').map(([, v]) => v);
+  const pIn = own ? prices.input : top;
+  const pOut = others.length ? Math.max(...others) : (own ? prices.input : 0);
+  return Number((BigInt(maxInputTokens) * BigInt(pIn) + BigInt(maxTokens) * BigInt(pOut) + 999_999n) / 1_000_000n);
+}
+
 /** The repository's std/, where the provider profiles of PT10e are, unless the caller names another. */
 const STD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'std');
 
@@ -174,7 +196,17 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const cites = d.items.find((x) => x.kind === 'DecCites') as { param: string } | undefined;
         // PS18.2: a routed decision names its route, in place of a provider.
         const route = d.items.find((x) => x.kind === 'DecRoute') as { route: string } | undefined;
-        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, ...(route ? { route: route.route } : {}), result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) });
+        // PS18.4a, PT10r (S454): an unrouted decision's budget, with its price table read here from beside the source,
+        // its digest, and the reservation of PS18.3 computed from it.
+        const own = d.items.find((x) => x.kind === 'DecBudget') as { budget: string | null; prices: string | null; maxInputTokens: number | null; maxTokens: number | null } | undefined;
+        let budget: unknown;
+        if (own) {
+          const p = own.prices !== null && sourceDir ? sourceFile(sourceDir, own.prices) : null;
+          if (!p) { out.push(`effects.manifest.json ${kind}.decision.budget: the price table ${own.prices} cannot be read beside the source to read the budget back against`); continue; }
+          const prices = p.json.perMillionTokens as Record<string, number>;
+          budget = { budget: own.budget, prices: { path: own.prices, digest: sha256(p.bytes), currency: p.json.currency, perMillionTokens: prices }, maxInputTokens: own.maxInputTokens, maxTokens: own.maxTokens, reservation: reservationRef(prices, own.maxInputTokens!, own.maxTokens!) };
+        }
+        differ(`effects.manifest.json ${kind}.decision`, entry.decision, { provider: provider?.value ?? null, ...(route ? { route: route.route } : {}), result: answers(resultType(d.result, M)), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}), ...(own ? { budget } : {}) });
       }
     }
   }
@@ -282,26 +314,14 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     if (!sourceDir) { out.push(`routes/${r.name}.json: no source directory to read its price tables and maps from`); continue; }
     let got: unknown;
     try { got = JSON.parse(readFileSync(file, 'utf8')); } catch { out.push(`routes/${r.name}.json is not JSON`); continue; }
-    const fileOf = (p: string): { bytes: Buffer; json: Record<string, any> } | null => {
-      const f = join(sourceDir, ...p.split('/'));
-      if (!existsSync(f)) return null;
-      const bytes = readFileSync(f);
-      try { return { bytes, json: JSON.parse(bytes.toString('utf8')) }; } catch { return null; }
-    };
-    const sha = (b: Buffer) => 'sha256:' + createHash('sha256').update(b).digest('hex');
+    const fileOf = (p: string) => sourceFile(sourceDir, p);
+    const sha = sha256;
     let missing: string | null = null;
     const tiers = r.tiers.map((t) => {
       const p = fileOf(t.prices);
       if (!p) { missing = t.prices; return null; }
       const prices = p.json.perMillionTokens as Record<string, number>;
-      // PS18.3, S360: the reservation is ceil((I x P_in + N x P_out) / 10^6), P_in the price of the class input and P_out
-      // the highest price of any other class.
-      const own = Object.prototype.hasOwnProperty.call(prices, 'input');
-      const top = Math.max(0, ...Object.values(prices));
-      const others = Object.entries(prices).filter(([k]) => k !== 'input').map(([, v]) => v);
-      const pIn = own ? prices.input : top;
-      const pOut = others.length ? Math.max(...others) : (own ? prices.input : 0);
-      const reservation = Number((BigInt(t.maxInputTokens) * BigInt(pIn) + BigInt(t.maxTokens) * BigInt(pOut) + 999_999n) / 1_000_000n);
+      const reservation = reservationRef(prices, t.maxInputTokens, t.maxTokens);
       const c = t.calibration === null ? null : fileOf(t.calibration);
       if (t.calibration !== null && !c) { missing = t.calibration; return null; }
       return {
@@ -315,12 +335,20 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
       v: 1, route: r.name, module: module.name, machine: `${module.name}.${r.name}.Route`, effectKind: `route.${r.name}.call`,
       decision: { machine: `${module.name}.${M.name}`, name: d.name }, tiers, escalate: r.escalate, budget: r.budget,
     });
-    const b = r.budget === null ? undefined : module.decls.find((x): x is A.Budget => x.kind === 'Budget' && x.name === r.budget);
-    if (!b) continue;
+    if (r.budget !== null) budgetBack(r.budget, `route ${r.name}`);
+  }
+  // PS18.4a, PT10r (S454): an unrouted decision's budget is written as a route's, and read back the same way.
+  for (const d of decisions) {
+    const own = d.items.find((x) => x.kind === 'DecBudget') as { budget: string | null } | undefined;
+    if (own?.budget) budgetBack(own.budget, `decision ${d.name} of ${M.name}`);
+  }
+  function budgetBack(name: string, by: string): void {
+    const b = module.decls.find((x): x is A.Budget => x.kind === 'Budget' && x.name === name);
+    if (!b) return;
     const bf = join(dir, '..', 'budgets', `${b.name}.json`);
-    if (!existsSync(bf)) { out.push(`budgets/${b.name}.json is missing, and route ${r.name} names budget ${b.name} (PT10r)`); continue; }
+    if (!existsSync(bf)) { out.push(`budgets/${b.name}.json is missing, and ${by} names budget ${b.name} (PT10r)`); return; }
     let gotB: unknown;
-    try { gotB = JSON.parse(readFileSync(bf, 'utf8')); } catch { out.push(`budgets/${b.name}.json is not JSON`); continue; }
+    try { gotB = JSON.parse(readFileSync(bf, 'utf8')); } catch { out.push(`budgets/${b.name}.json is not JSON`); return; }
     differ(`budgets/${b.name}.json`, gotB, { v: 1, budget: b.name, module: module.name, machine: `${module.name}.${b.name}.Budget`, caps: b.caps.map((c) => ({ currency: c.currency, amount: c.amount, run: c.run, period: c.period, scope: c.scope })), onExhausted: b.onExhausted });
   }
 

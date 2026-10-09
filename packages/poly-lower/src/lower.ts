@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped';
 
 export interface Lowered {
   machine: string;
@@ -262,7 +262,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // A machine that sends needs it too (S58): a send is an intent.
   if (facts.effects.size || facts.decisions.size || facts.timerKeys.size || facts.children.size || lowerable.some((a) => emitsAny(handlers.get(a.name)!.body))) {
     files['effects.cjs'] = effectsModule(mutated, lowerable, handlers, { ...base, mode: 'handler', stateVar: 'pre', dataVar: 'data', module: module.name, moduleDecls: module.decls, program: opts.program }, pre, opts.fault);
-    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data', fault: opts.fault }, module), null, 2) + '\n';
+    files['effects.manifest.json'] = JSON.stringify(manifestOf(facts, env, { ...base, mode: 'init', stateVar: 'model', dataVar: 'data', fault: opts.fault }, module, opts.routing), null, 2) + '\n';
     // PT6.5, S152: the opt-in sandbox, one OpenShell policy per effect kind, from its labels and targets.
     // The broken variant widen-sandbox generates it too, so translation validation has a policy to catch.
     if (opts.isolation === 'openshell' || opts.fault === 'widen-sandbox') files['openshell.policies.yaml'] = JSON.stringify(sandboxPolicies(facts, opts.fault), null, 2) + '\n';
@@ -286,7 +286,19 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // PT10r: each route a decision of this machine names has its descriptor, and so has the route's budget: what the
   // runtime reads to run the route's tiers, reserve, settle and record (PS18.2 to PS18.4). The broken lowerings change a
   // threshold, drop the last tier, leave a price table's digest stale, and raise a cap.
+  const writeBudget = (name: string) => {
+    const b = module.decls.find((x): x is A.Budget => x.kind === 'Budget' && x.name === name);
+    if (!b) return;
+    files[`../budgets/${b.name}.json`] = JSON.stringify({
+      v: 1, budget: b.name, module: module.name, machine: `${module.name}.${b.name}.Budget`,
+      caps: b.caps.map((c) => ({ currency: c.currency, amount: opts.fault === 'budget-cap-raised' ? c.amount * 2 : c.amount, run: c.run, period: c.period, scope: c.scope })),
+      onExhausted: b.onExhausted,
+    }, null, 2) + '\n';
+  };
   for (const d of facts.decisions.values()) {
+    // PS18.4a, S454: an unrouted decision's budget is written as a route's is.
+    const own = d.items.find((i) => i.kind === 'DecBudget') as { budget: string | null } | undefined;
+    if (own?.budget) writeBudget(own.budget);
     const named = d.items.find((i) => i.kind === 'DecRoute') as { route: string } | undefined;
     const r = named ? module.decls.find((x): x is A.Route => x.kind === 'Route' && x.name === named.route) : undefined;
     if (!r) continue;
@@ -309,14 +321,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
       decision: { machine: `${module.name}.${m.name}`, name: d.name },
       tiers: opts.fault === 'route-tier-dropped' ? tiers.slice(0, -1) : tiers, escalate, budget: r.budget,
     }, null, 2) + '\n';
-    const b = r.budget === null ? undefined : module.decls.find((x): x is A.Budget => x.kind === 'Budget' && x.name === r.budget);
-    if (b) {
-      files[`../budgets/${b.name}.json`] = JSON.stringify({
-        v: 1, budget: b.name, module: module.name, machine: `${module.name}.${b.name}.Budget`,
-        caps: b.caps.map((c) => ({ currency: c.currency, amount: opts.fault === 'budget-cap-raised' ? c.amount * 2 : c.amount, run: c.run, period: c.period, scope: c.scope })),
-        onExhausted: b.onExhausted,
-      }, null, 2) + '\n';
-    }
+    if (r.budget !== null) writeBudget(r.budget);
   }
   // PT10e: each credential an effect of this machine uses has its descriptor, which the vault adapter reads: what to ask
   // the provider for, and the base addresses the credential may be sent to. The broken lowerings add a scope the source
@@ -489,7 +494,7 @@ function emitsAny(body: A.Stmt[]): boolean {
 export const DEFAULT_RETRY = { maxAttempts: 5, baseMs: 500, timeoutMs: 30_000 } as const;
 
 /** effects.manifest.json (PT6.1): one kind per effect, with its completions, retry policy, labels, targets (S151) and class. */
-function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault }, module?: A.Module): { effects: Record<string, unknown>; timerTargets?: string[] } {
+function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault }, module?: A.Module, routing?: Readonly<RoutingFiles>): { effects: Record<string, unknown>; timerTargets?: string[] } {
   // Kinds are the author's strings, so the manifest is built from entries: an assignment to a key such
   // as "__proto__" would set a prototype instead of adding the kind.
   const out: [string, unknown][] = [];
@@ -549,6 +554,18 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
     // PS18.2: a routed decision names its route, whose tiers the runtime runs in place of one provider.
     const route = d.items.find((i) => i.kind === 'DecRoute') as { route: string } | undefined;
     entry.decision = { provider: provider?.value ?? null, ...(route ? { route: route.route } : {}), result: resultValues(tyOfTypeExpr(d.result, env), env, facts), ...(band ? { band: [band.lo, band.hi] } : {}), ...(cites ? { cites: cites.param } : {}) };
+    // PS18.4a, PT10r, S454: an unrouted decision's budget, its price table as a tier's record and its reservation, which
+    // the runtime reads to reserve and price the call. The broken lowering decision-budget-dropped leaves it out.
+    const own = d.items.find((i) => i.kind === 'DecBudget') as { budget: string; prices: string; maxInputTokens: number; maxTokens: number } | undefined;
+    if (own && cx.fault !== 'decision-budget-dropped') {
+      const p = routing?.prices[own.prices];
+      if (!p) throw new Error(`poly-lower: no price table ${own.prices} for decision ${d.name}`);
+      const table = p.table as PriceTable;
+      (entry.decision as Record<string, unknown>).budget = {
+        budget: own.budget, prices: { path: own.prices, digest: p.digest, currency: table.currency, perMillionTokens: table.perMillionTokens },
+        maxInputTokens: own.maxInputTokens, maxTokens: own.maxTokens, reservation: reservationOf(own.maxInputTokens, own.maxTokens, table),
+      };
+    }
     out.push([`decision.${d.name}`, entry]);
   }
   // PD2.4, S129: each adjudicated decision's outcome kind, class none, tried once, with no completion; its handler is

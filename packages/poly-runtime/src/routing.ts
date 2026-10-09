@@ -7,11 +7,11 @@
 // policy, reserves on each in the transaction that records the allow, settles each in the transaction of the call's
 // completion, and releases each when the intent dies; each step has an action id derived from the intent, so a step
 // repeated after a crash is deduplicated (K4) and no reservation is lost or counted twice.
-import { costOf, digest } from '@poly/core';
+import { digest } from '@poly/core';
 import type { OutboxRow, Runtime } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import type { LedgerStore } from './ledger-store.js';
 import { isItems } from './memory.js';
-import { answerProbability, calibrate, type DecisionRecord, type Provider } from './provider.js';
+import { answerProbability, calibrate, chargeOf, type DecisionRecord, type Provider } from './provider.js';
 import type { VerifiedBudget, VerifiedRoute, VerifiedTier } from './load.js';
 import type { Proposal } from './worker.js';
 
@@ -39,10 +39,22 @@ CREATE TABLE IF NOT EXISTS poly_route_call (
 /** One instance a tier's call reserves on: its address, the cap it is opened with, and the reservation. */
 export interface ReservationPlan { instance: string; cap: number; amount: number }
 
-/** What the runtime's budget check gives the worker for a tier's call (PS18.4). */
+/** What the runtime's budget check gives the worker for a tier's call (PS18.4), or a budgeted decision's, with no route (PS18.4a). */
 export type BudgetCheck =
-  | { refuse: 'deny' | 'escalate'; route: NonNullable<Proposal['route']>; budget: NonNullable<Proposal['budget']> | null }
-  | { route: NonNullable<Proposal['route']>; budget: NonNullable<Proposal['budget']> | null; plan: ReservationPlan[]; held: boolean };
+  | { refuse: 'deny' | 'escalate'; route: NonNullable<Proposal['route']> | null; budget: NonNullable<Proposal['budget']> | null }
+  | { route: NonNullable<Proposal['route']> | null; budget: NonNullable<Proposal['budget']> | null; plan: ReservationPlan[]; held: boolean };
+
+/**
+ * PS18.4a, PT10r (S454): an unrouted decision's budget, as its certified manifest entry gives it: the budget it reserves
+ * on, its price table as a tier's, both token limits and the reservation of PS18.3.
+ */
+export interface DecisionBudget {
+  budget: string;
+  prices: VerifiedTier['prices'];
+  maxInputTokens: number;
+  maxTokens: number;
+  reservation: number;
+}
 
 type BudgetState = { b?: string; cap?: number; spent?: number; reserved?: number; overrun?: number };
 
@@ -58,6 +70,18 @@ export class RoutingHost {
 
   /** The tier providers, by the provider name a tier gives (S356): host code, never certified, recorded in tests. */
   readonly providers = new Map<string, Provider>();
+
+  /** PS18.4a: each unrouted decision's budget, by its machine and kind, from the certified manifests; the runtime sets it. */
+  readonly decisionBudgets = new Map<string, DecisionBudget>();
+
+  /**
+   * Review B2 (M11), PS18.4a: a priced call's record, kept as soon as its provider answered, so the call is charged
+   * however its intent ends; settle reads it. The question is kept in the content store by digest.
+   */
+  async keep(intent: string, record: DecisionRecord & Record<string, unknown>): Promise<void> {
+    const { question: q, ...rest } = record;
+    await this.store.txn(() => { this.store.db.prepare('INSERT OR REPLACE INTO poly_route_call (intent, record) VALUES (?, ?)').run(intent, JSON.stringify({ ...rest, request: this.store.keep(q) })); });
+  }
 
   /** `resultOf` gives a routed decision's result values, as its certified manifest lists them. */
   constructor(private readonly kernel: Runtime, private readonly store: LedgerStore, readonly routes: VerifiedRoute[], readonly budgets: VerifiedBudget[], private readonly now: () => number, private readonly records: Map<string, DecisionRecord>, private readonly resultOf: (route: VerifiedRoute) => unknown = () => null) {
@@ -137,14 +161,25 @@ export class RoutingHost {
    */
   budgetCheck(row: OutboxRow, approved: boolean): BudgetCheck | null {
     const t = this.tierOf(row);
-    if (!t) return null;
-    const route = { route: t.route.name, tier: t.tier.name, reservation: t.tier.reservation };
-    const b = t.route.budget === null ? null : this.budgets.find((x) => x.name === t.route.budget);
-    if (t.route.budget === null) return { route, budget: null, plan: [], held: false };
-    // Review B5 (M11): a route that names a budget the runtime did not load is refused, fail closed (S353).
+    if (t) return this.check(row, approved, { route: t.route.name, tier: t.tier.name, reservation: t.tier.reservation }, t.route.budget, t.decision.run, t.tier.reservation);
+    // PS18.4a: an unrouted decision's own intent is read against its budget as a tier's call is; its run is its instance.
+    const d = this.decisionBudget(row);
+    return d ? this.check(row, approved, null, d.budget, row.instance_id, d.reservation) : null;
+  }
+
+  /** PS18.4a: the budget of an unrouted decision's intent, from its certified manifest entry, or null. */
+  decisionBudget(row: Pick<OutboxRow, 'instance_id' | 'kind'>): DecisionBudget | null {
+    const machine = this.machineOf(row.instance_id);
+    return machine ? this.decisionBudgets.get(`${machine}\u0000${row.kind}`) ?? null : null;
+  }
+
+  private check(row: OutboxRow, approved: boolean, route: NonNullable<Proposal['route']> | null, name: string | null, run: string, reservation: number): BudgetCheck {
+    const b = name === null ? null : this.budgets.find((x) => x.name === name);
+    if (name === null) return { route, budget: null, plan: [], held: false };
+    // Review B5 (M11): a call that names a budget the runtime did not load is refused, fail closed (S353).
     if (!b) return { refuse: 'deny', route, budget: null };
     const held = !!this.store.db.prepare("SELECT 1 FROM poly_reservation WHERE intent = ? AND status = 'held'").get(row.intent_id);
-    const plan = this.addresses(b, t.decision.run, this.now()).map((p) => ({ ...p, amount: t.tier.reservation }));
+    const plan = this.addresses(b, run, this.now()).map((p) => ({ ...p, amount: reservation }));
     const scope = plan.find((p) => p.instance.includes(':scope:'))?.instance.split(':scope:')[1]?.split(':')[0] ?? null;
     const budget = { budget: b.name, scope, remaining: this.remaining(plan) };
     if (held) return { route, budget, plan, held: true };
@@ -227,12 +262,7 @@ export class RoutingHost {
       const margin = Math.max(0, conf - calibrate(map, second));
       // S361, ruled: a call that answered with no usage report, or with a count that is not a whole number of tokens, is
       // charged its full reservation, the violation recorded and its counts not; it is never released for free.
-      const raw = a.usage;
-      const missing = raw === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw) || !Object.keys(raw).length;
-      const invalid = !missing && Object.values(raw as Record<string, unknown>).some((n) => !(typeof n === 'number' && Number.isSafeInteger(n) && n >= 0));
-      const violation = missing ? 'usage-missing' : invalid ? 'usage-invalid' : null;
-      const usage = violation ? null : (raw as Record<string, number>);
-      const { cost, unpriced } = usage ? costOf(usage, t.tier.prices) : { cost: t.tier.reservation, unpriced: [] as string[] };
+      const { usage, cost, unpriced, violation } = chargeOf(a.usage, t.tier.prices, t.tier.reservation);
       const machine = this.machineOf(t.decision.run) ?? '';
       // S310, PS18.6, F1 as ruled: an answer outside the decision's type is a provider's free text, which may carry what
       // the question held. It is recorded by its digest only, in the answer and the distribution alike; the completion
@@ -253,8 +283,7 @@ export class RoutingHost {
       };
       this.records.set(ctx.idempotencyKey, record);
       // Review B2 (M11): kept as soon as the provider answered, so a call that ran is charged however its intent ends.
-      const { question: q, ...rest } = record;
-      await this.store.txn(() => { this.store.db.prepare('INSERT OR REPLACE INTO poly_route_call (intent, record) VALUES (?, ?)').run(ctx.idempotencyKey, JSON.stringify({ ...rest, request: this.store.keep(q) })); });
+      await this.keep(ctx.idempotencyKey, record);
       return { conf, margin };
     };
   }

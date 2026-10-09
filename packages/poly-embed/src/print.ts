@@ -202,6 +202,8 @@ class Printer {
       case 'DecBand': return `${this.use('band')}(${decimal(x.lo)}, ${decimal(x.hi)})`;
       case 'DecCites': return `${this.use('cites')}(${q(x.param)})`;
       case 'DecRoute': return `${this.use('route')}(${q(x.route)})`;
+      // PT2.5: PT10r gives the clause of S454 no embedded form, so none is invented here.
+      case 'DecBudget': throw new Error('a decision\'s budget clause (prices ... budget b, PS18.4a) has no embedded form (PT10r)');
       default: return this.effItem(x);
     }
   }

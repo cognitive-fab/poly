@@ -410,6 +410,11 @@ export type DecisionItem =
   | (NodeBase & { kind: 'DecCites'; param: string })
   /** `route r` (PT24.1c, PS18.2): the decision's tiers, in place of a provider. */
   | (NodeBase & { kind: 'DecRoute'; route: string })
+  /**
+   * `prices "f" max input tokens I max tokens N budget b` (PS18.4a, S454): an unrouted decision's price table, token
+   * limits and budget, one clause after `provider`. A part left out is null, which the checker refuses (PL1201).
+   */
+  | (NodeBase & { kind: 'DecBudget'; budget: string | null; prices: string | null; maxInputTokens: number | null; maxTokens: number | null })
   | EffOutcomeItem;
 
 export interface Terminal extends NodeBase {

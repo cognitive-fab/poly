@@ -29,5 +29,17 @@ export function resolveRouting(module: Module, file: string): RoutingFiles {
       if (m) out.maps[t.calibration] = { map: m.json, file: m.file, digest: m.digest };
     }
   }
+  // PS18.4a, S454: an unrouted decision's price table is read beside the source as a tier's is.
+  for (const m of module.decls) {
+    if (m.kind !== 'Machine') continue;
+    for (const d of m.items) {
+      if (d.kind !== 'Decision') continue;
+      for (const it of d.items) {
+        if (it.kind !== 'DecBudget' || it.prices === null) continue;
+        const p = read(it.prices);
+        if (p) out.prices[it.prices] = { table: p.json, file: p.file, digest: p.digest };
+      }
+    }
+  }
   return out;
 }

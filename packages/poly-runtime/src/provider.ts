@@ -7,6 +7,7 @@
 // The model is runtime configuration, never part of what the certificate binds (PD3.1): swapping it changes no
 // file of the build.
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
+import { costOf, type PriceTable } from '@poly/core';
 
 /** What an engine answers: the chosen answer, its distribution over answers, and what it reports about itself. */
 export interface ProviderAnswer {
@@ -121,10 +122,39 @@ export function answerProbability(distribution: [unknown, number][], answer: unk
   return distribution.find(([x]) => sameAnswer(x, answer))?.[1] ?? 0;
 }
 
+/**
+ * PS18.3, S361: a priced call's charge from its provider's usage report. A report that is missing, empty or not whole
+ * numbers of tokens is a violation: the call is charged its full reservation, the violation recorded and its counts not.
+ * A class the table does not price is priced at its highest (costOf) and named in `unpriced`.
+ */
+export function chargeOf(raw: unknown, prices: Pick<PriceTable, 'perMillionTokens'>, reservation: number): { usage: Record<string, number> | null; cost: number; unpriced: string[]; violation: 'usage-missing' | 'usage-invalid' | null } {
+  const missing = raw === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw) || !Object.keys(raw).length;
+  const invalid = !missing && Object.values(raw as Record<string, unknown>).some((n) => !(typeof n === 'number' && Number.isSafeInteger(n) && n >= 0));
+  const violation = missing ? 'usage-missing' : invalid ? 'usage-invalid' : null;
+  const usage = violation ? null : (raw as Record<string, number>);
+  const { cost, unpriced } = usage ? costOf(usage, prices) : { cost: reservation, unpriced: [] as string[] };
+  return { usage, cost, unpriced, violation };
+}
+
+/**
+ * PS18.4a, S454: what the host gives an unrouted decision under a budget: its certified price table, limits and
+ * reservation, the scope of an instance (its machine's module), and where the record is kept for settlement.
+ */
+export interface DecisionBudgetHost {
+  budget: string;
+  prices: { path: string; digest: string; currency: string; perMillionTokens: Record<string, number> };
+  maxInputTokens: number;
+  maxTokens: number;
+  reservation: number;
+  scope(instance: string): string;
+  keep(intent: string, record: DecisionRecord & Record<string, unknown>): Promise<void>;
+}
+
 /** The adapter: the effect handler for `decision.<d>`, recording the full record for the ledger by intent id. */
-export function decisionHandler(decision: string, providerKind: string | null, config: ProviderConfig, records: Map<string, DecisionRecord>, memory?: { content: boolean; cites: string | null; mem: DecisionMemory }) {
+export function decisionHandler(decision: string, providerKind: string | null, config: ProviderConfig, records: Map<string, DecisionRecord>, memory?: { content: boolean; cites: string | null; mem: DecisionMemory }, budget?: DecisionBudgetHost | null) {
   return async (payload: unknown, _caps: unknown, ctx: { idempotencyKey: string; instanceId?: string }) => {
-    const question = { decision, payload, intent: ctx.idempotencyKey };
+    // PS18.4a, K15: a decision under a budget gives its provider both token limits with the question, as a tier does.
+    const question = { decision, payload, intent: ctx.idempotencyKey, ...(budget ? { limits: { maxInputTokens: budget.maxInputTokens, maxTokens: budget.maxTokens } } : {}) };
     const t0 = Date.now();
     // PS17.2: a decision of a program with memory reads its materials; the question recorded holds digests only (S310).
     const m = memory ? await memory.mem.materials((payload ?? {}) as Record<string, unknown>) : null;
@@ -148,6 +178,18 @@ export function decisionHandler(decision: string, providerKind: string | null, c
       answer: a.answer, raw: first, conf, margin, distribution: dist,
       latencyMs: a.latencyMs ?? Date.now() - t0, cost: a.cost ?? null,
     };
+    if (budget) {
+      // PS18.4a, S361: the cost is poly's, from the reported usage under the certified table, never the provider's own
+      // figure; the record carries usage, cost, reservation and prices as a tier's call does, so poly cost sums it.
+      const { usage, cost, unpriced, violation } = chargeOf(raw.usage, budget.prices, budget.reservation);
+      const instance = ctx.instanceId ?? '';
+      Object.assign(record, {
+        cost: { units: cost, unit: `micro-${budget.prices.currency}` }, usage, ...(violation ? { usageViolation: violation } : {}), ...(unpriced.length ? { unpriced } : {}),
+        reservation: budget.reservation, prices: budget.prices.digest, run: instance, scope: budget.scope(instance),
+      });
+      // Review B2 (M11): kept as soon as the provider answered, so the call is settled with its cost however it ends.
+      await budget.keep(ctx.idempotencyKey, record as DecisionRecord & Record<string, unknown>);
+    }
     // PS17.6: the citations are checked before the completion; an uncited answer is refused and its failed outcome runs.
     const cited = memory?.cites ? await memory.mem.cite((payload as Record<string, unknown>)?.[memory.cites], raw.cites, ctx.instanceId ?? '', ctx.idempotencyKey) : null;
     if (cited) record.cites = cited as { ref: string; count: number };

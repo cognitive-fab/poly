@@ -39,7 +39,10 @@ export interface Proposal {
   items?: { count: number; class: string; ageMs: number; provenance: string };
   /** PT25.1, PS18.2: a tier's call: its route, its tier and its reservation in micro-units. */
   route?: { route: string; tier: string; reservation: number };
-  /** PT25.1, PS18.4: a tier's call under a budget: the budget, its scope, and the least it has left before this call. */
+  /**
+   * PT25.1, PS18.4, PS18.4a: a tier's call, or an unrouted decision's, under a budget: the budget, its scope, and the
+   * least it has left before this call.
+   */
   budget?: { budget: string; scope: string | null; remaining: number };
 }
 
@@ -436,9 +439,10 @@ export class EffectWorker {
           // any other, a stale re-proposal escalates, which rule 2 of PT9.7 denies escalate-once.
           const mem = this.opts.memoryCheck?.(row, decl, d === 2 && this.lastEscalation(row) === 'stale-items') ?? null;
           if (mem && 'fields' in mem) Object.assign(proposal, mem.fields);
-          // PS18.4, S353: a tier's call is read against its budget next; its refusal is final whatever a policy says.
+          // PS18.4, S353: a tier's call, or a budgeted decision's (PS18.4a), is read against its budget next; its refusal
+          // is final whatever a policy says.
           const budget = this.opts.budgetCheck?.(row, d === 2) ?? null;
-          if (budget) { proposal.route = budget.route; if (budget.budget) proposal.budget = budget.budget; }
+          if (budget) { if (budget.route) proposal.route = budget.route; if (budget.budget) proposal.budget = budget.budget; }
           // PS16.3, S199: the grant check comes next, then the mandate's; each refusal is final whatever a policy says.
           const grant = this.opts.grantCheck?.(row, decl) ?? null;
           if (grant && 'credential' in grant) proposal.credential = grant.credential;

@@ -357,6 +357,8 @@ class Printer {
       case 'DecBand': return `band ${decimalText(e.lo)}..${decimalText(e.hi)}`;
       case 'DecCites': return `cites ${e.param}`;
       case 'DecRoute': return `route ${e.route}`;
+      // PS18.4a, S454: the clause as written, its missing parts left out.
+      case 'DecBudget': return [e.prices !== null ? `prices ${JSON.stringify(e.prices)}` : null, e.maxInputTokens !== null && e.maxTokens !== null ? `max input tokens ${e.maxInputTokens} max tokens ${e.maxTokens}` : null, e.budget !== null ? `budget ${e.budget}` : null].filter(Boolean).join(' ');
       default: return this.effectItem(e);
     }
   }

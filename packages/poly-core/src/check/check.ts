@@ -556,29 +556,11 @@ class Checker {
       for (const t of r.tiers) {
         if (tierNames.has(t.name)) this.err('PL1002', t, `route ${r.name} has two tiers ${t.name}`);
         tierNames.add(t.name);
-        if (!/^[a-z0-9][a-z0-9-]*$/.test(t.provider)) this.err('PL1201', t, `tier ${t.name}: the provider "${t.provider}" is not a plain name (lower-case letters, digits and -)`);
-        if (t.maxTokens < 1) this.err('PL1201', t, `tier ${t.name}: its token limit is at least 1 (PS18.3)`);
-        // Review A5 (M11): every amount is a safe integer of micro-units, so no reservation is rounded.
-        if (!Number.isSafeInteger(t.maxTokens)) this.err('PL1201', t, `tier ${t.name}: its token limit ${t.maxTokens} is beyond the integers an amount holds exactly (PS18.3)`);
-        // S360: the input limit is a whole number of tokens, at the table's input price.
-        if (!(Number.isSafeInteger(t.maxInputTokens) && t.maxInputTokens >= 0)) this.err('PL1201', t, `tier ${t.name}: its input token limit ${t.maxInputTokens} is not a whole number of tokens (S360)`);
-        for (const [what, p] of [['price table', t.prices], ['calibration map', t.calibration]] as const) {
-          if (p !== null && !routePathOk(p)) this.err('PL1201', t, `tier ${t.name}: the ${what} "${p}" is not a relative path to a .json file under the source's directory, with no . or .. segment (PS18.3)`);
-        }
-        const entry = routePathOk(t.prices) ? this.opts.routing?.prices[t.prices] : undefined;
-        if (routePathOk(t.prices) && !entry) this.err('PL1001', t, `tier ${t.name}: no price table at ${t.prices} beside the source (PS18.3)`);
-        else if (entry) {
-          const problem = priceTableProblem(entry.table, t.provider);
-          if (problem) this.err(problem.code, t, `tier ${t.name}: the price table ${t.prices} ${problem.message} (PS18.3, S350)`);
-        }
-        const table = this.priceTable(t.prices, t.provider);
-        // S360: the input limit is priced by the table's class input, which a route's table therefore names.
-        if (table && !Object.hasOwn(table.perMillionTokens, 'input')) this.err('PL1201', t, `tier ${t.name}: the price table ${t.prices} has no class input, at which the tier's input token limit is reserved (S360)`);
-        if (table && Number.isSafeInteger(t.maxTokens) && Number.isSafeInteger(t.maxInputTokens) && t.maxInputTokens >= 0) {
-          const r0 = reservationOf(t.maxInputTokens, t.maxTokens, table);
-          if (!Number.isSafeInteger(r0)) this.err('PL1201', t, `tier ${t.name}: its reservation is beyond the integers an amount holds exactly (PS18.3)`);
-          currencies.add(table.currency);
-          reservations.push({ tier: t, r: r0 });
+        if (t.calibration !== null && !routePathOk(t.calibration)) this.err('PL1201', t, `tier ${t.name}: the calibration map "${t.calibration}" is not a relative path to a .json file under the source's directory, with no . or .. segment (PS18.3)`);
+        const priced = this.pricedCall(t, `tier ${t.name}`, t.provider, t.prices, t.maxInputTokens, t.maxTokens);
+        if (priced) {
+          currencies.add(priced.currency);
+          reservations.push({ tier: t, r: priced.r });
         }
         if (t.calibration !== null && routePathOk(t.calibration)) {
           const m = this.opts.routing?.maps[t.calibration];
@@ -618,6 +600,59 @@ class Checker {
         }
       }
     }
+    // PS18.4a, PT10r, S454: an unrouted decision that names a provider may name its price table, both token limits and
+    // a budget, in one clause after its provider; the table is checked as a tier's, and the budget's caps against it.
+    for (const m of this.module.decls) {
+      if (m.kind !== 'Machine') continue;
+      for (const d of m.items) {
+        if (d.kind !== 'Decision') continue;
+        const it = d.items.find((x): x is Extract<A.DecisionItem, { kind: 'DecBudget' }> => x.kind === 'DecBudget');
+        if (!it) continue;
+        const provider = d.items.find((x): x is Extract<A.DecisionItem, { kind: 'DecProvider' }> => x.kind === 'DecProvider');
+        if (d.items.some((x) => x.kind === 'DecRoute')) { this.err('PL1201', it, `decision ${d.name} names its route, so the route names its budget and the decision names none (PS18.4a)`); continue; }
+        if (!provider) { this.err('PL1201', it, `decision ${d.name} names a budget and no provider; a budget is named by a decision that names its provider (PS18.4a)`); continue; }
+        if (d.items.indexOf(it) < d.items.indexOf(provider)) this.err('PL1201', it, `decision ${d.name} names its prices, limits and budget after its provider (PT10r)`);
+        const b = it.budget === null ? undefined : budgets.find((x) => x.name === it.budget);
+        if (it.budget !== null && !b) this.err('PL1001', it, `decision ${d.name} names budget ${it.budget}, which the module does not declare`);
+        if (it.prices === null || it.maxInputTokens === null || it.maxTokens === null || it.budget === null) {
+          this.err('PL1201', it, `decision ${d.name} names its budget with its price table and both token limits, as one clause: prices "f" max input tokens I max tokens N budget b (PS18.4a)`);
+          continue;
+        }
+        const priced = this.pricedCall(it, `decision ${d.name}`, provider.value, it.prices, it.maxInputTokens, it.maxTokens);
+        if (!b || !priced) continue;
+        for (const c of b.caps) {
+          if (c.currency !== priced.currency) this.err('PL6844', c, `budget ${b.name} caps ${c.currency}, and decision ${d.name} is priced in ${priced.currency} (PS18.3)`);
+          else if (priced.r > c.amount) this.err('PL6845', it, `decision ${d.name} reserves ${priced.r} micro-units, above budget ${b.name}'s cap of ${c.amount}, so it could never be called (PS18.4)`);
+        }
+      }
+    }
+  }
+
+  /**
+   * PS18.3, S360: a priced call's provider, limits and price table, a tier's or a budgeted decision's (PS18.4a), each
+   * fault reported against `who`; its currency and reservation when its table is well formed, else null.
+   */
+  private pricedCall(at: A.NodeBase, who: string, provider: string, prices: string, maxInputTokens: number, maxTokens: number): { currency: string; r: number } | null {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(provider)) this.err('PL1201', at, `${who}: the provider "${provider}" is not a plain name (lower-case letters, digits and -)`);
+    if (maxTokens < 1) this.err('PL1201', at, `${who}: its token limit is at least 1 (PS18.3)`);
+    // Review A5 (M11): every amount is a safe integer of micro-units, so no reservation is rounded.
+    if (!Number.isSafeInteger(maxTokens)) this.err('PL1201', at, `${who}: its token limit ${maxTokens} is beyond the integers an amount holds exactly (PS18.3)`);
+    // S360: the input limit is a whole number of tokens, at the table's input price.
+    if (!(Number.isSafeInteger(maxInputTokens) && maxInputTokens >= 0)) this.err('PL1201', at, `${who}: its input token limit ${maxInputTokens} is not a whole number of tokens (S360)`);
+    if (!routePathOk(prices)) this.err('PL1201', at, `${who}: the price table "${prices}" is not a relative path to a .json file under the source's directory, with no . or .. segment (PS18.3)`);
+    const entry = routePathOk(prices) ? this.opts.routing?.prices[prices] : undefined;
+    if (routePathOk(prices) && !entry) this.err('PL1001', at, `${who}: no price table at ${prices} beside the source (PS18.3)`);
+    else if (entry) {
+      const problem = priceTableProblem(entry.table, provider);
+      if (problem) this.err(problem.code, at, `${who}: the price table ${prices} ${problem.message} (PS18.3, S350)`);
+    }
+    const table = this.priceTable(prices, provider);
+    // S360: the input limit is priced by the table's class input, which the table therefore names.
+    if (table && !Object.hasOwn(table.perMillionTokens, 'input')) this.err('PL1201', at, `${who}: the price table ${prices} has no class input, at which the input token limit is reserved (S360)`);
+    if (!table || !Number.isSafeInteger(maxTokens) || !Number.isSafeInteger(maxInputTokens) || maxInputTokens < 0) return null;
+    const r = reservationOf(maxInputTokens, maxTokens, table);
+    if (!Number.isSafeInteger(r)) this.err('PL1201', at, `${who}: its reservation is beyond the integers an amount holds exactly (PS18.3)`);
+    return { currency: table.currency, r };
   }
 
   private credentials(): void {

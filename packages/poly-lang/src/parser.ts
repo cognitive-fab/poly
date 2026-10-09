@@ -1264,8 +1264,27 @@ class Parser {
         items.push(this.effItem(is, { kind: 'DecBand', lo, hi }) as unknown as A.DecisionItem);
       } else if (w === 'cites') items.push(this.effItem(is, { kind: 'DecCites', param: this.ident('an Items parameter') }) as unknown as A.DecisionItem);
       else if (w === 'route') items.push(this.effItem(is, { kind: 'DecRoute', route: this.ident('a route name') }) as unknown as A.DecisionItem);
-      else if (w === 'ok' || w === 'failed' || w === 'exhausted') items.push(this.outcome(is, w));
-      else this.fail('expected provider, route, labels, timeout, band, cites, ok or failed', is);
+      else if (w === 'prices' || w === 'budget') {
+        // PS18.4a, S454: `prices "f" max input tokens I max tokens N budget b`, one clause. A part left out is parsed as
+        // null, so `budget b` alone or a clause with no budget is the checker's PL1201, not a syntax error.
+        let prices: string | null = null, maxInputTokens: number | null = null, maxTokens: number | null = null, budget: string | null = null;
+        if (w === 'prices') {
+          prices = this.str('a price table');
+          if (this.at('max')) {
+            this.next();
+            if (!this.at('input')) this.fail('a decision states its input token limit: max input tokens n max tokens n (S360)');
+            this.next();
+            this.word('tokens');
+            maxInputTokens = this.int();
+            this.word('max');
+            this.word('tokens');
+            maxTokens = this.int();
+          }
+          if (this.at('budget')) { this.next(); budget = this.ident('a budget name'); }
+        } else budget = this.ident('a budget name');
+        items.push(this.effItem(is, { kind: 'DecBudget', budget, prices, maxInputTokens, maxTokens }) as unknown as A.DecisionItem);
+      } else if (w === 'ok' || w === 'failed' || w === 'exhausted') items.push(this.outcome(is, w));
+      else this.fail('expected provider, route, prices, labels, timeout, band, cites, ok or failed', is);
     }
     this.next();
     return this.node<A.Decision>(start, { kind: 'Decision', name, params, result, items }, true);
