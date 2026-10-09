@@ -825,7 +825,7 @@ export function inputData(instances: ConfigInstance[], M: RMachine, action: stri
   const a = M.actions.find((x) => x.name === action)!;
   let recs: Record<string, Value>[] = [{}];
   for (const p of a.params) {
-    const vs = p.check ?? (p.type.k === 'ref' ? [null, ...instances.filter((x) => x.machine.name === (p.type as { machine: string }).machine).map((x) => x.name)] : valuesOf(p.type, M));
+    const vs = p.cut?.reps ?? p.check ?? (p.type.k === 'ref' ? [null, ...instances.filter((x) => x.machine.name === (p.type as { machine: string }).machine).map((x) => x.name)] : valuesOf(p.type, M));
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
   // PD5.1.2c: an input with claims offers every claims value, as a machine's check does.

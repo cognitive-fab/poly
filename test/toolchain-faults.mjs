@@ -84,6 +84,8 @@ export const FAULT_SOURCES = {
   'budget-cap-raised': ['test/fixtures/m11/desk.poly'],
   // PS18.4a, PT10r (S454): an unrouted decision's budget in its manifest entry, which the runtime reserves on, dropped.
   'decision-budget-dropped': ['test/fixtures/decision-budget/writer.poly'],
+  // PS4.1h, PT3.3a (S458): a cut parameter explored at one class fewer than its representatives.
+  'range-cut-dropped': ['test/fixtures/cut-ranges/refunds.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

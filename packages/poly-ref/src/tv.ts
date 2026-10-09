@@ -117,28 +117,50 @@ export async function translationValidate(module: Module, machineName: string, b
 
   // Transitions (PS9.2): every edge of the explored graph is one (s, a, d).
   let transitions = 0;
-  for (const e of g.edges) {
+  // PT3.3a (S458): each edge whose data holds a cut parameter at its representative is also compared at the greatest
+  // value of that representative's class, so the cut invariance of PS4.1h is checked on the lowered module.
+  const probes = (e: Edge<State>): { data: Record<string, Value>; want: { verdict: Verdict; next: State; effects: Intent[] } }[] => {
+    const a = M.actions.find((x) => x.name === e.label.action);
+    const out: { data: Record<string, Value>; want: { verdict: Verdict; next: State; effects: Intent[] } }[] = [];
+    for (const p of a?.params ?? []) {
+      if (!p.cut) continue;
+      const i = p.cut.reps.indexOf(e.label.data[p.name] as number);
+      if (i < 0 || p.cut.greatest[i] === p.cut.reps[i]) continue;
+      const data = { ...e.label.data, [p.name]: p.cut.greatest[i] };
+      const st = transition(M, g.states[e.from], a!.name, data);
+      out.push({ data, want: { verdict: st.verdict, next: st.next, effects: st.effects } });
+    }
+    return out;
+  };
+  // A generator, so the probes of a large graph are never held all at once.
+  function* cases() {
+    for (const e of g.edges) {
+      yield { e, data: e.label.data, want: { verdict: e.label.verdict, next: e.outcome.state, effects: e.label.effects } };
+      for (const p of probes(e)) yield { e, ...p };
+    }
+  }
+  for (const { e, data, want: wantStep } of cases()) {
     transitions++;
     const s = g.states[e.from];
     const flatPre = flatten(s, M);
-    const flatData = flattenData(e.label.data, e.label.action, M);
+    const flatData = flattenData(data, e.label.action, M);
     const got = stepModule(mod, rt, flatPre, e.label.action, flatData);
     const where = [...pathTo(g, e.from), e];
     const what = `${e.label.action}(${stable(flatData)}) from ${stateKey(s, M.fieldNames)}`;
-    if ('error' in got) { mismatch(`the lowered module threw on ${what}: ${got.error}; R_M gives ${verdictText(e.label.verdict)}`, where); continue; }
+    if ('error' in got) { mismatch(`the lowered module threw on ${what}: ${got.error}; R_M gives ${verdictText(wantStep.verdict)}`, where); continue; }
     // S78: the kernel resolves a detached child's marker at commit, and the comparison is after resolution. The
     // mapper reads the post-state as the acceptor wrote it, before the commit.
     const raw = got.post;
     // Only the children this step creates are resolved: a marker written by any other step stays a marker, as
     // the kernel leaves it, and the comparison sees it (review C6).
-    const created = new Set(e.label.effects.filter((x) => x.type === 'create').map((x) => (x as { key: string }).key));
+    const created = new Set(wantStep.effects.filter((x) => x.type === 'create').map((x) => (x as { key: string }).key));
     got.post = resolveChildren(raw, M, created) as Record<string, unknown>;
-    const want = e.label.verdict;
+    const want = wantStep.verdict;
     if (got.verdict.kind !== want.kind || (want.kind === 'rejected' && got.verdict.reason !== want.reason)) {
       mismatch(`${what}: the lowered module gives ${verdictText(got.verdict)}, R_M gives ${verdictText(want)}`, where);
       continue;
     }
-    const expected = e.outcome.state;
+    const expected = wantStep.next;
     // A lowered state α cannot read (an unresolved child marker, say) is a mismatch, not a crash (review C6).
     let seen: string;
     try { seen = keyOf(alphaKey(alpha(got.post, M), M)); } catch { seen = `unreadable ${stable(got.post)}`; }
@@ -153,7 +175,7 @@ export async function translationValidate(module: Module, machineName: string, b
     // The intent sequence (PS9.2, decisions-m1.md): the kernel calls the mapper on accepted steps only, so
     // R_L's E is the mapper's output there and empty elsewhere, as R_M's is by PS3.2.
     if (want.kind !== 'accepted') continue;
-    const wantE = e.label.effects.flatMap(loweredIntents);
+    const wantE = wantStep.effects.flatMap(loweredIntents);
     let gotE: unknown;
     try {
       gotE = resolveChildren(mapper ? mapper(structuredClone(flatPre), e.label.action, structuredClone(flatData), structuredClone(raw), 'accepted') : [], M, created);

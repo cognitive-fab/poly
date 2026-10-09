@@ -619,7 +619,8 @@ function usesKeys(M: RMachine): boolean {
 export function instanceOf(M: RMachine): InstanceLine {
   return {
     fields: M.fields.filter((f) => f.check || f.type.k === 'int').map((f) => ({ name: f.name, domain: domainText(f.check, f.type, M) })),
-    params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'record' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) }))),
+    // PT3.3a (S458): a cut parameter prints its domain, its representatives and its cut points.
+    params: M.actions.flatMap((a) => a.params.map((p) => ({ name: `${a.name}.${p.name}`, domain: domainText(p.check ?? (p.type.k === 'union' || p.type.k === 'record' || p.type.k === 'bool' ? null : valuesOf(p.type, M)), p.type, M) + (p.cut ? ` at {${p.cut.reps.join(', ')}}${p.cut.cuts.length ? ` cut by {${p.cut.cuts.join(', ')}}` : ''} (S458)` : '') }))),
     ...(usesPrincipals(M) ? { principals: M.principals } : {}),
     // PS4.1f: and the content representatives, counted apart.
     ...([...M.fields.map((f) => f.type), ...M.actions.flatMap((a) => a.params.map((p) => p.type))].some(function deep(t: RType): boolean { return t.k === 'content' || (t.k === 'map' && deep(t.value)); }) ? { contents: M.contents } : {}),

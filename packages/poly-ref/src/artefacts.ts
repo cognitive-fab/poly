@@ -72,7 +72,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     if (!a.params.length && !a.claims) continue;
     // D(a) per parameter (PS1.1): its check domain, or every value of its type, encoded as the runtime sees it; and
     // the claims over the principal representatives (PD5.1.3c, S155).
-    const want: Record<string, unknown[]> = Object.fromEntries(a.params.map((p) => [p.name, (p.check ?? valuesOf(p.type, M)).map((v) => flatValue(v, p.type, M))]));
+    const want: Record<string, unknown[]> = Object.fromEntries(a.params.map((p) => [p.name, (p.cut?.reps ?? p.check ?? valuesOf(p.type, M)).map((v) => flatValue(v, p.type, M))]));
     if (a.claims) want.$claims = valuesOf(a.claims.type, M).map((v) => flatValue(v, a.claims!.type, M));
     differ(`contract.json dataDomain.${a.name}`, contract.dataDomain?.[a.name], want);
   }

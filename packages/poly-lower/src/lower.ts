@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
 
 export interface Lowered {
   machine: string;
@@ -175,7 +175,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     // the schema, so it is the reserved rejection claims-unverified (PS3.2).
     if (claimed.has(a.name)) schema.$claims = { type: ['object', 'string', 'number', 'boolean', 'array'], required: false, nullable: true };
     const claimsTy = claimsOf(a.name);
-    const domain = claimsTy ? dataDomainOf(a, env, facts).flatMap((d) => valuesOfTy(claimsTy, env, facts.machine).map((c) => ({ ...d, $claims: c }))) : dataDomainOf(a, env, facts);
+    const domain = claimsTy ? dataDomainOf(a, env, facts, opts.fault).flatMap((d) => valuesOfTy(claimsTy, env, facts.machine).map((c) => ({ ...d, $claims: c }))) : dataDomainOf(a, env, facts, opts.fault);
     return `    ${JSON.stringify(a.name)}: { action: (data = {}) => ({ ...data }), schema: ${JSON.stringify(schema)}, domain: ${JSON.stringify(domain)} },`;
   });
   const version = digest(module);
@@ -232,7 +232,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     // PD5.1.2c, S155: an action with claims has the field $claims, explored over the principal representatives.
     actions: Object.fromEntries(lowerable.map((a) => [a.name, { dataFields: { ...Object.fromEntries(a.params.map((p) => [p.name, typeText(tyOfTypeExpr(p.type, env), env)])), ...(claimsOf(a.name) ? { $claims: typeText(claimsOf(a.name)!, env) } : {}) } }])),
     terminalStates,
-    dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length || claimsOf(a.name)).map((a) => [a.name, { ...Object.fromEntries(a.params.map((p) => [p.name, paramValues(p, env, facts, a.name)])), ...(claimsOf(a.name) ? { $claims: valuesOfTy(claimsOf(a.name)!, env, facts.machine) } : {}) }])),
+    dataDomain: Object.fromEntries(lowerable.filter((a) => a.params.length || claimsOf(a.name)).map((a) => [a.name, { ...Object.fromEntries(a.params.map((p) => [p.name, exploreValues(p, env, facts, a.name, opts.fault)])), ...(claimsOf(a.name) ? { $claims: valuesOfTy(claimsOf(a.name)!, env, facts.machine) } : {}) }])),
     invariants: 'invariants.mjs',
     // S190: the AST digest of each module whose enums this machine uses, so that a build is never run against a
     // changed declaration: the certificate records the same digests, and load compares them.
@@ -931,11 +931,85 @@ function paramValues(p: A.Param, env: TypeEnv, facts?: MachineFacts, action?: st
   return p.check ? checkDomainValues(p.check) : valuesOfTy(tyOfTypeExpr(p.type, env), env, facts?.machine);
 }
 
-/** D(a) as the intent's `domain`: every payload object (PS1.1). */
-function dataDomainOf(a: A.Action, env: TypeEnv, facts?: MachineFacts): Record<string, unknown>[] {
+/**
+ * PS4.1h, PT3.3a (S458): the values a parameter is explored at. A range parameter whose every use is a comparison with
+ * an integer constant, or an unchanged argument of an emit or a decide, is explored at the least value of each class
+ * its cut points make; the acceptor still tests its whole check domain (paramValues).
+ */
+function exploreValues(p: A.Param, env: TypeEnv, facts?: MachineFacts, action?: string, fault?: Fault): unknown[] {
+  const all = paramValues(p, env, facts, action);
+  const ty = tyOfTypeExpr(p.type, env);
+  if (!facts || !action || ty.k !== 'int' || !Number.isFinite(ty.lo) || !Number.isFinite(ty.hi) || p.type.kind === 'TConf') return all;
+  const reps = cutRepresentatives(facts.machine, action, p.name, all as number[]);
+  // The broken lowering range-cut-dropped explores one class fewer, which poly-ref's read-back of dataDomain finds.
+  return reps && reps.length < all.length ? (fault === 'range-cut-dropped' ? reps.slice(0, -1) : reps) : all;
+}
+
+/**
+ * PS4.1h: the least value of each class of `values` that the parameter's cut points make, or null when a use other than
+ * a comparison with an integer constant or an unchanged emit or decide argument turns the reduction off.
+ */
+function cutRepresentatives(m: A.Machine, action: string, param: string, values: number[]): number[] | null {
+  if (m.fields.some((x) => x.name === param)) return null;
+  const cmp: [string, number, boolean][] = [];
+  const passed = new Set<string>();
+  let usedOtherwise = false;
+  const int = (x: A.Expr): number | null => (x.kind === 'Int' ? x.value : x.kind === 'Unary' && x.op === '-' && x.arg.kind === 'Int' ? -x.arg.value : null);
+  const named = (x: A.Expr): boolean => x.kind === 'Name' && x.name === param;
+  const declared = (target: string): string[] => {
+    const d = m.items.find((x) => (x.kind === 'EffectDecl' || x.kind === 'Decision') && x.name === target) as { params: A.Param[] } | undefined;
+    return d ? d.params.map((q) => q.name) : [];
+  };
+  const walk = (n: unknown): void => {
+    if (usedOtherwise || n === null || typeof n !== 'object') return;
+    if (Array.isArray(n)) { for (const x of n) walk(x); return; }
+    const o = n as Record<string, unknown> & { kind?: string };
+    if (o.kind === 'Binary' && ['==', '!=', '<', '<=', '>', '>='].includes(o.op as string)) {
+      const l = o.left as A.Expr, r = o.right as A.Expr;
+      if (named(l) && int(r) !== null) { cmp.push([o.op as string, int(r)!, false]); return; }
+      if (named(r) && int(l) !== null) { cmp.push([o.op as string, int(l)!, true]); return; }
+    }
+    if (o.kind === 'Intent' && (o.op === 'emit' || o.op === 'decide')) {
+      const ps = declared(o.target as string);
+      (o.args as A.NamedArg[]).forEach((x, i) => { if (named(x.value)) passed.add(`${o.target as string}.${x.name ?? ps[i] ?? ''}`); else walk(x.value); });
+      return;
+    }
+    if ((o.kind === 'Name' && o.name === param) || (o.kind === 'Let' && o.name === param) || (o.kind === 'For' && Object.values(o).includes(param)) || (o.kind === 'PCtor' && (o.fields as { bind: string | null }[]).some((x) => x.bind === param))) { usedOtherwise = true; return; }
+    for (const k of Object.keys(o)) if (k !== 'span' && k !== 'id') walk(o[k]);
+  };
+  for (const it of m.items) {
+    if (it.kind === 'Handler') { if (it.action === action) walk(it); }
+    else if (it.kind === 'Guard' || it.kind === 'Property' || it.kind === 'Liveness') walk(it);
+    else if (it.kind === 'NeverEmit') walk(it.cond);
+  }
+  if (usedOtherwise) return null;
+  // emits(k, f: v) and never … emit k(f: v) on a payload field the parameter is passed into unchanged: p == v.
+  const findEmits = (n: unknown): void => {
+    if (n === null || typeof n !== 'object') return;
+    if (Array.isArray(n)) { for (const x of n) findEmits(x); return; }
+    const o = n as Record<string, unknown> & { kind?: string };
+    if (o.kind === 'Emits' || o.kind === 'NeverEmit') for (const x of o.fields as A.EmitsField[]) { const v = int(x.value); if (v !== null && passed.has(`${o.effect as string}.${x.name}`)) cmp.push(['==', v, false]); }
+    for (const k of Object.keys(o)) if (k !== 'span' && k !== 'id') findEmits(o[k]);
+  };
+  for (const it of m.items) if (it.kind === 'Property' || it.kind === 'NeverEmit') findEmits(it);
+  const test = (v: number, [op, c, flip]: [string, number, boolean]) => {
+    const a = flip ? c : v, b = flip ? v : c;
+    return op === '==' ? a === b : op === '!=' ? a !== b : op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b;
+  };
+  const seen = new Set<string>();
+  const out: number[] = [];
+  for (const v of [...values].sort((a, b) => a - b)) {
+    const key = cmp.map((x) => (test(v, x) ? '1' : '0')).join('');
+    if (!seen.has(key)) { seen.add(key); out.push(v); }
+  }
+  return out;
+}
+
+/** D(a) as the intent's `domain`: every payload object (PS1.1), each cut parameter at its representatives (S458). */
+function dataDomainOf(a: A.Action, env: TypeEnv, facts?: MachineFacts, fault?: Fault): Record<string, unknown>[] {
   let recs: Record<string, unknown>[] = [{}];
   for (const p of a.params) {
-    const vs = paramValues(p, env, facts, a.name);
+    const vs = exploreValues(p, env, facts, a.name, fault);
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
   return recs;

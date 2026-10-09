@@ -47,7 +47,12 @@ export interface RParam {
   type: RType;
   check: Value[] | null;
   strict: boolean;
+  /** PS4.1h (S458): a cut range, explored at its representatives; its check domain stays what the runtime accepts. */
+  cut?: RangeCut;
 }
+
+/** PS4.1h (S458): a cut parameter's cut points, its representatives (each class's least value) and each class's greatest. */
+export interface RangeCut { cuts: number[]; reps: number[]; greatest: number[] }
 
 /** `decision d(params) -> R` (PD1): an effect of kind decision.<d>, and the completion its reply arrives by. */
 export interface RDecision {
@@ -483,6 +488,13 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
       }
     }
   }
+  // PS4.1h (S458): a range parameter read only against constants, or passed unchanged into a payload, is explored at
+  // the least value of each class its cut points make.
+  for (const a of actions) for (const p of a.params) {
+    if (p.type.k !== 'int' || !Number.isFinite(p.type.lo) || !Number.isFinite(p.type.hi)) continue;
+    const c = rangeCut(m, a.name, p.name, p.check ? (p.check as number[]) : { lo: p.type.lo, hi: p.type.hi });
+    if (c && c.reps.length < (p.check ? p.check.length : p.type.hi - p.type.lo + 1)) p.cut = c;
+  }
   // S51: a completion's childKey ranges over the keys whose spawn names that action as its completion.
   for (const a of actions) {
     const keys = [...children.values()].filter((c) => c.onComplete === a.name).map((c) => c.key);
@@ -732,7 +744,7 @@ export function selfAlone(M: RMachine): string {
 export function dataDomain(a: RAction, M: RMachine): Record<string, Value>[] {
   let recs: Record<string, Value>[] = [{}];
   for (const p of a.params) {
-    const vs = p.check ?? valuesOf(p.type, M);
+    const vs = p.cut?.reps ?? p.check ?? valuesOf(p.type, M);
     recs = recs.flatMap((r) => vs.map((v) => ({ ...r, [p.name]: v })));
   }
   // PD5.1.2c, S155: the claims are part of the label, carried under the reserved key $claims; every value is offered.
@@ -859,6 +871,88 @@ export function replyPath(e: A.Expr, bind: string): string[] | null {
   let x = e;
   while (x.kind === 'Member') { path.unshift(x.prop); x = x.object; }
   return x.kind === 'Name' && x.name === bind ? path : null;
+}
+
+/**
+ * PS4.1h (S458), read from the source: whether every use of the range parameter `param` of `action` is a comparison
+ * with an integer constant, in the action's handler or in a guard or property of the machine, or an argument of an
+ * emit or a decide written as the parameter alone. Its cut points are those constants and the constants of emits and
+ * never emit on a payload field it is passed into unchanged (v1's policies read no payload, PT8). Null when any other
+ * use turns the reduction off, a field of the same name included, since then the name is not the parameter's alone.
+ */
+export function rangeCut(m: A.Machine, action: string, param: string, domain: number[] | { lo: number; hi: number }): RangeCut | null {
+  if (m.fields.some((f) => f.name === param)) return null;
+  const tests: { op: string; c: number; flip: boolean }[] = [];
+  const payload = new Set<string>();
+  let off = false;
+  const constant = (x: A.Expr): number | null => (x.kind === 'Int' ? x.value : x.kind === 'Unary' && x.op === '-' && x.arg.kind === 'Int' ? -x.arg.value : null);
+  const isP = (x: A.Expr) => x.kind === 'Name' && x.name === param;
+  const paramsOf = (target: string): string[] => {
+    for (const it of m.items) if ((it.kind === 'EffectDecl' || it.kind === 'Decision') && it.name === target) return it.params.map((q) => q.name);
+    return [];
+  };
+  const visit = (n: unknown): void => {
+    if (off || !n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    const e = n as { kind?: string } & Record<string, unknown>;
+    if (e.kind === 'Binary' && ['==', '!=', '<', '<=', '>', '>='].includes(e.op as string)) {
+      const l = e.left as A.Expr, r = e.right as A.Expr;
+      if (isP(l) && constant(r) !== null) { tests.push({ op: e.op as string, c: constant(r)!, flip: false }); return; }
+      if (isP(r) && constant(l) !== null) { tests.push({ op: e.op as string, c: constant(l)!, flip: true }); return; }
+    }
+    if (e.kind === 'Intent' && (e.op === 'emit' || e.op === 'decide')) {
+      const names = paramsOf(e.target as string);
+      (e.args as A.NamedArg[]).forEach((x, i) => {
+        if (isP(x.value)) payload.add(`${e.target as string}.${x.name ?? names[i] ?? ''}`);
+        else visit(x.value);
+      });
+      return;
+    }
+    if (e.kind === 'Name' && e.name === param) { off = true; return; }
+    // A binding of the same name hides the parameter: the reduction is off.
+    if ((e.kind === 'Let' && e.name === param) || (e.kind === 'For' && Object.values(e).includes(param)) || (e.kind === 'PCtor' && (e.fields as { bind: string | null }[]).some((f) => f.bind === param))) { off = true; return; }
+    for (const [k, v] of Object.entries(e)) if (k !== 'span' && k !== 'id') visit(v);
+  };
+  for (const it of m.items) {
+    if (it.kind === 'Handler' && it.action === action) visit(it);
+    else if (it.kind === 'Guard' || it.kind === 'Property' || it.kind === 'Liveness') visit(it);
+    else if (it.kind === 'NeverEmit') visit(it.cond);
+  }
+  if (off) return null;
+  // The constants of emits(k, f: v) and never … emit k(f: v) on a payload field the parameter is passed into unchanged.
+  const emitsOf = (n: unknown): void => {
+    if (!n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(emitsOf); return; }
+    const e = n as { kind?: string } & Record<string, unknown>;
+    if (e.kind === 'Emits' || e.kind === 'NeverEmit') for (const f of e.fields as A.EmitsField[]) {
+      const v = constant(f.value);
+      if (v !== null && payload.has(`${e.effect as string}.${f.name}`)) tests.push({ op: '==', c: v, flip: false });
+    }
+    for (const [k, v] of Object.entries(e)) if (k !== 'span' && k !== 'id') emitsOf(v);
+  };
+  for (const it of m.items) if (it.kind === 'Property' || it.kind === 'NeverEmit') emitsOf(it);
+  const holds = (v: number, t: { op: string; c: number; flip: boolean }) => {
+    const [x, y] = t.flip ? [t.c, v] : [v, t.c];
+    switch (t.op) { case '==': return x === y; case '!=': return x !== y; case '<': return x < y; case '<=': return x <= y; case '>': return x > y; default: return x >= y; }
+  };
+  const sig = (v: number) => tests.map((t) => (holds(v, t) ? '1' : '0')).join('');
+  // Each class's least and greatest value. A range is read by segments: every value between two consecutive
+  // boundaries (lo, and c and c + 1 for each cut point c) gives every comparison the same outcome.
+  const segs: [number, number][] = [];
+  if (Array.isArray(domain)) for (const v of [...domain].sort((a, b) => a - b)) segs.push([v, v]);
+  else {
+    const bounds = [...new Set([domain.lo, ...tests.flatMap((t) => [t.c, t.c + 1])])].filter((b) => b >= domain.lo && b <= domain.hi).sort((a, b) => a - b);
+    bounds.forEach((b, i) => segs.push([b, i + 1 < bounds.length ? bounds[i + 1] - 1 : domain.hi]));
+  }
+  const classes = new Map<string, { least: number; greatest: number }>();
+  for (const [lo, hi] of segs) {
+    const k = sig(lo);
+    const c = classes.get(k);
+    if (!c) classes.set(k, { least: lo, greatest: hi });
+    else c.greatest = Math.max(c.greatest, hi);
+  }
+  const cls = [...classes.values()].sort((a, b) => a.least - b.least);
+  return { cuts: [...new Set(tests.map((t) => t.c))].sort((a, b) => a - b), reps: cls.map((c) => c.least), greatest: cls.map((c) => c.greatest) };
 }
 
 /**
