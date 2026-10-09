@@ -188,6 +188,8 @@ export interface RMachine {
   keys: number;
   /** PS15.3: the keys of the channels whose application this machine is; each names its conversation's address. */
   channelKeys: string[];
+  /** PS15.0a: for a conversation whose channel declares principal from, the Sender's field it names. */
+  threadPrincipal?: string;
   /** PS1.4b: the top of an Items count, the largest limit among the program's retrievals. */
   itemsLimit: number;
   /** PS17: what the flow rule reads, when the program declares a source; null otherwise, and then no taint but ⊥ exists. */
@@ -512,7 +514,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
     contents,
     keys,
     name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
-    actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness, channelKeys: (m.channelKeys ?? []).map((c) => c.key),
+    actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness, channelKeys: (m.channelKeys ?? []).map((c) => c.key), ...((m as A.Machine & { threadPrincipal?: string }).threadPrincipal ? { threadPrincipal: (m as A.Machine & { threadPrincipal?: string }).threadPrincipal } : {}),
     itemsLimit: itemsLimitOf(decls),
     memory: memoryOf(decls, m, effects, decisions),
   };
@@ -746,11 +748,14 @@ export function dataDomain(a: RAction, M: RMachine): Record<string, Value>[] {
 }
 
 /**
- * S450: the Principal fields of an action's claims that its handler never reads: the binder appears only as `c.f` for
- * other fields. A claims type with an Audience field is left whole, since the flow rule reads its claimant (S324).
+ * S450, PS15.0a as confirmed 2026-10-09: the Principal fields of an action's claims that nothing reads. Its handler reads
+ * the binder only as `c.f` for other fields; no policy reads a Principal field of claims (PT8); and principal from
+ * reads the Sender's principal of a conversation's Inbound, so that field is read there. A claims type with an Audience
+ * field is left whole, since the flow rule reads its claimant (S324).
  */
 function unreadPrincipals(a: RAction, M: RMachine): string[] {
   if (!a.claims || a.claims.type.k !== 'record') return [];
+  if (M.threadPrincipal && a.name === 'Inbound') return [];
   const fields = M.records.get(a.claims.type.name)?.fields ?? [];
   if (fields.some((f) => f.type.k === 'union' && f.type.name === 'Audience')) return [];
   const ps = fields.filter((f) => f.type.k === 'principal').map((f) => f.name);

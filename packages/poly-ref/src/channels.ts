@@ -175,6 +175,8 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
       return Object.fromEntries(Object.entries(n).map(([k, v]) => [k, asApp(v)]));
     };
     const instance = asApp(conv) as A.Machine;
+    // PS15.0a (confirmed 2026-10-09): principal from reads the Sender's principal, so the conversation keeps every value.
+    if (ch.principalFrom) (instance as A.Machine & { threadPrincipal?: string }).threadPrincipal = ch.principalFrom;
     conversations.push({ kind: 'Module', id: `ref:${ch.id}:module`, name: home, decls: [{ kind: 'Use', id: `ref:${ch.id}:module:use`, path: appPath } as A.UseDecl, ...library.decls.filter((d) => d.kind === 'EnumDecl' || d.kind === 'TypeDecl' || d.kind === 'RecordDecl'), instance] } as A.Module);
     // PS15.5: the configuration c, and the conversation in every declared one that includes A.
     const effect = conv.items.find((i): i is A.EffectDecl => i.kind === 'EffectDecl' && i.name === 'send');
