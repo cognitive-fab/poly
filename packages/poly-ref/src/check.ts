@@ -6,12 +6,12 @@
 // the same Graph.
 import type * as A from '@poly/core';
 import type { Diagnostic, Expr, FairGroup as AstFairGroup, Module, Witness, WitnessStep } from '@poly/core';
-import { buildMachine, dataDomain, valuesOf, selfAlone, monitorStart, monitorStep, clauseText, type PathClause, type RMachine, type RPathProperty, type RType } from './model.js';
+import { buildMachine, dataDomain, valuesOf, inCheckDomain, selfAlone, monitorStart, monitorStep, clauseText, type PathClause, type RMachine, type RPathProperty, type RType } from './model.js';
 import { explore, machineSystem, pathTo, type Edge, type Graph } from './explore.js';
 import { evaluate } from './eval.js';
 import { isTerminal, type Intent } from './step.js';
 import { machineHome } from './channels.js';
-import { statePlain, toPlain, keyOf, stateKey, type State } from './values.js';
+import { statePlain, toPlain, keyOf, stateKey, type State, type Value } from './values.js';
 import { createHash } from 'node:crypto';
 import { fairCycles, type FairGroup } from './liveness.js';
 import { taintSystem, firstBreaks, claimsClass, PENDING_BOUND, type TaintState } from './taint.js';
@@ -34,6 +34,7 @@ const CODE = {
   PL6831: ['AUDIENCE_LEAK', 'finding', 'model-check'],
   PL6832: ['TAINT_DOWNGRADE', 'finding', 'model-check'],
   PL6838: ['FLOW_NOT_FOLLOWED', 'inconclusive', 'model-check'],
+  PL5408: ['MESSAGE_OUTSIDE_DOMAIN', 'finding', 'model-check'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -309,6 +310,53 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
   for (const d of M.decisions.values()) {
     const hit = adjudicationWithoutDecision(g, d.name, ds);
     if (hit) findings.push(finding('PL6203', d.id, `${hit[hit.length - 1].label.action} adjudicates ${d.name} on a path where no ${d.ok?.action ?? 'ok completion'} answering ${d.name} was accepted, so there is no decision to link the outcome to (PD2.4)`, trace(hit), { property: d.name, state: g.states[hit[hit.length - 1].from] }));
+  }
+
+  // PS13.6, F4: on a machine alone, an accepted step that sends, spawns with a creation action or signals data that the
+  // receiving action's strict check domain refuses; the receiver would reject it outside-check-domain, untold. One
+  // finding per receiving machine's action, at its first step in BFS order.
+  const outsideSeen = new Set<string>();
+  // The machine a handler's send of an action names, by the declared type of its address: a Ref field or parameter.
+  const refMachineOf = (handler: string, action: string): string | null => {
+    const h = M.handlers.get(handler);
+    if (!h) return null;
+    let found: string | null = null;
+    const visit = (x: unknown): void => {
+      if (!x || typeof x !== 'object' || found) return;
+      if (Array.isArray(x)) { x.forEach(visit); return; }
+      const n = x as { kind?: string; op?: string; target?: string; to?: { kind?: string; name?: string } };
+      if (n.kind === 'Intent' && n.op === 'send' && n.target === action && n.to?.kind === 'Name') {
+        const name = n.to.name!;
+        const ty = M.fields.find((f) => f.name === name)?.type ?? M.actions.find((x) => x.name === handler)?.params.find((p) => p.name === name)?.type;
+        if (ty?.k === 'ref') found = ty.machine.split('.').pop() ?? null;
+      }
+      for (const [k, v] of Object.entries(n)) if (k !== 'span') visit(v);
+    };
+    visit(h.body);
+    return found;
+  };
+  for (const e of g.edges) {
+    if (e.label.verdict.kind !== 'accepted') continue;
+    for (const i of e.label.effects as unknown as { type: string; target?: unknown; action?: string; data?: Record<string, Value>; machine?: string; machineId?: string; key?: string; create?: { action: string; data: Record<string, Value> } | null }[]) {
+      let machine: string | null = null;
+      let action = '';
+      let data: Record<string, Value> | null = null;
+      // PS13.6: the receiver is known by the address's type, whatever its value: a send to none on a machine alone names
+      // the machine its Ref field or parameter is declared for.
+      if (i.type === 'send') { const a = bare((i.target ?? null) as Value); machine = typeof a === 'string' ? a.slice(0, a.lastIndexOf('#')) : refMachineOf(e.label.action, i.action ?? ''); action = i.action ?? ''; data = i.data ?? null; }
+      else if ((i.type === 'create' || i.type === 'spawn') && i.create) { machine = (i.machine ?? i.machineId ?? '').split('.').pop() ?? null; action = i.create.action; data = i.create.data; }
+      else if (i.type === 'signal') { machine = M.children.get(i.key ?? '')?.machine ?? null; action = i.action ?? ''; data = i.data ?? null; }
+      if (!machine || !data) continue;
+      const receiver = M.receivers.get(machine) ?? [...M.receivers.entries()].find(([k]) => k.split('.').pop() === machine)?.[1];
+      const ra = receiver?.find((a) => a.name === action);
+      if (!ra) continue;
+      const bad = ra.params.filter((p) => p.strict && p.name in data! && !inCheckDomain(data![p.name], { type: p.type, check: p.check ?? null }, M));
+      if (!bad.length) continue;
+      const key = `${machine}.${action}`;
+      if (outsideSeen.has(key)) continue;
+      outsideSeen.add(key);
+      findings.push(finding('PL5408', M.handlers.get(e.label.action)?.id, `${e.label.action} sends ${action} to ${machine} with ${bad.map((p) => `${p.name} = ${keyOf(data![p.name])}`).join(', ')}, outside its strict check domain; ${machine} would refuse it outside-check-domain and ${M.name} is not told (PS13.6, F4)`, trace([...pathTo(g, e.from), e]), { property: key, state: g.states[e.from] }));
+    }
   }
 
   // Liveness (PS6.4): each fair component that never reaches the goal, with its lasso.

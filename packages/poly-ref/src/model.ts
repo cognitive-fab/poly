@@ -162,7 +162,8 @@ export interface RMachine {
   decisions: Map<string, RDecision>;
   pathProperties: RPathProperty[];
   /** Every machine of the module by name, with its actions: what a send may name (PS2.2). */
-  receivers: Map<string, { name: string; params: { name: string; type: RType }[] }[]>;
+  /** F4: each parameter's check values and whether it is strict, so a sender's message can be judged against them. */
+  receivers: Map<string, { name: string; params: { name: string; type: RType; check?: Value[] | null; strict?: boolean }[] }[]>;
   unions: Map<string, RUnion>;
   /** Constructor name to its union. */
   ctors: Map<string, string>;
@@ -359,7 +360,11 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
   };
   // PS2.2, S176: what a send may name: this module's machines, and those of the modules it uses.
   const receiverModules = [module.name, ...decls.filter((d): d is A.UseDecl => d.kind === 'Use').map((d) => usedModule(d.path, program))];
-  const receivers = new Map([...new Set(receiverModules)].flatMap((mod) => (moduleNamed(mod)?.decls ?? []).filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [spell(mod, d.name), d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => ({ name: a.name, params: a.params.map((p) => ({ name: p.name, type: typeIn(mod)(p.type) })) }))] as const)));
+  const receivers = new Map([...new Set(receiverModules)].flatMap((mod) => (moduleNamed(mod)?.decls ?? []).filter((d): d is A.Machine => d.kind === 'Machine').map((d) => [spell(mod, d.name), d.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => {
+    // F4 (PS13.6): the receiver's strictness, by PT3.4a as read here: explicit, or the S400 default for a handled action.
+    const handledThere = d.items.some((i) => i.kind === 'Handler' && i.action === a.name);
+    return { name: a.name, params: a.params.map((p) => { const type = typeIn(mod)(p.type); return { name: p.name, type, check: checkValues(p.check), strict: p.check?.mode === 'strict' || (handledThere && p.check?.mode !== 'disclosed' && (p.check !== null || testable(type))) }; }) };
+  })] as const)));
   // PT6.4: attached children, by the key their spawn names (declared by use, like timer keys).
   const children = new Map<string, RChild>();
   const detached: RDetached[] = [];

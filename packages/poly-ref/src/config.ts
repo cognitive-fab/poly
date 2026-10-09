@@ -132,6 +132,7 @@ const CODE = {
   PL5404: ['SEND_TO_NONE', 'finding'],
   PL5406: ['RECEIPT_REJECTED', 'finding'],
   PL5407: ['REPLY_REFUSED', 'finding'],
+  PL5408: ['MESSAGE_OUTSIDE_DOMAIN', 'finding'],
   PL3301: ['LIVENESS_LASSO', 'finding'],
   PL6831: ['AUDIENCE_LEAK', 'finding'],
   PL6832: ['TAINT_DOWNGRADE', 'finding'],
@@ -640,6 +641,18 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
         ? `${inst.name} rejects the receipt ${l.action} (${reason}); a rejected step sends no Ack, so its conversation's slot is never freed (PS15.5)`
         : `${inst.name} refuses ${l.action} from its application (${reason}); the application is not told, and the message is lost (PS15.5)`, [...pathTo(g, e.from), e], { property: key }));
     }
+  }
+  // PS13.6, F4: a message its receiver rejects outside its strict check domain, which the sender is never told of; one
+  // finding per receiving machine's action, at its first delivery in BFS order.
+  const outside = new Set<string>();
+  for (const e of g.edges) {
+    const l = e.label as GlobalLabel;
+    if (l.via !== 'deliver' || l.verdict.kind !== 'rejected' || l.verdict.reason !== 'outside-check-domain') continue;
+    const inst = instances[l.instance];
+    const key = `${inst.machine.name}.${l.action}`;
+    if (outside.has(key)) continue;
+    outside.add(key);
+    findings.push(finding('PL5408', inst.machine.handlers.get(l.action)?.id, `${inst.name} refuses ${l.action} outside its check domain (${Object.entries(l.data).filter(([k]) => !k.startsWith('$')).map(([k, v]) => `${k} = ${keyOf(v)}`).join(', ')}); the sender is not told (PS13.6, F4)`, [...pathTo(g, e.from), e], { property: key }));
   }
   // PS13.6: a quiescent state (μ empty, no declared input accepted) where a non-service instance is not terminal.
   const stuck = g.states.findIndex((s, i) => s.mu.length === 0
