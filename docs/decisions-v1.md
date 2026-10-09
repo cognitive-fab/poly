@@ -220,3 +220,13 @@ Decided under the plan's rules, recorded:
 **Suite.** At fe5844fe: 2,183 tests and 6 in the after group, all passed but 2 skipped and 4 waiting, no failure; check-memory passed (`.poly/logs/fe5844fe-2026-10-09T05-35-32-452Z-w1.log`). No other suite ran (the examples session's last log ends at 03:13 UTC). The suite is smaller than at 0b1ca108 because SR3's records are now outside the standing rule (S163).
 
 **Measured verdicts.** Against `docs/v1/verdicts-after-v1.json`: 160 files, every verdict identical; three files differ in transition counts only, `conformance/m5/lineage-pay.poly`, `lineage-timer.poly` and `lineage.poly`, each with fewer transitions (219 to 111, 219 to 111, 3,052 to 1,540) and the same states, since a claims principal their handlers never read is now explored by one value (b6318b4c). The new record is `docs/v1/verdicts-after-rulings.json`.
+
+## S456, S457, the S454 embedded form and the one-value rule (owner's reviewer, 2026-10-09)
+
+The round above is accepted, with three additions.
+
+- **S456 and S457, built next, as ruled.** S456 as ruled on plan-ex: a channel's generated configuration also offers the completions of the application's pending decisions and effects, each only while its intent is pending. S457: a credential granted by a person may omit `holder`; it then has one `Grant` instance, whose holder is fixed at the first signed grant request (recorded by keyed digest, never readable by the program), and replacing that holder needs a revocation. **With S456, the PL6838 fix:** a channel's generated configuration counts as holding the conversation its application spawns, with a test.
+- **The S454 clause gets its embedded TypeScript form now**, in place of the stated limit.
+- **The one-value rule of b6318b4c applies only when nothing reads the principal:** no handler, no policy and no `principal from`. A test checks a thread that uses `principal from` and is explored with full representatives.
+
+Same method: the PS and PT text first, then tests written from the text alone, then the code.
