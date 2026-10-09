@@ -129,3 +129,21 @@ Probes that found nothing: the compiler and poly-ref agree on the strict set ove
   | Tokens per delivered run, arm 4 (T3, T7) | 1,309,116, 2,286,580 | 1,268,239, 2,041,726 |
 
   The pre-registered comparison (zero of 20 against five of 20 gives p = 0.024) is met. M3's verdict is not reopened.
+
+### V6 closed: three consecutive full suites with no failure
+
+After the probe fixes, the full suite ran twice more at 0b1ca108, back to back, with no other suite on the machine (the examples session's one log ends at 20:09 UTC): 2,310 tests and 6 in the after group, 2,304 and 6 passed, no failure, 2 skipped and 4 waiting, check-memory passed, each time (`.poly/logs/0b1ca108-2026-10-08T22-52-53-060Z-v6b.log`, `.poly/logs/0b1ca108-2026-10-08T23-29-25-573Z-v6c.log`). With the suite at b437c49b, m3-isolation passed in the serial after group in three consecutive full suites. The 160 measured files, measured between the two, are identical to the record after V1.
+
+The suite grew by 190 tests between b437c49b and 0b1ca108: the standing rules (`test/standing.test.mjs`) walk every `.poly` source under `experiments/`, and only `experiments/m3/runs/` is excepted (S163), so the programs SR3's agents delivered are now checked by them, and pass. **For the owner:** whether `experiments/sr/runs/` and `experiments/sr/void/` join S163's exception, as frozen evidence like M3's runs, is a change of the standing rule's one exception, so it is not made here.
+
+### V9 closed: the release notes
+
+`docs/release-notes.md` (6134a346, 03f231c5) lists, for M8, M9, M10, M11 and v1, the formats a reader must expect, the commands, the new codes (each name checked against `diagnostics.ts`) and every stated limit, including those the probe review leaves. PT12.2's table gained `PL6841` to `PL6846` (df0c1849).
+
+### Polywatch
+
+Polywatch reviewed none of this branch's work: its reviews in this session were skipped as outside its project (the worktree `poly-v1` is not the project it watches). There are no findings to mark.
+
+### What is next
+
+V1 to V9 are done. The merge into m4 and the v1 gate (V10) wait for the reviewer's go. Waiting on the owner: Q-V1 (the release), Q-V3 with V5's proposal (a stable key per work order), the probe review's two proposals (F3, F4), and S163's exception for SR's records.
