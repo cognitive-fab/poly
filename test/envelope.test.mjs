@@ -386,3 +386,22 @@ test('S459, PS17.4a: content.read in the draft\'s handler gives the bodies of it
     for (const body of [ANSWER, 'ann@example.org', 'Can you send two lamps?']) assert.ok(!recorded.includes(body), body);
   } finally { await rt.close(); }
 });
+
+test('S459, PS17.3a, PS17.7 (ruled 2026-10-09): a draft whose envelope was erased is denied envelope-origin before any handler, so no recipient survives erasure', async () => {
+  const a = await admitted('envelope-erased', ['test/fixtures/envelope/mail-reply-held.poly', 'test/fixtures/envelope/allow-all.policy.poly']);
+  const { rt, drafts } = await replier(a);
+  try {
+    await reply(rt, 'mail_reply_held.Replier', 'held-erased', 't-1');
+    const st = (await rt.getState('held-erased')).state;
+    assert.equal(st.phase, 'Ready');
+    // The envelope the source gave is kept in the field; it is erased before the draft is sent.
+    assert.ok(envelopes(rt).some((row) => Object.values(row).includes(st.env)), 'the field holds a stored envelope');
+    await rt.erase(st.env);
+    await rt.dispatch('held-erased', 'Send', {});
+    for (let k = 0; k < 4; k++) await rt.worker.tick();
+    assert.equal(drafts.length, 0, 'the handler never ran, so it never read a recipient');
+    const v = verdicts(rt, 'held-erased').find((x) => x.effectKind === 'mail.draft');
+    assert.ok(v, JSON.stringify(verdicts(rt, 'held-erased')));
+    assert.deepEqual([v.outcome, v.reason], ['denied', 'envelope-origin']);
+  } finally { await rt.close(); }
+});
