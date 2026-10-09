@@ -2020,16 +2020,24 @@ class Checker {
         else if (handled.has(it.name) && p.check?.mode !== 'disclosed' && this.hasCheckDomain(it, p)) facts.strictParams.add(`${it.name}.${p.name}`);
       }
     }
+    // F3 (PT3.4a, through fields): the fields an irreversible emit reads, and each write's flow from a parameter or a
+    // field into a field, over every handler, so a disclosed value stored by one step and charged by another is found.
+    const fieldNames = new Set(m.fields.map((f) => f.name));
+    const sinks = new Set<string>();
+    const flows: { from: string; to: string }[] = [];
     for (const h of m.items) {
       if (h.kind !== 'Handler') continue;
       const act = this.actions.get(h.action);
       if (!act) continue;
+      const params = new Set(act.params.map((p) => p.name));
+      const source = (n: string): string | null => (n.startsWith('pre.') ? n.slice(4) : params.has(n) ? `${act.name}.${n}` : fieldNames.has(n) ? n : null);
       const guarded = new Set<string>();
       const irreversible = new Set<string>();
       const lets = new Map<string, Set<string>>();
       const visit = (body: A.Stmt[]): void => {
         for (const st of body) {
           if (st.kind === 'Let') lets.set(st.name, readsOf(st.expr, lets));
+          if (st.kind === 'Assign' && fieldNames.has(st.field)) for (const n of readsOf(st.expr, lets)) { const s = source(n); if (s && s !== st.field) flows.push({ from: s, to: st.field }); }
           if (st.kind === 'If') { visit(st.then); visit(st.else ?? []); }
           if (st.kind === 'Match') for (const a of st.arms) visit(a.body);
           if (st.kind === 'For') visit(st.body);
@@ -2041,6 +2049,7 @@ class Checker {
             for (const n of readsOf(a.value, lets)) {
               guarded.add(n);
               if (cls === 'irreversible') irreversible.add(n);
+              if (cls === 'irreversible') { const s = source(n); if (s && !s.includes('.')) sinks.add(s); }
             }
           }
         }
@@ -2055,6 +2064,30 @@ class Checker {
       for (const f of m.fields) {
         const read = irreversible.has(`pre.${f.name}`) || (irreversible.has(f.name) && !act.params.some((p) => p.name === f.name));
         if (f.check?.mode === 'disclosed' && read) this.errOnce('PL1301', f.check, `${f.name} is disclosed, and it flows into an irreversible effect (PT3.4a)`);
+      }
+    }
+    // F3: from each disclosed parameter, the chain of writes that reaches a field an irreversible emit reads.
+    for (const it of m.items) {
+      if (it.kind !== 'Action') continue;
+      for (const p of it.params) {
+        if (p.check?.mode !== 'disclosed') continue;
+        const start = `${it.name}.${p.name}`;
+        const prev = new Map<string, string>([[start, '']]);
+        const queue = [start];
+        let hit: string | null = null;
+        while (queue.length && !hit) {
+          const x = queue.shift()!;
+          for (const e of flows) {
+            if (e.from !== x || prev.has(e.to)) continue;
+            prev.set(e.to, x);
+            if (sinks.has(e.to)) { hit = e.to; break; }
+            queue.push(e.to);
+          }
+        }
+        if (!hit) continue;
+        const chain: string[] = [];
+        for (let x: string = hit; x; x = prev.get(x)!) chain.unshift(x);
+        this.errOnce('PL1301', p.check, `${start} is disclosed, and it flows through ${chain.slice(1).join(' then ')} into an irreversible effect (PT3.4a, F3)`);
       }
     }
   }
