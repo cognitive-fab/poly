@@ -6,8 +6,9 @@
 // (PF11.8). Every reply is written by a decision from the customer's message and the outcome, and goes back on the
 // thread's conversation, which keeps WhatsApp's window (AC15).
 //
-// Waiting for v1 (decisions-ex.md): the status path, which retrieves the customer's own orders and cites them, needs
-// the thread's principal (S450). The refund names no holder: the merchant is the Stripe Connect grant's subject, not
+// A status question retrieves the asking customer's orders, and only theirs, and the answer cites them; the thread's
+// principal comes from the verifier's claims (S450), so the reply reaches the customer the orders belong to (AC22).
+// The refund names no holder: the merchant is the Stripe Connect grant's subject, not
 // program state (Q-EX6), which PL6822 refuses until S457 lands.
 module concierge
 
@@ -21,13 +22,26 @@ enum Outcome { Refunded, Declined, Unsure, Status, Other }
 // AC30, PT28.3a: the extracted amount, a record of one field with a strict domain.
 type Amount = { value: 0..500 }
 
-enum Phase { Idle, Classifying, Extracting, Refunding, Answering, Sending, Templating }
+enum Phase { Idle, Classifying, Looking, Citing, Extracting, Refunding, Answering, Sending, Templating }
+
+// S450: the bound action's claims, a field of the WhatsApp kind's Sender claims.
+claims Customer {
+  principal: Principal
+}
+
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+}
 
 enum Last { Nothing, Sent, Refused, Lost }
 
 channel support: whatsapp {
   adapter "whatsapp"
   thread "{from}"
+  audience customer
+  principal from principal
   starts Desk.Start on inbound
   Message -> Desk.Got
   Delivered -> Desk.Delivered
@@ -58,6 +72,7 @@ credential payments: oauth2 {
 service machine Desk {
   state {
     phase    : Phase     = Idle
+    customer : Principal = none
     started  : bool      = false
     question : Content   = none
     answer   : Content   = none
@@ -67,6 +82,9 @@ service machine Desk {
 
   action Start()
   action Got(body: Content)
+  action Found(items: Items)
+  action LookupFailed()
+  action Cited(text: Content, cites: Items)
   action Classified(branch: Branch, conf: Conf, margin: Conf)
   action Unclassified()
   action Amounted(value: 0..500, conf: Conf)
@@ -84,9 +102,10 @@ service machine Desk {
     started' = true
   }
 
-  on Got(body) {
+  on Got(body) by c: Customer {
     require phase == Idle else reject "busy"
     phase' = Classifying
+    customer' = c.principal
     question' = body
     decide classify(body: body)
   }
@@ -97,13 +116,34 @@ service machine Desk {
       phase' = Extracting
       decide amount(text: question)
     } else {
-      phase' = Answering
       if branch == Status {
-        decide reply(question: question, outcome: Status)
+        phase' = Looking
+        emit lookup(customer: customer)
       } else {
+        phase' = Answering
         decide reply(question: question, outcome: Other)
       }
     }
+  }
+
+  on Found(items) {
+    require phase == Looking else reject "not-looking"
+    phase' = Citing
+    decide answer(question: question, context: items)
+  }
+
+  on LookupFailed {
+    require phase == Looking else reject "not-looking"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  // The answer cites the orders it used, a subset of those it was given (PS17.6), and goes to the customer who asked.
+  on Cited(text, cites) {
+    require phase == Citing else reject "not-citing"
+    phase' = Sending
+    answer' = text
+    emit support.reply(body: text)
   }
 
   on Unclassified {
@@ -151,7 +191,7 @@ service machine Desk {
   }
 
   on AnswerFailed {
-    require phase == Answering else reject "not-answering"
+    require phase == Answering || phase == Citing else reject "not-answering"
     phase' = Idle
   }
 
@@ -197,6 +237,21 @@ service machine Desk {
     timeout 800ms
     ok(r) -> Amounted(value: r.answer.value, conf: r.conf.value)
     failed -> Unextracted()
+  }
+
+  effect lookup(customer: Principal) {
+    retrieve orders where owner == customer limit 3
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision answer(question: Content, context: Items) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    cites context
+    ok(r) -> Cited(text: r.answer, cites: r.cites)
+    failed -> AnswerFailed()
   }
 
   decision reply(question: Content, outcome: Outcome) -> Content {
