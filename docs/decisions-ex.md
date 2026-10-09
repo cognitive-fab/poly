@@ -128,6 +128,20 @@ So the cost was in the channel's configuration, whose flow rule follows every pe
 
 E1's full check waits for S456, S457 and a ruling on S458; Finding 1 goes to the release session with them.
 
+## Rebase on v1 at c8a03e09, and S458 accepted (owner's reviewer, 2026-10-09)
+
+`ex` was rebased on `v1` at c8a03e09 (S456 with the generated configuration counted for `PL6838`, S457, the S454 embedded form), with no conflict. Ruled with it: S458 is accepted and is built next on `v1`; if `PL6838` still shows on `Desk`'s replies after the rebase, it is reported as a defect; the concierge's full check runs at `0..500` once S458 lands, with its state count and check time reported; E2 starts now; and the concierge's full check joins the serial after-suite group for the v1 gate, so suite load cannot affect it.
+
+## E2.1: the inbox drafted and measured (2026-10-09)
+
+The inbox is drafted in `docs/ex/inbox-draft/` (`inbox.poly.draft`, `inbox.policy.poly.draft`, the concierge's price tables, and maps fitted for `triage` and `kind` with their digests made by `mapDigest`), outside `examples/` and as `.draft` files until it is the example, as the concierge's draft is.
+
+- **The program.** Each account's mail is the source `mail`, owned by the account's principal and keyed by `message`, `thread` and `correspondent` (S451), on the Gmail adapter. `Message`, one per received message, retrieves its own item by key and asks two routed decisions over it, `triage` (six values) and `kind` (eight), both on the cheap tier first (Q-EX1); it ends `Actionable` or `Filed`, or is `Held` when a decision failed, until the host retries it (IAC6). `Todo`, one per thread, reads the thread by key, asks `summary` (a `Content` title) and `when` (a `Due` bucket), and on the owner's request reads the thread again and asks `write`, on the strong tier, which cites the thread (IT4.1, IT4.2). Each of the three is an unrouted decision under the monthly budget (S454). An approved draft is `createDraft` through `gmail_draft` (`gmail.compose`) at the exact drafts URL (S455), to the account itself; the policy escalates every one to the owner (IAC2). `gmail_read` (`gmail.readonly`) is the poller's credential, used by the host through the vault for the Gmail source. Snooze is 24h, 72h or 168h (Q-EX2). The digest is the page's view (Q-EX4).
+- **Decided by the plan's rules.** Every retrieval of one source shares the kind `source.mail.retrieve`, so it has one payload and one pair of completions (S41): both machines use `read(owner, k)`, completing `Read(items)` or `ReadFailed()`. A `Todo` reads its thread twice (title, then draft), since an `Items` is passed, not stored (S316). The draft reads the thread only; the earlier mail with the same correspondent (IT4.1's history) needs a second set of items in the same decision, which a second retrieval in another step cannot give; it is left for after v1 and listed as a limit. The `Message` that opens a thread's `Todo` cannot name it, so the host opens it, as the concierge's host forwards an escalation.
+- **A defect of the first draft, found by the check.** A failed `triage` held the message while `kind` was still pending, and each retry left one more `kind` behind; poly-ref's flow rule stopped at its bound, `PL3901` ("decision.kind would hold more than 3 pending intents"), with the ten-step witness. A `Message` now waits for both answers before it holds or moves on.
+- **Measured** (`poly check` on the module alone, nothing else checking but the concierge's probe): **CLEAN in 14.7 s.** `Message` 20 states, its flow rule 29; `Todo` 94 states, its flow rule 116; each `Grant` 13; each `Route` 6; `monthly.Budget` 96. Three principal representatives and two key representatives with `none` (PS4.1g). The policy is checked with the project, at E2.2.
+
+
 ## Conclusion
 
 The examples branch holds the plan, its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader, the Gmail source kind, the measured concierge draft, and the concierge's recorded answers and host code. The concierge waits for S450, S456 and S457 on `v1`; the inbox's machines wait for S451, S454 and S455.

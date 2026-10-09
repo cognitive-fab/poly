@@ -1,0 +1,24 @@
+{
+  "decision": "kind",
+  "version": 1,
+  "fittedFor": "flash-2026-09",
+  "points": [
+    [
+      0,
+      0
+    ],
+    [
+      500,
+      400
+    ],
+    [
+      800,
+      700
+    ],
+    [
+      950,
+      880
+    ]
+  ],
+  "digest": "sha256:49e68e9ed6380984b36c15f5571201def0c0080766d8193295d0debfeeeb2397"
+}

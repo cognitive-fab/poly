@@ -1,0 +1,13 @@
+// The inbox assistant's policy (plan-ex.md E2, IAC2, PT12.5). Every Gmail draft waits for the owner, who approves it
+// with a signed record; nothing an email says, and no agent, can approve it.
+module inbox_policy
+
+policy drafts {
+  scope "inbox"
+  obligation owner-approves-drafts "A Gmail draft is created only after the owner approves it." rule {
+    when proposal.kind == "effect" && effect.kind == "gmail.createDraft"
+    require false else escalate
+    on unknown escalate
+  }
+  never draft-unapproved "A Gmail draft is never created without the owner.": allow when proposal.kind == "effect" && effect.kind == "gmail.createDraft"
+}
