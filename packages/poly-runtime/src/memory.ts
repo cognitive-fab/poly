@@ -429,9 +429,12 @@ export class Memory {
     return { envelope: digest };
   }
 
-  /** PS17.3a (S459): whether a value is the digest of a body the runtime stored as an envelope. */
+  /**
+   * PS17.3a (S459): whether a value is the digest of a body the runtime stored as an envelope and has not erased since
+   * (PS17.7, ruled 2026-10-09): no recipient survives an erasure.
+   */
   isEnvelope(v: unknown): boolean {
-    return typeof v === 'string' && DIGEST.test(v) && !!this.store.db.prepare('SELECT 1 FROM poly_envelope WHERE digest = ?').get(v);
+    return typeof v === 'string' && DIGEST.test(v) && !!this.store.db.prepare('SELECT 1 FROM poly_envelope WHERE digest = ?').get(v) && !this.store.erased(v);
   }
 
   /**
