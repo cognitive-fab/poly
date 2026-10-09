@@ -263,3 +263,20 @@ The round above is accepted: S456, S457, the S454 embedded form and the one-valu
 - **(4)** poly-ref applies it on its own, with a PS lemma, as it does for confidence intervals.
 
 Same method: the PS and PT text first, then tests written from the text alone, then the code.
+
+## S458, built
+
+| Text | Tests | Code |
+|---|---|---|
+| f2d1de93 | f9f11a80 (12; 10 failed before) | bd52f07c |
+
+**Decided under the plan's rules, recorded:**
+
+- **Storage turns the reduction off.** The ruling turns it off for a comparison after storage. A stored value can be compared by another handler, a property or a policy (`machine("m.M").f`), so a write to a field turns it off at once, as the examples session's proposal also said ("never storing it"). The lemma then needs no reading of the state.
+- **A class is an equivalence class, not an interval.** Two values are equivalent when every comparison with a cut point has one outcome on both, as for a `Conf` (PD1.4b). `amount != 7` gives the representatives {0, 7}, since 8 is equivalent to 0. The test writer read a class as an interval between cut points in three expectations, and those were corrected to the text in f9f11a80.
+- **A name shared with a field or a binding turns it off.** Both implementations read the parameter by its name, so a field, a `let`, a loop variable or a pattern binding of the same name turns the reduction off rather than being told apart. Both sides then agree by construction, and the read-back of `dataDomain` checks that they do.
+- **A broken variant.** PT3.3a makes a disagreement on `dataDomain` a translation-validation finding, so the broken lowering `range-cut-dropped` (one class fewer) is in the list of toolchain faults, over `test/fixtures/cut-ranges/refunds.poly`.
+
+**Suite.** At bd52f07c: 2,234 tests and 6 in the after group. All passed except 2 skipped and 4 waiting, with no failure; check-memory passed (`.poly/logs/bd52f07c-2026-10-09T15-49-17-807Z-w3.log`). No other suite ran.
+
+**Measured verdicts.** Against `docs/v1/verdicts-after-rulings.json`, all 160 files have identical verdicts, states and transitions. No conformance case or example has a range parameter that S458 cuts, so no new record is kept. The concierge draft in `poly-ex`, whose amount is compared with 100 and passed into the refund's payload, is the first program it reduces.
