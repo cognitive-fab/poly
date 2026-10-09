@@ -23,6 +23,8 @@ export interface ChannelPlan {
   pending: number;
   /** PS15.0a: the class of the channel's recipients, when it declares one. */
   audience?: string;
+  /** PS15.0a (S450): the field of the kind's Sender claims that gives the thread its principal, when declared. */
+  principal?: string;
 }
 
 export interface ChannelExpansion {
@@ -127,6 +129,13 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
     const app = out.decls[appIndex] as A.Machine;
     const appActions = new Map(app.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => [a.name, a]));
     const peerActions = new Map(peer.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => [a.name, a]));
+    // PS15.0a (S450): the kind's Sender claims, which the Inbound carries.
+    const sender = lib.decls.find((d): d is A.RecordDecl => d.kind === 'RecordDecl' && d.claims === true && d.name === 'Sender');
+    if (c.principalFrom) {
+      const f = sender?.fields.find((x) => x.name === c.principalFrom);
+      if (!f) { err('PL1001', c, `channel ${c.name}: ${libName}.Sender has no field ${c.principalFrom}; principal from names a field of the kind's Sender claims (PS15.0a, S450)`); continue; }
+      if (!(f.type.kind === 'TName' && f.type.name === 'Principal')) { err('PL1201', c, `channel ${c.name}: ${libName}.Sender.${c.principalFrom} is not a Principal; principal from names a field of type Principal (PS15.0a, S450)`); continue; }
+    }
     // PS15.1: the binding is total, one-to-one and typed.
     let bad = false;
     const binding: Record<string, string> = {};
@@ -141,6 +150,15 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
       const want = peerActions.get(m.peer)!.params.map((p) => paramKey(p, lib)).sort();
       const got = a.params.map((p) => paramKey(p, module)).sort();
       if (JSON.stringify(want) !== JSON.stringify(got)) { err('PL6815', m, `channel ${c.name}: ${appName}.${m.action}(${a.params.map((p) => p.name).join(', ')}) does not take what ${libName}.Peer.${m.peer}(${peerActions.get(m.peer)!.params.map((p) => p.name).join(', ')}) carries; a bound action has the Peer action's parameters, by name and type (PS15.1)`); bad = true; continue; }
+      // S450: a bound action may take claims; each field of its claims type is a field of the kind's Sender of the
+      // same name and type, so the runtime can give it the Inbound's verified claims, restricted to those fields.
+      const by = app.items.find((i): i is A.Handler => i.kind === 'Handler' && i.action === m.action)?.by;
+      if (by) {
+        const mine = module.decls.find((d): d is A.RecordDecl => d.kind === 'RecordDecl' && d.claims === true && d.name === by.type);
+        const theirs = new Map((sender?.fields ?? []).map((f) => [f.name, typeKey(f.type, lib)]));
+        const wrong = mine ? mine.fields.filter((f) => theirs.get(f.name) !== typeKey(f.type, module)).map((f) => f.name) : [];
+        if (!sender || (mine && wrong.length)) { err('PL6815', m, `channel ${c.name}: ${appName}.${m.action} takes claims ${by.type}, and ${sender ? `${wrong.join(', ')} ${wrong.length === 1 ? 'is not a field' : 'are not fields'} of ${libName}.Sender with the same type` : `${libName} declares no claims Sender`}; a bound action's claims are the Inbound's, restricted to its fields (PS15.4, S450)`); bad = true; continue; }
+      }
       binding[m.peer] = m.action;
     }
     const unbound = [...peerActions.keys()].filter((p) => !c.maps.some((m) => m.peer === p));
@@ -236,7 +254,7 @@ export function expandChannels(module: A.Module, program: A.Module[]): ChannelEx
       bounds: { kind: 'ConfigBounds', id: `${c.id}:bounds`, transit: N + bound - 1, instances: 1 + bound } as A.ConfigBounds,
       properties: [],
     } as A.Configuration);
-    plans.push({ name: c.name, kind: c.channelKind, library: libName, adapter: c.adapter, thread: { template: c.thread, fields }, application: appName, starts: { action: c.starts.action, onInbound: c.starts.onInbound }, module: synth, peer: binding, effectKind, pending: N, ...(c.audience ? { audience: c.audience } : {}) });
+    plans.push({ name: c.name, kind: c.channelKind, library: libName, adapter: c.adapter, thread: { template: c.thread, fields }, application: appName, starts: { action: c.starts.action, onInbound: c.starts.onInbound }, module: synth, peer: binding, effectKind, pending: N, ...(c.audience ? { audience: c.audience } : {}), ...(c.principalFrom ? { principal: c.principalFrom } : {}) });
   }
   // PS15.5 (S207, as ruled): an application that answers a message from one channel on another gets, beside the
   // configuration of each channel, one more named after it: every conversation live, the instance bound 1 + n and the

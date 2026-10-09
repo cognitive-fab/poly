@@ -700,10 +700,51 @@ export function dataDomain(a: RAction, M: RMachine): Record<string, Value>[] {
   }
   // PD5.1.2c, S155: the claims are part of the label, carried under the reserved key $claims; every value is offered.
   if (a.claims) {
-    const cs = valuesOf(a.claims.type, M);
+    let cs = valuesOf(a.claims.type, M);
+    // S450, PS4.1c: a Principal field of the claims that the handler never reads gives every value the same step
+    // (renaming invariance, and nothing else reads it on a machine alone), so it is explored by its first value. A
+    // channel's Sender principal is such a field for every conversation of std, which never reads it.
+    const unread = unreadPrincipals(a, M);
+    if (unread.length) {
+      const seen = new Set<string>();
+      cs = cs.filter((c) => {
+        const f = c && typeof c === 'object' && 'fields' in c ? (c as { fields: Record<string, Value> }).fields : {};
+        const key = Object.keys(f).filter((n) => !unread.includes(n)).sort().map((n) => `${n}=${keyOf(f[n] ?? null)}`).join(',');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
     recs = recs.flatMap((r) => cs.map((c) => ({ ...r, $claims: c })));
   }
   return recs;
+}
+
+/**
+ * S450: the Principal fields of an action's claims that its handler never reads: the binder appears only as `c.f` for
+ * other fields. A claims type with an Audience field is left whole, since the flow rule reads its claimant (S324).
+ */
+function unreadPrincipals(a: RAction, M: RMachine): string[] {
+  if (!a.claims || a.claims.type.k !== 'record') return [];
+  const fields = M.records.get(a.claims.type.name)?.fields ?? [];
+  if (fields.some((f) => f.type.k === 'union' && f.type.name === 'Audience')) return [];
+  const ps = fields.filter((f) => f.type.k === 'principal').map((f) => f.name);
+  if (!ps.length) return [];
+  const h = M.handlers.get(a.name);
+  if (!h) return [];
+  const binder = a.claims.binder;
+  const read = new Set<string>();
+  let whole = false;
+  const visit = (x: unknown): void => {
+    if (!x || typeof x !== 'object') return;
+    if (Array.isArray(x)) { for (const y of x) visit(y); return; }
+    const n = x as { kind?: string; name?: string; object?: { kind?: string; name?: string }; prop?: string };
+    if (n.kind === 'Member' && n.object?.kind === 'Name' && n.object.name === binder && typeof n.prop === 'string') { read.add(n.prop); return; }
+    if (n.kind === 'Name' && n.name === binder) whole = true;
+    for (const [k, v] of Object.entries(n)) if (k !== 'span') visit(v);
+  };
+  visit(h.body);
+  return whole ? [] : ps.filter((p) => !read.has(p));
 }
 
 // The canonical keys of a map type, computed once per type object: inType runs on every successor

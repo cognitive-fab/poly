@@ -27,7 +27,7 @@ export interface ChannelReading {
   conversations: A.Module[];
   program: A.Module[];
   /** Per channel, what the runtime's descriptor must say (PS15.4): read back against the lowered one. */
-  descriptors: Map<string, { application: string; conversation: string; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string }; peer: Record<string, string>; effectKind: string; pending: number; library: string; libraryDigest: string; kind: string; adapter: string | null; thread: { template: string; fields: string[] }; audience?: string }>;
+  descriptors: Map<string, { application: string; conversation: string; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string }; peer: Record<string, string>; effectKind: string; pending: number; library: string; libraryDigest: string; kind: string; adapter: string | null; thread: { template: string; fields: string[] }; audience?: string; principal?: string }>;
 }
 
 const readings = new WeakMap<A.Module, { libraries: A.Module[]; reading: ChannelReading }>();
@@ -200,7 +200,7 @@ export function readChannels(module: A.Module, program: A.Module[]): ChannelRead
       bounds: { kind: 'ConfigBounds', id: `ref:${ch.id}:bounds`, transit: pending.hi + bound - 1, instances: 1 + bound } as A.ConfigBounds,
       properties: [],
     } as A.Configuration);
-    descriptors.set(ch.name, { application: `${module.name}.${appName}`, conversation: convName, starts: { action: ch.starts!.action, onInbound: ch.starts!.onInbound }, inbound: { to: 'conversation', action: 'Inbound' }, peer, effectKind: `channel.${ch.name}.send`, pending: pending.hi, library: library.name, libraryDigest: moduleDigest(library), kind: ch.channelKind, adapter: ch.adapter, thread: { template: ch.thread, fields: [...ch.thread.matchAll(/\{([^}]*)\}/g)].map((x) => x[1]) }, ...(ch.audience ? { audience: ch.audience } : {}) });
+    descriptors.set(ch.name, { application: `${module.name}.${appName}`, conversation: convName, starts: { action: ch.starts!.action, onInbound: ch.starts!.onInbound }, inbound: { to: 'conversation', action: 'Inbound' }, peer, effectKind: `channel.${ch.name}.send`, pending: pending.hi, library: library.name, libraryDigest: moduleDigest(library), kind: ch.channelKind, adapter: ch.adapter, thread: { template: ch.thread, fields: [...ch.thread.matchAll(/\{([^}]*)\}/g)].map((x) => x[1]) }, ...(ch.audience ? { audience: ch.audience } : {}), ...(ch.principalFrom ? { principal: ch.principalFrom } : {}) });
   }
   // PS15.5 (S207), read from its text: an application bound to n > 1 channels whose handler of a message from one of
   // them emits a reply or a template on another gets one more configuration, named after it, every conversation live,

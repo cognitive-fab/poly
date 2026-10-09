@@ -24,10 +24,12 @@ test('AC14: a recorded SMS from an unverified sender reaches the application wit
     assert.equal((await handle('text', smsWebhook(cfg.tw, 'Where is my order?'))).status, 200);
     await rt.advance();
     const [inbound] = await accepted(rt, conv, 'Inbound');
-    assert.deepEqual(inbound.data.$claims, { verified: 'Unverified' });
+    // S450: the claims also name the sender's principal; unmapped, the keyed digest of its address, which no source owns.
+    assert.equal(inbound.data.$claims.verified, 'Unverified');
+    assert.match(inbound.data.$claims.principal, /^[0-9a-f]{64}$|^hmac/);
     const [got] = await accepted(rt, app, 'Got');
     assert.ok(got, 'the application took the message');
-    assert.deepEqual(rt.lineageOf(app, got.seq).origin, { verified: 'Unverified' });
+    assert.equal(rt.lineageOf(app, got.seq).origin.verified, 'Unverified');
   } finally { await rt.close(); }
 });
 
@@ -62,6 +64,6 @@ test('AC14, the real path: a first SMS from an unverified sender creates the thr
     await rt.advance();
     const app = await rt.threadId('text', SMS_FROM);
     const [got] = await accepted(rt, app, 'Got');
-    assert.deepEqual(rt.lineageOf(app, got.seq).origin, { verified: 'Unverified' });
+    assert.equal(rt.lineageOf(app, got.seq).origin.verified, 'Unverified');
   } finally { await rt.close(); }
 });

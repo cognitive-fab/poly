@@ -451,6 +451,25 @@ export class PolyRuntime {
     return maj > 8 || (maj === 8 && min >= 4);
   }
 
+  /** S450: per channel, the host's mapping of a verified sender to its principal (K11). */
+  #senderMaps = new Map<string, (sender: string, verified: boolean) => string | null>();
+
+  /**
+   * PS15.0a, PT10a (S450): registers the host's verifier of a channel's thread principal: it maps a sender the adapter
+   * verified to a principal, or to null. It is host code, like the claims verifier, and the only source of the principal.
+   */
+  mapSenders(channel: string, f: (sender: string, verified: boolean) => string | null): void {
+    if (!this.verified.channels.some((c) => c.channel === channel)) throw new Error(`no channel ${channel} is certified (PS15)`);
+    if (typeof f !== 'function') throw new Error('a sender mapping is a function (S450)');
+    this.#senderMaps.set(channel, f);
+  }
+
+  /** S450: the principal a thread was fixed to, or null. */
+  threadPrincipal(application: string): string | null {
+    this.store.db.exec('CREATE TABLE IF NOT EXISTS poly_thread_principal (thread TEXT PRIMARY KEY, principal TEXT NOT NULL)');
+    return (this.store.db.prepare('SELECT principal FROM poly_thread_principal WHERE thread = ?').get(application) as { principal: string } | undefined)?.principal ?? null;
+  }
+
   async inbound(channel: string, fields: Record<string, unknown>, opts: { messageId: string }): Promise<InboundResult> {
     // Review D-F4 (M8b): a caller supplies no claims. An Inbound that declares claims takes them only from a certified
     // adapter's verify, through rt.receive; here it is refused claims-unverified.
@@ -477,17 +496,43 @@ export class PolyRuntime {
       return { status: 401, contentType: 'text/plain', body: 'refused' };
     }
     for (const r of v.receipts) await this.ingressRecord(channel, { stage: 'receipt', outcome: 'recorded', provider: adapter.provider, providerId: r.providerId, status: r.status, ...(r.error ? { reason: r.error } : {}) });
+    const desc = this.verified.channels.find((c) => c.channel === channel);
     for (const m of v.messages) {
       // S191: the sender the adapter verified is an address, journaled by its keyed digest.
       let sender = m.claims.sender;
       if (this.#fault !== 'address-in-clear') await this.store.txn(() => { sender = this.store.keepAddress(m.claims.sender); });
-      // PS17.4, S327: a body received on a channel is owned by its sender, at the channel's class.
-      const owner = this.store.recipientDigest(m.claims.sender);
+      // PS15.0a (S450): the host maps a verified sender to its principal; any other sender's claims carry the keyed
+      // digest of its address, a principal no source owns, which never fixes a thread.
+      const map = m.claims.verified ? this.#senderMaps.get(channel) : undefined;
+      let mapped: string | null = null;
+      if (map) { const r = map(m.claims.sender, true); mapped = typeof r === 'string' && r.length ? r : null; }
+      const named = mapped ?? this.store.recipientDigest(m.claims.sender);
+      let thread: string | null = null;
+      let fixed: string | null = null;
+      if (desc?.principal) {
+        thread = await this.threadId(channel, desc.thread.template.replace(/\{([^}]*)\}/g, (_, f: string) => String(m.fields[f])));
+        fixed = this.threadPrincipal(thread);
+        // PS15.4 (S450): a thread whose principal is fixed refuses a message that names another, before the conversation.
+        if (mapped && fixed && fixed !== mapped) {
+          this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+          await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'inbound', channel, thread, messageId: m.providerMessageId, outcome: 'refused', reason: 'principal-mismatch', principal: this.store.recipientDigest(`principal:${mapped}`) }, this.now()); });
+          continue;
+        }
+      }
+      // PS17.4, S327: a body received on a channel is owned by its sender, at the channel's class; with principal from,
+      // by the thread's principal once it is fixed (S450).
+      const principal = desc?.principal ? (fixed ?? mapped) : null;
+      const owner = principal ?? this.store.recipientDigest(m.claims.sender);
       const content = this.memory.flows.size ? await this.#putTainted(m.body, { c: this.channelClass(channel), o: [owner] }, null) : await this.putContent(m.body);
-      await this.ingressRecord(channel, { stage: 'claims', outcome: m.claims.verified ? 'verified' : 'unverified', provider: adapter.provider, messageId: m.providerMessageId, claims: { ...m.claims, sender } });
-      // K11, PT21.4: the adapter's claims, typed as std's Sender (verified is Verified or Unverified).
-      const delivered = await this.#deliver(channel, { ...m.fields, body: content }, m.providerMessageId, { verified: m.claims.verified ? 'Verified' : 'Unverified' });
-      if (this.memory.flows.size && delivered.conversation) await this.store.txn(() => this.memory.setThreadSender(delivered.conversation, owner));
+      await this.ingressRecord(channel, { stage: 'claims', outcome: m.claims.verified ? 'verified' : 'unverified', provider: adapter.provider, messageId: m.providerMessageId, claims: { ...m.claims, sender, principal: this.store.recipientDigest(`principal:${named}`) } });
+      // K11, PT21.4: the adapter's claims, typed as std's Sender (verified is Verified or Unverified, and the principal).
+      const delivered = await this.#deliver(channel, { ...m.fields, body: content }, m.providerMessageId, { verified: m.claims.verified ? 'Verified' : 'Unverified', principal: named });
+      if (delivered.outcome === 'delivered' && thread && mapped && !fixed) {
+        await this.store.txn(() => { this.threadPrincipal(thread!); this.store.db.prepare('INSERT OR IGNORE INTO poly_thread_principal (thread, principal) VALUES (?, ?)').run(thread, mapped); });
+      }
+      // PS17.3 (S450): with principal from, the recipient of the thread's send is its principal, or none until it is fixed.
+      const recipient = desc?.principal ? principal : owner;
+      if (this.memory.flows.size && delivered.conversation && recipient) await this.store.txn(() => this.memory.setThreadSender(delivered.conversation, recipient));
     }
     return v.answer ?? { status: 200, contentType: 'text/plain', body: 'ok' };
   }
@@ -576,7 +621,7 @@ export class PolyRuntime {
    * is dispatched), a provider's receipt for an earlier send, and the sender claims of a message (K11). The channel
    * must be one the certificate names.
    */
-  async ingressRecord(channel: string, record: { stage: 'verify' | 'receipt' | 'claims'; outcome: string; provider: string; reason?: string; providerId?: string; status?: string; claims?: { verified: boolean; sender: string }; messageId?: string }): Promise<void> {
+  async ingressRecord(channel: string, record: { stage: 'verify' | 'receipt' | 'claims'; outcome: string; provider: string; reason?: string; providerId?: string; status?: string; claims?: { verified: boolean; sender: string; principal?: string }; messageId?: string }): Promise<void> {
     if (!this.verified.channels.some((c) => c.channel === channel)) throw new Error(`no channel ${channel}; the certificate names ${this.verified.channels.map((c) => c.channel).join(', ') || 'none'} (PS15)`);
     this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
     await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { channel, ...record }, this.now()); });
@@ -910,7 +955,9 @@ export class PolyRuntime {
         const fields: Record<string, unknown> = { ...e.fields };
         await this.store.txn(() => { for (const f of read) if (f in fields) fields[f] = this.store.keepAddress(String(fields[f])); });
         // A provider event is the provider's own report: its claim is verified.
-        await this.dispatch(ctx.instanceId, d.inbound.action, { ...fields, body: content }, { actionId: `${channel}:${e.providerId}`, [SUPPLIED_CLAIMS]: { verified: 'Verified' } });
+        // S450: a provider event names the thread's principal when it is fixed, else a principal no source owns.
+        const app = ctx.instanceId.slice(0, ctx.instanceId.lastIndexOf('/'));
+        await this.dispatch(ctx.instanceId, d.inbound.action, { ...fields, body: content }, { actionId: `${channel}:${e.providerId}`, [SUPPLIED_CLAIMS]: { verified: 'Verified', principal: this.threadPrincipal(app) ?? this.store.recipientDigest(`provider:${channel}`) } });
         await this.ingressRecord(channel, { stage: 'receipt', outcome: 'delivered', provider: adapter.provider, providerId: e.providerId, reason: error });
       }
       throw Object.assign(new Error(error), { permanent: r.permanent });
@@ -1655,6 +1702,7 @@ export class PolyRuntime {
     for (const m of await this.kernel.workers.pendingMessages()) {
       const fromMachine = (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(m.from) as { machine_id: string } | undefined)?.machine_id;
       const toMachine = (this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(m.to) as { machine_id: string } | undefined)?.machine_id;
+      await this.#bindClaims(m, fromMachine, toMachine);
       const scope = (x: string | undefined) => (x ? x.slice(0, x.lastIndexOf('.')) : null);
       if (!this.policyGate || !fromMachine || !toMachine || scope(fromMachine) === scope(toMachine)) {
         if (await this.kernel.workers.deliverMessage(m.id, now)) n++;
@@ -1693,6 +1741,28 @@ export class PolyRuntime {
       n++;
     }
     return n;
+  }
+
+  /**
+   * PS15.4 (S450): a message from a channel's conversation to an action of its application that declares claims carries,
+   * under $claims, the origin claims of the sending step's lineage, restricted to the action's claims fields; none when
+   * the chain started with none, and PS3.2's claims row then rejects the step. Written once, before the kernel delivers it.
+   */
+  async #bindClaims(m: { id: string; from: string; action: string; data: unknown }, fromMachine: string | undefined, toMachine: string | undefined): Promise<void> {
+    if (!fromMachine || !toMachine) return;
+    if (!this.verified.channels.some((c) => c.conversation === fromMachine && c.application === toMachine)) return;
+    const t = this.verified.machines.find((x) => x.id === toMachine)?.types.get(m.action)?.find(([p]) => p === '$claims')?.[1];
+    const rec = t?.k === 'record' ? t : t?.k === 'union' ? t.alts.find((a) => a.k === 'record') : undefined;
+    if (!rec || rec.k !== 'record') return;
+    const data = (m.data ?? {}) as Record<string, unknown>;
+    if ('$claims' in data) return;
+    const row = this.store.db.prepare('SELECT seq, payload FROM pr_outbox WHERE intent_id = ?').get(m.id) as { seq: number; payload: string } | undefined;
+    if (!row) return;
+    const origin = this.store.lineage(m.from, row.seq)?.origin as Record<string, unknown> | null | undefined;
+    const claims = origin && typeof origin === 'object' && rec.fields.every(([f]) => f in origin) ? Object.fromEntries(rec.fields.map(([f]) => [f, origin[f]])) : null;
+    const payload = JSON.parse(row.payload) as { data?: Record<string, unknown> };
+    payload.data = { ...(payload.data ?? {}), $claims: claims };
+    await this.store.txn(() => { this.store.db.prepare('UPDATE pr_outbox SET payload = ? WHERE intent_id = ?').run(JSON.stringify(payload), m.id); });
   }
 
   /** The gate's recorded decision on a message, from the sender's verdict events, or null (a held answer is none). */

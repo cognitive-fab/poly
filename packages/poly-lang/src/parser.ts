@@ -434,11 +434,14 @@ class Parser {
     let thread = '';
     let starts: A.Channel['starts'] = null;
     let audience: string | null = null;
+    let principalFrom: string | null = null;
     const maps: A.ChannelMap[] = [];
     const seen = new Set<string>();
     while (!this.atPunct('}')) {
       // PS15, S305: the class of the channel's recipients.
       if (this.at('audience') && !this.atPunct('->', 1)) { if (seen.has('audience')) this.fail('a channel names its audience once'); seen.add('audience'); this.next(); audience = this.ident('an audience class'); continue; }
+      // PS15.0a (S450): the claims field that gives the thread its principal.
+      if (this.at('principal') && this.at('from', 1)) { if (seen.has('principal')) this.fail('a channel names the field of its principal once'); seen.add('principal'); this.next(); this.next(); principalFrom = this.ident('a field of the Sender claims'); continue; }
       // Review A-F6 (M8b): each clause is written once; a second would silently replace the first.
       if (this.at('adapter')) { if (seen.has('adapter')) this.fail('a channel names its adapter once'); seen.add('adapter'); this.next(); adapter = this.str('an adapter name'); continue; }
       if (this.at('thread')) { if (seen.has('thread')) this.fail('a channel names its thread key once'); seen.add('thread'); this.next(); thread = this.str('a thread template'); continue; }
@@ -463,7 +466,7 @@ class Parser {
       maps.push(this.node<A.ChannelMap>(ms, { kind: 'ChannelMap', peer, machine, action }, true));
     }
     this.next();
-    return this.node<A.Channel>(start, { kind: 'Channel', name, channelKind, adapter, thread, starts, maps, ...(audience !== null ? { audience } : {}) }, true);
+    return this.node<A.Channel>(start, { kind: 'Channel', name, channelKind, adapter, thread, starts, maps, ...(audience !== null ? { audience } : {}), ...(principalFrom ? { principalFrom } : {}) }, true);
   }
 
   /** `workflow w runs M { input A  key "…" where f matches "…", …  tool "kind" -> t target "…" why "…" … }` (PT10, S166). */

@@ -195,13 +195,13 @@ class Reader {
       case 'channel': {
         // PT21.1, S186: channel(name, { kind, adapter?, thread, starts?, onInbound?, peer: { P: 'A.X' } }).
         const [name, body] = this.argsOf(c, 2, 2);
-        const o = this.opts(body, ['kind', 'adapter', 'thread', 'starts', 'onInbound', 'peer', 'audience']);
+        const o = this.opts(body, ['kind', 'adapter', 'thread', 'starts', 'onInbound', 'peer', 'audience', 'principal']);
         const dotted = (node: ts.Expression) => { const s = this.str(node); const i = s.indexOf('.'); if (i < 1) this.fail(node, 'expected Machine.Action'); return [s.slice(0, i), s.slice(i + 1)]; };
         const onIn = o.get('onInbound');
         const st = o.get('starts');
         const starts = st ? { machine: dotted(st)[0], action: dotted(st)[1], onInbound: !!onIn && this.unparen(onIn).kind === ts.SyntaxKind.TrueKeyword } : null;
         const maps = this.obj(o.get('peer')!).map(([peer, v, kn]) => { const [machine, action] = dotted(v); return this.mk<A.ChannelMap>(kn, { kind: 'ChannelMap', peer, machine, action }); });
-        return this.mk<A.Channel>(c.node, { kind: 'Channel', name: this.str(name), channelKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, thread: this.str(o.get('thread')!), starts, maps, ...(o.has('audience') ? { audience: this.str(o.get('audience')!) } : {}) });
+        return this.mk<A.Channel>(c.node, { kind: 'Channel', name: this.str(name), channelKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, thread: this.str(o.get('thread')!), starts, maps, ...(o.has('audience') ? { audience: this.str(o.get('audience')!) } : {}), ...(o.has('principal') ? { principalFrom: this.str(o.get('principal')!) } : {}) });
       }
       case 'credential': {
         // PT10e: credential(name, { kind, provider, grant, pkce?, scopes, holder? }).

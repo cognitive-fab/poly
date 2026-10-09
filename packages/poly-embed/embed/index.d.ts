@@ -71,7 +71,7 @@ export declare function pathProperty(name: string, e: Arrow): Item;
 export declare function composeInvariant(name: string, e: Arrow): Item;
 /** PS5.2a, S178: `never n: emit k(f: v) while P`; the field filter is an arrow to its constants, P an arrow. */
 /** PT21.1, S186: `channel c: k { … }`; each Peer action is bound to 'Machine.Action'. */
-export declare function channel(name: string, body: { kind: string; adapter?: string; thread: string; starts?: string; onInbound?: true; audience?: string; peer: { [peerAction: string]: string } }): Decl;
+export declare function channel(name: string, body: { kind: string; adapter?: string; thread: string; starts?: string; onInbound?: true; audience?: string; principal?: string; peer: { [peerAction: string]: string } }): Decl;
 export declare function never(name: string, effect: string, fields: Arrow<{ [field: string]: Expr }>, cond?: Arrow): Item;
 export declare function liveness(name: string, goal: { eventually: Arrow } | { from: Arrow; to: Arrow }, opts?: { forall?: [string, string]; exists?: [string, string]; fair?: string[][] }): Item;
 export declare function effect(name: string, params: { [param: string]: Type }, items: EffItem[]): Item;

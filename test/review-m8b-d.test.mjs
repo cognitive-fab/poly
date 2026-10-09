@@ -41,7 +41,7 @@ test('D-F4: rt.inbound takes no claims from its caller: claims come only from a 
     assert.deepEqual(await accepted(rt, conv, 'Inbound'), []);
     // Through the adapter, the same message carries the adapter's claim: an SMS sender is Unverified.
     assert.equal((await handle('text', smsWebhook(cfg.tw, 'hi'))).status, 200);
-    assert.deepEqual((await accepted(rt, conv, 'Inbound')).map((j) => j.data.$claims), [{ verified: 'Unverified' }]);
+    assert.deepEqual((await accepted(rt, conv, 'Inbound')).map((j) => j.data.$claims.verified), ['Unverified']);
   } finally { await rt.close(); }
 });
 

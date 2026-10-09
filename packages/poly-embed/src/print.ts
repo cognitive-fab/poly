@@ -48,7 +48,7 @@ class Printer {
       case 'Channel': {
         const peer = d.maps.map((m) => `${ind}  ${this.key(m.peer)}: ${q(`${m.machine}.${m.action}`)},\n`).join('');
         const starts = d.starts ? `, starts: ${q(`${d.starts.machine}.${d.starts.action}`)}${d.starts.onInbound ? ', onInbound: true' : ''}` : '';
-        return `${this.use('channel')}(${q(d.name)}, { kind: ${q(d.channelKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, thread: ${q(d.thread)}${starts}${d.audience ? `, audience: ${q(d.audience)}` : ''}, peer: {\n${peer}${ind}} })`;
+        return `${this.use('channel')}(${q(d.name)}, { kind: ${q(d.channelKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, thread: ${q(d.thread)}${starts}${d.audience ? `, audience: ${q(d.audience)}` : ''}${d.principalFrom ? `, principal: ${q(d.principalFrom)}` : ''}, peer: {\n${peer}${ind}} })`;
       }
       // PT10e: credential(name, { kind, provider, grant, pkce?, scopes, holder? }).
       case 'Credential': return `${this.use('credential')}(${q(d.name)}, { kind: ${q(d.credKind)}, provider: ${q(d.provider)}, grant: ${q(d.grant)}${d.pkce ? ', pkce: true' : ''}, scopes: [${d.scopes.map(q).join(', ')}]${d.holder === null ? '' : `, holder: ${q(d.holder)}`} })`;

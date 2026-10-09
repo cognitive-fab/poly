@@ -137,6 +137,8 @@ export interface Channel extends NodeBase {
   maps: ChannelMap[];
   /** PS15, PS17.3 (S305): the class of the channel's recipients, when written. */
   audience?: string | null;
+  /** PS15.0a (S450): the field of the kind's Sender claims that gives the thread its principal, when written. */
+  principalFrom?: string | null;
 }
 export interface ChannelMap extends NodeBase { kind: 'ChannelMap'; peer: string; machine: string; action: string }
 

@@ -73,6 +73,11 @@ export interface GlobalState {
   timers?: ArmedTimer[];
   /** PS17.2: with taints, each instance's pending taints, by the kind of the intent; absent elsewhere. */
   pending?: { instance: number; kind: string; t: Taint }[];
+  /**
+   * PS15.0a (S450): the principal each conversation's thread was fixed to, by instance, for a channel that declares
+   * principal from; absent until its first Inbound, and absent elsewhere.
+   */
+  threads?: Record<number, Value>;
 }
 
 export interface ArmedTimer { instance: number; key: string; action: string; data: Record<string, Value> }
@@ -80,7 +85,13 @@ const timerKey = (t: ArmedTimer) => `${t.instance}:${t.key}`;
 const sortTimers = (ts: ArmedTimer[]) => [...ts].sort((a, b) => (timerKey(a) < timerKey(b) ? -1 : timerKey(a) > timerKey(b) ? 1 : 0));
 
 /** PS15.5: the roles a channel gives the machines of a configuration. */
-export interface ChannelRoles { name: string; application: string; conversation: string; receipts: Set<string> }
+export interface ChannelRoles {
+  name: string; application: string; conversation: string; receipts: Set<string>;
+  /** PS15.0a (S450): the field of the Sender claims that fixes the thread's principal, when the channel declares one. */
+  principal?: string;
+  /** PS15.4 (S450): the application's actions the binding maps a Peer action to. */
+  bound: Set<string>;
+}
 
 export interface ConfigInstance {
   /** Its address: `inv`, or `order[0]` for a member of the group `order`. */
@@ -224,7 +235,7 @@ export function buildConfiguration(source: Module, name: string, opts: { program
     }
   }
   // PS15.0, PS15.5: per channel, its application, its conversation, and the application's actions bound to a receipt.
-  const channels: ChannelRoles[] = [...reading.descriptors.entries()].map(([name, d]) => ({ name, application: d.application, conversation: d.conversation, receipts: new Set(['Delivered', 'Rejected', 'Failed'].map((r) => d.peer[r]).filter((x): x is string => typeof x === 'string')) }));
+  const channels: ChannelRoles[] = [...reading.descriptors.entries()].map(([name, d]) => ({ name, application: d.application, conversation: d.conversation, receipts: new Set(['Delivered', 'Rejected', 'Failed'].map((r) => d.peer[r]).filter((x): x is string => typeof x === 'string')), bound: new Set(Object.values(d.peer)), ...(d.principal ? { principal: d.principal } : {}) }));
   return { decl, instances, groups, channels };
 }
 
@@ -257,8 +268,49 @@ export function globalView(instances: ConfigInstance[], sigma: (State | null)[],
 /** PS17: what a configuration's flow check gives its system: which pending kinds an instance's action completes, and an intent's taint. */
 export interface TaintRules { completes(instance: number, action: string): string[]; intentTaint(instance: number, i: import('./step.js').Intent): Taint | null; completions(instance: number): string[] }
 
-export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[], opts: { timed?: Set<number>; fault?: RefFault; taint?: TaintRules } = {}): System<GlobalState> {
+export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[], opts: { timed?: Set<number>; fault?: RefFault; taint?: TaintRules; channels?: ChannelRoles[] } = {}): System<GlobalState> {
   const taint = opts.taint;
+  // PS15.0a (S450): each conversation whose channel fixes its thread's principal, with the claims field that does.
+  const principalField = new Map<number, string>();
+  // PS15.4 (S450): each application instance's actions that take a Peer message, by instance.
+  const boundActions = new Map<number, Set<string>>();
+  for (const c of opts.channels ?? []) instances.forEach((x, k) => {
+    if (c.principal && x.machine.id === c.conversation) principalField.set(k, c.principal);
+    if (x.machine.id === c.application) boundActions.set(k, new Set([...(boundActions.get(k) ?? []), ...c.bound]));
+  });
+  // S450, PS4.1c: a conversation whose channel fixes no thread principal, and whose application's bound actions take no
+  // claims, never reads the principal of its Inbound's claims and passes it nowhere a step reads, so every value of it
+  // gives the same steps (renaming invariance); it is explored by its first value, as before the field existed.
+  const unread = new Set<number>();
+  for (const c of opts.channels ?? []) {
+    if (c.principal) continue;
+    const apps = instances.filter((x) => x.machine.id === c.application);
+    const claimed = apps.some((x) => [...c.bound].some((b) => x.machine.actions.find((a) => a.name === b)?.claims));
+    if (claimed) continue;
+    instances.forEach((x, k) => { if (x.machine.id === c.conversation) unread.add(k); });
+  }
+  const principalsOf = (k: number, d: Record<string, Value>): string | null => {
+    const a = instances[k].machine.actions.find((x) => x.name === 'Inbound');
+    const c = d.$claims;
+    if (!a?.claims || a.claims.type.k !== 'record' || !c || typeof c !== 'object' || !('fields' in c)) return null;
+    const fs = instances[k].machine.records.get(a.claims.type.name)?.fields ?? [];
+    return fs.filter((f) => f.type.k !== 'principal').map((f) => `${f.name}=${keyOf((c as { fields: Record<string, Value> }).fields[f.name] ?? null)}`).join(',');
+  };
+  const claimField = (d: Record<string, Value>, f: string): Value => {
+    const c = d.$claims;
+    return c && typeof c === 'object' && 'fields' in c ? (c as { fields: Record<string, Value> }).fields[f] ?? null : null;
+  };
+  // PS15.4 (S450): a message delivered to a bound action that takes claims carries its origin's claims, restricted to
+  // the action's claims fields; a message whose chain started with none carries none.
+  const withClaims = (k: number, action: string, data: Record<string, Value>, origin: Message['origin']): Record<string, Value> => {
+    if (!boundActions.get(k)?.has(action)) return data;
+    const a = instances[k].machine.actions.find((x) => x.name === action);
+    if (!a?.claims || a.claims.type.k !== 'record') return data;
+    const fields = instances[k].machine.records.get(a.claims.type.name)?.fields ?? [];
+    const from = origin?.claims && typeof origin.claims === 'object' && 'fields' in origin.claims ? (origin.claims as { fields: Record<string, Value> }).fields : null;
+    if (!from || fields.some((f) => !(f.name in from))) return { ...data, $claims: null };
+    return { ...data, $claims: { fields: Object.fromEntries(fields.map((f) => [f.name, from[f.name]])) } as Value };
+  };
   const pKey = (p: { instance: number; kind: string; t: Taint }) => `${p.instance}:${p.kind}=${taintText(p.t)}`;
   const sortPending = (ps: { instance: number; kind: string; t: Taint }[]) => [...ps].sort((a, b) => (pKey(a) < pKey(b) ? -1 : pKey(a) > pKey(b) ? 1 : 0));
   const timed = opts.timed ?? new Set<number>();
@@ -275,7 +327,12 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     const members = r.index === null ? [r.instance] : r.index === '*' ? instances.filter((x) => x.group === r.instance).map((x) => x.name) : [`${r.instance}[${r.index}]`];
     for (const n of members) {
       const k = index.get(n)!;
-      inputs.push({ instance: k, action: r.action, data: dataOf(instances[k].machine, r.action) });
+      let data = dataOf(instances[k].machine, r.action);
+      if (unread.has(k) && r.action === 'Inbound') {
+        const seen = new Set<string>();
+        data = data.filter((d) => { const key = `${Object.keys(d).filter((f) => f !== '$claims').sort().map((f) => `${f}=${keyOf(d[f])}`).join(',')}|${principalsOf(k, d)}`; if (seen.has(key)) return false; seen.add(key); return true; });
+      }
+      inputs.push({ instance: k, action: r.action, data });
     }
   }
   const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin'], firing?: string, pendingIn?: GlobalState['pending']): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
@@ -285,6 +342,11 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     const claimed = inst.machine.actions.find((x) => x.name === action)?.claims;
     const origin: Message['origin'] = via === 'input' ? (claimed && data.$claims !== undefined && data.$claims !== null ? { claims: data.$claims, intent: `${inst.machine.id}.${action}` } : undefined) : from;
     const st = transition(inst.machine, s.sigma[k]!, action, data, inst.name);
+    // PS15.0a (S450): the thread's principal is fixed by its first Inbound, whatever the module does with the message,
+    // since the runtime fixes it at ingress, before the conversation.
+    let threads = s.threads;
+    const pf = principalField.get(k);
+    if (pf && action === 'Inbound' && via === 'input' && (threads?.[k] === undefined) && claimField(data, pf) !== null) threads = { ...(threads ?? {}), [k]: claimField(data, pf) };
     const sigma = [...s.sigma];
     sigma[k] = st.next;
     const next = [...mu];
@@ -325,7 +387,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     }
     // PS17.2: an accepted step adds the taint of each intent that taints its completion.
     const pending = taint ? sortPending([...(pendingIn ?? s.pending ?? []), ...(st.verdict.kind === 'accepted' ? st.effects.flatMap((i) => { const t = taint.intentTaint(k, i); return t ? [{ instance: k, kind: i.kind, t }] : []; }) : [])]) : undefined;
-    const g: GlobalState = { sigma, mu: sortMu(next), ...(timed.size ? { timers: sortTimers(timers) } : {}), ...(pending ? { pending } : {}) };
+    const g: GlobalState = { sigma, mu: sortMu(next), ...(timed.size ? { timers: sortTimers(timers) } : {}), ...(pending ? { pending } : {}), ...(threads ? { threads } : {}) };
     if (pending) {
       const over = [...new Set(pending.map(pKey).map((x) => x.slice(0, x.indexOf('='))))].find((x) => pending.filter((q) => `${q.instance}:${q.kind}` === x).length > PENDING_BOUND);
       if (over) return { label, outcome: { kind: 'bound', state: g, field: `pending ${instances[k].name}.${over.slice(over.indexOf(':') + 1)}`, value: PENDING_BOUND + 1 } };
@@ -345,7 +407,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
   };
   return {
     initial: () => ({ sigma: instances.map((x) => (x.spawned ? null : x.init)), mu: [], ...(timed.size ? { timers: [] } : {}) }),
-    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}${s.timers?.length ? `||${s.timers.map((t) => `${timerKey(t)}>${t.action}(${Object.keys(t.data).sort().map((f) => `${f}=${keyOf(t.data[f])}`).join(',')})`).join(';')}` : ''}${taint ? `##${s.sigma.map((x, k) => (x === null ? '' : instances[k].machine.fieldNames.map((f) => taintsKey(x[f])).join('|'))).join('/')}#${s.mu.map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.timers ?? []).map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.pending ?? []).map(pKey).join(';')}` : ''}`,
+    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}${s.timers?.length ? `||${s.timers.map((t) => `${timerKey(t)}>${t.action}(${Object.keys(t.data).sort().map((f) => `${f}=${keyOf(t.data[f])}`).join(',')})`).join(';')}` : ''}${taint ? `##${s.sigma.map((x, k) => (x === null ? '' : instances[k].machine.fieldNames.map((f) => taintsKey(x[f])).join('|'))).join('/')}#${s.mu.map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.timers ?? []).map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.pending ?? []).map(pKey).join(';')}` : ''}${s.threads ? `##threads:${Object.keys(s.threads).sort().map((k) => `${k}=${keyOf(s.threads![Number(k)])}`).join(';')}` : ''}`,
     successors: (s) => {
       const out: { label: GlobalLabel; outcome: Outcome<GlobalState> }[] = [];
       // S60: a spawned child takes its creation action first, so no input reaches it while that waits (review C3).
@@ -354,6 +416,9 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
         if (s.sigma[inp.instance] === null || creating.has(inp.instance)) continue;
         for (const d of inp.data) {
           if (!refsExist(instances[inp.instance].machine, inp.action, d, s)) continue;
+          // PS15.4 (S450): on a thread whose principal is fixed, ingress refuses a message that names another.
+          const fixedField = principalField.get(inp.instance);
+          if (fixedField && inp.action === 'Inbound' && s.threads?.[inp.instance] !== undefined && keyOf(claimField(d, fixedField)) !== keyOf(s.threads[inp.instance])) continue;
           // PS17.2: a completion takes one pending taint of a kind it completes, as one choice per distinct taint.
           const kinds = taint ? taint.completes(inp.instance, inp.action) : [];
           const seen = new Set<string>();
@@ -395,13 +460,13 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
         if (seen.has(key) || (!m.creation && waiting.has(m.target))) return;
         seen.add(key);
         const rest = [...s.mu.slice(0, j), ...s.mu.slice(j + 1)];
-        out.push(step(s, m.target, m.action, m.data, rest, 'deliver', m.creation === true, m.origin));
+        out.push(step(s, m.target, m.action, withClaims(m.target, m.action, m.data, m.origin), rest, 'deliver', m.creation === true, m.origin));
         if (m.gate) {
           // PS8.7, PS4.4: the gate's decision is an environment choice: deny delivers SendDenied to the sender, as an
           // ordinary message; escalate holds the message, which is then approved (delivered) or timed out (denied).
           const reason = m.gate === 'held' ? 'escalation-timeout' : 'denied';
           const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason }, ...(m.origin ? { origin: m.origin } : {}) };
-          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}) } }) as Outcome<GlobalState> });
+          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}), ...(s.threads ? { threads: s.threads } : {}) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}), ...(s.threads ? { threads: s.threads } : {}) } }) as Outcome<GlobalState> });
           out.push(gateStep('deny', [...rest, denied]));
           if (m.gate === 'pending') out.push(gateStep('escalate', [...rest, { ...m, gate: 'held' }]));
         }
@@ -433,7 +498,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   // PS15.5 (S206, as ruled): every configuration keeps every instance's armed timers, and the environment may fire one
   // while it is armed. It replaces S61's rule for declared configurations, and A-F2's for another channel's conversation.
   const timed = new Set<number>(instances.map((x, k) => (timerTargets(x.machine).length ? k : -1)).filter((k) => k >= 0));
-  const sys = configurationSystem(decl, instances, { timed, fault: opts.fault });
+  const sys = configurationSystem(decl, instances, { timed, fault: opts.fault, channels });
   const absent = (err: unknown) => err instanceof AbsentInstance;
   // PS15.5 (S207): a joint configuration is explored to 10,000 global states at most; the cap is PL3901, INCONCLUSIVE.
   const g = explore(sys, decl.joint ? Math.min(opts.maxStates ?? JOINT_CAP, JOINT_CAP) : opts.maxStates);
@@ -617,14 +682,16 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
       const c = m ? descriptors.get(m[1])?.audience : undefined;
       return c ? Math.max(0, classes.indexOf(c)) : null;
     };
-    const tsys = configurationSystem(decl, instances, { timed, fault: opts.fault, taint: rules });
+    const tsys = configurationSystem(decl, instances, { timed, fault: opts.fault, taint: rules, channels });
+    // PS17.3 (S450): the recipient of a conversation's provider effect has its thread's principal, when it is fixed.
+    const threadOf = (s: GlobalState, k: number) => (s.threads?.[k] === undefined ? null : s.threads[k]);
     const tg = explore(tsys, decl.joint ? Math.min(opts.maxStates ?? JOINT_CAP, JOINT_CAP) : opts.maxStates);
     flowStates = tg.states.length;
     const seenCodes = new Set<string>();
     for (const e of tg.edges) {
       const l = e.label as GlobalLabel;
       if (l.via === 'gate' || l.verdict.kind !== 'accepted') continue;
-      for (const brk of flowBreaks(memOf(l.instance), l.effects, claimsClass(instances[l.instance].machine, l.action, l.data), channelClass)) {
+      for (const brk of flowBreaks(memOf(l.instance), l.effects, claimsClass(instances[l.instance].machine, l.action, l.data), channelClass, (kind) => (/^channel\.(.+)\.send$/.test(kind) ? threadOf(tg.states[e.from], l.instance) : null))) {
         if (seenCodes.has(brk.code)) continue;
         seenCodes.add(brk.code);
         findings.push(finding(brk.code, instances[l.instance].machine.handlers.get(l.action)?.id, `${instances[l.instance].name}: ${l.action} breaks the flow rule: ${brk.text}`, [...pathTo(tg, e.from), e], { property: brk.code === 'PL6831' ? 'flow' : 'remember', graph: tg }));

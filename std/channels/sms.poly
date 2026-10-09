@@ -18,8 +18,11 @@ enum Slot { Free, Sending, Receipt }
 // (Verified).
 enum Verification { Unverified, Verified }
 
+// S450: the principal the host maps a verified sender to (rt.mapSenders), else the keyed digest of its address, which no
+// source owns; a channel that declares principal from principal gives its thread that principal (PS15.0a).
 claims Sender {
   verified: Verification
+  principal: Principal
 }
 
 machine Peer {

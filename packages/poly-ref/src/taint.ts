@@ -69,7 +69,7 @@ export interface FlowBreak { code: 'PL6831' | 'PL6832'; text: string }
  * claimant (S324).
  * the action's claims carry one; `channelClass` gives a channel's provider effect its declared class.
  */
-export function flowBreaks(mem: RMemory, intents: Intent[], claims: StepClaims | null, channelClass: (kind: string) => number | null): FlowBreak[] {
+export function flowBreaks(mem: RMemory, intents: Intent[], claims: StepClaims | null, channelClass: (kind: string) => number | null, channelPrincipal: (kind: string) => Value = () => null): FlowBreak[] {
   const out: FlowBreak[] = [];
   const name = (c: number) => mem.classes[c] ?? String(c);
   const owners = (t: Taint) => (t.o.length ? `{${t.o.join(', ')}}` : '{}');
@@ -91,7 +91,8 @@ export function flowBreaks(mem: RMemory, intents: Intent[], claims: StepClaims |
       continue;
     }
     const rec = mem.recipients.get(i.kind);
-    const p = rec?.to ? bare(i.payload[rec.to] ?? null) : null;
+    // PS17.3 (S450): a channel's provider effect goes to its thread's principal, when the channel fixes one.
+    const p = rec?.to ? bare(i.payload[rec.to] ?? null) : bare(channelPrincipal(i.kind) ?? null);
     const claimant = claims && claims.cls !== null && (!rec?.to || (typeof p === 'string' && p === claims.principal)) ? claims.cls : null;
     const c = claimant ?? rec?.cls ?? channelClass(i.kind) ?? 0;
     for (const [f, v] of Object.entries(i.payload)) {

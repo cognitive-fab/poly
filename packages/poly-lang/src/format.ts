@@ -58,6 +58,7 @@ class Printer {
     this.out.push(`${INDENT}thread ${q(c.thread)}`);
     if (c.starts) this.out.push(`${INDENT}starts ${c.starts.machine}.${c.starts.action}${c.starts.onInbound ? ' on inbound' : ''}`);
     if (c.audience) this.out.push(`${INDENT}audience ${c.audience}`);
+    if (c.principalFrom) this.out.push(`${INDENT}principal from ${c.principalFrom}`);
     for (const m of c.maps) this.emit(m, INDENT, [`${m.peer} -> ${m.machine}.${m.action}`]);
     this.out.push(`}${this.trail(c)}`);
   }

@@ -281,7 +281,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const inbound = opts.fault === 'channel-inbound-to-app' ? { to: 'application', action: p.peer.Message ?? Object.values(p.peer)[0] } : { to: 'conversation', action: 'Inbound' };
     // Review A-F1 (M8b): the fault channel-thread writes a thread key that reads one field fewer.
     const thread = opts.fault === 'channel-thread' ? { template: p.thread.fields.length > 1 ? `{${p.thread.fields[0]}}` : 'fixed', fields: p.thread.fields.slice(0, -1) } : p.thread;
-    files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending, ...(p.audience ? { audience: p.audience } : {}) }, null, 2) + '\n';
+    files[`../channels/${p.name}.json`] = JSON.stringify({ v: 1, channel: p.name, kind: p.kind, library: { module: p.library, digest: lib ? digest(lib) : null }, adapter: p.adapter, thread, application: `${module.name}.${m.name}`, conversation: `${p.module}.Conversation`, starts: p.starts, inbound, peer: p.peer, effectKind: p.effectKind, pending: p.pending, ...(p.audience ? { audience: p.audience } : {}), ...(p.principal ? { principal: p.principal } : {}) }, null, 2) + '\n';
   }
   // PT10r: each route a decision of this machine names has its descriptor, and so has the route's budget: what the
   // runtime reads to run the route's tiers, reserve, settle and record (PS18.2 to PS18.4). The broken lowerings change a
