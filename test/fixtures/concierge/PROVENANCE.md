@@ -12,4 +12,6 @@
 | `injection` | a message that tells the assistant to refund 500: it is data, the amount stays in its domain, and the policy still sends 500 to a person (IF3.3's rule, carried to the concierge) |
 | `vague-amount` | the amount decision is unsure (raw 300), so no refund is proposed |
 
+**Customers and orders (the status path, S450).** `customers` maps each sender to the principal its verified claims name (`wa-1` to `cust-a`, `wa-2` to `cust-b`), as the verifier adapter would (K11). `orders` seeds three orders of the two customers for the Postgres source. The status message's `answer` cites `o-1002`, one of `cust-a`'s; given another customer's orders, the recorded provider cites none, since a citation is a subset of what the decision was given (PS17.6), which AC22's tests read.
+
 **The tests' own numbers.** The probabilities and token counts are chosen to place each answer on the side of a threshold the program or the route names; the price tables and maps are the M11 fixture's (`test/fixtures/m11`), whose sources are the tests' own, not a provider's. The model ids are those tables' `model`.

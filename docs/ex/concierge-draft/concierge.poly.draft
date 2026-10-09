@@ -77,7 +77,6 @@ service machine Desk {
     question : Content   = none
     answer   : Content   = none
     large    : bool      = false
-    last     : Last      = Nothing
   }
 
   action Start()
@@ -193,33 +192,44 @@ service machine Desk {
   on AnswerFailed {
     require phase == Answering || phase == Citing else reject "not-answering"
     phase' = Idle
+    question' = none
   }
 
-  // A receipt is never rejected (PL5406): each is taken in every phase, and settles the send it reports.
+  // A receipt is never rejected (PL5406): each is taken in every phase, and settles the send it reports. A return to
+  // Idle clears the message and the reply, so an idle Desk is one state whatever it answered before.
   on Delivered {
-    last' = Sent
     if phase == Sending || phase == Templating {
       phase' = Idle
+      question' = none
+      answer' = none
+    } else {
+      phase' = phase
     }
   }
 
   // AC15: a free-form reply refused outside the window goes again as a template, once.
   on SendRejected(reason) {
-    last' = Refused
     if phase == Sending {
       phase' = Templating
       emit support.template(body: answer)
     } else {
       if phase == Templating {
         phase' = Idle
+        question' = none
+        answer' = none
+      } else {
+        phase' = phase
       }
     }
   }
 
   on SendFailed {
-    last' = Lost
     if phase == Sending || phase == Templating {
       phase' = Idle
+      question' = none
+      answer' = none
+    } else {
+      phase' = phase
     }
   }
 
