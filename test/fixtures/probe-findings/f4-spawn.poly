@@ -1,0 +1,25 @@
+// F4 (PS13.6): a spawn's creation action carries Plan's n, which may be 3, into Kid's Start, whose strict
+// domain is { 1, 2 }. PL5408 on Parent alone.
+module f4spawn
+
+machine Kid {
+  state { got : 0..2 = 0 }
+  terminal got > 0
+  action Start(size: int check { 1, 2 })
+  on Start(size) { require got == 0 else reject "started"  got' = size }
+}
+
+enum P { Idle, Busy, Done }
+
+machine Parent {
+  state { p : P = Idle }
+  terminal p == Done
+  action Plan(n: int check { 1, 2, 3 })
+  action Landed()
+  on Plan(n) {
+    require p == Idle else reject "busy"
+    p' = Busy
+    spawn Kid as box -> Start(size: n) on complete -> Landed
+  }
+  on Landed { require p == Busy else reject "idle"  p' = Done }
+}

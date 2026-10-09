@@ -1,0 +1,18 @@
+// F4 (PS13.6): the same send judged on Send alone, with no configuration. Send's Ref<Recv> field names
+// the receiver, so Pay's strict domain { 1, 2 } is known, and Go(3) sends outside it: PL5408 with the path.
+module f4alone
+
+service machine Recv {
+  state { paid : bool = false }
+  action Pay(a: int check { 1, 2 })
+  on Pay(a) { require !paid else reject "paid"  paid' = true }
+}
+
+enum S { Idle, Sent }
+
+machine Send {
+  state { s : S = Idle   r : Ref<Recv> = none }
+  terminal s == Sent
+  action Go(v: int check { 1, 2, 3 })
+  on Go(v) { require s == Idle else reject "sent"  s' = Sent  send r <- Pay(a: v) }
+}
