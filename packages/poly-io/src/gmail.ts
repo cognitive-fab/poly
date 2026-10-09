@@ -41,6 +41,12 @@ export interface GmailSourceConfig {
   store: MailStore;
   /** The most characters of a message's text kept; longer text is cut and marked. */
   maxBody?: number;
+  /**
+   * S451: the value of an item's `correspondent` key, from its sender's address, by a function the host gives (a keyed
+   * digest under a key it keeps), so no address becomes a key and enters the journal (S191). Without it the adapter
+   * gives no correspondent key, and a retrieval by correspondent is refused.
+   */
+  correspondentKey?: (address: string) => string;
 }
 
 /** What a sync found: the items not yet announced to the host, and whether the cursor had expired. */
@@ -102,6 +108,8 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
   };
 
   const itemKey = (id: string) => `item:${id}`;
+  /** S451: an item's keys. The message key is the item's id, the thread key `<label>/<thread id>`. */
+  const keysOf = (i: ItemRecord): Record<string, string> => ({ message: i.id, thread: i.thread, ...(c.correspondentKey && i.correspondent ? { correspondent: c.correspondentKey(i.correspondent) } : {}) });
   const cursorKey = (label: string) => `cursor:${label}`;
 
   /** The text a decision reads: the headers a person reads, then the message's text, bounded. */
@@ -210,8 +218,14 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
 
     async retrieve(q: SourceQuery): Promise<ItemRef[]> {
       if (!Number.isInteger(q.limit) || q.limit < 1) throw new Error(`a retrieval's limit is a positive integer, not ${JSON.stringify(q.limit)}`);
-      const items = await itemsOf(q.owner);
-      return items.slice(0, q.limit).map((i) => ({ id: i.id, owner: i.owner, asOf: i.asOf }));
+      // S451: one equality on a key the source declares; a key the adapter cannot give is refused, never ignored.
+      if (q.key !== undefined) {
+        if (!['message', 'thread', 'correspondent'].includes(q.key.name)) throw new Error(`${A}: a retrieval by the key ${JSON.stringify(q.key.name)}, which the source does not give (S451)`);
+        if (q.key.name === 'correspondent' && !c.correspondentKey) throw new Error(`${A}: a retrieval by correspondent, and the host gave no correspondentKey (S451)`);
+        if (typeof q.key.value !== 'string' || q.key.value === '') throw new Error(`${A}: a key's value is a non-empty string (PS1.4c)`);
+      }
+      const items = (await itemsOf(q.owner)).filter((i) => q.key === undefined || keysOf(i)[q.key.name] === q.key.value);
+      return items.slice(0, q.limit).map((i) => ({ id: i.id, owner: i.owner, asOf: i.asOf, keys: keysOf(i) }));
     },
 
     async resolve(id: string): Promise<string | null> {

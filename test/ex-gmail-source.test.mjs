@@ -59,8 +59,8 @@ test('S452: a first sync lists the inbox once, fetches each message raw, and rep
     assert.ok(!Object.keys(q.headers).some((h) => /authorization/i.test(h)));
   }
   assert.deepEqual(await s.retrieve({ owner: 'acct-work', limit: 5 }), [
-    { id: W.a03, owner: 'acct-work', asOf: 1791270000000 },
-    { id: W.a01, owner: 'acct-work', asOf: 1791191520000 },
+    { id: W.a03, owner: 'acct-work', asOf: 1791270000000, keys: { message: W.a03, thread: W.a03 } },
+    { id: W.a01, owner: 'acct-work', asOf: 1791191520000, keys: { message: W.a01, thread: W.a01 } },
   ]);
   const body = await s.resolve(W.a01);
   assert.match(body, /^From: Alice Moreau <alice@supplier\.example\.com>\nTo: Owner <owner@work\.example\.com>\nSubject: Invoice 4471 for the October delivery\nDate: /);
@@ -195,4 +195,29 @@ test('S452: a source may name the adapter "gmail"; poly-io makes it, so the chec
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
+});
+
+test('S451: each item gives its message and thread keys; a retrieval by key narrows to them; a correspondent key only through the host\'s keyed function', async () => {
+  const w = tape('work');
+  const keyed = (address) => `ck:${address.length}:${address.split('@')[1]}`;
+  const s = gmailSource({ accounts: [account('acct-work', 'work', replay([...w.initial, ...w.poll]))], store: memoryMailStore(), correspondentKey: keyed });
+  await s.announce((await s.sync('acct-work')).fresh.map((i) => i.id));
+  await s.sync('acct-work');
+  // The reply joins the first message's thread: a retrieval by that thread returns both, newest first.
+  const thread = await s.retrieve({ owner: 'acct-work', key: { name: 'thread', value: 'work/19a2f0c4d1e70a01' }, limit: 5 });
+  assert.deepEqual(thread.map((i) => i.id), [W.a02, W.a01]);
+  assert.ok(thread.every((i) => i.keys.thread === 'work/19a2f0c4d1e70a01'));
+  assert.deepEqual((await s.retrieve({ owner: 'acct-work', key: { name: 'message', value: W.a04 }, limit: 5 })).map((i) => i.id), [W.a04]);
+  // Another owner's thread key gives nothing (K14): a key narrows within the owner, never across.
+  assert.deepEqual(await s.retrieve({ owner: 'acct-home', key: { name: 'thread', value: 'work/19a2f0c4d1e70a01' }, limit: 5 }), []);
+  // The correspondent key is the host's keyed value, never the address.
+  const alice = await s.retrieve({ owner: 'acct-work', key: { name: 'correspondent', value: keyed('alice@supplier.example.com') }, limit: 5 });
+  assert.deepEqual(alice.map((i) => i.id), [W.a02, W.a01]);
+  assert.ok(!JSON.stringify(alice).includes('alice@'));
+  await assert.rejects(s.retrieve({ owner: 'acct-work', key: { name: 'subject', value: 'x' }, limit: 5 }), /does not give/);
+  await assert.rejects(s.retrieve({ owner: 'acct-work', key: { name: 'thread', value: '' }, limit: 5 }), /non-empty/);
+  const plain = gmailSource({ accounts: [account('acct-work', 'work', replay(w.initial))], store: memoryMailStore() });
+  await plain.sync('acct-work');
+  assert.ok((await plain.retrieve({ owner: 'acct-work', limit: 5 })).every((i) => !('correspondent' in i.keys)));
+  await assert.rejects(plain.retrieve({ owner: 'acct-work', key: { name: 'correspondent', value: 'x' }, limit: 5 }), /correspondentKey/);
 });
