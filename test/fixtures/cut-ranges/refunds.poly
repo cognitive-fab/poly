@@ -1,0 +1,28 @@
+// S458, PS4.1h: a range parameter read only against a constant and passed unchanged into an effect's payload.
+// Ask.amount is compared with 100 and emitted as it is, so check offers it at {0, 101} only. The runtime still
+// accepts every value of 0..500 and refuses 501 (PS3.2, S400). The tests derive their variants from this file.
+module cut
+
+machine Refunds {
+  state {
+    n   : 0..2 = 0
+    big : bool = false
+  }
+  terminal n == 2
+
+  action Ask(amount: 0..500)
+
+  on Ask(amount) {
+    require n < 2 else reject "full"
+    n' = n + 1
+    if amount > 100 {
+      big' = true
+    }
+    emit refund(amount)
+  }
+
+  effect refund(amount: 0..500) {
+    kind "pay.refund"
+    labels { write:store }
+  }
+}
