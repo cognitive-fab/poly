@@ -69,13 +69,8 @@ test('each error source raises exactly the code it names', () => {
   assert.deepEqual(routed.filter((c) => !seen.has(c)), []);
 });
 
-test('every example checks with no diagnostic, liveness included (M1-2)', () => {
-  for (const f of polyFiles(join(ROOT, 'examples'))) {
-    const src = readFileSync(f, 'utf8');
-    // The OutboxIntent forms state `settles`: since M1-2 the checker accepts it, and the pipeline lists it as not run.
-    assert.deepEqual(codesOf(src), [], f);
-  }
-});
+// S459 (c): every example is checked with no diagnostic in test/examples-check.test.mjs, which resolves its uses,
+// provider profiles and route files as poly check does; checkModule alone here has no std, profiles or route files.
 
 test('S15: a parameter is readable in a property only where `action == A` establishes it', () => {
   const src = (prop: string) => `module t\nmachine M {\n  state { x : 0..3 = 0 }\n  action Pay(amount: 0..3)\n  action Other()\n  on Pay(amount) { x' = amount }\n  on Other { x' = 0 }\n  ${prop}\n}\n`;
