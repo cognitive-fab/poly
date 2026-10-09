@@ -1,0 +1,52 @@
+// S454 (PS18.4a, PT10r): a writer whose draft is an unrouted decision under a monthly budget. The decision names its
+// provider, its price table and both token limits, and the budget it reserves on: 2000 input tokens at 0.10 and 4000
+// output at 0.40 per million reserve 1,800 micro-units, so a cap of 0.004 usd a month holds two calls' reservations
+// and not three. The price table beside it is the tests' own, not a provider's.
+module writer
+
+enum Tone { Plain, Warm, Other }
+
+enum DraftStatus { New, Writing, Written, Unwritten }
+
+machine Draft {
+  state {
+    status : DraftStatus = New
+  }
+
+  terminal status in { Written, Unwritten }
+
+  action Requested(text: string check { "draft a reply" })
+  action Wrote(tone: Tone, conf: Conf, margin: Conf)
+  action NotWritten()
+
+  on Requested(text) {
+    require status == New else reject "not-new"
+    status' = Writing
+    decide draft(text)
+  }
+
+  on Wrote(tone, conf, margin) {
+    require status == Writing else reject "not-writing"
+    status' = Written
+  }
+
+  on NotWritten {
+    require status == Writing else reject "not-writing"
+    status' = Unwritten
+  }
+
+  decision draft(text: string) -> Tone {
+    provider "flash"
+    prices "prices/flash.json" max input tokens 2000 max tokens 4000 budget monthly
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Wrote(tone: r.answer, conf: r.conf, margin: r.margin)
+    failed -> NotWritten()
+  }
+
+  path property one-draft: count("decision.draft") <= 1
+}
+
+budget monthly {
+  cap usd 0.004 per month
+}
