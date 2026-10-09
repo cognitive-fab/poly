@@ -1,0 +1,54 @@
+// expect: PL6830 (a draft's envelope written by a model's answer: the recipient would be the model's choice, PS17.3a, S459)
+module errors
+
+audience { public < account }
+
+source mail: records {
+  adapter "postgres"
+  audience account owned
+  freshness 1h
+  keys { thread }
+  envelope thread
+}
+
+machine Replier {
+  state {
+    account : Principal = none
+    busy    : bool      = false
+  }
+
+  action Reply(question: Content)
+  action Written(text: Content)
+  action WriteFailed()
+
+  on Reply(question) {
+    require !busy else reject "busy"
+    busy' = true
+    decide write(question: question)
+  }
+
+  on Written(text) {
+    busy' = false
+    emit draft(account: account, e: text, body: text)
+  }
+
+  on WriteFailed {
+    busy' = false
+  }
+
+  decision write(question: Content) -> Content {
+    provider "flash"
+    labels { egress:external }
+    timeout 2s
+    ok(r) -> Written(text: r.answer)
+    failed -> WriteFailed()
+  }
+
+  effect draft(account: Principal, e: Content, body: Content) {
+    kind "mail.draft"
+    labels { egress:external }
+    to account
+    audience public
+    envelope e
+  }
+}
