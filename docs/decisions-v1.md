@@ -230,3 +230,25 @@ The round above is accepted, with three additions.
 - **The one-value rule of b6318b4c applies only when nothing reads the principal:** no handler, no policy and no `principal from`. A test checks a thread that uses `principal from` and is explored with full representatives.
 
 Same method: the PS and PT text first, then tests written from the text alone, then the code.
+
+## S456, S457, the S454 embedded form and the one-value rule, built
+
+Each item got its PS or PT text first. Subagents that read only `docs/`, `test/` and `std/` then wrote its tests, and each test file failed on the code before it. The code came last.
+
+| Item | Text | Tests | Code |
+|---|---|---|---|
+| S456 and the PL6838 fix | f0fa3d3f | 71970792 (9; 5 failed before) | 0554c5f7 |
+| S457, a person's credential with no holder | 51d0f5b3 | 575f3522 (7; 5 failed before) | 38910d5e |
+| S454's embedded form | a3e6084b, 5b6af3a9 | 575f3522 (8; 6 failed before) | ca1c15b0 |
+| The one-value rule | 828eadb5 | 575f3522 (6; 1 failed before) | ccf1f566 |
+
+**Decided under the plan's rules, recorded:**
+
+- **S456.** The joint configuration completes the application's intents in the same way, since PS15.5 makes it a model of the run as much as each channel's own configuration is. A completion's step takes one pending taint of its kind with it in the flow rule's exploration, so the PS17.3 branch no longer offers that application's completions on its own. PL6838 counts a conversation both by its address (`m.c.Conversation`, which a send names) and by its machine's last name (which a spawn names). The first build counted only the last name, and the test written from the text caught it.
+- **S457.** Only a person's signed grant request creates the one grant, so `rt.requestGrant(c, null)` is refused until a request has fixed the holder. Holding the grant back fails closed: it is never granted to a holder no record names. A request that names the same holder asks again, as `rt.requestGrant` does. The holder's keyed digest is in `poly_grant_holder`, and a refusal's journal entry and reason file never name the holder.
+- **S454.** The first text named `PL0001` for an option the embedded reader refuses. The embedded surface reports every form outside its subset as `PL0301` (PT2), so 5b6af3a9 corrected the text, and the test now follows it.
+- **The one-value rule.** No policy reads a `Principal` field of claims: the policy checker's `step.claims` and `lineage.origin` fields leave it out. So "no policy" holds for every program. The machine-alone exploration of a conversation whose channel declares `principal from` is now done with every representative. Its configurations already were.
+
+**Suite.** At 0554c5f7: 2,220 tests and 6 in the after group. All passed except 2 skipped and 4 waiting, with no failure; check-memory passed (`.poly/logs/0554c5f7-2026-10-09T10-21-36-744Z-w2.log`). No other suite ran.
+
+**Measured verdicts.** Against `docs/v1/verdicts-after-rulings.json`, all 160 files have identical verdicts and counts. None of them has a channel application that answers through a decision or an effect, and none has a conversation whose channel declares `principal from`. So no new record is kept.
