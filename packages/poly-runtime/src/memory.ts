@@ -5,7 +5,8 @@
 import { createHash } from 'node:crypto';
 import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
 import type { LedgerStore } from './ledger-store.js';
-import type { ItemRef, SourceAdapter } from './adapters.js';
+import { canonicalize } from '@poly/core';
+import type { EnvelopeAnswer, ItemRef, SourceAdapter } from './adapters.js';
 
 /**
  * PS17.1: a class's index in the audience order, and the owners, principals as the runtime holds them, sorted. S326: a
@@ -87,6 +88,10 @@ CREATE TABLE IF NOT EXISTS poly_items (
   kept   TEXT,
   asof   INTEGER,
   items  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS poly_envelope (
+  digest TEXT PRIMARY KEY,
+  source TEXT NOT NULL
 );
 `;
 
@@ -371,6 +376,62 @@ export class Memory {
     let ref!: { ref: string; count: number };
     await this.store.txn(() => { ref = this.keepItems(source, items, intent, d.owned && spec.owner === null); });
     return { items: ref };
+  }
+
+  /**
+   * PS17.2, PT10j (S459): an envelope retrieval, run by the runtime. The adapter gives the envelope of a reply to the
+   * newest item with the key's value (and the owner's, with `where owner == p`). Each wrong answer is refused, and
+   * retried no more: an adapter with no envelope method, an answer of another owner or of none on an owned source
+   * (K14), a `to` that is empty, a value holding CR or LF (a header written into another), a `references` that is no
+   * list of strings. null fails the retrieval and may be retried: the item may not be there yet. The body is the RFC
+   * 8785 canonical JSON of the envelope, kept erasable with the taint a retrieval of the source with the same owner
+   * predicate has, and its digest is recorded as an envelope of the source, which the origin check reads (PS17.3a).
+   */
+  async envelope(source: string, spec: { owner: string | null; key: { name: string; param: string } }, payload: Record<string, unknown>): Promise<{ envelope: string }> {
+    const d = this.sources.get(source);
+    if (!d) throw new SourceRefused(`no source ${source} in the certified build`);
+    const owner = spec.owner === null ? undefined : payload[spec.owner];
+    if (spec.owner !== null && typeof owner !== 'string') throw new SourceRefused(`the envelope retrieval from ${source} names no owner`);
+    const value = spec.key ? payload[spec.key.param] : undefined;
+    if (typeof value !== 'string' || value === '') throw new SourceRefused(`the envelope retrieval from ${source} names no ${spec.key?.name ?? ''} key (S459)`);
+    // PS17.0: the project's memory names no adapter and gives no envelope.
+    const adapter = d.kind === 'memory' ? null : this.adapters.get(source);
+    if (d.kind !== 'memory' && !adapter) throw new Error(`source ${source} has no adapter connected (PT26): connect one with rt.connectSource`);
+    if (!adapter || typeof adapter.envelope !== 'function') throw new SourceRefused(`source ${source}'s adapter gives no envelope (S459)`);
+    const got: EnvelopeAnswer | null = await adapter.envelope({ ...(owner !== undefined ? { owner: owner as string } : {}), key: { name: spec.key.name, value } });
+    // PT10j: null fails the retrieval, its failed completion, as for any refusal: with no item there is no reply to address.
+    if (got === null) throw new SourceRefused(`source ${source} holds no item whose ${spec.key.name} key is the one asked, so there is no envelope (S459)`);
+    if (!got || typeof got !== 'object' || typeof got.id !== 'string' || !Number.isFinite(got.asOf)) throw new SourceRefused(`source ${source} answered an envelope with no id or asOf (K14)`);
+    if (d.owned && typeof got.owner !== 'string') throw new SourceRefused(`source ${source} is owned, and answered an envelope of no owner (K14)`);
+    if (owner !== undefined && got.owner !== owner) throw new SourceRefused(`source ${source} answered an envelope of another owner for a retrieval by owner (K14)`);
+    const e = got.envelope as Partial<EnvelopeAnswer['envelope']> | null | undefined;
+    if (!e || typeof e !== 'object') throw new SourceRefused(`source ${source} answered no envelope (S459)`);
+    if (typeof e.to !== 'string' || e.to.trim() === '') throw new SourceRefused(`source ${source} answered an envelope whose recipient is empty (S459)`);
+    if (typeof e.subject !== 'string') throw new SourceRefused(`source ${source} answered an envelope with no subject (S459)`);
+    if (e.inReplyTo !== null && typeof e.inReplyTo !== 'string') throw new SourceRefused(`source ${source} answered an envelope whose inReplyTo is neither a string nor null (S459)`);
+    if (!Array.isArray(e.references) || e.references.some((r) => typeof r !== 'string')) throw new SourceRefused(`source ${source} answered an envelope whose references are not a list of strings (S459)`);
+    const values = [e.to, e.subject, ...(e.inReplyTo === null ? [] : [e.inReplyTo]), ...e.references];
+    if (values.some((v) => /[\r\n]/.test(v))) throw new SourceRefused(`source ${source} answered an envelope holding a carriage return or a line feed, a header written into another (S459)`);
+    // Only the four fields are kept, so nothing else the adapter answered rides in the body a handler reads.
+    const body = canonicalize({ inReplyTo: e.inReplyTo, references: [...e.references], subject: e.subject, to: e.to });
+    // PS17.2: the taint a retrieval of the source with the same owner predicate has. S326: with no owner predicate on an
+    // owned source it is Ω, and the real owner is kept for a forget.
+    const real = d.owned && typeof got.owner === 'string' ? [got.owner] : [];
+    const t: Taint = !d.owned ? { c: d.class, o: [] } : owner !== undefined ? { c: d.class, o: [owner as string] } : { c: d.class, o: [OMEGA], k: real };
+    const digest = `sha256:${createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex')}`;
+    // Review B3: the body, its taint, its source and its envelope record are kept in one transaction.
+    await this.store.txn(() => {
+      this.store.keepErasable(digest, body);
+      this.taint(digest, t);
+      this.fromSource(digest, source);
+      this.store.db.prepare('INSERT OR IGNORE INTO poly_envelope (digest, source) VALUES (?, ?)').run(digest, source);
+    });
+    return { envelope: digest };
+  }
+
+  /** PS17.3a (S459): whether a value is the digest of a body the runtime stored as an envelope. */
+  isEnvelope(v: unknown): boolean {
+    return typeof v === 'string' && DIGEST.test(v) && !!this.store.db.prepare('SELECT 1 FROM poly_envelope WHERE digest = ?').get(v);
   }
 
   /**

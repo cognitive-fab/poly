@@ -6,7 +6,7 @@
 //   postgres:   over the host's query function, parameterized SQL only, so no driver enters poly.
 //   opensearch: the OpenSearch REST API (_search, _doc, _delete_by_query), as its documentation gives it, over an HTTP
 //               transport the host or a test gives, so a test replays recorded traffic.
-import type { HttpTransport, ItemRef, PgQuery, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
+import type { EnvelopeAnswer, EnvelopeQuery, HttpTransport, ItemRef, PgQuery, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
 import { made, oneLine } from './util.js';
 
 /** A SQL identifier or an OpenSearch field name written into a query: letters, digits and underscores only. */
@@ -69,7 +69,27 @@ export interface PostgresSourceConfig {
   body: string;
   /** S451: the column of each key the source declares, by key name. */
   keys?: Record<string, string>;
+  /**
+   * PT10j (S459): for a source that declares `envelope k`, the columns of a row's sender, subject, message id and,
+   * optionally, references. A references column is a `text[]` (which the driver gives as an array) or a text of message
+   * ids separated by white space, as the References header writes them (RFC 5322 3.6.4); both are read.
+   */
+  envelope?: { from: string; subject: string; messageId: string; references?: string };
 }
+
+/** S459: a row's references, as an array column or as white-space separated text; none is an empty list. */
+const referencesOf = (adapter: string, v: unknown): string[] => {
+  if (v === null || v === undefined) return [];
+  if (Array.isArray(v)) return v.filter((x) => x !== null && x !== undefined).map((x) => String(x));
+  if (typeof v === 'string') return v.split(/\s+/).filter((x) => x !== '');
+  throw new Error(`${adapter}: a references column holds an array or a text, not ${typeof v}`);
+};
+
+/**
+ * S459: a reply's subject: the row's, with `Re: ` before it unless it already starts with `re: ` in any case, since mail
+ * clients write `RE: ` and `re: ` as well and a second prefix would grow the subject with each reply.
+ */
+const replySubject = (s: string): string => (/^re: /i.test(s) ? s : `Re: ${s}`);
 
 /** S308: a Postgres source over the host's query function. Every query is parameterized; only checked names are written. */
 export function postgresSource(c: PostgresSourceConfig): SourceAdapter {
@@ -81,9 +101,43 @@ export function postgresSource(c: PostgresSourceConfig): SourceAdapter {
   const body = name(A, 'body column', c.body);
   const keys = keysOf(A, c.keys);
   if (typeof c.query !== 'function') throw new Error(`${A}: query is the host's function (text, params) (S308)`);
+  if (c.envelope !== undefined && (c.envelope === null || typeof c.envelope !== 'object' || Array.isArray(c.envelope))) throw new Error(`${A}: envelope is an object of the from, subject, messageId and references columns (S459)`);
+  const env = c.envelope === undefined ? null : {
+    from: name(A, 'envelope from column', c.envelope.from),
+    subject: name(A, 'envelope subject column', c.envelope.subject),
+    messageId: name(A, 'envelope messageId column', c.envelope.messageId),
+    references: c.envelope.references === undefined ? null : name(A, 'envelope references column', c.envelope.references),
+  };
   const q = (s: string) => `"${s}"`;
+  // PT10j (S459): only an adapter given the envelope columns gives envelopes; one without them has no envelope method,
+  // which the runtime refuses.
+  const envelope = env === null ? {} : {
+    async envelope(query: EnvelopeQuery): Promise<EnvelopeAnswer | null> {
+      if (query.owner !== undefined && !owner) throw new Error(`${A}: an envelope retrieval by owner from a table with no owner column (PL6835 at run time)`);
+      // The key and the owner are each an equality with a parameter, never text, as a retrieval's are (S451).
+      const key = keyField(A, keys, { key: query.key, limit: 1 })!;
+      const params: unknown[] = [query.key.value];
+      const eqs = [`${q(key)} = $1`];
+      if (query.owner !== undefined) { params.push(query.owner); eqs.push(`${q(owner!)} = $${params.length}`); }
+      const cols = `${q(id)} AS id, ${owner ? `${q(owner)} AS owner` : 'NULL AS owner'}, ${q(asOf)} AS as_of, ${q(env.from)} AS env_from, ${q(env.subject)} AS env_subject, ${q(env.messageId)} AS env_message_id${env.references ? `, ${q(env.references)} AS env_references` : ''}`;
+      const r = await c.query(`SELECT ${cols} FROM ${q(table)} WHERE ${eqs.join(' AND ')} ORDER BY ${q(asOf)} DESC LIMIT 1`, params);
+      const row = r.rows[0];
+      if (!row) return null;
+      const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+      const messageId = row.env_message_id === null || row.env_message_id === undefined ? null : String(row.env_message_id);
+      // The reply's References are the row's with its own message id after them (RFC 5322 3.6.4).
+      const references = [...(env.references ? referencesOf(A, row.env_references) : []), ...(messageId === null ? [] : [messageId])];
+      return {
+        id: String(row.id),
+        owner: owner ? (row.owner === null || row.owner === undefined ? null : String(row.owner)) : null,
+        asOf: asOfMs(A, row.as_of),
+        envelope: { to: str(row.env_from), subject: replySubject(str(row.env_subject)), inReplyTo: messageId, references },
+      };
+    },
+  };
   return made({
     kind: 'postgres' as const,
+    ...envelope,
     async retrieve(query: SourceQuery): Promise<ItemRef[]> {
       const limit = limitOf(query);
       const cols = `${q(id)} AS id, ${owner ? `${q(owner)} AS owner` : 'NULL AS owner'}, ${q(asOf)} AS as_of${keys.map(([, f], i) => `, ${q(f)} AS key_${i}`).join('')}`;

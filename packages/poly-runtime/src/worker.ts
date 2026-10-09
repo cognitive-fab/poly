@@ -110,6 +110,11 @@ export interface WorkerOptions {
    * field `credential` and the grant instance's sequence number the allow reads; null for an effect with no `uses`.
    */
   grantCheck?: (row: OutboxRow, decl: any) => { deny: string; reads?: Record<string, number> } | { credential: NonNullable<Proposal['credential']>; reads: Record<string, number> } | null;
+  /**
+   * PS17.3a, PT10j (S459): the origin check of an effect whose manifest entry names an envelope, before the memory
+   * check: a final refusal `envelope-origin`, whatever a policy says, or null.
+   */
+  envelopeCheck?: (row: OutboxRow, decl: any) => { deny: string } | null;
   /** PT10k (S302, S307): the memory check, before the grant check: a final refusal, an escalation, or the proposal's fields. */
   memoryCheck?: (row: OutboxRow, decl: any, approved: boolean) => { deny: string } | { escalate: string; fields: Pick<Proposal, 'taint' | 'items'> } | { fields: Pick<Proposal, 'taint' | 'items'> } | null;
   /**
@@ -434,7 +439,9 @@ export class EffectWorker {
           const d = st.intent_decision!;
           const approval = d === 2 ? this.lastApproval(row) : undefined;
           const { proposal, snapshot } = await this.proposalOf(row, decl, approval, st.intent_rechecks ?? 0);
-          // PT10k, S302: the memory check comes first: the flow rule and freshness; its refusal is final whatever a policy says.
+          // PS17.3a (S459): the envelope's origin is checked before anything else; its refusal is final, fail closed.
+          const origin = this.opts.envelopeCheck?.(row, decl) ?? null;
+          // PT10k, S302: the memory check comes next: the flow rule and freshness; its refusal is final whatever a policy says.
           // Review B1: an approval lets stale items through only when the escalation it approved was stale-items; after
           // any other, a stale re-proposal escalates, which rule 2 of PT9.7 denies escalate-once.
           const mem = this.opts.memoryCheck?.(row, decl, d === 2 && this.lastEscalation(row) === 'stale-items') ?? null;
@@ -448,7 +455,7 @@ export class EffectWorker {
           if (grant && 'credential' in grant) proposal.credential = grant.credential;
           let g: GateDecision;
           try {
-            g = mem && 'deny' in mem ? { decision: 'deny', reason: mem.deny } : mem && 'escalate' in mem ? { decision: 'escalate', reason: String(mem.escalate) }
+            g = origin ? { decision: 'deny', reason: origin.deny } : mem && 'deny' in mem ? { decision: 'deny', reason: mem.deny } : mem && 'escalate' in mem ? { decision: 'escalate', reason: String(mem.escalate) }
               : budget && 'refuse' in budget ? (budget.refuse === 'escalate' ? { decision: 'escalate', reason: 'budget' } : { decision: 'deny', reason: 'budget' })
               : grant && 'deny' in grant ? { decision: 'deny', reason: grant.deny, ...(grant.reads ? { reads: grant.reads } : {}) }
               : this.opts.outsideMandate?.(row) ? { decision: 'deny', reason: 'outside-mandate' } : await this.gate.propose(proposal, snapshot, approval ? await this.laterOf(row, proposal) : undefined);

@@ -300,8 +300,8 @@ export class LedgerStore extends Store {
       if (machine && this.decisionCompletions(machine).has(row.action)) {
         const m = /^(.+):(done|failed|exhausted)$/.exec(row.actionId);
         const intent = m ? this.db.prepare('SELECT kind FROM pr_outbox WHERE intent_id = ? AND instance_id = ?').get(m[1], row.instanceId) : null;
-        // PS17.4: and a retrieval's, which only the runtime runs.
-        const byWorker = typeof intent?.kind === 'string' && (intent.kind.startsWith('decision.') || /^source\.[^.]+\.retrieve$/.test(intent.kind));
+        // PS17.4: and a retrieval's, which only the runtime runs; an envelope retrieval's too (PS17.2, S459).
+        const byWorker = typeof intent?.kind === 'string' && (intent.kind.startsWith('decision.') || /^source\.[^.]+\.(retrieve|envelope)$/.test(intent.kind));
         const byWitness = this.allowWitnessCompletions && row.actionId.startsWith('witness:');
         if (!byWorker && !byWitness) {
           const e = new DecisionCompletionRefused(`K10: '${row.action}' completes a decision of '${row.instanceId}', and only the outbox worker delivers it (action id ${row.actionId})`, row.instanceId, row.action, row.actionId);

@@ -191,7 +191,22 @@ export interface SourceAdapter {
   retrieve(q: SourceQuery): Promise<ItemRef[]>;
   resolve(id: string): Promise<string | null>;
   forget(subject: string): Promise<{ removed: number }>;
+  /**
+   * PS17.0, PS17.2, PT10j (S459): the envelope of a reply to the newest item whose key `key.name` is `key.value` (and,
+   * when given, whose owner is `owner`), each a parameter, never text; null when there is none. Only a source that
+   * declares `envelope k` is asked, and an adapter without this method is refused permanently.
+   */
+  envelope?(q: EnvelopeQuery): Promise<EnvelopeAnswer | null>;
 }
+
+/** S459: an envelope retrieval's query: the owner predicate's value, when there is one, and the key's. */
+export interface EnvelopeQuery { owner?: string; key: { name: string; value: string } }
+
+/** S459: a reply's recipient, subject and threading headers (In-Reply-To, References), as the source gives them. */
+export interface Envelope { to: string; subject: string; inReplyTo: string | null; references: string[] }
+
+/** S459: the item the envelope replies to, with its owner and asOf (K14), and the envelope itself. */
+export interface EnvelopeAnswer { id: string; owner: string | null; asOf: number; envelope: Envelope }
 
 /** The host's query function for Postgres (S308): parameterized text and its values; no driver enters poly. */
 export type PgQuery = (text: string, params: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;

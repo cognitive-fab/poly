@@ -10,7 +10,7 @@
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
-import { capabilitiesFor, type ApiTransport, type Transports } from './capabilities.js';
+import { capabilitiesFor, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
 import type { ChannelAdapter, ChannelTransports, IngressAnswer, SourceAdapter, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,7 +29,7 @@ import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionMemory, type DecisionRecord, type Provider, type ProviderConfig } from './provider.js';
-import { Memory, BOTTOM, type Taint } from './memory.js';
+import { Memory, BOTTOM, DIGEST, type Taint } from './memory.js';
 import { RoutingHost } from './routing.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, evidenceOf, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
@@ -230,8 +230,15 @@ export class PolyRuntime {
     // PS17.2: a retrieval is the runtime's own effect, run through its source's certified adapter.
     for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
       if (!e?.retrieve) continue;
-      const spec = e.retrieve as { source: string; owner: string | null; key?: { name: string; param: string }; limit: number };
-      builtins[kind] = (payload, _caps, ctx) => this.memory.retrieve(spec.source, spec, (payload ?? {}) as Record<string, unknown>, ctx.idempotencyKey);
+      const spec = e.retrieve as { source: string; owner: string | null; key?: { name: string; param: string }; limit: number; envelope?: boolean };
+      // PS17.2, S459: an envelope retrieval, of kind source.<s>.envelope, completes with its body's digest as r.envelope.
+      if (spec.envelope === true) {
+        if (!spec.key) throw new LoadError(`refused at load: the envelope retrieval ${kind} names no key (PT10j, S459)`);
+        const key = spec.key;
+        builtins[kind] = (payload) => this.memory.envelope(spec.source, { owner: spec.owner, key }, (payload ?? {}) as Record<string, unknown>);
+        continue;
+      }
+      builtins[kind] =(payload, _caps, ctx) => this.memory.retrieve(spec.source, spec, (payload ?? {}) as Record<string, unknown>, ctx.idempotencyKey);
     }
     // PS17.5: a remember is the runtime's own effect too, writing to the project's memory.
     for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
@@ -265,13 +272,22 @@ export class PolyRuntime {
       },
       capabilities: (row, decl) => capabilitiesFor(decl ?? {}, opts.transports ?? {}, async (reason) => {
         await this.store.insertAudit({ at: this.now(), instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule: 'PL6406', reason });
-      }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>)),
+      }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>), this.#contentFor(row)),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
       // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a
       // keyed digest (never the address itself, G10), its class (external in M8, S181), and the message kind it carries.
       outsideMandate: (row) => this.outsideMandate(row.instance_id, row.seq, row.kind, (row.payload ?? {}) as Record<string, unknown>),
       grantCheck: (row, decl) => this.grantCheck(row.instance_id, decl, (row.payload ?? {}) as Record<string, unknown>),
+      // PS17.3a, PT10j (S459): an effect whose entry names an envelope parameter sends only with an envelope the runtime
+      // stored from its source; none, or any other value, is denied envelope-origin, before the memory check.
+      envelopeCheck: (row, decl) => {
+        const e = decl?.envelope;
+        if (e === undefined || e === null) return null;
+        // An entry's envelope that is no parameter name is denied too: fail closed.
+        const v = typeof e === 'string' ? ((row.payload ?? {}) as Record<string, unknown>)[e] : undefined;
+        return this.memory.isEnvelope(v) ? null : { deny: 'envelope-origin' };
+      },
       // PT10k (S302, S307): the flow rule and freshness, before the grant check and the policy.
       memoryCheck: (row, decl, approved) => {
         if (!this.memory.flows.size) return null;
@@ -1157,8 +1173,8 @@ export class PolyRuntime {
     // Review B2: a decision's handler is the provider host's, which keeps the record its completion commits with.
     if (kind.startsWith('decision.')) throw new Error(`${kind} is a decision: register its provider with rt.provide, never rt.handle (PD2.2, K10)`);
     if (kind.startsWith('outcome.')) throw new Error(`${kind} is an adjudication's outcome, handled by the runtime itself (PD2.4)`);
-    // PS17.2, PS17.5: a retrieval and a remember are the runtime's own.
-    if (/^source\.[^.]+\.(retrieve|remember)$/.test(kind)) throw new Error(`${kind} reads or writes a source: the runtime runs it through the source's certified adapter, connected with rt.connectSource (PS17.2)`);
+    // PS17.2, PS17.5: a retrieval and a remember are the runtime's own, and so is an envelope retrieval (S459).
+    if (/^source\.[^.]+\.(retrieve|remember|envelope)$/.test(kind)) throw new Error(`${kind} reads or writes a source: the runtime runs it through the source's certified adapter, connected with rt.connectSource (PS17.2)`);
     // Review D-F3 (M8b): a channel's send runs only through its certified adapter (S182).
     if (/^channel\.[^.]+\.send$/.test(kind)) throw new Error(`${kind} is a channel's send: connect its certified adapter with rt.connectChannel, never rt.handle (PT21.5, S182)`);
     // S142: only an export of a certified handler file, as this runtime loaded it, by identity. The same file imported
@@ -1369,6 +1385,25 @@ export class PolyRuntime {
     const d = `sha256:${createHash('sha256').update(Buffer.from(body, 'utf8')).digest('hex')}`;
     await this.store.txn(() => { this.store.keepErasable(d, body); this.memory.taint(d, taint); if (source) this.memory.fromSource(d, source); });
     return d;
+  }
+
+  /**
+   * PS17.4a (S459): what content.read of one intent's handler is bound to: the Content values of the intent's own payload
+   * (each payload value that is a body's digest, as the flow check reads them), how a body is read, and how a read is
+   * recorded on runtime:content, by its digest and the intent, never the body. None when the payload holds no Content.
+   */
+  #contentFor(row: { intent_id: string; payload?: unknown }): ContentAccess | undefined {
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const digests = [...new Set(Object.values(payload).filter((v): v is string => typeof v === 'string' && DIGEST.test(v)))];
+    if (!digests.length) return undefined;
+    return {
+      digests,
+      body: async (d) => (this.store.erased(d) ? null : this.contentBody(d)),
+      recorded: async (d) => {
+        this.store.ensureRun(CONTENT_RUN, 'runtime', 'content');
+        await this.store.txn(() => { this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'read', intent: row.intent_id, digest: d }, this.now()); });
+      },
+    };
   }
 
   /** S180: the body a Content names, or null when the store holds none. */

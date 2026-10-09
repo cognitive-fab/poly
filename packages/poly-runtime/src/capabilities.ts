@@ -30,6 +30,22 @@ export interface CapabilityDecl { labels?: string[]; targets?: Record<string, Ta
 /** PT22.5, S201: the vault's transport for the intent's grant: the credential is attached inside the vault adapter. */
 export interface ApiTransport { request(r: { method: 'GET' | 'POST'; url: string; headers: Record<string, string>; body: string }): Promise<{ status: number; headers: Record<string, string>; body: string }> }
 
+/**
+ * PS17.4a (S459): what content.read is bound to for one intent: the Content values of its own payload, the store's read
+ * of a body (null when there is none, or it was erased), and the record of a read, by digest and intent.
+ */
+export interface ContentAccess { digests: readonly string[]; body(d: string): Promise<string | null>; recorded(d: string): Promise<void> }
+
+/**
+ * PS17.4a, PS17.7: a body erased since the intent was emitted; it is never stored again (S205), so a retry reads
+ * nothing more and the refusal is permanent.
+ */
+export class ContentMissing extends Error {
+  readonly permanent = true;
+  readonly reason = 'content-missing';
+  constructor(message: string) { super(message); this.name = 'ContentMissing'; }
+}
+
 /** Redirects followed before a request is given up; each hop is checked against the prefixes. */
 export const MAX_REDIRECTS = 5;
 
@@ -64,7 +80,7 @@ export function withinPrefix(url: string, prefixes: readonly Target[]): string |
  * The frozen capability object for one effect kind, for one call of its handler. `audit` writes the PL6406 row; it
  * is awaited before the refusal is thrown, so a refusal is in the ledger whatever the handler does with the error.
  */
-export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string) => Promise<void>, api?: ApiTransport): Readonly<Record<string, unknown>> {
+export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string) => Promise<void>, api?: ApiTransport, content?: ContentAccess): Readonly<Record<string, unknown>> {
   const targets = decl.targets ?? {};
   const refuse = async (reason: string): Promise<never> => { await audit(reason); throw new CapabilityRefused(`PL6406 CAPABILITY_REFUSED: ${reason}`); };
   const need = <K extends keyof Transports>(k: K): NonNullable<Transports[K]> => {
@@ -132,6 +148,20 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
     if (has(decl, 'read:store')) store.read = async (table: string, key: string) => { const bad = check('read', table); return bad ? refuse(bad) : need('store').read(table, key); };
     if (has(decl, 'write:store')) store.write = async (table: string, key: string, value: unknown) => { const bad = check('write', table); return bad ? refuse(bad) : need('store').write(table, key, value); };
     caps.store = Object.freeze(store);
+  }
+  // PS17.4a (S459): a handler reads the bodies of its own intent's payload and of nothing else. Any other digest is
+  // refused before the store is read, and audited; an erased body is refused content-missing; a read is recorded.
+  if (content && content.digests.length) {
+    const allowed = new Set(content.digests);
+    caps.content = Object.freeze({
+      read: async (d: string): Promise<string> => {
+        if (typeof d !== 'string' || !allowed.has(d)) return refuse(`content.read of ${String(d)}, which is not a Content of the intent's own payload`);
+        const b = await content.body(d);
+        if (b === null) throw new ContentMissing(`content-missing: the body of ${d} was erased (PS17.7)`);
+        await content.recorded(d);
+        return b;
+      },
+    });
   }
   return Object.freeze(caps);
 }
