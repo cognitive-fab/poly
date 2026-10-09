@@ -1,0 +1,24 @@
+{
+  "decision": "triage",
+  "version": 1,
+  "fittedFor": "opus-2026-08",
+  "points": [
+    [
+      0,
+      0
+    ],
+    [
+      500,
+      480
+    ],
+    [
+      800,
+      790
+    ],
+    [
+      950,
+      940
+    ]
+  ],
+  "digest": "sha256:e75401eedfce7ebc695d30bbef7463f39dfc5bd69a15dbc8b03c74a995c5edcc"
+}
