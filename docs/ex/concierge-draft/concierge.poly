@@ -1,0 +1,288 @@
+// The concierge, poly v1's release example (plan-ex.md E1; AC15, AC18, AC22, AC27, AC30). A small business answers its
+// customers on WhatsApp. A routed decision classifies each message from its body (S402): the small tier first, the
+// large one when the calibrated answer is unsure. A refund's amount is extracted by a typed decision with a strict
+// domain (AC30, PT28.3a), and the refund is issued through the merchant's delegated credential (PS16); the policy
+// escalates a refund above 100 to a person, and the host tells staff on Slack, where no message approves anything
+// (PF11.8). Every reply is written by a decision from the customer's message and the outcome, and goes back on the
+// thread's conversation, which keeps WhatsApp's window (AC15).
+//
+// Waiting for v1 (decisions-ex.md): the status path, which retrieves the customer's own orders and cites them, needs
+// the thread's principal (S450); the merchant comes from Bind until Q-EX6 is ruled.
+module concierge
+
+audience { public < customer < staff }
+
+enum Branch { Refund, Status, Other }
+
+// What a reply tells the customer; the decision that writes it reads this and the customer's message.
+enum Outcome { Refunded, Declined, Unsure, Status, Other }
+
+// AC30, PT28.3a: the extracted amount, a record of one field with a strict domain.
+type Amount = { value: 0..500 }
+
+enum Phase { Idle, Classifying, Extracting, Refunding, Answering, Sending, Templating }
+
+enum Last { Nothing, Sent, Refused, Lost }
+
+channel support: whatsapp {
+  adapter "whatsapp"
+  thread "{from}"
+  starts Desk.Start on inbound
+  Message -> Desk.Got
+  Delivered -> Desk.Delivered
+  Rejected -> Desk.SendRejected
+  Failed -> Desk.SendFailed
+}
+
+channel staff: slack {
+  adapter "slack"
+  thread "{channel}"
+  starts Notice.Start on inbound
+  Message -> Notice.Got
+  Delivered -> Notice.Delivered
+  Rejected -> Notice.SendRejected
+  Failed -> Notice.SendFailed
+}
+
+// S208: Stripe Connect, the platform's key in the vault and the merchant's account as the grant's subject.
+credential payments: oauth2 {
+  provider "stripe-connect"
+  grant authorization_code
+  scopes { read_write }
+  holder Principal
+}
+
+// Desk: one per customer's WhatsApp thread. One message is worked on at a time; another that arrives meanwhile is
+// refused "busy" and waits in the conversation, which keeps at most two (std.channels.whatsapp).
+service machine Desk {
+  state {
+    phase    : Phase     = Idle
+    started  : bool      = false
+    question : Content   = none
+    answer   : Content   = none
+    merchant : Principal = none
+    large    : bool      = false
+    last     : Last      = Nothing
+  }
+
+  action Start()
+  action Bind(m: Principal)
+  action Got(body: Content)
+  action Classified(branch: Branch, conf: Conf, margin: Conf)
+  action Unclassified()
+  action Amounted(value: 0..500, conf: Conf)
+  action Unextracted()
+  action Refunded()
+  action RefundFailed()
+  action Answered(text: Content)
+  action AnswerFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+
+  // Q-EX6, provisional: the host names the merchant once per thread.
+  on Bind(m) {
+    require merchant == none else reject "bound"
+    require m != none else reject "no-merchant"
+    merchant' = m
+  }
+
+  on Got(body) {
+    require phase == Idle else reject "busy"
+    phase' = Classifying
+    question' = body
+    decide classify(body: body)
+  }
+
+  on Classified(branch, conf, margin) {
+    require phase == Classifying else reject "not-classifying"
+    if branch == Refund {
+      phase' = Extracting
+      decide amount(text: question)
+    } else {
+      phase' = Answering
+      if branch == Status {
+        decide reply(question: question, outcome: Status)
+      } else {
+        decide reply(question: question, outcome: Other)
+      }
+    }
+  }
+
+  on Unclassified {
+    require phase == Classifying else reject "not-classifying"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  // AC30: the amount reaches the program only as a value of 0..500; an answer outside it never reaches this handler.
+  on Amounted(value, conf) {
+    require phase == Extracting else reject "not-extracting"
+    if conf >= 0.8 && merchant != none {
+      phase' = Refunding
+      large' = value > 100
+      emit refund(merchant: merchant, amount: value)
+    } else {
+      phase' = Answering
+      decide reply(question: question, outcome: Unsure)
+    }
+  }
+
+  on Unextracted {
+    require phase == Extracting else reject "not-extracting"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  on Refunded {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Answering
+    decide reply(question: question, outcome: Refunded)
+  }
+
+  on RefundFailed {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Answering
+    decide reply(question: question, outcome: Declined)
+  }
+
+  on Answered(text) {
+    require phase == Answering else reject "not-answering"
+    phase' = Sending
+    answer' = text
+    emit support.reply(body: text)
+  }
+
+  on AnswerFailed {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+  }
+
+  // A receipt is never rejected (PL5406): each is taken in every phase, and settles the send it reports.
+  on Delivered {
+    last' = Sent
+    if phase == Sending || phase == Templating {
+      phase' = Idle
+    }
+  }
+
+  // AC15: a free-form reply refused outside the window goes again as a template, once.
+  on SendRejected(reason) {
+    last' = Refused
+    if phase == Sending {
+      phase' = Templating
+      emit support.template(body: answer)
+    } else {
+      if phase == Templating {
+        phase' = Idle
+      }
+    }
+  }
+
+  on SendFailed {
+    last' = Lost
+    if phase == Sending || phase == Templating {
+      phase' = Idle
+    }
+  }
+
+  decision classify(body: Content) -> Branch {
+    route triage
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Classified(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Unclassified()
+  }
+
+  decision amount(text: Content) -> Amount {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Amounted(value: r.answer.value, conf: r.conf.value)
+    failed -> Unextracted()
+  }
+
+  decision reply(question: Content, outcome: Outcome) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Answered(text: r.answer)
+    failed -> AnswerFailed()
+  }
+
+  effect refund(merchant: Principal, amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    uses payments { read_write } for merchant
+    class irreversible
+    ok -> Refunded()
+    failed -> RefundFailed()
+  }
+}
+
+// Notice: the staff's Slack thread. The host dispatches Notify when the gate escalates a refund; a staff member's
+// message is heard and approves nothing (PF11.8, AC17): an approval is a person's signed record (PF9.6).
+service machine Notice {
+  state {
+    started  : bool = false
+    inflight : bool = false
+    heard    : bool = false
+    last     : Last = Nothing
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Notify(text: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "channel-archived", "rate-limited" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+
+  on Got(body) {
+    heard' = true
+  }
+
+  on Notify(text) {
+    require !inflight else reject "busy"
+    inflight' = true
+    emit staff.reply(body: text)
+  }
+
+  on Delivered {
+    inflight' = false
+    last' = Sent
+  }
+
+  on SendRejected(reason) {
+    inflight' = false
+    last' = Refused
+  }
+
+  on SendFailed {
+    inflight' = false
+    last' = Lost
+  }
+}
+
+route triage {
+  tier small provider "small" prices "prices/small.json" calibration "maps/small.json" max input tokens 2000 max tokens 4000
+  tier large provider "large" prices "prices/large.json" calibration "maps/large.json" max input tokens 2000 max tokens 8000
+  escalate when conf < 0.8 or margin < 0.1 or failed
+  budget spend
+}
+
+budget spend {
+  cap usd 0.5 per run
+  cap usd 20 per day per scope
+  on exhausted escalate
+}
