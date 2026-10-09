@@ -193,3 +193,30 @@ Raised by the release session: S450 as ruled says where the thread's principal c
 - (a) An unmapped sender gives no principal, so a reply carrying owned content is refused (fail closed); a test covers it.
 - (b) A later message whose claims name another principal is refused under a new reserved reason, added to PS3.2's list.
 - (c) The merchant (Q-EX6) is not a claims field: it comes from the Stripe Connect grant, as ruled.
+
+## S450, S451, S454, S455, F4, F3 and the work-order key, built
+
+Each was built with its PS and PT text first, then tests written by a subagent that read only the text and the tests (each failed on the code before it, but the confirmations named as such), then the code. S451, S454 and S455 were built by builder subagents from the text; the release session reviewed and committed each.
+
+| Item | Text | Tests | Code |
+|---|---|---|---|
+| S450, the thread's principal | 283c5b2c, b6318b4c | ef12cf0b (8) | f2331af7 |
+| S451, Key and retrieval by key | 35585af2 | 463e8d58 (4) | dd7060fa |
+| S454, a budget on an unrouted decision | 70c2dfa2, 20d65adc | 681c546c (8) | 5e9cad52 |
+| S455, an exact egress target | 7df04787, c87ccb61 | b9596441 (6) | bcd8ae46 |
+| F4, PL5408 | 4b052c36 | 9173bc6f | a5569f5f |
+| F3, PL1301 through fields | 02744afe | 9173bc6f | 754a2093 |
+| The work-order key | e7e9c447 | 9173bc6f | fe5844fe |
+
+Decided under the plan's rules, recorded:
+
+- **S450.** The thread's principal is fixed only by a mapped principal; an unmapped or unverified sender's claims carry the keyed digest of its address, a principal no source owns, which never fixes a thread (SMS verifies no sender, so an SMS thread never has one). Adding `principal` to every std `Sender` doubled each conversation's inputs and ran the conformance concierge out of memory, so a claims `Principal` field that the handler never reads, in claims with no `Audience` field, is explored by one value (PS4.1c's renaming invariance), and a channel configuration does so for the Sender's principal unless the channel declares `principal from` or its bound actions take claims (b6318b4c, ruled in the text first). The first S450 test writer's fixtures took 190 s and ran out of memory; a second writer made them small, without weakening an assertion.
+- **S451.** A key written twice in `keys` is refused; a retrieval by key from a `memory` source refuses every item, since the memory store keeps no keys; a key value of `none` or empty is refused before the adapter.
+- **S454.** The clause before `provider` is `PL1201`; the embedded form has no surface for the clause yet, stated in the release notes.
+- **F4.** On a machine alone, the receiver is known by the declared type of the send's address, so a send through a `Ref` field still `none` is judged.
+
+**Found, not built: S322 and a channel's configuration.** `PL6838 FLOW_NOT_FOLLOWED` reads a configuration as holding the machines its instances declare, so a channel's generated configuration, whose conversation is spawned, does not count as holding it: a channel application that replies tainted content is `INCONCLUSIVE` on its own though its channel's configuration follows the reply. It is older than v1's work; it is brought to the reviewer as a fix to make (count a channel configuration's conversation), with a test.
+
+**Suite.** At fe5844fe: 2,183 tests and 6 in the after group, all passed but 2 skipped and 4 waiting, no failure; check-memory passed (`.poly/logs/fe5844fe-2026-10-09T05-35-32-452Z-w1.log`). No other suite ran (the examples session's last log ends at 03:13 UTC). The suite is smaller than at 0b1ca108 because SR3's records are now outside the standing rule (S163).
+
+**Measured verdicts.** Against `docs/v1/verdicts-after-v1.json`: 160 files, every verdict identical; three files differ in transition counts only, `conformance/m5/lineage-pay.poly`, `lineage-timer.poly` and `lineage.poly`, each with fewer transitions (219 to 111, 219 to 111, 3,052 to 1,540) and the same states, since a claims principal their handlers never read is now explored by one value (b6318b4c). The new record is `docs/v1/verdicts-after-rulings.json`.
