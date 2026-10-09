@@ -185,3 +185,11 @@ Copied from `docs/decisions-ex.md` on `ex` ("plan-ex ruled"), as the reviewer or
 - **Google OAuth.** Confirm from Google's documentation: refresh tokens of an app in Testing expire after seven days, and `gmail.readonly` and `gmail.compose` are restricted scopes, which may require verification for an app In production. Bring the facts to the owner; the owner sets the Google project and its keys.
 
 **Start now:** recorded traffic, the MIME reader (kept for SES after v1), the synthetic corpus, the Gmail adapter kind (S452), and the concierge parts that do not need S450. Then E1 after S402 and S450 land, E2 after S451, S454 and S455.
+
+## S450: how the application learns the thread's principal (owner, 2026-10-08)
+
+Raised by the release session: S450 as ruled says where the thread's principal comes from and that it becomes the reply's recipient, not how the application learns it; an application's step bound to a channel message carries the Inbound's claims only by lineage, which a handler cannot read. **Ruled (owner): the claims on the bound action.** std's `Sender` claims gain `principal: Principal`, the principal the verifier maps the verified sender to, `none` when it maps none. `principal from principal` fixes the thread's principal at the first message that names one. An application action bound to the conversation's message may declare `by c: C` and receives the Inbound's verified claims, so it stores `c.principal` and retrieves by it; the principal always comes from the verifier, never from message content or a message parameter. The reply's recipient and the received body's owner are the thread's principal. Notes:
+
+- (a) An unmapped sender gives no principal, so a reply carrying owned content is refused (fail closed); a test covers it.
+- (b) A later message whose claims name another principal is refused under a new reserved reason, added to PS3.2's list.
+- (c) The merchant (Q-EX6) is not a claims field: it comes from the Stripe Connect grant, as ruled.
