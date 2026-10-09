@@ -77,6 +77,18 @@ The joined concierge is drafted in `docs/ex/concierge-draft/` (with its policy, 
 
 E1 stops here for S456, as the handoff's stop list asks (a needed change in the core). Q-EX6 is still open. What can go on meanwhile on `ex`: the concierge's recorded provider answers and host, which do not depend on the configuration.
 
+## S456 and Q-EX6 ruled (owner's reviewer, 2026-10-08)
+
+- **S456, accepted.** A channel's generated configuration also offers the completions of the application's pending decisions and effects, each only while its intent is pending. The release session builds it on `v1` right after S450; `ex` rebases on it.
+- **Q-EX6, ruled.** The refund's merchant comes from the Stripe Connect grant, not program state. The host action `Bind` is removed.
+- **Then.** `ex` carries on with the recorded model answers and the host code, and resumes E1 when S450 and S456 land. The concierge's state count and check time are reported when it reaches CLEAN.
+
+## Q-EX6 built in the draft, and what it needs from the core (S457, for the release session)
+
+`Bind` and the `merchant` field are gone from `docs/ex/concierge-draft/concierge.poly`; `refund(amount)` names no holder, and the credential declares none. The checker refuses that program today, twice: `PL1201`, "credential payments is granted by a person (authorization_code) and names no holder", and `PL6822`, "effect refund uses payments, a person's grant, and names no holder" (PT10e, PS16.2). PS16 knows a holder only as a `Principal` payload field (`for p`), or none for `client_credentials`, the service's own grant. So the ruling needs a form PS16 does not have yet.
+
+**S457, proposal (semantics and security, so for the release session).** A credential granted by a person may omit `holder`: it then has one `Grant` instance, as a `client_credentials` credential does (PS16.2), whose holder is whoever completes the consent, recorded in the grant (by keyed digest, as now) and never readable by the program. An effect that `uses` it names no `for`. The grant check (PS16.3) reads that one instance. `rt.requestGrant(c, null)` asks for it. A credential with `holder Principal` keeps today's meaning, so no existing program changes. Tests: the draft's refund passes the check; a refund proposed while the one grant is `Revoked` is `credential-unavailable`; a credential with `holder` and an effect with no `for` stays `PL6822`. Until S457 lands, the draft is `REFUSED` at stage 0.
+
 ## Conclusion
 
-The examples branch holds the plan, its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader, the Gmail source kind and the measured concierge draft. The concierge waits for S450 and S456 on `v1`, with Q-EX6 for the reviewer; the inbox's machines wait for S451, S454 and S455.
+The examples branch holds the plan, its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader, the Gmail source kind and the measured concierge draft. The concierge waits for S450, S456 and S457 on `v1`; the inbox's machines wait for S451, S454 and S455.

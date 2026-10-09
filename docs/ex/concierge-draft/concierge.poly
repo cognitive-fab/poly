@@ -7,7 +7,8 @@
 // thread's conversation, which keeps WhatsApp's window (AC15).
 //
 // Waiting for v1 (decisions-ex.md): the status path, which retrieves the customer's own orders and cites them, needs
-// the thread's principal (S450); the merchant comes from Bind until Q-EX6 is ruled.
+// the thread's principal (S450). The refund names no holder: the merchant is the Stripe Connect grant's subject, not
+// program state (Q-EX6), which PL6822 refuses until S457 lands.
 module concierge
 
 audience { public < customer < staff }
@@ -44,12 +45,12 @@ channel staff: slack {
   Failed -> Notice.SendFailed
 }
 
-// S208: Stripe Connect, the platform's key in the vault and the merchant's account as the grant's subject.
+// S208: Stripe Connect, the platform's key in the vault and the merchant's account as the grant's subject. Q-EX6: the
+// merchant is the grant's, so the credential names no holder the program could set.
 credential payments: oauth2 {
   provider "stripe-connect"
   grant authorization_code
   scopes { read_write }
-  holder Principal
 }
 
 // Desk: one per customer's WhatsApp thread. One message is worked on at a time; another that arrives meanwhile is
@@ -60,13 +61,11 @@ service machine Desk {
     started  : bool      = false
     question : Content   = none
     answer   : Content   = none
-    merchant : Principal = none
     large    : bool      = false
     last     : Last      = Nothing
   }
 
   action Start()
-  action Bind(m: Principal)
   action Got(body: Content)
   action Classified(branch: Branch, conf: Conf, margin: Conf)
   action Unclassified()
@@ -83,13 +82,6 @@ service machine Desk {
   on Start {
     require !started else reject "started"
     started' = true
-  }
-
-  // Q-EX6, provisional: the host names the merchant once per thread.
-  on Bind(m) {
-    require merchant == none else reject "bound"
-    require m != none else reject "no-merchant"
-    merchant' = m
   }
 
   on Got(body) {
@@ -123,10 +115,10 @@ service machine Desk {
   // AC30: the amount reaches the program only as a value of 0..500; an answer outside it never reaches this handler.
   on Amounted(value, conf) {
     require phase == Extracting else reject "not-extracting"
-    if conf >= 0.8 && merchant != none {
+    if conf >= 0.8 {
       phase' = Refunding
       large' = value > 100
-      emit refund(merchant: merchant, amount: value)
+      emit refund(amount: value)
     } else {
       phase' = Answering
       decide reply(question: question, outcome: Unsure)
@@ -215,11 +207,11 @@ service machine Desk {
     failed -> AnswerFailed()
   }
 
-  effect refund(merchant: Principal, amount: 0..500) {
+  effect refund(amount: 0..500) {
     kind "payments.refund"
     labels { egress:external }
     targets { egress: "https://api.stripe.com/v1/refunds" }
-    uses payments { read_write } for merchant
+    uses payments { read_write }
     class irreversible
     ok -> Refunded()
     failed -> RefundFailed()
