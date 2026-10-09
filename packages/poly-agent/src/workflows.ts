@@ -14,6 +14,8 @@ const str = (description: string) => ({ type: 'string', description });
 
 const WORK_ORDER = obj({
   order_id: str('pass this back to workflow_report'),
+  // PT10, S173 as amended (accepted with V5): the same for every attempt, for a tool that takes an idempotency key.
+  idempotency_key: str('the same for every attempt of this step; give it to a tool that takes an idempotency key, never to workflow_report'),
   tool: str('the tool to call'),
   target: str('what to call it against; absent when the tool needs no target'),
   args: { type: 'object', description: 'arguments for the call' },
@@ -53,7 +55,7 @@ export interface WorkflowTool { name: string; description: string; inputSchema: 
 export function workflowTools(rt: PolyRuntime): WorkflowTool[] {
   const READ = { readOnlyHint: true };
   const WRITE = { readOnlyHint: false, destructiveHint: false };
-  const order = (o: WorkOrder) => compact({ order_id: o.orderId, tool: o.tool, target: o.target, args: o.args, why: o.why, attempt: o.attempt });
+  const order = (o: WorkOrder) => compact({ order_id: o.orderId, idempotency_key: o.idempotencyKey, tool: o.tool, target: o.target, args: o.args, why: o.why, attempt: o.attempt });
   const runView = async (instance: string, extra: Record<string, unknown> = {}) => {
     await rt.advance();
     const v = await rt.workflowView(instance);

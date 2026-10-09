@@ -72,7 +72,7 @@ export type Handler = EffectHandler;
 /** An outside dispatch that the runtime refuses before any step, with an audit row (K9, K10). */
 /** PD2.4: an adjudication with no decision event to link; a checked program cannot reach it (PL6203). */
 /** S173: an open work order, as an agent takes it: the gate's decision is the intent's, once; the order id is the attempt's (PF8.5a, S173 as amended). */
-export interface WorkOrder { orderId: string; intent: string; instanceId: string; workflow: string; kind: string; tool: string; target?: string; why: string; args: Record<string, unknown>; attempt: number; deadline: number }
+export interface WorkOrder { orderId: string; intent: string; /** PT10, S173 as amended: the intent's id, the same for every attempt; it names nothing a report can give. */ idempotencyKey: string; instanceId: string; workflow: string; kind: string; tool: string; target?: string; why: string; args: Record<string, unknown>; attempt: number; deadline: number }
 
 /** S189: the runtime's own ledger run for the approvals drop folder; `runtime.*` is reserved for the runtime (S143). */
 export const APPROVALS_RUN = 'runtime:approvals';
@@ -1417,7 +1417,7 @@ export class PolyRuntime {
   async workOrders(instanceId?: string): Promise<WorkOrder[]> {
     return (await this.worker.openOrders(instanceId)).map(({ row, orderId, attempt, deadline }) => {
       const t = this.orderToolOf(row.instance_id, row.kind)!;
-      return { orderId, intent: row.intent_id, instanceId: row.instance_id, workflow: t.workflow, kind: row.kind, tool: t.tool, ...(t.target !== undefined ? { target: t.target } : {}), why: t.why, args: row.payload as Record<string, unknown>, attempt, deadline };
+      return { orderId, intent: row.intent_id, idempotencyKey: row.intent_id, instanceId: row.instance_id, workflow: t.workflow, kind: row.kind, tool: t.tool, ...(t.target !== undefined ? { target: t.target } : {}), why: t.why, args: row.payload as Record<string, unknown>, attempt, deadline };
     });
   }
 
