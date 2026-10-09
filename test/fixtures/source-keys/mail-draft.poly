@@ -1,0 +1,83 @@
+// S451 (PS17.0, PS17.2, IAC3): mail is a source owned by its account's principal and keyed by message, thread and
+// correspondent. A draft reads one thread of its own account by key, asks a decision that cites what it read, and
+// sends the draft to that account. The flow rule (PS17.3) holds: the draft is tainted with the account's own mail.
+module mail_draft
+
+audience { public < account < staff }
+
+claims Account {
+  principal: Principal
+}
+
+source mail: records {
+  adapter "postgres"
+  audience account owned
+  freshness 1h
+  keys { message, thread, correspondent }
+}
+
+enum Phase { Idle, Reading, Writing }
+
+machine Drafter {
+  state {
+    phase   : Phase     = Idle
+    account : Principal = none
+  }
+
+  action Draft(thread: Key)
+  action Read(items: Items)
+  action ReadFailed()
+  action Written(text: Content, cites: Items)
+  action WriteFailed()
+
+  on Draft(thread) by c: Account {
+    require phase == Idle else reject "busy"
+    phase' = Reading
+    account' = c.principal
+    emit read(account: c.principal, t: thread)
+  }
+
+  on Read(items) {
+    require phase == Reading else reject "not-reading"
+    phase' = Writing
+    decide write(context: items)
+  }
+
+  on ReadFailed {
+    require phase == Reading else reject "not-reading"
+    phase' = Idle
+  }
+
+  on Written(text, cites) {
+    require phase == Writing else reject "not-writing"
+    phase' = Idle
+    emit send(recipient: account, body: text)
+  }
+
+  on WriteFailed {
+    require phase == Writing else reject "not-writing"
+    phase' = Idle
+  }
+
+  effect read(account: Principal, t: Key) {
+    retrieve mail where owner == account and thread == t limit 2
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  decision write(context: Items) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    cites context
+    ok(r) -> Written(text: r.answer, cites: r.cites)
+    failed -> WriteFailed()
+  }
+
+  effect send(recipient: Principal, body: Content) {
+    kind "mail.send"
+    labels { egress:external }
+    to recipient
+    audience public
+  }
+}

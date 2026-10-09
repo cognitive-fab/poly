@@ -1,0 +1,32 @@
+// S451 (PS1.4c, PS4.1g): Key, an opaque name of a source's item. The machine holds a key, compares a second one with it,
+// and records whether they were equal; it never orders, adds or spells one. Check explores Key by representatives.
+module held
+
+enum Phase { Empty, Holding, Compared }
+
+machine Hold {
+  state {
+    phase : Phase = Empty
+    key   : Key   = none
+    same  : bool  = false
+  }
+  terminal phase is Compared
+
+  action Put(k: Key)
+  action Compare(k: Key)
+
+  on Put(k) {
+    require phase is Empty else reject "full"
+    require k != none else reject "no-key"
+    phase' = Holding
+    key' = k
+  }
+
+  on Compare(k) {
+    require phase is Holding else reject "empty"
+    phase' = Compared
+    same' = k == key
+  }
+
+  invariant held-when-holding: phase is Holding implies key != none
+}
