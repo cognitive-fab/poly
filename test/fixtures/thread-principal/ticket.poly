@@ -1,0 +1,60 @@
+// S450 (PS15.0a, PS15.4): the support channel of test/fixtures/channels/concierge.poly on the tests' own kind, which
+// gives each thread a principal from its Sender claims, and an application action bound to Message that declares the
+// claims it reads: Customer has only Sender's field principal, with its type.
+module concierge
+
+enum Status { New, Open, Closed }
+
+claims Customer {
+  principal: Principal
+}
+
+channel support: test {
+  adapter "test"
+  thread "{from}"
+  starts Ticket.Start on inbound
+  principal from principal
+  Message -> Ticket.Got
+  Delivered -> Ticket.Delivered
+  Rejected -> Ticket.SendRejected
+  Failed -> Ticket.SendFailed
+}
+
+machine Ticket {
+  state {
+    status  : Status    = New
+    replies : 0..1      = 0
+    who     : Principal = none
+  }
+  terminal status is Closed
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require status is New else reject "started"
+    status' = Open
+  }
+  on Got(body) by c: Customer {
+    require status is Open else reject "closed"
+    require replies == 0 else reject "replied"
+    replies' = 1
+    who' = c.principal
+    emit support.reply(body: body)
+  }
+  on Delivered {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+  on SendRejected(reason) {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+  on SendFailed {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+}

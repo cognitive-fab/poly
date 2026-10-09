@@ -1,0 +1,106 @@
+// S450 (PS15.0a, PS15.4, PS17.3, AC22): the smallest concierge on one WhatsApp channel whose thread has a principal.
+// Got, bound to the channel's Message, reads the verified Sender's principal through its claims, stores it, retrieves
+// that customer's owned orders by it, and replies an answer over them on the thread. The thread's principal is the
+// reply's recipient, so the customer's own orders may go to it. The tests' AC22 variant drops the owner predicate, so
+// the retrieval is owned by every principal (S326) and its answer may not go to this thread.
+// WhatsApp, not SMS: the host maps only a sender the adapter verified (PT10a), and an SMS sender is never verified.
+// Measured: this desk checks in about 12 s on whatsapp against about 57 s on sms (the sms conversation alone is about
+// 31 s of translation validation and model checking). A stored question Content, a second Principal field or a staff
+// action made it 20 to 100 times larger.
+module tp_desk
+
+audience { public < customer < staff }
+
+claims Customer {
+  principal: Principal
+}
+
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+}
+
+enum Phase { Idle, Looking, Answering }
+
+channel support: whatsapp {
+  adapter "whatsapp"
+  thread "{from}"
+  starts Desk.Start on inbound
+  audience customer
+  principal from principal
+  Message -> Desk.Got
+  Delivered -> Desk.Delivered
+  Rejected -> Desk.SendRejected
+  Failed -> Desk.SendFailed
+}
+
+service machine Desk {
+  state {
+    started  : bool      = false
+    phase    : Phase     = Idle
+    customer : Principal = none
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Found(items: Items)
+  action LookupFailed()
+  action Answered(answer: Content)
+  action AnswerFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) by c: Customer {
+    require phase == Idle else reject "busy"
+    phase' = Looking
+    customer' = c.principal
+    emit lookup(customer: c.principal)
+  }
+  on Found(items) {
+    require phase == Looking else reject "not-looking"
+    phase' = Answering
+    decide answer(context: items)
+  }
+  on LookupFailed {
+    require phase == Looking else reject "not-looking"
+    phase' = Idle
+  }
+  on Answered(answer) {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    emit support.reply(body: answer)
+  }
+  on AnswerFailed {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+  }
+  on Delivered {
+    require started else reject "not-started"
+  }
+  on SendRejected(reason) {
+    require started else reject "not-started"
+  }
+  on SendFailed {
+    require started else reject "not-started"
+  }
+
+  effect lookup(customer: Principal) {
+    retrieve orders where owner == customer limit 1
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision answer(context: Items) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Answered(answer: r.answer)
+    failed -> AnswerFailed()
+  }
+}
