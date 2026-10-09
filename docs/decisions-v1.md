@@ -252,3 +252,14 @@ Each item got its PS or PT text first. Subagents that read only `docs/`, `test/`
 **Suite.** At 0554c5f7: 2,220 tests and 6 in the after group. All passed except 2 skipped and 4 waiting, with no failure; check-memory passed (`.poly/logs/0554c5f7-2026-10-09T10-21-36-744Z-w2.log`). No other suite ran.
 
 **Measured verdicts.** Against `docs/v1/verdicts-after-rulings.json`, all 160 files have identical verdicts and counts. None of them has a channel application that answers through a decision or an effect, and none has a conversation whose channel declares `principal from`. So no new record is kept.
+
+## S458: a range read only against constants (owner's reviewer, 2026-10-09)
+
+The round above is accepted: S456, S457, the S454 embedded form and the one-value rule. S458 comes next, as proposed by the examples session (decisions-ex.md, Finding 2): a range used only in comparisons with constants, or passed unchanged into a payload, is explored at the values its constants cut.
+
+- **(1)** Any arithmetic, any comparison with another variable, or any comparison after storage turns the reduction off for that value.
+- **(2)** The cut points come from the handlers, the guards, the properties (the constants of `emits` included) and the policies that read the payload.
+- **(3)** The verdict prints the reduced domain and its representatives.
+- **(4)** poly-ref applies it on its own, with a PS lemma, as it does for confidence intervals.
+
+Same method: the PS and PT text first, then tests written from the text alone, then the code.
