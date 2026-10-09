@@ -280,3 +280,13 @@ Same method: the PS and PT text first, then tests written from the text alone, t
 **Suite.** At bd52f07c: 2,234 tests and 6 in the after group. All passed except 2 skipped and 4 waiting, with no failure; check-memory passed (`.poly/logs/bd52f07c-2026-10-09T15-49-17-807Z-w3.log`). No other suite ran.
 
 **Measured verdicts.** Against `docs/v1/verdicts-after-rulings.json`, all 160 files have identical verdicts, states and transitions. No conformance case or example has a range parameter that S458 cuts, so no new record is kept. The concierge draft in `poly-ex`, whose amount is compared with 100 and passed into the refund's payload, is the first program it reduces.
+
+## S459 and the examples' harness (owner's reviewer, 2026-10-09)
+
+S458 is accepted as built, with both of the release session's choices: storage turns the reduction off, and a class is an equivalence class. S459 is ruled as the examples session proposed it (decisions-ex.md, E2), in three parts:
+
+- **(a) A handler reads its own payload's bodies.** A handler may read the bodies of the `Content` values of its own payload, and of nothing else, only once the flow check has allowed the intent (PS17.3). Each read is recorded by digest.
+- **(b) A thread's envelope from the source.** A source may give, by key, an envelope item for a thread: the recipient, the subject, `In-Reply-To` and `References` of a reply to its newest message. The program passes it to the draft effect as a `Content` tainted by the account. **The condition:** the draft effect's recipient and threading headers come from the source's envelope item for that thread, never from a decision's answer or a message body. The checker refuses a draft whose envelope value has any other origin, and a test shows a model's answer that tries to set the recipient being refused.
+- **(c) The harness fix.** The examples' checks resolve `use`, provider profiles and route files as `poly check` does, from `std/` and beside the source, so an example that uses a v1 surface can live in `examples/`.
+
+Then: measure what drives the growth S456 caused in the concierge (the stored reply's `Content` representatives times the pending completions, or something else), and bring the numbers before changing anything.
