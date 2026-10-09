@@ -162,3 +162,7 @@ V1 to V9 are done. The merge into m4 and the v1 gate (V10) wait for the reviewer
 2. Build, each with PS/PT text first and tests written from the text alone: S450, S451, S454, the core half of S455 (ruled in poly-ex's `docs/decisions-ex.md`, "plan-ex ruled"; copy them here), then F4, F3 and the work-order key.
 3. Report each commit that changes PS or PT text, for the examples session to rebase.
 4. V10 waits for E1 and E2.
+
+## m4 fast-forwarded to v1
+
+As ordered, m4 was fast-forwarded with `--ff-only` from fec4337f to 16b2cde7 (V1 to V9, the acceptance and the owner's rulings, which the m4 worktree held uncommitted and which were committed on v1 first, so the fast-forward kept them unchanged). This is not the V10 gate: it gives the examples branch a stable base. This record is the one commit after it, and m4 is fast-forwarded again to carry it. Nothing was pushed.
