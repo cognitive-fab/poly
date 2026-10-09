@@ -1,0 +1,14 @@
+// The concierge's policy (plan-ex.md E1). A refund above 100 waits for a person, who approves it with a signed record
+// (PF9.6); one approved after the customer's thread has moved on is judged on the later state too (S401). The guard
+// proposal.kind == "effect" keeps the rule off the sends between the concierge's scopes, where effect is unknown.
+module concierge_policy
+
+policy refunds {
+  scope "concierge"
+  obligation large-refund-reviewed "A refund above 100 is issued only after a person approves it." rule {
+    when proposal.kind == "effect" && effect.kind == "payments.refund" && machine("concierge.Desk").large
+    require false else escalate
+    on unknown escalate
+  }
+  never large-refund-unreviewed "A refund above 100 is never allowed without a person.": allow when proposal.kind == "effect" && effect.kind == "payments.refund" && machine("concierge.Desk").large
+}
