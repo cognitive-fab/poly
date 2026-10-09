@@ -415,12 +415,20 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
     const mem = M.memory;
     const program = [module, ...(opts.program ?? [])];
     // PS17.3, S322: a message no configuration follows. Two machines are followed together when some configuration of
-    // the program holds both (two instances, for a message to another instance of the same machine).
+    // the program holds both (two instances, for a message to another instance of the same machine). S456: a
+    // configuration holds its declared instances and, for each channel application among them, the conversation of each
+    // of its channels (PS15.5), which its starts spawns.
     const counts = new Map<string, number>();
     const followed = (target: string): boolean => program.some((mod) => mod.decls.some((d) => {
       if (d.kind !== 'Configuration') return false;
       counts.clear();
-      for (const x of d.instances) { const n = x.machine[x.machine.length - 1]; counts.set(n, (counts.get(n) ?? 0) + (x.count ?? 1)); }
+      for (const x of d.instances) {
+        const n = x.machine[x.machine.length - 1];
+        counts.set(n, (counts.get(n) ?? 0) + (x.count ?? 1));
+        const app = mod.decls.find((m): m is A.Machine => m.kind === 'Machine' && m.name === n);
+        // A send names the conversation by its address, m.c.Conversation; a spawn by its machine's last name.
+        for (const k of app?.channelKeys ?? []) for (const c of new Set([k.machine, k.machine.split('.').pop()!])) counts.set(c, (counts.get(c) ?? 0) + (x.count ?? 1));
+      }
       return target === M.name ? (counts.get(M.name) ?? 0) >= 2 : counts.has(M.name) && counts.has(target);
     }));
     const tainted = (data: Record<string, unknown>): string | null => {

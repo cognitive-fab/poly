@@ -78,6 +78,11 @@ export interface GlobalState {
    * principal from; absent until its first Inbound, and absent elsewhere.
    */
   threads?: Record<number, Value>;
+  /**
+   * PS15.5 (S456): in a channel's generated configuration, the application's pending intents: the kind of each intent of
+   * a decision or an effect with a declared completion, emitted on an accepted step and not yet completed. Absent elsewhere.
+   */
+  intents?: { instance: number; kind: string }[];
 }
 
 export interface ArmedTimer { instance: number; key: string; action: string; data: Record<string, Value> }
@@ -269,8 +274,13 @@ export function globalView(instances: ConfigInstance[], sigma: (State | null)[],
 /** PS17: what a configuration's flow check gives its system: which pending kinds an instance's action completes, and an intent's taint. */
 export interface TaintRules { completes(instance: number, action: string): string[]; intentTaint(instance: number, i: import('./step.js').Intent): Taint | null; completions(instance: number): string[] }
 
-export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[], opts: { timed?: Set<number>; fault?: RefFault; taint?: TaintRules; channels?: ChannelRoles[] } = {}): System<GlobalState> {
+export function configurationSystem(decl: A.Configuration, instances: ConfigInstance[], opts: { timed?: Set<number>; fault?: RefFault; taint?: TaintRules; channels?: ChannelRoles[]; completing?: Set<number> } = {}): System<GlobalState> {
   const taint = opts.taint;
+  // PS15.5 (S456): the instances whose pending intents the environment completes: a channel application's, in its
+  // channel's generated configuration and the joint one.
+  const completing = opts.completing ?? new Set<number>();
+  const iKey = (q: { instance: number; kind: string }) => `${q.instance}:${q.kind}`;
+  const sortIntents = (qs: { instance: number; kind: string }[]) => [...qs].sort((a, b) => (iKey(a) < iKey(b) ? -1 : iKey(a) > iKey(b) ? 1 : 0));
   // PS15.0a (S450): each conversation whose channel fixes its thread's principal, with the claims field that does.
   const principalField = new Map<number, string>();
   // PS15.4 (S450): each application instance's actions that take a Peer message, by instance.
@@ -336,7 +346,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       inputs.push({ instance: k, action: r.action, data });
     }
   }
-  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin'], firing?: string, pendingIn?: GlobalState['pending']): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
+  const step = (s: GlobalState, k: number, action: string, data: Record<string, Value>, mu: Message[], via: 'input' | 'deliver', creation = false, from?: Message['origin'], firing?: string, pendingIn?: GlobalState['pending'], intentsIn?: GlobalState['intents']): { label: GlobalLabel; outcome: Outcome<GlobalState> } => {
     const inst = instances[k];
     // PD5.2.2a: an input with claims starts a chain whose origin class is its claims and its intent; a delivered message's
     // step inherits the message's origin class.
@@ -388,10 +398,17 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     }
     // PS17.2: an accepted step adds the taint of each intent that taints its completion.
     const pending = taint ? sortPending([...(pendingIn ?? s.pending ?? []), ...(st.verdict.kind === 'accepted' ? st.effects.flatMap((i) => { const t = taint.intentTaint(k, i); return t ? [{ instance: k, kind: i.kind, t }] : []; }) : [])]) : undefined;
-    const g: GlobalState = { sigma, mu: sortMu(next), ...(timed.size ? { timers: sortTimers(timers) } : {}), ...(pending ? { pending } : {}), ...(threads ? { threads } : {}) };
+    // PS15.5 (S456): an accepted step of the application adds each intent whose declaration names a completion.
+    const intents = completing.size ? sortIntents([...(intentsIn ?? s.intents ?? []), ...(completing.has(k) && st.verdict.kind === 'accepted' ? st.effects.flatMap((i) => (i.type === 'effect' && inst.machine.outcomes.has(i.kind) ? [{ instance: k, kind: i.kind }] : [])) : [])]) : undefined;
+    const g: GlobalState = { sigma, mu: sortMu(next), ...(timed.size ? { timers: sortTimers(timers) } : {}), ...(pending ? { pending } : {}), ...(threads ? { threads } : {}), ...(intents ? { intents } : {}) };
     if (pending) {
       const over = [...new Set(pending.map(pKey).map((x) => x.slice(0, x.indexOf('='))))].find((x) => pending.filter((q) => `${q.instance}:${q.kind}` === x).length > PENDING_BOUND);
       if (over) return { label, outcome: { kind: 'bound', state: g, field: `pending ${instances[k].name}.${over.slice(over.indexOf(':') + 1)}`, value: PENDING_BOUND + 1 } };
+    }
+    if (intents) {
+      // PS15.5 (S456): more than 3 pending intents of one kind is not explored, as for pending taints (PS17.2).
+      const over = [...new Set(intents.map(iKey))].find((x) => intents.filter((q) => iKey(q) === x).length > PENDING_BOUND);
+      if (over) return { label, outcome: { kind: 'bound', state: g, field: `intents ${instances[k].name}.${over.slice(over.indexOf(':') + 1)}`, value: PENDING_BOUND + 1 } };
     }
     if (collision) return { label, outcome: { kind: 'collision', state: g, field: collision.address, value: collision.key } };
     if (over) return { label, outcome: { kind: 'bound', state: g, field: 'instances', value: N + 1 } };
@@ -407,8 +424,8 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
     return { label, outcome: { kind: 'state', state: g } };
   };
   return {
-    initial: () => ({ sigma: instances.map((x) => (x.spawned ? null : x.init)), mu: [], ...(timed.size ? { timers: [] } : {}) }),
-    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}${s.timers?.length ? `||${s.timers.map((t) => `${timerKey(t)}>${t.action}(${Object.keys(t.data).sort().map((f) => `${f}=${keyOf(t.data[f])}`).join(',')})`).join(';')}` : ''}${taint ? `##${s.sigma.map((x, k) => (x === null ? '' : instances[k].machine.fieldNames.map((f) => taintsKey(x[f])).join('|'))).join('/')}#${s.mu.map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.timers ?? []).map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.pending ?? []).map(pKey).join(';')}` : ''}${s.threads ? `##threads:${Object.keys(s.threads).sort().map((k) => `${k}=${keyOf(s.threads![Number(k)])}`).join(';')}` : ''}`,
+    initial: () => ({ sigma: instances.map((x) => (x.spawned ? null : x.init)), mu: [], ...(timed.size ? { timers: [] } : {}), ...(completing.size ? { intents: [] } : {}) }),
+    key: (s) => `${s.sigma.map((x, k) => (x === null ? '-' : stateKey(x, instances[k].machine.fieldNames))).join('|')}||${s.mu.map(msgKey).join(';')}${s.timers?.length ? `||${s.timers.map((t) => `${timerKey(t)}>${t.action}(${Object.keys(t.data).sort().map((f) => `${f}=${keyOf(t.data[f])}`).join(',')})`).join(';')}` : ''}${taint ? `##${s.sigma.map((x, k) => (x === null ? '' : instances[k].machine.fieldNames.map((f) => taintsKey(x[f])).join('|'))).join('/')}#${s.mu.map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.timers ?? []).map((m) => Object.keys(m.data).sort().map((f) => taintsKey(m.data[f])).join(',')).join(';')}#${(s.pending ?? []).map(pKey).join(';')}` : ''}${s.threads ? `##threads:${Object.keys(s.threads).sort().map((k) => `${k}=${keyOf(s.threads![Number(k)])}`).join(';')}` : ''}${s.intents?.length ? `##intents:${s.intents.map(iKey).join(';')}` : ''}`,
     successors: (s) => {
       const out: { label: GlobalLabel; outcome: Outcome<GlobalState> }[] = [];
       // S60: a spawned child takes its creation action first, so no input reaches it while that waits (review C3).
@@ -433,13 +450,32 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
       if (taint) {
         const declared = new Set(inputs.map((i) => `${i.instance}:${i.action}`));
         for (const k of [...new Set((s.pending ?? []).map((q) => q.instance))]) {
-          if (s.sigma[k] === null || creating.has(k)) continue;
+          // S456: an application whose intents are completed below takes its pending taints there.
+          if (s.sigma[k] === null || creating.has(k) || completing.has(k)) continue;
           for (const a of taint.completions(k)) {
             if (declared.has(`${k}:${a}`)) continue;
             const kinds = taint.completes(k, a);
             const seen = new Set<string>();
             const choices = s.pending!.map((q, j) => [q, j] as const).filter(([q]) => q.instance === k && kinds.includes(q.kind) && !seen.has(pKey(q)) && seen.add(pKey(q)));
             for (const d of dataOf(instances[k].machine, a)) for (const [q, j] of choices) out.push(step(s, k, a, taintData(instances[k].machine, a, d, q.t), s.mu, 'input', false, undefined, undefined, s.pending!.filter((_, x) => x !== j)));
+          }
+        }
+      }
+      // PS15.5 (S456): while an intent of the application is pending, each completion its declaration names is an input,
+      // over every value of its data; the step takes one pending intent of that kind off, whatever its verdict. In the
+      // flow rule's exploration it also takes one pending taint of its kind, one choice per distinct taint (PS17.3).
+      for (const k of [...new Set((s.intents ?? []).map((q) => q.instance))]) {
+        if (s.sigma[k] === null || creating.has(k)) continue;
+        const M = instances[k].machine;
+        for (const kind of [...new Set(s.intents!.filter((q) => q.instance === k).map((q) => q.kind))]) {
+          const j = s.intents!.findIndex((q) => q.instance === k && q.kind === kind);
+          const rest = s.intents!.filter((_, x) => x !== j);
+          for (const a of M.outcomes.get(kind) ?? []) for (const d of dataOf(M, a)) {
+            if (!refsExist(M, a, d, s)) continue;
+            const seen = new Set<string>();
+            const choices = taint ? (s.pending ?? []).map((q, x) => [q, x] as const).filter(([q]) => q.instance === k && q.kind === kind && !seen.has(pKey(q)) && seen.add(pKey(q))) : [];
+            if (!choices.length) { out.push(step(s, k, a, d, s.mu, 'input', false, undefined, undefined, undefined, rest)); continue; }
+            for (const [q, x] of choices) out.push(step(s, k, a, taintData(M, a, d, q.t), s.mu, 'input', false, undefined, undefined, s.pending!.filter((_, y) => y !== x), rest));
           }
         }
       }
@@ -467,7 +503,7 @@ export function configurationSystem(decl: A.Configuration, instances: ConfigInst
           // ordinary message; escalate holds the message, which is then approved (delivered) or timed out (denied).
           const reason = m.gate === 'held' ? 'escalation-timeout' : 'denied';
           const denied: Message = { target: m.from!, action: 'SendDenied', data: { to: instances[m.target].name, action: m.action, reason }, ...(m.origin ? { origin: m.origin } : {}) };
-          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}), ...(s.threads ? { threads: s.threads } : {}) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}), ...(s.threads ? { threads: s.threads } : {}) } }) as Outcome<GlobalState> });
+          const gateStep = (choice: string, mu: Message[]) => ({ label: { action: `gate:${choice}`, data: { to: instances[m.target].name, action: m.action }, verdict: { kind: 'accepted' }, effects: [], via: 'gate', instance: m.from!, toNone: false } as unknown as GlobalLabel, outcome: (mu.length > B ? { kind: 'bound', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}), ...(s.threads ? { threads: s.threads } : {}), ...(s.intents ? { intents: s.intents } : {}) }, field: 'transit', value: mu.length } : { kind: 'state', state: { sigma: s.sigma, mu: sortMu(mu), ...(s.timers ? { timers: s.timers } : {}), ...(s.pending ? { pending: s.pending } : {}), ...(s.threads ? { threads: s.threads } : {}), ...(s.intents ? { intents: s.intents } : {}) } }) as Outcome<GlobalState> });
           out.push(gateStep('deny', [...rest, denied]));
           if (m.gate === 'pending') out.push(gateStep('escalate', [...rest, { ...m, gate: 'held' }]));
         }
@@ -499,7 +535,9 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
   // PS15.5 (S206, as ruled): every configuration keeps every instance's armed timers, and the environment may fire one
   // while it is armed. It replaces S61's rule for declared configurations, and A-F2's for another channel's conversation.
   const timed = new Set<number>(instances.map((x, k) => (timerTargets(x.machine).length ? k : -1)).filter((k) => k >= 0));
-  const sys = configurationSystem(decl, instances, { timed, fault: opts.fault, channels });
+  // PS15.5 (S456): in a channel's generated configuration and the joint one, the application's pending intents are completed.
+  const completing = new Set<number>(decl.generated === 'channel' ? instances.map((x, k) => (!x.spawned && channels.some((c) => ofThis(c) && c.application === x.machine.id) ? k : -1)).filter((k) => k >= 0) : []);
+  const sys = configurationSystem(decl, instances, { timed, fault: opts.fault, channels, completing });
   const absent = (err: unknown) => err instanceof AbsentInstance;
   // PS15.5 (S207): a joint configuration is explored to 10,000 global states at most; the cap is PL3901, INCONCLUSIVE.
   const g = explore(sys, decl.joint ? Math.min(opts.maxStates ?? JOINT_CAP, JOINT_CAP) : opts.maxStates);
@@ -673,6 +711,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
     if (o.kind === 'collision') findings.push(finding('PL5101', undefined, `${instances[(e.label as GlobalLabel).instance].name} spawns ${String(o.value)} again, and ${o.field} exists; one key names one address, so the spawn creates nothing (S60, S83)`, path, { field: o.field, state: o.state }));
     else if (o.field === 'instances') findings.push(finding('PL5302', undefined, `a detached spawn would make ${String(o.value)} instances, above the bound ${decl.bounds?.instances}; it is not explored`, path, { field: 'instances', state: o.state }));
     else if (o.field === 'transit') findings.push(finding('PL5301', undefined, `a step would put ${String(o.value)} messages in transit, above the bound ${decl.bounds?.transit}; it is not explored`, path, { field: 'transit', state: o.state }));
+    else if (o.field.startsWith('intents ')) findings.push(finding('PL3901', undefined, `${o.field.slice(8)} would hold more than ${PENDING_BOUND} pending intents; the step is not explored (PS15.5, S456)`, path, { field: o.field, state: o.state }));
     else if (o.kind === 'escape') findings.push(finding('PL3102', undefined, `${o.field} can leave its type (value ${keyOf(o.value)})`, path, { field: o.field, state: o.state }));
     else findings.push(finding('PL3901', undefined, `${o.field} can leave its check domain (value ${keyOf(o.value)}); the state is not explored`, path, { field: o.field, state: o.state }));
   }
@@ -695,7 +734,7 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
       const c = m ? descriptors.get(m[1])?.audience : undefined;
       return c ? Math.max(0, classes.indexOf(c)) : null;
     };
-    const tsys = configurationSystem(decl, instances, { timed, fault: opts.fault, taint: rules, channels });
+    const tsys = configurationSystem(decl, instances, { timed, fault: opts.fault, taint: rules, channels, completing });
     // PS17.3 (S450): the recipient of a conversation's provider effect has its thread's principal, when it is fixed.
     const threadOf = (s: GlobalState, k: number) => (s.threads?.[k] === undefined ? null : s.threads[k]);
     const tg = explore(tsys, decl.joint ? Math.min(opts.maxStates ?? JOINT_CAP, JOINT_CAP) : opts.maxStates);

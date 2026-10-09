@@ -188,6 +188,8 @@ export interface RMachine {
   keys: number;
   /** PS15.3: the keys of the channels whose application this machine is; each names its conversation's address. */
   channelKeys: string[];
+  /** PS15.5 (S456): each effect's and decision's kind, with the actions its outcomes name (its completions). */
+  outcomes: Map<string, string[]>;
   /** PS15.0a: for a conversation whose channel declares principal from, the Sender's field it names. */
   threadPrincipal?: string;
   /** PS1.4b: the top of an Items count, the largest limit among the program's retrievals. */
@@ -338,6 +340,14 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
     const ok = it.items.find((x): x is A.EffOutcomeItem => x.kind === 'EffOutcome' && x.outcome === 'ok');
     const bound = (head: string[]) => (ok?.bind === undefined ? [] : ok.args.filter((a) => { const p = replyPath(a.value, ok.bind!); return p !== null && head.includes(p[0]); }).map((a) => a.name!));
     decisions.set(it.name, { id: it.id, name: it.name, kind: `decision.${it.name}`, params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })), ok: ok ? { action: ok.action, answer: bound(['answer']), confidence: bound(['conf', 'margin']) } : null });
+  }
+  // PS15.5 (S456): the completions each effect's and decision's declaration names, by its kind.
+  const outcomes = new Map<string, string[]>();
+  for (const it of m.items) {
+    if (it.kind !== 'EffectDecl' && it.kind !== 'Decision') continue;
+    const kind = it.kind === 'Decision' ? decisions.get(it.name)!.kind : effects.get(it.name)!.kind;
+    const acts = (it.items as { kind: string; action?: string }[]).filter((x) => x.kind === 'EffOutcome').map((x) => x.action!);
+    if (acts.length) outcomes.set(kind, [...new Set([...(outcomes.get(kind) ?? []), ...acts])]);
   }
   const guardedInputs = strictInputs(m, effects);
   // PT3.4a, S400: a parameter of a handled action is strict unless written disclosed, when its type has a check domain
@@ -514,7 +524,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
     contents,
     keys,
     name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
-    actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness, channelKeys: (m.channelKeys ?? []).map((c) => c.key), ...((m as A.Machine & { threadPrincipal?: string }).threadPrincipal ? { threadPrincipal: (m as A.Machine & { threadPrincipal?: string }).threadPrincipal } : {}),
+    actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness, channelKeys: (m.channelKeys ?? []).map((c) => c.key), outcomes, ...((m as A.Machine & { threadPrincipal?: string }).threadPrincipal ? { threadPrincipal: (m as A.Machine & { threadPrincipal?: string }).threadPrincipal } : {}),
     itemsLimit: itemsLimitOf(decls),
     memory: memoryOf(decls, m, effects, decisions),
   };
