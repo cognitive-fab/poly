@@ -154,7 +154,7 @@ export class OutcomeWithoutDecision extends Error {
 
 /** PT12.5: an approval that is not a person's signed record for a waiting escalation. Audited, with no effect. */
 /** S189: why an approval was refused, as the drop folder names it. */
-export type ApprovalRefusal = 'not-a-record' | 'wrong-key' | 'unmatched' | 'replayed' | 'expired' | 'wrong-project';
+export type ApprovalRefusal = 'not-a-record' | 'wrong-key' | 'unmatched' | 'replayed' | 'expired' | 'wrong-project' | 'holder-mismatch';
 
 export class ApprovalRefused extends Error {
   constructor(message: string, readonly reason: ApprovalRefusal = 'unmatched') { super(message); this.name = 'ApprovalRefused'; }
@@ -667,7 +667,7 @@ export class PolyRuntime {
    * PS16.1: the certified credential, as load read its descriptor once with the certified bytes (review D4, B7, M9), or
    * null for an unknown credential.
    */
-  #credential(c: string): { machine: string; provider: string; scopes: string[]; holder: boolean } | null {
+  #credential(c: string): { machine: string; provider: string; scopes: string[]; holder: boolean; person: boolean } | null {
     return this.verified.credentials.find((x) => x.name === c) ?? null;
   }
 
@@ -813,7 +813,40 @@ export class PolyRuntime {
   async requestGrant(c: string, holder: string | null): Promise<string> {
     const cred = this.#credential(c);
     if (!cred) throw new Error(`no credential ${c} in the certified build (PS16)`);
-    if (cred.holder !== (holder !== null)) throw new Error(`credential ${c} ${cred.holder ? 'is granted by a holder, a Principal' : 'is the service\'s own, with no holder'} (PT10e)`);
+    if (cred.holder !== (holder !== null)) throw new Error(`credential ${c} ${cred.holder ? 'is granted by a holder, a Principal' : cred.person ? 'names no holder: a person\'s signed grant request names it (S457)' : 'is the service\'s own, with no holder'} (PT10e)`);
+    // S457, PT10g: only a person's signed grant request creates the one grant of a person's credential with no holder.
+    if (cred.person && !cred.holder && !this.#fixedHolder(c)) throw new Error(`credential ${c}'s holder is fixed by a person's signed grant request first (PT10g, S457)`);
+    return this.#askGrant(c, holder);
+  }
+
+  /** S457: the keyed digest of the holder fixed for the current, unrevoked grant of a credential that names none, or null. */
+  #fixedHolder(c: string): string | null {
+    const id = this.grantOf(c, null);
+    if (!id) return null;
+    const row = this.store.db.prepare('SELECT state FROM pr_instance WHERE instance_id = ?').get(id) as { state: string } | undefined;
+    if (!row || (JSON.parse(row.state) as { g?: string }).g === 'Revoked') return null;
+    return (this.store.db.prepare('SELECT holder FROM poly_grant_holder WHERE instance = ?').get(id) as { holder: string } | undefined)?.holder ?? null;
+  }
+
+  /**
+   * S457, PT10g: a person's signed grant request for a credential that names no holder. With no unrevoked grant it creates
+   * the next one and fixes its holder by keyed digest; with one, the same holder asks again and another is refused
+   * holder-mismatch, so replacing the holder needs a revocation.
+   */
+  async #requestForHolder(c: string, holder: string): Promise<string> {
+    const key = this.#holderKey(holder);
+    const fixed = this.#fixedHolder(c);
+    if (fixed !== null && fixed !== key) throw new ApprovalRefused(`the grant of credential ${c} has another holder; it is replaced only after a revocation (PS16.2, S457)`, 'holder-mismatch');
+    const url = await this.#askGrant(c, null);
+    if (fixed === null) {
+      const id = this.grantOf(c, null)!;
+      await this.store.txn(() => { this.store.db.prepare('INSERT OR REPLACE INTO poly_grant_holder (instance, holder) VALUES (?, ?)').run(id, key); });
+    }
+    return url;
+  }
+
+  async #askGrant(c: string, holder: string | null): Promise<string> {
+    const cred = this.#credential(c)!;
     const vault = this.#vaults.get(c);
     if (!vault) throw new Error(`no vault is connected for credential ${c} (PT10f)`);
     let id = this.grantOf(c, holder);
@@ -996,7 +1029,12 @@ export class PolyRuntime {
             const r = record as { credential?: unknown; holder?: unknown; record?: unknown };
             if (typeof r.credential !== 'string' || (r.holder !== null && typeof r.holder !== 'string')) throw new ApprovalRefused('a grant request names a credential and a holder or null', 'not-a-record');
             await this.#takeGrantRequest(r.credential, r.holder as string | null, r.record);
-            this.#authorizations.push({ credential: r.credential, url: await this.requestGrant(r.credential, r.holder as string | null) });
+            // S457: a person's credential with no holder is requested for the person the signed request names.
+            const cred = this.#credential(r.credential);
+            if (cred?.person && !cred.holder) {
+              if (typeof r.holder !== 'string') throw new ApprovalRefused('a grant request for a credential that names no holder names the person as holder (PT10g, S457)', 'not-a-record');
+              this.#authorizations.push({ credential: r.credential, url: await this.#requestForHolder(r.credential, r.holder) });
+            } else this.#authorizations.push({ credential: r.credential, url: await this.requestGrant(r.credential, r.holder as string | null) });
           } else await this.revokeBySubject(record);
         } catch (e) { reason = e instanceof ApprovalRefused ? e.reason : 'unmatched'; message = (e as Error).message; }
         await this.store.txn(() => { this.store.appendEvent(APPROVALS_RUN, 'verdict', { stage: kind, file, ...(kind === 'revocation' ? { record: this.store.keep(text) } : {}), outcome: reason ? 'refused' : 'applied', ...(reason ? { reason } : {}) }, this.now()); });

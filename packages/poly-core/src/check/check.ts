@@ -679,7 +679,6 @@ class Checker {
       if (profile && !profile.grants.includes(d.grant)) this.err('PL1201', d, `provider "${d.provider}" does not support the ${d.grant} grant; its profile names ${profile.grants.join(', ')} (PT10e)`);
       if (profile && d.pkce && !profile.pkce) this.err('PL1201', d, `provider "${d.provider}" does not support PKCE, by its profile (PT10e)`);
       // A person's grant is held by someone, a Principal; the service's own credential is held by no one (PT10e).
-      if (d.grant === 'authorization_code' && d.holder === null) this.err('PL1201', d, `credential ${d.name} is granted by a person (authorization_code) and names no holder: write holder Principal (PT10e)`);
       if (d.grant === 'client_credentials' && d.holder !== null) this.err('PL1201', d, `credential ${d.name} is the service's own (client_credentials) and has no holder (PT10e)`);
       else if (d.holder !== null && (d.holder !== 'Principal' || this.env.unions.has('Principal') || this.env.records.has('Principal'))) this.err('PL1201', d, `the holder of credential ${d.name} is ${d.holder}; a holder is a Principal (PT10e)`);
     }
@@ -697,7 +696,10 @@ class Checker {
       // A credential with no scope is reported once, at its declaration.
       if (c.scopes.length && !c.scopes.includes(s)) this.err('PL6821', u, `effect ${e.name} uses the scope ${s}, which credential ${c.name} does not declare: ${c.scopes.join(', ')} (PT10e)`);
     }
-    if (c.grant === 'authorization_code') {
+    // S457: a person's credential that names no holder has one grant, and an effect that uses it names no for.
+    if (c.grant === 'authorization_code' && c.holder === null) {
+      if (u.holder !== null) this.err('PL1201', u, `credential ${c.name} is granted by a person and names no holder, so effect ${e.name} names no holder for it: the first signed grant request fixes the holder (PT10e, S457)`);
+    } else if (c.grant === 'authorization_code') {
       if (u.holder === null) this.err('PL6822', u, `effect ${e.name} uses ${c.name}, a person's grant, and names no holder: write for p, p a Principal parameter of the effect (PT10e)`);
       else {
         const p = e.params.find((x) => x.name === u.holder);

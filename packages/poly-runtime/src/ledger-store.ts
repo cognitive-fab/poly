@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS poly_grant (
   instance   TEXT NOT NULL,
   PRIMARY KEY (credential, holder, generation)
 );
+-- S457, PT10g: the holder a person's signed grant request fixed for the one grant of a credential that names none, by
+-- its keyed digest; no program, policy or proposal reads it.
+CREATE TABLE IF NOT EXISTS poly_grant_holder (
+  instance TEXT PRIMARY KEY,
+  holder   TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS poly_erasable (
   digest TEXT PRIMARY KEY
 );
