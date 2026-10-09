@@ -1,0 +1,86 @@
+// PS15.0a (S450, the one-value rule): the tests' channel kind of test/fixtures/thread-principal/std as it was before
+// S450, whose Sender claims carry no principal. A channel that neither declares `principal from` nor binds an
+// application action with claims explores what it explored before S450, so its configuration on this kind and on the
+// S450 kind are the same size. It is found through the test-only std option and never ships in std/.
+module std.channels.test
+
+enum Window { Closed, Open }
+enum Verification { Signed }
+
+claims Sender {
+  verified  : Verification
+}
+
+machine Peer {
+  state { }
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "window-closed" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    window  : Window = Closed
+    pending : 0..2 = 0
+    receipt : bool = false
+    app     : Ref<Peer> = none
+  }
+
+  action Open(app: Ref<Peer>)
+  action Inbound(from: string check { "alice", "bob" } disclosed, body: Content)
+  action Reply(body: Content)
+  action Template()
+  action Sent()
+  action SendFailed()
+  action Ack()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+  on Inbound(from, body) by s: Sender {
+    require window is Closed else reject "open"
+    window' = Open
+    send app <- Message(body: body)
+  }
+  on Reply(body) {
+    require pending == 0 else reject "busy"
+    pending' = 1
+    if window is Open {
+      emit send(body: body)
+    } else {
+      receipt' = true
+      send app <- Rejected(reason: "window-closed")
+    }
+  }
+  on Template {
+    require window is Open else reject "closed"
+    require pending == 0 else reject "busy"
+    pending' = 1
+    emit send(body: none)
+  }
+  on Sent {
+    require pending == 1 && !receipt else reject "idle"
+    receipt' = true
+    send app <- Delivered()
+  }
+  on SendFailed {
+    require pending == 1 && !receipt else reject "idle"
+    receipt' = true
+    send app <- Failed()
+  }
+  on Ack {
+    require receipt else reject "no-receipt"
+    receipt' = false
+    pending' = 0
+  }
+
+  effect send(body: Content) {
+    kind "channel.send"
+    labels { egress:external }
+    ok -> Sent()
+    failed -> SendFailed()
+    exhausted -> SendFailed()
+  }
+}

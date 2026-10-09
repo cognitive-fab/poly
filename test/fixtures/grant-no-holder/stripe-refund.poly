@@ -1,0 +1,32 @@
+// S457 (PS16.2, PT10e): the refund case. A Stripe Connect credential granted by one person at a time names no
+// holder, and the effect that uses it names no `for`. Checked against std's own profile.
+module refund_nh
+
+credential payments: oauth2 {
+  provider "stripe-connect"
+  grant authorization_code
+  scopes { read_write }
+}
+
+machine Desk {
+  state {
+    n : 0..1 = 0
+  }
+  terminal n == 1
+
+  action Refund(amount: 0..500)
+
+  on Refund(amount) {
+    require n == 0 else reject "done"
+    n' = 1
+    emit refund(amount: amount)
+  }
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    uses payments { read_write }
+    class irreversible
+  }
+}
