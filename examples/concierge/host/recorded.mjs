@@ -47,10 +47,20 @@ export function recordedConcierge(fixture) {
     if (typeof text !== 'string') throw new Error(`no recorded ${outcome} reply for ${m.id}`);
     return { answer: text, distribution: [[text, 1]], reported: fixture.models.small, latencyMs: 0 };
   };
+  // The status answer: its text, and the ids it cites, kept to the items it was given (PS17.6); an id the fixture names
+  // that the retrieval did not return is left out, as a provider citing only what it read.
+  const answer = (q, materials) => {
+    const m = messageOf(fixture, materials);
+    asked.push({ decision: q.decision, tier: null, message: m.id });
+    if (!m.answer) throw new Error(`no recorded answer for ${m.id}`);
+    const given = new Set(Object.values(materials?.items ?? {}).flat().map((i) => i.id));
+    return { answer: m.answer.text, distribution: [[m.answer.text, m.answer.p]], cites: m.answer.cites.filter((id) => given.has(id)), usage: m.answer.usage, reported: fixture.models.small, latencyMs: 0 };
+  };
   return {
     asked,
     tiers: { small: tier('small'), large: tier('large') },
     decisions: {
+      answer: { provider: answer, model: fixture.models.small },
       amount: { provider: amount, model: fixture.models.small },
       reply: { provider: reply, model: fixture.models.small },
     },

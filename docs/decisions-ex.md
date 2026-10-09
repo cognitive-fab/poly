@@ -102,6 +102,32 @@ E1 stops here for S456, as the handoff's stop list asks (a needed change in the 
 
 S450's PS and PT text is on `v1` (283c5b2c), its code is not. The draft now has the status path as that text gives it: the channel `support` declares `audience customer` and `principal from principal`; `Got(body) by c: Customer` takes the thread's principal from the verified claims and keeps it as `customer`; a `Status` message retrieves `orders where owner == customer limit 3`, and the decision `answer(question, context)` cites the orders it used and answers the customer who asked. The checker refuses the draft at `principal from` (`PL0001`), as it must until S450's code lands; and the WhatsApp kind's `Sender` claims hold no `Principal` field yet, which PS15.0a's `principal from f` needs. The recorded answers gain the `answer` decision's entries, with the seeded orders, when the module first checks.
 
+## E1: the status path checked, the Desk reduced, and two findings for the release session (2026-10-09)
+
+`ex` was rebased on `v1` at f373e0fe (S450's code, S451, S454, S455, F3, F4 and the work-order key), with no conflict. The WhatsApp kind's `Sender` claims now hold `principal`, so the status path parses. Until S457 the draft is checked as a probe with the credential and its `uses` left out (nothing of the probe is committed; it is made by a script from the draft).
+
+**Measured** (`poly check` with a 12 GB heap, nothing else running):
+
+| Probe | Result |
+|---|---|
+| The draft with the status path, amount `0..500` | stopped at the one-hour background limit; `Desk` had about 5,300 states by its second pass at 7.5 min, and nothing more was printed |
+| The same, amount narrowed to `0..2` | out of memory after 17 min 38 s |
+| `Desk` alone, no channels, amount `0..2` | CLEAN in 1 min 32 s: 5,336 states, the flow rule 15,128 |
+| The reduced draft, amount `0..2` | 8 min 37 s: `Desk` 686 states and its flow rule 974; `support` 339 global states, 7,006 steps, its flow rule 298,403 global states, CLEAN; `staff` 112 |
+| The reduced draft, amount `0..500` | out of memory after 19 min 25 s |
+
+So the cost was in the channel's configuration, whose flow rule follows every pending completion with its taint (PS17.3), not in `Desk` alone.
+
+**The reduction, decided by the plan's rules.** `Desk` no longer keeps the last receipt (`last`, four values), which only gave each receipt handler a write; the handlers write `phase` instead. Every return to `Idle` clears the message and the reply, so an idle `Desk` is one state whatever it answered before. No behaviour changes: no handler read `last`, and an idle `Desk` reads neither field before `Got` writes it again.
+
+**Finding 1, for the release session: `PL6838` on a channel's own conversation.** poly-ref reports `PL6838 FLOW_NOT_FOLLOWED` on `Desk`'s `Reply` and `Template` to `support.Conversation` ("no configuration of the program holds Desk and concierge.support.Conversation"), although the channel's generated configuration holds both and its flow rule followed those messages CLEAN over 298,403 states. `followed` in `packages/poly-ref/src/check.ts` counts declared configurations only, never the configurations a channel generates (PS15.5). S322 asks whether some configuration of the program holds the two; a generated one is one. A defect of poly-ref against S322; `ex` does not change it.
+
+**Finding 2, for a ruling: AC30's domain and the configuration (S458).** With the strict `{ value: 0..500 }` of AC30, the reduced draft does not fit 12 GB; with `0..2` it checks in under nine minutes. The amount is explored over all 501 values, and in the configuration's flow rule each pending `amount` completion is offered with each of them; S456 will offer them in the configuration too. The program reads the value only by comparing it with 100 and passes it on in the refund's payload. **Proposal (semantics, for the release session):** a range-typed value that a machine only compares with constants and passes on in a payload, never storing it or doing arithmetic on it, is explored by the intervals those constants cut, as PT20.3 does for ages, remainders and counters, and as PD1.4b does for `Conf`: here `{0, 100, 101, 500}`. The verdict prints the cuts in its instance. The runtime still refuses any value outside `0..500` (strict, S400), so AC30 holds as written. **Alternative:** the example's domain is cut to what fits, which changes AC30's example and the refunds the concierge can make.
+
+- **The full suite** (`.poly/logs/4a782928-2026-10-09T11-26-53-289Z-ex-status.log`, nothing else running): 2,210 tests and 6 after, 2,204 and 6 passed, no failure, 2 skipped and 4 waiting; check-memory passed.
+
+E1's full check waits for S456, S457 and a ruling on S458; Finding 1 goes to the release session with them.
+
 ## Conclusion
 
 The examples branch holds the plan, its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader, the Gmail source kind, the measured concierge draft, and the concierge's recorded answers and host code. The concierge waits for S450, S456 and S457 on `v1`; the inbox's machines wait for S451, S454 and S455.

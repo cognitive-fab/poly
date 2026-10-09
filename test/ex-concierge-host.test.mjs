@@ -51,7 +51,20 @@ test('E1: the reply decision answers each message and outcome the program can as
   const seen = { tiers: [], decisions: [] };
   provideRecorded({ provideTier: (n) => seen.tiers.push(n), provide: (d, c) => seen.decisions.push([d, c.model]) }, r);
   assert.deepEqual(seen.tiers, ['small', 'large']);
-  assert.deepEqual(seen.decisions, [['amount', 'flash-2026-09'], ['reply', 'flash-2026-09']]);
+  assert.deepEqual(seen.decisions, [['answer', 'flash-2026-09'], ['amount', 'flash-2026-09'], ['reply', 'flash-2026-09']]);
+});
+
+test('E1, AC22: the status answer cites only orders it was given, and the seeded orders belong to two customers', () => {
+  const r = recordedConcierge(FIXTURE);
+  const own = FIXTURE.orders.filter((o) => o.owner === FIXTURE.customers['wa-1']).map((o) => ({ id: o.id, body: o.body }));
+  const a = r.decisions.answer.provider({ decision: 'answer', payload: {} }, { bodies: { question: msg('status').text }, items: { context: own } });
+  assert.match(a.answer, /Order 1002/);
+  assert.deepEqual(a.cites, ['o-1002']);
+  // Given another customer's orders, it cites none of its recorded ids: a citation is a subset of what was given.
+  const other = FIXTURE.orders.filter((o) => o.owner === FIXTURE.customers['wa-2']).map((o) => ({ id: o.id, body: o.body }));
+  assert.deepEqual(r.decisions.answer.provider({ decision: 'answer', payload: {} }, { bodies: { question: msg('status').text }, items: { context: other } }).cites, []);
+  assert.deepEqual([...new Set(FIXTURE.orders.map((o) => o.owner))].sort(), ['cust-a', 'cust-b']);
+  assert.equal(FIXTURE.customers[msg('status').from], 'cust-a');
 });
 
 /** A runtime that holds two Desk journals and one Notice, and refuses a Notify while the previous one is in flight. */
