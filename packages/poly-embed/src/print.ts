@@ -202,8 +202,12 @@ class Printer {
       case 'DecBand': return `${this.use('band')}(${decimal(x.lo)}, ${decimal(x.hi)})`;
       case 'DecCites': return `${this.use('cites')}(${q(x.param)})`;
       case 'DecRoute': return `${this.use('route')}(${q(x.route)})`;
-      // PT2.5: PT10r gives the clause of S454 no embedded form, so none is invented here.
-      case 'DecBudget': throw new Error('a decision\'s budget clause (prices ... budget b, PS18.4a) has no embedded form (PT10r)');
+      // PT10r, S454: the clause as budget(b, { … }), each part it names; a clause with no budget name has no embedded form.
+      case 'DecBudget': {
+        if (x.budget === null) throw new Error('a decision\'s budget clause with no budget name (prices ... with no budget b, PL1201) has no embedded form (PT10r)');
+        const parts = [x.prices !== null ? `prices: ${q(x.prices)}` : null, x.maxInputTokens !== null ? `maxInputTokens: ${x.maxInputTokens}` : null, x.maxTokens !== null ? `maxTokens: ${x.maxTokens}` : null].filter(Boolean);
+        return `${this.use('budget')}(${q(x.budget)}, { ${parts.join(', ')} })`;
+      }
       default: return this.effItem(x);
     }
   }

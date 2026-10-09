@@ -516,11 +516,20 @@ class Reader {
   }
 
   private decisionItem(node: ts.Expression): A.DecisionItem {
-    const c = this.call(node, 'provider', 'route', 'labels', 'timeout', 'band', 'cites', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'provider', 'route', 'budget', 'labels', 'timeout', 'band', 'cites', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.DecisionItem;
     if (c.name === 'provider') return mk({ kind: 'DecProvider', value: this.str(this.argsOf(c, 1, 1)[0]) });
     if (c.name === 'timeout') return mk({ kind: 'DecTimeout', value: this.str(this.argsOf(c, 1, 1)[0]) });
     if (c.name === 'route') return mk({ kind: 'DecRoute', route: this.str(this.argsOf(c, 1, 1)[0]) });
+    // PT10r, S454: budget(b, { prices, maxInputTokens, maxTokens }) is the clause prices "f" max input tokens I max
+    // tokens N budget b. A key left out is the part left out, so the checker's PL1201 is the same in both surfaces.
+    if (c.name === 'budget') {
+      const [name, body] = this.argsOf(c, 2, 2);
+      const seen = new Set<string>();
+      for (const [k, , kn] of this.obj(body)) { if (seen.has(k)) this.fail(kn, `${k} is written twice (PT10r)`); seen.add(k); }
+      const o = this.opts(body, ['prices', 'maxInputTokens', 'maxTokens']);
+      return mk({ kind: 'DecBudget', budget: this.str(name), prices: o.has('prices') ? this.str(o.get('prices')!) : null, maxInputTokens: o.has('maxInputTokens') ? this.int(o.get('maxInputTokens')!) : null, maxTokens: o.has('maxTokens') ? this.int(o.get('maxTokens')!) : null });
+    }
     if (c.name === 'band') { const [lo, hi] = this.argsOf(c, 2, 2); return mk({ kind: 'DecBand', lo: this.decimal(lo), hi: this.decimal(hi) }); }
     // PS17.6: cites(param).
     if (c.name === 'cites') return mk({ kind: 'DecCites', param: this.str(this.argsOf(c, 1, 1)[0]) });

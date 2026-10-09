@@ -97,6 +97,8 @@ export declare function to(param: string): EffItem;
 export declare function route(name: string, body: { tiers: { name: string; provider: string; prices: string; calibration?: string; maxInputTokens: number; maxTokens: number }[]; escalate: (['conf' | 'margin', number] | ['failed'])[]; budget?: string }): Decl;
 /** PT24.1c: `route r` in a decision, its tiers in place of a provider. */
 export declare function route(name: string): DecisionItem;
+/** PT10r, S454: `prices "f" max input tokens I max tokens N budget b` in an unrouted decision, after its provider. */
+export declare function budget(name: string, clause: { prices?: string; maxInputTokens?: number; maxTokens?: number }): DecisionItem;
 /** PT10r: `budget b { cap <currency> <amount> per … }`, each amount a decimal as written. */
 export declare function budget(name: string, body: { caps: { currency: string; amount: number; per: 'run' | 'scope' | 'hour' | 'day' | 'month'; scope?: true }[]; onExhausted?: 'deny' | 'escalate' }): Decl;
 /** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target; S455: `{ exact: url }` is `exact "<url>"`. */
