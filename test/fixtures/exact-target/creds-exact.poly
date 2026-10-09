@@ -1,0 +1,63 @@
+// S455 on PT10e: the desk of M9 step 5 with its refund bound to the exact refunds URL. The merchant's token may
+// do more than refund (as Gmail's compose token may send); the exact target keeps the effect at that one URL.
+module creds
+
+credential payments: oauth2 {
+  provider "test-oauth"
+  grant authorization_code pkce
+  scopes { refunds.write, charges.read }
+  holder Principal
+}
+
+credential reports: oauth2 {
+  provider "test-oauth"
+  grant client_credentials
+  scopes { reports.read }
+}
+
+machine Desk {
+  state {
+    n : 0..2 = 0
+  }
+
+  action Refund(merchant: Principal, amount: 0..2)
+  action Report()
+  action Note()
+
+  on Refund(merchant, amount) {
+    require n < 2 else reject "full"
+    n' = n + 1
+    emit refund(merchant: merchant, amount: amount)
+  }
+  on Report {
+    require n > 0 else reject "empty"
+    n' = 0
+    emit report(n: n)
+  }
+  on Note {
+    require n < 2 else reject "full"
+    n' = n + 1
+    emit note(n: n)
+  }
+
+  effect refund(merchant: Principal, amount: 0..2) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: exact "https://api.test-oauth.example/v1/refunds" }
+    uses payments { refunds.write } for merchant
+    class irreversible
+  }
+  effect report(n: 0..2) {
+    kind "reports.fetch"
+    labels { egress:external }
+    targets { egress: "https://api.test-oauth.example/v1/reports" }
+    uses reports { reports.read }
+    class none
+  }
+  effect note(n: 0..2) {
+    kind "desk.note"
+    labels { write:store }
+    targets { store: ["notes"] }
+    class reversible
+  }
+}

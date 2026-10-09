@@ -1,0 +1,40 @@
+// S455: exact egress targets. The draft effect may reach the drafts URL itself and nothing under it, so a send at
+// .../drafts/send is outside its bounds. The mixed effect lists an exact target beside a plain prefix, which still
+// admits every path below it.
+module drafts
+
+enum Phase { Open, Done }
+
+machine Mail {
+  state {
+    phase : Phase = Open
+  }
+  terminal phase == Done
+
+  action Draft()
+  action Mixed()
+
+  on Draft {
+    require phase == Open else reject "done"
+    phase' = Done
+    emit draft(1)
+  }
+  on Mixed {
+    require phase == Open else reject "done"
+    phase' = Done
+    emit mixed(1)
+  }
+
+  effect draft(n: 0..1) {
+    kind "mail.draft"
+    labels { egress:external }
+    targets { egress: exact "https://api.example.com/v1/drafts" }
+    class reversible
+  }
+  effect mixed(n: 0..1) {
+    kind "mail.mixed"
+    labels { egress:external }
+    targets { egress: [exact "https://api.example.com/v1/drafts", "https://api.example.com/v1/labels"] }
+    class reversible
+  }
+}
