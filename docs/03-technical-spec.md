@@ -1127,8 +1127,10 @@ Q9 placed these two at the start of M10 (decisions-m9.md); neither adds a constr
 ```ebnf
 Audience     = "audience" "{" Ident { "<" Ident } "}" ;                       (* PS1.4b, the lowest first *)
 Source       = "source" Ident ":" ( "records" | "documents" | "memory" ) "{" { SourceItem } "}" ;
-SourceItem   = "adapter" String | "audience" Ident [ "owned" ] | "freshness" Duration | "stale" ( "escalate" | "deny" ) ;
-EffectItem  += "retrieve" Ident [ "where" "owner" "==" Ident ] "limit" Int      (* PS17.2 *)
+SourceItem   = "adapter" String | "audience" Ident [ "owned" ] | "freshness" Duration | "stale" ( "escalate" | "deny" )
+             | "keys" "{" Ident { "," Ident } "}" ;                        (* PS17.0, S451 *)
+EffectItem  += "retrieve" Ident [ "where" Pred [ "and" Pred ] ] "limit" Int    (* PS17.2, S451 *)
+Pred         = "owner" "==" Ident | Ident "==" Ident ;                   (* at most one owner and one key equality *)
              | "remember" Ident "as" ( "observed" | "derived" | "verified" ) "about" Ident   (* PS17.5 *)
              | "to" Ident | "audience" Ident ;                                (* PS17.3 *)
 DecisionItem += "cites" Ident ;                                               (* PS17.6 *)
@@ -1143,6 +1145,8 @@ ChannelItem  += "audience" Ident ;                                            (*
 - **Representatives (PS17.4).** A module with an owned source explores one more principal representative, in poly-ref and in the contract's domains alike.
 
 ## PT10j. Memory at run time: sources, retrieval and what a decision reads, as built (M10 steps 7 and 8, PS17.2, PS17.4, S302, S308)
+
+- **Keys (S451, PS1.4c, PS17.0, PS17.2).** `Key` is a built-in opaque type like `Principal`: it lowers to a string (`key | null` in the contract, `Key | null` in the host types) and the runtime refuses an empty one as outside the type (S140). A source declares its keys in `keys { … }`, written once, each an identifier, recorded in `sources/<s>.json` as `keys` and read back by poly-ref. A retrieval with a key predicate records it in its manifest entry as `retrieve: { source, owner, key: { name, param }, limit }`, read back by poly-ref. The runtime calls the adapter with `{ owner?, key?: { name, value }, limit }` and refuses an item that does not carry the key with that value (`keys` on `ItemRef`, permanent, K14), as it refuses one of another owner. `postgresSource` and `openSearchSource` take `keys: { <key>: <column or field> }`, each name checked at construction, and filter by equality with the value as a parameter or a `term`, never as text. The embedded form writes `source(name, { …, keys: ['k', …] })` and `retrieve(s, { owner?, key?: ['k', 'x'], limit })`. Mail is such a source: an account's messages owned by the account's principal and keyed by message, thread and correspondent, so a draft that reads a thread by key reads only that account's items (IAC3).
 
 - **Certified descriptors and adapters (S308).** Admission certifies each `sources/<s>.json` and `flow/<module>.json` under `artefacts`, and lists them in `poly.memory`, each source with its adapter bound by package, version and digest, as a channel's is; load reads each once and keeps what it read. `rt.connectSource(s, adapter)` takes only an adapter the certified poly-io made, of the kind the source declares (`PL6408` otherwise); a `memory` source has none.
 - **The adapters (PT20.2, K14).** poly-io makes `postgresSource({ query, table, id, owner?, asOf, body })`, over the host's `query(text, params)`, and `openSearchSource({ base, index, transport, owner?, asOf, body })`, over an HTTP transport and the OpenSearch REST API (`_search` with a `term` filter, `_doc`, `_delete_by_query`). Each writes only names checked at construction, and passes the owner and the limit as values, never as query text. `retrieve(query)` returns `{ id, owner, asOf }` by reference, `resolve(id)` a body, and `forget(subject)` removes a subject's items.
