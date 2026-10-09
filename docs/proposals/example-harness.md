@@ -92,7 +92,7 @@ The harness drives a coding agent's tool loop through MCP. In v1 it is an exampl
 
 1. **Q-H1.** Base harness for the comparison: Pi (as in the paper), or one of the owner's own harnesses (Puffin, Claude Code)?
 2. **Q-H2.** Task set: a small subset of a public benchmark the paper used (EdgeBench, Terminal-Bench), or tasks from the owner's own repositories?
-3. **Q-H3.** Does it ship with v1, or right after v1 as the first post-release example?
+3. **Q-H3.** Ruled (owner, 2026-10-08): right after v1, as the first post-release example.
 
 ## Conclusion
 

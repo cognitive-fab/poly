@@ -147,3 +147,18 @@ Polywatch reviewed none of this branch's work: its reviews in this session were 
 ### What is next
 
 V1 to V9 are done. The merge into m4 and the v1 gate (V10) wait for the reviewer's go. Waiting on the owner: Q-V1 (the release), Q-V3 with V5's proposal (a stable key per work order), the probe review's two proposals (F3, F4), and S163's exception for SR's records.
+
+## V1 to V9 accepted, and what comes next (owner's reviewer, 2026-10-08)
+
+- **Accepted.** V1 to V9 as recorded (fec4337f..3f539a47): three full suites with no failure, the 160 measured verdicts identical at every step, the baseline `docs/v1/verdicts-after-v1.json`. The voided SR3 block is a reported deviation, kept with its records. SR3's result stands: 0 of 20 runs with an escaped defect against 5 of 20 in M3, one-sided Fisher p = 0.0236.
+- **V5 and Q-V3.** Workflows already cross the gate; Q-V3 is closed. The proposal to give each work order a key that stays the same across attempts (amending S173) is accepted; build it.
+- **Probe findings.** B1, A F1 and A F2 as fixed. F3 and F4 are accepted for v1, not left as limits: F4 contradicts "no silent clean" (a send that the receiver's strict domain refuses must be a finding at check, in a configuration and outside one), and F3 is the S400 trap through a state field (PL1301 follows a value through fields to the effect). B4 is accepted as is, stated in the release notes.
+- **S163.** SR3's run records join M3's as the paths the standing rule skips.
+- **The examples session's poly-io commit (71a0e628)** is within S452: new files, a provenance entry, and one registry entry each in the checker and the runtime's kind list. No action.
+- **The overlap** of the examples session's suite with V1's is noted; the later suites cover it. One suite at a time stays the rule for both sessions.
+
+**Order from here, on v1:**
+1. Fast-forward m4 to v1 now (`--ff-only`), record it, fast-forward again. This is not the V10 gate; it gives the examples branch a stable base.
+2. Build, each with PS/PT text first and tests written from the text alone: S450, S451, S454, the core half of S455 (ruled in poly-ex's `docs/decisions-ex.md`, "plan-ex ruled"; copy them here), then F4, F3 and the work-order key.
+3. Report each commit that changes PS or PT text, for the examples session to rebase.
+4. V10 waits for E1 and E2.

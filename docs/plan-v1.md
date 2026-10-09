@@ -21,7 +21,7 @@ Each language step: PS and PT text first, committed alone (rule 7a). Then the fa
 | V2 | **S401, an approved effect reads the state at approval** (`decisions-v1.md`) | The three tests of the ruling: approval after `Cancel` denied `stale-approval` and replayed; approval before `Cancel` allowed; a control without the rule allows both. The checker's policy stage covers the later states. |
 | V3 | **S402, routed decisions over Content and Items** (`decisions-v1.md`) | The concierge's classification runs as a routed decision over the message body; each tier call is proposed with the decision's taint; a policy denying by `effect.taint.class` stops a tier; PL6839 still refuses a Content result and cites; the canary test of S310 passes over a routed run. |
 | V4 | **Replaying a credential's grant** (`std.credentials` in the build's records) | `poly journal replay` of a concierge run with a delegated refund reproduces every state and decision, the grant included (AC27). |
-| V5 | **Workflows under poly's gate** | Measure first: list what polyflow's runtime does that poly's gate does not, and bring it as a proposal. If it fits in v1, a workflow's effects cross the gate and its certificate no longer says `ungated`. If not, the release notes state the limit. Owner's call (Q-V3). |
+| V5 | **Workflows under poly's gate** | Measure first: list what polyflow's runtime does that poly's gate does not, and bring it as a proposal. If it fits in v1, a workflow's effects cross the gate and its certificate no longer says `ungated`. If not, the release notes state the limit (Q-V3, ruled). |
 | V6 | **The m3-isolation test** moved to the serial after-suite group | Passes in three consecutive full suites. |
 | V7 | **The strict-default experiment, part 1** (SR2, no model call) | Report as SR-AC2 asks. |
 | V8 | **The strict-default experiment, part 2** (SR3, 20 runs on the subscription) | Report as SR-AC3 asks, with its Fisher test. Runs only when no suite runs. |
@@ -34,7 +34,7 @@ Each language step: PS and PT text first, committed alone (rule 7a). Then the fa
 |---|---|---|
 | E1 | **The concierge** completed as the release example (AC27, AC30), after V3 lands on `ex` by rebase | AC15, AC18, AC22, AC27 and AC30 pass with recorded providers and fake adapters. |
 | E2 | **The inbox assistant** (`proposals/example-inbox.md`, Q-I1 to Q-I5 ruled) | Gmail through the history API by polling, with the Google provider profile of M9 and drafts only (no send scope); SES through SQS and S3; one audience per inbox; the digest on the local page. IAC1 to IAC9 pass on recorded traffic; no test calls a live account. |
-| E3 | **The checked harness** (`proposals/example-harness.md`) | Only if the owner rules it into v1 (Q-H3). Recommended: after the release. |
+| E3 | **The checked harness** (`proposals/example-harness.md`) | After the release (Q-V2, ruled). Not part of v1. |
 
 Adapters for Gmail and SES are host code in the examples branch. If an adapter needs a change in the core, the examples session stops and brings it to the reviewer; it does not change the core on its own.
 
@@ -50,7 +50,7 @@ From a clean build, on a quiet machine, after both branches are merged into m4 (
 6. The release notes complete.
 7. A record in `decisions-v1.md`.
 
-Then the owner decides the release (Q-V1).
+Then main is fast-forwarded to m4 and tagged `v1.0.0` locally (Q-V1). The owner pushes and publishes.
 
 ## Stop list (unchanged)
 
@@ -66,11 +66,11 @@ examples:      E1 (after V3) ─ E2 ────────────┘
 
 E2 can start at once on the adapters and machines that do not depend on V1 to V3, and rebases as each lands.
 
-## Questions for the owner
+## Owner's rulings (2026-10-08)
 
-1. **Q-V1.** What is the release: a tag `v1.0.0` on main, local only, with the push yours to make; or also a package published to npm under `@cognitive-fab`? Recommended: the tag, then you push and publish.
-2. **Q-V2.** The harness example (Q-H3): after the release, as recommended?
-3. **Q-V3.** Workflows under poly's gate: in v1 if V5's measurement shows it fits, otherwise a stated limit. Agreed?
+1. **Q-V1.** The release is a local tag `v1.0.0` on main after the gate. The owner pushes and publishes.
+2. **Q-V2.** The harness example comes after the release (Q-H3 ruled the same way). E3 is out of v1.
+3. **Q-V3.** Workflows run under poly's gate in v1 only if V5's measurement shows it fits; otherwise the release notes state the limit.
 
 ## Conclusion
 
