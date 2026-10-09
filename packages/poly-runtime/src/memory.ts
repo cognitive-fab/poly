@@ -345,22 +345,27 @@ export class Memory {
 
   /**
    * PS17.2: a retrieval, run by the runtime: the adapter's items by reference, kept as a set whose taint is the source's
-   * class and its items' owners. With `where owner == p`, an item of another owner, or of none, is refused (K14).
+   * class and its items' owners. With `where owner == p`, an item of another owner, or of none, is refused (K14). S451:
+   * with `k == x`, an item whose key k is not x's value, or that carries no such key, is refused the same way; the key
+   * narrows the items and never their taint.
    */
-  async retrieve(source: string, spec: { owner: string | null; limit: number }, payload: Record<string, unknown>, intent: string): Promise<{ items: { ref: string; count: number } }> {
+  async retrieve(source: string, spec: { owner: string | null; key?: { name: string; param: string }; limit: number }, payload: Record<string, unknown>, intent: string): Promise<{ items: { ref: string; count: number } }> {
     const d = this.sources.get(source);
     if (!d) throw new SourceRefused(`no source ${source} in the certified build`);
     const owner = spec.owner === null ? undefined : payload[spec.owner];
     if (spec.owner !== null && typeof owner !== 'string') throw new SourceRefused(`the retrieval from ${source} names no owner`);
+    const key = spec.key ? { name: spec.key.name, value: payload[spec.key.param] } : undefined;
+    if (key && (typeof key.value !== 'string' || key.value === '')) throw new SourceRefused(`the retrieval from ${source} names no ${key.name} key`);
     const adapter = d.kind === 'memory' ? this.memoryAdapter(source) : this.adapters.get(source);
     if (!adapter) throw new Error(`source ${source} has no adapter connected (PT26): connect one with rt.connectSource`);
-    const got: (ItemRef & { provenance?: string })[] = await adapter.retrieve({ ...(owner !== undefined ? { owner: owner as string } : {}), limit: spec.limit });
+    const got: (ItemRef & { provenance?: string })[] = await adapter.retrieve({ ...(owner !== undefined ? { owner: owner as string } : {}), ...(key ? { key: { name: key.name, value: key.value as string } } : {}), limit: spec.limit });
     if (!Array.isArray(got) || got.length > spec.limit) throw new SourceRefused(`source ${source} answered ${Array.isArray(got) ? got.length : 'no list of'} items for a limit of ${spec.limit} (K14)`);
     const items: Item[] = [];
     for (const i of got) {
       if (!i || typeof i.id !== 'string' || !Number.isFinite(i.asOf)) throw new SourceRefused(`source ${source} answered an item with no id or asOf (K14)`);
       if (d.owned && typeof i.owner !== 'string') throw new SourceRefused(`source ${source} is owned, and answered an item with no owner (K14)`);
       if (owner !== undefined && i.owner !== owner) throw new SourceRefused(`source ${source} answered an item of another owner for a retrieval by owner (K14)`);
+      if (key && (!i.keys || typeof i.keys !== 'object' || i.keys[key.name] !== key.value)) throw new SourceRefused(`source ${source} answered an item whose ${key.name} key is not the one asked for a retrieval by key (K14, S451)`);
       items.push({ id: i.id, owner: d.owned ? i.owner : null, asOf: i.asOf, ...(i.provenance ? { provenance: i.provenance } : {}) });
     }
     let ref!: { ref: string; count: number };

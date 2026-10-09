@@ -123,6 +123,8 @@ export function cardinality(t: TypeExpr, env: TypeEnv, check: CheckClause | null
       if (t.name === 'Principal' && !env.unions.has(t.name) && !env.records.has(t.name)) return 2;
       // PS4.1f: and so is a Content, by its representatives, plus none.
       if (t.name === 'Content' && !env.unions.has(t.name) && !env.records.has(t.name)) return 3;
+      // PS4.1g, S451: and so is a Key, by its representatives, plus none.
+      if (t.name === 'Key' && !env.unions.has(t.name) && !env.records.has(t.name)) return 3;
       // PS1.4b: an Items is explored by its count; its taint is the checker's ghost (PS17.1).
       if (t.name === 'Items' && !env.unions.has(t.name) && !env.records.has(t.name)) return 1;
       visiting = new Set([...visiting, t.name]);

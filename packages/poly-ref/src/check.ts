@@ -45,6 +45,8 @@ export interface InstanceLine {
   principals?: number;
   /** PS4.1f: the content representatives, when the machine's state or labels hold a Content. */
   contents?: number;
+  /** PS4.1g: the key representatives, when the machine's state or labels hold a Key. */
+  keys?: number;
 }
 
 export interface MachineReport {
@@ -85,6 +87,8 @@ export interface CheckOptions {
   principals?: number;
   /** PS4.1f: the number of content representatives, forced (a control); by default the rule's count. */
   contents?: number;
+  /** PS4.1g: the number of key representatives, forced (a control); by default the rule's count. */
+  keys?: number;
   /** PS1.0 (S176): the modules the machine's module uses, for a send to or a spawn of a machine named m.M. */
   program?: Module[];
   /** For one test each (ruled on M8 plan step 10): a deliberately broken check. */
@@ -173,7 +177,7 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
   const module = home.module;
   const machineName = home.machine;
   opts = { ...opts, program: home.program };
-  const M = buildMachine(module, machineName, { principals: opts.principals, contents: opts.contents, program: opts.program });
+  const M = buildMachine(module, machineName, { principals: opts.principals, contents: opts.contents, keys: opts.keys, program: opts.program });
   const g = explore(machineSystem(M), opts.maxStates);
   const findings: Diagnostic[] = [];
   const at = (node?: string) => ({ module: module.name, machine: M.name, ...(node ? { node } : {}) });
@@ -547,6 +551,14 @@ function usesPrincipals(M: RMachine): boolean {
   return M.actions.some((a) => a.claims && deep(a.claims.type, new Set())) || M.fields.some((f) => deep(f.type, new Set()));
 }
 
+/** Whether the machine's labels or state hold a Key (PS4.1g), so its instance names the representatives. */
+function usesKeys(M: RMachine): boolean {
+  const deep = (x: RType, seen: Set<string>): boolean => x.k === 'key' || (x.k === 'map' && deep(x.value, seen))
+    || (x.k === 'record' && !seen.has(x.name) && (M.records.get(x.name)?.fields ?? []).some((f) => deep(f.type, new Set([...seen, x.name]))))
+    || (x.k === 'union' && !seen.has(x.name) && (M.unions.get(x.name)?.ctors ?? []).some((c) => c.fields.some((f) => deep(f.type, new Set([...seen, x.name])))));
+  return M.fields.some((f) => deep(f.type, new Set())) || M.actions.some((a) => a.params.some((p) => deep(p.type, new Set())));
+}
+
 /** The checked instance a verdict holds for (PS4.3, PT12.3a). */
 export function instanceOf(M: RMachine): InstanceLine {
   return {
@@ -555,6 +567,8 @@ export function instanceOf(M: RMachine): InstanceLine {
     ...(usesPrincipals(M) ? { principals: M.principals } : {}),
     // PS4.1f: and the content representatives, counted apart.
     ...([...M.fields.map((f) => f.type), ...M.actions.flatMap((a) => a.params.map((p) => p.type))].some(function deep(t: RType): boolean { return t.k === 'content' || (t.k === 'map' && deep(t.value)); }) ? { contents: M.contents } : {}),
+    // PS4.1g: and the key representatives, counted apart.
+    ...(usesKeys(M) ? { keys: M.keys } : {}),
   };
 }
 

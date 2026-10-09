@@ -48,6 +48,8 @@ export function tyOfTypeExpr(t: A.TypeExpr, env?: TypeEnv): Ty {
       if (t.name === 'Principal' && !env?.unions.has(t.name)) return { k: 'principal' };
       // PS1.4a, S180: Content is built in, unless the module declares a type of that name.
       if (t.name === 'Content' && !env?.unions.has(t.name)) return { k: 'content' };
+      // PS1.4c, S451: Key is built in, unless the module declares a type of that name.
+      if (t.name === 'Key' && !env?.unions.has(t.name)) return { k: 'key' };
       // PS1.4b: Items is built in, unless the module declares a type of that name.
       if (t.name === 'Items' && !env?.unions.has(t.name) && !env?.records.has(t.name)) return { k: 'items' };
       return { k: 'union', name: t.name };
@@ -84,6 +86,8 @@ function scalarShape(t: Ty, env: TypeEnv): ShapeSpec | null {
     case 'principal': return { type: 'string', nullable: true };
     // PS1.4a: a Content is its body's digest string; none is null.
     case 'content': return { type: 'string', nullable: true };
+    // PS1.4c, S451: a Key is a non-empty string; none is null.
+    case 'key': return { type: 'string', nullable: true };
     default: return null;
   }
 }

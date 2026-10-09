@@ -968,7 +968,7 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
   const bounds = [...new Set(ref.findings.filter((f) => f.code === 'PL3901').map((f) => f.field ?? 'exploration cap'))];
   return {
     // PD5.1.3c: the principal representatives the verdict holds for, when the machine has any.
-    domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`), ...(ref.instance.principals ? [`${ref.instance.principals} principal representatives (PD5.1.3c)`] : []), ...(ref.instance.contents ? [`${ref.instance.contents} content representatives and none (PS4.1f)`] : [])],
+    domains: [...ref.instance.fields.map((f) => `${f.name} ∈ ${f.domain}`), ...ref.instance.params.map((p) => `${p.name} ∈ ${p.domain}`), ...(ref.instance.principals ? [`${ref.instance.principals} principal representatives (PD5.1.3c)`] : []), ...(ref.instance.contents ? [`${ref.instance.contents} content representatives and none (PS4.1f)`] : []), ...(ref.instance.keys ? [`${ref.instance.keys} key representatives and none (PS4.1g)`] : [])],
     states: ref.states,
     transitions: ref.transitions,
     bounds,

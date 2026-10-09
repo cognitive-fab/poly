@@ -230,7 +230,7 @@ export class PolyRuntime {
     // PS17.2: a retrieval is the runtime's own effect, run through its source's certified adapter.
     for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
       if (!e?.retrieve) continue;
-      const spec = e.retrieve as { source: string; owner: string | null; limit: number };
+      const spec = e.retrieve as { source: string; owner: string | null; key?: { name: string; param: string }; limit: number };
       builtins[kind] = (payload, _caps, ctx) => this.memory.retrieve(spec.source, spec, (payload ?? {}) as Record<string, unknown>, ctx.idempotencyKey);
     }
     // PS17.5: a remember is the runtime's own effect too, writing to the project's memory.

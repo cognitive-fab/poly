@@ -82,6 +82,7 @@ class Printer {
     this.out.push(`${INDENT}audience ${s.audience}${s.owned ? ' owned' : ''}`);
     if (s.freshness !== null) this.out.push(`${INDENT}freshness ${s.freshness}`);
     if (s.stale !== 'escalate') this.out.push(`${INDENT}stale ${s.stale}`);
+    if (s.keys?.length) this.out.push(`${INDENT}keys { ${s.keys.join(', ')} }`);
     this.out.push(`}${this.trail(s)}`);
   }
 
@@ -342,7 +343,7 @@ class Printer {
       case 'EffTargets': return `targets { ${e.targets.map((t) => `${t.key}: ${t.key === 'egress' && t.values.length === 1 ? JSON.stringify(t.values[0]) : `[${t.values.map((v) => JSON.stringify(v)).join(', ')}]`}`).join(', ')} }`;
       case 'EffUses': return `uses ${e.credential} ${scopeSet(e.scopes)}${e.holder === null ? '' : ` for ${e.holder}`}`;
       case 'EffOutcome': return `${e.outcome}${e.bind !== undefined ? `(${e.bind})` : ''} -> ${e.action}(${this.args(e.args)})`;
-      case 'EffRetrieve': return `retrieve ${e.source}${e.owner !== null ? ` where owner == ${e.owner}` : ''} limit ${e.limit}`;
+      case 'EffRetrieve': { const preds = [...(e.owner !== null ? [`owner == ${e.owner}`] : []), ...(e.key ? [`${e.key.name} == ${e.key.param}`] : [])]; return `retrieve ${e.source}${preds.length ? ` where ${preds.join(' and ')}` : ''} limit ${e.limit}`; }
       case 'EffRemember': return `remember ${e.source} as ${e.provenance} about ${e.about}`;
       case 'EffTo': return `to ${e.param}`;
       case 'EffAudience': return `audience ${e.cls}`;

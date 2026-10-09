@@ -51,6 +51,8 @@ export interface SourceDecl extends NodeBase {
   owned: boolean;
   freshness: string | null;
   stale: 'escalate' | 'deny';
+  /** PS17.0, S451: the item keys the adapter supplies with each item, in source order; absent when none are declared. */
+  keys?: string[];
 }
 
 // ── Routes and budgets (PT24, PS18, M11) ───────────────────────────────────
@@ -493,8 +495,8 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffAudience'; cls: string })
   | EffOutcomeItem;
 
-/** PS17.2: `retrieve s [where owner == p] limit n`, the body of a retrieval effect; `p` a Principal parameter. */
-export type EffRetrieve = NodeBase & { kind: 'EffRetrieve'; source: string; owner: string | null; limit: number };
+/** PS17.2: `retrieve s [where owner == p [and k == x]] limit n`, the body of a retrieval effect; `p` a Principal parameter, `x` a Key parameter and `k` a key the source declares (S451). */
+export type EffRetrieve = NodeBase & { kind: 'EffRetrieve'; source: string; owner: string | null; limit: number; key?: { name: string; param: string } };
 
 /** PS17.5: `remember s as k about p`, which writes the payload's Content to the memory source s, owned by p. */
 export type EffRemember = NodeBase & { kind: 'EffRemember'; source: string; provenance: 'observed' | 'derived' | 'verified'; about: string };

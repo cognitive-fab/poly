@@ -1,6 +1,7 @@
 // PT20.2, PS17.2, S308: the source adapters. Each returns items by reference, with their owner and `asOf` (K14),
 // resolves an item to its body only when a decision reads it, and forgets a subject's items. Neither builds a query from
-// text: the owner is a typed parameter, and every name the adapter writes into a query is checked at construction.
+// text: the owner and a key's value (S451) are typed parameters, and every name the adapter writes into a query is
+// checked at construction.
 //
 //   postgres:   over the host's query function, parameterized SQL only, so no driver enters poly.
 //   opensearch: the OpenSearch REST API (_search, _doc, _delete_by_query), as its documentation gives it, over an HTTP
@@ -13,6 +14,33 @@ const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const name = (adapter: string, what: string, v: string): string => {
   if (typeof v !== 'string' || !NAME.test(v)) throw new Error(`${adapter}: ${what} ${JSON.stringify(v)} is not a plain name (letters, digits, underscores)`);
   return v;
+};
+
+/**
+ * S451, PT10j: a source's keys, each a declared key name and the column or field that holds it, both checked as plain
+ * names at construction.
+ */
+const keysOf = (adapter: string, keys: Record<string, string> | undefined): [string, string][] => {
+  if (keys === undefined) return [];
+  if (keys === null || typeof keys !== 'object' || Array.isArray(keys)) throw new Error(`${adapter}: keys is an object of key names to columns or fields`);
+  return Object.entries(keys).map(([k, v]) => [name(adapter, 'key', k), name(adapter, `${k} key column or field`, v)]);
+};
+
+/** The column or field of the key a query names; a key the adapter was not given is refused, never ignored. */
+const keyField = (adapter: string, keys: [string, string][], q: SourceQuery): string | null => {
+  if (q.key === undefined) return null;
+  const f = keys.find(([k]) => k === q.key!.name)?.[1];
+  if (f === undefined) throw new Error(`${adapter}: a retrieval by the key ${JSON.stringify(q.key.name)}, which the adapter was not given (S451)`);
+  if (typeof q.key.value !== 'string' || q.key.value === '') throw new Error(`${adapter}: a key's value is a non-empty string (PS1.4c)`);
+  return f;
+};
+
+/** An item's keys as the adapter read them: a key with no value is left out, so the runtime refuses the item (K14). */
+const itemKeys = (keys: [string, string][], read: (i: number, field: string) => unknown): { keys?: Record<string, string> } => {
+  if (!keys.length) return {};
+  const out: Record<string, string> = {};
+  keys.forEach(([k, f], i) => { const v = read(i, f); if (v !== undefined && v !== null) out[k] = String(v); });
+  return { keys: out };
 };
 
 /** A limit as the runtime gives it: a positive integer, never above the declared one. */
@@ -39,6 +67,8 @@ export interface PostgresSourceConfig {
   owner?: string;
   asOf: string;
   body: string;
+  /** S451: the column of each key the source declares, by key name. */
+  keys?: Record<string, string>;
 }
 
 /** S308: a Postgres source over the host's query function. Every query is parameterized; only checked names are written. */
@@ -49,19 +79,26 @@ export function postgresSource(c: PostgresSourceConfig): SourceAdapter {
   const owner = c.owner === undefined ? null : name(A, 'owner column', c.owner);
   const asOf = name(A, 'asOf column', c.asOf);
   const body = name(A, 'body column', c.body);
+  const keys = keysOf(A, c.keys);
   if (typeof c.query !== 'function') throw new Error(`${A}: query is the host's function (text, params) (S308)`);
   const q = (s: string) => `"${s}"`;
   return made({
     kind: 'postgres' as const,
     async retrieve(query: SourceQuery): Promise<ItemRef[]> {
       const limit = limitOf(query);
-      const cols = `${q(id)} AS id, ${owner ? `${q(owner)} AS owner` : 'NULL AS owner'}, ${q(asOf)} AS as_of`;
-      const where = query.owner !== undefined ? (owner ? `WHERE ${q(owner)} = $1 ` : null) : '';
-      if (where === null) throw new Error(`${A}: a retrieval by owner from a table with no owner column (PL6835 at run time)`);
-      const params = query.owner !== undefined ? [query.owner, limit] : [limit];
+      const cols = `${q(id)} AS id, ${owner ? `${q(owner)} AS owner` : 'NULL AS owner'}, ${q(asOf)} AS as_of${keys.map(([, f], i) => `, ${q(f)} AS key_${i}`).join('')}`;
+      if (query.owner !== undefined && !owner) throw new Error(`${A}: a retrieval by owner from a table with no owner column (PL6835 at run time)`);
+      // S451: the owner and the key are each an equality with a parameter, never text.
+      const key = keyField(A, keys, query);
+      const params: unknown[] = [];
+      const eqs: string[] = [];
+      if (query.owner !== undefined) { params.push(query.owner); eqs.push(`${q(owner!)} = $${params.length}`); }
+      if (key !== null) { params.push(query.key!.value); eqs.push(`${q(key)} = $${params.length}`); }
+      params.push(limit);
+      const where = eqs.length ? `WHERE ${eqs.join(' AND ')} ` : '';
       const text = `SELECT ${cols} FROM ${q(table)} ${where}ORDER BY ${q(asOf)} DESC LIMIT $${params.length}`;
       const r = await c.query(text, params);
-      return r.rows.map((row) => ({ id: String(row.id), owner: owner ? (row.owner === null || row.owner === undefined ? null : String(row.owner)) : null, asOf: asOfMs(A, row.as_of) }));
+      return r.rows.map((row) => ({ id: String(row.id), owner: owner ? (row.owner === null || row.owner === undefined ? null : String(row.owner)) : null, asOf: asOfMs(A, row.as_of), ...itemKeys(keys, (i) => row[`key_${i}`]) }));
     },
     async resolve(item: string): Promise<string | null> {
       const r = await c.query(`SELECT ${q(body)} AS body FROM ${q(table)} WHERE ${q(id)} = $1`, [item]);
@@ -85,6 +122,8 @@ export interface OpenSearchSourceConfig {
   owner?: string;
   asOf: string;
   body: string;
+  /** S451: the field of each key the source declares, by key name. */
+  keys?: Record<string, string>;
   /** An Authorization header value the host gives, from its vault or environment at run time (PL6825); never written to a file. */
   authorization?: string;
 }
@@ -100,6 +139,7 @@ export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
   const owner = c.owner === undefined ? null : name(A, 'owner field', c.owner);
   const asOf = name(A, 'asOf field', c.asOf);
   const body = name(A, 'body field', c.body);
+  const keys = keysOf(A, c.keys);
   // Review D4: a header value is one line, as the channel adapters require (review C-F1, M8b).
   if (c.authorization !== undefined) oneLine(A, { authorization: c.authorization });
   const headers = { 'content-type': 'application/json', accept: 'application/json', ...(c.authorization ? { authorization: c.authorization } : {}) };
@@ -115,11 +155,14 @@ export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
     async retrieve(query: SourceQuery): Promise<ItemRef[]> {
       const limit = limitOf(query);
       if (query.owner !== undefined && !owner) throw new Error(`${A}: a retrieval by owner from an index with no owner field (PL6835 at run time)`);
-      // A term query on the owner field: the owner is a value in the request's JSON, never query text.
-      const search = { size: limit, query: query.owner !== undefined ? { bool: { filter: [{ term: { [owner!]: query.owner } }] } } : { match_all: {} }, sort: [{ [asOf]: { order: 'desc' } }], _source: [...(owner ? [owner] : []), asOf] };
+      // A term query on the owner field, and one on the key's field (S451): each value is in the request's JSON, never
+      // query text.
+      const key = keyField(A, keys, query);
+      const filter = [...(query.owner !== undefined ? [{ term: { [owner!]: query.owner } }] : []), ...(key !== null ? [{ term: { [key]: query.key!.value } }] : [])];
+      const search = { size: limit, query: filter.length ? { bool: { filter } } : { match_all: {} }, sort: [{ [asOf]: { order: 'desc' } }], _source: [...(owner ? [owner] : []), asOf, ...keys.map(([, f]) => f).filter((f) => f !== owner && f !== asOf)] };
       const r = await call('POST', '_search', search);
       if (r.status !== 200 || !Array.isArray(r.json?.hits?.hits)) throw new Error(`${A}: _search answered ${r.status}`);
-      return r.json!.hits.hits.map((h: any) => ({ id: String(h._id), owner: owner ? (h._source?.[owner] === undefined || h._source?.[owner] === null ? null : String(h._source[owner])) : null, asOf: asOfMs(A, h._source?.[asOf]) }));
+      return r.json!.hits.hits.map((h: any) => ({ id: String(h._id), owner: owner ? (h._source?.[owner] === undefined || h._source?.[owner] === null ? null : String(h._source[owner])) : null, asOf: asOfMs(A, h._source?.[asOf]), ...itemKeys(keys, (_, f) => h._source?.[f]) }));
     },
     async resolve(item: string): Promise<string | null> {
       // Review D5: `.` and `..` would leave the _doc API once the URL is normalised.

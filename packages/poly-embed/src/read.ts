@@ -222,16 +222,19 @@ class Reader {
         return this.mk<A.AudienceDecl>(c.node, { kind: 'Audience', classes: this.arr(classes).map((s) => this.str(s)) });
       }
       case 'source': {
-        // PS17.0: source(name, { kind, adapter?, audience, owned?, freshness?, stale? }).
+        // PS17.0: source(name, { kind, adapter?, audience, owned?, freshness?, stale?, keys? }), keys ['k', …] (S451).
         const [name, body] = this.argsOf(c, 2, 2);
-        const o = this.opts(body, ['kind', 'adapter', 'audience', 'owned', 'freshness', 'stale']);
+        const o = this.opts(body, ['kind', 'adapter', 'audience', 'owned', 'freshness', 'stale', 'keys']);
         if (!o.has('kind') || !o.has('audience')) this.fail(body, 'a source names its kind and audience (PS17.0)');
         const ow = o.get('owned');
         const owned = !!ow && this.unparen(ow).kind === ts.SyntaxKind.TrueKeyword;
         if (ow && !owned) this.fail(ow, 'owned is written true, or left out');
         const stale = o.has('stale') ? this.str(o.get('stale')!) : 'escalate';
         if (stale !== 'escalate' && stale !== 'deny') this.fail(o.get('stale')!, 'expected escalate or deny');
-        return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale });
+        const keys = o.has('keys') ? this.arr(o.get('keys')!).map((k) => this.str(k)) : null;
+        if (keys && !keys.length) this.fail(o.get('keys')!, 'keys names at least one key, or is left out (PS17.0)');
+        if (keys) for (const [i, k] of keys.entries()) { if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) this.fail(o.get('keys')!, `the key ${JSON.stringify(k)} is not an identifier`); if (keys.indexOf(k) !== i) this.fail(o.get('keys')!, `a source names its key ${k} once`); }
+        return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale, ...(keys ? { keys } : {}) });
       }
       case 'route': {
         // PT10r: route(name, { tiers: [{ name, provider, prices, calibration?, maxTokens }], escalate: [['conf', 0.8], ['failed']], budget? }).
@@ -530,11 +533,13 @@ class Reader {
         return mk({ kind: 'EffUses', credential: this.str(cred), scopes: this.arr(scopes).map((s) => this.str(s)), holder: holder ? this.str(holder) : null });
       }
       case 'retrieve': {
-        // PS17.2: retrieve(source, { owner?, limit }).
+        // PS17.2: retrieve(source, { owner?, key?, limit }), key ['k', 'x'] for `k == x` (S451).
         const [src, body] = this.argsOf(c, 2, 2);
-        const o = this.opts(body, ['owner', 'limit']);
+        const o = this.opts(body, ['owner', 'key', 'limit']);
         if (!o.has('limit')) this.fail(body, 'a retrieval names its limit (PS17.2)');
-        return mk({ kind: 'EffRetrieve', source: this.str(src), owner: o.has('owner') ? this.str(o.get('owner')!) : null, limit: this.int(o.get('limit')!) });
+        const kv = o.has('key') ? this.arr(o.get('key')!).map((x) => this.str(x)) : null;
+        if (kv && kv.length !== 2) this.fail(o.get('key')!, "a key predicate is written ['k', 'x'], the key and its Key parameter (PS17.2)");
+        return mk({ kind: 'EffRetrieve', source: this.str(src), owner: o.has('owner') ? this.str(o.get('owner')!) : null, limit: this.int(o.get('limit')!), ...(kv ? { key: { name: kv[0], param: kv[1] } } : {}) });
       }
       case 'remember': {
         // PS17.5: remember(source, provenance, about).

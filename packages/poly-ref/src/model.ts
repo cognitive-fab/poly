@@ -24,6 +24,8 @@ export type RType =
   | { k: 'principal' }
   /** PS1.4a (S180): an opaque reference to a body, or none. */
   | { k: 'content' }
+  /** PS1.4c (S451): an opaque name of a source's items by one of its keys, a non-empty string, or null for none. */
+  | { k: 'key' }
   /** PS1.4b: an opaque reference to retrieved items, of which a module reads the count. */
   | { k: 'items' };
 
@@ -181,6 +183,8 @@ export interface RMachine {
   principals: number;
   /** PS4.1f: how many content representatives the check offers, besides none. */
   contents: number;
+  /** PS4.1g: how many key representatives the check offers, besides none. */
+  keys: number;
   /** PS15.3: the keys of the channels whose application this machine is; each names its conversation's address. */
   channelKeys: string[];
   /** PS1.4b: the top of an Items count, the largest limit among the program's retrievals. */
@@ -209,7 +213,7 @@ export interface RMemory {
  * `view` is the module whose spelling names take: M for its own machines, m.M for any other's. A machine built for a
  * configuration of another module is built with that module as its view.
  */
-export interface BuildOptions { principals?: number; contents?: number; program?: A.Module[]; view?: string }
+export interface BuildOptions { principals?: number; contents?: number; keys?: number; program?: A.Module[]; view?: string }
 
 /** PS1.0: the module a `use` path names, the whole path when it is a module, else the path without its machine. */
 export function usedModule(path: string[], program: A.Module[]): string {
@@ -246,6 +250,8 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
         if (t.name === 'Principal' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Principal')) return { k: 'principal' };
         // PS1.4a: Content is built in, unless the module declares a type of that name.
         if (t.name === 'Content' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Content')) return { k: 'content' };
+        // PS1.4c (S451): Key is built in, unless the module declares a type of that name.
+        if (t.name === 'Key' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl') && d.name === 'Key')) return { k: 'key' };
         // PS1.4b: Items is built in, unless the module declares a type of that name.
         if (t.name === 'Items' && !decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl' || d.kind === 'RecordDecl') && d.name === 'Items')) return { k: 'items' };
         // PS1.0, S190: m.E, an enum of another module, read from the declaring module's own source.
@@ -275,7 +281,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
   };
   // A parameter of a used module's action: its addresses and its enums are that module's, spelled from the view (S176,
   // S190); Principal and Content are builtins.
-  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : t.kind === 'TName' && t.name === 'Content' ? { k: 'content' } : t.kind === 'TName' && t.name === 'Items' ? { k: 'items' } : t.kind === 'TName' ? foreignEnum(t.name.includes('.') ? t.name : `${mod}.${t.name}`) : typeOf(t));
+  const typeIn = (mod: string) => (t: A.TypeExpr): RType => (mod === module.name ? typeOf(t) : t.kind === 'TRef' ? { k: 'ref', machine: named(t.machine, mod) } : t.kind === 'TName' && t.name === 'Principal' ? { k: 'principal' } : t.kind === 'TName' && t.name === 'Content' ? { k: 'content' } : t.kind === 'TName' && t.name === 'Key' ? { k: 'key' } : t.kind === 'TName' && t.name === 'Items' ? { k: 'items' } : t.kind === 'TName' ? foreignEnum(t.name.includes('.') ? t.name : `${mod}.${t.name}`) : typeOf(t));
   for (const d of decls) {
     if (d.kind === 'EnumDecl') unions.set(d.name, { name: d.name, ctors: d.members.map((m) => ({ name: m, fields: [] })) });
     if (d.kind === 'TypeDecl') unions.set(d.name, { name: d.name, ctors: d.ctors.map((c) => ({ name: c.name, fields: c.fields.map((f) => ({ name: f.name, type: typeOf(f.type) })) })) });
@@ -336,7 +342,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
   // not a completion's childKey and childState, which the runtime supplies from the child (S44, S51).
   const handledActions = new Set(m.items.flatMap((h) => (h.kind === 'Handler' ? [h.action] : [])));
   const testable = (t: RType, seen = new Set<string>()): boolean => {
-    if (t.k === 'principal' || t.k === 'ref' || t.k === 'content' || t.k === 'items' || t.k === 'string') return false;
+    if (t.k === 'principal' || t.k === 'ref' || t.k === 'content' || t.k === 'key' || t.k === 'items' || t.k === 'string') return false;
     if (t.k === 'int') return Number.isFinite(t.lo) && Number.isFinite(t.hi);
     if (t.k === 'map') return testable(t.key, seen) && testable(t.value, seen);
     if (t.k !== 'record' && t.k !== 'union') return true;
@@ -485,9 +491,21 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
   const contentPositions = (t: RType): number => (t.k === 'content' ? 1 : t.k === 'map' ? contentPositions(t.value) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? (unions.get(t.key.name)?.ctors.length ?? 1) : 1) : 0);
   const contentLabel = Math.max(1, ...actions.map((a) => a.params.reduce((n, p) => n + contentPositions(p.type), 0)));
   const contents = opts.contents ?? Math.max(2, fields.reduce((n, f) => n + contentPositions(f.type), 0) + contentLabel);
+  // PS4.1g (S451): the same rule applied to Key apart, which sits where a Principal may: in a field, a parameter, a
+  // payload or a record.
+  const keyPositions = (t: RType, seen: Set<string>): number => {
+    if (t.k === 'key') return 1;
+    if (t.k === 'record' && !seen.has(t.name)) return (records.get(t.name)?.fields ?? []).reduce((n, f) => n + keyPositions(f.type, new Set([...seen, t.name])), 0);
+    if (t.k === 'union' && !seen.has(t.name)) return (unions.get(t.name)?.ctors ?? []).reduce((n, c) => n + c.fields.reduce((k, f) => k + keyPositions(f.type, new Set([...seen, t.name])), 0), 0);
+    if (t.k === 'map') return keyPositions(t.value, seen) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? (unions.get(t.key.name)?.ctors.length ?? 1) : 1);
+    return 0;
+  };
+  const keyLabel = Math.max(1, ...actions.map((a) => a.params.reduce((n, p) => n + keyPositions(p.type, new Set()), 0)));
+  const keys = opts.keys ?? Math.max(2, fields.reduce((n, f) => n + keyPositions(f.type, new Set()), 0) + keyLabel);
   return {
     principals,
     contents,
+    keys,
     name: spell(module.name, m.name), records, id: `${module.name}.${m.name}`, service: m.service, children, detached, families, effects, decisions, pathProperties, receivers, unions, ctors, fields, fieldNames: fields.map((f) => f.name),
     actions, handlers, guards, terminal, invariants, stepProperties, nevers, rejectProperties, liveness, channelKeys: (m.channelKeys ?? []).map((c) => c.key),
     itemsLimit: itemsLimitOf(decls),
@@ -624,6 +642,8 @@ export function valuesOf(t: RType, M: RMachine): Value[] {
     // PS4.1f: a Content ranges over none and the representatives c1..cn, ci written as the digest of i (PT: Content lowers
     // to sha256:<hex>), so a representative is a value of the runtime's type.
     case 'content': return [null, ...Array.from({ length: M.contents }, (_, i) => `sha256:${(i + 1).toString(16).padStart(64, '0')}`)];
+    // PS4.1g (S451): a Key ranges over none and the representatives k1..kn.
+    case 'key': return [null, ...Array.from({ length: M.keys }, (_, i) => `k${i + 1}`)];
     // PS1.4b: an Items by its count, 0 to the largest limit; its taint is a ghost (PS17.1).
     case 'items': return Array.from({ length: M.itemsLimit + 1 }, (_, n) => ({ fields: { count: n } }) satisfies RecordValue);
     case 'ref': {
@@ -768,6 +788,8 @@ export function inType(v: Value, t: RType, M: RMachine): boolean {
     case 'ref': return v === null || typeof v === 'string';
     case 'principal': return v === null || (typeof v === 'string' && v.length > 0);
     case 'content': { const b = bare(v); return b === null || (typeof b === 'string' && b.length > 0); }
+    // PS1.4c, PT10j: a Key is a non-empty string, or none.
+    case 'key': return v === null || (typeof v === 'string' && v.length > 0);
     case 'items': return isRecord(v) && Object.keys(v.fields).length === 1 && typeof v.fields.count === 'number' && Number.isInteger(v.fields.count) && v.fields.count >= 0 && v.fields.count <= M.itemsLimit;
     case 'conf': return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1000;
     case 'record': {

@@ -136,7 +136,8 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const src = r ? module.decls.find((d): d is A.SourceDecl => d.kind === 'Source' && d.name === r.source) : undefined;
         const memLabels = w ? ['write:store'] : r ? [src && (src.owned || src.audience !== lowest) ? 'read:private' : 'read:store'] : null;
         differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, memLabels ?? (labels ? labels.labels : null));
-        differ(`effects.manifest.json ${kind}.retrieve`, entry.retrieve ?? null, r ? { source: r.source, owner: r.owner, limit: r.limit } : null);
+        // S451: and its key predicate, which the runtime passes to the adapter and checks each item against.
+        differ(`effects.manifest.json ${kind}.retrieve`, entry.retrieve ?? null, r ? { source: r.source, owner: r.owner, ...(r.key ? { key: { name: r.key.name, param: r.key.param } } : {}), limit: r.limit } : null);
         differ(`effects.manifest.json ${kind}.remember`, entry.remember ?? null, w ? { source: w.source, provenance: w.provenance, about: w.about } : null);
         // PS17.3: the recipient's field and class, which the runtime's flow check reads.
         const to = e.items.find((x): x is A.EffectItem & { kind: 'EffTo'; param: string } => x.kind === 'EffTo');
@@ -251,7 +252,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     const ms = (d: string | null) => (d === null ? null : durationMs(d));
     for (const s of sourceDecls) {
       const got = read(`sources/${s.name}.json`);
-      if (got !== undefined) differ(`sources/${s.name}.json`, got, { v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: s.owned, freshnessMs: ms(s.freshness), stale: s.stale });
+      if (got !== undefined) differ(`sources/${s.name}.json`, got, { v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: s.owned, freshnessMs: ms(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}) });
     }
     const got = read(`flow/${module.name}.json`);
     // PT10k: each action whose claims type has exactly one field of type Audience, read from the source here.
@@ -434,8 +435,8 @@ function pathDisagreement(p: RPathProperty, pred: (path: unknown) => boolean, ma
 }
 
 /**
- * PT10h, S311: the declarations of types.d.ts after its first line, from poly-ref's model of the machine: the two
- * branded strings, the flat state of PS9.1b, every action with its parameters' declared types, each effect's and
+ * PT10h, S311: the declarations of types.d.ts after its first line, from poly-ref's model of the machine: the three
+ * branded strings (S451 adds Key), the flat state of PS9.1b, every action with its parameters' declared types, each effect's and
  * decision's payload, and each kind's completions.
  */
 export function hostDeclarations(M: RMachine, decl: A.Machine): string {
@@ -451,6 +452,8 @@ export function hostDeclarations(M: RMachine, decl: A.Machine): string {
       case 'ref': return 'string | null';
       case 'principal': return 'Principal | null';
       case 'content': return 'Content | null';
+      // PT10j (S451).
+      case 'key': return 'Key | null';
       case 'items': return 'Items';
       case 'record': return `{ ${M.records.get(t.name)!.fields.map((f) => `${q(f.name)}: ${ts(f.type)}`).join('; ')} }`;
       case 'map': return t.key.k === 'int' ? `(${ts(t.value)})[]` : `{ ${M.unions.get((t.key as { name: string }).name)!.ctors.map((c) => `${q(c.name)}: ${ts(t.value)}`).join('; ')} }`;
@@ -462,7 +465,7 @@ export function hostDeclarations(M: RMachine, decl: A.Machine): string {
     }
   };
   const rec = (ps: { name: string; type: RType }[]) => (ps.length ? `{ ${ps.map((p) => `${q(p.name)}: ${ts(p.type)}`).join('; ')} }` : '{}');
-  const lines = ['export type Content = string & { readonly __poly: "Content" };', 'export type Principal = string & { readonly __poly: "Principal" };', 'export type Items = { readonly count: number; readonly __poly: "Items" };', 'export interface State {'];
+  const lines = ['export type Content = string & { readonly __poly: "Content" };', 'export type Principal = string & { readonly __poly: "Principal" };', 'export type Key = string & { readonly __poly: "Key" };', 'export type Items = { readonly count: number; readonly __poly: "Items" };', 'export interface State {'];
   for (const f of M.fields) {
     const u = f.type.k === 'union' ? M.unions.get(f.type.name)! : null;
     if (u && u.ctors.some((c) => c.fields.length)) {

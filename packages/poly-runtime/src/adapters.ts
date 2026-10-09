@@ -173,10 +173,14 @@ export interface CredentialHost {
 // ── Source adapters (PT20.2, PS17.2, S308) ──────────────────────────────────────────────────────────────────────────
 
 /** One item a source holds, by reference: its id, its owner when the source is owned, and when it was true (ms). */
-export interface ItemRef { id: string; owner: string | null; asOf: number }
+/** S451: `keys` holds the item's value of each key its source declares, as the adapter supplies it. */
+export interface ItemRef { id: string; owner: string | null; asOf: number; keys?: Record<string, string> }
 
-/** A retrieval's query: `owner == p` is a typed parameter, never text, and the limit bounds what comes back. */
-export interface SourceQuery { owner?: string; limit: number }
+/**
+ * A retrieval's query: `owner == p` is a typed parameter, never text, and the limit bounds what comes back. S451:
+ * `key` is the key predicate `k == x`, its name and the value of x, which the adapter filters by as a parameter.
+ */
+export interface SourceQuery { owner?: string; key?: { name: string; value: string }; limit: number }
 
 /**
  * PT20.2, K14: a source adapter. It returns items with their true owner and `asOf`, resolves an item to its body when a

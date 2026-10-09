@@ -33,6 +33,8 @@ export type Ty =
   | { k: 'principal' }
   /** `Content` (PS1.4a, S180): an opaque reference to a body by its digest, or `none`. */
   | { k: 'content' }
+  /** `Key` (PS1.4c, S451): an opaque name of a source's items by one of its keys, or `none`. */
+  | { k: 'key' }
   /** `Items` (PS1.4b, S303): an opaque reference to retrieved items, of which a module reads only the count. */
   | { k: 'items' }
   | { k: 'error' };
@@ -51,6 +53,7 @@ export function tyToString(t: Ty): string {
     case 'map': return `map<${tyToString(t.key)}, ${tyToString(t.value)}>`;
     case 'ref': return t.machine === null ? 'none' : `Ref<${t.machine}>`;
     case 'content': return 'Content';
+    case 'key': return 'Key';
     case 'items': return 'Items';
     default: return t.k;
   }
@@ -58,8 +61,8 @@ export function tyToString(t: Ty): string {
 
 /** Review C-F5, PS1.4a: a Content where another type is expected, or the reverse, is PL1209; any other mismatch PL1201. */
 function opaqueCode(a: Ty, b: Ty): 'PL1209' | 'PL1201' {
-  // PS1.4b: an Items is opaque as a Content is.
-  const opaque = (t: Ty) => t.k === 'content' || t.k === 'items';
+  // PS1.4b: an Items is opaque as a Content is; PS1.4c: and so is a Key.
+  const opaque = (t: Ty) => t.k === 'content' || t.k === 'items' || t.k === 'key';
   return opaque(a) !== opaque(b) && a.k !== 'error' && b.k !== 'error' ? 'PL1209' : 'PL1201';
 }
 
@@ -71,6 +74,8 @@ function same(a: Ty, b: Ty): boolean {
   if ((a.k === 'principal' && b.k === 'ref' && b.machine === null) || (b.k === 'principal' && a.k === 'ref' && a.machine === null)) return true;
   // PS1.4a: and the absent body.
   if ((a.k === 'content' && b.k === 'ref' && b.machine === null) || (b.k === 'content' && a.k === 'ref' && a.machine === null)) return true;
+  // PS1.4c: and the absent key.
+  if ((a.k === 'key' && b.k === 'ref' && b.machine === null) || (b.k === 'key' && a.k === 'ref' && a.machine === null)) return true;
   if (a.k !== b.k) return false;
   if (a.k === 'union' || a.k === 'record') return a.name === (b as { name: string }).name;
   // `none` is an address of every machine (PS1.6).
@@ -312,6 +317,7 @@ class Checker {
         const owner = this.moduleNamed(mod);
         const declared = owner?.decls.some((d) => (d.kind === 'TypeDecl' || d.kind === 'EnumDecl' || d.kind === 'RecordDecl') && d.name === t.name);
         if (t.name === 'Content' && !declared) return { k: 'content' };
+        if (t.name === 'Key' && !declared) return { k: 'key' };
         if (t.name === 'Principal' && !declared) return { k: 'principal' };
         // S190: an enum of the receiver's module (or one it names m.E), spelled from here, when this module knows it.
         const q = t.name.includes('.') ? (t.name.slice(0, t.name.lastIndexOf('.')) === this.view ? t.name.slice(t.name.lastIndexOf('.') + 1) : t.name) : this.canon(mod, t.name);
@@ -481,6 +487,14 @@ class Checker {
       if (r.owner !== null) {
         principal(r.owner, r, 'the owner');
         if (s && !s.owned) this.err('PL6835', r, `effect ${e.name} retrieves where owner == ${r.owner} from source ${s.name}, which is not owned (PS17.2)`);
+      }
+      // PS17.2, S451: a key predicate names a key its source declares (PL1001) and a Key parameter (PL1201).
+      if (r.key) {
+        const k = r.key;
+        if (s && !(s.keys ?? []).includes(k.name)) this.err('PL1001', r, `effect ${e.name} retrieves where ${k.name} == ${k.param}, and source ${s.name} declares no key ${k.name} (PS17.0, PS17.2)`);
+        const p = e.params.find((x) => x.name === k.param);
+        if (!p) this.err('PL1001', r, `effect ${e.name} has no parameter ${k.param} to be the key`);
+        else if (this.tyOf(p.type).k !== 'key') this.err('PL1201', r, `the key ${k.param} is ${tyToString(this.tyOf(p.type))}; it is a Key parameter of the effect (PS17.2)`);
       }
     }
     if (m) {
@@ -1009,6 +1023,8 @@ class Checker {
         if (t.name === 'Principal' && !this.env.unions.has(t.name)) return { k: 'principal' };
         // PS1.4a, S180: Content is built in, unless the module declares a type of that name.
         if (t.name === 'Content' && !this.env.unions.has(t.name)) return { k: 'content' };
+        // PS1.4c, S451: Key is built in, unless the module declares a type of that name.
+        if (t.name === 'Key' && !this.env.unions.has(t.name) && !this.env.records.has(t.name)) return { k: 'key' };
         // PS1.4b, S303: Items is built in, unless the module declares a type of that name.
         if (t.name === 'Items' && !this.env.unions.has(t.name) && !this.env.records.has(t.name)) return { k: 'items' };
         // S190: m.E, an enum of a used module, nameable where a use admits it.
@@ -1033,6 +1049,7 @@ class Checker {
         const key = this.tyOf(t.key);
         if (key.k === 'principal') this.errOnce('PL1206', t.key, 'a Principal is opaque, so it cannot key a map: it is compared by equality, stored or passed (PD5.1.2b)');
         if (key.k === 'content') this.errOnce('PL1209', t.key, 'a Content is opaque, so it cannot key a map: it is stored, passed or compared for equality (PS1.4a)');
+        if (key.k === 'key') this.errOnce('PL1209', t.key, 'a Key is opaque, so it cannot key a map: it is stored, passed or compared for equality (PS1.4c)');
         if (key.k === 'items' || value.k === 'items') this.errOnce('PL1209', t, 'an Items is passed, never stored in a map (PS1.4b)');
         if (key.k === 'union' && !this.env.unions.get(key.name)!.isEnum) this.errOnce('PL1201', t.key, `map key ${key.name} must be an enum (constructors without payload)`);
         // PT3.1: an enum or an integer range 0..n; a record has no key form in JSON.
@@ -2016,7 +2033,7 @@ class Checker {
     if ((ty.k === 'int' && !Number.isFinite(ty.lo)) || ty.k === 'string') return p.check !== null;
     const seen = new Set<string>();
     const opaque = (t: Ty): boolean => {
-      if (t.k === 'principal' || t.k === 'ref' || t.k === 'content' || t.k === 'items' || t.k === 'error' || t.k === 'action') return true;
+      if (t.k === 'principal' || t.k === 'ref' || t.k === 'content' || t.k === 'key' || t.k === 'items' || t.k === 'error' || t.k === 'action') return true;
       if (t.k === 'string' || (t.k === 'int' && !Number.isFinite(t.lo))) return true;
       if (t.k === 'map') return opaque(t.key) || opaque(t.value);
       if ((t.k !== 'record' && t.k !== 'union') || seen.has(t.name)) return false;
@@ -2029,6 +2046,7 @@ class Checker {
 
   private checkDomain(what: string, t: A.TypeExpr, ty: Ty, check: A.CheckClause | null, at: A.NodeBase): void {
     if (check && ty.k === 'items') { this.err('PL1209', check, 'an Items has no check domain: its count is explored from 0 to the largest limit (PS1.4b)'); return; }
+    if (check && ty.k === 'key') { this.err('PL1209', check, 'a Key has no check domain: its only constant is none, and check explores it by representatives (PS1.4c, PS4.1g)'); return; }
     if (check && ty.k === 'content') { this.err('PL1209', check, `a Content has no check domain: its only constant is none, and check explores it by representatives (PS1.4a, PS4.1f)`); return; }
     if (check) {
       if (ty.k !== 'int' && ty.k !== 'string') { this.err('PL1201', check, `a check clause applies to int and string, not ${tyToString(ty)}`); return; }
@@ -2256,7 +2274,7 @@ class Checker {
   private match(s: A.Match, scope: Scope): void {
     const st = this.typeOf(s.scrutinee, scope);
     if (st.k !== 'union') {
-      if (st.k !== 'error') this.err(st.k === 'content' ? 'PL1209' : 'PL1201', s.scrutinee, `match needs a union value, not ${tyToString(st)}`);
+      if (st.k !== 'error') this.err(st.k === 'content' || st.k === 'key' ? 'PL1209' : 'PL1201', s.scrutinee, `match needs a union value, not ${tyToString(st)}`);
       for (const arm of s.arms) this.stmts(arm.body, scope);
       return;
     }
@@ -2468,7 +2486,7 @@ class Checker {
 
   private expectBool(e: A.Expr, scope: Scope): void {
     const t = this.typeOf(e, scope, BOOL);
-    if (t.k !== 'bool' && t.k !== 'error') this.err(t.k === 'content' ? 'PL1209' : 'PL1201', e, `expected a Bool condition, found ${tyToString(t)}`);
+    if (t.k !== 'bool' && t.k !== 'error') this.err(t.k === 'content' || t.k === 'key' ? 'PL1209' : 'PL1201', e, `expected a Bool condition, found ${tyToString(t)}`);
   }
 
   private record(e: A.Expr, t: Ty): Ty {
@@ -2529,6 +2547,8 @@ class Checker {
       case 'Bool': return BOOL;
       // PS1.4a, S180: the only constant of type Content is none; a digest written in source is no body.
       case 'String':
+        // PS1.4c, S451: and of type Key; a key enters only as data at run time.
+        if (expected?.k === 'key') { this.err('PL1209', e, 'a Key enters only as data at run time; the only constant of type Key is none (PS1.4c)'); return { k: 'key' }; }
         if (expected?.k === 'content') { this.err('PL1209', e, 'a Content is a body that enters at run time, through ingress or the store; the only constant of type Content is none (PS1.4a)'); return { k: 'content' }; }
         return { k: 'string' };
       case 'Primed':
@@ -2700,6 +2720,7 @@ class Checker {
         const t = this.typeOf(e.arg, scope);
         if (t.k === 'principal') { this.err('PL1206', e, 'a Principal is opaque: unary - is not defined on it (PD5.1.2b)'); return ERR; }
         if (t.k === 'content') { this.err('PL1209', e, 'a Content is opaque: unary - is not defined on it (PS1.4a)'); return ERR; }
+        if (t.k === 'key') { this.err('PL1209', e, 'a Key is opaque: unary - is not defined on it (PS1.4c)'); return ERR; }
         if (t.k !== 'int') { if (t.k !== 'error' && t.k !== 'conf') this.err('PL1201', e, `unary - needs an int, not ${tyToString(t)}`); return ERR; }
         return { k: 'int', lo: -t.hi, hi: -t.lo };
       }
@@ -2757,7 +2778,7 @@ class Checker {
           return BOOL;
         }
         const t = this.typeOf(e.expr, scope);
-        if (t.k !== 'union') { if (t.k !== 'error') this.err(t.k === 'content' ? 'PL1209' : 'PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
+        if (t.k !== 'union') { if (t.k !== 'error') this.err(t.k === 'content' || t.k === 'key' ? 'PL1209' : 'PL1201', e, `\`is\` needs a union value, not ${tyToString(t)}`); return BOOL; }
         const u = this.env.unions.get(t.name)!;
         for (const c of e.ctors) if (!u.ctors.some((x) => x.name === c)) this.err('PL1201', e, `${c} is not a constructor of ${u.name}`);
         return BOOL;
@@ -2881,7 +2902,7 @@ class Checker {
     const n = v.kind === 'Int' ? v.value : v.kind === 'Unary' && v.op === '-' && v.arg.kind === 'Int' ? -v.arg.value : null;
     if (n !== null) { if (ty.k !== 'int' || n < ty.lo || n > ty.hi) bad(`${n}, not a value of ${tyToString(ty)}`); return; }
     if (v.kind === 'Bool') { if (ty.k !== 'bool') bad(`a boolean, not a value of ${tyToString(ty)}`); return; }
-    if (v.kind === 'Name' && v.name === 'none') { if (ty.k !== 'content' && ty.k !== 'principal') bad(`none, not a value of ${tyToString(ty)}`); return; }
+    if (v.kind === 'Name' && v.name === 'none') { if (ty.k !== 'content' && ty.k !== 'principal' && ty.k !== 'key') bad(`none, not a value of ${tyToString(ty)}`); return; }
     // A bare name is a constructor, never a field (review D-F6); `T.C` names it with its type.
     const ctor = v.kind === 'Name' ? v.name : v.kind === 'Member' && v.object.kind === 'Name' && ty.k === 'union' && v.object.name === ty.name ? v.prop : null;
     if (ctor !== null) {
@@ -2973,6 +2994,8 @@ class Checker {
         // PD5.1.2b: a Principal is compared only with a Principal (or none).
         if ((l.k === 'principal' || r.k === 'principal') && !same(l, r)) { this.err('PL1206', e, `a Principal is opaque: it is compared only with another Principal, not with ${tyToString(l.k === 'principal' ? r : l)} (PD5.1.2b)`); return BOOL; }
         if ((l.k === 'content' || r.k === 'content') && !same(l, r)) { this.err('PL1209', e, `a Content is opaque: it is compared only with another Content or none, not with ${tyToString(l.k === 'content' ? r : l)} (PS1.4a)`); return BOOL; }
+        // PS1.4c, S451: a Key is compared only with another Key or none.
+        if ((l.k === 'key' || r.k === 'key') && !same(l, r)) { this.err('PL1209', e, `a Key is opaque: it is compared only with another Key or none, not with ${tyToString(l.k === 'key' ? r : l)} (PS1.4c)`); return BOOL; }
         // PS1.4b: an Items is passed and its count read; it is never compared.
         if (l.k === 'items' || r.k === 'items') { this.err('PL1209', e, 'an Items is opaque: it is passed and its count read, never compared (PS1.4b)'); return BOOL; }
         if (!same(l, r)) this.err('PL1201', e, `cannot compare ${tyToString(l)} with ${tyToString(r)}`);
@@ -2986,6 +3009,7 @@ class Checker {
         const r = this.typeOf(e.right, scope);
         if (l.k === 'conf' || r.k === 'conf') return this.confCompare(e, l, r);
         if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque and has no order: ${e.op} is not defined on it (PD5.1.2b)`); return BOOL; }
+        if (l.k === 'key' || r.k === 'key') { this.err('PL1209', e, `a Key is opaque and has no order: ${e.op} is not defined on it (PS1.4c)`); return BOOL; }
         if (l.k === 'content' || r.k === 'content' || l.k === 'items' || r.k === 'items') { this.err('PL1209', e, `a ${l.k === 'items' || r.k === 'items' ? 'Items' : 'Content'} is opaque and has no order: ${e.op} is not defined on it (PS1.4a, PS1.4b)`); return BOOL; }
         if ((l.k !== 'int' && l.k !== 'error') || (r.k !== 'int' && r.k !== 'error')) this.err('PL1201', e, `${e.op} compares ints, not ${tyToString(l)} and ${tyToString(r)}`);
         return BOOL;
@@ -2996,6 +3020,7 @@ class Checker {
         // PD1.3b: arithmetic on a Conf is PL1205, reported once at the Conf by confUses.
         if (l.k === 'conf' || r.k === 'conf') return ERR;
         if (l.k === 'principal' || r.k === 'principal') { this.err('PL1206', e, `a Principal is opaque: ${e.op} is not defined on it (PD5.1.2b)`); return ERR; }
+        if (l.k === 'key' || r.k === 'key') { this.err('PL1209', e, `a Key is opaque: ${e.op} is not defined on it (PS1.4c)`); return ERR; }
         if (l.k === 'content' || r.k === 'content' || l.k === 'items' || r.k === 'items') { this.err('PL1209', e, `a ${l.k === 'items' || r.k === 'items' ? 'Items' : 'Content'} is opaque: ${e.op} is not defined on it (PS1.4a, PS1.4b)`); return ERR; }
         if (l.k !== 'int' || r.k !== 'int') {
           if (l.k !== 'error' && r.k !== 'error') this.err('PL1201', e, `${e.op} needs ints, not ${tyToString(l)} and ${tyToString(r)}`);

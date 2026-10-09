@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised';
 
 export interface Lowered {
   machine: string;
@@ -168,7 +168,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   for (const l of layout.fields) Object.assign(modelShape, l.shapes);
   const intentDecls = lowerable.map((a) => {
     // S58: an address is a string, and none is null.
-    const schema: Record<string, unknown> = Object.fromEntries(a.params.map((p) => { const ty = tyOfTypeExpr(p.type, env); return [p.name, { type: jsType(ty, env), required: true, ...(p.type.kind === 'TRef' || ty.k === 'principal' || ty.k === 'content' ? { nullable: true } : {}) }]; }));
+    const schema: Record<string, unknown> = Object.fromEntries(a.params.map((p) => { const ty = tyOfTypeExpr(p.type, env); return [p.name, { type: jsType(ty, env), required: true, ...(p.type.kind === 'TRef' || ty.k === 'principal' || ty.k === 'content' || ty.k === 'key' ? { nullable: true } : {}) }]; }));
     // PS3.2, S180: the runtime's mark of a missing body travels under the reserved key $content.
     if (carriesContent(a, env)) schema.$content = { type: 'string', required: false, nullable: true };
     // PD5.1.2c, S155: the claims travel under the reserved key $claims; their absence is refused by the acceptor, not
@@ -342,7 +342,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const classes = module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? [];
     const cls = (c: string) => Math.max(0, classes.indexOf(c));
     for (const s of sources) {
-      files[`../sources/${s.name}.json`] = JSON.stringify({ v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: opts.fault === 'source-unowned' ? false : s.owned, freshnessMs: s.freshness === null ? null : durationMs(s.freshness), stale: s.stale }, null, 2) + '\n';
+      files[`../sources/${s.name}.json`] = JSON.stringify({ v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: opts.fault === 'source-unowned' ? false : s.owned, freshnessMs: s.freshness === null ? null : durationMs(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}) }, null, 2) + '\n';
     }
     const lowered = (k: number, first: boolean) => (opts.fault === 'flow-class-lowered' && first ? 0 : k);
     files[`../flow/${module.name}.json`] = JSON.stringify({
@@ -508,7 +508,9 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
       // payload field that names the holder. The broken lowering credential-holder-dropped loses the holder.
       if (it.kind === 'EffUses') entry.uses = { credential: it.credential, scopes: it.scopes, holder: cx.fault === 'credential-holder-dropped' ? null : it.holder };
       // PS17.2, PS17.5: what the runtime retrieves or remembers, which no handler performs.
-      if (it.kind === 'EffRetrieve') entry.retrieve = { source: it.source, owner: it.owner, limit: it.limit };
+      // S451: a key predicate, which the runtime passes to the adapter and checks each item against. The broken lowering
+      // source-key-dropped loses it.
+      if (it.kind === 'EffRetrieve') entry.retrieve = { source: it.source, owner: it.owner, ...(it.key && cx.fault !== 'source-key-dropped' ? { key: { name: it.key.name, param: it.key.param } } : {}), limit: it.limit };
       if (it.kind === 'EffRemember') entry.remember = { source: it.source, provenance: it.provenance, about: it.about };
     }
     // PS17.2: a retrieval's and a remember's labels are the runtime's.
@@ -857,6 +859,11 @@ function valuesOfTy(t: Ty, env: TypeEnv, m?: A.Machine): unknown[] {
     if (!m) throw new Error('poly-lower: a content domain needs its machine (PS4.1f)');
     return [null, ...Array.from({ length: contentCount(m, env) }, (_, i) => `sha256:${(i + 1).toString(16).padStart(64, '0')}`)];
   }
+  // PS4.1g, S451: the key representatives k1..kn and none, n by PS4.1c's rule applied to Key apart.
+  if (t.k === 'key') {
+    if (!m) throw new Error('poly-lower: a key domain needs its machine (PS4.1g)');
+    return [null, ...Array.from({ length: keyCount(m, env) }, (_, i) => `k${i + 1}`)];
+  }
   // PS1.4b: an Items by its count, 0 to the largest limit; the runtime's carries more, which no handler reads.
   if (t.k === 'items') return Array.from({ length: (env.itemsLimit ?? 0) + 1 }, (_, n) => ({ count: n }));
   if (t.k === 'ref') {
@@ -956,6 +963,22 @@ export function contentCount(m: A.Machine, env: TypeEnv): number {
   return Math.max(2, state + label);
 }
 
+/** PS4.1g: the Key positions of a type: one for a Key, its fields' for a record or a union, one per key for a map. */
+function keyPositions(t: Ty, env: TypeEnv, seen: Set<string>): number {
+  if (t.k === 'key') return 1;
+  if (t.k === 'record' && !seen.has(t.name)) return env.records.get(t.name)!.fields.reduce((n, f) => n + keyPositions(tyOfTypeExpr(f.type, env), env, new Set([...seen, t.name])), 0);
+  if (t.k === 'union' && !seen.has(t.name)) return env.unions.get(t.name)!.ctors.reduce((n, c) => n + c.fields.reduce((k, f) => k + keyPositions(tyOfTypeExpr(f.type, env), env, new Set([...seen, t.name])), 0), 0);
+  if (t.k === 'map') return keyPositions(t.value, env, seen) * (t.key.k === 'int' ? t.key.hi - t.key.lo + 1 : t.key.k === 'union' ? env.unions.get(t.key.name)!.ctors.length : 1);
+  return 0;
+}
+
+/** PS4.1g: the Key positions of the state plus the most keys one label carries (at least one), at least 2. */
+export function keyCount(m: A.Machine, env: TypeEnv): number {
+  const state = m.fields.reduce((k, f) => k + keyPositions(tyOfTypeExpr(f.type, env), env, new Set()), 0);
+  const label = Math.max(1, ...m.items.filter((i): i is A.Action => i.kind === 'Action').map((a) => a.params.reduce((k, p) => k + keyPositions(tyOfTypeExpr(p.type, env), env, new Set()), 0)));
+  return Math.max(2, state + label);
+}
+
 /** S180: whether an action's data can carry a Content, so the runtime may mark a missing body. */
 function carriesContent(a: A.Action, env: TypeEnv): boolean {
   // By the resolved type, not the name: a module may declare its own type named Content (polywatch muva0r1v-3c89f81a).
@@ -995,6 +1018,7 @@ function typeText(t: Ty, env: TypeEnv): string {
     case 'ref': return `address of ${t.machine} | null`;
     case 'principal': return 'principal | null';
     case 'content': return 'content | null';
+    case 'key': return 'key | null';
     case 'items': return 'items';
     default: return t.k;
   }

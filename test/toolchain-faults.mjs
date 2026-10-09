@@ -73,6 +73,8 @@ export const FAULT_SOURCES = {
   'source-unowned': ['test/fixtures/m10/concierge-memory.poly'],
   'flow-class-lowered': ['test/fixtures/m10/concierge-memory.poly'],
   'flow-recipient-dropped': ['test/fixtures/m10/concierge-memory.poly'],
+  // PT10j (S451): the manifest's key predicate the runtime passes to the adapter and checks each item against, dropped.
+  'source-key-dropped': ['test/fixtures/source-keys/mail-draft.poly'],
   // PT10r (M11): the route's and the budget's descriptors the runtime reads to run the tiers and hold the caps.
   'route-threshold-changed': ['test/fixtures/m11/desk.poly'],
   'route-tier-dropped': ['test/fixtures/m11/desk.poly'],
