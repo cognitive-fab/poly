@@ -230,9 +230,10 @@ class Reader {
         return this.mk<A.AudienceDecl>(c.node, { kind: 'Audience', classes: this.arr(classes).map((s) => this.str(s)) });
       }
       case 'source': {
-        // PS17.0: source(name, { kind, adapter?, audience, owned?, freshness?, stale?, keys? }), keys ['k', …] (S451).
+        // PS17.0: source(name, { kind, adapter?, audience, owned?, freshness?, stale?, keys?, envelope? }), keys ['k', …] (S451),
+        // envelope 'k' (S459).
         const [name, body] = this.argsOf(c, 2, 2);
-        const o = this.opts(body, ['kind', 'adapter', 'audience', 'owned', 'freshness', 'stale', 'keys']);
+        const o = this.opts(body, ['kind', 'adapter', 'audience', 'owned', 'freshness', 'stale', 'keys', 'envelope']);
         if (!o.has('kind') || !o.has('audience')) this.fail(body, 'a source names its kind and audience (PS17.0)');
         const ow = o.get('owned');
         const owned = !!ow && this.unparen(ow).kind === ts.SyntaxKind.TrueKeyword;
@@ -242,7 +243,8 @@ class Reader {
         const keys = o.has('keys') ? this.arr(o.get('keys')!).map((k) => this.str(k)) : null;
         if (keys && !keys.length) this.fail(o.get('keys')!, 'keys names at least one key, or is left out (PS17.0)');
         if (keys) for (const [i, k] of keys.entries()) { if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) this.fail(o.get('keys')!, `the key ${JSON.stringify(k)} is not an identifier`); if (keys.indexOf(k) !== i) this.fail(o.get('keys')!, `a source names its key ${k} once`); }
-        return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale, ...(keys ? { keys } : {}) });
+        const envelope = o.has('envelope') ? this.str(o.get('envelope')!) : null;
+        return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale, ...(keys ? { keys } : {}), ...(envelope !== null ? { envelope } : {}) });
       }
       case 'route': {
         // PT10r: route(name, { tiers: [{ name, provider, prices, calibration?, maxTokens }], escalate: [['conf', 0.8], ['failed']], budget? }).
@@ -537,7 +539,7 @@ class Reader {
   }
 
   private effItem(node: ts.Expression): A.EffectItem {
-    const c = this.call(node, 'kind', 'labels', 'targets', 'uses', 'retrieve', 'remember', 'to', 'audience', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'kind', 'labels', 'targets', 'uses', 'retrieve', 'remember', 'to', 'audience', 'envelope', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.EffectItem;
     switch (c.name) {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
@@ -550,12 +552,19 @@ class Reader {
         return mk({ kind: 'EffUses', credential: this.str(cred), scopes: this.arr(scopes).map((s) => this.str(s)), holder: holder ? this.str(holder) : null });
       }
       case 'retrieve': {
-        // PS17.2: retrieve(source, { owner?, key?, limit }), key ['k', 'x'] for `k == x` (S451).
+        // PS17.2: retrieve(source, { owner?, key?, limit }), key ['k', 'x'] for `k == x` (S451); S459: an envelope
+        // retrieval writes envelope: true, names its key and no limit.
         const [src, body] = this.argsOf(c, 2, 2);
-        const o = this.opts(body, ['owner', 'key', 'limit']);
-        if (!o.has('limit')) this.fail(body, 'a retrieval names its limit (PS17.2)');
+        const o = this.opts(body, ['owner', 'key', 'limit', 'envelope']);
+        const ev = o.get('envelope');
+        const envelope = !!ev && this.unparen(ev).kind === ts.SyntaxKind.TrueKeyword;
+        if (ev && !envelope) this.fail(ev, 'envelope is written true, or left out');
+        if (envelope && o.has('limit')) this.fail(o.get('limit')!, 'an envelope retrieval names no limit (PS17.2, PT10j)');
+        if (envelope && !o.has('key')) this.fail(body, 'an envelope retrieval names its key (PS17.2)');
+        if (!envelope && !o.has('limit')) this.fail(body, 'a retrieval names its limit (PS17.2)');
         const kv = o.has('key') ? this.arr(o.get('key')!).map((x) => this.str(x)) : null;
         if (kv && kv.length !== 2) this.fail(o.get('key')!, "a key predicate is written ['k', 'x'], the key and its Key parameter (PS17.2)");
+        if (envelope) return mk({ kind: 'EffRetrieve', source: this.str(src), owner: o.has('owner') ? this.str(o.get('owner')!) : null, limit: 0, ...(kv ? { key: { name: kv[0], param: kv[1] } } : {}), envelope: true });
         return mk({ kind: 'EffRetrieve', source: this.str(src), owner: o.has('owner') ? this.str(o.get('owner')!) : null, limit: this.int(o.get('limit')!), ...(kv ? { key: { name: kv[0], param: kv[1] } } : {}) });
       }
       case 'remember': {
@@ -568,6 +577,8 @@ class Reader {
       // PS17.3: to(param) and audience(class), an effect's recipient.
       case 'to': return mk({ kind: 'EffTo', param: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'audience': return mk({ kind: 'EffAudience', cls: this.str(this.argsOf(c, 1, 1)[0]) });
+      // PS17.3a, S459: envelope(e), the Content parameter whose envelope gives the recipient and the headers.
+      case 'envelope': return mk({ kind: 'EffEnvelope', param: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'retry': {
         const [n, base, timeout] = this.argsOf(c, 3, 3);
         return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });

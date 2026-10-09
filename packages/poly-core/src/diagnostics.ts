@@ -160,6 +160,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL6824: { name: 'TOKEN_READ_IN_HANDLER', stage: 'lint', severity: 'error' },
   PL6825: { name: 'SECRET_IN_CONFIG', stage: 'runtime', severity: 'error' },
   // PT10f, S200 (M9): admission refuses the development keychain in a build for production.
+  // PS17.3a (S459): the argument for an effect's envelope parameter at an emit is not an envelope a retrieval gave.
+  PL6830: { name: 'ENVELOPE_NOT_FROM_SOURCE', stage: 'types', severity: 'error' },
   // PS17.3 (S301): tainted content can reach a recipient outside its audience, with the shortest witness.
   PL6831: { name: 'AUDIENCE_LEAK', stage: 'model-check', severity: 'finding' },
   // PS17.5 (S309): a memory item written with a wider audience than its content's taint.

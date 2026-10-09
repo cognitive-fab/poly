@@ -333,7 +333,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
     effects.set(it.name, {
       name: it.name,
       // PT6.1: the manifest is keyed by kind; S41 makes the name the kind when none is given.
-      kind: retrieveOf(it) ? `source.${retrieveOf(it)!.source}.retrieve` : rememberOf(it) ? `source.${rememberOf(it)!.source}.remember` : kind && kind.kind === 'EffKind' ? kind.value : it.name,
+      kind: retrieveOf(it) ? retrieveKind(retrieveOf(it)!) : rememberOf(it) ? `source.${rememberOf(it)!.source}.remember` : kind && kind.kind === 'EffKind' ? kind.value : it.name,
       cls: cls && cls.kind === 'EffClass' ? cls.value : 'none',
       params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })),
     });
@@ -569,9 +569,11 @@ function memoryOf(decls: A.Decl[], m: A.Machine, effects: Map<string, REffect>, 
     const r = retrieveOf(it);
     const w = rememberOf(it);
     // PS17.2, PS17.5: their kinds are source.<s>.retrieve and source.<s>.remember, whatever the effect is called.
+    // PS17.2 (S459): an envelope retrieval is source.<s>.envelope, and its intent taints its completion as a retrieval
+    // of s with the same owner predicate does, so it sits among the retrievals: the flow rule never reads it as a send.
     if (r) {
       const s = sources.find((x) => x.name === r.source);
-      const kind = `source.${r.source}.retrieve`;
+      const kind = retrieveKind(r);
       retrievals.set(kind, { source: r.source, cls: s ? cls(s.audience) : 0, owned: s?.owned ?? false, owner: r.owner });
       for (const o of it.items) if (o.kind === 'EffOutcome') completing(o.action, kind);
       continue;
@@ -589,6 +591,8 @@ function memoryOf(decls: A.Decl[], m: A.Machine, effects: Map<string, REffect>, 
 }
 
 const retrieveOf = (e: A.EffectDecl) => e.items.find((x): x is A.EffRetrieve => x.kind === 'EffRetrieve');
+/** PS17.2: a retrieval's kind, source.<s>.retrieve, or source.<s>.envelope for an envelope retrieval (S459). */
+const retrieveKind = (r: A.EffRetrieve) => `source.${r.source}.${r.envelope ? 'envelope' : 'retrieve'}`;
 const rememberOf = (e: A.EffectDecl) => e.items.find((x): x is A.EffRemember => x.kind === 'EffRemember');
 
 /** The indices of a key's index: the loop variable, it plus or minus a constant, or a constant (S49). */

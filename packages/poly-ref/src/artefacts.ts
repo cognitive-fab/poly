@@ -159,7 +159,13 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const memLabels = w ? ['write:store'] : r ? [src && (src.owned || src.audience !== lowest) ? 'read:private' : 'read:store'] : null;
         differ(`effects.manifest.json ${kind}.labels`, entry.labels ?? null, memLabels ?? (labels ? labels.labels : null));
         // S451: and its key predicate, which the runtime passes to the adapter and checks each item against.
-        differ(`effects.manifest.json ${kind}.retrieve`, entry.retrieve ?? null, r ? { source: r.source, owner: r.owner, ...(r.key ? { key: { name: r.key.name, param: r.key.param } } : {}), limit: r.limit } : null);
+        // PS17.2 (S459): an envelope retrieval records envelope: true in place of a limit; its kind, source.<s>.envelope,
+        // is read back with the kinds above.
+        differ(`effects.manifest.json ${kind}.retrieve`, entry.retrieve ?? null, r ? { source: r.source, owner: r.owner, ...(r.key ? { key: { name: r.key.name, param: r.key.param } } : {}), ...(r.envelope ? { envelope: true } : { limit: r.limit }) } : null);
+        // PS17.3a (S459): the envelope parameter, which the runtime's origin check reads before the memory check. Read from
+        // the source here, so a manifest that drops it (envelope-dropped) differs.
+        const envelope = e.items.find((x): x is A.EffectItem & { kind: 'EffEnvelope'; param: string } => x.kind === 'EffEnvelope');
+        differ(`effects.manifest.json ${kind}.envelope`, entry.envelope ?? null, envelope ? envelope.param : null);
         differ(`effects.manifest.json ${kind}.remember`, entry.remember ?? null, w ? { source: w.source, provenance: w.provenance, about: w.about } : null);
         // PS17.3: the recipient's field and class, which the runtime's flow check reads.
         const to = e.items.find((x): x is A.EffectItem & { kind: 'EffTo'; param: string } => x.kind === 'EffTo');
@@ -286,7 +292,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     const ms = (d: string | null) => (d === null ? null : durationMs(d));
     for (const s of sourceDecls) {
       const got = read(`sources/${s.name}.json`);
-      if (got !== undefined) differ(`sources/${s.name}.json`, got, { v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: s.owned, freshnessMs: ms(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}) });
+      if (got !== undefined) differ(`sources/${s.name}.json`, got, { v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: s.owned, freshnessMs: ms(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}), ...(s.envelope !== undefined ? { envelope: s.envelope } : {}) });
     }
     const got = read(`flow/${module.name}.json`);
     // PT10k: each action whose claims type has exactly one field of type Audience, read from the source here.

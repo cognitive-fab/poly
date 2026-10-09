@@ -231,7 +231,7 @@ class Parser {
     return this.node<A.AudienceDecl>(start, { kind: 'Audience', classes }, true);
   }
 
-  /** `source s: k { adapter "a"  audience c [owned]  freshness d [stale escalate | stale deny]  [keys { k, … }] }` (PS17.0, S451). */
+  /** `source s: k { adapter "a"  audience c [owned]  freshness d [stale escalate | stale deny]  [keys { k, … }]  [envelope k] }` (PS17.0, S451, S459). */
   private source(): A.SourceDecl {
     const start = this.next();
     const name = this.ident('a source name');
@@ -244,10 +244,11 @@ class Parser {
     let freshness: string | null = null;
     let stale: A.SourceDecl['stale'] = 'escalate';
     let keys: string[] | null = null;
+    let envelope: string | null = null;
     const seen = new Set<string>();
     while (!this.atPunct('}')) {
       const is = this.peek();
-      const w = this.ident('adapter, audience, freshness, stale or keys');
+      const w = this.ident('adapter, audience, freshness, stale, keys or envelope');
       // As for a channel's and a credential's clauses: each is written once.
       if (seen.has(w)) this.fail(`a source states its ${w} once`, is);
       seen.add(w);
@@ -271,11 +272,14 @@ class Parser {
           keys.push(k);
         } while (this.atPunct(',') && this.next());
         this.expect('}');
-      } else this.fail('expected adapter, audience, freshness, stale or keys', is);
+      } else if (w === 'envelope') {
+        // PS17.0, S459: `envelope k`, the key by which the adapter gives a reply's envelope; the check holds k to keys.
+        envelope = this.ident('a key name');
+      } else this.fail('expected adapter, audience, freshness, stale, keys or envelope', is);
     }
     if (audience === null) this.fail('a source names its audience (PS17.0)');
     this.next();
-    return this.node<A.SourceDecl>(start, { kind: 'Source', name, sourceKind, adapter, audience, owned, freshness, stale, ...(keys ? { keys } : {}) }, true);
+    return this.node<A.SourceDecl>(start, { kind: 'Source', name, sourceKind, adapter, audience, owned, freshness, stale, ...(keys ? { keys } : {}), ...(envelope !== null ? { envelope } : {}) }, true);
   }
 
   /**
@@ -1187,9 +1191,12 @@ class Parser {
         items.push(this.effItem(is, { kind: 'EffUses', credential, scopes, holder }));
       } else if (w === 'retrieve') {
         // PS17.2, S451: `retrieve s [where Pred [and Pred]] limit n`, Pred `owner == p` or `k == x`, at most one of each.
+        // S459: `retrieve s envelope where Pred [and Pred]`, an envelope retrieval, which names no limit.
         const source = this.ident('a source');
         let owner: string | null = null;
         let key: { name: string; param: string } | null = null;
+        const envelope = this.at('envelope');
+        if (envelope) { this.next(); if (!this.at('where')) this.fail("expected 'where': an envelope retrieval names its key (PS17.2)"); }
         if (this.at('where')) {
           this.next();
           do {
@@ -1201,9 +1208,14 @@ class Parser {
             else { if (key !== null) this.fail('a retrieval names at most one key', at); key = { name, param }; }
           } while (this.at('and') && this.next());
         }
-        this.expect('limit');
-        const limit = this.int();
-        items.push(this.effItem(is, { kind: 'EffRetrieve', source, owner, limit, ...(key ? { key } : {}) }));
+        if (envelope) {
+          if (this.at('limit')) this.fail('an envelope retrieval names no limit: it gives one envelope (PS17.2, PT10j)');
+          items.push(this.effItem(is, { kind: 'EffRetrieve', source, owner, limit: 0, ...(key ? { key } : {}), envelope: true }));
+        } else {
+          this.expect('limit');
+          const limit = this.int();
+          items.push(this.effItem(is, { kind: 'EffRetrieve', source, owner, limit, ...(key ? { key } : {}) }));
+        }
       } else if (w === 'remember') {
         // PS17.5: `remember s as k about p`.
         const source = this.ident('a memory source');
@@ -1219,9 +1231,12 @@ class Parser {
         items.push(this.effItem(is, { kind: 'EffTo', param: this.ident('the recipient parameter') }));
       } else if (w === 'audience') {
         items.push(this.effItem(is, { kind: 'EffAudience', cls: this.ident('an audience class') }));
+      } else if (w === 'envelope') {
+        // PS17.3a, S459: the Content parameter whose envelope gives the recipient and the threading headers.
+        items.push(this.effItem(is, { kind: 'EffEnvelope', param: this.ident('a Content parameter') }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
         items.push(this.outcome(is, w));
-      } else this.fail('expected kind, labels, targets, uses, retrieve, remember, to, audience, class, retry, ok, failed or exhausted', is);
+      } else this.fail('expected kind, labels, targets, uses, retrieve, remember, to, audience, envelope, class, retry, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);

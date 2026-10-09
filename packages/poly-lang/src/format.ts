@@ -83,6 +83,8 @@ class Printer {
     if (s.freshness !== null) this.out.push(`${INDENT}freshness ${s.freshness}`);
     if (s.stale !== 'escalate') this.out.push(`${INDENT}stale ${s.stale}`);
     if (s.keys?.length) this.out.push(`${INDENT}keys { ${s.keys.join(', ')} }`);
+    // PS17.0, S459.
+    if (s.envelope !== undefined) this.out.push(`${INDENT}envelope ${s.envelope}`);
     this.out.push(`}${this.trail(s)}`);
   }
 
@@ -347,10 +349,12 @@ class Printer {
       }
       case 'EffUses': return `uses ${e.credential} ${scopeSet(e.scopes)}${e.holder === null ? '' : ` for ${e.holder}`}`;
       case 'EffOutcome': return `${e.outcome}${e.bind !== undefined ? `(${e.bind})` : ''} -> ${e.action}(${this.args(e.args)})`;
-      case 'EffRetrieve': { const preds = [...(e.owner !== null ? [`owner == ${e.owner}`] : []), ...(e.key ? [`${e.key.name} == ${e.key.param}`] : [])]; return `retrieve ${e.source}${preds.length ? ` where ${preds.join(' and ')}` : ''} limit ${e.limit}`; }
+      case 'EffRetrieve': { const preds = [...(e.owner !== null ? [`owner == ${e.owner}`] : []), ...(e.key ? [`${e.key.name} == ${e.key.param}`] : [])]; return e.envelope ? `retrieve ${e.source} envelope where ${preds.join(' and ')}` : `retrieve ${e.source}${preds.length ? ` where ${preds.join(' and ')}` : ''} limit ${e.limit}`; }
       case 'EffRemember': return `remember ${e.source} as ${e.provenance} about ${e.about}`;
       case 'EffTo': return `to ${e.param}`;
       case 'EffAudience': return `audience ${e.cls}`;
+      // PS17.3a, S459.
+      case 'EffEnvelope': return `envelope ${e.param}`;
     }
   }
 

@@ -463,6 +463,8 @@ class Checker {
       if (d.sourceKind !== 'memory' && d.adapter === null) this.err('PL6834', d, `source ${d.name} names no adapter: one of ${[...SOURCE_ADAPTERS].join(', ')} (PS17.0)`);
       if (d.adapter !== null && d.sourceKind !== 'memory' && !SOURCE_ADAPTERS.has(d.adapter)) this.err('PL6834', d, `source ${d.name} names the adapter "${d.adapter}", which poly-io does not make: one of ${[...SOURCE_ADAPTERS].join(', ')} (PS17.0)`);
       if (d.freshness !== null && durationMs(d.freshness) === null) this.err('PL1201', d, `${d.freshness} is not a duration`);
+      // PS17.0, S459: envelope k names one of the source's keys; the parser and the embedded reader hold it to once.
+      if (d.envelope !== undefined && !(d.keys ?? []).includes(d.envelope)) this.err('PL1001', d, `source ${d.name} gives envelopes by ${d.envelope}, which is not one of its keys${d.keys?.length ? `: ${d.keys.join(', ')}` : ''} (PS17.0)`);
     }
   }
 
@@ -480,10 +482,17 @@ class Checker {
     };
     if (r && m) this.err('PL1201', m, `effect ${e.name} both retrieves and remembers; each is an effect of its own (PS17.2, PS17.5)`);
     // One meaning per effect: a retrieval's and a remember's kind and labels are fixed (PS17.2), and they name nothing else.
-    for (const it of e.items) if ((r || m) && (it.kind === 'EffKind' || it.kind === 'EffLabels' || it.kind === 'EffTargets' || it.kind === 'EffUses' || it.kind === 'EffTo' || it.kind === 'EffAudience')) this.err('PL1201', it, `effect ${e.name} ${r ? 'retrieves' : 'remembers'}, so its kind and labels are the runtime's and it names no target, credential or recipient (PS17.2)`);
+    for (const it of e.items) if ((r || m) && (it.kind === 'EffKind' || it.kind === 'EffLabels' || it.kind === 'EffTargets' || it.kind === 'EffUses' || it.kind === 'EffTo' || it.kind === 'EffAudience' || it.kind === 'EffEnvelope')) this.err('PL1201', it, `effect ${e.name} ${r ? 'retrieves' : 'remembers'}, so its kind and labels are the runtime's and it names no target, credential or recipient (PS17.2)`);
     if (r) {
       const s = src(r.source, r);
-      if (r.limit < 1) this.err('PL1201', r, 'a retrieval is limited to at least one item');
+      // S459: an envelope retrieval gives one envelope and names no limit (0 in the tree); any other names at least one.
+      if (r.envelope && r.limit !== 0) this.err('PL1201', r, 'an envelope retrieval names no limit: it gives the envelope of a reply to the newest item (PS17.2, PT10j)');
+      if (!r.envelope && r.limit < 1) this.err('PL1201', r, 'a retrieval is limited to at least one item');
+      // PS17.2, S459: an envelope retrieval's source declares envelope k, and its key predicate names that k.
+      if (r.envelope && s) {
+        if (s.envelope === undefined) this.err('PL1201', r, `effect ${e.name} retrieves an envelope from source ${s.name}, which declares no envelope (PS17.0, PS17.2)`);
+        else if (!r.key || r.key.name !== s.envelope) this.err('PL1201', r, `effect ${e.name} retrieves an envelope from source ${s.name}, whose envelope is by its key ${s.envelope}; the retrieval names ${s.envelope} == x (PS17.2)`);
+      }
       if (r.owner !== null) {
         principal(r.owner, r, 'the owner');
         if (s && !s.owned) this.err('PL6835', r, `effect ${e.name} retrieves where owner == ${r.owner} from source ${s.name}, which is not owned (PS17.2)`);
@@ -1294,8 +1303,87 @@ class Checker {
       }
     }
     this.strictFlow(m, facts);
+    // PS17.3a (S459): an envelope reaches an emit only from an envelope retrieval.
+    this.envelopeOrigins(m, facts);
     this.machine = null;
     return facts;
+  }
+
+  /**
+   * PS17.3a (S459): the envelope rule, static. In every emit of an effect with `envelope e`, the argument for e is
+   * none, a parameter of the emitting action that an envelope retrieval's ok outcome binds from r.envelope (an envelope
+   * slot), or a field every write of which, in every handler, is such a parameter or none; each passed as a bare name.
+   * Any other origin (a decision's answer, a body from a channel, an input's parameter, a computed value) is PL6830.
+   * A slot is A.p only when every other delivery of A this machine writes (another completion, a timer) gives p none:
+   * a decision's answer bound to the same parameter would choose the recipient (PS17.3a). The run-time origin check
+   * holds the rest, the digest being one the runtime stored as an envelope (PT10j).
+   */
+  private envelopeOrigins(m: A.Machine, facts: MachineFacts): void {
+    // An envelope that names no Content parameter is PL1001 or PL1201 at the effect, and no origin is read for it.
+    const enveloped = [...facts.effects.values()].filter((e) => e.items.some((x) => x.kind === 'EffEnvelope' && e.params.some((p) => p.name === x.param && this.tyOf(p.type).k === 'content')));
+    if (!enveloped.length) return;
+    const isNone = (v: A.Expr) => v.kind === 'Name' && facts.resolutions.get(v.id)?.k === 'none';
+    // The slots, and the parameters some other delivery of the same action gives a value other than none.
+    const slots = new Set<string>();
+    const other = new Set<string>();
+    const outcomes = (items: readonly { kind: string }[], envelopeRetrieval: boolean) => {
+      for (const it of items) {
+        if (it.kind !== 'EffOutcome') continue;
+        const o = it as A.EffOutcomeItem;
+        for (const arg of o.args) {
+          if (arg.name === null) continue;
+          const path = o.bind !== undefined ? boundPath(arg.value, o.bind) : null;
+          if (envelopeRetrieval && o.outcome === 'ok' && path && path.length === 1 && path[0] === 'envelope') slots.add(`${o.action}.${arg.name}`);
+          else if (!isNone(arg.value)) other.add(`${o.action}.${arg.name}`);
+        }
+      }
+    };
+    for (const e of facts.effects.values()) outcomes(e.items, e.items.some((x) => x.kind === 'EffRetrieve' && x.envelope === true));
+    for (const d of facts.decisions.values()) outcomes(d.items, false);
+    const handlers = m.items.filter((h): h is A.Handler => h.kind === 'Handler');
+    const walk = (body: A.Stmt[], f: (st: A.Stmt) => void): void => {
+      for (const st of body) {
+        f(st);
+        if (st.kind === 'If') { walk(st.then, f); walk(st.else ?? [], f); }
+        if (st.kind === 'Match') for (const arm of st.arms) walk(arm.body, f);
+        if (st.kind === 'For') walk(st.body, f);
+      }
+    };
+    // A timer (`after`) or a send of this machine to one of its own actions is another delivery of that action.
+    for (const h of handlers) walk(h.body, (st) => {
+      if (st.kind !== 'Intent' || (st.op !== 'after' && !(st.op === 'send' && st.to?.kind === 'Name' && facts.resolutions.get(st.to.id)?.k === 'self'))) return;
+      const act = this.actions.get(st.target);
+      if (!act) return;
+      st.args.forEach((arg, i) => { const name = arg.name ?? act.params[i]?.name; if (name && !isNone(arg.value)) other.add(`${st.target}.${name}`); });
+    });
+    const isSlot = (action: string, param: string) => slots.has(`${action}.${param}`) && !other.has(`${action}.${param}`);
+    // A field qualifies when every write of it is a slot of the writing action, passed as a bare name, or none.
+    const fieldOk = new Map(m.fields.map((f) => [f.name, true]));
+    for (const h of handlers) walk(h.body, (st) => {
+      if (st.kind === 'MapUpdate') fieldOk.set(st.field, false);
+      if (st.kind !== 'Assign' || !fieldOk.has(st.field)) return;
+      const r = st.expr.kind === 'Name' ? facts.resolutions.get(st.expr.id) : undefined;
+      if (!(isNone(st.expr) || (r?.k === 'param' && isSlot(h.action, r.name)))) fieldOk.set(st.field, false);
+    });
+    for (const h of handlers) walk(h.body, (st) => {
+      if (st.kind !== 'Intent' || st.op !== 'emit') return;
+      const eff = facts.effects.get(st.target);
+      const env = eff?.items.find((x): x is A.EffectItem & { kind: 'EffEnvelope'; param: string } => x.kind === 'EffEnvelope');
+      if (!eff || !env) return;
+      const positional = st.args.every((x) => x.name === null);
+      const arg = positional ? st.args[eff.params.findIndex((x) => x.name === env.param)] : st.args.find((x) => x.name === env.param);
+      // A missing argument is the arity check's (PL1201).
+      if (!arg) return;
+      const v = arg.value;
+      if (isNone(v)) return;
+      const r = v.kind === 'Name' ? facts.resolutions.get(v.id) : v.kind === 'Member' && v.object.kind === 'Name' && facts.resolutions.get(v.object.id)?.k === 'pre' ? { k: 'field' as const, name: v.prop } : undefined;
+      if (r?.k === 'param' && isSlot(h.action, r.name)) return;
+      if (r?.k === 'field' && fieldOk.get(r.name)) return;
+      const why = r?.k === 'param'
+        ? (slots.has(`${h.action}.${r.name}`) ? `${h.action}.${r.name}, which another delivery of ${h.action} also gives` : `${h.action}.${r.name}, which no envelope retrieval binds from r.envelope`)
+        : r?.k === 'field' ? `field ${r.name}, which some handler writes with a value that is not an envelope a retrieval gave` : 'a value computed here, not an envelope a retrieval gave';
+      this.err('PL6830', v, `emit ${eff.name} passes ${why} as its envelope ${env.param}; the envelope comes from the source only, through an envelope retrieval's r.envelope passed unchanged, or none (PS17.3a)`);
+    });
   }
 
   // ── effects (PT6.1, PT6.2, PT3.4a) ─────────────────────────────────────
@@ -1343,13 +1431,20 @@ class Checker {
         case 'EffAudience':
           this.audienceClass(it.cls, it, `effect ${e.name}`);
           break;
+        case 'EffEnvelope': {
+          // PS17.3a, S459: the envelope is a Content parameter of the effect; written once, by the PL1002 above.
+          const p = e.params.find((x) => x.name === it.param);
+          if (!p) this.err('PL1001', it, `effect ${e.name} has no parameter ${it.param} to give its envelope`);
+          else if (this.tyOf(p.type).k !== 'content') this.err('PL1201', it, `the envelope ${it.param} is ${tyToString(this.tyOf(p.type))}; it is a Content parameter of the effect (PS17.3a)`);
+          break;
+        }
         case 'EffRetry':
           if (it.attempts < 1) this.err('PL1201', it, 'retry needs at least one attempt');
           for (const d of [it.base, it.timeout]) if (durationMs(d) === null) this.err('PL1201', it, `${d} is not a duration`);
           break;
         case 'EffOutcome':
-          // PS17.2: a retrieval's ok(r) binds r.items, an Items.
-          this.completion(it, handlers, retrieve && it.outcome === 'ok' ? (path) => (path.length === 1 && path[0] === 'items' ? { k: 'items' } : null) : null);
+          // PS17.2: a retrieval's ok(r) binds r.items, an Items; an envelope retrieval's binds r.envelope, a Content (S459).
+          this.completion(it, handlers, retrieve && it.outcome === 'ok' ? (retrieve.envelope ? (path) => (path.length === 1 && path[0] === 'envelope' ? { k: 'content' } : null) : (path) => (path.length === 1 && path[0] === 'items' ? { k: 'items' } : null)) : null);
           break;
         default:
           break;
@@ -3279,10 +3374,13 @@ const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
 export const SOURCE_KINDS = new Set(['records', 'documents', 'memory']);
 export const SOURCE_ADAPTERS = new Set(['postgres', 'opensearch']);
 
-/** S41: an effect with no `kind` has its name as its kind; PS17.2, PS17.5: a retrieval's and a remember's are the runtime's. */
+/**
+ * S41: an effect with no `kind` has its name as its kind; PS17.2, PS17.5: a retrieval's and a remember's are the
+ * runtime's, and an envelope retrieval's is source.<s>.envelope (S459), labelled as a retrieval of s by effectLabels.
+ */
 export function effectKind(e: A.EffectDecl): string {
   for (const it of e.items) {
-    if (it.kind === 'EffRetrieve') return `source.${it.source}.retrieve`;
+    if (it.kind === 'EffRetrieve') return `source.${it.source}.${it.envelope ? 'envelope' : 'retrieve'}`;
     if (it.kind === 'EffRemember') return `source.${it.source}.remember`;
   }
   for (const it of e.items) if (it.kind === 'EffKind') return it.value;
@@ -3328,7 +3426,9 @@ export function effectSignature(e: A.EffectDecl): string {
   const outcomes = e.items.filter((i) => i.kind === 'EffOutcome').map(strip).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   // PT10e: the credential an effect uses is in its manifest entry, so effects that share a kind use the same one.
   const uses = e.items.find((i) => i.kind === 'EffUses');
-  return JSON.stringify({ params: e.params.map((p) => [p.name, strip(p.type)]), outcomes, cls: effectClass(e), ...(uses ? { uses: strip(uses) } : {}) });
+  // PS17.3a (S459): and so is its envelope parameter, which the runtime's origin check reads.
+  const envelope = e.items.find((i) => i.kind === 'EffEnvelope');
+  return JSON.stringify({ params: e.params.map((p) => [p.name, strip(p.type)]), outcomes, cls: effectClass(e), ...(uses ? { uses: strip(uses) } : {}), ...(envelope ? { envelope: envelope.param } : {}) });
 }
 
 /** `before("k1", "k2")` (S37): the two kinds, in order. */

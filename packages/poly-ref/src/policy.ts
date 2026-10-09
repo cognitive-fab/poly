@@ -85,11 +85,12 @@ export function policyFacts(modules: Module[]): PolicyFacts {
           // PS16.3: the credential an effect uses, whose grant the runtime checks before any policy.
           const uses = it.items.find((x) => x.kind === 'EffUses') as { credential: string } | undefined;
           // PS17.2, PS17.5: a retrieval's and a remember's kind and labels are the runtime's, read from the source here.
-          const r = it.items.find((x) => x.kind === 'EffRetrieve') as { source: string } | undefined;
+          const r = it.items.find((x) => x.kind === 'EffRetrieve') as { source: string; envelope?: boolean } | undefined;
           const w = it.items.find((x) => x.kind === 'EffRemember') as { source: string } | undefined;
           const src = r ? m.decls.find((x) => x.kind === 'Source' && (x as { name: string }).name === r.source) as { owned: boolean; audience: string } | undefined : undefined;
           const lowest = (m.decls.find((x) => x.kind === 'Audience') as { classes: string[] } | undefined)?.classes[0];
-          const memKind = r ? `source.${r.source}.retrieve` : w ? `source.${w.source}.remember` : null;
+          // PS17.2 (S459): an envelope retrieval is source.<s>.envelope, labelled as a retrieval of s.
+          const memKind = r ? `source.${r.source}.${r.envelope ? 'envelope' : 'retrieve'}` : w ? `source.${w.source}.remember` : null;
           const memLabels = w ? ['write:store'] : r ? [src && (src.owned || src.audience !== lowest) ? 'read:private' : 'read:store'] : null;
           const effect = { kind: memKind ?? kind?.value ?? it.name, class: cls?.value ?? 'none', labels: memLabels ?? it.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])), ...(uses ? { uses: uses.credential } : {}), ...(!memKind && it.params.some((x) => isContent(x.type)) ? { content: true } : {}), ...(!memKind && it.params.some((x) => isItems(x.type)) ? { items: it.params.filter((x) => isItems(x.type)).length } : {}) };
           // PS18.4: the budget check precedes the policy, so a call reaches it once per tier, with its route and budget.

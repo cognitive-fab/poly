@@ -85,14 +85,18 @@ export declare function uses(credential: string, scopes: string[], holder?: stri
 /** PS1.4b: `audience { a1 < a2 < … }`, the lowest first; in an effect, `audience c`, its recipient's class (PS17.3). */
 export declare function audience(classes: string[]): Decl;
 export declare function audience(cls: string): EffItem;
-/** PS17.0: `source s: k { adapter "a"  audience c [owned]  freshness d [stale deny]  [keys { k, … }] }` (S451). */
-export declare function source(name: string, body: { kind: 'records' | 'documents' | 'memory'; adapter?: string; audience: string; owned?: true; freshness?: string; stale?: 'escalate' | 'deny'; keys?: string[] }): Decl;
+/** PS17.0: `source s: k { adapter "a"  audience c [owned]  freshness d [stale deny]  [keys { k, … }]  [envelope k] }` (S451, S459). */
+export declare function source(name: string, body: { kind: 'records' | 'documents' | 'memory'; adapter?: string; audience: string; owned?: true; freshness?: string; stale?: 'escalate' | 'deny'; keys?: string[]; envelope?: string }): Decl;
 /** PS17.2, S451: `retrieve s [where owner == p [and k == x]] limit n` in an effect; `key` is [k, x]. */
 export declare function retrieve(source: string, body: { owner?: string; key?: [string, string]; limit: number }): EffItem;
+/** PS17.2, S459: `retrieve s envelope where [owner == p and] k == x`, an envelope retrieval, which names no limit. */
+export declare function retrieve(source: string, body: { owner?: string; key: [string, string]; envelope: true }): EffItem;
 /** PS17.5: `remember s as k about p` in an effect. */
 export declare function remember(source: string, provenance: 'observed' | 'derived' | 'verified', about: string): EffItem;
 /** PS17.3: `to p`, the payload field that names an effect's recipient. */
 export declare function to(param: string): EffItem;
+/** PS17.3a, S459: `envelope e`, the Content parameter whose envelope gives the recipient and the threading headers. */
+export declare function envelope(param: string): EffItem;
 /** PT10r: `route r { tier t provider "p" prices "f" [calibration "f"] max tokens n …  escalate when …  budget b }`. */
 export declare function route(name: string, body: { tiers: { name: string; provider: string; prices: string; calibration?: string; maxInputTokens: number; maxTokens: number }[]; escalate: (['conf' | 'margin', number] | ['failed'])[]; budget?: string }): Decl;
 /** PT24.1c: `route r` in a decision, its tiers in place of a provider. */

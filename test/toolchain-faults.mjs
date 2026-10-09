@@ -77,6 +77,9 @@ export const FAULT_SOURCES = {
   'flow-recipient-dropped': ['test/fixtures/m10/concierge-memory.poly'],
   // PT10j (S451): the manifest's key predicate the runtime passes to the adapter and checks each item against, dropped.
   'source-key-dropped': ['test/fixtures/source-keys/mail-draft.poly'],
+  // PT10j (S459): the effect's envelope parameter, which the runtime's origin check reads before the memory check,
+  // dropped from the manifest, so the runtime would skip that check.
+  'envelope-dropped': ['test/fixtures/envelope-fault/reply.poly'],
   // PT10r (M11): the route's and the budget's descriptors the runtime reads to run the tiers and hold the caps.
   'route-threshold-changed': ['test/fixtures/m11/desk.poly'],
   'route-tier-dropped': ['test/fixtures/m11/desk.poly'],

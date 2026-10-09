@@ -54,7 +54,7 @@ class Printer {
       case 'Credential': return `${this.use('credential')}(${q(d.name)}, { kind: ${q(d.credKind)}, provider: ${q(d.provider)}, grant: ${q(d.grant)}${d.pkce ? ', pkce: true' : ''}, scopes: [${d.scopes.map(q).join(', ')}]${d.holder === null ? '' : `, holder: ${q(d.holder)}`} })`;
       // PS1.4b, PS17.0: audience([…]) and source(name, { … }).
       case 'Audience': return `${this.use('audience')}([${d.classes.map(q).join(', ')}])`;
-      case 'Source': return `${this.use('source')}(${q(d.name)}, { kind: ${q(d.sourceKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, audience: ${q(d.audience)}${d.owned ? ', owned: true' : ''}${d.freshness === null ? '' : `, freshness: ${q(d.freshness)}`}${d.stale === 'escalate' ? '' : `, stale: ${q(d.stale)}`}${d.keys?.length ? `, keys: [${d.keys.map(q).join(', ')}]` : ''} })`;
+      case 'Source': return `${this.use('source')}(${q(d.name)}, { kind: ${q(d.sourceKind)}${d.adapter === null ? '' : `, adapter: ${q(d.adapter)}`}, audience: ${q(d.audience)}${d.owned ? ', owned: true' : ''}${d.freshness === null ? '' : `, freshness: ${q(d.freshness)}`}${d.stale === 'escalate' ? '' : `, stale: ${q(d.stale)}`}${d.keys?.length ? `, keys: [${d.keys.map(q).join(', ')}]` : ''}${d.envelope !== undefined ? `, envelope: ${q(d.envelope)}` : ''} })`;
       // PT10r: route(name, { tiers: [{ … }], escalate: [[…]], budget? }) and budget(name, { caps: [{ … }], onExhausted? }).
       case 'Route': {
         const tiers = d.tiers.map((t) => `${ind}  { name: ${q(t.name)}, provider: ${q(t.provider)}, prices: ${q(t.prices)}${t.calibration === null ? '' : `, calibration: ${q(t.calibration)}`}, maxInputTokens: ${t.maxInputTokens}, maxTokens: ${t.maxTokens} },\n`).join('');
@@ -182,9 +182,12 @@ class Printer {
       // PT10e: uses(credential, [scopes], holder?).
       case 'EffUses': return `${this.use('uses')}(${q(x.credential)}, [${x.scopes.map(q).join(', ')}]${x.holder === null ? '' : `, ${q(x.holder)}`})`;
       // PS17.2, PS17.3, PS17.5.
-      case 'EffRetrieve': return `${this.use('retrieve')}(${q(x.source)}, { ${x.owner === null ? '' : `owner: ${q(x.owner)}, `}${x.key ? `key: [${q(x.key.name)}, ${q(x.key.param)}], ` : ''}limit: ${x.limit} })`;
+      // S459: an envelope retrieval writes envelope: true in place of its limit.
+      case 'EffRetrieve': return `${this.use('retrieve')}(${q(x.source)}, { ${x.owner === null ? '' : `owner: ${q(x.owner)}, `}${x.key ? `key: [${q(x.key.name)}, ${q(x.key.param)}], ` : ''}${x.envelope ? 'envelope: true' : `limit: ${x.limit}`} })`;
       case 'EffRemember': return `${this.use('remember')}(${q(x.source)}, ${q(x.provenance)}, ${q(x.about)})`;
       case 'EffTo': return `${this.use('to')}(${q(x.param)})`;
+      // PS17.3a, S459.
+      case 'EffEnvelope': return `${this.use('envelope')}(${q(x.param)})`;
       case 'EffAudience': return `${this.use('audience')}(${q(x.cls)})`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
       case 'EffOutcome': {

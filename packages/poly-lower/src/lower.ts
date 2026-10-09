@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'envelope-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
 
 export interface Lowered {
   machine: string;
@@ -347,7 +347,7 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
     const classes = module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? [];
     const cls = (c: string) => Math.max(0, classes.indexOf(c));
     for (const s of sources) {
-      files[`../sources/${s.name}.json`] = JSON.stringify({ v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: opts.fault === 'source-unowned' ? false : s.owned, freshnessMs: s.freshness === null ? null : durationMs(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}) }, null, 2) + '\n';
+      files[`../sources/${s.name}.json`] = JSON.stringify({ v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: opts.fault === 'source-unowned' ? false : s.owned, freshnessMs: s.freshness === null ? null : durationMs(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}), ...(s.envelope !== undefined ? { envelope: s.envelope } : {}) }, null, 2) + '\n';
     }
     const lowered = (k: number, first: boolean) => (opts.fault === 'flow-class-lowered' && first ? 0 : k);
     files[`../flow/${module.name}.json`] = JSON.stringify({
@@ -521,7 +521,12 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
       // PS17.2, PS17.5: what the runtime retrieves or remembers, which no handler performs.
       // S451: a key predicate, which the runtime passes to the adapter and checks each item against. The broken lowering
       // source-key-dropped loses it.
-      if (it.kind === 'EffRetrieve') entry.retrieve = { source: it.source, owner: it.owner, ...(it.key && cx.fault !== 'source-key-dropped' ? { key: { name: it.key.name, param: it.key.param } } : {}), limit: it.limit };
+      // S459: an envelope retrieval names no limit and records envelope: true, which the runtime reads to call the
+      // adapter's envelope method.
+      if (it.kind === 'EffRetrieve') entry.retrieve = { source: it.source, owner: it.owner, ...(it.key && cx.fault !== 'source-key-dropped' ? { key: { name: it.key.name, param: it.key.param } } : {}), ...(it.envelope ? { envelope: true } : { limit: it.limit }) };
+      // PS17.3a, S459: the Content parameter whose envelope the runtime's origin check reads before the memory check.
+      // The broken lowering envelope-dropped loses it, so the runtime would skip that check.
+      if (it.kind === 'EffEnvelope' && cx.fault !== 'envelope-dropped') entry.envelope = it.param;
       if (it.kind === 'EffRemember') entry.remember = { source: it.source, provenance: it.provenance, about: it.about };
     }
     // PS17.2: a retrieval's and a remember's labels are the runtime's.

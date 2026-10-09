@@ -1,0 +1,87 @@
+// S459 (PS17.0, PS17.2, PS17.3a): mail is a source owned by its account's principal, keyed by message and thread, that
+// gives the envelope of a reply by thread. A reply retrieves that envelope, keeps it, asks a decision for the text and
+// drafts the reply under the envelope the source gave. The broken lowering envelope-dropped loses the draft's envelope
+// in the manifest, so the runtime would skip the origin check; poly-ref reads it back from here.
+module envelope_reply
+
+audience { public < account < staff }
+
+claims Account {
+  principal: Principal
+}
+
+source mail: records {
+  adapter "postgres"
+  audience account owned
+  freshness 1h
+  keys { message, thread }
+  envelope thread
+}
+
+enum Phase { Idle, Fetching, Writing }
+
+machine Replier {
+  state {
+    phase    : Phase     = Idle
+    account  : Principal = none
+    replyTo  : Content   = none
+  }
+
+  action Reply(thread: Key)
+  action Fetched(env: Content)
+  action FetchFailed()
+  action Written(text: Content)
+  action WriteFailed()
+
+  on Reply(thread) by c: Account {
+    require phase == Idle else reject "busy"
+    phase' = Fetching
+    account' = c.principal
+    emit fetch(account: c.principal, t: thread)
+  }
+
+  on Fetched(env) {
+    require phase == Fetching else reject "not-fetching"
+    phase' = Writing
+    replyTo' = env
+    decide write(context: env)
+  }
+
+  on FetchFailed {
+    require phase == Fetching else reject "not-fetching"
+    phase' = Idle
+  }
+
+  on Written(text) {
+    require phase == Writing else reject "not-writing"
+    phase' = Idle
+    emit draft(recipient: account, reply: replyTo, body: text)
+  }
+
+  on WriteFailed {
+    require phase == Writing else reject "not-writing"
+    phase' = Idle
+  }
+
+  effect fetch(account: Principal, t: Key) {
+    retrieve mail envelope where owner == account and thread == t
+    ok(r) -> Fetched(env: r.envelope)
+    failed -> FetchFailed()
+  }
+
+  decision write(context: Content) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Written(text: r.answer)
+    failed -> WriteFailed()
+  }
+
+  effect draft(recipient: Principal, reply: Content, body: Content) {
+    kind "mail.draft"
+    labels { egress:external }
+    to recipient
+    audience public
+    envelope reply
+  }
+}

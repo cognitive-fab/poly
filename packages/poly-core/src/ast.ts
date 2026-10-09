@@ -53,6 +53,8 @@ export interface SourceDecl extends NodeBase {
   stale: 'escalate' | 'deny';
   /** PS17.0, S451: the item keys the adapter supplies with each item, in source order; absent when none are declared. */
   keys?: string[];
+  /** PS17.0, S459: the key by which the adapter gives a thread's envelope; absent when the source gives none. */
+  envelope?: string;
 }
 
 // ── Routes and budgets (PT24, PS18, M11) ───────────────────────────────────
@@ -498,10 +500,12 @@ export type EffectItem =
   | EffRemember
   | (NodeBase & { kind: 'EffTo'; param: string })
   | (NodeBase & { kind: 'EffAudience'; cls: string })
+  /** PS17.3a, S459: `envelope e`, the Content parameter whose envelope gives the recipient and the threading headers. */
+  | (NodeBase & { kind: 'EffEnvelope'; param: string })
   | EffOutcomeItem;
 
 /** PS17.2: `retrieve s [where owner == p [and k == x]] limit n`, the body of a retrieval effect; `p` a Principal parameter, `x` a Key parameter and `k` a key the source declares (S451). */
-export type EffRetrieve = NodeBase & { kind: 'EffRetrieve'; source: string; owner: string | null; limit: number; key?: { name: string; param: string } };
+export type EffRetrieve = NodeBase & { kind: 'EffRetrieve'; source: string; owner: string | null; limit: number; key?: { name: string; param: string }; /** PS17.2, S459: an envelope retrieval, `retrieve s envelope where …`, with no limit (0). */ envelope?: boolean };
 
 /** PS17.5: `remember s as k about p`, which writes the payload's Content to the memory source s, owned by p. */
 export type EffRemember = NodeBase & { kind: 'EffRemember'; source: string; provenance: 'observed' | 'derived' | 'verified'; about: string };
