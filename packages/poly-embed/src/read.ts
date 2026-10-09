@@ -136,6 +136,14 @@ class Reader {
     return [...n.elements];
   }
 
+  /** PT6.5, S455: a target, a string or `{ exact: '<url>' }`, the embedded form of `exact "<url>"`. */
+  private target(node: ts.Expression): A.TargetValue {
+    if (!ts.isObjectLiteralExpression(this.unparen(node))) return this.str(node);
+    const entries = this.obj(node);
+    if (entries.length !== 1 || entries[0][0] !== 'exact') this.fail(node, "a target is a string or { exact: '<url>' } (S455)");
+    return { exact: this.str(entries[0][1]) };
+  }
+
   /** An object literal as [key, value, key node] entries, in order; only plain `key: value`. */
   private obj(node: ts.Expression): [string, ts.Expression, ts.PropertyName][] {
     const n = this.unparen(node);
@@ -526,7 +534,7 @@ class Reader {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'labels': return mk({ kind: 'EffLabels', labels: this.arr(this.argsOf(c, 1, 1)[0]).map((l) => this.str(l)) });
       case 'cls': return mk({ kind: 'EffClass', value: this.str(this.argsOf(c, 1, 1)[0]) });
-      case 'targets': return mk({ kind: 'EffTargets', targets: this.arr(this.argsOf(c, 1, 1)[0]).map((p) => { const [k, v] = this.arr(p); return { key: this.str(k), values: this.arr(v).map((s) => this.str(s)) }; }) });
+      case 'targets': return mk({ kind: 'EffTargets', targets: this.arr(this.argsOf(c, 1, 1)[0]).map((p) => { const [k, v] = this.arr(p); return { key: this.str(k), values: this.arr(v).map((s) => this.target(s)) }; }) });
       case 'uses': {
         // PT10e: uses(credential, [scopes], holder?).
         const [cred, scopes, holder] = this.argsOf(c, 2, 3);

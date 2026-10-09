@@ -1156,18 +1156,23 @@ class Parser {
         this.expect('}');
         items.push(this.effItem(is, { kind: 'EffRetry', attempts, base, timeout }));
       } else if (w === 'targets') {
-        // PT6.5, S151: each key names a capability; its value is one string or a list of strings.
+        // PT6.5, S151: each key names a capability; its value is one target or a list of them. S455: a target is a
+        // string or `exact "<url>"`; the check allows exact on egress only (PL1201), so it is read here on any kind.
         this.expect('{');
-        const targets: { key: string; values: string[] }[] = [];
+        const targets: { key: string; values: A.TargetValue[] }[] = [];
+        const target = (): A.TargetValue => {
+          if (this.peek().kind === 'ident' && this.peek().text === 'exact' && this.peek(1).kind === 'string') { this.next(); return { exact: this.str('a target') }; }
+          return this.str('a target');
+        };
         while (!this.atPunct('}')) {
           const key = this.ident('a target kind');
           this.expect(':');
-          const values: string[] = [];
+          const values: A.TargetValue[] = [];
           if (this.atPunct('[')) {
             this.next();
-            while (!this.atPunct(']')) { values.push(this.str('a target')); if (!this.atPunct(']')) this.expect(','); }
+            while (!this.atPunct(']')) { values.push(target()); if (!this.atPunct(']')) this.expect(','); }
             this.next();
-          } else values.push(this.str('a target'));
+          } else values.push(target());
           targets.push({ key, values });
           if (!this.atPunct('}')) this.expect(',');
         }

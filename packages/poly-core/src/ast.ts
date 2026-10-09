@@ -509,8 +509,14 @@ export type EffRemember = NodeBase & { kind: 'EffRemember'; source: string; prov
 /** PT10e: `uses c { s, ... } for p`, the credential an effect runs with, the scopes it needs and its holder parameter. */
 export type EffUses = NodeBase & { kind: 'EffUses'; credential: string; scopes: string[]; holder: string | null };
 
-/** PT6.5, S151: `targets { egress: "<prefix>" | [ … ], secrets: [ … ], exec: [ … ], store: [ … ] }`, in source order. */
-export type EffTargets = NodeBase & { kind: 'EffTargets'; targets: { key: string; values: string[] }[] };
+/**
+ * One target: a string (a prefix, a secret's name, a command or a table), or an exact egress URL (S455), which the
+ * manifest writes as { "exact": "<url>" } among the kind's strings.
+ */
+export type TargetValue = string | { exact: string };
+
+/** PT6.5, S151: `targets { egress: "<prefix>" | exact "<url>" | [ … ], secrets: [ … ], exec: [ … ], store: [ … ] }`, in source order. */
+export type EffTargets = NodeBase & { kind: 'EffTargets'; targets: { key: string; values: TargetValue[] }[] };
 
 /** `ok -> A(args)`, or `ok(r) -> A(p: r.x)`, which binds the handler's result (PD1.2b, PD1.2g, S79). */
 export type EffOutcomeItem = NodeBase & { kind: 'EffOutcome'; outcome: 'ok' | 'failed' | 'exhausted'; action: string; args: NamedArg[]; bind?: string };

@@ -166,6 +166,7 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const au = e.items.find((x): x is A.EffectItem & { kind: 'EffAudience'; cls: string } => x.kind === 'EffAudience');
         differ(`effects.manifest.json ${kind}.recipient`, entry.recipient ?? null, to || au ? { to: to?.param ?? null, audience: au?.cls ?? null } : null);
         // S151: the capability bounds, read back exactly: a wider prefix in the manifest is a wider capability at run time.
+        // S455: an exact target is { exact: url } among the strings, so one written as a prefix differs here (exact-widened).
         const targets = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
         differ(`effects.manifest.json ${kind}.targets`, entry.targets ?? null, targets ? Object.fromEntries(targets.targets.map((t) => [t.key, t.values])) : null);
         differ(`effects.manifest.json ${kind}.class`, entry.class, M.effects.get(e.name)!.cls);
@@ -223,12 +224,13 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
       const t = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
       const of = (k: string) => t?.targets.find((x) => x.key === k)?.values ?? [];
       const prefixes = labels.has('egress:external') || labels.has('egress:public') ? of('egress') : [];
-      const secrets = labels.has('read:private') ? of('secrets') : [];
+      const secrets = labels.has('read:private') ? of('secrets').filter((s): s is string => typeof s === 'string') : [];
       const endpoints: unknown[] = [];
       for (const p of prefixes) {
-        const u = new URL(p);
+        const u = new URL(typeof p === 'string' ? p : p.exact);
         const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
-        const globs = u.pathname.endsWith('/') ? [u.pathname + '**'] : [u.pathname, u.pathname + '/**'];
+        // S455: an exact target admits its own path and nothing under it.
+        const globs = typeof p !== 'string' ? [u.pathname] : u.pathname.endsWith('/') ? [u.pathname + '**'] : [u.pathname, u.pathname + '/**'];
         for (const g of globs) for (const s of secrets.length ? secrets : [null]) endpoints.push({ host: u.hostname, port, path: g, protocol: 'rest', access: 'full', ...(s ? { credential_binding: { provider: s } } : {}) });
       }
       want[M.effects.get(e.name)!.kind] = {

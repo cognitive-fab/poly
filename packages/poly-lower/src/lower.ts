@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped';
 
 export interface Lowered {
   machine: string;
@@ -424,9 +424,15 @@ function breakArtefact(fault: Fault, files: Lowered['files'], contract: Record<s
   }
   // S151: a capability bound wider than the source declares (the first egress prefix cut back to its origin).
   if (fault === 'widen-target' && files['effects.manifest.json']) {
-    const man = JSON.parse(files['effects.manifest.json']) as { effects: Record<string, { targets?: Record<string, string[]> }> };
+    const man = JSON.parse(files['effects.manifest.json']) as { effects: Record<string, { targets?: Record<string, A.TargetValue[]> }> };
     const entry = Object.values(man.effects).find((e) => e.targets?.egress?.length);
-    if (entry) { entry.targets!.egress[0] = new URL(entry.targets!.egress[0]).origin + '/'; files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
+    if (entry) { const t = entry.targets!.egress[0]; entry.targets!.egress[0] = new URL(typeof t === 'string' ? t : t.exact).origin + '/'; files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
+  }
+  // S455: an exact egress target written as a prefix, which would admit every path under it (a draft URL that sends).
+  if (fault === 'exact-widened' && files['effects.manifest.json']) {
+    const man = JSON.parse(files['effects.manifest.json']) as { effects: Record<string, { targets?: Record<string, A.TargetValue[]> }> };
+    const entry = Object.values(man.effects).find((e) => e.targets?.egress?.some((t) => typeof t !== 'string'));
+    if (entry) { entry.targets!.egress = entry.targets!.egress.map((t) => (typeof t === 'string' ? t : t.exact)); files['effects.manifest.json'] = JSON.stringify(man, null, 2) + '\n'; }
   }
   if (fault === 'path-invariant') rewrite('effect-invariants.mjs', /<= (\d+)/, (m) => `<= ${Number(m.slice(3)) + 1}`);
   if (fault === 'compose-invariant') rewrite('invariants.compose.mjs', /pred: \(joint\) => /, () => 'pred: (joint) => !');
@@ -938,21 +944,22 @@ function dataDomainOf(a: A.Action, env: TypeEnv, facts?: MachineFacts): Record<s
 /**
  * PT6.5, S152: an OpenShell policy for each effect kind, generated from its labels and targets, deterministically
  * (written as JSON, which is YAML). The filesystem is a scratch directory and the system's read-only trees; each
- * declared egress prefix is a REST endpoint by host, port and path (the prefix and below it), bound to each declared
- * secret as a credential provider; a kind with no egress label has no network policy at all. OpenShell has no
- * per-command allowlist, so the declared commands stay enforced in process only (the capability object).
+ * declared egress prefix is a REST endpoint by host, port and path (the prefix and below it), and an exact target
+ * (S455) by its path alone, bound to each declared secret as a credential provider; a kind with no egress label has
+ * no network policy at all. OpenShell has no per-command allowlist, so the declared commands stay enforced in process
+ * only (the capability object).
  */
 function sandboxPolicies(facts: MachineFacts, fault?: Fault): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const e of facts.effects.values()) {
     const labels = e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : []));
-    const targets = Object.fromEntries(e.items.flatMap((x) => (x.kind === 'EffTargets' ? x.targets.map((t) => [t.key, t.values]) : [])));
+    const targets: Record<string, A.TargetValue[]> = Object.fromEntries(e.items.flatMap((x) => (x.kind === 'EffTargets' ? x.targets.map((t) => [t.key, t.values]) : [])));
     const egress = labels.includes('egress:external') || labels.includes('egress:public') ? (targets.egress ?? []) : [];
-    const secrets: string[] = labels.includes('read:private') ? (targets.secrets ?? []) : [];
-    const endpoints = egress.flatMap((p: string) => {
-      const u = new URL(p);
+    const secrets = labels.includes('read:private') ? (targets.secrets ?? []).filter((s): s is string => typeof s === 'string') : [];
+    const endpoints = egress.flatMap((p) => {
+      const u = new URL(typeof p === 'string' ? p : p.exact);
       const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
-      const paths = fault === 'widen-sandbox' ? ['/**'] : u.pathname.endsWith('/') ? [`${u.pathname}**`] : [u.pathname, `${u.pathname}/**`];
+      const paths = fault === 'widen-sandbox' ? ['/**'] : typeof p !== 'string' ? [u.pathname] : u.pathname.endsWith('/') ? [`${u.pathname}**`] : [u.pathname, `${u.pathname}/**`];
       return paths.flatMap((path) => (secrets.length ? secrets : [null]).map((s) => ({ host: u.hostname, port, path, protocol: 'rest', access: 'full', ...(s ? { credential_binding: { provider: s } } : {}) })));
     });
     out[effectKind(e)] = {

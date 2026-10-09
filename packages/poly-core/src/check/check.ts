@@ -705,7 +705,8 @@ class Checker {
         else if (this.tyOf(p.type).k !== 'principal') this.err('PL1201', u, `the holder ${u.holder} of ${c.name} is ${tyToString(this.tyOf(p.type))}; a holder is a Principal parameter of the effect (PT10e)`);
       }
     } else if (u.holder !== null) this.err('PL1201', u, `credential ${c.name} is the service's own (client_credentials), so effect ${e.name} names no holder for it (PT10e)`);
-    const egress = targets.flatMap((t) => t.targets.filter((x) => x.key === 'egress').flatMap((x) => x.values));
+    // S455: an exact target is checked against the bases as a prefix is, by its URL.
+    const egress = targets.flatMap((t) => t.targets.filter((x) => x.key === 'egress').flatMap((x) => x.values.map((v) => (typeof v === 'string' ? v : v.exact))));
     if (!egress.length) { this.err('PL1201', u, `effect ${e.name} uses ${c.name} and declares no egress target; a credential is sent only to declared targets under its provider's base addresses (PT10e)`); return; }
     const profile = this.profile(c.provider);
     if (!profile) return;
@@ -1403,7 +1404,10 @@ class Checker {
       const grants = GRANTS[key];
       if (!grants) { this.err('PL1001', t, `${key} is not a kind of target: egress, secrets, exec or store (PT6.5)`); continue; }
       if (!grants.some((l) => labels.has(l))) this.err('PL6303', t, `effect ${e.name} declares ${key} targets, and none of its labels grants them: ${grants.join(' or ')} (PT6.5)`);
-      for (const v of values) {
+      for (const tv of values) {
+        // S455: `exact "<url>"` is allowed on egress only, and its URL is written as a prefix is.
+        if (typeof tv !== 'string' && key !== 'egress') { this.err('PL1201', t, `exact ${JSON.stringify(tv.exact)}: an exact target is an egress URL, and ${key} targets are names (S455)`); continue; }
+        const v = typeof tv === 'string' ? tv : tv.exact;
         if (!v.length) { this.err('PL1201', t, `an empty ${key} target`); continue; }
         if (key !== 'egress') continue;
         let u: URL | null = null;

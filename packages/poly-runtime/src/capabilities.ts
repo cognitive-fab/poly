@@ -21,8 +21,11 @@ export class CapabilityRefused extends Error {
   constructor(message: string) { super(message); this.name = 'CapabilityRefused'; }
 }
 
+/** One declared target: a string, or an exact egress URL written { exact } among the kind's strings (S455). */
+export type Target = string | { exact: string };
+
 /** The manifest entry's labels and targets, as the lowering wrote them (PT6.1, S151), and the credential it uses (PT10e). */
-export interface CapabilityDecl { labels?: string[]; targets?: Record<string, string[]>; uses?: { credential: string; scopes: string[]; holder: string | null } }
+export interface CapabilityDecl { labels?: string[]; targets?: Record<string, Target[]>; uses?: { credential: string; scopes: string[]; holder: string | null } }
 
 /** PT22.5, S201: the vault's transport for the intent's grant: the credential is attached inside the vault adapter. */
 export interface ApiTransport { request(r: { method: 'GET' | 'POST'; url: string; headers: Record<string, string>; body: string }): Promise<{ status: number; headers: Record<string, string>; body: string }> }
@@ -36,9 +39,11 @@ const has = (decl: CapabilityDecl, ...labels: string[]) => labels.some((l) => de
  * S151: the normalised URL when it lies under one of the prefixes, else null. Both are parsed by the WHATWG URL
  * parser, which lowercases the host, drops a default port and resolves `.`, `..` and their encoded forms. The scheme
  * and host (with port) must be equal, and the path must equal the prefix's or continue it past a `/`, so
- * `/v1/charges` does not admit `/v1/charges-evil`. A URL with a user or password is refused outright.
+ * `/v1/charges` does not admit `/v1/charges-evil`. A URL with a user or password is refused outright. S455: an exact
+ * target admits the URL whose scheme, host, path and query equal its own after the same normalisation, and nothing
+ * under it.
  */
-export function withinPrefix(url: string, prefixes: readonly string[]): string | null {
+export function withinPrefix(url: string, prefixes: readonly Target[]): string | null {
   let u: URL;
   try { u = new URL(url); } catch { return null; }
   if (u.username || u.password) return null;
@@ -46,8 +51,9 @@ export function withinPrefix(url: string, prefixes: readonly string[]): string |
   // as separators or as `..`, outside the prefix. They are refused.
   if (/%2f|%5c/i.test(u.pathname) || u.pathname.split('/').some((s) => /^\.\.?;/.test(s) || /^%2e%2e?;/i.test(s))) return null;
   for (const p of prefixes) {
-    const q = new URL(p);
+    const q = new URL(typeof p === 'string' ? p : p.exact);
     if (q.protocol !== u.protocol || q.host !== u.host) continue;
+    if (typeof p !== 'string') { if (u.pathname === q.pathname && u.search === q.search) return u.href; continue; }
     const base = q.pathname;
     if (u.pathname === base || u.pathname.startsWith(base.endsWith('/') ? base : `${base}/`)) return u.href;
   }

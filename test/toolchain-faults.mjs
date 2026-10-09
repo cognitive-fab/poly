@@ -31,6 +31,8 @@ export const FAULT_SOURCES = {
   'outcome-entry': ['conformance/m4/router.poly'],
   // S151: the targets the runtime binds a handler's capabilities to.
   'widen-target': ['conformance/m5/capabilities.poly'],
+  // S455: an exact egress target written as a prefix, so a draft URL would admit the send under it.
+  'exact-widened': ['test/fixtures/exact-target/drafts.poly'],
   // PD5.1.2c: PS3.2's claims row, which the runtime applies before the module.
   'skip-claims': ['conformance/m5/refund.poly'],
   // PS3.2, S180: the content row, which rejects a step whose Content names no body before the module.

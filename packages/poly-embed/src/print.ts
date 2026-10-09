@@ -177,8 +177,8 @@ class Printer {
       case 'EffLabels': return `${this.use('labels')}([${x.labels.map(q).join(', ')}])`;
       case 'EffClass': return `${this.use('cls')}(${q(x.value)})`;
       case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
-      // PT6.5, S151: one entry per key, in source order.
-      case 'EffTargets': return `${this.use('targets')}([${x.targets.map((t) => `[${q(t.key)}, [${t.values.map(q).join(', ')}]]`).join(', ')}])`;
+      // PT6.5, S151: one entry per key, in source order. S455: an exact target is { exact: '<url>' }, as read.
+      case 'EffTargets': return `${this.use('targets')}([${x.targets.map((t) => `[${q(t.key)}, [${t.values.map((v) => (typeof v === 'string' ? q(v) : `{ exact: ${q(v.exact)} }`)).join(', ')}]]`).join(', ')}])`;
       // PT10e: uses(credential, [scopes], holder?).
       case 'EffUses': return `${this.use('uses')}(${q(x.credential)}, [${x.scopes.map(q).join(', ')}]${x.holder === null ? '' : `, ${q(x.holder)}`})`;
       // PS17.2, PS17.3, PS17.5.

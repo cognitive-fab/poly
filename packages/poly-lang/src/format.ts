@@ -340,7 +340,11 @@ class Printer {
       case 'EffClass': return `class ${e.value}`;
       case 'EffLabels': return `labels { ${e.labels.join(', ')} }`;
       case 'EffRetry': return `retry { attempts ${e.attempts}, base ${e.base}, timeout ${e.timeout} }`;
-      case 'EffTargets': return `targets { ${e.targets.map((t) => `${t.key}: ${t.key === 'egress' && t.values.length === 1 ? JSON.stringify(t.values[0]) : `[${t.values.map((v) => JSON.stringify(v)).join(', ')}]`}`).join(', ')} }`;
+      // S455: an exact target prints as written, `exact "<url>"`.
+      case 'EffTargets': {
+        const tv = (v: A.TargetValue) => (typeof v === 'string' ? JSON.stringify(v) : `exact ${JSON.stringify(v.exact)}`);
+        return `targets { ${e.targets.map((t) => `${t.key}: ${t.key === 'egress' && t.values.length === 1 ? tv(t.values[0]) : `[${t.values.map(tv).join(', ')}]`}`).join(', ')} }`;
+      }
       case 'EffUses': return `uses ${e.credential} ${scopeSet(e.scopes)}${e.holder === null ? '' : ` for ${e.holder}`}`;
       case 'EffOutcome': return `${e.outcome}${e.bind !== undefined ? `(${e.bind})` : ''} -> ${e.action}(${this.args(e.args)})`;
       case 'EffRetrieve': { const preds = [...(e.owner !== null ? [`owner == ${e.owner}`] : []), ...(e.key ? [`${e.key.name} == ${e.key.param}`] : [])]; return `retrieve ${e.source}${preds.length ? ` where ${preds.join(' and ')}` : ''} limit ${e.limit}`; }

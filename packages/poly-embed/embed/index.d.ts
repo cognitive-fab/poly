@@ -99,8 +99,8 @@ export declare function route(name: string, body: { tiers: { name: string; provi
 export declare function route(name: string): DecisionItem;
 /** PT10r: `budget b { cap <currency> <amount> per … }`, each amount a decimal as written. */
 export declare function budget(name: string, body: { caps: { currency: string; amount: number; per: 'run' | 'scope' | 'hour' | 'day' | 'month'; scope?: true }[]; onExhausted?: 'deny' | 'escalate' }): Decl;
-/** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target. */
-export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: string[]][]): EffItem;
+/** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target; S455: `{ exact: url }` is `exact "<url>"`. */
+export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: (string | { exact: string })[]][]): EffItem;
 export declare function retry(attempts: number, base: string, timeout: string): EffItem;
 export declare function ok(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
 export declare function failed(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
