@@ -1,0 +1,95 @@
+// S456 with the PL6838 fix (PS17.3, S322 as amended 2026-10-09): a channel application that replies tainted content.
+// Got retrieves the newest order from a declared source, Found decides an answer over the items, and Answered replies
+// it on the thread. The reply is a send to the conversation the application's starts spawned, and the channel's
+// generated configuration holds that conversation, so the message is followed and is not PL6838 on the application
+// alone. The source is not owned and its class is the channel's, so the recipient may read the answer (no PL6831).
+module ccflow
+
+audience { public < customer < staff }
+
+source orders: records {
+  adapter "postgres"
+  audience customer
+  freshness 1h
+}
+
+channel support: test {
+  adapter "test"
+  thread "{from}"
+  starts Desk.Start on inbound
+  audience customer
+  Message -> Desk.Got
+  Delivered -> Desk.Delivered
+  Rejected -> Desk.SendRejected
+  Failed -> Desk.SendFailed
+}
+
+enum Phase { Idle, Looking, Answering, Done }
+
+service machine Desk {
+  state {
+    started : bool  = false
+    phase   : Phase = Idle
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Found(items: Items)
+  action LookupFailed()
+  action Answered(answer: Content)
+  action AnswerFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    require phase is Idle else reject "busy"
+    phase' = Looking
+    emit lookup()
+  }
+  on Found(items) {
+    require phase is Looking else reject "not-looking"
+    phase' = Answering
+    decide answer(context: items)
+  }
+  on LookupFailed {
+    require phase is Looking else reject "not-looking"
+    phase' = Done
+  }
+  on Answered(answer) {
+    require phase is Answering else reject "not-answering"
+    phase' = Done
+    emit support.reply(body: answer)
+  }
+  on AnswerFailed {
+    require phase is Answering else reject "not-answering"
+    phase' = Done
+  }
+  on Delivered {
+    require started else reject "not-started"
+  }
+  on SendRejected(reason) {
+    require started else reject "not-started"
+  }
+  on SendFailed {
+    require started else reject "not-started"
+  }
+
+  effect lookup() {
+    retrieve orders limit 1
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision answer(context: Items) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Answered(answer: r.answer)
+    failed -> AnswerFailed()
+  }
+}

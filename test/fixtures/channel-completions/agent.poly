@@ -1,0 +1,70 @@
+// S456 (PS15.5): the concierge situation of poly-ex in its smallest form. The application answers its channel's
+// message through a decision: Got decides answer, and only the decision's ok completion, Answered, replies. In the
+// channel's generated configuration the conversation's rule free-when-closed is tested only when the application
+// replies, so it is tested only if the configuration offers the decision's completions while its intent is pending.
+// The tests derive their variants from this text: an effect with ok and failed completions in place of the decision,
+// an application that decides nothing (the seeded control), and one that emits four intents of one kind (PL3901).
+module cc
+
+channel support: test {
+  adapter "test"
+  thread "{from}"
+  starts Agent.Start on inbound
+  Message -> Agent.Got
+  Delivered -> Agent.Delivered
+  Rejected -> Agent.SendRejected
+  Failed -> Agent.SendFailed
+}
+
+enum Phase { Idle, Asking, Replied, Done }
+
+service machine Agent {
+  state {
+    started : bool  = false
+    phase   : Phase = Idle
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Answered(answer: Content)
+  action AnswerFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    require phase is Idle else reject "busy"
+    phase' = Asking
+    decide answer(question: body)
+  }
+  on Answered(answer) {
+    require phase is Asking else reject "not-asking"
+    phase' = Replied
+    emit support.reply(body: answer)
+  }
+  on AnswerFailed {
+    require phase is Asking else reject "not-asking"
+    phase' = Done
+  }
+  on Delivered {
+    require started else reject "not-started"
+  }
+  on SendRejected(reason) {
+    require started else reject "not-started"
+  }
+  on SendFailed {
+    require started else reject "not-started"
+  }
+
+  decision answer(question: Content) -> Content {
+    provider "flash"
+    labels { egress:external }
+    timeout 2s
+    ok(r) -> Answered(answer: r.answer)
+    failed -> AnswerFailed()
+  }
+}

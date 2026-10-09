@@ -1,0 +1,44 @@
+// S456, S61 (PS15.5): a declared configuration is unchanged. It offers a completion only as a declared input: the
+// configuration c declares only Ask, so neither of the decision's completions is offered, though Ask emits its intent.
+// The tests' variant declares Answered as an input, which is then offered as any input is, pending intent or not.
+module ccdecl
+
+enum Phase { Idle, Asking, Done }
+
+service machine Asker {
+  state {
+    phase : Phase = Idle
+  }
+
+  action Ask(question: Content)
+  action Answered(answer: Content)
+  action AnswerFailed()
+
+  on Ask(question) {
+    require phase is Idle else reject "busy"
+    phase' = Asking
+    decide answer(question: question)
+  }
+  on Answered(answer) {
+    require phase is Asking else reject "not-asking"
+    phase' = Done
+  }
+  on AnswerFailed {
+    require phase is Asking else reject "not-asking"
+    phase' = Done
+  }
+
+  decision answer(question: Content) -> Content {
+    provider "flash"
+    labels { egress:external }
+    timeout 2s
+    ok(r) -> Answered(answer: r.answer)
+    failed -> AnswerFailed()
+  }
+}
+
+configuration c {
+  a : Asker
+  inputs { a.Ask }
+  bounds { transit 1 }
+}
