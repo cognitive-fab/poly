@@ -322,6 +322,8 @@ What is ruled for after the release, in one place:
 
 - **S453:** SES, with an `aws_sigv4` credential kind and its own ruling (Q-EX5: Gmail only for the v1 gate).
 - **`PL1002` for a parameter named after a state field** (item (c) above), with std's channel kinds, the conformance cases, the examples and the tests' fixtures renamed together, and `conformance/m0/shadowing.poly` turned into its error source.
+- **Erasure at the provider where the provider's copy is poly's own** and is reached through a credential (ruled 2026-10-10, with the forget that uses no grant).
+- **The journal records of a provider revocation are named in the spec** (ruled 2026-10-10): which records journal each attempt of `credential.revoke`, which the tests read today from the runtime's own.
 
 ## (a), S460 and (c), built
 
