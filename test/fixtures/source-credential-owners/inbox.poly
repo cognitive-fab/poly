@@ -1,0 +1,67 @@
+// S461 (PS17.0, PT10j): an owned source whose credential names `holder Principal`. Each account owns its own items in
+// the inbox index and has a grant of its own, so a retrieval names its owner and runs under that owner's grant only.
+// The help index is reached under the service's own credential `reports` (S460), and is not owned. The provider is the
+// tests' test-oauth, found under the test-only std.
+module srcown
+
+audience { public < staff }
+
+credential payments: oauth2 {
+  provider "test-oauth"
+  grant authorization_code pkce
+  scopes { charges.read }
+  holder Principal
+}
+
+credential reports: oauth2 {
+  provider "test-oauth"
+  grant client_credentials
+  scopes { reports.read }
+}
+
+source inbox: documents {
+  adapter "opensearch"
+  audience staff owned
+  credential payments
+}
+
+source help: documents {
+  adapter "opensearch"
+  audience staff
+  credential reports
+}
+
+enum Phase { Idle, Searching }
+
+machine Desk {
+  state {
+    phase : Phase = Idle
+    found : 0..2  = 0
+  }
+
+  action Search(account: Principal)
+  action Found(items: Items)
+  action SearchFailed()
+
+  on Search(account) {
+    require phase == Idle else reject "busy"
+    phase' = Searching
+    emit search(account: account)
+  }
+  on Found(items) {
+    require phase == Searching else reject "not-searching"
+    phase' = Idle
+    found' = 1
+  }
+  on SearchFailed {
+    require phase == Searching else reject "not-searching"
+    phase' = Idle
+    found' = 2
+  }
+
+  effect search(account: Principal) {
+    retrieve inbox where owner == account limit 1
+    ok(r) -> Found(items: r.items)
+    failed -> SearchFailed()
+  }
+}
