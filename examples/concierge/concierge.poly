@@ -10,6 +10,9 @@
 // A status question retrieves the asking customer's orders, and only theirs, and the answer cites them; the thread's
 // principal comes from the verifier's claims (S450), so the reply reaches the customer the orders belong to (AC22).
 // The refund names no holder: the merchant is the Stripe Connect grant's subject, not program state (Q-EX6, S457).
+// It acts on one order: the customer's own orders are retrieved, the amount decision cites the one the message is about,
+// and the refund carries that item set (`one order`, S462), so the host never picks which charge to refund. The handler
+// reads the order (`items.read`), refuses unless it is the requesting customer's, and refunds no more than was paid.
 module concierge
 
 audience { public < customer < staff }
@@ -19,20 +22,19 @@ enum Branch { Refund, Status, Other }
 // What a reply tells the customer; the decision that writes it reads this and the customer's message.
 enum Outcome { Refunded, Declined, Unsure, Status, Other }
 
-// AC30, PT28.3a: the extracted amount, a record of one field with a strict domain.
-type Amount = { value: 0..500 }
-
-enum Phase { Idle, Classifying, Looking, Citing, Extracting, Refunding, Answering }
+enum Phase { Idle, Classifying, Looking, Finding, Citing, Extracting, Refunding, Answering }
 
 // S450: the bound action's claims, a field of the WhatsApp kind's Sender claims.
 claims Customer {
   principal: Principal
 }
 
+// The order's charge is the source's key (S451): the handler refunds that charge and no other (S462).
 source orders: records {
   adapter "postgres"
   audience customer owned
   freshness 1h
+  keys { charge }
 }
 
 channel support: whatsapp {
@@ -87,7 +89,7 @@ service machine Desk {
   action Cited(text: Content, cites: Items)
   action Classified(branch: Branch, conf: Conf, margin: Conf)
   action Unclassified()
-  action Amounted(value: 0..500, conf: Conf)
+  action Amounted(value: 0..500, conf: Conf, cites: Items)
   action Unextracted()
   action Refunded()
   action RefundFailed()
@@ -121,8 +123,8 @@ service machine Desk {
   on Classified(branch, conf, margin) {
     require phase == Classifying else reject "not-classifying"
     if branch == Refund {
-      phase' = Extracting
-      decide amount(text: question)
+      phase' = Finding
+      emit lookup(customer: customer)
     } else {
       if branch == Status {
         phase' = Looking
@@ -134,14 +136,20 @@ service machine Desk {
     }
   }
 
+  // The one lookup serves both paths: a status question cites the orders it used, a refund names the one it is for.
   on Found(items) {
-    require phase == Looking else reject "not-looking"
-    phase' = Citing
-    decide answer(question: question, context: items)
+    require phase == Looking || phase == Finding else reject "not-looking"
+    if phase == Finding {
+      phase' = Extracting
+      decide amount(text: question, context: items)
+    } else {
+      phase' = Citing
+      decide answer(question: question, context: items)
+    }
   }
 
   on LookupFailed {
-    require phase == Looking else reject "not-looking"
+    require phase == Looking || phase == Finding else reject "not-looking"
     phase' = Answering
     decide reply(question: question, outcome: Unsure)
   }
@@ -165,13 +173,21 @@ service machine Desk {
   }
 
   // AC30: the amount reaches the program only as a value of 0..500; an answer outside it never reaches this handler.
-  // It is compared with 100 and passed on unchanged, so it is explored at its cuts (S458).
-  on Amounted(value, conf) {
+  // It is compared with 100 and passed on unchanged, so it is explored at its cuts (S458). S462: the refund acts on
+  // exactly one order, so the emit is guarded by the citation's count. A guard with `if`, not `require`: a rejected
+  // completion would leave the Desk in Extracting with no reply (ex-concierge-refund shows it), and an answer that
+  // cites two orders, or an amount the decision is unsure of, is answered Unsure.
+  on Amounted(value, conf, cites) {
     require phase == Extracting else reject "not-extracting"
     if conf >= 0.8 {
-      phase' = Refunding
-      large' = value > 100
-      emit refund(amount: value)
+      if cites.count == 1 {
+        phase' = Refunding
+        large' = value > 100
+        emit refund(amount: value, customer: customer, order: cites)
+      } else {
+        phase' = Answering
+        decide reply(question: question, outcome: Unsure)
+      }
     } else {
       phase' = Answering
       decide reply(question: question, outcome: Unsure)
@@ -260,11 +276,17 @@ service machine Desk {
     failed -> Unclassified()
   }
 
-  decision amount(text: Content) -> Amount {
+  // Reads the message and the customer's orders, and cites the order the message is about (PS17.6): an answer that
+  // cites none is uncited and takes the failed path.
+  // AC30: the amount is typed by a strict domain, 0..500, and an answer outside it is refused at dispatch and journaled.
+  // A bare range, not PT28.3a's record { value: 0..500 }: a record result checks with r.conf.value (PD1.2b), but the
+  // runtime gives a decision one scalar conf, so the completion is outside its type (decisions-ex.md, a defect).
+  decision amount(text: Content, context: Items) -> 0..500 {
     provider "small"
     labels { egress:external, read:private }
     timeout 800ms
-    ok(r) -> Amounted(value: r.answer.value, conf: r.conf.value)
+    cites context
+    ok(r) -> Amounted(value: r.answer, conf: r.conf, cites: r.cites)
     failed -> Unextracted()
   }
 
@@ -299,11 +321,14 @@ service machine Desk {
     failed -> AckFailed()
   }
 
-  effect refund(amount: 0..500) {
+  // S462: the handler reads `order` with items.read, reads that order's charge (GET under /v1/charges/) and refunds it
+  // (POST /v1/refunds). A prefix with the slash admits a charge by its id and not `POST /v1/charges`, which creates one.
+  effect refund(amount: 0..500, customer: Principal, order: Items) {
     kind "payments.refund"
     labels { egress:external }
-    targets { egress: "https://api.stripe.com/v1/refunds" }
+    targets { egress: ["https://api.stripe.com/v1/refunds", "https://api.stripe.com/v1/charges/"] }
     uses payments { read_write }
+    one order
     class irreversible
     ok -> Refunded()
     failed -> RefundFailed()

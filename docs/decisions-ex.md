@@ -386,6 +386,37 @@ As ruled, the full-inbox variant was run once in its own process with a 12 GB he
 
 **Next.** S462, then AC27.
 
+## S462 in the concierge, and AC27 (2026-10-10)
+
+`ex` is rebased on `8a1488fb` (S462: text `2cba85ef`, tests `46570170`, code `2fd29e66`) with no conflict.
+
+**The refund acts on one order, as ruled.**
+- **The path.** The refund branch retrieves the customer's own orders through the one `lookup` (rule (a): a second, differing retrieval of `orders` in the Desk would be `PL1002`), in a new phase `Finding`. `Found` branches on the phase. The `amount` decision now reads the message and the orders and `cites context`, so `Amounted(value, conf, cites)` carries the order the message is about. `refund(amount, customer, order: Items)` declares `one order`. `Items` is passed and never stored, so the cites reach the emit inside `Amounted`.
+- **The source** declares `keys { charge }`: the order's own Stripe charge, as the source gave it, is what the handler refunds (S451, PS17.4b). `targets` is now the refunds URL and `https://api.stripe.com/v1/charges/`; the trailing slash admits a charge by its id and not `POST /v1/charges`, which creates one. The checker accepts it.
+- **The guard is an `if`, not a `require`, and that departs from the ruling's wording.** `if cites.count == 1` guards the emit, and an answer that cites two orders is answered Unsure with nothing emitted. `test/ex-concierge-refund.test.mjs` shows why: a `require cites.count == 1` checks `CLEAN`, with no `PL3201`, but at run time a rejected completion leaves the Desk in `Extracting` with no reply to the customer. Unguarded, the emit is `PL6847` with the witness `Got -> Found -> Amounted`.
+- **The handler** (`examples/concierge/host/refund.mjs`) reads the order with `items.read`. It refuses with no request sent unless the order's owner is the payload's customer. It then reads the charge (one GET) and refuses unless the amount is within `amount - amount_refunded` on a paid charge. Only then does it POST the refund, naming that charge, with the intent's key as Stripe's `Idempotency-Key` so a retried POST is the same refund. A refusal is a permanent error (a 4xx from Stripe too), so the effect fails at once and the customer is told it was declined. **The stated limit is dropped.**
+- **"Nothing sent" is literal for the owner refusal only.** The amount refusal sends one read of the charge, and no refund.
+
+**Tests** (`test/ex-concierge-refund.test.mjs`, 11 passing). At check: the guarded path is `CLEAN`, the unguarded one `PL6847`. The handler alone, with a fake `items.read` and `api`:
+- the control: a valid refund of 40 on a 45 charge, then the whole 45, then 30 of what is left after an earlier refund;
+- another customer's order, or none, refused with no request;
+- an amount above what was paid, or above what is left, refused after one GET and no POST;
+- a forged or unstored reference (`items.read` refuses it, `PL6406`), two orders, no order, an order with no charge or a malformed one, and an unpaid charge refused with nothing refunded.
+
+At run time over the cut-down path: the control reaches Stripe with the order's charge, in cents, under the connected account, with an idempotency key; an amount of 60 on a 45 charge is declined after one read; an answer citing two orders emits no refund and reads no charge; a message about an order the customer lacks is uncited and answered Unsure; and the `require` variant strands the Desk. AC30 at run time: an amount of 650 is refused as the completion's type (`S140`, audited), nothing goes to Stripe, and the customer is answered Unsure.
+
+**A defect for the release session: a decision with a record result gets no per-field confidence at run time.** PD1.2b and PT28.3a give `r.conf.f` and `r.margin.f` for each field of a record result, and the checker needs them (`r.conf` alone on a record is `PL1001`). The runtime's decision handler computes one scalar `conf` and `margin`, so the concierge's `Amounted(value: r.answer.value, conf: r.conf.value, …)` completes with `conf` undefined, and the step is refused: "Amounted.conf is undefined, outside 0..1000 (S140)". Every amount then took the failed path. It was found by the first run of such a decision. **Worked around, not fixed:** the `amount` decision returns the bare range `0..500`, which has the same strict domain and the same refusal of an answer outside it. PT28.3a's record pattern, `-> { value: 0..500 }`, is therefore not what the example uses, and the project check and every test above run on the range.
+
+**The concierge's project check with its policy.** In its own process (8 GB heap; 2,267 MB resident), after this change: **CLEAN in 91 s**. Desk 2,114 states and 112,042 transitions (it was 1,826 and 82,170), Notice 28, the two conversations 342 and 666, Grant 13, Route 6, Budget 96; the support configuration 29,379 global states (it was 26,211) and staff 3,620. All seven policy stages are `CLEAN`.
+
+**AC27 passes.** `test/after/ex-concierge-e2e.test.mjs`, in the serial after-suite group, drives the concierge end to end over recorded traffic. Two customers on WhatsApp, the staff on Slack, orders in Postgres with their charges, refunds through a Stripe Connect grant requested by a person's signed record, and every model call from `answers.json`:
+- **Status:** the question is answered with the customer's own order cited, and sent to that customer (the Postgres retrieval was by `cust-a` only).
+- **Refund under the limit:** the 40 on the lamp is unsure on the small tier and answered on the large, the handler reads `ch_ex1001`, and 4,000 cents are refunded under the connected account.
+- **Refund over the limit:** 250 on the sofa is escalated with nothing sent to Stripe; the host tells the staff's Slack thread by intent and with nothing of the customer; a person's signed approval releases it, and 25,000 cents are refunded on `ch_ex2001`.
+- **Replay:** the program is `CLEAN` with its instance printed (Desk 2,114, Notice 28, the conversations 342 and 666, Grant 13, Route 6, Budget 96). Replay folds **36 runs and 231 rows**, one of them the grant's, with the routes' tier choices among them, and **4 gate sessions with 43 proposals**: **0 divergences**. It took 123 s.
+
+**IAC5 and the inbox** are unchanged by this: the shared test helpers were not touched.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy. The inbox meets IAC1 to IAC9 on recorded traffic, IAC5 in full once the release session's citation fix lands.
