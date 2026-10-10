@@ -325,6 +325,7 @@ What is ruled for after the release, in one place:
 - **Erasure at the provider where the provider's copy is poly's own** and is reached through a credential (ruled 2026-10-10, with the forget that uses no grant).
 - **The journal records of a provider revocation are named in the spec** (ruled 2026-10-10): which records journal each attempt of `credential.revoke`, which the tests read today from the runtime's own.
 - **The full inbox checked with its cross-account variant (IAC3)** (ruled 2026-10-10). That check runs out of a 12 GB heap, so in v1 IAC3's witness comes from a cut-down copy of the inbox. The variant is measured in the release session's probes, after the concierge's.
+- **The checker keeps every edge of a flow-rule exploration** (ruled 2026-10-10, from probe 2): keeping only state keys plus one predecessor for witnesses would let the full inbox (IAC3) and larger configurations reach a verdict.
 
 ## (a), S460 and (c), built
 
@@ -429,7 +430,7 @@ Run w9 at 9112728c, alone on the machine after the examples session's heavy runs
 
 **Ruled.** AC27 waits on it: the concierge's refund must name the order it refunds, and a module cannot take a `Key` out of a retrieval (PS1.4c). As S459's `content.read`, a handler whose effect has an `Items` parameter may call `items.read(ref)`, which gives the ids, owners and keys of that payload's own item set only, each read recorded by digest. An effect parameter declared as exactly one item is refused before the handler runs when the set holds any other count. The `Items` type check still refuses a forged or unstored reference. **The form, as answered:** the effect item `one p` (option 1). The checker narrows `p`'s count domain to `{1}`, so an emit whose `Items` could hold any other count is refused at check time with a code and a witness; the runtime refuses any other count before the handler as the second layer; both layers are tested.
 
-**Text** 2cba85ef (PS17.4b, PT10j, the grammar and `PL6847 ONE_ITEM_COUNT`). **Tests** 46570170, `test/items-read.test.mjs` with the fixtures in `test/fixtures/items-read/`, written from the text by a writer that read docs, test and std only; the runtime layer's test was added by the release session from the same text. The writer's runs came after the code was built, so the tests were not seen failing first; the code was written from the same text, before the tests were read.
+**Text** 2cba85ef (PS17.4b, PT10j, the grammar and `PL6847 ONE_ITEM_COUNT`). **Tests** 46570170, `test/items-read.test.mjs` with the fixtures in `test/fixtures/items-read/`, written from the text by a writer that read docs, test and std only; the runtime layer's test was added by the release session from the same text. The writer's runs came after the code was built, so the tests were not seen failing first; that is shown below ("S462, the tests without the code").
 - Check layer: the refund guarded by `require cites.count == 1` checks `CLEAN`; without the guard it is `PL6847` with its witness. `one p` naming no parameter is `PL1001`, a parameter that is no `Items` `PL1201`, and `one` written twice `PL1002`.
 - The control: the refund's handler reads its one cited order with `items.read`, `[{ id: 'o-2', owner: 'c-a', keys: { order: 'o-2' } }]`, and the read is recorded on `runtime:content` with the set's reference and the digest of what it gave, no id or owner in the record.
 - `items.read` refuses a forged reference, an unstored one and an `Items` of another intent's payload, each `PL6406`, audited, before any read.
@@ -439,3 +440,28 @@ Run w9 at 9112728c, alone on the machine after the examples session's heavy runs
 **Built** 2fd29e66. The compiler reads `one p` on both surfaces and checks it; the lowering writes `one` in the manifest entry, and the effect signature carries it; poly-ref reads it back and finds `PL6847` at the first emitting step in BFS order, once per effect. A retrieval now keeps each item's values for the source's declared keys. The runtime gives a handler `items.read` beside `content.read`, and its count check runs with the envelope's origin check, before the memory check; its refusal is final whatever a policy says.
 
 **For the examples session.** The concierge's refund carries `order: Items` with `one order`, guarded by a count read, and its handler reads the order with `items.read`. A set retrieved before this build has no keys; its items read with `keys: {}`.
+
+## S462, the tests without the code (owner's reviewer, 2026-10-10)
+
+**Asked.** The S462 tests were never seen failing. Run against a build of 46570170 (the tests, without the code), each fails for the reason it tests; then against that build with the compiler packages of 2fd29e66 and the old runtime, to separate the two layers.
+
+**46570170 as it is.** `test/items-read.test.mjs`: 10 of 11 fail. Every check-layer and run-time test fails because `one` is not in the grammar: `PL0001 expected kind, labels, targets, uses, retrieve, remember, to, audience, envelope, class, retry, ok, failed or exhausted, found 'one'`, and each runtime test fails at admission with the verdict `REFUSED`. The one that passes is the check that `one-dropped` is listed in `test/toolchain-faults.mjs`: it reads the list the same commit adds, so it shows nothing about the code. The fault itself, `a broken lowering is caught with PL2501: one-dropped` in `test/tv.test.mjs`, fails on the same `PL0001`.
+
+**46570170 with the compiler packages of 2fd29e66 and the runtime of 46570170 (no `items.read`, no count check).** 6 of 11 pass: the five check-layer tests (`CLEAN` when guarded, `PL6847` unguarded, `PL1001`, `PL1201`, `PL1002`) and the fault list, and `one-dropped` is caught with `PL2501`. The five runtime tests fail for the missing code: the control with `handler error: items capability missing`, and the two-items test with `two: the handler never ran` expected and the handler having run (the intent reached its handler with a set of two). The three refusal tests (forged, unstored, another intent's set) fail indirectly: with no `items` capability the handler's call throws before any refusal, so no refund is recorded, and the assertion on the recorded refund (line 243) fails. They show the capability is missing; they do not show the refusals' own reason, which only the control and the passing run at 2fd29e66 together do.
+
+**Reading.** The check-layer tests, the control and the runtime count check each fail without their code for the reason they test. The three `items.read` refusals fail without their code, but not for the refusal's own reason. The build was restored to 8a1488fb afterwards and the file passes, 11 of 11.
+
+## Probes 1 and 2 of the concierge and the inbox (2026-10-10)
+
+Measured on `v1` at 8a1488fb, one at a time, with no suite or test run beside them, and changing nothing. Both are on copies of the examples branch's files in `.poly/probe/`, which is not committed.
+
+**Probe 1: the concierge with its policy, as a project.** `CLEAN` in 92 s (160 s on a cold cache), peak 1.95 GiB, with a policy `concierge` `CLEAN` at every stage. The counts are those the examples session reported: `Desk` 1,826 states, flow rule 2,978, translation validation 107,734 transitions; `Notice` 28; `support.Conversation` 342; `staff.Conversation` 666; `payments.Grant` 13; `triage.Route` 6; `spend.Budget` 96; configuration `support` 26,211 global states, 650,210 steps and flow rule 34,179; configuration `staff` 3,620 and 194,795. This concierge still has the refund from before S462.
+
+**Probe 2: the inbox's cross-account variant (IAC3).** The `Todo` machine of the inbox with a second `Principal` field, explored keeping only state keys:
+
+| `Todo` | Principals | Model-check states | Steps | Flow-rule states | Flow-rule steps | Peak memory |
+|---|---|---|---|---|---|---|
+| Unchanged inbox | 3 | 7,294 | 605,402 | 18,746 | 1,555,918 | 0.17 GiB |
+| With the second principal | 4 | 48,470 | 4,507,710 | 594,820 | 55,318,260 | 0.55 GiB (396 s) |
+
+The flow rule's states grow 31.7 times. The state space is small, so the 12 GB limit is the edges a full check keeps (55 million steps), not the states; I did not measure which stage ran out. The stated limit stands, and the remedy is on the After v1 list.
