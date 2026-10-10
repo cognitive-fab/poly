@@ -51,7 +51,10 @@ test('E1: the reply decision answers each message and outcome the program can as
   const seen = { tiers: [], decisions: [] };
   provideRecorded({ provideTier: (n) => seen.tiers.push(n), provide: (d, c) => seen.decisions.push([d, c.model]) }, r);
   assert.deepEqual(seen.tiers, ['small', 'large']);
-  assert.deepEqual(seen.decisions, [['answer', 'flash-2026-09'], ['amount', 'flash-2026-09'], ['reply', 'flash-2026-09']]);
+  assert.deepEqual(seen.decisions, [['answer', 'flash-2026-09'], ['amount', 'flash-2026-09'], ['reply', 'flash-2026-09'], ['ack', 'flash-2026-09'], ['noted', 'flash-2026-09']]);
+  // Q-EX7: the acknowledgements are fixed texts, whatever the message.
+  assert.match(r.decisions.ack.provider({ decision: 'ack' }, materials('unsure')).answer, /we have your message/);
+  assert.equal(r.decisions.noted.provider({ decision: 'noted' }, { bodies: { text: 'Can someone look at ticket 42?' } }).answer, 'Noted.');
 });
 
 test('E1, AC22: the status answer cites only orders it was given, and the seeded orders belong to two customers', () => {
