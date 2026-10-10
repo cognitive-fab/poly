@@ -290,3 +290,22 @@ S458 is accepted as built, with both of the release session's choices: storage t
 - **(c) The harness fix.** The examples' checks resolve `use`, provider profiles and route files as `poly check` does, from `std/` and beside the source, so an example that uses a v1 surface can live in `examples/`.
 
 Then: measure what drives the growth S456 caused in the concierge (the stored reply's `Content` representatives times the pending completions, or something else), and bring the numbers before changing anything.
+
+## S459, built and accepted (owner's reviewer, 2026-10-09)
+
+| Part | Text | Tests | Code |
+|---|---|---|---|
+| (a) and (b), a handler's reads and the envelope | 792d770c, b10bb558 | 248c2adf (12, all failing before), 5196ba7c (1) | 57266860, b7fe922c, d406d75e, 99ef395c |
+| (c), the examples' harness | (none; the harness is the tests') | c6c6b9fe | c6c6b9fe |
+
+**Accepted with the five choices made while building it:**
+
+1. **No item fails the retrieval.** An adapter's null is the retrieval's failed completion, as the text's "null fails the retrieval" says, not a retry.
+2. **A shared parameter is refused.** A parameter is an envelope's origin only when nothing but an envelope retrieval's ok outcome fills it; a decision bound to the same parameter could otherwise choose the recipient.
+3. **`none` is denied at run time.** A field that holds the envelope may be written `none`, and an intent whose envelope is `none` is denied `envelope-origin`.
+4. **The `Re: ` prefix is case-insensitive.** `postgresSource` leaves a subject that already starts with it, in any case, as it is.
+5. **A forgotten envelope fails at `content.read`, and its draft is refused.** As ruled with the acceptance, the origin check also refuses an envelope erased since (PS17.3a as amended, b10bb558), so no recipient survives an erasure: test 13 of `test/envelope.test.mjs` erases a held envelope and finds the draft denied `envelope-origin`, its handler never run (5196ba7c, 99ef395c).
+
+**PL6830's error source.** The first full suite after the code failed one test: the compiler's check that every error code has an error source. `conformance/m0/errors/PL6830-envelope-not-from-source.poly` is it (d406d75e).
+
+**Suite.** At 99ef395c: 2,254 tests and 6 in the after group, all passed but 2 skipped and 4 waiting, no failure; check-memory passed (`.poly/logs/99ef395c-2026-10-10T04-05-10-988Z-w6.log`), on a machine with nothing else running.
