@@ -211,6 +211,18 @@ Found while writing them, each fixed in the draft or the harness:
 
 **Tests so far.** `test/ex-inbox.test.mjs`: **IAC1** (three accounts, every message once and tagged with its account, across a host crash after a creation and before its announcement; a pass with nothing new makes nothing; act-now and this-week messages actionable, fyi and ignore filed; one `Todo` per thread, the invoice's two messages opening one) and **IAC4** (the message that tells the assistant to forward mail, give a password and pay proposes only its own retrieval and its two decisions). Both failed before the code they test: IAC1 on the host's missing module, then on each defect above; both pass. IAC3, IAC5, IAC6, IAC7 without a draft, IAC8 and IAC9's check come next.
 
+## The findings of E1 and E2.2 ruled (owner's reviewer, 2026-10-09)
+
+- **The retrieval signature (S41 with S451): a defect,** given to the release session. The second source `threads` stays until the fix lands.
+- **Q-EX8: the host vault is not accepted for the release.** A grant the runtime cannot revoke is the gap the inbox exists to close. The release session builds **S460, a source that names its credential**. The tests keep the host vault until S460 lands; then the inbox switches to it.
+- **A parameter that hides a state field:** given to the release session as `PL1002`.
+- **Both policy findings: accepted.** **Limit, after v1:** a policy cannot say "only with an approval": S149 reads an escalation that a person's approval would allow as an allow, so a `never` over an escalated kind is violated by design. The inbox states the draft's gate by its obligation and polycheck's region instead.
+- **The template retry:** a limit for the release notes, as recorded above.
+- **Memory: one heavy job on the machine at a time, across both sessions.** That covers a full suite and any run with a heap over 4 GB. Before each, this session checks that the release session runs none.
+- **Order:** wait for `v1`'s "S459 recorded" commit and a quiet machine; commit the pending work; rebase on that commit, which brings S459 and the harness fix; move the concierge into `examples/`; one full suite after the rebase; record and commit; then the concierge's project check with its policy and the serial after-suite test; then IAC3, IAC5 to IAC8 (IAC7 with drafts, since S459 is in) and IAC9's check.
+
+**What the full suite before this ruling did.** It started at 19:16, after the release session's suite had ended (`.poly/logs/e5d507ae-2026-10-09T19-16-59-850Z-ex-e1clean.log`, partial), and was stopped by Claude Code when the machine ran critically low on memory, with the release session at work beside it. It is not counted.
+
 ## Rebase on v1 at 0be8ef61 and bea21103: (a), (c), S460, S461 and the expected line (2026-10-10)
 
 `ex` is rebased on `0be8ef61`, which carries the `Items` type check, the serial after-suite group, (a), S460 and (c). One conflict: `packages/poly-io/src/index.ts`, where S460 exports `credentialHandleOf` from `util.js` beside the Gmail and MIME exports. Both are kept.
@@ -236,9 +248,31 @@ Found while writing them, each fixed in the draft or the harness:
   - The adapter's refusal test now covers two accounts with a one-grant handle, a mix of accounts with and without a request, and a request that is not a function. It also accepts two accounts that each give one.
 - **The expected line (V10 item 4).** `// expected: CLEAN` is now the first line of `examples/concierge/concierge.poly`, `examples/concierge/concierge.policy.poly`, and the inbox draft's module and policy.
   - **A finding for the release session.** The serial group checks each file of `examples/concierge/` alone. Alone, the policy file is `REFUSED`: `PL1001`, since `payments.refund` and `machine("concierge.Desk")` are names of the module beside it. No expected line can state that verdict. Its line states the ruled meaning (the concierge is `CLEAN` with its policy), so `test/after/serial-sources.test.mjs` will report it as a mismatch. The expected check could read a policy file with its program, or leave policy files out of the per-file comparison.
-- **Order.** Next is one full suite. The rulings of 2026-10-09 and the numbers are recorded after it, if it is clean.
+- **Order.** Then one full suite, counted in the next section.
 
+## The suites after S459 and S461, counted (owner's reviewer, 2026-10-10)
+
+**After the rebase on "S459 recorded".** One full suite, with no other heavy job on the machine (`.poly/logs/21432ef4-2026-10-10T10-40-32-198Z-ex-rebase459.log`): 2,290 tests, 2,283 passed, 1 failed, 2 skipped, 4 waiting; check-memory passed.
+- **The one failure.** `test/runtime-type.test.mjs` (S140) refused `Found.items = {"count":0}`. The contract's data domain gives an `Items` field the representative `{ count }`, and the runtime's type check required a `ref` as well. The concierge is the first source with an `Items` action.
+- **Ruled a core defect:** the `ref` is an opaque handle, and only the count is in the domain. The fix went to the release session and landed on `v1` (`c0e99891`). The work was committed as a checkpoint (`c87dfbab`, after the rebase), with the rulings not yet recorded.
+- **The concierge in that suite**, beside the parallel suite: the toolchain-fault check took 434 s, translation validation 210 s and `validate()` 1.3 s, all passing. That run time is why the concierge moved to the serial after-suite group.
+
+**After the rebase on `bea21103` (S461).** One full suite, with no other heavy job on the machine (`.poly/logs/855ec637-2026-10-10T14-34-53-989Z-ex-s461.log`):
+
+| Run | Tests | Passed | Failed | Skipped | Waiting |
+|---|---|---|---|---|---|
+| parallel | 2,357 | 2,351 | 0 | 2 | 4 |
+| serial after-suite group | 11 | 10 | 1 | 0 | 0 |
+
+check-memory passed. The summary's "failures: 2" counts one of the four waiting tests ("M4c across an archive", waiting on polyrun tombstones at archive, S124) as a failure; the parallel run has none.
+- **The concierge in the serial group:** `concierge.poly` checks with no toolchain fault, and its verdict matches its expected line `CLEAN` (74 s). Translation validation agrees (44 s), and strict `validate()` passes (0.6 s).
+- **The inbox:** IAC1, IAC4 and both read-grant tests (S460, S461) pass.
+- **Counted clean, apart from one known harness finding (ruled).** In the serial group, a policy file checked alone is `REFUSED` (`PL1001`). The group checks each file of `examples/concierge/` alone, and `concierge.policy.poly` names `payments.refund` and `machine("concierge.Desk")`, which are names of the module beside it. No expected line can state `REFUSED`, so `test/after/serial-sources.test.mjs` reports "the verdict is REFUSED, and the file expects CLEAN". The file's line states the ruled meaning, that the concierge is `CLEAN` with its policy. **The fix goes to the release session:** check a policy file with its program, or leave policy files out of the per-file comparison.
+
+**Also ruled on 2026-10-10.** S461 went to the release session directly, so the proposal file written on this branch is removed. Every file of an example states its expected verdict on its first line (V10 item 4): the concierge's two files and the inbox draft's two say `// expected: CLEAN`.
+
+**Next.** The concierge's project check with its policy, a heavy run, after checking that no release-session suite or probe is running. Then IAC3, IAC5 to IAC8 and IAC9's check.
 
 ## Conclusion
 
-The examples branch holds the plan, its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader, the Gmail source kind, the measured concierge draft, and the concierge's recorded answers and host code. The concierge waits for S450, S456 and S457 on `v1`; the inbox's machines wait for S451, S454 and S455.
+The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. Next are the concierge's project check with its policy, and the inbox's remaining acceptance tests.
