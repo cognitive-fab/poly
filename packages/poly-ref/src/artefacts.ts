@@ -166,6 +166,10 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         // the source here, so a manifest that drops it (envelope-dropped) differs.
         const envelope = e.items.find((x): x is A.EffectItem & { kind: 'EffEnvelope'; param: string } => x.kind === 'EffEnvelope');
         differ(`effects.manifest.json ${kind}.envelope`, entry.envelope ?? null, envelope ? envelope.param : null);
+        // PS17.4b (S462): the one-item parameter, which the runtime's count check reads; read from the source, so a
+        // manifest that drops it (one-dropped) differs.
+        const one = e.items.find((x): x is A.EffectItem & { kind: 'EffOne'; param: string } => x.kind === 'EffOne');
+        differ(`effects.manifest.json ${kind}.one`, entry.one ?? null, one ? one.param : null);
         differ(`effects.manifest.json ${kind}.remember`, entry.remember ?? null, w ? { source: w.source, provenance: w.provenance, about: w.about } : null);
         // PS17.3: the recipient's field and class, which the runtime's flow check reads.
         const to = e.items.find((x): x is A.EffectItem & { kind: 'EffTo'; param: string } => x.kind === 'EffTo');

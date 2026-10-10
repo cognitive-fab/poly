@@ -115,6 +115,11 @@ export interface WorkerOptions {
    * check: a final refusal `envelope-origin`, whatever a policy says, or null.
    */
   envelopeCheck?: (row: OutboxRow, decl: any) => { deny: string } | null;
+  /**
+   * PS17.4b (S462): the count check of an effect whose manifest entry names a one-item parameter, beside the envelope's
+   * origin check: a final refusal `items-count`, whatever a policy says, or null.
+   */
+  oneCheck?: (row: OutboxRow, decl: any) => { deny: string } | null;
   /** PT10k (S302, S307): the memory check, before the grant check: a final refusal, an escalation, or the proposal's fields. */
   memoryCheck?: (row: OutboxRow, decl: any, approved: boolean) => { deny: string } | { escalate: string; fields: Pick<Proposal, 'taint' | 'items'> } | { fields: Pick<Proposal, 'taint' | 'items'> } | null;
   /**
@@ -440,7 +445,8 @@ export class EffectWorker {
           const approval = d === 2 ? this.lastApproval(row) : undefined;
           const { proposal, snapshot } = await this.proposalOf(row, decl, approval, st.intent_rechecks ?? 0);
           // PS17.3a (S459): the envelope's origin is checked before anything else; its refusal is final, fail closed.
-          const origin = this.opts.envelopeCheck?.(row, decl) ?? null;
+          // PS17.4b (S462): and so is a one-item parameter's count, beside it, before the memory check.
+          const origin = this.opts.envelopeCheck?.(row, decl) ?? this.opts.oneCheck?.(row, decl) ?? null;
           // PT10k, S302: the memory check comes next: the flow rule and freshness; its refusal is final whatever a policy says.
           // Review B1: an approval lets stale items through only when the escalation it approved was stale-items; after
           // any other, a stale re-proposal escalates, which rule 2 of PT9.7 denies escalate-once.

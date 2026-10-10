@@ -3,6 +3,8 @@
 // validation compared with the source. poly-runtime imports no network module: the host's transport performs the
 // request, and only after the wrapper has checked it. A call outside the bounds throws CapabilityRefused before the
 // transport is called, and is audited (PL6406).
+import { createHash } from 'node:crypto';
+import { canonicalize } from '@poly/core';
 
 /** One HTTP request, made by the host. It follows no redirect: the capability checks each hop itself (S151). */
 export interface EgressRequest { method: 'GET' | 'POST'; url: string; headers?: Record<string, string>; body?: unknown }
@@ -35,6 +37,12 @@ export interface ApiTransport { request(r: { method: 'GET' | 'POST'; url: string
  * of a body (null when there is none, or it was erased), and the record of a read, by digest and intent.
  */
 export interface ContentAccess { digests: readonly string[]; body(d: string): Promise<string | null>; recorded(d: string): Promise<void> }
+
+/**
+ * PS17.4b (S462): what items.read is bound to for one intent: the references of the Items of its own payload, the store's
+ * read of a set (null when it holds none), and the record of a read, by the set's reference and the digest of what it gave.
+ */
+export interface ItemsAccess { refs: readonly string[]; read(ref: string): { id: string; owner: string | null; keys: Record<string, string> }[] | null; recorded(ref: string, digest: string): Promise<void> }
 
 /**
  * PS17.4a, PS17.7: a body erased since the intent was emitted; it is never stored again (S205), so a retry reads
@@ -115,7 +123,7 @@ export function withinPrefix(url: string, prefixes: readonly Target[]): string |
  * The frozen capability object for one effect kind, for one call of its handler. `audit` writes the PL6406 row; it
  * is awaited before the refusal is thrown, so a refusal is in the ledger whatever the handler does with the error.
  */
-export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string) => Promise<void>, api?: ApiTransport, content?: ContentAccess): Readonly<Record<string, unknown>> {
+export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string) => Promise<void>, api?: ApiTransport, content?: ContentAccess, items?: ItemsAccess): Readonly<Record<string, unknown>> {
   const targets = decl.targets ?? {};
   const refuse = async (reason: string): Promise<never> => { await audit(reason); throw new CapabilityRefused(`PL6406 CAPABILITY_REFUSED: ${reason}`); };
   const need = <K extends keyof Transports>(k: K): NonNullable<Transports[K]> => {
@@ -195,6 +203,22 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
         if (b === null) throw new ContentMissing(`content-missing: the body of ${d} was erased (PS17.7)`);
         await content.recorded(d);
         return b;
+      },
+    });
+  }
+  // PS17.4b (S462): a handler reads the item sets of its own intent's payload and of nothing else: an Items given as its
+  // value or its reference. Any other, a forged or unstored reference or another intent's set, is refused before the store
+  // is read, and audited; a read is recorded by the set's reference and the digest of what it gave.
+  if (items && items.refs.length) {
+    const allowed = new Set(items.refs);
+    caps.items = Object.freeze({
+      read: async (x: unknown): Promise<{ id: string; owner: string | null; keys: Record<string, string> }[]> => {
+        const ref = typeof x === 'string' ? x : x && typeof x === 'object' && typeof (x as { ref?: unknown }).ref === 'string' ? (x as { ref: string }).ref : null;
+        if (ref === null || !allowed.has(ref)) return refuse(`items.read of ${ref ?? JSON.stringify(x)}, which is not an Items of the intent's own payload`);
+        const got = items.read(ref);
+        if (got === null) return refuse(`items.read of ${ref}, an item set the runtime does not hold`);
+        await items.recorded(ref, `sha256:${createHash('sha256').update(canonicalize(got), 'utf8').digest('hex')}`);
+        return got;
       },
     });
   }

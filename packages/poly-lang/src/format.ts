@@ -357,6 +357,8 @@ class Printer {
       case 'EffAudience': return `audience ${e.cls}`;
       // PS17.3a, S459.
       case 'EffEnvelope': return `envelope ${e.param}`;
+      // PS17.4b, S462.
+      case 'EffOne': return `one ${e.param}`;
     }
   }
 

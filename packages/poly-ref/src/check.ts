@@ -35,6 +35,7 @@ const CODE = {
   PL6832: ['TAINT_DOWNGRADE', 'finding', 'model-check'],
   PL6838: ['FLOW_NOT_FOLLOWED', 'inconclusive', 'model-check'],
   PL5408: ['MESSAGE_OUTSIDE_DOMAIN', 'finding', 'model-check'],
+  PL6847: ['ONE_ITEM_COUNT', 'finding', 'model-check'],
 } as const;
 
 export const ENGINE = 'poly-ref@0.0.0';
@@ -356,6 +357,27 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
       if (outsideSeen.has(key)) continue;
       outsideSeen.add(key);
       findings.push(finding('PL5408', M.handlers.get(e.label.action)?.id, `${e.label.action} sends ${action} to ${machine} with ${bad.map((p) => `${p.name} = ${keyOf(data![p.name])}`).join(', ')}, outside its strict check domain; ${machine} would refuse it outside-check-domain and ${M.name} is not told (PS13.6, F4)`, trace([...pathTo(g, e.from), e]), { property: key, state: g.states[e.from] }));
+    }
+  }
+
+  // PS17.4b (S462): `one p` narrows p's count domain to {1}. An accepted step that emits such an effect with a p whose
+  // count is any other is a finding, at its first step in BFS order, once per effect, with the path to it.
+  const ones = [...M.effects.values()].filter((x) => x.one !== undefined);
+  if (ones.length) {
+    const oneSeen = new Set<string>();
+    for (const e of g.edges) {
+      if (e.label.verdict.kind !== 'accepted') continue;
+      for (const i of e.label.effects) {
+        if (i.type !== 'effect') continue;
+        for (const eff of ones) {
+          if (eff.kind !== i.kind || oneSeen.has(eff.name) || !(eff.one! in i.payload)) continue;
+          const v = i.payload[eff.one!];
+          const n = v !== null && typeof v === 'object' && 'fields' in v ? v.fields.count : undefined;
+          if (n === 1) continue;
+          oneSeen.add(eff.name);
+          findings.push(finding('PL6847', M.handlers.get(e.label.action)?.id, `${e.label.action} emits ${eff.name} with ${eff.one} holding ${String(n)} items; one ${eff.one} narrows its count to 1, so the runtime would deny the intent items-count (PS17.4b)`, trace([...pathTo(g, e.from), e]), { property: eff.name, state: g.states[e.from] }));
+        }
+      }
     }
   }
 

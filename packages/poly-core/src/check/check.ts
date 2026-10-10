@@ -511,7 +511,7 @@ class Checker {
     };
     if (r && m) this.err('PL1201', m, `effect ${e.name} both retrieves and remembers; each is an effect of its own (PS17.2, PS17.5)`);
     // One meaning per effect: a retrieval's and a remember's kind and labels are fixed (PS17.2), and they name nothing else.
-    for (const it of e.items) if ((r || m) && (it.kind === 'EffKind' || it.kind === 'EffLabels' || it.kind === 'EffTargets' || it.kind === 'EffUses' || it.kind === 'EffTo' || it.kind === 'EffAudience' || it.kind === 'EffEnvelope')) this.err('PL1201', it, `effect ${e.name} ${r ? 'retrieves' : 'remembers'}, so its kind and labels are the runtime's and it names no target, credential or recipient (PS17.2)`);
+    for (const it of e.items) if ((r || m) && (it.kind === 'EffKind' || it.kind === 'EffLabels' || it.kind === 'EffTargets' || it.kind === 'EffUses' || it.kind === 'EffTo' || it.kind === 'EffAudience' || it.kind === 'EffEnvelope' || it.kind === 'EffOne')) this.err('PL1201', it, `effect ${e.name} ${r ? 'retrieves' : 'remembers'}, so its kind and labels are the runtime's and it names no target, credential or recipient (PS17.2)`);
     if (r) {
       const s = src(r.source, r);
       // S459: an envelope retrieval gives one envelope and names no limit (0 in the tree); any other names at least one.
@@ -1468,6 +1468,13 @@ class Checker {
           const p = e.params.find((x) => x.name === it.param);
           if (!p) this.err('PL1001', it, `effect ${e.name} has no parameter ${it.param} to give its envelope`);
           else if (this.tyOf(p.type).k !== 'content') this.err('PL1201', it, `the envelope ${it.param} is ${tyToString(this.tyOf(p.type))}; it is a Content parameter of the effect (PS17.3a)`);
+          break;
+        }
+        case 'EffOne': {
+          // PS17.4b, S462: one item, an Items parameter of the effect; written once, by the PL1002 above.
+          const p = e.params.find((x) => x.name === it.param);
+          if (!p) this.err('PL1001', it, `effect ${e.name} has no parameter ${it.param} to hold its one item`);
+          else if (this.tyOf(p.type).k !== 'items') this.err('PL1201', it, `one ${it.param} names ${tyToString(this.tyOf(p.type))}; it is an Items parameter of the effect (PS17.4b)`);
           break;
         }
         case 'EffRetry':
@@ -3460,7 +3467,9 @@ export function effectSignature(e: A.EffectDecl): string {
   const uses = e.items.find((i) => i.kind === 'EffUses');
   // PS17.3a (S459): and so is its envelope parameter, which the runtime's origin check reads.
   const envelope = e.items.find((i) => i.kind === 'EffEnvelope');
-  return JSON.stringify({ params: e.params.map((p) => [p.name, strip(p.type)]), outcomes, cls: effectClass(e), ...(uses ? { uses: strip(uses) } : {}), ...(envelope ? { envelope: envelope.param } : {}) });
+  // PS17.4b (S462): and its one-item parameter, which the runtime's count check reads.
+  const one = e.items.find((i) => i.kind === 'EffOne');
+  return JSON.stringify({ params: e.params.map((p) => [p.name, strip(p.type)]), outcomes, cls: effectClass(e), ...(uses ? { uses: strip(uses) } : {}), ...(envelope ? { envelope: envelope.param } : {}), ...(one ? { one: one.param } : {}) });
 }
 
 /** `before("k1", "k2")` (S37): the two kinds, in order. */

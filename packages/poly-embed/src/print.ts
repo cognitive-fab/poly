@@ -188,6 +188,8 @@ class Printer {
       case 'EffTo': return `${this.use('to')}(${q(x.param)})`;
       // PS17.3a, S459.
       case 'EffEnvelope': return `${this.use('envelope')}(${q(x.param)})`;
+      // PS17.4b, S462.
+      case 'EffOne': return `${this.use('one')}(${q(x.param)})`;
       case 'EffAudience': return `${this.use('audience')}(${q(x.cls)})`;
       // Outside a handler no arrow gives `$`: arguments that name a constructor or a field take one.
       case 'EffOutcome': {

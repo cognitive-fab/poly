@@ -26,7 +26,7 @@ export const join = (a: Taint, b: Taint): Taint => {
 };
 
 /** PS17.0: a source's descriptor, as the build wrote it and admission certified it (PT10i); `credential` when it names one (S460). */
-export interface SourceDescriptor { v: 1; module: string; source: string; kind: string; adapter: string | null; audience: string; class: number; owned: boolean; freshnessMs: number | null; stale: 'escalate' | 'deny'; credential?: string }
+export interface SourceDescriptor { v: 1; module: string; source: string; kind: string; adapter: string | null; audience: string; class: number; owned: boolean; freshnessMs: number | null; stale: 'escalate' | 'deny'; keys?: string[]; credential?: string }
 /**
  * PS17.0, PT10j (S461): the retrieval an adapter call runs in, its source and its owner (null with no owner predicate),
  * carried across the adapter's own async calls. The runtime sets it around each call of a source adapter's retrieve,
@@ -49,8 +49,11 @@ export type MemoryCheck = { deny: string } | { escalate: string; fields: Proposa
 /** PT25.1: the proposal fields taint and items. */
 export interface ProposalMemory { taint?: { class: string; owners: string[] }; items?: { count: number; class: string; ageMs: number; provenance: string } }
 
-/** One item of a set: its id at the source, its owner and its asOf, and, for a memory item, its provenance. */
-interface Item { id: string; owner: string | null; asOf: number; provenance?: string }
+/**
+ * One item of a set: its id at the source, its owner and its asOf, for a memory item its provenance, and (S462) the values
+ * the adapter gave for the source's declared keys, which items.read gives a handler.
+ */
+interface Item { id: string; owner: string | null; asOf: number; provenance?: string; keys?: Record<string, string> }
 
 /** PS17.5: provenance, lowest first. */
 const PROVENANCE = ['observed', 'derived', 'verified'];
@@ -346,6 +349,16 @@ export class Memory {
     this.store.db.prepare('INSERT INTO poly_taint (digest, class, owners, kept) VALUES (?, ?, ?, ?) ON CONFLICT(digest) DO UPDATE SET class = excluded.class, owners = excluded.owners, kept = excluded.kept').run(digest, t2.c, JSON.stringify(t2.o), t2.k ? JSON.stringify(t2.k) : null);
   }
 
+  /**
+   * PS17.4b (S462): what items.read gives a handler for a set the runtime stored: each item's id, owner and keys, in the
+   * set's order; null for a reference it does not hold (never stored, or removed by a forget). A set kept before S462
+   * has no keys, so its items read with keys {}.
+   */
+  readItems(ref: string): { id: string; owner: string | null; keys: Record<string, string> }[] | null {
+    const set = this.itemsOf(ref);
+    return set ? set.items.map((i) => ({ id: i.id, owner: i.owner, keys: { ...(i.keys ?? {}) } })) : null;
+  }
+
   /** An item set's taint, source and items. */
   itemsOf(ref: string): { source: string; taint: Taint; asOf: number | null; items: Item[] } | null {
     const r = this.store.db.prepare('SELECT source, class, owners, kept, asof, items FROM poly_items WHERE ref = ?').get(ref) as { source: string; class: number; owners: string; kept: string | null; asof: number | null; items: string } | undefined;
@@ -386,7 +399,10 @@ export class Memory {
       if (d.owned && typeof i.owner !== 'string') throw new SourceRefused(`source ${source} is owned, and answered an item with no owner (K14)`);
       if (owner !== undefined && i.owner !== owner) throw new SourceRefused(`source ${source} answered an item of another owner for a retrieval by owner (K14)`);
       if (key && (!i.keys || typeof i.keys !== 'object' || i.keys[key.name] !== key.value)) throw new SourceRefused(`source ${source} answered an item whose ${key.name} key is not the one asked for a retrieval by key (K14, S451)`);
-      items.push({ id: i.id, owner: d.owned ? i.owner : null, asOf: i.asOf, ...(i.provenance ? { provenance: i.provenance } : {}) });
+      // PS17.4b (S462): the values of the source's declared keys, strings only, kept for items.read.
+      const given = (i.keys && typeof i.keys === 'object' ? i.keys : {}) as Record<string, unknown>;
+      const keys: Record<string, string> = Object.fromEntries((d.keys ?? []).flatMap((k) => (typeof given[k] === 'string' ? [[k, given[k] as string]] : [])));
+      items.push({ id: i.id, owner: d.owned ? i.owner : null, asOf: i.asOf, ...(i.provenance ? { provenance: i.provenance } : {}), ...(Object.keys(keys).length ? { keys } : {}) });
     }
     let ref!: { ref: string; count: number };
     await this.store.txn(() => { ref = this.keepItems(source, items, intent, d.owned && spec.owner === null); });

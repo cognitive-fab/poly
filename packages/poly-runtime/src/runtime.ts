@@ -10,7 +10,7 @@
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
-import { capabilitiesFor, withinPrefix, CapabilityRefused, CredentialUnavailable, OwnerMismatch, ForgetNoGrant, CREDENTIAL_HANDLE, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
+import { capabilitiesFor, withinPrefix, CapabilityRefused, CredentialUnavailable, OwnerMismatch, ForgetNoGrant, CREDENTIAL_HANDLE, type ApiTransport, type ContentAccess, type ItemsAccess, type Transports } from './capabilities.js';
 import type { ChannelAdapter, ChannelTransports, HttpRequest, HttpResponse, IngressAnswer, SourceAdapter, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -294,7 +294,7 @@ export class PolyRuntime {
       },
       capabilities: (row, decl) => capabilitiesFor(decl ?? {}, opts.transports ?? {}, async (reason) => {
         await this.store.insertAudit({ at: this.now(), instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule: 'PL6406', reason });
-      }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>), this.#contentFor(row)),
+      }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>), this.#contentFor(row), this.#itemsFor(row)),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
       // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a
@@ -309,6 +309,17 @@ export class PolyRuntime {
         // An entry's envelope that is no parameter name is denied too: fail closed.
         const v = typeof e === 'string' ? ((row.payload ?? {}) as Record<string, unknown>)[e] : undefined;
         return this.memory.isEnvelope(v) ? null : { deny: 'envelope-origin' };
+      },
+      // PS17.4b (S462): an effect whose entry names a one-item parameter reaches its handler only with an item set the
+      // runtime stored holding exactly one item; any other count, or value, is denied items-count, the second layer
+      // after the checker's PL6847.
+      oneCheck: (row, decl) => {
+        const p = decl?.one;
+        if (p === undefined || p === null) return null;
+        const v = typeof p === 'string' ? ((row.payload ?? {}) as Record<string, unknown>)[p] : undefined;
+        const o = v as { ref?: unknown; count?: unknown } | null | undefined;
+        const ok = !!o && typeof o === 'object' && typeof o.ref === 'string' && o.count === 1 && this.memory.readItems(o.ref)?.length === 1;
+        return ok ? null : { deny: 'items-count' };
       },
       // PT10k (S302, S307): the flow rule and freshness, before the grant check and the policy.
       memoryCheck: (row, decl, approved) => {
@@ -1523,6 +1534,25 @@ export class PolyRuntime {
       recorded: async (d) => {
         this.store.ensureRun(CONTENT_RUN, 'runtime', 'content');
         await this.store.txn(() => { this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'read', intent: row.intent_id, digest: d }, this.now()); });
+      },
+    };
+  }
+
+  /**
+   * PS17.4b (S462): what items.read of one intent's handler is bound to: the references of the Items of the intent's own
+   * payload, the memory's read of a set, and the record of a read on runtime:content, by the set's reference and the
+   * digest of what it gave, never an id or an owner. None when the payload holds no Items.
+   */
+  #itemsFor(row: { intent_id: string; payload?: unknown }): ItemsAccess | undefined {
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const refs = [...new Set(Object.values(payload).flatMap((v) => (v && typeof v === 'object' && typeof (v as { ref?: unknown }).ref === 'string' && (v as { ref: string }).ref.startsWith('items:') ? [(v as { ref: string }).ref] : [])))];
+    if (!refs.length) return undefined;
+    return {
+      refs,
+      read: (ref) => this.memory.readItems(ref),
+      recorded: async (ref, digest) => {
+        this.store.ensureRun(CONTENT_RUN, 'runtime', 'content');
+        await this.store.txn(() => { this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'read', intent: row.intent_id, items: ref, digest }, this.now()); });
       },
     };
   }

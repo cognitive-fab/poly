@@ -507,6 +507,8 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffAudience'; cls: string })
   /** PS17.3a, S459: `envelope e`, the Content parameter whose envelope gives the recipient and the threading headers. */
   | (NodeBase & { kind: 'EffEnvelope'; param: string })
+  /** PS17.4b, S462: `one p`, the Items parameter that holds exactly one item. */
+  | (NodeBase & { kind: 'EffOne'; param: string })
   | EffOutcomeItem;
 
 /** PS17.2: `retrieve s [where owner == p [and k == x]] limit n`, the body of a retrieval effect; `p` a Principal parameter, `x` a Key parameter and `k` a key the source declares (S451). */

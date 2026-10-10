@@ -209,6 +209,8 @@ export const CODES: Record<string, CodeInfo> = {
   // PT28.2, S362 (M11): a poly try operation that is no step of the machine: an action it does not declare, or data the
   // kernel refuses; the session stops there.
   PL6846: { name: 'TRY_OPERATION_REFUSED', stage: 'runtime', severity: 'error' },
+  // PS17.4b (S462): an emit of an effect with `one p` whose p can hold any count other than 1, with its witness.
+  PL6847: { name: 'ONE_ITEM_COUNT', stage: 'model-check', severity: 'finding' },
   // M4 review C5, K10: a send of an action that completes one of the receiver's decisions.
   PL6204: { name: 'DECISION_COMPLETION_SENT', stage: 'types', severity: 'error' },
   // S52: one action wired as a child completion or cancel and as an effect completion or a timer action.

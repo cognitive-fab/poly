@@ -97,6 +97,8 @@ export declare function remember(source: string, provenance: 'observed' | 'deriv
 export declare function to(param: string): EffItem;
 /** PS17.3a, S459: `envelope e`, the Content parameter whose envelope gives the recipient and the threading headers. */
 export declare function envelope(param: string): EffItem;
+/** PS17.4b, S462: `one p`, the Items parameter that holds exactly one item. */
+export declare function one(param: string): EffItem;
 /** PT10r: `route r { tier t provider "p" prices "f" [calibration "f"] max tokens n …  escalate when …  budget b }`. */
 export declare function route(name: string, body: { tiers: { name: string; provider: string; prices: string; calibration?: string; maxInputTokens: number; maxTokens: number }[]; escalate: (['conf' | 'margin', number] | ['failed'])[]; budget?: string }): Decl;
 /** PT24.1c: `route r` in a decision, its tiers in place of a provider. */

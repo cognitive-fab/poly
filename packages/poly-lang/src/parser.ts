@@ -1238,9 +1238,12 @@ class Parser {
       } else if (w === 'envelope') {
         // PS17.3a, S459: the Content parameter whose envelope gives the recipient and the threading headers.
         items.push(this.effItem(is, { kind: 'EffEnvelope', param: this.ident('a Content parameter') }));
+      } else if (w === 'one') {
+        // PS17.4b, S462: the Items parameter that holds exactly one item.
+        items.push(this.effItem(is, { kind: 'EffOne', param: this.ident('an Items parameter') }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
         items.push(this.outcome(is, w));
-      } else this.fail('expected kind, labels, targets, uses, retrieve, remember, to, audience, envelope, class, retry, ok, failed or exhausted', is);
+      } else this.fail('expected kind, labels, targets, uses, retrieve, remember, to, audience, envelope, one, class, retry, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);

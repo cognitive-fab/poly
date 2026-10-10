@@ -77,6 +77,8 @@ export interface REffect {
   kind: string;
   cls: string;
   params: { name: string; type: RType }[];
+  /** PS17.4b (S462): `one p`, the Items parameter whose count is narrowed to {1}. */
+  one?: string;
 }
 
 /** One conjunct of a path property (PS5.4, S37): a bound on a kind's count, or an order of two kinds. */
@@ -336,6 +338,7 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
       kind: retrieveOf(it) ? retrieveKind(retrieveOf(it)!) : rememberOf(it) ? `source.${rememberOf(it)!.source}.remember` : kind && kind.kind === 'EffKind' ? kind.value : it.name,
       cls: cls && cls.kind === 'EffClass' ? cls.value : 'none',
       params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })),
+      ...((o) => (o && o.kind === 'EffOne' ? { one: o.param } : {}))(it.items.find((x) => x.kind === 'EffOne')),
     });
   }
   // PD1.7: a decision is an effect of kind decision.<d>, class none.
