@@ -8,10 +8,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { translationValidate } from '@poly/ref';
 import { DELIBERATELY_BROKEN_LOWERINGS, FAULT_SOURCES } from './toolchain-faults.mjs';
 import { ROOT, polyFiles, build } from './helpers.mjs';
+import { serial } from './serial-sources.mjs';
 
 const SOURCES = [...polyFiles(join(ROOT, 'examples')), ...polyFiles(join(ROOT, 'conformance', 'm0')), ...polyFiles(join(ROOT, 'conformance', 'm1')), ...polyFiles(join(ROOT, 'conformance', 'm2'))];
 
-for (const file of SOURCES) {
+// Ruled 2026-10-10: a source of the serial group is validated in test/after/serial-sources.test.mjs instead.
+for (const file of SOURCES.filter((f) => !serial(f))) {
   test(`translation validation agrees: ${basename(file)}`, async (t) => {
     for (const b of build(file, 'tv')) {
       const r = await translationValidate(b.module, b.machine, b.dir, { program: b.program, std: b.std, sourceDir: b.sourceDir });

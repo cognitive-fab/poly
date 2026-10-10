@@ -17,6 +17,7 @@ import { checkFile } from '@poly/check';
 import { FAULTS } from '@poly/lower';
 import { ROOT } from './helpers.mjs';
 import { DELIBERATELY_BROKEN_LOWERINGS, toolchainFaults } from './toolchain-faults.mjs';
+import { serial } from './serial-sources.mjs';
 
 // Build output and installed packages are not sources. Their directories are not entered at all: an
 // installed package may be a link to an engine's own checkout, with files a walk cannot stat.
@@ -70,7 +71,9 @@ test('the standing rule covers every source in the repository', () => {
   assert.ok(ALL.length >= 49, `${ALL.length} sources`);
 });
 
-for (const file of ALL) {
+// Ruled 2026-10-10: a source of the serial group is checked in test/after/serial-sources.test.mjs instead, with the same
+// assertion; it stays in ALL, so the coverage test above still holds it.
+for (const file of ALL.filter((f) => !serial(f))) {
   test(`no toolchain fault: ${relative(ROOT, file)}`, async () => {
     const r = await checkFile(file, { root: OUT });
     assert.ok(r.verdict !== 'ERROR', `poly check errored: ${r.error}`);
