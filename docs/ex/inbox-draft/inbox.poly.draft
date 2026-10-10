@@ -1,3 +1,4 @@
+// expected: CLEAN
 // The inbox assistant (plan-ex.md E2; proposals/example-inbox.md, Q-I1 to Q-I5 and Q-EX1 to Q-EX5 ruled). Gmail only
 // for v1 (S453 deferred). Each account's mail is a source owned by the account's principal and keyed by message,
 // thread and correspondent (S451), so every body a decision reads carries its account as taint, and a draft for one
@@ -6,9 +7,9 @@
 // created through the compose credential at the exact drafts URL, which admits no send (S455). Every model call is
 // reserved against the monthly budget before it runs (PS18.4, S454; IAC6).
 //
-// The host (examples/inbox/host) syncs each mailbox through the Gmail source with a read-only grant (gmail.readonly). Under
-// S460 the mail source names that credential and the runtime holds its one grant; until S461 gives an owned source's
-// credential a grant per owner, three accounts read through a vault the host keeps (decisions-ex.md). It creates one
+// The host (examples/inbox/host) syncs each mailbox through the Gmail source under the read-only credential the mail
+// source names (gmail.readonly), whose grants the runtime holds, one per account (S460, S461): revoking one stops that
+// account's sync and no other. No token reaches the host or the adapter. It creates one
 // Message per new item, opens the thread's Todo when a Message is actionable, and serves the local page. It holds no
 // rule: it forwards facts the machines record.
 module inbox
@@ -36,8 +37,18 @@ credential gmail_draft: oauth2 {
   holder Principal
 }
 
+// The read credential: one grant per account, each held by the account's principal (S461), reached only through the
+// runtime's handle, never by a token the host holds.
+credential gmail_read: oauth2 {
+  provider "google"
+  grant authorization_code pkce
+  scopes { gmail.readonly }
+  holder Principal
+}
+
 source mail: records {
   adapter "gmail"
+  credential gmail_read
   audience account owned
   freshness 720h
   keys { message, thread, correspondent }

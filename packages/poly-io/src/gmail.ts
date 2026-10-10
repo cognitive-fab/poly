@@ -1,10 +1,11 @@
 // plan-ex.md E2.0, S451, S452: the Gmail source. An account's mail is a source owned by its account's principal: the
 // adapter syncs a mailbox through the Gmail API's history (users.history.list from the stored cursor, users.messages.get
 // with format=raw), keeps each message's text in a mail store by reference, and answers a retrieval by owner, newest
-// first, as the other sources do (K14). Every request goes through the runtime's handle for the source's credential
-// (S460, rt.credentialHandle), which sends it through the vault under the grant, or, until S461 gives a grant per owner,
-// through the host's `request` for an account, bound to its read grant in a vault the host keeps (`withToken`, K13).
-// Either way no token reaches this file.
+// first, as the other sources do (K14). The adapter is built with the runtime's handle for the source's credential
+// (rt.credentialHandle(c)), which sends through the vault (`withToken`, K13), so no token reaches this file. Under S460
+// the credential has one grant and the source one account, whose sync goes through that handle. Under S461 each owner
+// has a grant, and each account's sync goes through that owner's handle (rt.credentialHandle(c, owner)), which the host
+// gives as the account's `request`. A source that names no credential takes each account's request from the host.
 // The adapter only ever sends a GET under the Gmail API's base: it holds no code path that could send mail (S455).
 //
 // The read credential holds `gmail.readonly` alone, which every method used here accepts (PROVENANCE.md).
@@ -35,8 +36,9 @@ export interface GmailAccount {
   /** An opaque label the owner gives the account, used in item ids in place of its address (S191, plan-ex 4.5). */
   label: string;
   /**
-   * The host's request function for this account, which attaches the read grant's token in the vault; absent when the
-   * source is built with `transport`.
+   * The request function this account's sync sends through: under S461 the runtime's handle for this owner
+   * (rt.credentialHandle(c, owner)), which sends under this owner's grant only; for a source that names no credential, the
+   * host's. Absent under S460, where the account's sync goes through `transport`.
    */
   request?(r: HttpRequest): Promise<HttpResponse>;
 }
@@ -44,9 +46,10 @@ export interface GmailAccount {
 export interface GmailSourceConfig {
   accounts: GmailAccount[];
   /**
-   * S460: the runtime's handle for the credential the source names (rt.credentialHandle), which sends each request
-   * through the vault under the credential's one grant. A grant reaches one mailbox, so a source built with it has one
-   * account, which gives no request of its own; the adapter records the handle, so rt.connectSource can ask.
+   * S460, S461: the runtime's handle for the credential the source names (rt.credentialHandle(c)); the adapter records
+   * it, so rt.connectSource can ask. Under S460 it sends under the credential's one grant, which reaches one mailbox, so
+   * the source has one account, which gives no request. Under S461 it is the routing handle, and every account gives its
+   * owner's handle as its request.
    */
   transport?: HttpTransport;
   store: MailStore;
@@ -86,13 +89,18 @@ interface ItemRecord { id: string; owner: string; thread: string; correspondent:
 export function gmailSource(c: GmailSourceConfig): GmailSource {
   const A = 'gmail source';
   if (!Array.isArray(c.accounts) || c.accounts.length === 0) throw new Error(`${A}: at least one account`);
-  if (c.transport !== undefined && (typeof c.transport?.request !== 'function' || c.accounts.length !== 1)) throw new Error(`${A}: a transport is the runtime's handle for the source's credential, whose one grant reaches one account (S460)`);
+  if (c.transport !== undefined && typeof c.transport?.request !== 'function') throw new Error(`${A}: a transport is the runtime's handle for the source's credential`);
+  // S460: one grant reaches one mailbox, so with no account's own request there is one account; S461: every account gives
+  // its owner's handle, or none does.
+  const own = c.accounts.filter((a) => a?.request !== undefined).length;
+  if (c.transport !== undefined && own === 0 && c.accounts.length !== 1) throw new Error(`${A}: a transport with one grant reaches one account (S460); for more, each account gives its owner's handle (S461)`);
+  if (c.transport !== undefined && own !== 0 && own !== c.accounts.length) throw new Error(`${A}: every account gives its owner's handle as its request, or none does (S461)`);
   const byOwner = new Map<string, GmailAccount>();
   const labels = new Set<string>();
   for (const a of c.accounts) {
     if (typeof a.owner !== 'string' || a.owner === '') throw new Error(`${A}: an account's owner is its principal, not empty`);
     if (typeof a.label !== 'string' || !LABEL.test(a.label)) throw new Error(`${A}: label ${JSON.stringify(a.label)} is lower-case letters, digits and hyphens, from a letter`);
-    if (c.transport !== undefined ? a.request !== undefined : typeof a.request !== 'function') throw new Error(`${A}: an account's request is the host's function, bound to its read grant, and a source built with a transport gives none`);
+    if (a.request !== undefined ? typeof a.request !== 'function' : c.transport === undefined) throw new Error(`${A}: an account's request is a function: its owner's handle, or the host's for a source that names no credential`);
     if (byOwner.has(a.owner) || labels.has(a.label)) throw new Error(`${A}: an owner or a label named twice`);
     byOwner.set(a.owner, a);
     labels.add(a.label);
@@ -109,7 +117,7 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
 
   /** The one way out: a GET under the API's base, with no header that could carry a credential of its own. */
   const getJson = async (a: GmailAccount, path: string): Promise<{ status: number; json: Record<string, any> | null }> => {
-    const r = await (c.transport ?? a).request!({ method: 'GET', url: `${GMAIL_BASE}${path}`, headers: { accept: 'application/json' }, body: '' });
+    const r = await (a.request ? a : c.transport!).request!({ method: 'GET', url: `${GMAIL_BASE}${path}`, headers: { accept: 'application/json' }, body: '' });
     let json: Record<string, any> | null = null;
     try { json = r.body ? JSON.parse(r.body) : null; } catch { json = null; }
     return { status: r.status, json };

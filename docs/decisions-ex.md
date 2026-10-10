@@ -211,7 +211,7 @@ Found while writing them, each fixed in the draft or the harness:
 
 **Tests so far.** `test/ex-inbox.test.mjs`: **IAC1** (three accounts, every message once and tagged with its account, across a host crash after a creation and before its announcement; a pass with nothing new makes nothing; act-now and this-week messages actionable, fyi and ignore filed; one `Todo` per thread, the invoice's two messages opening one) and **IAC4** (the message that tells the assistant to forward mail, give a password and pay proposes only its own retrieval and its two decisions). Both failed before the code they test: IAC1 on the host's missing module, then on each defect above; both pass. IAC3, IAC5, IAC6, IAC7 without a draft, IAC8 and IAC9's check come next.
 
-## Rebase on v1 at 0be8ef61: S460 with one account, (a), (c), and S461 proposed (2026-10-10)
+## Rebase on v1 at 0be8ef61 and bea21103: (a), (c), S460, S461 and the expected line (2026-10-10)
 
 `ex` is rebased on `0be8ef61`, which carries the `Items` type check, the serial after-suite group, (a), S460 and (c). One conflict: `packages/poly-io/src/index.ts`, where S460 exports `credentialHandleOf` from `util.js` beside the Gmail and MIME exports. Both are kept.
 
@@ -225,15 +225,19 @@ Found while writing them, each fixed in the draft or the harness:
   - After `revokeGrant('gmail_read', null, …)`, the next sync fails `credential-unavailable` with no request reaching Gmail, while the account's compose grant stands.
 
   It passes. The adapter's refusal test adds four cases: two accounts with a handle, an account's own request with a handle, a handle with no `request`, and no request and no handle.
-- **A gap in S460, ruled 2026-10-10 (option 1).** A holder-less source credential has one grant, and a Gmail token reaches one mailbox, so S460 reads one account. IAC1 needs three in one assistant (IF4.1). Two other ways would also work on v1, and the reviewer rejected both: one source per account fixes the accounts in the program, and one runtime per account splits the budget. The reviewer chose a per-owner grant: **S461**, proposed in `docs/proposals/s461-source-grant-per-owner.md` for the release session, with the reviewer's conditions:
-  - An owned source's credential may name `holder Principal`.
-  - Each owner has one `Grant` keyed by the owner's verified Principal (S450).
-  - `rt.credentialHandle(c, owner)` sends only under that owner's grant, and a request for one owner's items through another owner's handle is refused, with a test.
-  - Revoking one owner's grant stops only that owner's sync, with a test showing the other two accounts still syncing.
-  - The checker treats the grants per owner, as M9 does, with no state beyond one `Grant` per owner.
+- **A gap in S460, ruled 2026-10-10.** A holder-less source credential has one grant, and a Gmail token reaches one mailbox, so S460 reads one account; IAC1 needs three in one assistant (IF4.1). The reviewer gave the release session S461, a grant per owner of an owned source, which it built on `v1` (`b49fce1c`, recorded in `bea21103`). No proposal from this branch was needed.
+- **S461, on the rebase onto `bea21103`.** The draft's `gmail_read` now names `holder Principal`, and the mail source names it. The host's read vault is deleted: both credentials' vaults are the runtime's, and each account has a read grant, `rt.requestGrant('gmail_read', owner)`.
+  - `gmailSource` is built with the routing handle `rt.credentialHandle('gmail_read')`, which `connectSource` requires.
+  - Each account syncs through its owner's handle, `rt.credentialHandle('gmail_read', owner)`, given as the account's `request`. Every account gives one, or none does (S460).
+  - The fake Google answers each Gmail request from the tape of the account whose token the vault attached, so a request under the wrong grant reads the wrong tape and fails.
+  - **The S461 test** (in the same file) shows: three distinct read grants; an adapter built with one owner's handle refused (`PL6408`); each account syncing under its own token; after `revokeGrant('gmail_read', <work>, …)`, work's sync failing `credential-unavailable` with nothing sent; home and club still syncing under their own grants; and every compose grant standing.
+  - **The S460 test** runs the same draft with `holder Principal` removed (`SOURCE_ONE_GRANT`), on one account.
+  - IAC1 and IAC4 pass on the per-owner grants. With the two read-grant tests that is 4 of 4.
+  - The adapter's refusal test now covers two accounts with a one-grant handle, a mix of accounts with and without a request, and a request that is not a function. It also accepts two accounts that each give one.
+- **The expected line (V10 item 4).** `// expected: CLEAN` is now the first line of `examples/concierge/concierge.poly`, `examples/concierge/concierge.policy.poly`, and the inbox draft's module and policy.
+  - **A finding for the release session.** The serial group checks each file of `examples/concierge/` alone. Alone, the policy file is `REFUSED`: `PL1001`, since `payments.refund` and `machine("concierge.Desk")` are names of the module beside it. No expected line can state that verdict. Its line states the ruled meaning (the concierge is `CLEAN` with its policy), so `test/after/serial-sources.test.mjs` will report it as a mismatch. The expected check could read a policy file with its program, or leave policy files out of the per-file comparison.
+- **Order.** Next is one full suite. The rulings of 2026-10-09 and the numbers are recorded after it, if it is clean.
 
-  Until S461 lands, IAC1's three accounts read through the vault the host keeps, which is deleted then.
-- **Order.** The full suite waits for S461, by the reviewer's ruling. The rulings of 2026-10-09 and the numbers are recorded after a clean suite.
 
 ## Conclusion
 
