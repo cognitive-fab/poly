@@ -392,3 +392,9 @@ What is ruled for after the release, in one place:
 - **An adapter over a store poly reaches with no credential** (a `postgres` table, an OpenSearch index over the host's transport) still removes the subject's items there, as in M10. The After v1 item covers the case where the provider's copy is poly's own and is reached through a credential.
 
 **Tests run** (no full suite, as ordered): `test/forget-no-grant.test.mjs`, `test/source-credential-owners.test.mjs`, `test/source-credential.test.mjs`, `test/memory-forget.test.mjs` and `test/erasure.test.mjs`, 39 tests, no failure.
+
+## The provider's revocation (owner's reviewer, 2026-10-10)
+
+**Ruled.** The RFC 7009 revocation at the provider stays: a token left valid there would undo the point of revoking. Condition: the local grant goes to `Revoked` first and unconditionally; the provider's revocation is then sent, retried like an effect and journaled; its failure never undoes the local revocation or blocks the forget. Erasure in a store poly owns without a credential stays as M10 has it.
+
+**Text** 72b08a3f (PS16.4, PT10g). **Tests** `test/revocation-provider.test.mjs`, written from the text: three, which pass with no code change, since the `Grant` machine's `Revoke` step makes the grant `Revoked` in the same step that emits `credential.revoke`, and that intent is retried within polyrun's default bound like any effect. Measured: when the provider answers 503 to every attempt, or times out, the forget completes and the grant is `Revoked` before any provider answer; the intent makes five attempts, each journaled (a `Start` and a `HandlerFailed` step on the intent's run, and an observation on the grant's run), ends dead, and changes no grant; `rt.revokeGrant` returns while the provider's answer is still held. The release notes state that a token stays valid at the provider until the revocation succeeds or the token expires.
