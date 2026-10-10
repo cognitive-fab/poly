@@ -109,6 +109,7 @@ Each limit is something v1 does not do. It is checked to fail closed where it ca
 - **A handler is held to its envelope as to its effect (S459).** The runtime gives the draft's handler only an envelope the source gave. The handler is the host's code, and it is held to taking the recipient and headers from that envelope as every handler is held to its effect.
 - **Only `openSearchSource` takes a credential handle (S460).** A `postgres` source that names a credential checks clean but cannot be connected, which fails closed.
 - **A parameter named after a state field is only a warning** (ruled 2026-10-10). S19's shadowing stays the meaning in v1.
+- **A forget does not erase the provider's copy** (PS17.7, ruled 2026-10-10). `poly forget` erases what the runtime holds for the subject: its items, bodies, envelopes and taint records. When the subject is an owner of a source with a grant per owner, it also revokes that owner's grant first, so no later sync brings the data back. A forget never uses a grant, so the provider's own copy, such as the person's mailbox, is not erased: it is not poly's to erase. An adapter over a store that poly reaches with no credential (a `postgres` table, an OpenSearch index over the host's transport) still removes the subject's items there.
 - **The earlier limits.** M8 to M11's stated limits stand as listed in `docs/release-notes.md`.
 
 ## After v1
@@ -117,6 +118,7 @@ What is ruled for after the release (`decisions-v1.md`, "After v1"):
 
 - **S453: SES**, with an `aws_sigv4` credential kind and its own ruling.
 - **`PL1002` for a parameter named after a state field.** It lands with std's channel kinds (`Conversation.Open(app)`), the conformance cases, the examples and the tests' fixtures renamed together, and `conformance/m0/shadowing.poly` turned into its error source. 35 such parameters were found in 275 sources.
+- **Erasure at the provider, where the provider's copy is poly's own.** An example is a table poly wrote and reaches through a credential. It needs its own ruling, since a forget uses no grant in v1.
 - **E3: the checked harness example** (Q-V2), and M7, which follows the release.
 
 ## Conclusion

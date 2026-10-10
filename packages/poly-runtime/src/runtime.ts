@@ -10,7 +10,7 @@
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
-import { capabilitiesFor, withinPrefix, CapabilityRefused, CredentialUnavailable, OwnerMismatch, CREDENTIAL_HANDLE, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
+import { capabilitiesFor, withinPrefix, CapabilityRefused, CredentialUnavailable, OwnerMismatch, ForgetNoGrant, CREDENTIAL_HANDLE, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
 import type { ChannelAdapter, ChannelTransports, HttpRequest, HttpResponse, IngressAnswer, SourceAdapter, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,7 +29,7 @@ import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionMemory, type DecisionRecord, type Provider, type ProviderConfig } from './provider.js';
-import { Memory, BOTTOM, DIGEST, SourceRefused, RETRIEVAL, type Taint } from './memory.js';
+import { Memory, BOTTOM, DIGEST, SourceRefused, RETRIEVAL, FORGETTING, type Taint } from './memory.js';
 import { RoutingHost } from './routing.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, evidenceOf, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
@@ -811,8 +811,27 @@ export class PolyRuntime {
     const bodies = this.memory.forgettable(target).bodies.filter((b) => this.store.db.prepare('SELECT 1 FROM poly_erasable WHERE digest = ?').get(b));
     // Review C1: each erasure and the adapters' forget may be run again; the record is taken with the forget event, so a
     // forget cut short by a failing adapter is completed by the same record.
+    // PS17.7, PS16.4 (ruled 2026-10-10): a forget of an owner first revokes that owner's own grant of each credential with a
+    // grant per owner that a source names, so no later sync brings the items back; no other grant changes.
+    if ('subject' in target) {
+      for (const c of this.verified.credentials) {
+        if (!c.holder || !this.verified.memory.sources.some((s) => s.credential === c.name && s.owned)) continue;
+        const id = this.grantOf(c.name, target.subject);
+        const state = id ? (this.store.db.prepare('SELECT state FROM pr_instance WHERE instance_id = ?').get(id) as { state: string } | undefined) : undefined;
+        if (!id || !state || (JSON.parse(state.state) as { g?: unknown }).g === 'Revoked') continue;
+        await this.dispatch(id, 'Revoke', {}, { [GRANT_STEP]: true });
+        this.store.ensureRun(INGRESS_RUN, 'runtime', 'ingress');
+        await this.store.txn(() => { this.store.appendEvent(INGRESS_RUN, 'verdict', { stage: 'revocation', credential: c.name, grant: id, source: 'forget', record: d }, this.now()); });
+      }
+    }
     for (const b of bodies) await this.erase(b);
-    if ('subject' in target) for (const a of this.memory.connected()) await a.forget(target.subject);
+    // PS17.7: each adapter's forget runs with no grant: a request through a credential handle is refused before sending,
+    // and that refusal is the adapter's end, not a failed forget. Any other failure fails the forget as before (review C1).
+    const noGrant: { source: string; refused: 'forget-no-grant' }[] = [];
+    if ('subject' in target) for (const [name, a] of this.memory.connectedByName()) {
+      try { await FORGETTING.run({ source: name }, () => a.forget(target.subject)); }
+      catch (e) { if (e instanceof ForgetNoGrant) noGrant.push({ source: name, refused: 'forget-no-grant' }); else throw e; }
+    }
     this.store.ensureRun(CONTENT_RUN, 'runtime', 'content');
     let taken = false;
     await this.store.txn(() => {
@@ -820,7 +839,7 @@ export class PolyRuntime {
       this.memory.removeItems(target);
       // Review C5: an erased body's taint record would keep the subject beside its digest.
       this.memory.dropTaint(bodies);
-      this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'forget', ...('subject' in target ? { subject: this.store.recipientDigest(`principal:${target.subject}`) } : { source: target.source }), erased: bodies, record: d }, this.now());
+      this.store.appendEvent(CONTENT_RUN, 'verdict', { stage: 'forget', ...('subject' in target ? { subject: this.store.recipientDigest(`principal:${target.subject}`) } : { source: target.source }), erased: bodies, record: d, ...(noGrant.length ? { noGrant } : {}) }, this.now());
     });
     if (!taken) throw new ApprovalRefused('a forget was taken before', 'replayed');
     return { erased: bodies };
@@ -1002,6 +1021,9 @@ export class PolyRuntime {
       return at && sourcesOfC.has(at.source) && typeof at.owner === 'string' && at.owner !== '' ? at.owner : undefined;
     };
     const request = async (r: { method: string; url: string; headers?: Record<string, string>; body?: string }): Promise<HttpResponse> => {
+      // PS17.7 (ruled 2026-10-10): a forget uses no grant, so inside one every handle refuses before anything else.
+      const forgetting = FORGETTING.getStore();
+      if (forgetting) throw new ForgetNoGrant(`forget-no-grant: source ${forgetting.source}'s adapter made a request through credential ${c} while forgetting; a forget uses no grant, so nothing is sent (PS17.7)`);
       const method = String(r?.method ?? '');
       const url = String(r?.url ?? '');
       const at = withinPrefix(url, bases);

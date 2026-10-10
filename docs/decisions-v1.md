@@ -376,3 +376,19 @@ What is ruled for after the release, in one place:
 **For the reviewer: a forget through a per-owner source.** `rt.forget` calls the source adapter's `forget(subject)`, which is not a retrieval, so the routing handle refuses it (`credential-unavailable`) and a forget by subject cannot reach such a source today: it fails closed, with nothing erased there. Running it under the subject's own grant would serve a forget while that grant is `Granted`, but not after its revocation, when a person who withdrew may most want it. Not built; a ruling is needed.
 
 **Tests run** (no full suite, as ordered): `test/source-credential-owners.test.mjs` and `test/source-credential.test.mjs`, 26 tests, no failure; the memory, envelope and `Items` tests before them, 51 tests, no failure but the one fixed in the test.
+
+## A forget uses no grant (owner's reviewer, 2026-10-10), built
+
+**Ruled.** Forget never uses a grant. `rt.forget(subject)` erases what the runtime holds for the subject (items, bodies, envelopes, taint records), the M10 erasure unchanged. The adapter's `forget(subject)` runs with no handle: any request it makes is refused, so it clears only its own state. When the subject is an owner of the source, the forget first revokes that owner's grant, so the next sync cannot bring the data back; the other owners keep syncing. The provider's copy is not poly's to erase, a limit in the release notes; provider-side erasure where the provider's copy is poly's own goes on the After v1 list.
+
+| Text | Tests | Code |
+|---|---|---|
+| 8c2cde1d (PS17.7, PS16.4, PT) | 4917f8a2 (4, all failing before) | this record's commit |
+
+**Decided under the plan's rules, recorded:**
+
+- **The token revocation at the provider is not a request under a grant.** Revoking the owner's grant dispatches `Revoke()`, whose `credential.revoke` the vault sends (RFC 7009), as every revocation does. It withdraws the token and reads or writes no data, so the forget's tests allow it and no other request.
+- **The refusal is the adapter's end.** A request through a credential handle inside the forget throws `forget-no-grant`. `rt.forget` takes it as that adapter's end and records it on the `forget` event, `noGrant: [{ source, refused: 'forget-no-grant' }]`. Any other failure of an adapter's forget still fails the forget, which the same record completes later (review C1).
+- **An adapter over a store poly reaches with no credential** (a `postgres` table, an OpenSearch index over the host's transport) still removes the subject's items there, as in M10. The After v1 item covers the case where the provider's copy is poly's own and is reached through a credential.
+
+**Tests run** (no full suite, as ordered): `test/forget-no-grant.test.mjs`, `test/source-credential-owners.test.mjs`, `test/source-credential.test.mjs`, `test/memory-forget.test.mjs` and `test/erasure.test.mjs`, 39 tests, no failure.

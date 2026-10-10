@@ -61,6 +61,13 @@ export class CredentialUnavailable extends Error {
  * PS17.0, PT10j (S461): an owner's credential handle refuses a request made inside a retrieval for another owner, so one
  * account's grant never reaches another's items. Permanent: the same request in the same retrieval meets the same owner.
  */
+/** PS17.7 (ruled 2026-10-10): a request through a credential handle inside a forget; a forget uses no grant. */
+export class ForgetNoGrant extends Error {
+  readonly permanent = true;
+  readonly reason = 'forget-no-grant';
+  constructor(message: string) { super(message); this.name = 'ForgetNoGrant'; }
+}
+
 export class OwnerMismatch extends Error {
   readonly permanent = true;
   readonly reason = 'owner-mismatch';

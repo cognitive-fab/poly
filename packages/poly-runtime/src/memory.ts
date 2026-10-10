@@ -35,6 +35,8 @@ export interface SourceDescriptor { v: 1; module: string; source: string; kind: 
  * undefined, so the routing handle sends nothing there.
  */
 export const RETRIEVAL = new AsyncLocalStorage<Readonly<{ source: string; owner: string | null }>>();
+/** PS17.7 (ruled 2026-10-10): set while an adapter's forget(subject) runs; every credential handle refuses inside it. */
+export const FORGETTING = new AsyncLocalStorage<Readonly<{ source: string }>>();
 
 /** PS17.3: a module's flow descriptor (PT10i). */
 export interface FlowDescriptor { v: 1; module: string; audience: string[]; sources: Record<string, { class: number; owned: boolean }>; claims?: Record<string, { class: string; principal: string | null }> }
@@ -329,6 +331,8 @@ export class Memory {
 
   /** PS17.7: each connected adapter, to forget a subject at its source. */
   connected(): SourceAdapter[] { return [...this.adapters.values()]; }
+  /** Each connected adapter with its source's name. */
+  connectedByName(): [string, SourceAdapter][] { return [...this.adapters.entries()]; }
 
   /** PS17.4: a body's taint, or null when the store holds no record of it. */
   taintOf(digest: string): Taint | null {
