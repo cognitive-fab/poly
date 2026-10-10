@@ -6,7 +6,8 @@
 // created through the compose credential at the exact drafts URL, which admits no send (S455). Every model call is
 // reserved against the monthly budget before it runs (PS18.4, S454; IAC6).
 //
-// The host (examples/inbox/host) syncs each mailbox through the Gmail source with the read credential, creates one
+// The host (examples/inbox/host) syncs each mailbox through the Gmail source with a read-only grant it keeps in its own
+// vault (gmail.readonly; no program effect uses it, so the runtime certifies no vault for it, decisions-ex.md), creates one
 // Message per new item, opens the thread's Todo when a Message is actionable, and serves the local page. It holds no
 // rule: it forwards facts the machines record.
 module inbox
@@ -27,13 +28,6 @@ enum Step { Reading, Asking, Done }
 
 enum Status { Opening, Summing, Open, Reading, Drafting, Drafted, Proposed, Created, Snoozed, Done, Dismissed }
 
-credential gmail_read: oauth2 {
-  provider "google"
-  grant authorization_code pkce
-  scopes { gmail.readonly }
-  holder Principal
-}
-
 credential gmail_draft: oauth2 {
   provider "google"
   grant authorization_code pkce
@@ -42,6 +36,15 @@ credential gmail_draft: oauth2 {
 }
 
 source mail: records {
+  adapter "gmail"
+  audience account owned
+  freshness 720h
+  keys { message, thread, correspondent }
+}
+
+// The same mailboxes, read by thread: a retrieval's key and limit are not part of its kind's signature, so a second
+// retrieval of mail by another key would share the first one's (decisions-ex.md, a defect for the release session).
+source threads: records {
   adapter "gmail"
   audience account owned
   freshness 720h
@@ -66,7 +69,7 @@ machine Message {
 
   terminal seen in { Actionable, Filed }
 
-  action Arrived(account: Principal, id: Key)
+  action Arrived(owner: Principal, item: Key)
   action Read(items: Items)
   action ReadFailed()
   action Triaged(t: Triage, conf: Conf, margin: Conf)
@@ -75,11 +78,13 @@ machine Message {
   action Unkinded()
   action Retry()
 
-  on Arrived(account, id) {
+  // A parameter is not named after a field: inside the handler it would hide the field (account == none read the
+  // parameter, and every arrival was refused).
+  on Arrived(owner, item) {
     require step == Reading && account == none else reject "arrived"
-    account' = account
-    id' = id
-    emit read(owner: account, k: id)
+    account' = owner
+    id' = item
+    emit read(owner: owner, k: item)
   }
 
   on Read(items) {
@@ -167,7 +172,8 @@ machine Message {
     emit read(owner: account, k: id)
   }
 
-  // Every retrieval of mail shares one kind, source.mail.retrieve, so one payload and one pair of completions (S41).
+  // Every retrieval of one source shares one kind, source.<s>.retrieve, so one payload and one pair of completions
+  // (S41); the Todo reads threads through a second source over the same mailboxes (decisions-ex.md).
   effect read(owner: Principal, k: Key) {
     retrieve mail where owner == owner and message == k limit 1
     ok(r) -> Read(items: r.items)
@@ -209,7 +215,7 @@ machine Todo {
 
   terminal status in { Done, Dismissed }
 
-  action Open(account: Principal, thread: Key, reply: bool)
+  action Open(owner: Principal, at: Key, answer: bool)
   action Read(items: Items)
   action ReadFailed()
   action Summed(text: Content)
@@ -228,12 +234,12 @@ machine Todo {
   action Finish()
   action Dismiss()
 
-  on Open(account, thread, reply) {
+  on Open(owner, at, answer) {
     require status == Opening && account == none else reject "opened"
-    account' = account
-    thread' = thread
-    reply' = reply
-    emit read(owner: account, k: thread)
+    account' = owner
+    thread' = at
+    reply' = answer
+    emit read(owner: owner, k: at)
   }
 
   // The thread is read twice: when the to-do opens, for its title and due bucket, and when a draft is asked for.
@@ -360,7 +366,7 @@ machine Todo {
   }
 
   effect read(owner: Principal, k: Key) {
-    retrieve mail where owner == owner and thread == k limit 5
+    retrieve threads where owner == owner and thread == k limit 5
     ok(r) -> Read(items: r.items)
     failed -> ReadFailed()
   }
@@ -397,7 +403,7 @@ machine Todo {
   // S455: the compose credential, bound to the drafts URL exactly, so drafts/send is outside the gate.
   effect createDraft(account: Principal, body: Content) {
     kind "gmail.createDraft"
-    labels { egress:external }
+    labels { egress:external, read:private }
     targets { egress: exact "https://gmail.googleapis.com/gmail/v1/users/me/drafts" }
     uses gmail_draft { gmail.compose } for account
     to account

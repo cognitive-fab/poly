@@ -8,8 +8,7 @@
 //
 // A status question retrieves the asking customer's orders, and only theirs, and the answer cites them; the thread's
 // principal comes from the verifier's claims (S450), so the reply reaches the customer the orders belong to (AC22).
-// The refund names no holder: the merchant is the Stripe Connect grant's subject, not
-// program state (Q-EX6), which PL6822 refuses until S457 lands.
+// The refund names no holder: the merchant is the Stripe Connect grant's subject, not program state (Q-EX6, S457).
 module concierge
 
 audience { public < customer < staff }
@@ -22,7 +21,7 @@ enum Outcome { Refunded, Declined, Unsure, Status, Other }
 // AC30, PT28.3a: the extracted amount, a record of one field with a strict domain.
 type Amount = { value: 0..500 }
 
-enum Phase { Idle, Classifying, Looking, Citing, Extracting, Refunding, Answering, Sending, Templating }
+enum Phase { Idle, Classifying, Looking, Citing, Extracting, Refunding, Answering }
 
 // S450: the bound action's claims, a field of the WhatsApp kind's Sender claims.
 claims Customer {
@@ -34,8 +33,6 @@ source orders: records {
   audience customer owned
   freshness 1h
 }
-
-enum Last { Nothing, Sent, Refused, Lost }
 
 channel support: whatsapp {
   adapter "whatsapp"
@@ -67,16 +64,19 @@ credential payments: oauth2 {
   scopes { read_write }
 }
 
-// Desk: one per customer's WhatsApp thread. One message is worked on at a time; another that arrives meanwhile is
-// refused "busy" and waits in the conversation, which keeps at most two (std.channels.whatsapp).
+// Desk: one per customer's WhatsApp thread. One message is worked on at a time. A message that arrives meanwhile is
+// acknowledged with a short reply, so every message is answered (Q-EX7), and a third waits in the conversation, which
+// keeps at most two (std.channels.whatsapp). A reply refused outside the window ends its exchange: the customer's next
+// message opens the window again (the template retry is left out of v1, decisions-ex.md).
 service machine Desk {
   state {
     phase    : Phase     = Idle
     customer : Principal = none
     started  : bool      = false
     question : Content   = none
-    answer   : Content   = none
     large    : bool      = false
+    acking   : bool      = false
+    inflight : 0..3      = 0
   }
 
   action Start()
@@ -92,6 +92,8 @@ service machine Desk {
   action RefundFailed()
   action Answered(text: Content)
   action AnswerFailed()
+  action Acked(text: Content)
+  action AckFailed()
   action Delivered()
   action SendRejected(reason: string check { "window-closed" })
   action SendFailed()
@@ -102,11 +104,17 @@ service machine Desk {
   }
 
   on Got(body) by c: Customer {
-    require phase == Idle else reject "busy"
-    phase' = Classifying
-    customer' = c.principal
-    question' = body
-    decide classify(body: body)
+    if phase == Idle {
+      customer' = c.principal
+      phase' = Classifying
+      question' = body
+      decide classify(body: body)
+    } else {
+      require !acking else reject "busy"
+      customer' = c.principal
+      acking' = true
+      decide ack(question: body)
+    }
   }
 
   on Classified(branch, conf, margin) {
@@ -138,10 +146,14 @@ service machine Desk {
   }
 
   // The answer cites the orders it used, a subset of those it was given (PS17.6), and goes to the customer who asked.
+  // The Desk is idle again as it sends: the conversation holds the reply until the provider takes it.
   on Cited(text, cites) {
     require phase == Citing else reject "not-citing"
-    phase' = Sending
-    answer' = text
+    phase' = Idle
+    question' = none
+    if inflight < 3 {
+      inflight' = inflight + 1
+    }
     emit support.reply(body: text)
   }
 
@@ -152,6 +164,7 @@ service machine Desk {
   }
 
   // AC30: the amount reaches the program only as a value of 0..500; an answer outside it never reaches this handler.
+  // It is compared with 100 and passed on unchanged, so it is explored at its cuts (S458).
   on Amounted(value, conf) {
     require phase == Extracting else reject "not-extracting"
     if conf >= 0.8 {
@@ -184,8 +197,11 @@ service machine Desk {
 
   on Answered(text) {
     require phase == Answering else reject "not-answering"
-    phase' = Sending
-    answer' = text
+    phase' = Idle
+    question' = none
+    if inflight < 3 {
+      inflight' = inflight + 1
+    }
     emit support.reply(body: text)
   }
 
@@ -195,41 +211,43 @@ service machine Desk {
     question' = none
   }
 
-  // A receipt is never rejected (PL5406): each is taken in every phase, and settles the send it reports. A return to
-  // Idle clears the message and the reply, so an idle Desk is one state whatever it answered before.
+  // Q-EX7: the acknowledgement of a message that arrived while the Desk was busy.
+  on Acked(text) {
+    require acking else reject "not-acking"
+    acking' = false
+    if inflight < 3 {
+      inflight' = inflight + 1
+    }
+    emit support.reply(body: text)
+  }
+
+  on AckFailed {
+    require acking else reject "not-acking"
+    acking' = false
+  }
+
+  // A receipt is never rejected (PL5406): each is taken in every phase, and settles one send in flight.
   on Delivered {
-    if phase == Sending || phase == Templating {
-      phase' = Idle
-      question' = none
-      answer' = none
+    if inflight > 0 {
+      inflight' = inflight - 1
     } else {
-      phase' = phase
+      inflight' = 0
     }
   }
 
-  // AC15: a free-form reply refused outside the window goes again as a template, once.
   on SendRejected(reason) {
-    if phase == Sending {
-      phase' = Templating
-      emit support.template(body: answer)
+    if inflight > 0 {
+      inflight' = inflight - 1
     } else {
-      if phase == Templating {
-        phase' = Idle
-        question' = none
-        answer' = none
-      } else {
-        phase' = phase
-      }
+      inflight' = 0
     }
   }
 
   on SendFailed {
-    if phase == Sending || phase == Templating {
-      phase' = Idle
-      question' = none
-      answer' = none
+    if inflight > 0 {
+      inflight' = inflight - 1
     } else {
-      phase' = phase
+      inflight' = 0
     }
   }
 
@@ -250,7 +268,7 @@ service machine Desk {
   }
 
   effect lookup(customer: Principal) {
-    retrieve orders where owner == customer limit 3
+    retrieve orders where owner == customer limit 2
     ok(r) -> Found(items: r.items)
     failed -> LookupFailed()
   }
@@ -272,6 +290,14 @@ service machine Desk {
     failed -> AnswerFailed()
   }
 
+  decision ack(question: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Acked(text: r.answer)
+    failed -> AckFailed()
+  }
+
   effect refund(amount: 0..500) {
     kind "payments.refund"
     labels { egress:external }
@@ -283,18 +309,22 @@ service machine Desk {
   }
 }
 
-// Notice: the staff's Slack thread. The host dispatches Notify when the gate escalates a refund; a staff member's
-// message is heard and approves nothing (PF11.8, AC17): an approval is a person's signed record (PF9.6).
+// Notice: the staff's Slack thread. The host dispatches Notify when the gate escalates a refund, and Notice answers
+// each staff message with a short acknowledgement (Q-EX7). A staff message approves nothing (PF11.8, AC17): an
+// approval is a person's signed record (PF9.6). One notice is in flight at a time; an acknowledgement answers a
+// waiting message, which the conversation queues behind a send in flight.
 service machine Notice {
   state {
-    started  : bool = false
-    inflight : bool = false
-    heard    : bool = false
-    last     : Last = Nothing
+    started   : bool = false
+    acking    : bool = false
+    notifying : bool = false
+    sending   : 0..3 = 0
   }
 
   action Start()
   action Got(body: Content)
+  action Noted(text: Content)
+  action NotNoted()
   action Notify(text: Content)
   action Delivered()
   action SendRejected(reason: string check { "channel-archived", "rate-limited" })
@@ -306,28 +336,60 @@ service machine Notice {
   }
 
   on Got(body) {
-    heard' = true
+    require !acking else reject "busy"
+    acking' = true
+    decide noted(text: body)
   }
 
-  on Notify(text) {
-    require !inflight else reject "busy"
-    inflight' = true
+  on Noted(text) {
+    require acking else reject "not-acking"
+    acking' = false
+    if sending < 3 {
+      sending' = sending + 1
+    }
     emit staff.reply(body: text)
   }
 
+  on NotNoted {
+    require acking else reject "not-acking"
+    acking' = false
+  }
+
+  on Notify(text) {
+    require !notifying && sending == 0 else reject "busy"
+    notifying' = true
+    sending' = 1
+    emit staff.reply(body: text)
+  }
+
+  // A receipt settles one send in flight; the notice is done once nothing is in flight.
   on Delivered {
-    inflight' = false
-    last' = Sent
+    if sending > 0 {
+      sending' = sending - 1
+    }
+    notifying' = notifying && sending > 1
   }
 
   on SendRejected(reason) {
-    inflight' = false
-    last' = Refused
+    if sending > 0 {
+      sending' = sending - 1
+    }
+    notifying' = notifying && sending > 1
   }
 
   on SendFailed {
-    inflight' = false
-    last' = Lost
+    if sending > 0 {
+      sending' = sending - 1
+    }
+    notifying' = notifying && sending > 1
+  }
+
+  decision noted(text: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Noted(text: r.answer)
+    failed -> NotNoted()
   }
 }
 
