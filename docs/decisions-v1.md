@@ -359,3 +359,20 @@ What is ruled for after the release, in one place:
 
 - **Item 4, ruled: the release session's reading is accepted.** The concierge and the inbox are each `CLEAN` with their policy, and their journals replay; every other example's verdict equals its recorded one, under item 3. **Added:** every file in `examples/` carries a first line `// expected: CLEAN | FINDING <code> | INCONCLUSIVE <reason>`, and the gate compares each verdict with that line, so nobody has to know which files are teaching variants; `examples/README.md` states the line. Built: the 20 files on `v1` state their lines, taken from `docs/v1/verdicts-after-rulings.json` (a `FINDING` line lists every code the check reports, an `INCONCLUSIVE` reason begins with its code); `test/examples-expected.test.mjs` compares each (21 tests, all passing), and `test/after/serial-sources.test.mjs` does so for the serial group. One test read a diagnostic's line in `checkout-optimistic.poly`, now one lower.
 - **S461, per-owner grants for an owned source.** The inbox needs three Gmail accounts in one assistant, and S460 gives a source's credential exactly one grant. **Ruled:** an owned source's credential may name `holder Principal`; each owner gets one `Grant` instance, keyed by the owner's verified principal (S450); `rt.credentialHandle(c, owner)` routes a request only to that owner's grant, and a request for one owner's items through another owner's handle is refused, with a test; revoking one owner's grant stops only that owner's sync, with a test showing the other accounts still syncing; the checker treats these grants per owner, as M9 does for a credential held by a principal, adding only one `Grant` per owner in the instance. Built now, before the concierge probes, text first and tests from the text; added to the release notes. No full suite until the examples session has run its own.
+
+## S461, built (no full suite yet)
+
+| Text | Tests | Code |
+|---|---|---|
+| 1824c65f | c102801d (8; 7 failed before), 410b4488 | b49fce1c |
+
+**Decided under the plan's rules, recorded:**
+
+- **The retrieval's context.** The runtime runs every source adapter call (a retrieval, an envelope retrieval, and a decision's read of an item's body) inside a context that names the source and the owner, so a handle knows the retrieval it serves. A decision's read of a body runs under the grant of the item's owner, as the read of the retrieval that kept the item.
+- **An owner's handle fails closed.** Inside any retrieval whose owner is not its own (another owner's, one with no owner, or one from another source), it is refused `owner-mismatch` before the grant is read, and nothing is sent.
+- **The instance line** is the pipeline's, since poly-ref's instance sees the machine and not the module's sources; it is text in the instance record, no new artefact.
+- **The test fix (410b4488).** The required owner-mismatch test held on the first run; it failed at its last step only, on a recorded answer left queued for a body a retrieval never reads.
+
+**For the reviewer: a forget through a per-owner source.** `rt.forget` calls the source adapter's `forget(subject)`, which is not a retrieval, so the routing handle refuses it (`credential-unavailable`) and a forget by subject cannot reach such a source today: it fails closed, with nothing erased there. Running it under the subject's own grant would serve a forget while that grant is `Granted`, but not after its revocation, when a person who withdrew may most want it. Not built; a ruling is needed.
+
+**Tests run** (no full suite, as ordered): `test/source-credential-owners.test.mjs` and `test/source-credential.test.mjs`, 26 tests, no failure; the memory, envelope and `Items` tests before them, 51 tests, no failure but the one fixed in the test.

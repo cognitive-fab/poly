@@ -46,6 +46,7 @@ Each milestone's formats, commands and limits are in `docs/release-notes.md`.
 
 - **A person's credential may name no holder (S457).** It then has one grant, and the first signed grant request fixes the holder by keyed digest. Replacing the holder needs a revocation.
 - **A source names its credential (S460).** The certificate binds its vault, and its `Grant` tracks it. The adapter reaches the provider only through `rt.credentialHandle(c)`, which never yields a token, keeps to the provider's base addresses, and stops once the grant is not `Granted`. So revoking the grant stops the source's sync.
+- **Per-owner grants for an owned source (S461).** An owned source's credential may name `holder Principal`. Each owner then has its own grant, keyed by the owner's principal, so one assistant can hold several accounts' grants. Each retrieval names its owner and runs under that owner's grant only: a request for one owner's items through another owner's handle is refused `owner-mismatch`. Revoking one owner's grant stops that owner's sync and no other.
 - **Exact egress targets (S455).** `exact "<url>"` admits that URL and nothing under it, so a Gmail draft effect cannot reach `…/drafts/send`.
 
 ### Memory
