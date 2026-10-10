@@ -347,6 +347,12 @@ The example's two files, maps and prices as a project, its policy signed by a pe
 
 **The combined run.** Every examples test file, one process at a time (`ex-concierge-host`, `ex-concierge-policy`, `ex-gmail-source`, `ex-inbox-drafts`, `ex-inbox-read-grant`, `ex-inbox`, `ex-mime`): 40 tests, 40 passed. `ex-inbox-host`, written during it, passes 3 of 3 on its own.
 
+## IAC3 on the full inbox, with a 12 GB heap (2026-10-10)
+
+As ruled, the full-inbox variant was run once in its own process with a 12 GB heap (`--max-old-space-size=12288`), after checking that nothing else heavy was running. The variant is the inbox draft's Todo with the cut-down fixture's one change: a second principal `other`, set by `Link(p)`, under which `WriteDraft` reads the thread. It ran out of memory after 571 s: the last mark-compact was at 12,269.7 MB of a 12,293.3 MB heap. The unchanged inbox checks in about 2 minutes, with Todo at 7,294 states. A second `Principal` field multiplies the Todo's states by the principals it can hold, and the flow rule follows each body's owners through them.
+
+**So IAC3's evidence at check is the cut-down copy,** `test/fixtures/ex-inbox/cross-account.poly`: `PL6831` with the witness `Open -> Read -> Written -> Propose -> Enveloped`, and `CLEAN` when the thread is read under its own account. **Stated limit:** the full inbox with that change is not checkable within 12 GB. Its last heap figure was 12,269.7 MB at 571 s. At run time, IAC3 is shown on the full inbox: `createDraft` is denied `audience`.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy. The inbox meets IAC1 to IAC9 on recorded traffic, IAC5 in full once the release session's citation fix lands.
