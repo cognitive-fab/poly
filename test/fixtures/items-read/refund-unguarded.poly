@@ -1,0 +1,86 @@
+// S462 (PS17.4b, PT10j): variant without the guard. poly-ref must find PL6847 ONE_ITEM_COUNT
+// as a finding with witness, because the decision cites the context but may cite multiple items,
+// and the emit does not guard the count.
+module refund_desk
+
+audience { public < customer < staff }
+
+claims Customer {
+  principal: Principal
+}
+
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+  keys { order }
+}
+
+enum Phase { Idle, Looking, Answering }
+
+machine Desk {
+  state {
+    phase    : Phase     = Idle
+    customer : Principal = none
+    question : Content   = none
+  }
+
+  action Ask(question: Content)
+  action Found(items: Items)
+  action LookupFailed()
+  action Answered(cites: Items)
+  action AnswerFailed()
+
+  on Ask(question) by c: Customer {
+    require phase == Idle else reject "busy"
+    phase' = Looking
+    customer' = c.principal
+    question' = question
+    emit lookup(customer: c.principal)
+  }
+
+  on Found(items) {
+    require phase == Looking else reject "not-looking"
+    phase' = Answering
+    decide answer(question: question, context: items)
+  }
+
+  on LookupFailed {
+    require phase == Looking else reject "not-looking"
+    phase' = Idle
+  }
+
+  on Answered(cites) {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    emit refund(order: cites, customer: customer)
+  }
+
+  on AnswerFailed {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+  }
+
+  effect lookup(customer: Principal) {
+    retrieve orders where owner == customer limit 2
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision answer(question: Content, context: Items) -> Content {
+    provider "flash"
+    labels { egress:external, read:private }
+    timeout 2s
+    cites context
+    ok(r) -> Answered(cites: r.cites)
+    failed -> AnswerFailed()
+  }
+
+  effect refund(order: Items, customer: Principal) {
+    one order
+    kind "support.refund"
+    labels { egress:external }
+    to customer
+    audience public
+  }
+}

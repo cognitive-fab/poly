@@ -1,0 +1,43 @@
+// S462, PT10j: `one x` naming a parameter that does not exist is PL1001.
+module refund_desk
+
+audience { public < customer < staff }
+
+claims Customer {
+  principal: Principal
+}
+
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+  keys { order }
+}
+
+enum Phase { Idle, Looking, Answering }
+
+machine Desk {
+  state {
+    phase    : Phase     = Idle
+    customer : Principal = none
+  }
+
+  action Ask()
+  action Answered()
+
+  on Ask() by c: Customer {
+    phase' = Answering
+  }
+
+  on Answered() {
+    phase' = Idle
+  }
+
+  effect refund(customer: Principal) {
+    one nonexistent
+    kind "support.refund"
+    labels { egress:external }
+    to customer
+    audience public
+  }
+}

@@ -83,6 +83,9 @@ export const FAULT_SOURCES = {
   // PT10j (S460): the source descriptor's credential, which the runtime holds the source's adapter to, dropped, so the
   // source would run with no grant.
   'source-credential-dropped': ['test/fixtures/source-credential-fault/search.poly'],
+  // PT10j (S462): the effect's one-item entry, which the runtime checks before the memory check, dropped, so the
+  // runtime would skip the items-count check.
+  'one-dropped': ['test/fixtures/items-read/refund.poly'],
   // PT10r (M11): the route's and the budget's descriptors the runtime reads to run the tiers and hold the caps.
   'route-threshold-changed': ['test/fixtures/m11/desk.poly'],
   'route-tier-dropped': ['test/fixtures/m11/desk.poly'],
