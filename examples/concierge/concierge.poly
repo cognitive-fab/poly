@@ -1,3 +1,4 @@
+// expected: CLEAN
 // The concierge, poly v1's release example (plan-ex.md E1; AC15, AC18, AC22, AC27, AC30). A small business answers its
 // customers on WhatsApp. A routed decision classifies each message from its body (S402): the small tier first, the
 // large one when the calibrated answer is unsure. A refund's amount is extracted by a typed decision with a strict

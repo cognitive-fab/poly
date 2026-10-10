@@ -1,8 +1,8 @@
 // plan-ex.md E2.2: the inbox assistant admitted, loaded and connected over recorded traffic only. The module is the
-// draft in docs/ex/inbox-draft until the example checks resolve std, profiles and route files (decisions-ex.md). The
-// vault speaks to a fake Google token endpoint whose tokens the test makes; the Gmail source replays the recorded tapes
-// through the vault's withToken, as the host binds it to each account's read grant; every decision is answered by a
-// recorded provider. No test reaches Google or calls a model.
+// draft in docs/ex/inbox-draft until the example checks resolve std, profiles and route files (decisions-ex.md). Both
+// credentials' vaults are the runtime's and speak to a fake Google token endpoint whose tokens the test makes; the Gmail
+// source replays the recorded tapes through the runtime's handles for the read credential, one grant per account
+// (S461); every decision is answered by a recorded provider. No test reaches Google or calls a model.
 import assert from 'node:assert/strict';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -31,15 +31,14 @@ function memoryWrap() {
 }
 
 /**
- * S460 with one account: the draft whose mail source names a holder-less read credential, so the runtime's vault holds
- * the read grant and its Grant instance tracks it. A grant reaches one mailbox; the three accounts of IAC1 stay on the
- * host's read vault until S461 gives an owned source's credential a grant per owner (decisions-ex.md).
+ * S460: the draft with a holder-less read credential, which has one grant and so reaches one mailbox. The draft itself
+ * names gmail_read with holder Principal, one grant per account (S461).
  */
-export const SOURCE_READ_GRANT = (() => {
-  const swap = (src, from, to) => { assert.equal(src.split(from).length, 2, from); return src.split(from).join(to); };
+export const SOURCE_ONE_GRANT = (() => {
   const nl = SOURCE.includes('\r\n') ? '\r\n' : '\n';
-  const read = ['credential gmail_read: oauth2 {', '  provider "google"', '  grant authorization_code pkce', '  scopes { gmail.readonly }', '}', '', 'source mail: records {', '  adapter "gmail"', '  credential gmail_read'].join(nl);
-  return swap(SOURCE, ['source mail: records {', '  adapter "gmail"'].join(nl), read);
+  const from = ['  scopes { gmail.readonly }', '  holder Principal'].join(nl);
+  assert.equal(SOURCE.split(from).length, 2, from);
+  return SOURCE.split(from).join('  scopes { gmail.readonly }');
 })();
 
 /** The draft as a project: the module, its policy (signed by a person), and its price tables and maps. */
@@ -51,7 +50,7 @@ export async function admittedInbox(name, { source = SOURCE, policy = POLICY } =
   cpSync(join(DRAFT, 'prices'), join(dir, 'src', 'prices'), { recursive: true });
   cpSync(join(DRAFT, 'maps'), join(dir, 'src', 'maps'), { recursive: true });
   const cfg = JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8'));
-  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...cfg, credentials: { gmail_draft: { store: 'kms' }, ...(source.includes('credential gmail_read') ? { gmail_read: { store: 'kms' } } : {}) } }, null, 2));
+  writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...cfg, credentials: { gmail_draft: { store: 'kms' }, gmail_read: { store: 'kms' } } }, null, 2));
   await signPolicies(dir);
   const r = await admit(dir);
   assert.ok(r.certificatePath, `the inbox is admitted: ${JSON.stringify(r.certificate ?? r).slice(0, 3000)}`);
@@ -79,14 +78,16 @@ export function recordedInbox(answers) {
 }
 
 /**
- * The inbox loaded over a store file. The compose credential's vault is the runtime's, with a grant per account. The
- * read grant is the runtime's too when the source names its credential (S460, `readGrant: 'source'`, one account): the
- * Gmail source is built with rt.credentialHandle('gmail_read'). Otherwise (`'host'`, until S461) the read-only grants
- * are the host's own, one per account, in a vault the host keeps. Both vaults speak to a fake Google token endpoint; the
- * Gmail API answers from the tapes; and the recorded providers answer every decision. `tokens` makes each token the
- * endpoint issues, so a canary can be put in one.
+ * The inbox loaded over a store file. Both credentials' vaults are the runtime's, each with a grant per account
+ * (PS16.2): the compose credential's, and the read credential's (S461), so revoking one account's read grant stops that
+ * account's sync and no other. The Gmail source is built with the runtime's routing handle for gmail_read, and each
+ * account syncs through its owner's handle, rt.credentialHandle('gmail_read', owner). With `oneGrant` (S460, one
+ * account, SOURCE_ONE_GRANT) the read credential has one grant, requested by the person's signed grant request, and the
+ * account syncs through the one handle. Both vaults speak to a fake Google token endpoint; the Gmail API answers each
+ * request from the tape of the account whose token the vault attached; and the recorded providers answer every
+ * decision. `tokens` makes each token the endpoint issues, so a canary can be put in one.
  */
-export async function inbox(a, { db, tapes, answers, tokens = (k) => `${k}-${randomBytes(18).toString('base64url')}`, mailStore = memoryMailStore(), readGrant = 'host', accounts: chosen = ACCOUNTS }) {
+export async function inbox(a, { db, tapes, answers, tokens = (k) => `${k}-${randomBytes(18).toString('base64url')}`, mailStore = memoryMailStore(), oneGrant = false, accounts: chosen = ACCOUNTS }) {
   const { rt, clock } = await loaded(a, { store: { sqlite: db } });
   const issued = [];
   // The Gmail API, from the tapes: the first unused exchange of the account with the same method and URL answers.
@@ -99,31 +100,37 @@ export async function inbox(a, { db, tapes, answers, tokens = (k) => `${k}-${ran
     e.used = true;
     return { status: e.response.status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(e.response.body) };
   };
-  const google = (label) => ({
+  // Each access token the endpoint issues, and the account whose consent it was issued for.
+  const tokenOf = new Map();
+  let consenting = null;
+  const google = {
     async request(q) {
       if (q.url === GOOGLE.token) {
         const at = tokens('at');
         const rt_ = tokens('rt');
         issued.push(at, rt_);
+        tokenOf.set(at, consenting);
         return { status: 200, headers: {}, body: JSON.stringify({ access_token: at, refresh_token: rt_, token_type: 'Bearer', expires_in: 3599 }) };
       }
       if (q.url === GOOGLE.revocation) return { status: 200, headers: {}, body: '' };
-      return gmail(q, label());
+      const auth = Object.entries(q.headers ?? {}).find(([h]) => h.toLowerCase() === 'authorization')?.[1] ?? '';
+      return gmail(q, tokenOf.get(String(auth).replace(/^Bearer /, '')) ?? null);
     },
-  });
+  };
   const client = { clientId: 'inbox', redirectUri: 'https://inbox.example/credentials', clientSecret: randomBytes(24).toString('base64url') };
-  // The compose credential, the runtime's: one grant per account (PS16.2).
-  const drafts = oauthVault(GOOGLE, client, kmsStore(memoryWrap()), { http: google(() => null) });
+  const drafts = oauthVault(GOOGLE, client, kmsStore(memoryWrap()), { http: google });
+  const reads = oauthVault(GOOGLE, client, kmsStore(memoryWrap()), { http: google });
   rt.connectVault('gmail_draft', drafts);
-  let reading = null;
-  const reads = oauthVault(GOOGLE, client, kmsStore(memoryWrap()), { http: google(() => reading) });
-  if (readGrant === 'source') {
+  rt.connectVault('gmail_read', reads);
+  const callback = credentialIngress(rt, { gmail_draft: drafts, gmail_read: reads }, () => rt.now());
+  const consent = async (c, url, label) => {
+    consenting = label;
+    const res = await callback(c, { method: 'GET', url: `https://inbox.example/credentials/${c}?code=c-${randomBytes(6).toString('hex')}&state=${new URL(url).searchParams.get('state')}`, headers: {}, body: '' });
+    consenting = null;
+    assert.equal(res.status, 200, `the ${c} grant of ${label}`);
+  };
+  if (oneGrant) {
     assert.equal(chosen.length, 1, 'a source credential\'s one grant reaches one mailbox (S460)');
-    rt.connectVault('gmail_read', reads);
-    reading = chosen[0].label;
-  }
-  const callback = credentialIngress(rt, readGrant === 'source' ? { gmail_draft: drafts, gmail_read: reads } : { gmail_draft: drafts }, () => rt.now());
-  if (readGrant === 'source') {
     // S457, PT10g: a person's credential with no holder is requested by the person's signed grant request, which fixes
     // the account's principal as its holder; the runtime makes the authorization URL, and the person consents.
     const approvals = join(dirname(db), 'approvals');
@@ -132,30 +139,20 @@ export async function inbox(a, { db, tapes, answers, tokens = (k) => `${k}-${ran
     writeFileSync(join(approvals, '00-read-grant.json'), JSON.stringify({ kind: 'grant-request', credential: 'gmail_read', holder: chosen[0].owner, record }));
     const taken = await rt.takeApprovals(approvals);
     assert.deepEqual(taken.map((x) => x.outcome), ['applied'], JSON.stringify(taken));
-    const url = rt.takeAuthorizations().find((x) => x.credential === 'gmail_read').url;
-    const res = await callback('gmail_read', { method: 'GET', url: `https://inbox.example/credentials/gmail_read?code=c-${randomBytes(6).toString('hex')}&state=${new URL(url).searchParams.get('state')}`, headers: {}, body: '' });
-    assert.equal(res.status, 200, 'the read grant');
+    await consent('gmail_read', rt.takeAuthorizations().find((x) => x.credential === 'gmail_read').url, chosen[0].label);
   }
   for (const acct of chosen) {
-    const url = await rt.requestGrant('gmail_draft', acct.owner);
-    const state = new URL(url).searchParams.get('state');
-    const res = await callback('gmail_draft', { method: 'GET', url: `https://inbox.example/credentials/gmail_draft?code=c-${randomBytes(6).toString('hex')}&state=${state}`, headers: {}, body: '' });
-    assert.equal(res.status, 200, `the compose grant of ${acct.label}`);
-    if (readGrant === 'source') continue;
-    // The read-only grants, the host's until S461: one per account, by a grant id the host names.
-    const r = await reads.authorize({ grantId: `read:${acct.label}`, scopes: ['gmail.readonly'], now: rt.now() });
-    const v = await reads.verify({ method: 'GET', url: `https://inbox.example/credentials?code=c-${randomBytes(6).toString('hex')}&state=${r.state}`, headers: {}, body: '' }, rt.now());
-    assert.equal(v.grantId, `read:${acct.label}`, `the read grant of ${acct.label}: ${JSON.stringify(v)}`);
+    await consent('gmail_draft', await rt.requestGrant('gmail_draft', acct.owner), acct.label);
+    if (!oneGrant) await consent('gmail_read', await rt.requestGrant('gmail_read', acct.owner), acct.label);
   }
-  const accounts = readGrant === 'source'
-    ? chosen.map((acct) => ({ owner: acct.owner, label: acct.label }))
-    : chosen.map((acct) => ({ owner: acct.owner, label: acct.label, request: async (q) => { reading = acct.label; return reads.withToken(`read:${acct.label}`, q); } }));
-  const source = gmailSource(readGrant === 'source' ? { accounts, transport: rt.credentialHandle('gmail_read'), store: mailStore } : { accounts, store: mailStore });
+  // S461: each account syncs through its owner's handle; the adapter is built with the routing handle.
+  const accounts = chosen.map((acct) => (oneGrant ? { owner: acct.owner, label: acct.label } : { owner: acct.owner, label: acct.label, request: rt.credentialHandle('gmail_read', acct.owner).request }));
+  const source = gmailSource({ accounts, transport: rt.credentialHandle('gmail_read'), store: mailStore });
   rt.connectSource('mail', source);
   const p = recordedInbox(answers);
   rt.provideTier('small', p.tiers.small);
   rt.provideTier('large', p.tiers.large);
   for (const d of ['summary', 'when', 'write']) rt.provide(d, { provider: p.decision, model: 'flash-2026-09' });
   const settle = async (n = 30) => { for (let i = 0; i < n; i++) await rt.worker.tick(); };
-  return { rt, clock, source, accounts, provider: p, issued, seen, left, settle, reads };
+  return { rt, clock, source, accounts, provider: p, issued, seen, left, settle };
 }

@@ -160,12 +160,15 @@ test('S452: a body is bounded, and the adapter refuses a configuration it could 
     [[{ owner: 'acct-work', label: 'work', request: 'no' }], /request/],
     [[], /account/],
   ]) assert.throws(() => gmailSource({ accounts, store: memoryMailStore() }), why);
-  // S460: a source built with the runtime's handle has one account, which gives no request of its own.
+  // S460: a source built with a one-grant handle has one account, which gives no request of its own. S461: with the
+  // routing handle, every account gives its owner's handle, or none does.
   const handle = { request: async () => ({ status: 500, headers: {}, body: '' }) };
   for (const [accounts, why] of [
     [[{ owner: 'acct-work', label: 'work' }, { owner: 'acct-home', label: 'home' }], /one account/],
-    [[account('acct-work', 'work', t)], /gives none/],
+    [[account('acct-work', 'work', t), { owner: 'acct-home', label: 'home' }], /or none does/],
+    [[{ owner: 'acct-work', label: 'work', request: 'no' }], /request is a function/],
   ]) assert.throws(() => gmailSource({ accounts, transport: handle, store: memoryMailStore() }), why);
+  assert.doesNotThrow(() => gmailSource({ accounts: [account('acct-work', 'work', t), account('acct-home', 'home', t)], transport: handle, store: memoryMailStore() }));
   assert.throws(() => gmailSource({ accounts: [{ owner: 'acct-work', label: 'work' }], transport: {}, store: memoryMailStore() }), /handle/);
   assert.throws(() => gmailSource({ accounts: [{ owner: 'acct-work', label: 'work' }], store: memoryMailStore() }), /request/);
 });
