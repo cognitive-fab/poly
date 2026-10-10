@@ -57,16 +57,16 @@ test('E1: the reply decision answers each message and outcome the program can as
   assert.equal(r.decisions.noted.provider({ decision: 'noted' }, { bodies: { text: 'Can someone look at ticket 42?' } }).answer, 'Noted.');
 });
 
-test('E1, AC22: the status answer cites only orders it was given, always at least one, and the seeded orders belong to two customers', () => {
+test('E1, AC22: the status answer cites only orders it was given and used, and the seeded orders belong to two customers', () => {
   const r = recordedConcierge(FIXTURE);
   const own = FIXTURE.orders.filter((o) => o.owner === FIXTURE.customers['wa-1']).map((o) => ({ id: o.id, body: o.body }));
   const a = r.decisions.answer.provider({ decision: 'answer', payload: {} }, { bodies: { question: msg('status').text }, items: { context: own } });
   assert.match(a.answer, /Order 1002/);
   assert.deepEqual(a.cites, ['o-1002']);
-  // Given other orders, it cites none of its recorded ids, which it was not given: a citation is a subset of what was
-  // given, and one is required (PS17.6), so it cites the orders it read.
+  // Given other orders, it cites none of its recorded ids, which it was not given, and nothing it did not use: the
+  // empty citation is refused uncited at run time (PS17.6), so the answer takes the failed path.
   const other = FIXTURE.orders.filter((o) => o.owner === FIXTURE.customers['wa-2']).map((o) => ({ id: o.id, body: o.body }));
-  assert.deepEqual(r.decisions.answer.provider({ decision: 'answer', payload: {} }, { bodies: { question: msg('status').text }, items: { context: other } }).cites, ['o-2001']);
+  assert.deepEqual(r.decisions.answer.provider({ decision: 'answer', payload: {} }, { bodies: { question: msg('status').text }, items: { context: other } }).cites, []);
   assert.deepEqual([...new Set(FIXTURE.orders.map((o) => o.owner))].sort(), ['cust-a', 'cust-b']);
   assert.equal(FIXTURE.customers[msg('status').from], 'cust-a');
 });
