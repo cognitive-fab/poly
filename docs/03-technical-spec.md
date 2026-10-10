@@ -1327,6 +1327,8 @@ The verdicts and exit codes follow the polygents codes:
 
 ### PT12.3a Every verdict carries its instance
 
+**Warnings (v1, ruled 2026-10-09).** `poly check` prints a warning, beside the verdict and never in it, for each action parameter named after a state field of its machine, naming both: the parameter shadows the field wherever the action is known (S19), which reads easily as the field. The report lists them under `warnings`, `{ machine, action, param, field }`; a warning is not a diagnostic, changes no verdict and is not certified. After v1 such a parameter is `PL1002`, with std and the corpora renamed together (decisions-v1.md, After v1).
+
 A verdict is printed with the checked instance it holds for (PS4.3), and the same record is written to the certificate under `instance`:
 
 ```
