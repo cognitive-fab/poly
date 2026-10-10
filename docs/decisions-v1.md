@@ -340,3 +340,17 @@ What is ruled for after the release, in one place:
 - **(c)** The report's `warnings` is absent when there is none.
 
 **Suite.** At 96929562: 2,284 tests and 6 in the after group, all passed but 2 skipped and 4 waiting, no failure; check-memory passed (`.poly/logs/96929562-2026-10-10T04-46-42-521Z-w7.log`). One heavy job on the machine.
+
+## An Items at the type check, and the serial after-suite group (owner's reviewer, 2026-10-10)
+
+**The defect.** The examples suite (`ex`, rebased on 459) failed `test/runtime-type.test.mjs` on `examples/concierge`: `Found.items = {"count":0}` is in the contract's data domain, and the runtime's type check refused it, since it asked for `{ ref, count }` with a `ref` beginning `items:`. **Ruled:** an `Items` is checked as a `Content` is. The checker's domain covers the count; the `ref` is an opaque handle, never a domain value, so the runtime checks only its form (`items:` and a key it stored) and the count against the domain; no synthetic reference enters a domain.
+
+| Text | Tests | Code |
+|---|---|---|
+| b8bccdc5 (PT10j) | 52dd6e49 (8; 4 failed before) | c0e99891 |
+
+**Decided under the plan's rules, recorded.** The type check reads the top of the domain's counts from the contract's `dataDomain`, and asks the store whether it keeps the item set (`poly_items`); an item set forgotten since is outside the type, which fails closed. The domain sweep of `test/runtime-type.test.mjs` carries each `Items` count by a reference its lookup holds. The older test of an outside `Found` with a forged reference now takes either refusal, the type check's or K10's, both before any step; the new tests show K10 alone with a stored reference.
+
+**The serial after-suite group (ruled 2026-10-10).** `test/serial-sources.mjs` names `examples/concierge/`: its sources stay in the standing rule's coverage, the parallel sweeps of `test/standing.test.mjs` and `test/tv.test.mjs` skip them, and `test/after/serial-sources.test.mjs` runs the same two assertions after the parallel suite (c7af49be). The example arrives from `ex`; on `v1` the group holds no source yet.
+
+**Suite.** At c0e99891: 2,292 tests and 7 in the after group, all passed but 2 skipped and 4 waiting, no failure; check-memory passed (`.poly/logs/c0e99891-2026-10-10T12-31-21-167Z-w8.log`).
