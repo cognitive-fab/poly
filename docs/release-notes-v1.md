@@ -128,6 +128,7 @@ What is ruled for after the release (`decisions-v1.md`, "After v1"):
 - **`PL1002` for a parameter named after a state field.** It lands with std's channel kinds (`Conversation.Open(app)`), the conformance cases, the examples and the tests' fixtures renamed together, and `conformance/m0/shadowing.poly` turned into its error source. 35 such parameters were found in 275 sources.
 - **Erasure at the provider, where the provider's copy is poly's own.** An example is a table poly wrote and reaches through a credential. It needs its own ruling, since a forget uses no grant in v1.
 - **The journal records of a provider revocation are named in the spec.** In v1 each attempt is journaled, and the spec does not yet say by which records.
+- **The full inbox checked with its cross-account variant (IAC3).** It runs out of a 12 GB heap; in v1 IAC3's witness comes from a cut-down copy of the inbox.
 - **E3: the checked harness example** (Q-V2), and M7, which follows the release.
 
 ## Conclusion
