@@ -47,15 +47,15 @@ export function recordedConcierge(fixture) {
     if (typeof text !== 'string') throw new Error(`no recorded ${outcome} reply for ${m.id}`);
     return { answer: text, distribution: [[text, 1]], reported: fixture.models.small, latencyMs: 0 };
   };
-  // The status answer: its text, and the ids it cites, kept to the items it was given (PS17.6). A citation is required
-  // (PS17.6 as amended, 58b59cd5): when none of the fixture's ids was returned, the answer cites every item it read.
+  // The status answer: its text, and the ids it cites, kept to the items it was given (PS17.6). When none of the
+  // fixture's ids was returned, it cites nothing rather than items it did not use, and a citation being required
+  // (PS17.6 as amended, 58b59cd5), the answer is refused uncited and takes the failed path.
   const answer = (q, materials) => {
     const m = messageOf(fixture, materials);
     asked.push({ decision: q.decision, tier: null, message: m.id });
     if (!m.answer) throw new Error(`no recorded answer for ${m.id}`);
     const read = Object.values(materials?.items ?? {}).flat().map((i) => i.id);
-    const named = m.answer.cites.filter((id) => read.includes(id));
-    return { answer: m.answer.text, distribution: [[m.answer.text, m.answer.p]], cites: named.length ? named : read, usage: m.answer.usage, reported: fixture.models.small, latencyMs: 0 };
+    return { answer: m.answer.text, distribution: [[m.answer.text, m.answer.p]], cites: m.answer.cites.filter((id) => read.includes(id)), usage: m.answer.usage, reported: fixture.models.small, latencyMs: 0 };
   };
   // Q-EX7: the acknowledgement of a message that arrives while the Desk is busy, and of each staff message. Both are
   // the fixture's fixed texts, whatever the message: an acknowledgement says only that the message was seen.

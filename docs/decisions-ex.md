@@ -375,6 +375,17 @@ As ruled, the full-inbox variant was run once in its own process with a 12 GB he
 
 **Order.** AC27 waits for S462 and for the release session's suite to end. Then this branch rebases, fixes the refund, checks that nothing heavy is running, runs AC27, and reports its divergences.
 
+## The inbox tests after the rebase, and the recorded answer's citation corrected (owner's reviewer, 2026-10-10)
+
+**Ruled.** When none of the fixture's order ids was returned, the concierge's recorded `answer` cites nothing. The earlier fallback cited every order it read, which made the answer cite items it did not use only to avoid the refusal. Now the answer is refused `uncited` and takes the failed path. The normal case is unchanged: it cites the fixture's ids among the orders it read. `test/ex-concierge-host.test.mjs` expects an empty citation for another customer's orders, and passes 5 of 5.
+
+**The rerun.** The release session's `w9` had ended clean, and nothing heavy was running. Every inbox test file ran one process at a time (`ex-inbox`, `ex-inbox-drafts`, `ex-inbox-read-grant`, `ex-inbox-host`, `ex-gmail-source`, `ex-mime`): **35 tests, 35 passed**, in 806 s.
+- **IAC1 to IAC9** all pass on the rebased branch.
+- **IAC5** now covers an answer citing none, which the runtime refuses `uncited`.
+- **IAC9's figures are unchanged:** Todo 7,294 states; 65 runs and 369 rows replay, and 3 gate sessions with 41 proposals.
+
+**Next.** S462, then AC27.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy. The inbox meets IAC1 to IAC9 on recorded traffic, IAC5 in full once the release session's citation fix lands.
