@@ -295,6 +295,31 @@ The example's two files, maps and prices as a project, its policy signed by a pe
   - `PL6503`, never: `large-refund-unreviewed` is violated by an approved large refund (verdict `allow (approved)`). S149 reads an escalation that an approval would allow as an allow. This is the limit ruled on 2026-10-09: a policy cannot say "only with an approval".
 - **For a ruling.** The inbox's fix was a gate on its decisions and no `never`. Here that means dropping the `never`, since the obligation already states the review. It also means an obligation over the six decisions whose condition can hold, and the concierge has no rule of its own to put there yet. The inbox's gate was freshness by `effect.items.age`. Most of the concierge's decisions carry no `Items`, so that condition would be unknown for them.
 
+## The concierge's policy ruled, and its project check CLEAN (owner's reviewer, 2026-10-10)
+
+**Ruled.**
+- **The never statement is dropped,** as in the inbox. The refund rule's escalation of a refund above 100 to a person stays as the control. The limit (a policy cannot say "only with an approval") is recorded above.
+- **Every decision is gated by its audience.** A customer-facing decision (`classify`, `amount`, `answer`, `reply`, `ack`) is denied when any input is above the customer audience, and the staff decision (`noted`) when any input is above the staff audience. No decision is left out.
+- **The rule must be able to deny,** shown by a variant in the tests that feeds a staff note into `decision.classify`.
+
+**Built.**
+- `examples/concierge/concierge.policy.poly` has two new obligations, `customer-decisions` and `staff-decisions`. Each reads `effect.taint.class`, the join of a decision's inputs (PS17.2), and is `require false else deny` with `on unknown deny`. Every decision of the concierge takes a `Content`, so each is proposed with its taint.
+- **What polycheck counts as a gate.** Its regions treat a decision as gated when any rule of the scope names its kind (`mentionedKinds`). The region check alone cannot tell whether the rule can deny, which is why the variant is needed.
+
+**The variant,** `test/fixtures/ex-concierge/staff-classify.poly`.
+- It is a module named `concierge`, so the concierge's policy governs it unchanged. Its staff Slack channel (`audience staff`) feeds each message into `decision.classify`.
+- It declares the concierge's other decision kinds and the refund effect, so every kind the policy names is one of the program's.
+- `test/ex-concierge-policy.test.mjs` passes three tests:
+  - **The decision table.** poly-ref's decision table proposes `decision.classify` with each class and with none. `decide` denies the staff rows by `refunds.customer-decisions`, allows the public and customer rows, and denies a row with no taint, which is unknown to the rule. With the two audience obligations taken out, the same staff rows are allowed, so the deny is the rule's.
+  - **With the policy:** regions find "credential-egress: every path crosses a gate", and the policy is CLEAN.
+  - **Without the two audience obligations:** `PL7001`, region `credential-egress`, with the witness `decision.classify` holding `sensitive` and `egress`.
+- **A stated property of the staff rule.** Nothing in this audience is above staff, so `staff-decisions` denies `noted` only when its taint is unknown. It still names the kind, which is what gates it, and it will deny once the audience has a class above staff.
+
+**The project check with the policy.** No release-session run was active, and the check ran in its own process (8 GB heap; resident 1.99 GB at the end). It took 167 s, and the verdict is **CLEAN**.
+- **The module:** Desk 1,826 states and 82,170 transitions; Notice 28 and 420; support.Conversation 342 and 16,074; staff.Conversation 666 and 41,958; payments.Grant 13 and 104; triage.Route 6 and 36; spend.Budget 96 and 2,976.
+- **The configurations:** support at 26,211 global states, staff at 3,620.
+- **The policy:** all seven stages CLEAN. Polyaxion's admission checked the coverage of all six rules (three obligations, each with its `on unknown`). policy-tv found 118 proposals agreeing. Regions report: lethal-trifecta unreachable, credential-egress with every path crossing a gate, source-egress unreachable. The never stage reports "no never statement".
+
 ## Conclusion
 
-The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. Next are the concierge's project check with its policy, and the inbox's remaining acceptance tests.
+The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy. Next are the inbox's remaining acceptance tests.
