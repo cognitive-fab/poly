@@ -169,6 +169,49 @@ With S456 and S457 on `ex`, the draft is checked with its real credential (S457 
 - **S459, a gap in the core: a handler cannot read the body of a `Content` in its own payload.** Only a channel's send resolves bodies; any other effect's handler is given digests (`packages/poly-runtime/src/capabilities.ts`, `worker.ts`). So `createDraft` cannot get the draft's text to send to Gmail. Nor can it get the reply's recipient, subject and threading headers: the program holds the correspondent only by a keyed key, the compose token cannot read the thread (`users.threads.get` takes no `gmail.compose`), and a recipient written by the model would let a message choose where its reply goes. **Proposal (for the release session):** (a) a handler is given read access to the bodies of the `Content` values of its own payload, and of nothing else, only once the flow check has allowed the intent (PS17.3), each read recorded by digest; (b) a source may give, by key, an envelope item for a thread (the recipient, subject, `In-Reply-To` and `References` of a reply to its newest message), which the program passes to the draft effect as a `Content` tainted by the account, so the recipient comes from the source and never from a decision. Until S459, E2 builds and tests what does not create a draft: IAC1, IAC3, IAC4, IAC5, IAC6, IAC8, IAC7 without a draft, and IAC9's check.
 
 
+## Q-EX7 and the template retry ruled, S458 landed (owner's reviewer, 2026-10-09)
+
+- **Q-EX7: option 1.** `Desk` acknowledges a message that arrives while it is busy, and `Notice` acknowledges each staff message. M8's rule stays: an unexercised rule keeps the verdict at INCONCLUSIVE.
+- **The template retry is dropped for v1.** **Limit, for the release notes:** a free-form WhatsApp reply refused `window-closed` is not sent again as a template; the exchange ends, and the customer's next message opens the window again. AC15 holds as written: the variant that sends after the window gets a witness at check, and the conversation refuses the send at run time.
+- **S458 landed** (bd52f07c, recorded at 1f1d17f4); `ex` rebased on `v1` at 1f1d17f4 with no conflict. S459 and the example harness fix are queued on `v1`.
+
+## E1: the concierge CLEAN at 0..500 (2026-10-09)
+
+The draft, as committed with this entry, has the ruled changes: `Desk` keeps no reply and has no template retry; its order retrieval is limited to 2; a message that arrives while it is busy gets an acknowledgement written by the decision `ack`, so two replies can be in flight; the `Desk` is idle again as it sends, and counts its sends in flight (`inflight: 0..3`) so each receipt settles one; `Notice` answers each staff message through the decision `noted`, and sends one notice at a time. The amount stays a strict `0..500`.
+
+**The check** (`poly check` on the module, the policy apart, a 12 GB heap; the inbox's tests ran for about a minute of it, so the time is an upper bound, measured again in the after-suite group): **CLEAN in 6 min 27 s.**
+
+| Machine or configuration | States | Steps or transitions |
+|---|---|---|
+| `Desk` | 1,826 (flow rule 2,978) | 107,734 transitions agreed by translation validation |
+| `Notice` | 28 (flow rule 28) | 504 |
+| `support.Conversation` | 342 | 20,178 |
+| `staff.Conversation` | 666 | 49,950 |
+| `payments.Grant` | 13 | 104 |
+| `triage.Route` | 6 | 36 |
+| `spend.Budget` | 96 | 2,976 |
+| configuration `support` | 26,211 global states (flow rule 34,179) | 650,210 global steps |
+| configuration `staff` | 3,620 global states (flow rule 3,620) | 194,795 global steps |
+
+- **S458 at work:** `Amounted.value ∈ 0..500 at {0, 101} cut by {100}`, in the checked instance. `large' = value > 100` is a comparison with a constant, so the field write does not turn the reduction off.
+- **No rule is vacuous.** `free-form-outside-window`, `one-send-at-a-time` (both channels) and `no-post-to-archived` are all tested; no `PL6838`.
+- **A defect of the draft, found by the check:** `Got` wrote `customer'` before the `require` of its busy branch, `PL2101 WRITE_BEFORE_REQUIRE` (PT4.1); the write moved into each branch after its `require`.
+- **Still to run:** the project's check with the policy (polycheck's regions and the decision table), and the after-suite test that runs it apart, once the harness fix lets the concierge move to `examples/concierge/`.
+
+## E2.2: the inbox's first acceptance tests, and three findings (2026-10-09)
+
+`test/ex-inbox-helpers.mjs` admits the draft as a project (its policy signed by a person), loads it over a store file, connects the compose credential's vault with a grant per account, the Gmail source over the recorded tapes, and recorded providers for every decision. `examples/inbox/host/inbox.mjs` is the host: one pass syncs an account, creates one `Message` per item not yet announced (`msg:<label>:<message id>`), and announces the items whose instance exists; `openTodos` opens a thread's `Todo` (`todo:<label>:<thread id>`) once a `Message` of it is actionable.
+
+Found while writing them, each fixed in the draft or the harness:
+
+- **The policy.** Admission found two findings. polycheck's `credential-egress` region reached `decision.triage` with no gate crossed (`PL7001`): each of the five decisions reads the account's mail and sends it to a model provider. The policy now gates them with an obligation that a model is asked only about mail no older than thirty days. And the `never` that a draft is never created without the owner was violated by design (`PL6503`): S149 counts an escalation that a person's approval would allow as an allow, so a `never` cannot say "only with an approval". It is gone. In its place, `createDraft` is labelled `read:private` beside `egress:external`, since it carries the account's mail out: without the escalation, polycheck's region reaches it ungated (`PL7001`), which is IAC2's witness at check.
+- **A parameter named after a field hides it.** `Arrived(account, id)` wrote `account' = account` after `require … account == none`, and inside the handler `account` is the parameter: every arrival was refused `arrived`. The parameters are now `owner` and `item` (and `Open(owner, at, answer)`). No diagnostic said so; M8 refused a parameter named after a channel (`PL1002`, review A-F3) but not one named after a field. **For the release session:** a parameter that hides a state field could be `PL1002` too.
+- **The read grant is the host's (Q-EX8, for the reviewer).** A credential that no program effect uses gets no vault in the certificate, so `rt.connectVault('gmail_read', …)` is refused ("no credential gmail_read; the certificate binds gmail_draft"). The source's syncs are the adapter's, not an effect's, as a Postgres connection is the host's. So `gmail_read` is no longer declared in the module: the host keeps the read-only grants in a vault of its own (`oauthVault`, `gmail.readonly`, one per account), and the source calls `withToken` through it. The token stays in a vault and never reaches the program, but the runtime's `Grant` machine does not track the read grant, and its revocation is the host's. The alternative is a source that names its credential, which is a change to PS17.0.
+- **A defect of S41 with S451, for the release session.** Every retrieval of one source shares the kind `source.<s>.retrieve`, and S41 requires effects of one kind to agree on payload, completions and class; but the retrieval's key and limit are not part of that signature, and the manifest keeps one entry per kind. `Message` retrieved `mail` by `message == k limit 1`, `Todo` by `thread == k limit 5`; the check passed, and at run time both ran as the `Todo`'s, so the first message got its whole thread and the second an empty set (measured: `poly_items` held `[a02, a01]` for the first message's retrieval and `[]` for the second's). The draft now reads threads through a second source, `threads`, over the same mailboxes and adapter. **Proposal:** the retrieval's source, owner predicate, key and limit join the effect's signature, so two that differ are `PL1002`.
+
+**Tests so far.** `test/ex-inbox.test.mjs`: **IAC1** (three accounts, every message once and tagged with its account, across a host crash after a creation and before its announcement; a pass with nothing new makes nothing; act-now and this-week messages actionable, fyi and ignore filed; one `Todo` per thread, the invoice's two messages opening one) and **IAC4** (the message that tells the assistant to forward mail, give a password and pay proposes only its own retrieval and its two decisions). Both failed before the code they test: IAC1 on the host's missing module, then on each defect above; both pass. IAC3, IAC5, IAC6, IAC7 without a draft, IAC8 and IAC9's check come next.
+
+
 ## Conclusion
 
 The examples branch holds the plan, its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader, the Gmail source kind, the measured concierge draft, and the concierge's recorded answers and host code. The concierge waits for S450, S456 and S457 on `v1`; the inbox's machines wait for S451, S454 and S455.
