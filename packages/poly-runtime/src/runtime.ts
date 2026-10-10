@@ -29,7 +29,7 @@ import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionMemory, type DecisionRecord, type Provider, type ProviderConfig } from './provider.js';
-import { Memory, BOTTOM, DIGEST, type Taint } from './memory.js';
+import { Memory, BOTTOM, DIGEST, SourceRefused, type Taint } from './memory.js';
 import { RoutingHost } from './routing.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, evidenceOf, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
@@ -227,24 +227,35 @@ export class PolyRuntime {
     this.memory = new Memory(store, verified.memory.sources, verified.memory.flows);
     const builtins: Record<string, EffectHandler> = {};
     for (const m of verified.machines) for (const kind of Object.keys(m.manifest?.effects ?? {})) if (kind.startsWith('outcome.')) builtins[kind] = () => ({});
-    // PS17.2: a retrieval is the runtime's own effect, run through its source's certified adapter.
+    // PS17.2, PS17.5: a retrieval and a remember are the runtime's own effects, run through the source's certified
+    // adapter. S41 with S451 (ruled 2026-10-09): every retrieval of a source shares its kind, so each intent runs the
+    // entry of its own machine's manifest, never one entry for the program (the last machine's, before the ruling).
+    type RetrieveSpec = { source: string; owner: string | null; key?: { name: string; param: string }; limit: number; envelope?: boolean };
+    type RememberSpec = { source: string; provenance: string; about: string };
+    const perMachine = new Map<string, Map<string, { retrieve?: RetrieveSpec; remember?: RememberSpec }>>();
     for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
-      if (!e?.retrieve) continue;
-      const spec = e.retrieve as { source: string; owner: string | null; key?: { name: string; param: string }; limit: number; envelope?: boolean };
-      // PS17.2, S459: an envelope retrieval, of kind source.<s>.envelope, completes with its body's digest as r.envelope.
-      if (spec.envelope === true) {
-        if (!spec.key) throw new LoadError(`refused at load: the envelope retrieval ${kind} names no key (PT10j, S459)`);
-        const key = spec.key;
-        builtins[kind] = (payload) => this.memory.envelope(spec.source, { owner: spec.owner, key }, (payload ?? {}) as Record<string, unknown>);
-        continue;
-      }
-      builtins[kind] =(payload, _caps, ctx) => this.memory.retrieve(spec.source, spec, (payload ?? {}) as Record<string, unknown>, ctx.idempotencyKey);
+      if (!e?.retrieve && !e?.remember) continue;
+      const retrieve = e.retrieve as RetrieveSpec | undefined;
+      // PS17.2, S459: an envelope retrieval, of kind source.<s>.envelope, names its key.
+      if (retrieve?.envelope === true && !retrieve.key) throw new LoadError(`refused at load: the envelope retrieval ${kind} names no key (PT10j, S459)`);
+      if (!perMachine.has(kind)) perMachine.set(kind, new Map());
+      perMachine.get(kind)!.set(m.id, { ...(retrieve ? { retrieve } : {}), ...(e.remember ? { remember: e.remember as RememberSpec } : {}) });
     }
-    // PS17.5: a remember is the runtime's own effect too, writing to the project's memory.
-    for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
-      if (!e?.remember) continue;
-      const spec = e.remember as { source: string; provenance: string; about: string };
-      builtins[kind] = (payload, _caps, ctx) => this.memory.remember(spec, (payload ?? {}) as Record<string, unknown>, ctx.instanceId, ctx.idempotencyKey, this.now());
+    const specOf = (kind: string, instanceId: string) => {
+      const machine = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instanceId)?.machine_id as string | undefined;
+      const spec = machine ? perMachine.get(kind)?.get(machine) : undefined;
+      if (!spec) throw new SourceRefused(`no machine of the build declares ${kind} for instance ${instanceId} (PS17.2)`);
+      return spec;
+    };
+    for (const kind of perMachine.keys()) {
+      builtins[kind] = (payload, _caps, ctx) => {
+        const s = specOf(kind, ctx.instanceId);
+        const data = (payload ?? {}) as Record<string, unknown>;
+        // PS17.2, S459: an envelope retrieval completes with its body's digest as r.envelope.
+        if (s.retrieve?.envelope === true) return this.memory.envelope(s.retrieve.source, { owner: s.retrieve.owner, key: s.retrieve.key! }, data);
+        if (s.retrieve) return this.memory.retrieve(s.retrieve.source, s.retrieve, data, ctx.idempotencyKey);
+        return this.memory.remember(s.remember!, data, ctx.instanceId, ctx.idempotencyKey, this.now());
+      };
     }
     this.memory.body = (d) => this.contentBody(d);
     // PS18.2: a route's call runs its tier's provider, through the runtime's own handler.

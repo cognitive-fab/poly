@@ -418,6 +418,25 @@ class Checker {
         if (effectSignature(first) !== effectSignature(e)) this.err('PL1002', e, `effect ${e.name} has kind "${k}", which ${first.name} declares with a different payload, completions or class (S41)`);
       }
     }
+    // PS17.2, PT10j (S41 with S451, ruled 2026-10-09): each machine runs its own retrieval of a source, so two machines
+    // may differ; within one machine a kind has one manifest entry, so two retrievals (or remembers) of one source that
+    // differ in source, owner, key, limit or envelope (or provenance and subject) are refused at the second.
+    const body = (e: A.EffectDecl): string | null => {
+      const it = e.items.find((i) => i.kind === 'EffRetrieve' || i.kind === 'EffRemember');
+      if (!it) return null;
+      const { id: _id, span: _span, ...rest } = it as A.EffectItem & { span?: unknown };
+      return JSON.stringify(Object.keys(rest).sort().map((x) => [x, (rest as Record<string, unknown>)[x]]));
+    };
+    for (const facts of machines.values()) {
+      const seen = new Map<string, A.EffectDecl>();
+      for (const e of facts.effects.values()) {
+        if (body(e) === null) continue;
+        const k = effectKind(e);
+        const first = seen.get(k);
+        if (!first) { seen.set(k, e); continue; }
+        if (body(first) !== body(e)) this.err('PL1002', e, `effect ${e.name} reads or writes the source as ${first.name} does, with kind "${k}", and differs from it; a machine holds one retrieval or remember per source and kind (PS17.2, S41 with S451)`);
+      }
+    }
     return { diagnostics: this.diags, env: this.env, machines };
   }
 
