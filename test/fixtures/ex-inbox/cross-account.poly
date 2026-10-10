@@ -1,0 +1,154 @@
+// IAC3 at check (plan-ex.md 4.6): the inbox's draft path cut down to one machine, with one change. The to-do learns a
+// second principal and reads the thread for its draft under that one, while the draft still goes to its own account,
+// so a draft for account A can carry account B's mail. The flow rule finds it: PL6831 AUDIENCE_LEAK at createDraft.
+// The inbox's own Todo, with this change, is too large for a test's heap; this keeps every part the leak runs through:
+// the owned mail source, the retrieval by thread, the citing decision, the envelope and the compose credential.
+module inbox
+
+audience { public < account }
+
+enum Status { Open, Reading, Drafting, Drafted, Enveloping, Proposed, Created }
+
+credential gmail_draft: oauth2 {
+  provider "google"
+  grant authorization_code pkce
+  scopes { gmail.compose }
+  holder Principal
+}
+
+credential gmail_read: oauth2 {
+  provider "google"
+  grant authorization_code pkce
+  scopes { gmail.readonly }
+  holder Principal
+}
+
+source mail: records {
+  adapter "gmail"
+  credential gmail_read
+  audience account owned
+  freshness 720h
+  keys { message, thread }
+  envelope thread
+}
+
+machine Todo {
+  state {
+    status  : Status    = Open
+    account : Principal = none
+    other   : Principal = none
+    thread  : Key       = none
+    draft   : Content   = none
+  }
+
+  terminal status in { Created }
+
+  action Open(owner: Principal, from: Principal, at: Key)
+  action Read(items: Items)
+  action ReadFailed()
+  action Written(text: Content, cites: Items)
+  action Unwritten()
+  action Retry()
+  action Propose()
+  action Enveloped(e: Content)
+  action Unenveloped()
+  action Created()
+  action NotCreated()
+
+  on Open(owner, from, at) {
+    require status == Open && account == none else reject "opened"
+    account' = owner
+    other' = from
+    thread' = at
+    status' = Reading
+    emit read(owner: from, k: at)
+  }
+
+  on Retry {
+    require status == Open && account != none else reject "not-open"
+    status' = Reading
+    emit read(owner: other, k: thread)
+  }
+
+  on Read(items) {
+    require status == Reading else reject "not-reading"
+    status' = Drafting
+    decide write(thread: items)
+  }
+
+  on ReadFailed {
+    require status == Reading else reject "not-reading"
+    status' = Open
+  }
+
+  on Written(text, cites) {
+    require status == Drafting else reject "not-drafting"
+    status' = Drafted
+    draft' = text
+  }
+
+  on Unwritten {
+    require status == Drafting else reject "not-drafting"
+    status' = Open
+  }
+
+  on Propose {
+    require status == Drafted else reject "not-drafted"
+    status' = Enveloping
+    emit envelope_of(owner: account, k: thread)
+  }
+
+  on Enveloped(e) {
+    require status == Enveloping else reject "not-enveloping"
+    status' = Proposed
+    emit createDraft(account: account, t: thread, e: e, body: draft)
+  }
+
+  on Unenveloped {
+    require status == Enveloping else reject "not-enveloping"
+    status' = Drafted
+  }
+
+  on Created {
+    require status == Proposed else reject "not-proposed"
+    status' = Created
+  }
+
+  on NotCreated {
+    require status == Proposed else reject "not-proposed"
+    status' = Drafted
+  }
+
+  effect read(owner: Principal, k: Key) {
+    retrieve mail where owner == owner and thread == k limit 5
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  effect envelope_of(owner: Principal, k: Key) {
+    retrieve mail envelope where owner == owner and thread == k
+    ok(r) -> Enveloped(e: r.envelope)
+    failed -> Unenveloped()
+  }
+
+  decision write(thread: Items) -> Content {
+    provider "large"
+    labels { egress:external, read:private }
+    timeout 20s
+    cites thread
+    ok(r) -> Written(text: r.answer, cites: r.cites)
+    failed -> Unwritten()
+  }
+
+  effect createDraft(account: Principal, t: Key, e: Content, body: Content) {
+    kind "gmail.createDraft"
+    labels { egress:external, read:private }
+    targets { egress: exact "https://gmail.googleapis.com/gmail/v1/users/me/drafts" }
+    uses gmail_draft { gmail.compose } for account
+    to account
+    envelope e
+    class irreversible
+    ok -> Created()
+    failed -> NotCreated()
+  }
+}

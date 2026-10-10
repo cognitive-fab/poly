@@ -28,7 +28,7 @@ enum Seen { Pending, Actionable, Filed, Held }
 
 enum Step { Reading, Asking, Done }
 
-enum Status { Opening, Summing, Open, Reading, Drafting, Drafted, Proposed, Created, Snoozed, Done, Dismissed }
+enum Status { Opening, Summing, Open, Reading, Drafting, Enveloping, Drafted, Proposed, Created, Snoozed, Done, Dismissed }
 
 credential gmail_draft: oauth2 {
   provider "google"
@@ -52,6 +52,7 @@ source mail: records {
   audience account owned
   freshness 720h
   keys { message, thread, correspondent }
+  envelope thread
 }
 
 // Message: one per received message, created by the host at <account label>:<message id> (IT2.3), so a message
@@ -227,6 +228,8 @@ machine Todo {
   action WriteDraft()
   action Written(text: Content, cites: Items)
   action Unwritten()
+  action Enveloped(e: Content)
+  action Unenveloped()
   action Edit(body: Content)
   action Propose()
   action Created()
@@ -305,6 +308,9 @@ machine Todo {
     emit read(owner: account, k: thread)
   }
 
+  // IT4.2, IAC5: a draft rests on messages of its thread; the runtime refuses an answer citing a message it was not
+  // given (uncited). An answer citing none is kept: setting it aside here reads cites.count in a handler, which replay
+  // cannot fold (PL9001, decisions-ex.md, a defect for the release session).
   on Written(text, cites) {
     require status == Drafting else reject "not-drafting"
     status' = Drafted
@@ -322,10 +328,24 @@ machine Todo {
   }
 
   // IAC2: the draft is proposed; the policy escalates it, and only the owner's signed approval lets it through.
+  // S459: its recipient, subject and threading headers come from the source when it is proposed, never from the
+  // draft's text or the thread's mail: the envelope of a reply to the thread's newest message, passed unchanged from
+  // the retrieval's completion. With no envelope the draft stays as it is.
   on Propose {
     require status == Drafted else reject "not-drafted"
+    status' = Enveloping
+    emit envelope_of(owner: account, k: thread)
+  }
+
+  on Enveloped(e) {
+    require status == Enveloping else reject "not-enveloping"
     status' = Proposed
-    emit createDraft(account: account, body: draft)
+    emit createDraft(account: account, t: thread, e: e, body: draft)
+  }
+
+  on Unenveloped {
+    require status == Enveloping else reject "not-enveloping"
+    status' = Drafted
   }
 
   on Created {
@@ -373,6 +393,12 @@ machine Todo {
     failed -> ReadFailed()
   }
 
+  effect envelope_of(owner: Principal, k: Key) {
+    retrieve mail envelope where owner == owner and thread == k
+    ok(r) -> Enveloped(e: r.envelope)
+    failed -> Unenveloped()
+  }
+
   decision summary(context: Items) -> Content {
     provider "small"
     prices "prices/small.json" max input tokens 4000 max tokens 200 budget monthly
@@ -402,13 +428,15 @@ machine Todo {
     failed -> Unwritten()
   }
 
-  // S455: the compose credential, bound to the drafts URL exactly, so drafts/send is outside the gate.
-  effect createDraft(account: Principal, body: Content) {
+  // S455: the compose credential, bound to the drafts URL exactly, so drafts/send is outside the gate. S459: the draft
+  // goes to its envelope's recipient, in the thread t names (examples/inbox/host/drafts.mjs).
+  effect createDraft(account: Principal, t: Key, e: Content, body: Content) {
     kind "gmail.createDraft"
     labels { egress:external, read:private }
     targets { egress: exact "https://gmail.googleapis.com/gmail/v1/users/me/drafts" }
     uses gmail_draft { gmail.compose } for account
     to account
+    envelope e
     class irreversible
     ok -> Created()
     failed -> NotCreated()

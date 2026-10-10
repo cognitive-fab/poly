@@ -90,3 +90,55 @@ test('IAC4: a message that gives the assistant instructions yields its triage an
     try { rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch { /* the store's file may stay locked a moment on Windows */ }
   }
 });
+
+const states = async (rt, instance) => {
+  const out = [];
+  for (const e of await rt.chain(instance)) if (e.kind === 'step' && e.body.stepKind === 'accepted') out.push({ action: e.body.action, post: await rt.store.body(e.body.post) });
+  return out;
+};
+
+test('IAC6: with the monthly budget below a batch\'s cost, triage stops at the limit with the reason budget, no reservation is overspent, and the rest wait for the next month', { timeout: 900_000 }, async () => {
+  // The cap is 40,000 micro-usd, which must hold the largest reservation on the budget (the draft's, 39,000; PL6845).
+  // Each message's triage and kind are unsure on the small tier and answered on the large one, and each call uses its
+  // whole limits, so it costs its reservation: 408 on the small tier and 12,300 on the large. A decision costs 12,708,
+  // three fit, and the work account's four messages ask eight.
+  const { SOURCE } = await import('./ex-inbox-helpers.mjs');
+  const from = 'cap usd 20 per month';
+  assert.equal(SOURCE.split(from).length, 2);
+  const a = await admittedInbox('ex-inbox-iac6', { source: SOURCE.split(from).join('cap usd 0.04 per month') });
+  const unsure = (decision, ids, tier) => ({ ...answers(decision, ids), p: tier === 'small' ? 0.5 : 0.97, usage: { input: 4000, output: 20 } });
+  const dir = mkdtempSync(join(tmpdir(), 'poly-ex-inbox-'));
+  const w = tape('work');
+  const { rt, clock, source, accounts, settle } = await inbox(a, { db: join(dir, 'store.db'), tapes: { work: [...w.initial, ...w.poll] }, answers: unsure, accounts: ACCOUNTS.filter((x) => x.label === 'work') });
+  try {
+    const made = [];
+    for (let k = 0; k < 2; k++) made.push(...(await host.syncAccount(rt, source, accounts[0])).created);
+    assert.equal(made.length, 4);
+    await settle();
+    const seen = await Promise.all(made.map(async (m) => (await rt.getState(m.id)).state.seen));
+    console.log(`IAC6: ${JSON.stringify(seen)}`);
+    assert.ok(seen.some((s) => s === 'Held') && seen.some((s) => s === 'Actionable' || s === 'Filed'), JSON.stringify(seen));
+    // The calls past the cap were refused budget at the gate, before any provider.
+    const refused = rt.store.db.prepare("SELECT event FROM poly_ledger WHERE kind = 'verdict'").all().map((r) => JSON.parse(r.event).body).filter((v) => v.reason === 'budget');
+    assert.ok(refused.length >= 2 && refused.every((v) => v.outcome === 'denied'), JSON.stringify(refused));
+    // One budget instance for the month; spent plus reserved never passed the cap, and nothing is held at the end.
+    const month = new Date(clock.now()).toISOString().slice(0, 7);
+    const budgets = rt.store.db.prepare("SELECT instance_id FROM pr_instance WHERE machine_id = 'inbox.monthly.Budget'").all().map((r) => r.instance_id);
+    assert.deepEqual(budgets, [`budget:monthly:month:${month}`]);
+    const steps = await states(rt, budgets[0]);
+    assert.ok(steps.length > 0);
+    for (const s of steps) assert.ok(s.post.spent + s.post.reserved <= s.post.cap + s.post.overrun && s.post.overrun === 0, JSON.stringify(s));
+    assert.equal(rt.store.db.prepare("SELECT COUNT(*) AS n FROM poly_reservation WHERE status = 'held'").get().n, 0);
+    // The rest wait: in the next month, a new budget holds them, and a retry triages them from the source's store.
+    clock.advance(32 * 24 * 3600 * 1000);
+    const held = made.filter((_, k) => seen[k] === 'Held');
+    for (const m of held.slice(0, 1)) await rt.dispatch(m.id, 'Retry', {});
+    await settle();
+    const after = (await rt.getState(held[0].id)).state.seen;
+    assert.ok(after === 'Actionable' || after === 'Filed', after);
+    assert.equal(rt.store.db.prepare("SELECT COUNT(*) AS n FROM pr_instance WHERE machine_id = 'inbox.monthly.Budget'").get().n, 2);
+  } finally {
+    await rt.close();
+    try { rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch { /* the store's file may stay locked a moment on Windows */ }
+  }
+});

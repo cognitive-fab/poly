@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import type { HttpRequest, HttpResponse, HttpTransport, ItemRef, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
+import type { EnvelopeAnswer, EnvelopeQuery, HttpRequest, HttpResponse, HttpTransport, ItemRef, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
 import { readMime } from './mime.js';
 import { builtWith, made } from './util.js';
 
@@ -83,7 +83,13 @@ export interface GmailSource extends SourceAdapter {
 const LABEL = /^[a-z][a-z0-9-]{0,31}$/;
 const GMAIL_ID = /^[0-9a-zA-Z_-]{1,64}$/;
 
-interface ItemRecord { id: string; owner: string; thread: string; correspondent: string; asOf: number; body: string; announced: boolean }
+/**
+ * S459: what a reply to a message needs, read from its headers when it is kept: whom to answer (Reply-To, else From),
+ * its subject, its Message-ID and References. Kept in the mail store beside the text, never in a journal.
+ */
+interface ReplyHeaders { to: string; subject: string; messageId: string | null; references: string[] }
+
+interface ItemRecord { id: string; owner: string; thread: string; correspondent: string; asOf: number; body: string; announced: boolean; reply?: ReplyHeaders }
 
 /** S452: the Gmail source over the host's accounts. */
 export function gmailSource(c: GmailSourceConfig): GmailSource {
@@ -133,15 +139,17 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
   const cursorKey = (label: string) => `cursor:${label}`;
 
   /** The text a decision reads: the headers a person reads, then the message's text, bounded. */
-  const render = (raw: Buffer): { body: string; correspondent: string } => {
+  const render = (raw: Buffer): { body: string; correspondent: string; reply: ReplyHeaders } => {
     const m = readMime(raw);
+    const replyTo = m.headers.find(([h]) => h === 'reply-to')?.[1]?.match(/<([^<>s]+@[^<>s]+)>|([^s<>,]+@[^s<>,]+)/);
+    const reply: ReplyHeaders = { to: replyTo ? (replyTo[1] ?? replyTo[2]) : (m.from?.address ?? ''), subject: m.subject, messageId: m.messageId, references: m.references };
     const who = (x: { name: string; address: string } | null) => (x ? (x.name ? `${x.name} <${x.address}>` : x.address) : '');
     const lines = [`From: ${who(m.from)}`, `To: ${m.to.map(who).join(', ')}`, `Subject: ${m.subject}`, `Date: ${m.date === null ? '' : new Date(m.date).toISOString()}`, ''];
     let text = m.text;
     for (const f of m.attachments) text += `\n[attachment: ${f.filename || 'unnamed'}, ${f.type}, ${f.size} bytes]`;
     let body = `${lines.join('\n')}\n${text}`;
     if (body.length > maxBody) body = `${body.slice(0, maxBody)}\n[truncated]`;
-    return { body, correspondent: m.from?.address ?? '' };
+    return { body, correspondent: m.from?.address ?? '', reply };
   };
 
   /** Fetches and keeps one message unless it is kept already; a message deleted meanwhile (404) is skipped. */
@@ -155,8 +163,8 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
     if (typeof m.raw !== 'string' || typeof m.threadId !== 'string' || !GMAIL_ID.test(m.threadId)) throw new Error(`${A}: users.messages.get answered no raw message`);
     const asOf = Number(m.internalDate);
     if (!Number.isFinite(asOf)) throw new Error(`${A}: a message has no internalDate (K14)`);
-    const { body, correspondent } = render(Buffer.from(m.raw, 'base64url'));
-    const rec: ItemRecord = { id, owner: a.owner, thread: `${a.label}/${m.threadId}`, correspondent, asOf, body, announced: false };
+    const { body, correspondent, reply } = render(Buffer.from(m.raw, 'base64url'));
+    const rec: ItemRecord = { id, owner: a.owner, thread: `${a.label}/${m.threadId}`, correspondent, asOf, body, announced: false, reply };
     await store.put(itemKey(id), rec as unknown as Record<string, unknown>);
   };
 
@@ -246,6 +254,24 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
       }
       const items = (await itemsOf(q.owner)).filter((i) => q.key === undefined || keysOf(i)[q.key.name] === q.key.value);
       return items.slice(0, q.limit).map((i) => ({ id: i.id, owner: i.owner, asOf: i.asOf, keys: keysOf(i) }));
+    },
+
+    /**
+     * S459 (PT10j): the envelope of a reply to the newest item of the owner with this key: to its Reply-To or sender,
+     * its subject after "Re: " unless it starts so, In-Reply-To its Message-ID, and References its own followed by that
+     * id (RFC 5322 section 3.6.4). Null when the owner holds no such item; an item kept before S459 has no headers kept,
+     * and is refused, since a reply could not be addressed.
+     */
+    async envelope(q: EnvelopeQuery): Promise<EnvelopeAnswer | null> {
+      if (q.key?.name !== 'thread' && q.key?.name !== 'message') throw new Error(`${A}: an envelope is by the thread or the message key, not ${JSON.stringify(q.key?.name)} (S459)`);
+      if (typeof q.key.value !== 'string' || q.key.value === '') throw new Error(`${A}: a key's value is a non-empty string (PS1.4c)`);
+      const newest = (await itemsOf(q.owner)).find((i) => keysOf(i)[q.key.name] === q.key.value);
+      if (!newest) return null;
+      if (!newest.reply) throw new Error(`${A}: item ${newest.id} was kept with no reply headers, so no envelope can address it (S459)`);
+      const r = newest.reply;
+      const subject = /^re:/i.test(r.subject) ? r.subject : `Re: ${r.subject}`;
+      const references = r.messageId ? [...r.references.filter((x) => x !== r.messageId), r.messageId] : [...r.references];
+      return { id: newest.id, owner: newest.owner, asOf: newest.asOf, envelope: { to: r.to, subject, inReplyTo: r.messageId, references } };
     },
 
     async resolve(id: string): Promise<string | null> {
