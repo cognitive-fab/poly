@@ -60,9 +60,14 @@ Each milestone's formats, commands and limits are in `docs/release-notes.md`.
 - **A routed decision reads `Content` and `Items` (S402).** Each tier's call carries the decision's taint and items.
 - **An unrouted decision may name a budget (S454).** It has its embedded form.
 
-### The examples (waiting on E1 and E2)
+### The examples (E1 in part, E2 waiting)
 
-- **The concierge** (`examples/concierge`, E1): a WhatsApp customer desk with a staff thread on Slack. A routed classification, a refund through Stripe Connect under a person's grant with no holder named, an escalation above 100, and a reply written by a decision. On `ex` it checks `CLEAN` at the AC30 domain `0..500`. Its full check with the policy, and its after-suite run, are to be recorded at the gate.
+- **The concierge** (`examples/concierge`, E1): a WhatsApp customer desk with a staff thread on Slack. A routed classification over the message body, a refund through Stripe Connect under a person's grant with no holder named (S457), an escalation above 100, a reply written by a decision, an acknowledgement for a message that arrives while the desk is busy, and a staff notice. Its module checks `CLEAN`, with both generated configurations, at the AC30 domain `0..500` (on `ex`, 2026-10-09):
+  - `Desk`: 1,826 states, and its flow rule 2,978; translation validation agrees on 107,734 transitions. The refund's amount is explored at `{0, 101}`, cut by 100 (S458).
+  - `Notice`: 28 states. `support.Conversation`: 342. `staff.Conversation`: 666. `payments.Grant`: 13. `triage.Route`: 6. `spend.Budget`: 96.
+  - The configuration `support`: 26,211 global states and 650,210 global steps, its flow rule 34,179. The configuration `staff`: 3,620 global states and 194,795 global steps.
+  - Every rule of both conversations is tested, and no `PL6838` remains. The check took 6 min 27 s on `ex` with other tests running, an upper bound; the release session's probe took 69 s alone.
+  - **Pending:** the project's check with its policy, which waits on the audience rule; its move to `examples/concierge/` and its run in the serial after-suite group; and AC27's replay.
 - **The inbox assistant** (`examples/inbox`, E2): Gmail by key, triage, to-dos, and drafts only, each draft escalated to its owner. Its acceptance tests IAC1 to IAC9 run on recorded traffic. It is in progress on `ex`.
 
 ### Formats a reader must expect
