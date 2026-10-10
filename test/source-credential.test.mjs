@@ -118,7 +118,8 @@ test('S460, PT10j: the embedded option credential: \'c\' reads back to the same 
   const a = parse(DESK);
   assert.ok(a.module, JSON.stringify(a.diagnostics));
   const printed = printModule(a.module);
-  assert.ok(printed.includes("credential: 'reports'"), printed);
+  // PT10j writes the option as credential: 'c'; the printer quotes every string option alike (double), as adapter and audience.
+  assert.match(printed, /credential: ['"]reports['"]/, printed);
   const back = readEmbedded(printed);
   assert.ok(back.module, JSON.stringify(back.diagnostics));
   assert.equal(digest(back.module), digest(a.module));
