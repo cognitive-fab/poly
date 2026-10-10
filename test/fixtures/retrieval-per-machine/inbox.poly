@@ -1,0 +1,83 @@
+// S41 with S451 (PS17.2, PT10j): the inbox. One owned source, mail, keyed by message and thread. Message reads one
+// message by its key with limit 1; Todo reads a thread by its key with limit 5. Both effects are of the kind
+// source.mail.retrieve, with the same payload and the same completions (S41), and each machine runs its own retrieval.
+module inbox
+
+audience { public < account < staff }
+
+claims Account {
+  principal: Principal
+}
+
+source mail: records {
+  adapter "postgres"
+  audience account owned
+  freshness 1h
+  keys { message, thread }
+}
+
+enum Phase { Idle, Reading }
+
+machine Message {
+  state {
+    phase : Phase = Idle
+  }
+
+  action Open(k: Key)
+  action Read(items: Items)
+  action ReadFailed()
+
+  on Open(k) by c: Account {
+    require phase == Idle else reject "busy"
+    phase' = Reading
+    emit read(account: c.principal, k: k)
+  }
+
+  on Read(items) {
+    require phase == Reading else reject "not-reading"
+    phase' = Idle
+  }
+
+  on ReadFailed {
+    require phase == Reading else reject "not-reading"
+    phase' = Idle
+  }
+
+  effect read(account: Principal, k: Key) {
+    retrieve mail where owner == account and message == k limit 1
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+}
+
+machine Todo {
+  state {
+    phase : Phase = Idle
+  }
+
+  action Open(k: Key)
+  action Read(items: Items)
+  action ReadFailed()
+
+  on Open(k) by c: Account {
+    require phase == Idle else reject "busy"
+    phase' = Reading
+    emit read(account: c.principal, k: k)
+  }
+
+  on Read(items) {
+    require phase == Reading else reject "not-reading"
+    phase' = Idle
+  }
+
+  on ReadFailed {
+    require phase == Reading else reject "not-reading"
+    phase' = Idle
+  }
+
+  effect read(account: Principal, k: Key) {
+    retrieve mail where owner == account and thread == k limit 5
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+}
