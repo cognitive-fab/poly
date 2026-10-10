@@ -1,3 +1,4 @@
+// expected: FINDING PL5401
 // PT7a's checkout with the optimistic order: on Available(n) with n > 0 it confirms at once and sends
 // Take afterwards. Each machine is correct on its own; the configuration confirms two orders against
 // one unit of stock (PL5401), a defect that lives in the arrival order.

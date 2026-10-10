@@ -1,3 +1,4 @@
+// expected: CLEAN
 // OutboxIntent in its v0.3 five-field form (03-technical-spec.md at commit 5160ba8).
 // evidence/outbox_check.py v0.3: 33 states, 40 accepted steps, no deadlock.
 module intents

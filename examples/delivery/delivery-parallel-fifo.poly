@@ -1,3 +1,4 @@
+// expected: FINDING PL3001
 // PT9.8 with a parallel worker, still claiming in-order delivery: M2 can take its step before M1
 // (delivery_check.py: the 4-step witness Emit(M1), Emit(M2), Send(M2), DeliverReq(M2)).
 module delivery

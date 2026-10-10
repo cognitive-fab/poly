@@ -46,7 +46,7 @@ test('AC10: the optimistic order confirms two orders against one unit, PL5401 wi
   const c = r.configurations.find((x) => x.configuration === 'two-buyers');
   assert.deepEqual(c.diagnostics.map((d) => [d.code, d.property]), [['PL5401', 'confirmed-within-stock']]);
   assert.deepEqual(steps(c.diagnostics[0]), WITNESS);
-  assert.equal(c.diagnostics[0].at.line, 37);
+  assert.equal(c.diagnostics[0].at.line, 38); // the property's line, after the file's expected-verdict line (V10 item 4)
   assert.deepEqual(c.instance.bounds, ['transit ≤ 4']);
   assert.deepEqual(c.instance.instances, ['inv: Inventory', 'order[0..1]: Order']);
   assert.equal(c.stages[0].verdict, 'FINDINGS');

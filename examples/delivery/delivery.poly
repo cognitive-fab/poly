@@ -1,3 +1,4 @@
+// expected: CLEAN
 // PT9.8 as written: the in-order worker, and the dedupe table kept on archive (K4). delivery_check.py:
 // 1,147 states, at-most-once and in-order hold; exactly-once is liveness, checked from M2.
 module delivery

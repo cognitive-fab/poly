@@ -1,3 +1,4 @@
+// expected: CLEAN
 // Negative control: hatchet's status derivation with FAILED dominance disabled
 // (conformance/field-studies/hatchet/specs_broken/reference.js: 'if (false) return FAILED').
 module hatchet

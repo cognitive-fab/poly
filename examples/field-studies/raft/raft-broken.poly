@@ -1,3 +1,4 @@
+// expected: INCONCLUSIVE PL3901 (a bound is hit, PS13.5)
 // Negative control: raft, except that NewerTermSeen keeps the old term
 // (conformance/field-studies/raft/specs_broken/reference.js, one line changed).
 module raft

@@ -1,3 +1,4 @@
+// expected: CLEAN
 // The README turnstile with the operator action Empty: no deadlock
 // (evidence/turnstile_check.py, second line).
 module hello

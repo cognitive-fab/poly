@@ -1,3 +1,4 @@
+// expected: INCONCLUSIVE PL3901 (a bound is hit, PS13.5)
 // Negative control: the turnstile, except that PUSH while LOCKED wrongly UNLOCKS
 // instead of rejecting (conformance/field-studies/turnstile/specs-mutant/mutant.js).
 // The corpus must tell it apart from the reference.

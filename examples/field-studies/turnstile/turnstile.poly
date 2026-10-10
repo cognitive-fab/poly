@@ -1,3 +1,4 @@
+// expected: INCONCLUSIVE PL3901 (a bound is hit, PS13.5)
 // The turnstile of the polygraph field study (conformance/field-studies/turnstile), in poly.
 // The corpus names are kept verbatim: the field `state` (a contextual keyword, PT2.1),
 // the actions COIN and PUSH, the reason push-while-locked-is-noop.

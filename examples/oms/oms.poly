@@ -1,3 +1,4 @@
+// expected: CLEAN
 // The OMS order and its shipments (AC1), written in poly from the polyrun-oms example
 // (conformance/field-studies/order). Names, states, rejection reasons, effect kinds and domains are the
 // hand-written artefacts' own, so the corpora, check-effects and check-product compare one to one.

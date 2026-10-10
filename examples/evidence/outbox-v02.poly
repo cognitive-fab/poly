@@ -1,3 +1,4 @@
+// expected: FINDING PL3201 PL3301
 // OutboxIntent in its v0.2 form, AC9's variant: SettleFailed always returns to Allowed.
 // evidence/outbox_check.py v0.2: 35 states, deadlocked at (Allowed, 3, 1, T, F) and (Allowed, 3, 2, T, T).
 module intents

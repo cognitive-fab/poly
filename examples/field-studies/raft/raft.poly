@@ -1,3 +1,4 @@
+// expected: INCONCLUSIVE PL3901 (a bound is hit, PS13.5)
 // The hashicorp/raft role-transition machine of the field study (conformance/field-studies/raft), in poly.
 // Two differences from the hand-written reference, neither visible to replay, which compares states:
 //   - Shutdown is declared terminal, so actions in Shutdown reject with "terminal" (PS3.2);

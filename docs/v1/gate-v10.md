@@ -20,22 +20,19 @@ Written by the release session on 2026-10-10, against `plan-v1.md` ("V10. The v1
 | 1 | The full suite and the after-suite: no failure | **Met on v1.** At c0e99891 there were 2,292 tests and 7 in the after group, all passed but 2 skipped and 4 waiting, with no failure (`.poly/logs/c0e99891-2026-10-10T12-31-21-167Z-w8.log`). The 4 waiting tests wait on engine fixes, among them polyrun's tombstones at archive (S124). | Run again from a clean build after the merge, alone on the machine, with the examples and their serial group included. |
 | 2 | check-memory passes | **Met on v1** (the same run). | Run again with item 1. |
 | 3 | The measured programs: every verdict identical to the one recorded after V1, or changed with a ruled cause | **Met up to S458.** The baseline is `docs/v1/verdicts-after-rulings.json`; it differs from `verdicts-after-v1.json` only in 3 transition counts, caused by b6318b4c and ruled. It was measured identical after S456 and after S458. **Not measured since S459**: S459, S460, (a), (c) and the `Items` type check have no heavy run allowed now. | Measure the 160 files and compare with `verdicts-after-rulings.json`, then list any change with its ruled cause. Add the concierge and the inbox as new entries, with no baseline. |
-| 4 | Every example checked `CLEAN` and its journal replayed | **Needs a reading (see below).** Of the 20 example files on `v1`, 9 are `CLEAN` and 11 are not, by design: they are the broken or teaching variants (for example `hello.poly`, `orders.poly`, `raft-broken.poly`), and their verdicts are recorded and compared under item 3. | The concierge and the inbox checked `CLEAN` with their policies, and their journals replayed (AC27). |
+| 4 | Every example checked `CLEAN` and its journal replayed | **Ruled (see below); met for the 20 files on `v1`.** Each states its expected verdict on its first line, and each verdict matches it (`test/examples-expected.test.mjs`): 9 are `CLEAN`, and 11 are teaching variants or field studies whose findings or bounds they state. | The concierge and the inbox checked `CLEAN` with their policies, and their journals replayed (AC27). |
 | 5 | Per-file times compared with `docs/m11/gate2-file-times.json` | **Waits on the gate run.** The last suites show the slowest file near its usual time: the staff-documents test took 410 s in w7 and 525 s in w8. | Compare `.poly/file-times.json` and `.poly/file-times-after.json` of the gate run with `gate2-file-times.json`, and name each file that moved by more than its usual spread. The serial group's concierge files are new. |
 | 6 | The release notes complete | **Drafted** in `docs/release-notes-v1.md`, complete for the release branch. `docs/release-notes.md` has the entries to S458; S459, S460, (a), (c) and the `Items` type check are in the v1 page only. | Fill in E1's and E2's entries and limits, and bring `docs/release-notes.md` up to the same point. |
 | 7 | A record in `decisions-v1.md` | **Waits on the gate run.** | The gate's record: commits, suite, measured verdicts, file times and the examples. |
 
 Then main is fast-forwarded to m4 and tagged `v1.0.0` locally (Q-V1). The owner pushes and publishes.
 
-## For the reviewer: item 4 as written
+## Item 4, as ruled (owner's reviewer, 2026-10-10)
 
-"Every example checked `CLEAN`" cannot hold of `examples/` as it is: 11 of its 20 files are deliberate findings or `INCONCLUSIVE` field studies, kept to show what the checker finds. The release session reads item 4 as follows:
+The release session's reading is accepted. The concierge and the inbox are each `CLEAN` with their policy, and their journals replay. Every other example's verdict equals its recorded one, under item 3.
 
-- **The two release examples.** Each is `CLEAN` with its policy, and its journal replays.
-- **Every other example.** Its verdict equals the one recorded, under item 3.
-
-This reading needs the reviewer's word before the gate. The alternative, every example `CLEAN`, would mean moving the teaching variants out of `examples/`.
+**Added:** every file in `examples/` begins with `// expected: CLEAN | FINDING <code> | INCONCLUSIVE <reason>`, and the gate compares each verdict with that line, so nobody has to know which files are teaching variants. `test/examples-expected.test.mjs` does it for the parallel suite, and `test/after/serial-sources.test.mjs` for the serial group's examples. `examples/README.md` states the line.
 
 ## Conclusion
 
-On the release branch, items 1 and 2 are met, item 3 is met up to S458, and item 6 is drafted. Items 3, 5 and 7 need the gate run itself, after the merge. Item 4 waits on E1 and E2, and on a reading of "every example". Nothing on the release branch is known to block the gate: what remains is the examples branch's two examples, then one gate run alone on the machine.
+On the release branch, items 1 and 2 are met, item 3 is met up to S458, and item 6 is drafted. Items 3, 5 and 7 need the gate run itself, after the merge. Item 4 is ruled and met for the files on `v1`; it waits on E1 and E2 for the two release examples. Nothing on the release branch is known to block the gate: what remains is the examples branch's two examples, then one gate run alone on the machine.

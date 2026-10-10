@@ -1,3 +1,4 @@
+// expected: CLEAN
 // PT9.8 with a parallel worker: Send does not wait for M1 to be acknowledged. The dedupe table is kept
 // on archive, so at-most-once holds (delivery_check.py: 2,368 states). In-order delivery is not claimed.
 module delivery

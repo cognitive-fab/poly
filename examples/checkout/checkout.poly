@@ -1,3 +1,4 @@
+// expected: CLEAN
 module checkout
 
 service machine Inventory {

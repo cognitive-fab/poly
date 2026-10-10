@@ -1,3 +1,4 @@
+// expected: FINDING PL3201
 // The hello-world turnstile of README.md. poly check finds PL3201 DEADLOCK:
 // a full coin box locks the turnstile forever (evidence/turnstile_check.py).
 module hello

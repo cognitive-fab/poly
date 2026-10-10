@@ -1,3 +1,4 @@
+// expected: FINDING PL3001 PL3301
 // PT9.8 with the in-order worker and a dedupe table cleared on archive, against K4: a late copy of M1
 // takes a second step (delivery_check.py: the 10-step at-most-once witness).
 module delivery

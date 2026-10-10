@@ -1,3 +1,4 @@
+// expected: CLEAN
 // hatchet's DeriveWorkflowRunStatus, from the field study (conformance/field-studies/hatchet), in poly.
 // The corpus names are kept verbatim: the field `derived` (a contextual keyword, PT2.1) and the
 // array `taskStatuses`, a map keyed by 0..2 (S4).

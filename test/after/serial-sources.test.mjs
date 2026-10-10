@@ -10,6 +10,7 @@ import { translationValidate } from '@poly/ref';
 import { ROOT, polyFiles, build } from '../helpers.mjs';
 import { toolchainFaults } from '../toolchain-faults.mjs';
 import { SERIAL, serial } from '../serial-sources.mjs';
+import { expectedOf, mismatch } from '../examples-expected.mjs';
 
 const FILES = SERIAL.flatMap((d) => (existsSync(join(ROOT, d)) ? polyFiles(join(ROOT, d)) : []));
 const OUT = join(ROOT, '.poly', 'test-build', 'standing-serial');
@@ -27,6 +28,8 @@ for (const file of FILES) {
     assert.ok(r.verdict !== 'ERROR', `poly check errored: ${r.error}`);
     const faults = toolchainFaults([...r.diagnostics, ...r.machines.flatMap((m) => m.diagnostics)]);
     assert.deepEqual(faults.map((d) => `${d.code} ${d.message}`), []);
+    // V10 item 4 (ruled 2026-10-10): an example's verdict is the one its first line states.
+    if (relative(ROOT, file).startsWith('examples')) { const e = expectedOf(file); assert.ok(e, 'the example states its expected verdict'); assert.equal(mismatch(e, r), null); }
   });
   test(`translation validation agrees: ${relative(ROOT, file)}`, async (t) => {
     for (const b of build(file, 'tv-serial')) {
