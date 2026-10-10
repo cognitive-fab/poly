@@ -12,7 +12,7 @@ import { admit } from '@poly/check';
 import { oauthVault, kmsStore, credentialIngress, gmailSource, memoryMailStore } from '@poly/io';
 import { grantRequestSubject, signRecord } from '@poly/core';
 import { ROOT } from './helpers.mjs';
-import { PERSON, loaded, makeKey, project, signPolicies } from './runtime-helpers.mjs';
+import { PERSON, handleWith, loaded, makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
 export const DRAFT = join(ROOT, 'docs', 'ex', 'inbox-draft');
 export const SOURCE = readFileSync(join(DRAFT, 'inbox.poly.draft'), 'utf8');
@@ -21,6 +21,7 @@ export const GOOGLE = JSON.parse(readFileSync(join(ROOT, 'std', 'credentials', '
 export const ACCOUNTS = JSON.parse(readFileSync(join(ROOT, 'test', 'fixtures', 'inbox', 'corpus.json'), 'utf8')).accounts;
 export const tape = (label) => JSON.parse(readFileSync(join(ROOT, 'test', 'fixtures', 'traffic', 'gmail', `${label}.json`), 'utf8'));
 export const host = await import(pathToFileURL(join(ROOT, 'examples', 'inbox', 'host', 'inbox.mjs')).href);
+export const draftsHost = await import(pathToFileURL(join(ROOT, 'examples', 'inbox', 'host', 'drafts.mjs')).href);
 
 function memoryWrap() {
   const key = randomBytes(32);
@@ -41,8 +42,18 @@ export const SOURCE_ONE_GRANT = (() => {
   return SOURCE.split(from).join('  scopes { gmail.readonly }');
 })();
 
-/** The draft as a project: the module, its policy (signed by a person), and its price tables and maps. */
-export async function admittedInbox(name, { source = SOURCE, policy = POLICY } = {}) {
+/**
+ * The draft as a project: the module, its policy (signed by a person), and its price tables and maps. Admission checks
+ * the whole program, so one admission of a source and policy serves every test of a file, each over its own store.
+ */
+const ADMITTED = new Map();
+export function admittedInbox(name, { source = SOURCE, policy = POLICY } = {}) {
+  const k = source + '\u0000' + policy;
+  if (!ADMITTED.has(k)) ADMITTED.set(k, admitInbox(name, { source, policy }));
+  return ADMITTED.get(k);
+}
+
+async function admitInbox(name, { source, policy }) {
   const key = makeKey(name);
   const dir = project(name, [], key, 'test-ex-inbox');
   writeFileSync(join(dir, 'src', 'inbox.poly'), source);
@@ -54,7 +65,7 @@ export async function admittedInbox(name, { source = SOURCE, policy = POLICY } =
   await signPolicies(dir);
   const r = await admit(dir);
   assert.ok(r.certificatePath, `the inbox is admitted: ${JSON.stringify(r.certificate ?? r).slice(0, 3000)}`);
-  return { dir, key, build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey } };
+  return { dir, key, build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey }, report: r.report };
 }
 
 /**
@@ -100,6 +111,8 @@ export async function inbox(a, { db, tapes, answers, tokens = (k) => `${k}-${ran
     e.used = true;
     return { status: e.response.status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(e.response.body) };
   };
+  // Each draft Gmail was asked to create, with the account whose token came with it.
+  const created = [];
   // Each access token the endpoint issues, and the account whose consent it was issued for.
   const tokenOf = new Map();
   let consenting = null;
@@ -114,7 +127,14 @@ export async function inbox(a, { db, tapes, answers, tokens = (k) => `${k}-${ran
       }
       if (q.url === GOOGLE.revocation) return { status: 200, headers: {}, body: '' };
       const auth = Object.entries(q.headers ?? {}).find(([h]) => h.toLowerCase() === 'authorization')?.[1] ?? '';
-      return gmail(q, tokenOf.get(String(auth).replace(/^Bearer /, '')) ?? null);
+      const label = tokenOf.get(String(auth).replace(/^Bearer /, '')) ?? null;
+      // drafts.create, as its reference gives it: the draft's id and its message's.
+      if (q.method === 'POST' && q.url === draftsHost.DRAFTS_URL) {
+        const sent = JSON.parse(q.body);
+        created.push({ label, auth: auth !== '', raw: Buffer.from(sent.message.raw, 'base64url').toString('utf8'), threadId: sent.message.threadId });
+        return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: `r-${created.length}`, message: { id: `m-${created.length}`, threadId: sent.message.threadId, labelIds: ['DRAFT'] } }) };
+      }
+      return gmail(q, label);
     },
   };
   const client = { clientId: 'inbox', redirectUri: 'https://inbox.example/credentials', clientSecret: randomBytes(24).toString('base64url') };
@@ -153,6 +173,8 @@ export async function inbox(a, { db, tapes, answers, tokens = (k) => `${k}-${ran
   rt.provideTier('small', p.tiers.small);
   rt.provideTier('large', p.tiers.large);
   for (const d of ['summary', 'when', 'write']) rt.provide(d, { provider: p.decision, model: 'flash-2026-09' });
+  // The draft's handler, examples/inbox/host/drafts.mjs, through the project's certified handler (S142).
+  handleWith(rt, 'gmail.createDraft', draftsHost.createDraft);
   const settle = async (n = 30) => { for (let i = 0; i < n; i++) await rt.worker.tick(); };
-  return { rt, clock, source, accounts, provider: p, issued, seen, left, settle };
+  return { rt, clock, source, accounts, provider: p, issued, seen, left, settle, created };
 }

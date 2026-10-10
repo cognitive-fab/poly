@@ -232,3 +232,21 @@ test('S451: each item gives its message and thread keys; a retrieval by key narr
   assert.ok((await plain.retrieve({ owner: 'acct-work', limit: 5 })).every((i) => !('correspondent' in i.keys)));
   await assert.rejects(plain.retrieve({ owner: 'acct-work', key: { name: 'correspondent', value: 'x' }, limit: 5 }), /correspondentKey/);
 });
+
+test('S459 at the adapter: the envelope of a reply to a thread\'s newest message, its subject, In-Reply-To and References; none for another owner or no item', async () => {
+  const w = tape('work');
+  const s = gmailSource({ accounts: [account('acct-work', 'work', replay([...w.initial, ...w.poll])), account('acct-home', 'home', replay(tape('home').initial))], store: memoryMailStore() });
+  await s.sync('acct-work');
+  // Before the poll, the invoice thread holds its first message only.
+  const first = await s.envelope({ owner: 'acct-work', key: { name: 'thread', value: W.a01 } });
+  assert.deepEqual(first, { id: W.a01, owner: 'acct-work', asOf: 1791191520000, envelope: { to: 'alice@supplier.example.com', subject: 'Re: Invoice 4471 for the October delivery', inReplyTo: '<inv-4471@supplier.example.com>', references: ['<inv-4471@supplier.example.com>'] } });
+  await s.sync('acct-work');
+  // After it, the newest is the supplier's reply: its subject keeps one "Re: ", and References chain both ids.
+  const second = await s.envelope({ owner: 'acct-work', key: { name: 'thread', value: W.a01 } });
+  assert.equal(second.id, W.a02);
+  assert.deepEqual(second.envelope, { to: 'alice@supplier.example.com', subject: 'Re: Invoice 4471 for the October delivery', inReplyTo: '<inv-4471-2@supplier.example.com>', references: ['<inv-4471@supplier.example.com>', '<inv-4471-2@supplier.example.com>'] });
+  // Another owner's thread is not found under this owner, and a thread no item has is null.
+  assert.equal(await s.envelope({ owner: 'acct-home', key: { name: 'thread', value: W.a01 } }), null);
+  assert.equal(await s.envelope({ owner: 'acct-work', key: { name: 'thread', value: 'work/none' } }), null);
+  await assert.rejects(s.envelope({ owner: 'acct-work', key: { name: 'correspondent', value: 'x' } }), /thread or the message key/);
+});
