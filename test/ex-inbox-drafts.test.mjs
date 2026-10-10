@@ -3,7 +3,7 @@
 // from the source when it is proposed; the gate escalates it, and only the owner's signed approval lets it through
 // (IAC2); the handler creates it as a Gmail draft in the thread, and never sends. IAC3: a body of another account is
 // denied audience at the gate, and a variant that drafts from another account's thread is PL6831 at check. IAC5: an
-// answer citing a message it was not given is refused uncited. IAC7: canaries in a message body and in every OAuth
+// answer citing a message it was not given, or none, is refused uncited. IAC7: canaries in a message body and in every OAuth
 // token appear in no record. IAC8: forgetting an account erases its bodies, and replay still folds. IAC9: CLEAN, and
 // every run and gate session replays. Recorded traffic only: the corpus's Gmail tapes, a fake token endpoint, a fake
 // drafts.create, and recorded model answers.
@@ -120,7 +120,7 @@ test('IAC3: at run time, a draft of the work account carrying the home account\'
   });
 });
 
-test('IAC5: a draft citing a message it was not given is refused uncited, and the to-do stays open', { timeout: 900_000 }, async () => {
+test('IAC5: a draft citing a message it was not given, or citing none, is refused uncited, and the to-do stays open', { timeout: 900_000 }, async () => {
   const { ACCOUNTS } = await import('./ex-inbox-helpers.mjs');
   let cite = () => [W3];
   await run('iac5', { tapes: workTapes(), answers: answering(() => ({ answer: DRAFT, cites: cite() })), accounts: workOnly(ACCOUNTS) }, async (i) => {
@@ -130,6 +130,11 @@ test('IAC5: a draft citing a message it was not given is refused uncited, and th
     assert.equal(await written(i), 'Open');
     const run_ = (await rt.chain(INVOICE)).filter((e) => e.kind === 'observation' && e.body.stage === 'citation');
     assert.deepEqual(run_.map((e) => e.body.outcome), ['uncited']);
+    assert.equal((await rt.getState(INVOICE)).state.draft, null);
+    // An answer citing nothing: a citation is required (PS17.6 as amended, 58b59cd5), so it is refused uncited too.
+    cite = () => [];
+    assert.equal(await written(i), 'Open');
+    assert.deepEqual((await rt.chain(INVOICE)).filter((e) => e.kind === 'observation' && e.body.stage === 'citation').map((e) => e.body.outcome), ['uncited', 'uncited']);
     assert.equal((await rt.getState(INVOICE)).state.draft, null);
     // With the thread cited, the draft is kept: the recorded provider reads `cite` at each call.
     cite = () => [W1, W2];

@@ -309,8 +309,7 @@ machine Todo {
   }
 
   // IT4.2, IAC5: a draft rests on messages of its thread; the runtime refuses an answer citing a message it was not
-  // given (uncited). An answer citing none is kept: setting it aside here reads cites.count in a handler, which replay
-  // cannot fold (PL9001, decisions-ex.md, a defect for the release session).
+  // given, or none (uncited, PS17.6).
   on Written(text, cites) {
     require status == Drafting else reject "not-drafting"
     status' = Drafted
