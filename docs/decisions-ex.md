@@ -273,6 +273,28 @@ check-memory passed. The summary's "failures: 2" counts one of the four waiting 
 
 **Next.** The concierge's project check with its policy, a heavy run, after checking that no release-session suite or probe is running. Then IAC3, IAC5 to IAC8 and IAC9's check.
 
+## E1: the concierge's project check with its policy (2026-10-10)
+
+The example's two files, maps and prices as a project, its policy signed by a person, checked by `checkProject` in its own process (8 GB heap; resident 2.1 GB at the end). No release-session suite or probe was running. It took 132 s, and its verdict is **FINDINGS**.
+
+- **The module is CLEAN:**
+
+| Machine | States | Transitions |
+|---|---|---|
+| Desk | 1,826 | 82,170 |
+| Notice | 28 | 420 |
+| support.Conversation | 342 | 16,074 |
+| staff.Conversation | 666 | 41,958 |
+| payments.Grant | 13 | 104 |
+| triage.Route | 6 | 36 |
+| spend.Budget | 96 | 2,976 |
+
+  The configurations are CLEAN too: support at 26,211 global states, staff at 3,620.
+- **The policy.** Five stages are CLEAN: policy-types, policy-lower, consistency, policy-admission and policy-tv. Two stages give findings, the same two the inbox's policy gave in E2.2:
+  - `PL7001`, regions: the credential-egress region is reached by `decision.classify` with no gate crossed. A customer's message is sensitive, and a model call is egress. A policy of scope `concierge` that names any of the six decisions would gate it.
+  - `PL6503`, never: `large-refund-unreviewed` is violated by an approved large refund (verdict `allow (approved)`). S149 reads an escalation that an approval would allow as an allow. This is the limit ruled on 2026-10-09: a policy cannot say "only with an approval".
+- **For a ruling.** The inbox's fix was a gate on its decisions and no `never`. Here that means dropping the `never`, since the obligation already states the review. It also means an obligation over the six decisions whose condition can hold, and the concierge has no rule of its own to put there yet. The inbox's gate was freshness by `effect.items.age`. Most of the concierge's decisions carry no `Items`, so that condition would be unknown for them.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. Next are the concierge's project check with its policy, and the inbox's remaining acceptance tests.
