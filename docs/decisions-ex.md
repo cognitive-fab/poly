@@ -353,6 +353,28 @@ As ruled, the full-inbox variant was run once in its own process with a 12 GB he
 
 **So IAC3's evidence at check is the cut-down copy,** `test/fixtures/ex-inbox/cross-account.poly`: `PL6831` with the witness `Open -> Read -> Written -> Propose -> Enveloped`, and `CLEAN` when the thread is read under its own account. **Stated limit:** the full inbox with that change is not checkable within 12 GB. Its last heap figure was 12,269.7 MB at 571 s. At run time, IAC3 is shown on the full inbox: `createDraft` is denied `audience`.
 
+## Rebase on v1 at db7ef72d, citations required, and S462 proposed (2026-10-10)
+
+`ex` is rebased on `db7ef72d`, with no conflict. The rebase brings 58b59cd5 to db7ef72d: replay takes a count read in a handler as the checker admits it, and an empty or missing citation list on a decision with `cites` is refused `uncited` (PS11.4, PS17.6 as amended).
+
+- **IAC3, ruled:** accepted. The check evidence is the cut-down copy, the run-time evidence is the full inbox's `audience` denial, and the 12 GB figure is a stated limit.
+- **IAC5, now met by the runtime.** The to-do keeps no `cites.count` check, as ruled. Its test adds the answer citing none back: it is refused `uncited`, the second citation observation, and the draft is not kept.
+- **The concierge's recorded `answer`** cites the fixture's ids among the orders it read, or, when none of them was returned, every order it read. A citation is now required, and a provider citing nothing would take the failed path.
+- **The refund handler, ruled a fix before AC27.** The program carries only the amount, so the host would choose which charge to refund: the gap S459 closed for the envelope. The refund must carry the order, taken from the customer's own orders as retrieved. The handler refunds only that order's payment, and refuses if the order is not the requesting customer's or the amount exceeds what was paid. That stated limit is dropped once this is in.
+- **What the language lacks.** A module cannot take an order's `Key` out of a retrieval: a `Key` enters only as data a host or a completion gives (PS1.4c), and a retrieval's `ok` binds only `r.items`, and `r.envelope` since S459. A handler reads its own payload's `Content` (`content.read`, PS17.4a), but not an `Items`' ids or owners.
+
+**S462, for the release session (ruled 2026-10-10, option 1 of three):** a handler reads its own payload's item set.
+- `items.read(ref)` works only on an `Items` in the handler's own payload, and returns the ids, owners and keys of that set only. Each read is recorded by digest, as `content.read` is.
+- The refund's order must hold exactly one item. Any other count is refused before the handler runs.
+- The handler refuses, with nothing sent, if the item's owner is not the payload's customer, or if the amount exceeds what was paid on that order's charge.
+- Tests from the text: a forged or unstored ref, another customer's order, two items, and an amount above what was paid are each refused, and a valid refund is the control.
+- **The concierge, once S462 lands:**
+  - the refund effect carries `order: Items`, the cited subset of the customer's own retrieved orders, and `customer: Principal`;
+  - the handler reads the order with `items.read`, reads the order's charge from Stripe, and refunds that charge.
+- The two options not chosen: a retrieval binding the `Key` of its one item, checked for origin at the gate; and host-side records only, which leaves the gap.
+
+**Order.** AC27 waits for S462 and for the release session's suite to end. Then this branch rebases, fixes the refund, checks that nothing heavy is running, runs AC27, and reports its divergences.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy. The inbox meets IAC1 to IAC9 on recorded traffic, IAC5 in full once the release session's citation fix lands.
