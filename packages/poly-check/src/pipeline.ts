@@ -148,6 +148,8 @@ export interface CheckReport {
   configurations: ConfigCheck[];
   /** S190: each module whose enums a machine's build uses: the file it was read from, and its AST digest. */
   typeModules?: Record<string, { file: string; digest: string }>;
+  /** PT12 (v1, ruled 2026-10-09): each action parameter named after a state field of its machine; never in the verdict. */
+  warnings?: { machine: string; action: string; param: string; field: string }[];
   error?: string;
   engines: Record<string, string>;
   /** Stage 5 (PT8): the module's policies, one report per trust scope. */
@@ -237,6 +239,10 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   if (!parsed.module) return finish(report);
   const original = parsed.module;
   report.module = original.name;
+  // PT12 (v1, ruled 2026-10-09): a parameter named after a state field shadows it wherever the action is known (S19).
+  // It is a warning beside the verdict, never a diagnostic; after v1 it is PL1002, with std and the corpora renamed.
+  const shadows = original.decls.flatMap((m) => (m.kind !== 'Machine' ? [] : m.items.flatMap((a) => (a.kind !== 'Action' ? [] : a.params.filter((p) => m.fields.some((x) => x.name === p.name)).map((p) => ({ machine: m.name, action: a.name, param: p.name, field: p.name }))))));
+  if (shadows.length) report.warnings = shadows;
   // S176: the modules `use` names, found in the project or, for a lone file, in its directory and std/.
   const uses = resolveUses(original, file, opts.programFiles, ...(opts.std ? [opts.std] : []));
   usesFiles.set(report, uses.files);

@@ -91,6 +91,8 @@ export function render(r: CheckReport): string {
   for (const c of r.configurations ?? []) for (const d of c.diagnostics) out.push(...renderDiagnostic(d, r.file));
   for (const p of r.policies ?? []) for (const d of p.diagnostics) out.push(...renderDiagnostic(d, r.file));
   if (r.error) out.push(`error: ${r.error}`);
+  // PT12 (v1): a warning names the parameter and the field it shadows; it changes no verdict.
+  for (const w of r.warnings ?? []) out.push(`warning: parameter ${w.param} of ${w.machine}.${w.action} is named after the field ${w.field}, which it shadows wherever the action is known (S19); it will be PL1002 after v1`);
   for (const m of r.machines) {
     const ran = m.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
     const notRun = m.stages.filter((s) => s.status === 'not-run');
