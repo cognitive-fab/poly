@@ -32,12 +32,15 @@ export function recordedConcierge(fixture) {
     const second = a.answer === 'Other' ? 'Status' : 'Other';
     return { answer: a.answer, distribution: [[a.answer, a.p], [second, Math.max(0, 1 - a.p)]], usage: a.usage, reported: fixture.models[name], latencyMs: 0 };
   };
+  // The amount, and the order its message is about (S462): the fixture's order among the customer's orders it read, and
+  // nothing otherwise, so a message about an order the customer does not have takes the failed path, uncited (PS17.6).
   const amount = (q, materials) => {
     const m = messageOf(fixture, materials);
     asked.push({ decision: q.decision, tier: null, message: m.id });
     if (!m.amount) throw new Error(`no recorded amount for ${m.id}`);
-    const other = { value: m.amount.answer.value === 0 ? 1 : 0 };
-    return { answer: m.amount.answer, distribution: [[m.amount.answer, m.amount.p], [other, Math.max(0, 1 - m.amount.p)]], usage: m.amount.usage, reported: fixture.models.small, latencyMs: 0 };
+    const read = Object.values(materials?.items ?? {}).flat().map((i) => i.id);
+    const other = m.amount.answer === 0 ? 1 : 0;
+    return { answer: m.amount.answer, distribution: [[m.amount.answer, m.amount.p], [other, Math.max(0, 1 - m.amount.p)]], cites: (m.amount.cites ?? []).filter((id) => read.includes(id)), usage: m.amount.usage, reported: fixture.models.small, latencyMs: 0 };
   };
   const reply = (q, materials) => {
     const m = messageOf(fixture, materials);

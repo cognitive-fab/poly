@@ -1,0 +1,148 @@
+// The concierge's refund path cut down to what S462 touches (plan-ex.md E1, PS17.4b): the customer's own orders are
+// retrieved, a decision with `cites` names the one order the message is about, and the refund effect acts on exactly
+// that item (`one order`). The emit is guarded: an answer that cites two orders, or none the handler could refund, is
+// answered Unsure and nothing is emitted. The unguarded variant is PL6847, with its witness (test/ex-concierge-refund).
+module concierge
+
+audience { public < customer < staff }
+
+claims Customer {
+  principal: Principal
+}
+
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+  keys { charge }
+}
+
+credential payments: oauth2 {
+  provider "stripe-connect"
+  grant authorization_code
+  scopes { read_write }
+}
+
+enum Phase { Idle, Finding, Extracting, Refunding, Answering }
+
+enum Outcome { Refunded, Declined, Unsure }
+
+service machine Desk {
+  state {
+    phase    : Phase     = Idle
+    customer : Principal = none
+    question : Content   = none
+    large    : bool      = false
+  }
+
+  action Got(body: Content)
+  action Found(items: Items)
+  action LookupFailed()
+  action Amounted(value: 0..500, conf: Conf, cites: Items)
+  action Unextracted()
+  action Refunded()
+  action RefundFailed()
+  action Answered(text: Content)
+  action AnswerFailed()
+
+  on Got(body) by c: Customer {
+    require phase == Idle else reject "busy"
+    customer' = c.principal
+    phase' = Finding
+    question' = body
+    emit lookup(customer: c.principal)
+  }
+
+  on Found(items) {
+    require phase == Finding else reject "not-finding"
+    phase' = Extracting
+    decide amount(text: question, context: items)
+  }
+
+  on LookupFailed {
+    require phase == Finding else reject "not-finding"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  on Amounted(value, conf, cites) {
+    require phase == Extracting else reject "not-extracting"
+    if conf >= 0.8 {
+      if cites.count == 1 {
+        phase' = Refunding
+        large' = value > 100
+        emit refund(amount: value, customer: customer, order: cites)
+      } else {
+        phase' = Answering
+        decide reply(question: question, outcome: Unsure)
+      }
+    } else {
+      phase' = Answering
+      decide reply(question: question, outcome: Unsure)
+    }
+  }
+
+  on Unextracted {
+    require phase == Extracting else reject "not-extracting"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  on Refunded {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Answering
+    decide reply(question: question, outcome: Refunded)
+  }
+
+  on RefundFailed {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Answering
+    decide reply(question: question, outcome: Declined)
+  }
+
+  on Answered(text) {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    question' = none
+  }
+
+  on AnswerFailed {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    question' = none
+  }
+
+  effect lookup(customer: Principal) {
+    retrieve orders where owner == customer limit 2
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision amount(text: Content, context: Items) -> 0..500 {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 800ms
+    cites context
+    ok(r) -> Amounted(value: r.answer, conf: r.conf, cites: r.cites)
+    failed -> Unextracted()
+  }
+
+  decision reply(question: Content, outcome: Outcome) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Answered(text: r.answer)
+    failed -> AnswerFailed()
+  }
+
+  effect refund(amount: 0..500, customer: Principal, order: Items) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: ["https://api.stripe.com/v1/refunds", "https://api.stripe.com/v1/charges/"] }
+    uses payments { read_write }
+    one order
+    class irreversible
+    ok -> Refunded()
+    failed -> RefundFailed()
+  }
+}
