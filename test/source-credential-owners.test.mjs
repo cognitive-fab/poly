@@ -191,7 +191,9 @@ test('S461, PT10j: inside a retrieval for one owner, a request through another o
     // B's own retrieval still went through, under B's grant only: A's grant reached nothing.
     assert.deepEqual([st.phase, st.found], ['Idle', 1], JSON.stringify(st));
     assert.deepEqual([...new Set(d.sent.slice(before).map(whose))], ['acct-b']);
-    // A's handle outside any retrieval is the host's sync of A, and sends under A's grant.
+    // A's handle outside any retrieval is the host's sync of A, and sends under A's grant. The recorded answer for B's
+    // document is still queued, since a retrieval reads no body (a decision does, PT10j), so it is cleared first.
+    d.answers.length = 0;
     assert.equal(await through(d, whose, rt.credentialHandle('payments', 'acct-a')), 'acct-a');
   } finally { await d.rt.close(); }
 });
