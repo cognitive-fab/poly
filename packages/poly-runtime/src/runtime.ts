@@ -10,8 +10,8 @@
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
-import { capabilitiesFor, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
-import type { ChannelAdapter, ChannelTransports, IngressAnswer, SourceAdapter, VaultAdapter, Verified, Webhook } from './adapters.js';
+import { capabilitiesFor, withinPrefix, CapabilityRefused, CredentialUnavailable, CREDENTIAL_HANDLE, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
+import type { ChannelAdapter, ChannelTransports, HttpRequest, HttpResponse, IngressAnswer, SourceAdapter, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -142,6 +142,12 @@ const GRANT_ONLY = new Set(['Callback', 'Reauthorize', 'Refreshed', 'RefreshFail
 /** Deliberately broken runtimes, for one test each: the recipient digest without the store's key (ruled on step 9). */
 export const RUNTIME_FAULTS = ['unkeyed-recipient', 'address-in-clear'] as const;
 
+/**
+ * S182: the certified adapter package as the runtime loaded it: whether it made an adapter, and (S460) the credential
+ * handle a source adapter was built with, or null. A package with no credentialHandleOf answers none.
+ */
+export interface IoPackage { madeHere(a: unknown): boolean; credentialHandleOf?(a: unknown): unknown }
+
 /** A name under `dir` that no file has yet: `name`, else `name.2`, `name.3`, ... so a record is never overwritten. */
 function freeName(dir: string, name: string): string {
   if (!existsSync(join(dir, name))) return name;
@@ -174,11 +180,13 @@ export class PolyRuntime {
    * S182: the certified adapter package, as this runtime loaded it (given at load when the certificate binds
    * adapters). Review D-F2 (M8b): private and set once, so no host can put in a package that calls a look-alike its own.
    */
-  readonly #ioPackage: { madeHere(a: unknown): boolean } | null;
+  readonly #ioPackage: IoPackage | null;
   /** For one test each: a deliberately broken runtime (RUNTIME_FAULTS). */
   readonly #fault: LoadOptions['fault'];
   /** Review D-F4 (M8b): each channel's connected adapter, with which rt.receive verifies the channel's webhooks. */
   readonly #adapters = new Map<string, ChannelAdapter>();
+  /** S460: each source credential handle this runtime made, and the credential it is for. */
+  readonly #handles = new WeakMap<object, string>();
   /** PT10f: each credential's certified vault. */
   readonly #vaults = new Map<string, VaultAdapter>();
   /** PS18.2, PS18.4: the routes' and budgets' instances, reservations and tier providers. */
@@ -210,7 +218,7 @@ export class PolyRuntime {
   /** PS17 (M10): the taint of each body, the item sets retrievals return, and the sources' adapters. */
   readonly memory: Memory;
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: { madeHere(a: unknown): boolean } | null } = {}) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: IoPackage | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
     this.#ioPackage = opts.ioPackage ?? null;
     this.#fault = opts.fault;
@@ -694,7 +702,7 @@ export class PolyRuntime {
    * PS16.1: the certified credential, as load read its descriptor once with the certified bytes (review D4, B7, M9), or
    * null for an unknown credential.
    */
-  #credential(c: string): { machine: string; provider: string; scopes: string[]; holder: boolean; person: boolean } | null {
+  #credential(c: string): { machine: string; provider: string; scopes: string[]; holder: boolean; person: boolean; bases: string[] } | null {
     return this.verified.credentials.find((x) => x.name === c) ?? null;
   }
 
@@ -953,6 +961,42 @@ export class PolyRuntime {
   }
 
   /**
+   * PS17.0, PT10j (S460): the handle a source's adapter is built with, for credential c, which a source of the build names
+   * and which has no holder. Each request is refused before it is sent when its URL lies outside the provider's base
+   * addresses (PL6406, audited as a capability refusal is) and while c's one grant is not Granted (credential-unavailable,
+   * read at the request, so a revocation stops the next one); otherwise it goes through the vault's withToken for the
+   * grant, which attaches the token and strips it from the answer. The handle holds no token and no way to get one: its
+   * one method is request, and the runtime keeps which handles it made.
+   */
+  credentialHandle(c: string): Readonly<{ request(r: { method: string; url: string; headers?: Record<string, string>; body?: string }): Promise<HttpResponse> }> {
+    const cred = this.#credential(c);
+    if (!cred) throw new Error(`no credential ${c} in the certified build (PS16)`);
+    if (!this.verified.memory.sources.some((s) => s.credential === c)) throw new Error(`credential ${c} is named by no source of the build; a handle is for a source's adapter (PS17.0, S460)`);
+    if (cred.holder) throw new Error(`credential ${c} has a holder, and a source's credential has none (PS17.0, S460)`);
+    const bases = [...cred.bases];
+    const request = async (r: { method: string; url: string; headers?: Record<string, string>; body?: string }): Promise<HttpResponse> => {
+      const method = String(r?.method ?? '');
+      const url = String(r?.url ?? '');
+      const at = withinPrefix(url, bases);
+      if (at === null) {
+        const reason = `${method} ${url} is outside the base addresses of credential ${c}'s provider ${JSON.stringify(bases)}`;
+        await this.store.insertAudit({ at: this.now(), instanceId: this.grantOf(c, null) ?? `credential:${c}`, action: `credential.${c}.request`, actionId: `credential.${c}.request`, rule: 'PL6406', reason });
+        throw new CapabilityRefused(`PL6406 CAPABILITY_REFUSED: ${reason}`);
+      }
+      const vault = this.#vaults.get(c);
+      const id = vault ? this.grantOf(c, null) : null;
+      const row = id ? this.store.db.prepare('SELECT state FROM pr_instance WHERE instance_id = ?').get(id) as { state: string } | undefined : undefined;
+      if (!vault || !id || !row || (JSON.parse(row.state) as { g?: unknown }).g !== 'Granted') throw new CredentialUnavailable(`credential-unavailable: credential ${c} has no Granted grant, so its source's adapter sends nothing (PS16.4, S460)`);
+      const req: HttpRequest = { method, url: at, headers: { ...(r.headers ?? {}) }, body: typeof r.body === 'string' ? r.body : '' };
+      const res = await vault.withToken(id, req);
+      return { status: res.status, headers: { ...res.headers }, body: res.body };
+    };
+    const handle = Object.freeze({ request, [CREDENTIAL_HANDLE]: true });
+    this.#handles.set(handle, c);
+    return handle;
+  }
+
+  /**
    * PT10f, S200: the vault of a credential the certificate names, made by the certified adapter package, of the store the
    * certificate binds (PL6408 otherwise). The runtime holds it for the grant check and `api` (PT22.4, PT22.5).
    */
@@ -984,6 +1028,14 @@ export class PolyRuntime {
     if (pin.adapter === null) throw new Error(`source ${source} is the project's memory, which the runtime keeps itself (PS17.5)`);
     if (!this.#ioPackage?.madeHere(adapter)) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: the adapter for source ${source} was not made by the certified ${pin.package} ${pin.version} as this runtime loaded it (S308)`);
     if (adapter.kind !== pin.adapter) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: source ${source} declares adapter ${pin.adapter}, and this is a ${adapter.kind} adapter (S308)`);
+    // PS17.0, PT10j (S460): a source that names a credential takes only an adapter built with this runtime's handle for
+    // it, so its requests go through the vault under the grant; a source that names none takes no adapter built with a
+    // handle. A package that cannot say what an adapter was built with says none, so a credential's source is refused.
+    const want = this.memory.sources.get(source)?.credential;
+    const handle = typeof this.#ioPackage?.credentialHandleOf === 'function' ? this.#ioPackage.credentialHandleOf(adapter) : null;
+    const built = handle !== null && typeof handle === 'object' ? this.#handles.get(handle) : undefined;
+    if (want !== undefined && built !== want) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: source ${source} names credential ${want}, and this adapter was not built with this runtime's handle for it (rt.credentialHandle, S460)`);
+    if (want === undefined && handle !== null && handle !== undefined) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: source ${source} names no credential, and this adapter was built with a credential handle (S460)`);
     this.memory.connect(source, adapter);
   }
 
@@ -1998,7 +2050,7 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     }
   }
   // S182, plan step 10: the adapters are the ones admitted. The installed package is pinned again and compared.
-  let ioPackage: { madeHere(a: unknown): boolean } | null = null;
+  let ioPackage: IoPackage | null = null;
   // PT10f: a credential's vault is pinned the same way.
   // S308: and each source's adapter.
   const adapters = [...(verified.certificate.poly.adapters ?? []), ...(verified.certificate.poly.vaults ?? []), ...(verified.certificate.poly.memory?.sources ?? []).filter((s): s is typeof s & { package: string; version: string; digest: string } => s.adapter !== null)];
@@ -2006,7 +2058,7 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     const now = adapterPackagePin();
     const other = adapters.find((x) => x.package !== now.package || x.version !== now.version || x.digest !== now.digest);
     if (other) { await kernel.close(); throw new LoadError(`refused at load: the build was admitted with ${other.package} ${other.version} ${other.digest}; this runtime has ${now.package} ${now.version} ${now.digest} (S182)`); }
-    ioPackage = (await import(pathToFileURL(realpathSync(createRequire(import.meta.url).resolve('@poly/io'))).href)) as { madeHere(a: unknown): boolean };
+    ioPackage = (await import(pathToFileURL(realpathSync(createRequire(import.meta.url).resolve('@poly/io'))).href)) as IoPackage;
   }
   return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault, ioPackage });
 }

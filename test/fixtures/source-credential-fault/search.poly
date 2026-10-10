@@ -1,0 +1,50 @@
+// S460 (PT10j): the fixture of the broken lowering source-credential-dropped. The source help names the service's own
+// credential reports, which no effect uses, so its descriptor drops the credential and poly-ref's read-back of
+// sources/help.json differs. The provider is the tests' test-oauth, found under the test-only std.
+module srcfault
+
+audience { public < staff }
+
+credential reports: oauth2 {
+  provider "test-oauth"
+  grant client_credentials
+  scopes { reports.read }
+}
+
+source help: documents {
+  adapter "opensearch"
+  audience staff
+  credential reports
+}
+
+enum Phase { Idle, Searching }
+
+machine Search {
+  state {
+    phase : Phase = Idle
+  }
+
+  action Ask()
+  action Found(items: Items)
+  action Failed()
+
+  on Ask {
+    require phase == Idle else reject "busy"
+    phase' = Searching
+    emit lookup()
+  }
+  on Found(items) {
+    require phase == Searching else reject "not-searching"
+    phase' = Idle
+  }
+  on Failed {
+    require phase == Searching else reject "not-searching"
+    phase' = Idle
+  }
+
+  effect lookup() {
+    retrieve help limit 1
+    ok(r) -> Found(items: r.items)
+    failed -> Failed()
+  }
+}

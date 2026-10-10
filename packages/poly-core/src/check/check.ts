@@ -484,6 +484,14 @@ class Checker {
       if (d.freshness !== null && durationMs(d.freshness) === null) this.err('PL1201', d, `${d.freshness} is not a duration`);
       // PS17.0, S459: envelope k names one of the source's keys; the parser and the embedded reader hold it to once.
       if (d.envelope !== undefined && !(d.keys ?? []).includes(d.envelope)) this.err('PL1001', d, `source ${d.name} gives envelopes by ${d.envelope}, which is not one of its keys${d.keys?.length ? `: ${d.keys.join(', ')}` : ''} (PS17.0)`);
+      // PS17.0, S460: credential c names a credential of the module with no holder, whose one grant the adapter reaches its
+      // provider under; the memory source is the runtime's own store and reaches no provider. Written once by the parser.
+      if (d.credential !== undefined) {
+        const c = this.module.decls.find((x): x is A.Credential => x.kind === 'Credential' && x.name === d.credential);
+        if (d.sourceKind === 'memory') this.err('PL1201', d, `source ${d.name} is the project's memory, which the runtime keeps in its own store, so it names no credential (PS17.0)`);
+        else if (!c) this.err('PL1001', d, `source ${d.name} names the credential ${d.credential}, and the module declares no credential ${d.credential} (PS17.0)`);
+        else if (c.holder !== null) this.err('PL1201', d, `source ${d.name} names credential ${c.name}, which has a holder; a source's credential names no holder, so it has one grant (PS17.0, S460)`);
+      }
     }
   }
 

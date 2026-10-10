@@ -24,8 +24,8 @@ export const join = (a: Taint, b: Taint): Taint => {
   return { c: Math.max(a.c, b.c), o: omega ? [OMEGA] : k, ...(omega ? { k } : {}) };
 };
 
-/** PS17.0: a source's descriptor, as the build wrote it and admission certified it (PT10i). */
-export interface SourceDescriptor { v: 1; module: string; source: string; kind: string; adapter: string | null; audience: string; class: number; owned: boolean; freshnessMs: number | null; stale: 'escalate' | 'deny' }
+/** PS17.0: a source's descriptor, as the build wrote it and admission certified it (PT10i); `credential` when it names one (S460). */
+export interface SourceDescriptor { v: 1; module: string; source: string; kind: string; adapter: string | null; audience: string; class: number; owned: boolean; freshnessMs: number | null; stale: 'escalate' | 'deny'; credential?: string }
 /** PS17.3: a module's flow descriptor (PT10i). */
 export interface FlowDescriptor { v: 1; module: string; audience: string[]; sources: Record<string, { class: number; owned: boolean }>; claims?: Record<string, { class: string; principal: string | null }> }
 

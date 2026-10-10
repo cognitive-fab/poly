@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'envelope-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
+export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'envelope-dropped' | 'source-credential-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
 
 export interface Lowered {
   machine: string;
@@ -326,7 +326,12 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // PT10e: each credential an effect of this machine uses has its descriptor, which the vault adapter reads: what to ask
   // the provider for, and the base addresses the credential may be sent to. The broken lowerings add a scope the source
   // does not declare, and widen a base address to plain http.
-  const used = new Set([...facts.effects.values()].flatMap((e) => e.items.flatMap((i) => (i.kind === 'EffUses' ? [i.credential] : []))));
+  // PS17.0, PT10j (S460): and each credential a source of the module names, used by no effect or not, so admission binds
+  // its vault and refuses it with no store, as for an effect's (the sources are written by every machine of the module).
+  const used = new Set([
+    ...[...facts.effects.values()].flatMap((e) => e.items.flatMap((i) => (i.kind === 'EffUses' ? [i.credential] : []))),
+    ...module.decls.flatMap((d) => (d.kind === 'Source' && d.credential !== undefined ? [d.credential] : [])),
+  ]);
   for (const c of module.decls) {
     if (c.kind !== 'Credential' || !used.has(c.name)) continue;
     const entry = opts.providers?.[c.provider];
@@ -341,13 +346,14 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   }
   // PS17.0, PS17.3 (S303): the module's sources, each the descriptor its adapter is bound by, and the flow descriptor, the
   // audience order and each channel's declared class, which the runtime's flow check reads. The broken lowerings make an
-  // owned source unowned and lower a source's class.
+  // owned source unowned and lower a source's class. S460: a source's credential, which the runtime holds the adapter to;
+  // the broken lowering source-credential-dropped loses it, so the source would run with no grant.
   const sources = module.decls.filter((d): d is A.SourceDecl => d.kind === 'Source');
   if (sources.length || module.decls.some((d) => d.kind === 'Audience')) {
     const classes = module.decls.find((d): d is A.AudienceDecl => d.kind === 'Audience')?.classes ?? [];
     const cls = (c: string) => Math.max(0, classes.indexOf(c));
     for (const s of sources) {
-      files[`../sources/${s.name}.json`] = JSON.stringify({ v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: opts.fault === 'source-unowned' ? false : s.owned, freshnessMs: s.freshness === null ? null : durationMs(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}), ...(s.envelope !== undefined ? { envelope: s.envelope } : {}) }, null, 2) + '\n';
+      files[`../sources/${s.name}.json`] = JSON.stringify({ v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: opts.fault === 'source-unowned' ? false : s.owned, freshnessMs: s.freshness === null ? null : durationMs(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}), ...(s.envelope !== undefined ? { envelope: s.envelope } : {}), ...(s.credential !== undefined && opts.fault !== 'source-credential-dropped' ? { credential: s.credential } : {}) }, null, 2) + '\n';
     }
     const lowered = (k: number, first: boolean) => (opts.fault === 'flow-class-lowered' && first ? 0 : k);
     files[`../flow/${module.name}.json`] = JSON.stringify({

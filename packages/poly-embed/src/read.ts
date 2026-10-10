@@ -230,10 +230,10 @@ class Reader {
         return this.mk<A.AudienceDecl>(c.node, { kind: 'Audience', classes: this.arr(classes).map((s) => this.str(s)) });
       }
       case 'source': {
-        // PS17.0: source(name, { kind, adapter?, audience, owned?, freshness?, stale?, keys?, envelope? }), keys ['k', …] (S451),
-        // envelope 'k' (S459).
+        // PS17.0: source(name, { kind, adapter?, audience, owned?, freshness?, stale?, keys?, envelope?, credential? }), keys ['k', …] (S451),
+        // envelope 'k' (S459), credential 'c' (S460).
         const [name, body] = this.argsOf(c, 2, 2);
-        const o = this.opts(body, ['kind', 'adapter', 'audience', 'owned', 'freshness', 'stale', 'keys', 'envelope']);
+        const o = this.opts(body, ['kind', 'adapter', 'audience', 'owned', 'freshness', 'stale', 'keys', 'envelope', 'credential']);
         if (!o.has('kind') || !o.has('audience')) this.fail(body, 'a source names its kind and audience (PS17.0)');
         const ow = o.get('owned');
         const owned = !!ow && this.unparen(ow).kind === ts.SyntaxKind.TrueKeyword;
@@ -244,7 +244,8 @@ class Reader {
         if (keys && !keys.length) this.fail(o.get('keys')!, 'keys names at least one key, or is left out (PS17.0)');
         if (keys) for (const [i, k] of keys.entries()) { if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) this.fail(o.get('keys')!, `the key ${JSON.stringify(k)} is not an identifier`); if (keys.indexOf(k) !== i) this.fail(o.get('keys')!, `a source names its key ${k} once`); }
         const envelope = o.has('envelope') ? this.str(o.get('envelope')!) : null;
-        return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale, ...(keys ? { keys } : {}), ...(envelope !== null ? { envelope } : {}) });
+        const credential = o.has('credential') ? this.str(o.get('credential')!) : null;
+        return this.mk<A.SourceDecl>(c.node, { kind: 'Source', name: this.str(name), sourceKind: this.str(o.get('kind')!), adapter: o.has('adapter') ? this.str(o.get('adapter')!) : null, audience: this.str(o.get('audience')!), owned, freshness: o.has('freshness') ? this.str(o.get('freshness')!) : null, stale, ...(keys ? { keys } : {}), ...(envelope !== null ? { envelope } : {}), ...(credential !== null ? { credential } : {}) });
       }
       case 'route': {
         // PT10r: route(name, { tiers: [{ name, provider, prices, calibration?, maxTokens }], escalate: [['conf', 0.8], ['failed']], budget? }).

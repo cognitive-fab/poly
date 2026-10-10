@@ -80,6 +80,9 @@ export const FAULT_SOURCES = {
   // PT10j (S459): the effect's envelope parameter, which the runtime's origin check reads before the memory check,
   // dropped from the manifest, so the runtime would skip that check.
   'envelope-dropped': ['test/fixtures/envelope-fault/reply.poly'],
+  // PT10j (S460): the source descriptor's credential, which the runtime holds the source's adapter to, dropped, so the
+  // source would run with no grant.
+  'source-credential-dropped': ['test/fixtures/source-credential-fault/search.poly'],
   // PT10r (M11): the route's and the budget's descriptors the runtime reads to run the tiers and hold the caps.
   'route-threshold-changed': ['test/fixtures/m11/desk.poly'],
   'route-tier-dropped': ['test/fixtures/m11/desk.poly'],

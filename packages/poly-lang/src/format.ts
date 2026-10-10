@@ -85,6 +85,8 @@ class Printer {
     if (s.keys?.length) this.out.push(`${INDENT}keys { ${s.keys.join(', ')} }`);
     // PS17.0, S459.
     if (s.envelope !== undefined) this.out.push(`${INDENT}envelope ${s.envelope}`);
+    // PS17.0, S460.
+    if (s.credential !== undefined) this.out.push(`${INDENT}credential ${s.credential}`);
     this.out.push(`}${this.trail(s)}`);
   }
 

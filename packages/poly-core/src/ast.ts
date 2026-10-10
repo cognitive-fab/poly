@@ -55,6 +55,8 @@ export interface SourceDecl extends NodeBase {
   keys?: string[];
   /** PS17.0, S459: the key by which the adapter gives a thread's envelope; absent when the source gives none. */
   envelope?: string;
+  /** PS17.0, S460: the holder-less credential under whose one grant the adapter reaches its provider; absent when none. */
+  credential?: string;
 }
 
 // ── Routes and budgets (PT24, PS18, M11) ───────────────────────────────────

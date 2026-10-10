@@ -231,7 +231,7 @@ class Parser {
     return this.node<A.AudienceDecl>(start, { kind: 'Audience', classes }, true);
   }
 
-  /** `source s: k { adapter "a"  audience c [owned]  freshness d [stale escalate | stale deny]  [keys { k, … }]  [envelope k] }` (PS17.0, S451, S459). */
+  /** `source s: k { adapter "a"  audience c [owned]  freshness d [stale escalate | stale deny]  [keys { k, … }]  [envelope k]  [credential c] }` (PS17.0, S451, S459, S460). */
   private source(): A.SourceDecl {
     const start = this.next();
     const name = this.ident('a source name');
@@ -245,10 +245,11 @@ class Parser {
     let stale: A.SourceDecl['stale'] = 'escalate';
     let keys: string[] | null = null;
     let envelope: string | null = null;
+    let credential: string | null = null;
     const seen = new Set<string>();
     while (!this.atPunct('}')) {
       const is = this.peek();
-      const w = this.ident('adapter, audience, freshness, stale, keys or envelope');
+      const w = this.ident('adapter, audience, freshness, stale, keys, envelope or credential');
       // As for a channel's and a credential's clauses: each is written once.
       if (seen.has(w)) this.fail(`a source states its ${w} once`, is);
       seen.add(w);
@@ -275,11 +276,14 @@ class Parser {
       } else if (w === 'envelope') {
         // PS17.0, S459: `envelope k`, the key by which the adapter gives a reply's envelope; the check holds k to keys.
         envelope = this.ident('a key name');
-      } else this.fail('expected adapter, audience, freshness, stale, keys or envelope', is);
+      } else if (w === 'credential') {
+        // PS17.0, PT10j, S460: `credential c`, the holder-less credential whose one grant the adapter reaches its provider under.
+        credential = this.ident('a credential name');
+      } else this.fail('expected adapter, audience, freshness, stale, keys, envelope or credential', is);
     }
     if (audience === null) this.fail('a source names its audience (PS17.0)');
     this.next();
-    return this.node<A.SourceDecl>(start, { kind: 'Source', name, sourceKind, adapter, audience, owned, freshness, stale, ...(keys ? { keys } : {}), ...(envelope !== null ? { envelope } : {}) }, true);
+    return this.node<A.SourceDecl>(start, { kind: 'Source', name, sourceKind, adapter, audience, owned, freshness, stale, ...(keys ? { keys } : {}), ...(envelope !== null ? { envelope } : {}), ...(credential !== null ? { credential } : {}) }, true);
   }
 
   /**

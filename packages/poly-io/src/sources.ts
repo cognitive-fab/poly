@@ -7,7 +7,7 @@
 //   opensearch: the OpenSearch REST API (_search, _doc, _delete_by_query), as its documentation gives it, over an HTTP
 //               transport the host or a test gives, so a test replays recorded traffic.
 import type { EnvelopeAnswer, EnvelopeQuery, HttpTransport, ItemRef, PgQuery, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
-import { made, oneLine } from './util.js';
+import { builtWith, made, oneLine } from './util.js';
 
 /** A SQL identifier or an OpenSearch field name written into a query: letters, digits and underscores only. */
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -171,6 +171,10 @@ export interface OpenSearchSourceConfig {
   /** The cluster's base URL, https, with no path beyond the root. */
   base: string;
   index: string;
+  /**
+   * The HTTP transport: the host's, or (S460) the runtime's handle for the credential the source names
+   * (rt.credentialHandle), which sends each request through the vault; the adapter records which handle it was built with.
+   */
   transport: HttpTransport;
   /** The fields of the owner (absent when not owned), the asOf and the body; the id is the document's _id. */
   owner?: string;
@@ -204,7 +208,8 @@ export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
     try { json = r.body ? JSON.parse(r.body) : null; } catch { json = null; }
     return { status: r.status, json: json as Record<string, any> | null };
   };
-  return made({
+  // S460: the adapter records the credential handle it is built with, so the runtime's connectSource can ask.
+  return made(builtWith({
     kind: 'opensearch' as const,
     async retrieve(query: SourceQuery): Promise<ItemRef[]> {
       const limit = limitOf(query);
@@ -235,5 +240,5 @@ export function openSearchSource(c: OpenSearchSourceConfig): SourceAdapter {
       if (Array.isArray(r.json?.failures) && r.json!.failures.length) throw new Error(`${A}: _delete_by_query reported ${r.json!.failures.length} failures`);
       return { removed: Number(r.json?.deleted ?? 0) };
     },
-  });
+  }, c.transport));
 }

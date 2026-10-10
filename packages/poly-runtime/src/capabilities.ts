@@ -46,6 +46,24 @@ export class ContentMissing extends Error {
   constructor(message: string) { super(message); this.name = 'ContentMissing'; }
 }
 
+/**
+ * PS17.0, PT10j (S460): a source's credential handle refuses a request while the credential's one grant is not Granted
+ * (or no vault is connected). A retrieval that meets it fails permanently: retrying reads the same grant, and only a new
+ * grant, by a person's request, makes it Granted again.
+ */
+export class CredentialUnavailable extends Error {
+  readonly permanent = true;
+  readonly reason = 'credential-unavailable';
+  constructor(message: string) { super(message); this.name = 'CredentialUnavailable'; }
+}
+
+/**
+ * S460: the brand a source's credential handle carries, set by the runtime that made it. poly-io records an adapter's
+ * transport when it carries this brand, so the runtime can ask which handle an adapter was built with; the brand alone
+ * proves nothing, and the runtime looks the handle up among the ones it made.
+ */
+export const CREDENTIAL_HANDLE = Symbol.for('poly.credential-handle');
+
 /** Redirects followed before a request is given up; each hop is checked against the prefixes. */
 export const MAX_REDIRECTS = 5;
 

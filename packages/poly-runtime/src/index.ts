@@ -16,7 +16,7 @@ export const openJournal = (dbPath: string) => readerOf(openLedgerStore(dbPath))
 export { peer, polyaxionPeer, polycheckPeer, loadPolyaxion, loadPolyaxionModule, loadPolycheck, pinDigest, PeerUnavailable, REPO_ROOT, type PeerStatus } from './peers.js';
 export { PolicyGate, GateUnavailable, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 export { personKeyVerifier, type Verifier, type VerifierContext } from './verifier.js';
-export { capabilitiesFor, withinPrefix, CapabilityRefused, ContentMissing, MAX_REDIRECTS, type ContentAccess, type Transports, type EgressRequest, type EgressResponse } from './capabilities.js';
+export { capabilitiesFor, withinPrefix, CapabilityRefused, ContentMissing, CredentialUnavailable, CREDENTIAL_HANDLE, MAX_REDIRECTS, type ContentAccess, type Transports, type EgressRequest, type EgressResponse } from './capabilities.js';
 export { policyEngine, actionOf, decisionOfReject, type EngineDecision } from './policy-engine.js';
 export { deriveKey, keyFields, runIdOf, keyOfRun, WorkflowError } from './workflows.js';
 export { loadRun, runConfigOf, RunConfigError, STORE_RUN, type LoadedRun } from './run.js';

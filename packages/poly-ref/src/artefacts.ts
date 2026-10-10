@@ -266,12 +266,14 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
   }
 
   // ── credentials/<c>.json (PT10e): each credential an effect of this machine uses, against its source and the
-  // provider profile it names, read here from the profile's file ──
-  for (const name of new Set(effects.flatMap((e) => e.items.flatMap((i) => (i.kind === 'EffUses' ? [i.credential] : []))))) {
+  // provider profile it names, read here from the profile's file. S460 (PS17.0, PT10j): and each credential a source of
+  // the module names, whose descriptor admission binds a vault by. ──
+  const sourceCredentials = module.decls.flatMap((d) => (d.kind === 'Source' && d.credential !== undefined ? [d.credential] : []));
+  for (const name of new Set([...effects.flatMap((e) => e.items.flatMap((i) => (i.kind === 'EffUses' ? [i.credential] : []))), ...sourceCredentials])) {
     const c = module.decls.find((d): d is A.Credential => d.kind === 'Credential' && d.name === name);
-    if (!c) { out.push(`an effect uses credential ${name}, which the source does not declare`); continue; }
+    if (!c) { out.push(`an effect or a source uses credential ${name}, which the source does not declare`); continue; }
     const file = join(dir, '..', 'credentials', `${name}.json`);
-    if (!existsSync(file)) { out.push(`credentials/${name}.json is missing, and an effect of ${M.name} uses ${name} (PT10e)`); continue; }
+    if (!existsSync(file)) { out.push(`credentials/${name}.json is missing, and an effect of ${M.name} or a source of ${module.name} uses ${name} (PT10e, PS17.0)`); continue; }
     let got: unknown;
     try { got = JSON.parse(readFileSync(file, 'utf8')); } catch { out.push(`credentials/${name}.json is not JSON`); continue; }
     const profileFile = join(std, 'credentials', 'providers', `${c.provider}.json`);
@@ -292,7 +294,9 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     const ms = (d: string | null) => (d === null ? null : durationMs(d));
     for (const s of sourceDecls) {
       const got = read(`sources/${s.name}.json`);
-      if (got !== undefined) differ(`sources/${s.name}.json`, got, { v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: s.owned, freshnessMs: ms(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}), ...(s.envelope !== undefined ? { envelope: s.envelope } : {}) });
+      // S460 (PS17.0): the source's credential, which the runtime holds the adapter to; a descriptor that drops it
+      // (source-credential-dropped) differs here.
+      if (got !== undefined) differ(`sources/${s.name}.json`, got, { v: 1, module: module.name, source: s.name, kind: s.sourceKind, adapter: s.adapter, audience: s.audience, class: cls(s.audience), owned: s.owned, freshnessMs: ms(s.freshness), stale: s.stale, ...(s.keys ? { keys: s.keys } : {}), ...(s.envelope !== undefined ? { envelope: s.envelope } : {}), ...(s.credential !== undefined ? { credential: s.credential } : {}) });
     }
     const got = read(`flow/${module.name}.json`);
     // PT10k: each action whose claims type has exactly one field of type Audience, read from the source here.

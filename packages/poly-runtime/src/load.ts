@@ -79,7 +79,8 @@ export interface VerifiedBudget {
 
 /** PS16.1, PT10e: what the runtime needs of a credential: its Grant machine, provider, scopes and whether it has a holder. */
 /** `person`: granted by a person (authorization_code); with no holder named, its one grant's holder is fixed at run time (S457). */
-export interface VerifiedCredential { name: string; machine: string; provider: string; scopes: string[]; holder: boolean; person: boolean }
+/** `bases`: the provider profile's base addresses, as the certified descriptor gives them; a source's handle sends only under them (S460). */
+export interface VerifiedCredential { name: string; machine: string; provider: string; scopes: string[]; holder: boolean; person: boolean; bases: string[] }
 
 /** PS15.4: what the runtime needs to route a channel's inbound message. */
 export interface VerifiedChannel { channel: string; kind: string; application: string; conversation: string; thread: { template: string; fields: string[] }; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string }; audience?: string | null; principal?: string | null }
@@ -297,18 +298,22 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
   // the certificate names; the runtime keeps what was read here and never reads the file again.
   const credentials: VerifiedCredential[] = [];
   for (const c of certificate.poly?.credentials ?? []) {
-    const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as { credential?: unknown; provider?: unknown; scopes?: unknown; holder?: unknown; grant?: unknown };
+    const d = JSON.parse(bytes.get(c.descriptor)!.toString('utf8')) as { credential?: unknown; provider?: unknown; scopes?: unknown; holder?: unknown; grant?: unknown; bases?: unknown };
     if (d.credential !== c.name) throw new LoadError(`refused at load: the certificate's credential ${c.name} has the descriptor of credential ${String(d.credential)} (PT10e)`);
     const m = machines.find((x) => x.id.endsWith(`.${c.name}.Grant`));
     if (!m) throw new LoadError(`refused at load: credential ${c.name} has no Grant machine the certificate names (PS16.1)`);
-    if (typeof d.provider !== 'string' || !Array.isArray(d.scopes) || typeof d.holder !== 'boolean' || (d.grant !== 'authorization_code' && d.grant !== 'client_credentials')) throw new LoadError(`refused at load: the descriptor of credential ${c.name} is not a credential's (PT10e)`);
-    credentials.push({ name: c.name, machine: m.id, provider: d.provider, scopes: d.scopes as string[], holder: d.holder, person: d.grant === 'authorization_code' });
+    // S460: and its base addresses, which a source's credential handle holds each request to.
+    if (typeof d.provider !== 'string' || !Array.isArray(d.scopes) || typeof d.holder !== 'boolean' || (d.grant !== 'authorization_code' && d.grant !== 'client_credentials') || !Array.isArray(d.bases) || !d.bases.every((b) => typeof b === 'string')) throw new LoadError(`refused at load: the descriptor of credential ${c.name} is not a credential's (PT10e)`);
+    credentials.push({ name: c.name, machine: m.id, provider: d.provider, scopes: d.scopes as string[], holder: d.holder, person: d.grant === 'authorization_code', bases: d.bases as string[] });
   }
   // PT10i: each source's descriptor is the certificate entry's own, by name; each flow descriptor its module's.
   const memorySources: SourceDescriptor[] = [];
   for (const s of certificate.poly?.memory?.sources ?? []) {
     const d = JSON.parse(bytes.get(s.descriptor)!.toString('utf8')) as SourceDescriptor;
     if (d.source !== s.name || d.adapter !== s.adapter) throw new LoadError(`refused at load: the certificate's source ${s.name} has the descriptor of source ${String(d.source)} (PT10i)`);
+    // PS17.0, PT10j (S460): a source's credential is a certified credential with no holder, whose one grant its adapter
+    // reaches the provider under; anything else is refused here, fail closed.
+    if (d.credential !== undefined && (typeof d.credential !== 'string' || !credentials.some((x) => x.name === d.credential && !x.holder))) throw new LoadError(`refused at load: source ${s.name} names the credential ${JSON.stringify(d.credential)}, which is no certified credential without a holder (PS17.0, S460)`);
     memorySources.push(d);
   }
   const memoryFlows: FlowDescriptor[] = [];

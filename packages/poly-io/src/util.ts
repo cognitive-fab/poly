@@ -48,6 +48,25 @@ export function oneLine(adapter: string, fields: Record<string, string>): void {
 }
 export function madeHere(adapter: unknown): boolean { return typeof adapter === 'object' && adapter !== null && MADE.has(adapter); }
 
+/**
+ * S460 (PT10j): the brand a runtime sets on a source's credential handle (Symbol.for, so poly-io imports no runtime). An
+ * adapter built over a branded transport records it here, and the runtime asks with credentialHandleOf which handle that
+ * was; the runtime alone knows which handles it made and for which credential.
+ */
+const CREDENTIAL_HANDLE = Symbol.for('poly.credential-handle');
+const BUILT_WITH = new WeakMap<object, object>();
+
+/** S460: records the credential handle an adapter is built with, when the transport is one; call before made(). */
+export function builtWith<T extends object>(adapter: T, transport: unknown): T {
+  if (typeof transport === 'object' && transport !== null && (transport as Record<symbol, unknown>)[CREDENTIAL_HANDLE] === true) BUILT_WITH.set(adapter, transport);
+  return adapter;
+}
+
+/** S460: the credential handle an adapter this package made was built with, or null. */
+export function credentialHandleOf(adapter: unknown): object | null {
+  return typeof adapter === 'object' && adapter !== null && MADE.has(adapter) ? BUILT_WITH.get(adapter) ?? null : null;
+}
+
 /** Constant-time comparison of two encoded signatures; a length difference is a mismatch, never an exception. */
 export function sameText(a: string, b: string): boolean {
   const x = Buffer.from(a, 'utf8');
