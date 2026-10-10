@@ -56,8 +56,11 @@ test('the runtime reads the type of every action of every conformance and exampl
       for (const [a, params] of Object.entries(contract.dataDomain ?? {})) {
         actions++;
         for (const [p, values] of Object.entries(params)) for (const v of values) {
-          const d = Object.fromEntries((types.get(a) ?? []).map(([q, t]) => [q, q === p ? v : undefined]));
-          if (dataOutside(new Map([[a, (types.get(a) ?? []).filter(([q]) => q === p)]]), a, d) !== null) assert.fail(`${f} ${a}.${p} = ${JSON.stringify(v)} is in its domain and refused`);
+          // PT10j (ruled 2026-10-10): an Items domain value is a count; the runtime takes it carried by a reference it stored.
+          const isItems = (types.get(a) ?? []).some(([q, ty]) => q === p && ty.k === 'items');
+          const value = isItems ? { ref: 'items:stored-by-the-sweep', ...v } : v;
+          const d = Object.fromEntries((types.get(a) ?? []).map(([q, t]) => [q, q === p ? value : undefined]));
+          if (dataOutside(new Map([[a, (types.get(a) ?? []).filter(([q]) => q === p)]]), a, d, undefined, (ref) => ref === 'items:stored-by-the-sweep') !== null) assert.fail(`${f} ${a}.${p} = ${JSON.stringify(v)} is in its domain and refused`);
         }
       }
     }

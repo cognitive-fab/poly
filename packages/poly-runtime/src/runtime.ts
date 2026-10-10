@@ -1500,7 +1500,8 @@ export class PolyRuntime {
     const module = m.id.slice(0, m.id.lastIndexOf('.'));
     // S176: a machine spelled m.M is a used module's, already its id.
     const exists = (machine: string, ref: string) => this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(ref)?.machine_id === (machine.includes('.') ? machine : `${module}.${machine}`);
-    return dataOutside(m.types, action, data, exists);
+    // PT10j (ruled 2026-10-10): an Items names an item set this store keeps.
+    return dataOutside(m.types, action, data, exists, (ref) => this.memory.itemsOf(ref) !== null);
   }
 
   /** The manifest entry of an effect kind on an instance's machine, or null. */

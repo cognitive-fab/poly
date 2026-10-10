@@ -77,7 +77,9 @@ test('PS17.4, S308: only the runtime completes a retrieval, runs it, and binds i
   const { rt } = await concierge();
   try {
     await rt.create('concierge_memory.Desk', { id: 'desk-c' });
-    await assert.rejects(rt.dispatch('desk-c', 'Found', { items: { ref: 'items:forged', count: 1 } }), /only the outbox worker delivers it/);
+    // Since PT10j as amended 2026-10-10 a forged reference is also outside the type (S140), which may refuse it first;
+    // either refusal comes before any step. test/items-type.test.mjs shows K10 alone with a stored reference.
+    await assert.rejects(rt.dispatch('desk-c', 'Found', { items: { ref: 'items:forged', count: 1 } }), /only the outbox worker delivers it|no item set the runtime stored/);
     assert.throws(() => rt.handle('source.orders.retrieve', () => ({})), /the runtime runs it/);
     assert.throws(() => rt.connectSource('orders', { kind: 'postgres', retrieve: async () => [], resolve: async () => null, forget: async () => ({ removed: 0 }) }), /PL6408/);
     assert.throws(() => rt.connectSource('nowhere', postgresSource({ query: async () => ({ rows: [] }), table: 't', id: 'i', asOf: 'a', body: 'b' })), /no source nowhere/);

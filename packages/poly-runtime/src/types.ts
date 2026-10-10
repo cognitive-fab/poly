@@ -16,8 +16,8 @@ export type TypeNode =
   | { k: 'content' }
   /** PS1.4c, PT10j (S451): a key, a non-empty string. */
   | { k: 'key' }
-  /** PS1.4b: the runtime's reference to retrieved items, { ref, count }. */
-  | { k: 'items' }
+  /** PS1.4b: the runtime's reference to retrieved items, { ref, count }; max, the top of the domain's counts (PT10j). */
+  | { k: 'items'; max?: number }
   | { k: 'record'; fields: [string, TypeNode][] }
   | { k: 'union'; alts: TypeNode[] };
 
@@ -73,7 +73,10 @@ export function parseType(text: string): TypeNode {
 export type InstanceOf = (machine: string, id: string) => boolean;
 
 /** Why `v` is not in `t`, or null when it is. Without `exists`, an address is only checked to be a string. */
-export function outside(t: TypeNode, v: unknown, at = 'the value', exists?: InstanceOf): string | null {
+/** PT10j (ruled 2026-10-10): whether a reference names an item set the runtime stored. */
+export type ItemsStored = (ref: string) => boolean;
+
+export function outside(t: TypeNode, v: unknown, at = 'the value', exists?: InstanceOf, stored?: ItemsStored): string | null {
   switch (t.k) {
     case 'lit': return v === t.value ? null : `${at} is ${JSON.stringify(v)}, not '${t.value}'`;
     case 'range': return Number.isInteger(v) && (v as number) >= t.lo && (v as number) <= t.hi ? null : `${at} is ${JSON.stringify(v)}, outside ${t.lo}..${t.hi}`;
@@ -84,7 +87,16 @@ export function outside(t: TypeNode, v: unknown, at = 'the value', exists?: Inst
     case 'content': return typeof v === 'string' && /^sha256:[0-9a-f]{64}$/.test(v) ? null : `${at} is ${JSON.stringify(v)}, not a body's digest (sha256:<64 hex digits>)`;
     case 'key': return typeof v === 'string' && v.length > 0 ? null : `${at} is ${JSON.stringify(v)}, not a key (a non-empty string)`;
     // PS1.4b: an Items is the runtime's reference, with its count; nothing else gives one.
-    case 'items': return v !== null && typeof v === 'object' && !Array.isArray(v) && typeof (v as { ref?: unknown }).ref === 'string' && (v as { ref: string }).ref.startsWith('items:') && Number.isInteger((v as { count?: unknown }).count) && ((v as { count: number }).count >= 0) ? null : `${at} is ${JSON.stringify(v)}, not the runtime's reference to retrieved items`;
+    // PT10j (S140, ruled 2026-10-10): checked as a Content is. The ref is an opaque handle, never a domain value: its form
+    // is items: and a key of an item set the runtime stored; the count lies in the domain's counts, 0..max.
+    case 'items': {
+      const o = v as { ref?: unknown; count?: unknown } | null;
+      const ok = o !== null && typeof o === 'object' && !Array.isArray(o) && typeof o.ref === 'string' && o.ref.startsWith('items:') && o.ref.length > 'items:'.length && Number.isInteger(o.count) && (o.count as number) >= 0;
+      if (!ok) return `${at} is ${JSON.stringify(v)}, not the runtime's reference to retrieved items`;
+      if (t.max !== undefined && (o!.count as number) > t.max) return `${at} counts ${String(o!.count)} items, outside its domain 0..${t.max}`;
+      if (stored && !stored(o!.ref as string)) return `${at} names ${String(o!.ref)}, which is no item set the runtime stored`;
+      return null;
+    }
     case 'address': {
       if (typeof v !== 'string' || v === '') return `${at} is ${JSON.stringify(v)}, not an address of ${t.machine}`;
       // Review C9, PS2.1: Ref<M> holds the addresses of instances of M, so an id naming no instance of M is outside it.
@@ -95,27 +107,33 @@ export function outside(t: TypeNode, v: unknown, at = 'the value', exists?: Inst
       const o = v as Record<string, unknown>;
       for (const [k, ft] of t.fields) {
         if (!(k in o)) return `${at} has no ${k}`;
-        const p = outside(ft, o[k], `${at}.${k}`, exists);
+        const p = outside(ft, o[k], `${at}.${k}`, exists, stored);
         if (p) return p;
       }
       const extra = Object.keys(o).filter((k) => !t.fields.some(([f]) => f === k));
       return extra.length ? `${at} has ${extra.join(', ')}, which its type does not` : null;
     }
     case 'union': {
-      if (t.alts.some((x) => outside(x, v, at, exists) === null)) return null;
+      if (t.alts.some((x) => outside(x, v, at, exists, stored) === null)) return null;
       // A Ref<M> with none: say why the address is not one, rather than that no alternative matched.
       const address = t.alts.find((x) => x.k === 'address');
-      if (address && typeof v === 'string' && v !== '') return outside(address, v, at, exists);
+      if (address && typeof v === 'string' && v !== '') return outside(address, v, at, exists, stored);
       return `${at} is ${JSON.stringify(v)}, in none of its type's alternatives`;
     }
   }
 }
 
 /** Each action's parameter types, from a contract's `actions[a].dataFields`. Throws on a type it cannot read. */
-export function actionTypes(contract: { actions?: Record<string, { dataFields?: Record<string, string> }> }): Map<string, [string, TypeNode][]> {
+export function actionTypes(contract: { actions?: Record<string, { dataFields?: Record<string, string> }>; dataDomain?: Record<string, Record<string, unknown[]>> }): Map<string, [string, TypeNode][]> {
   const out = new Map<string, [string, TypeNode][]>();
   for (const [a, decl] of Object.entries(contract.actions ?? {})) {
-    out.set(a, Object.entries(decl.dataFields ?? {}).map(([p, t]) => [p, parseType(t)]));
+    out.set(a, Object.entries(decl.dataFields ?? {}).map(([p, t]) => {
+      const node = parseType(t);
+      // PT10j: an Items parameter's domain is its counts, { count }; the type check reads their top.
+      if (node.k !== 'items') return [p, node];
+      const counts = (contract.dataDomain?.[a]?.[p] ?? []).map((x) => (x as { count?: unknown } | null)?.count).filter((n): n is number => Number.isInteger(n));
+      return [p, counts.length ? { k: 'items', max: Math.max(...counts) } : node];
+    }));
   }
   return out;
 }
@@ -132,7 +150,7 @@ export function contentValues(types: Map<string, [string, TypeNode][]>, action: 
   return params.filter(([p, t]) => isContent(t) && typeof (data as Record<string, unknown>)[p] === 'string').map(([p]) => (data as Record<string, string>)[p]);
 }
 
-export function dataOutside(types: Map<string, [string, TypeNode][]>, action: string, data: unknown, exists?: InstanceOf): string | null {
+export function dataOutside(types: Map<string, [string, TypeNode][]>, action: string, data: unknown, exists?: InstanceOf, stored?: ItemsStored): string | null {
   const params = types.get(action);
   if (!params) return null; // not in the module: the kernel answers it (unhandled, PS9.1a)
   if (data !== undefined && data !== null && (typeof data !== 'object' || Array.isArray(data))) return `${action}'s data is ${JSON.stringify(data)}, not a record of its parameters`;
@@ -141,7 +159,7 @@ export function dataOutside(types: Map<string, [string, TypeNode][]>, action: st
     // PD5.1.2c: the claims are the runtime's to supply, and PS3.2's claims row is the module's to apply.
     if (p === '$claims') continue;
     if (!(p in d)) return `${action} has no ${p}`;
-    const why = outside(t, d[p], `${action}.${p}`, exists);
+    const why = outside(t, d[p], `${action}.${p}`, exists, stored);
     if (why) return why;
   }
   return null;
