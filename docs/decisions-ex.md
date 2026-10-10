@@ -415,7 +415,9 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 - **Refund over the limit:** 250 on the sofa is escalated with nothing sent to Stripe; the host tells the staff's Slack thread by intent and with nothing of the customer; a person's signed approval releases it, and 25,000 cents are refunded on `ch_ex2001`.
 - **Replay:** the program is `CLEAN` with its instance printed (Desk 2,114, Notice 28, the conversations 342 and 666, Grant 13, Route 6, Budget 96). Replay folds **36 runs and 231 rows**, one of them the grant's, with the routes' tier choices among them, and **4 gate sessions with 43 proposals**: **0 divergences**. It took 123 s.
 
-**IAC5 and the inbox** are unchanged by this: the shared test helpers were not touched.
+**The inbox after the S462 rebase.** The rebase brought S462's runtime code (keys kept with retrieved items, the items-count check), which the inbox's retrievals and citations run through. Every inbox test file was rerun, one process at a time, with nothing else heavy running: `ex-inbox`, `ex-inbox-drafts`, `ex-inbox-read-grant`, `ex-inbox-host`, `ex-gmail-source` and `ex-mime`. **35 of 35 pass** in 478 s, IAC1 to IAC9 among them. IAC9's figures are unchanged: Todo 7,294 states, 65 runs and 369 rows replayed, 3 gate sessions with 41 proposals.
+
+**The serial group and the runtime type check after the change.** `test/after/*.test.mjs`: 12 tests, 11 passed. The concierge has no toolchain fault (87 s), its translation validation agrees (56 s), and AC27 passes again (121 s). The one failure is the known harness finding: the policy file checked alone is `REFUSED` (`PL1001`), which no expected line can state. `test/runtime-type.test.mjs` passes 6 of 6, with the `Items` and `Principal` of the refund among the actions it reads.
 
 ## Conclusion
 
