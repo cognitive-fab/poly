@@ -419,4 +419,8 @@ Against the build before the fix, replay refused both count reads and the empty 
 
 **For the examples session.** The concierge's decision has `cites`: a recorded or real answer that cites nothing now takes the `failed` outcome. Its host's recorded provider must cite the items it read.
 
-**Not yet run:** the full suite, held until the examples session's heavy check is done.
+**Accepted** (owner's reviewer, 2026-10-10), with the standing test's runs recorded as poly-ref's in `gate-v10.md`.
+
+## The full suite after item 4, S461, the forget, the revocation and the two replay and citation fixes
+
+Run w9 at 9112728c, alone on the machine after the examples session's heavy runs (`.poly/logs/9112728c-2026-10-10T17-45-24-454Z-w9.log`): 2,337 tests, 2,331 passed, 2 skipped and 4 waiting, with no failure; the after group's 7 passed; check-memory passed. The 4 waiting tests are those of w8, which wait on engine fixes (polyrun's tombstones at archive, S124, among them). Against w8 (2,292 tests at c0e99891) the 45 new tests are those of item 4, S461, the forget, the revocation and the two fixes. The slowest files are the channel tests, as before: `channels-whatsapp` 1,272 s, `channels-events` 1,270 s, `channels-adapter-pin` 1,229 s, `std-channels` 1,193 s, each run beside the others. S456's test of the M8 concierge's recorded counts took 537 s.
