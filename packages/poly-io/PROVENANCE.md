@@ -95,7 +95,7 @@ Written from the Gmail API reference, read on 2026-10-08, and tested against rec
 | Reads a 404 on the history as an expired cursor ("typically valid for at least a week, but in some rare circumstances ... only a few hours"), and syncs again by a list with `q=after:<seconds>` since the newest message kept | the same page |
 | Fetches each message with `GET users/me/messages/<id>?format=raw` and reads `raw`, the whole message in base64url, with the MIME reader below; `internalDate` is the item's `asOf` | https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get |
 | Moves the cursor only after every message it covers is kept, and fetches no message it holds, so a sync cut short is taken again on the next with nothing twice and nothing missed (IT2.3) | poly's own rule |
-| Sends only GETs under `https://gmail.googleapis.com/gmail/v1/users/me/`, through the host's request function for the account, which the vault binds to the read credential (`gmail.readonly`, which every method above accepts); it sets no credential header of its own | S455, part a |
+| Sends only GETs under `https://gmail.googleapis.com/gmail/v1/users/me/`, through the runtime's handle for the source's credential (S460, one account), or until S461 through the host's request function for each account, which its vault binds to the account's read grant; either way under the read credential (`gmail.readonly`, which every method above accepts); it sets no credential header of its own | S455, part a |
 
 **Poly's own bounds.** A message's text is kept to 32,768 characters by default and marked `[truncated]` beyond. A mail store keeps each record under the SHA-256 of its key, so no file name holds an id.
 

@@ -160,6 +160,14 @@ test('S452: a body is bounded, and the adapter refuses a configuration it could 
     [[{ owner: 'acct-work', label: 'work', request: 'no' }], /request/],
     [[], /account/],
   ]) assert.throws(() => gmailSource({ accounts, store: memoryMailStore() }), why);
+  // S460: a source built with the runtime's handle has one account, which gives no request of its own.
+  const handle = { request: async () => ({ status: 500, headers: {}, body: '' }) };
+  for (const [accounts, why] of [
+    [[{ owner: 'acct-work', label: 'work' }, { owner: 'acct-home', label: 'home' }], /one account/],
+    [[account('acct-work', 'work', t)], /gives none/],
+  ]) assert.throws(() => gmailSource({ accounts, transport: handle, store: memoryMailStore() }), why);
+  assert.throws(() => gmailSource({ accounts: [{ owner: 'acct-work', label: 'work' }], transport: {}, store: memoryMailStore() }), /handle/);
+  assert.throws(() => gmailSource({ accounts: [{ owner: 'acct-work', label: 'work' }], store: memoryMailStore() }), /request/);
 });
 
 test('S452: a file mail store is named by an absolute file: path, keeps items across instances, names no file by an address, and forgets', async () => {

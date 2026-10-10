@@ -211,6 +211,29 @@ Found while writing them, each fixed in the draft or the harness:
 
 **Tests so far.** `test/ex-inbox.test.mjs`: **IAC1** (three accounts, every message once and tagged with its account, across a host crash after a creation and before its announcement; a pass with nothing new makes nothing; act-now and this-week messages actionable, fyi and ignore filed; one `Todo` per thread, the invoice's two messages opening one) and **IAC4** (the message that tells the assistant to forward mail, give a password and pay proposes only its own retrieval and its two decisions). Both failed before the code they test: IAC1 on the host's missing module, then on each defect above; both pass. IAC3, IAC5, IAC6, IAC7 without a draft, IAC8 and IAC9's check come next.
 
+## Rebase on v1 at 0be8ef61: S460 with one account, (a), (c), and S461 proposed (2026-10-10)
+
+`ex` is rebased on `0be8ef61`, which carries the `Items` type check, the serial after-suite group, (a), S460 and (c). One conflict: `packages/poly-io/src/index.ts`, where S460 exports `credentialHandleOf` from `util.js` beside the Gmail and MIME exports. Both are kept.
+
+- **(a), each machine runs its own retrieval.** The second source `threads` is gone. `Message` reads `mail` by `message == k limit 1`, and `Todo` reads `mail` by `thread == k limit 5`. The host connects one source, and IAC1 and IAC4 pass on it.
+- **(c), the shadowing warning.** A parse of both sources, under the rule `poly check` applies, lists no action parameter named after a field of its machine. The inbox's parameters were renamed in E2.2.
+- **S460, one account.** `gmailSource` takes `transport`: the runtime's handle for the source's credential. A source built with it has exactly one account, which gives no request of its own, and the adapter records the handle with `builtWith`, as `openSearchSource` does. This is additive under S452. `test/ex-inbox-read-grant.test.mjs` admits the draft with the holder-less `gmail_read` (`gmail.readonly`) named in the mail source, and checks five things:
+  - The certificate binds vaults for `gmail_draft` and `gmail_read`.
+  - An adapter the host built over its own request function is refused, `PL6408`.
+  - The grant is requested by the person's signed grant request (S457, PT10g, holder: the account's principal).
+  - Every Gmail request of the sync goes through the vault, which attaches the token, and no token is in the runtime's rows.
+  - After `revokeGrant('gmail_read', null, …)`, the next sync fails `credential-unavailable` with no request reaching Gmail, while the account's compose grant stands.
+
+  It passes. The adapter's refusal test adds four cases: two accounts with a handle, an account's own request with a handle, a handle with no `request`, and no request and no handle.
+- **A gap in S460, ruled 2026-10-10 (option 1).** A holder-less source credential has one grant, and a Gmail token reaches one mailbox, so S460 reads one account. IAC1 needs three in one assistant (IF4.1). Two other ways would also work on v1, and the reviewer rejected both: one source per account fixes the accounts in the program, and one runtime per account splits the budget. The reviewer chose a per-owner grant: **S461**, proposed in `docs/proposals/s461-source-grant-per-owner.md` for the release session, with the reviewer's conditions:
+  - An owned source's credential may name `holder Principal`.
+  - Each owner has one `Grant` keyed by the owner's verified Principal (S450).
+  - `rt.credentialHandle(c, owner)` sends only under that owner's grant, and a request for one owner's items through another owner's handle is refused, with a test.
+  - Revoking one owner's grant stops only that owner's sync, with a test showing the other two accounts still syncing.
+  - The checker treats the grants per owner, as M9 does, with no state beyond one `Grant` per owner.
+
+  Until S461 lands, IAC1's three accounts read through the vault the host keeps, which is deleted then.
+- **Order.** The full suite waits for S461, by the reviewer's ruling. The rulings of 2026-10-09 and the numbers are recorded after a clean suite.
 
 ## Conclusion
 
