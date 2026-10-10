@@ -322,3 +322,21 @@ What is ruled for after the release, in one place:
 
 - **S453:** SES, with an `aws_sigv4` credential kind and its own ruling (Q-EX5: Gmail only for the v1 gate).
 - **`PL1002` for a parameter named after a state field** (item (c) above), with std's channel kinds, the conformance cases, the examples and the tests' fixtures renamed together, and `conformance/m0/shadowing.poly` turned into its error source.
+
+## (a), S460 and (c), built
+
+| Item | Text | Tests | Code |
+|---|---|---|---|
+| (a) one retrieval per machine and kind | de6e4538 | 12a73b53 (4; 3 failed before) | 5ea0b6a0 |
+| (b) S460, a source's credential | 69de3796 | f1fc221b (19; 17 failed before), 56491250 | 96929562 |
+| (c) the v1 warning | fc2b2ddd | 1b75822f (4; 3 failed before) | cb304e6e |
+
+**Decided under the plan's rules, recorded:**
+
+- **(a)** Remembers share the defect and the fix: every remember of a source has one kind, so each intent runs its own machine's entry too, and two differing remembers of one source in one machine are `PL1002`.
+- **S460, the handle.** `rt.credentialHandle(c)` refuses a credential that no source of the build names, or one with a holder: otherwise a host could reach anything under the provider's bases outside an effect's declared targets. A request outside the bases is checked before the grant, audited `PL6406` under the grant's id, and a refusal for the grant (`credential-unavailable`) is permanent, so a retrieval fails at once and is not retried. The runtime knows its handles by its own table; a handle another runtime made is refused for a source that names a credential.
+- **S460, the adapters.** Only `openSearchSource` takes a handle in v1, as PT10j says; a `postgres` source that names a credential checks clean and cannot be connected, which fails closed.
+- **S460, the quote.** The test asked for the printed option with single quotes after PT10j's notation; the embedded printer writes every string option in double quotes, and the test takes either (56491250).
+- **(c)** The report's `warnings` is absent when there is none.
+
+**Suite.** At 96929562: 2,284 tests and 6 in the after group, all passed but 2 skipped and 4 waiting, no failure; check-memory passed (`.poly/logs/96929562-2026-10-10T04-46-42-521Z-w7.log`). One heavy job on the machine.
