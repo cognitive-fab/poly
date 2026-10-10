@@ -29,7 +29,7 @@ async function build(name, src = REMEMBERING) {
 
 async function ask(rt, customer, query) {
   rt.connectSource('orders', postgresSource({ query, table: 'orders', id: 'order_id', owner: 'customer_id', asOf: 'updated_at', body: 'summary' }));
-  rt.provide('answer', { provider: (_q, m) => ({ answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: [] }), model: 'flash' });
+  rt.provide('answer', { provider: (_q, m) => ({ answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: Object.values(m.items).flat().map((i) => i.id) }), model: 'flash' });
   handleWith(rt, 'support.reply', () => ({ ok: true }));
   await rt.create('concierge_memory.Desk', { id: 'desk' });
   const q = await rt.putContent('Where is my order?');
@@ -232,7 +232,7 @@ test('review B1: an approval of a policy\'s escalation does not let stale items 
     const db = pgOrders([{ order_id: 'o-1', customer_id: 'cust-a', updated_at: new Date(clock.now()).toISOString(), summary: 'Order 1: a lamp.' }]);
     const asked = [];
     rt.connectSource('orders', postgresSource({ query: db.query, table: 'orders', id: 'order_id', owner: 'customer_id', asOf: 'updated_at', body: 'summary' }));
-    rt.provide('answer', { provider: () => { asked.push(1); return { answer: 'ok', distribution: [['ok', 0.9]], cites: [] }; }, model: 'flash' });
+    rt.provide('answer', { provider: (_q, m) => { asked.push(1); return { answer: 'ok', distribution: [['ok', 0.9]], cites: Object.values(m.items).flat().map((i) => i.id) }; }, model: 'flash' });
     handleWith(rt, 'support.reply', () => ({ ok: true }));
     await rt.create('concierge_memory.Desk', { id: 'desk' });
     await rt.dispatch('desk', 'Ask', { question: await rt.putContent('Where is my order?') }, { credentials: { principal: 'cust-a' } });

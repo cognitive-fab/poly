@@ -43,7 +43,7 @@ async function suite(echo) {
   try {
     const db = pgOrders(ORDERS.map((o) => ({ ...o, summary: `${o.summary} ${canary}-item-${o.order_id}` })));
     rt.connectSource('orders', postgresSource({ query: db.query, table: 'orders', id: 'order_id', owner: 'customer_id', asOf: 'updated_at', body: 'summary' }));
-    rt.provide('answer', { provider: (_q, m) => ({ answer: `Your orders ${Object.values(m.items).flat().map((i) => i.id).join(', ')} ${canary}-answer`, distribution: [['x', 0.9]], cites: [] }), model: 'flash' });
+    rt.provide('answer', { provider: (_q, m) => ({ answer: `Your orders ${Object.values(m.items).flat().map((i) => i.id).join(', ')} ${canary}-answer`, distribution: [['x', 0.9]], cites: Object.values(m.items).flat().map((i) => i.id) }), model: 'flash' });
     handleWith(rt, 'support.reply', async (payload) => {
       if (echo) console.log(`replying ${await rt.contentBody(payload.body)}`);
       return { ok: true };

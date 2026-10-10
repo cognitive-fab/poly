@@ -102,6 +102,9 @@ function flatClaims(x: unknown, t: RType, M: RMachine): boolean {
 }
 
 function structValue(x: unknown, t: RType, M: RMachine): Value {
+  // PS11.4, PS1.4b (ruled 2026-10-10): an Items of a step's data is the checker's value of it, the record whose count a
+  // handler reads; the runtime's ref rides beside the count and is never read.
+  if (t.k === 'items' && x && typeof x === 'object' && !Array.isArray(x)) return { fields: { ...(x as Record<string, Value>) } };
   if (t.k === 'union' && x && typeof x === 'object' && '$' in (x as object)) {
     // S65: { $: C, payloads } back to (C, r); a key the constructor does not have is left out here and
     // caught by the exact comparison of flat values in translation validation.

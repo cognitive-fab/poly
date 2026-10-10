@@ -22,7 +22,7 @@ async function run(rt, customer, opts = {}) {
   const db = pgOrders();
   rt.connectSource('orders', postgresSource({ query: db.query, table: 'orders', id: 'order_id', owner: 'customer_id', asOf: 'updated_at', body: 'summary' }));
   const asked = [];
-  rt.provide('answer', { provider: (q, m) => { asked.push(m); return { answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: [] }; }, model: 'flash' });
+  rt.provide('answer', { provider: (q, m) => { asked.push(m); return { answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: Object.values(m.items).flat().map((i) => i.id) }; }, model: 'flash' });
   const sent = [];
   handleWith(rt, 'support.reply', (payload) => { sent.push(payload); return { ok: true }; });
   if (opts.advance) opts.clock.advance(opts.advance);

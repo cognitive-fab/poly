@@ -456,15 +456,16 @@ export class Memory {
 
   /**
    * PS17.6, S304: the items an answer cites, by id, a subset of the set the decision was given: a new set of those items,
-   * with their taint. Any other id refuses the answer with the reserved reason uncited, recorded on the run.
+   * with their taint. Any other id, or no id at all, refuses the answer with the reserved reason uncited, recorded on the run.
    */
   async cite(given: unknown, ids: unknown, run: string, intent: string, now: number): Promise<{ ref: string; count: number }> {
     const set = isItems(given) ? this.itemsOf(given.ref) : null;
     const list = ids === undefined || ids === null ? [] : ids;
-    const bad = !set || !Array.isArray(list) || list.some((x) => typeof x !== 'string' || !set.items.some((i) => i.id === x));
+    // PS17.6 (ruled 2026-10-10): a citation is required, so an empty or absent list is refused as an item not given is.
+    const bad = !set || !Array.isArray(list) || list.length === 0 || list.some((x) => typeof x !== 'string' || !set.items.some((i) => i.id === x));
     if (bad) {
       await this.store.txn(() => { this.store.appendEvent(run, 'observation', { stage: 'citation', intent, outcome: 'uncited' }, now); });
-      throw new Uncited('uncited: the answer cites an item it was not given (PS17.6)');
+      throw new Uncited(Array.isArray(list) && list.length === 0 && set ? 'uncited: the answer cites nothing, and a citation is required (PS17.6)' : 'uncited: the answer cites an item it was not given (PS17.6)');
     }
     const cited = set.items.filter((i) => (list as string[]).includes(i.id));
     let ref!: { ref: string; count: number };

@@ -156,7 +156,7 @@ test('S451, K14: Postgres retrieves one account\'s items of one thread by key as
     const { rt } = await loaded(a, { verifier: (c) => (c ? { principal: c.principal } : null) });
     rt.connectSource('mail', source(query));
     const asked = [];
-    rt.provide('write', { provider: (q, m) => { asked.push({ q, m }); const t = `Draft over: ${Object.values(m.items).flat().map((i) => i.body).join(' ')}`; return { answer: t, distribution: [[t, 0.9]], reported: 'flash-2026-09', latencyMs: 4 }; }, model: 'flash' });
+    rt.provide('write', { provider: (q, m) => { asked.push({ q, m }); const t = `Draft over: ${Object.values(m.items).flat().map((i) => i.body).join(' ')}`; return { answer: t, distribution: [[t, 0.9]], cites: Object.values(m.items).flat().map((i) => i.id), reported: 'flash-2026-09', latencyMs: 4 }; }, model: 'flash' });
     await rt.create('mail_draft.Drafter', { id: 'draft-1' });
     await rt.dispatch('draft-1', 'Draft', { thread: 't-1' }, { credentials: { principal: 'acct-a' } });
     for (let k = 0; k < 4; k++) await rt.worker.tick();

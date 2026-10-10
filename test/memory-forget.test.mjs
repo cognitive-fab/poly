@@ -32,7 +32,7 @@ async function build(name, src = REMEMBERING, extra = {}) {
 }
 
 async function ask(rt, customer) {
-  rt.provide('answer', { provider: (_q, m) => ({ answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: [] }), model: 'flash' });
+  rt.provide('answer', { provider: (_q, m) => ({ answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: Object.values(m.items).flat().map((i) => i.id) }), model: 'flash' });
   handleWith(rt, 'support.reply', () => ({ ok: true }));
   const q = await rt.putContent('Where is my order?');
   await rt.dispatch('desk', 'Ask', { question: q }, { credentials: { principal: customer } });
@@ -87,8 +87,8 @@ test('AC24: forgetting a customer erases every body about them, removes their it
     assert.ok(erased.length >= 3, 'the answer and the two orders the decision read');
     for (const d of erased) assert.equal(await rt.contentBody(d), null, d);
     assert.equal(rt.store.db.prepare('SELECT count(*) AS n FROM poly_memory').get().n, 0);
-    // The answer's citations, an empty set, name no one and stay; the orders' set is gone.
-    assert.deepEqual(rt.store.db.prepare('SELECT owners, items FROM poly_items').all().map((r) => [r.owners, r.items]), [['[]', '[]']]);
+    // PS17.6 as ruled 2026-10-10: an answer cites, so its citations name the customer and go with the orders' set.
+    assert.deepEqual(rt.store.db.prepare('SELECT owners, items FROM poly_items').all().map((r) => [r.owners, r.items]), []);
     assert.deepEqual(db.rows.map((r) => r.order_id), ['o-3'], 'the source forgot the customer\'s orders');
     // The forget event names the subject by its keyed digest, never as itself.
     const ev = rt.store.db.prepare("SELECT event, hash FROM poly_ledger WHERE run = 'runtime:content' AND kind = 'verdict'").all().map((r) => ({ ...JSON.parse(r.event).body, hash: r.hash })).filter((x) => x.stage === 'forget');

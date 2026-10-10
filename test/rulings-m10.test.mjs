@@ -41,7 +41,7 @@ async function build(name, src) {
 async function ask(rt, customer, rows) {
   const db = pgOrders(rows);
   rt.connectSource('orders', postgresSource({ query: db.query, table: 'orders', id: 'order_id', owner: 'customer_id', asOf: 'updated_at', body: 'summary' }));
-  rt.provide('answer', { provider: (_q, m) => ({ answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: [] }), model: 'flash' });
+  rt.provide('answer', { provider: (_q, m) => ({ answer: `About ${Object.values(m.items).flat().map((i) => i.id).join(', ')}`, distribution: [['x', 0.9]], cites: Object.values(m.items).flat().map((i) => i.id) }), model: 'flash' });
   const sent = [];
   handleWith(rt, 'support.reply', (p) => { sent.push(p); return { ok: true }; });
   await rt.create('concierge_memory.Desk', { id: 'desk' });
@@ -166,7 +166,7 @@ test('S327: a body received on a channel is owned by its sender; the conversatio
       return { status: 200, headers: {}, body: JSON.stringify({ found: true, _source: { body: 'Reset it from the settings page.' } }) };
     } };
     rt.connectSource('help', openSearchSource({ base: 'https://search.example', index: 'help', transport: docs, asOf: 'asof', body: 'body' }));
-    rt.provide('answer', { provider: () => ({ answer: 'Reset it from the settings page.', distribution: [['x', 0.9]], cites: [] }), model: 'flash' });
+    rt.provide('answer', { provider: (_q, m) => ({ answer: 'Reset it from the settings page.', distribution: [['x', 0.9]], cites: Object.values(m.items).flat().map((i) => i.id) }), model: 'flash' });
     const text = `How do I reset ${randomBytes(4).toString('hex')}?`;
     await rt.receive('text', smsWebhook(tw, text));
     for (let k = 0; k < 10; k++) { await rt.advance(); await rt.worker.tick(); }

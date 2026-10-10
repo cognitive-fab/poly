@@ -12,7 +12,7 @@ const a = await admitted('memory-runtime', ['test/fixtures/m10/concierge-memory.
 /** A recorded provider for the answer: it gives a text, and keeps what it was asked and what it read. */
 function answering(text = (m) => `Your orders: ${Object.values(m.items).flat().map((i) => i.body).join(' ')}`) {
   const asked = [];
-  const provider = (q, materials) => { asked.push({ q, materials }); return { answer: text(materials), distribution: [[text(materials), 0.9]], reported: 'flash-2026-09', latencyMs: 4 }; };
+  const provider = (q, materials) => { asked.push({ q, materials }); return { answer: text(materials), distribution: [[text(materials), 0.9]], cites: Object.values(materials.items).flat().map((i) => i.id), reported: 'flash-2026-09', latencyMs: 4 }; };
   return { provider, asked };
 }
 
