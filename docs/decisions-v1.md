@@ -309,3 +309,16 @@ Then: measure what drives the growth S456 caused in the concierge (the stored re
 **PL6830's error source.** The first full suite after the code failed one test: the compiler's check that every error code has an error source. `conformance/m0/errors/PL6830-envelope-not-from-source.poly` is it (d406d75e).
 
 **Suite.** At 99ef395c: 2,254 tests and 6 in the after group, all passed but 2 skipped and 4 waiting, no failure; check-memory passed (`.poly/logs/99ef395c-2026-10-10T04-05-10-988Z-w6.log`), on a machine with nothing else running.
+
+## Three items from the examples session (owner's reviewer, 2026-10-09)
+
+- **(a) The retrieval signature (a defect, S41 with S451).** The runtime ran every retrieval of one source with one manifest entry for the whole program, the last machine's, so two different retrievals silently ran as one. **Ruled, as the release session proposed:** each intent reads its retrieval from its own machine's manifest entry, and two differing retrievals of one source within one machine are `PL1002`. Tested first with the inbox's case: by message with limit 1, and by thread with limit 5.
+- **(b) S460, a source names its credential.** The certificate gets a vault for it, and its `Grant` machine tracks it. The adapter receives a handle, never the token: `rt.credentialHandle(c)`, limited to the provider's base addresses, refusing once the grant is not `Granted`. `rt.connectSource` accepts only an adapter built with that credential's handle. Revoking the grant stops the sync. This is additive.
+- **(c) A parameter named after a state field.** The release session's scan found 35 in 275 sources, among them `Conversation.Open(app)` in every std channel kind, which the channel expansion writes, and `conformance/m0/shadowing.poly` tests S19, under which such a parameter shadows the field. **Ruled (option 3):** in v1, `poly check` warns, naming both, and S19 stays the meaning; `PL1002` comes after v1, with std and the corpora renamed together.
+
+## After v1
+
+What is ruled for after the release, in one place:
+
+- **S453:** SES, with an `aws_sigv4` credential kind and its own ruling (Q-EX5: Gmail only for the v1 gate).
+- **`PL1002` for a parameter named after a state field** (item (c) above), with std's channel kinds, the conformance cases, the examples and the tests' fixtures renamed together, and `conformance/m0/shadowing.poly` turned into its error source.
