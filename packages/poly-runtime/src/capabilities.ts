@@ -58,6 +58,16 @@ export class CredentialUnavailable extends Error {
 }
 
 /**
+ * PS17.0, PT10j (S461): an owner's credential handle refuses a request made inside a retrieval for another owner, so one
+ * account's grant never reaches another's items. Permanent: the same request in the same retrieval meets the same owner.
+ */
+export class OwnerMismatch extends Error {
+  readonly permanent = true;
+  readonly reason = 'owner-mismatch';
+  constructor(message: string) { super(message); this.name = 'OwnerMismatch'; }
+}
+
+/**
  * S460: the brand a source's credential handle carries, set by the runtime that made it. poly-io records an adapter's
  * transport when it carries this brand, so the runtime can ask which handle an adapter was built with; the brand alone
  * proves nothing, and the runtime looks the handle up among the ones it made.

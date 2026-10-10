@@ -312,8 +312,9 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     const d = JSON.parse(bytes.get(s.descriptor)!.toString('utf8')) as SourceDescriptor;
     if (d.source !== s.name || d.adapter !== s.adapter) throw new LoadError(`refused at load: the certificate's source ${s.name} has the descriptor of source ${String(d.source)} (PT10i)`);
     // PS17.0, PT10j (S460): a source's credential is a certified credential with no holder, whose one grant its adapter
-    // reaches the provider under; anything else is refused here, fail closed.
-    if (d.credential !== undefined && (typeof d.credential !== 'string' || !credentials.some((x) => x.name === d.credential && !x.holder))) throw new LoadError(`refused at load: source ${s.name} names the credential ${JSON.stringify(d.credential)}, which is no certified credential without a holder (PS17.0, S460)`);
+    // reaches the provider under, or (S461) one with a holder when the source is owned, a grant per owner; anything else
+    // is refused here, fail closed.
+    if (d.credential !== undefined && (typeof d.credential !== 'string' || !credentials.some((x) => x.name === d.credential && (!x.holder || d.owned === true)))) throw new LoadError(`refused at load: source ${s.name} names the credential ${JSON.stringify(d.credential)}, which is no certified credential without a holder, nor one with a holder on an owned source (PS17.0, S460, S461)`);
     memorySources.push(d);
   }
   const memoryFlows: FlowDescriptor[] = [];

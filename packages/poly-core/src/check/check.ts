@@ -486,11 +486,13 @@ class Checker {
       if (d.envelope !== undefined && !(d.keys ?? []).includes(d.envelope)) this.err('PL1001', d, `source ${d.name} gives envelopes by ${d.envelope}, which is not one of its keys${d.keys?.length ? `: ${d.keys.join(', ')}` : ''} (PS17.0)`);
       // PS17.0, S460: credential c names a credential of the module with no holder, whose one grant the adapter reaches its
       // provider under; the memory source is the runtime's own store and reaches no provider. Written once by the parser.
+      // S461: an owned source may name one with holder Principal (the credential check holds a holder to Principal), and
+      // then each owner of its items has a grant of its own; a source that is not owned has no owner to key one by.
       if (d.credential !== undefined) {
         const c = this.module.decls.find((x): x is A.Credential => x.kind === 'Credential' && x.name === d.credential);
         if (d.sourceKind === 'memory') this.err('PL1201', d, `source ${d.name} is the project's memory, which the runtime keeps in its own store, so it names no credential (PS17.0)`);
         else if (!c) this.err('PL1001', d, `source ${d.name} names the credential ${d.credential}, and the module declares no credential ${d.credential} (PS17.0)`);
-        else if (c.holder !== null) this.err('PL1201', d, `source ${d.name} names credential ${c.name}, which has a holder; a source's credential names no holder, so it has one grant (PS17.0, S460)`);
+        else if (c.holder !== null && !d.owned) this.err('PL1201', d, `source ${d.name} names credential ${c.name}, which has a holder, and the source is not owned; a holder's grant is kept per owner, so only an owned source names one (PS17.0, S460, S461)`);
       }
     }
   }
@@ -524,6 +526,9 @@ class Checker {
         principal(r.owner, r, 'the owner');
         if (s && !s.owned) this.err('PL6835', r, `effect ${e.name} retrieves where owner == ${r.owner} from source ${s.name}, which is not owned (PS17.2)`);
       }
+      // PS17.0 (S461): a source whose credential names a holder reaches its provider under one owner's grant per request,
+      // so each retrieval from it, an envelope retrieval included, names that owner.
+      if (r.owner === null && s && s.credential !== undefined && this.module.decls.some((x) => x.kind === 'Credential' && x.name === s.credential && x.holder !== null)) this.err('PL1201', r, `effect ${e.name} retrieves from source ${s.name}, whose credential ${s.credential} names a holder, and names no owner: write where owner == p, so the request runs under p's grant only (PS17.0, S461)`);
       // PS17.2, S451: a key predicate names a key its source declares (PL1001) and a Key parameter (PL1201).
       if (r.key) {
         const k = r.key;

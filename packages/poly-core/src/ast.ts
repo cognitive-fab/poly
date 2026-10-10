@@ -55,7 +55,10 @@ export interface SourceDecl extends NodeBase {
   keys?: string[];
   /** PS17.0, S459: the key by which the adapter gives a thread's envelope; absent when the source gives none. */
   envelope?: string;
-  /** PS17.0, S460: the holder-less credential under whose one grant the adapter reaches its provider; absent when none. */
+  /**
+   * PS17.0, S460: the credential under whose grant the adapter reaches its provider; absent when none. Holder-less, it has
+   * one grant; with holder Principal, on an owned source only, a grant per owner (S461).
+   */
   credential?: string;
 }
 

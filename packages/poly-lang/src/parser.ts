@@ -277,7 +277,7 @@ class Parser {
         // PS17.0, S459: `envelope k`, the key by which the adapter gives a reply's envelope; the check holds k to keys.
         envelope = this.ident('a key name');
       } else if (w === 'credential') {
-        // PS17.0, PT10j, S460: `credential c`, the holder-less credential whose one grant the adapter reaches its provider under.
+        // PS17.0, PT10j, S460: `credential c`, the credential whose grant the adapter reaches its provider under (S461: per owner when c has a holder).
         credential = this.ident('a credential name');
       } else this.fail('expected adapter, audience, freshness, stale, keys, envelope or credential', is);
     }

@@ -10,7 +10,7 @@
 import { digest } from '@cognitive-fab/polyflow-kernel/digest';
 import { personKeyVerifier, evidenceOf as claimsEvidence, chainProblem, withinScope, type Verifier, type Evidence, type Mandate } from './verifier.js';
 import { lineageDigest, type Lineage } from './ledger-store.js';
-import { capabilitiesFor, withinPrefix, CapabilityRefused, CredentialUnavailable, CREDENTIAL_HANDLE, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
+import { capabilitiesFor, withinPrefix, CapabilityRefused, CredentialUnavailable, OwnerMismatch, CREDENTIAL_HANDLE, type ApiTransport, type ContentAccess, type Transports } from './capabilities.js';
 import type { ChannelAdapter, ChannelTransports, HttpRequest, HttpResponse, IngressAnswer, SourceAdapter, VaultAdapter, Verified, Webhook } from './adapters.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,7 +29,7 @@ import { verifiedModels, modelSource, BOUNDS } from './model.js';
 import { PolicyGate, type PolicyGateOptions, type ProgramView, type SessionEvent, type SessionReplay } from './policy-gate.js';
 import { polyaxionPeer, loadPolyaxion } from './peers.js';
 import { decisionHandler, mapDigest, type DecisionMemory, type DecisionRecord, type Provider, type ProviderConfig } from './provider.js';
-import { Memory, BOTTOM, DIGEST, SourceRefused, type Taint } from './memory.js';
+import { Memory, BOTTOM, DIGEST, SourceRefused, RETRIEVAL, type Taint } from './memory.js';
 import { RoutingHost } from './routing.js';
 import { signHeads, headsOf, publishAnchor, verifyRun, evidenceOf, type LedgerSigner, type SignedHead, type Anchor, type RunVerification , countersignHeads, type CountersignAdapter, type Countersignature } from './journal.js';
 
@@ -185,8 +185,11 @@ export class PolyRuntime {
   readonly #fault: LoadOptions['fault'];
   /** Review D-F4 (M8b): each channel's connected adapter, with which rt.receive verifies the channel's webhooks. */
   readonly #adapters = new Map<string, ChannelAdapter>();
-  /** S460: each source credential handle this runtime made, and the credential it is for. */
-  readonly #handles = new WeakMap<object, string>();
+  /**
+   * S460: each source credential handle this runtime made, and the credential it is for. S461: and the owner an owner's
+   * handle is for; null for a holder-less credential's handle and for a routing handle, the ones an adapter is built with.
+   */
+  readonly #handles = new WeakMap<object, { credential: string; owner: string | null }>();
   /** PT10f: each credential's certified vault. */
   readonly #vaults = new Map<string, VaultAdapter>();
   /** PS18.2, PS18.4: the routes' and budgets' instances, reservations and tier providers. */
@@ -967,32 +970,63 @@ export class PolyRuntime {
    * read at the request, so a revocation stops the next one); otherwise it goes through the vault's withToken for the
    * grant, which attaches the token and strips it from the answer. The handle holds no token and no way to get one: its
    * one method is request, and the runtime keeps which handles it made.
+   *
+   * S461 (PS17.0, PT10j): for credential c with holder Principal, which an owned source names, each owner of the source's
+   * items has a grant of its own, grant:<c>:<keyed digest of the owner>#<n> (PT10g). With no owner, the handle is the
+   * routing handle the source's adapter is built with: inside a retrieval from a source that names c (RETRIEVAL, set by
+   * the runtime around the adapter's retrieve, envelope and resolve) it sends under the grant of that retrieval's owner,
+   * and outside one it refuses (credential-unavailable). With an owner, it is that owner's handle, for the host's sync of
+   * that owner: it sends under that owner's grant only, refuses a request made inside a retrieval for another owner
+   * (owner-mismatch, permanent, nothing sent), and refuses while that grant is not Granted. Both check the base addresses
+   * first, as above. An owner's handle for a credential with no holder is refused: it has one grant and no owner.
+   * Messages name no owner: a holder is named by its keyed digest only (S191).
    */
-  credentialHandle(c: string): Readonly<{ request(r: { method: string; url: string; headers?: Record<string, string>; body?: string }): Promise<HttpResponse> }> {
+  credentialHandle(c: string, owner?: string): Readonly<{ request(r: { method: string; url: string; headers?: Record<string, string>; body?: string }): Promise<HttpResponse> }> {
     const cred = this.#credential(c);
     if (!cred) throw new Error(`no credential ${c} in the certified build (PS16)`);
-    if (!this.verified.memory.sources.some((s) => s.credential === c)) throw new Error(`credential ${c} is named by no source of the build; a handle is for a source's adapter (PS17.0, S460)`);
-    if (cred.holder) throw new Error(`credential ${c} has a holder, and a source's credential has none (PS17.0, S460)`);
+    const naming = this.verified.memory.sources.filter((s) => s.credential === c);
+    if (!naming.length) throw new Error(`credential ${c} is named by no source of the build; a handle is for a source's adapter (PS17.0, S460)`);
+    if (owner !== undefined && !cred.holder) throw new Error(`credential ${c} names no holder, so it has one grant and no owner's handle: use rt.credentialHandle(${JSON.stringify(c)}) (PS17.0, S461)`);
+    if (owner !== undefined && (typeof owner !== 'string' || owner === '')) throw new Error(`an owner's handle for credential ${c} names its owner, a principal (PS17.0, S461)`);
+    // Load admits a holder's credential only on an owned source (S461); read again here, fail closed.
+    if (cred.holder && !naming.every((s) => s.owned)) throw new Error(`credential ${c} has a holder, and a source that names it is not owned (PS17.0, S461)`);
     const bases = [...cred.bases];
+    const sourcesOfC = new Set(naming.map((s) => s.source));
+    const perOwner = cred.holder;
+    // The grant holder a request runs under: null for the one grant; the owner (an owner's handle) or the retrieval's
+    // owner (the routing handle) for a grant per owner; undefined when the routing handle is outside a retrieval of c's.
+    const holderOf = (): string | null | undefined => {
+      if (!perOwner) return null;
+      if (owner !== undefined) return owner;
+      const at = RETRIEVAL.getStore();
+      return at && sourcesOfC.has(at.source) && typeof at.owner === 'string' && at.owner !== '' ? at.owner : undefined;
+    };
     const request = async (r: { method: string; url: string; headers?: Record<string, string>; body?: string }): Promise<HttpResponse> => {
       const method = String(r?.method ?? '');
       const url = String(r?.url ?? '');
       const at = withinPrefix(url, bases);
+      const holder = holderOf();
       if (at === null) {
         const reason = `${method} ${url} is outside the base addresses of credential ${c}'s provider ${JSON.stringify(bases)}`;
-        await this.store.insertAudit({ at: this.now(), instanceId: this.grantOf(c, null) ?? `credential:${c}`, action: `credential.${c}.request`, actionId: `credential.${c}.request`, rule: 'PL6406', reason });
+        await this.store.insertAudit({ at: this.now(), instanceId: (holder === undefined ? null : this.grantOf(c, holder)) ?? `credential:${c}`, action: `credential.${c}.request`, actionId: `credential.${c}.request`, rule: 'PL6406', reason });
         throw new CapabilityRefused(`PL6406 CAPABILITY_REFUSED: ${reason}`);
       }
+      // S461: an owner's handle inside a retrieval for another owner (or for none) sends nothing.
+      if (perOwner && owner !== undefined) {
+        const inside = RETRIEVAL.getStore();
+        if (inside && inside.owner !== owner) throw new OwnerMismatch(`owner-mismatch: a request under one owner's grant of credential ${c} was made inside a retrieval from source ${inside.source} for another owner, so nothing is sent (PS17.0, S461)`);
+      }
+      if (holder === undefined) throw new CredentialUnavailable(`credential-unavailable: credential ${c} has a grant per owner, and this request was made outside a retrieval by owner from a source that names it, so no grant is chosen and nothing is sent (PS17.0, S461)`);
       const vault = this.#vaults.get(c);
-      const id = vault ? this.grantOf(c, null) : null;
+      const id = vault ? this.grantOf(c, holder) : null;
       const row = id ? this.store.db.prepare('SELECT state FROM pr_instance WHERE instance_id = ?').get(id) as { state: string } | undefined : undefined;
-      if (!vault || !id || !row || (JSON.parse(row.state) as { g?: unknown }).g !== 'Granted') throw new CredentialUnavailable(`credential-unavailable: credential ${c} has no Granted grant, so its source's adapter sends nothing (PS16.4, S460)`);
+      if (!vault || !id || !row || (JSON.parse(row.state) as { g?: unknown }).g !== 'Granted') throw new CredentialUnavailable(`credential-unavailable: credential ${c} has no Granted grant${perOwner ? ' for this owner' : ''}, so its source's adapter sends nothing (PS16.4, S460${perOwner ? ', S461' : ''})`);
       const req: HttpRequest = { method, url: at, headers: { ...(r.headers ?? {}) }, body: typeof r.body === 'string' ? r.body : '' };
       const res = await vault.withToken(id, req);
       return { status: res.status, headers: { ...res.headers }, body: res.body };
     };
     const handle = Object.freeze({ request, [CREDENTIAL_HANDLE]: true });
-    this.#handles.set(handle, c);
+    this.#handles.set(handle, { credential: c, owner: owner ?? null });
     return handle;
   }
 
@@ -1033,8 +1067,10 @@ export class PolyRuntime {
     // handle. A package that cannot say what an adapter was built with says none, so a credential's source is refused.
     const want = this.memory.sources.get(source)?.credential;
     const handle = typeof this.#ioPackage?.credentialHandleOf === 'function' ? this.#ioPackage.credentialHandleOf(adapter) : null;
+    // S461: for a credential with a holder, only the routing handle, never one owner's, which would send every owner's
+    // retrievals under that one owner's grant (an owner's handle refuses them, and the routing handle chooses per owner).
     const built = handle !== null && typeof handle === 'object' ? this.#handles.get(handle) : undefined;
-    if (want !== undefined && built !== want) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: source ${source} names credential ${want}, and this adapter was not built with this runtime's handle for it (rt.credentialHandle, S460)`);
+    if (want !== undefined && (built?.credential !== want || built.owner !== null)) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: source ${source} names credential ${want}, and this adapter was not built with this runtime's ${this.#credential(want)?.holder ? 'routing ' : ''}handle for it (rt.credentialHandle(${JSON.stringify(want)}), S460${this.#credential(want)?.holder ? ', S461' : ''})`);
     if (want === undefined && handle !== null && handle !== undefined) throw new Error(`PL6408 ADAPTER_NOT_CERTIFIED: source ${source} names no credential, and this adapter was built with a credential handle (S460)`);
     this.memory.connect(source, adapter);
   }

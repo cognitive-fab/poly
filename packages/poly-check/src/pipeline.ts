@@ -506,6 +506,13 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, std: opts.std ?? STD, ...(opts.sourceDir ? { sourceDir: opts.sourceDir } : {}), ...(opts.refFault ? { fault: opts.refFault } : {}) });
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
+  // PS17.0, PT10j (S461): the Grant of a credential with a holder that a source names is one instance per owner of the
+  // source's items, each an instance of this one machine; the instance line says so, as text, with no artefact of its own.
+  if (machine === 'Grant' && opts.refModule && module.name.startsWith(`${opts.refModule.name}.`)) {
+    const c = module.name.slice(opts.refModule.name.length + 1);
+    const decls = opts.refModule.decls;
+    if (decls.some((d) => d.kind === 'Credential' && d.name === c && d.holder !== null) && decls.some((d) => d.kind === 'Source' && d.credential === c)) mc.instance.domains.push('one instance per owner (S461)');
+  }
   if (tv.mismatches.length) {
     mc.diagnostics.push(...tv.mismatches.slice(0, 20));
     mc.stages.push({ stage: 'translation-validation', status: 'ran', engine: 'poly-ref', verdict: 'REFUSED', ms: performance.now() - t0, note: `${tv.mismatches.length} mismatches over ${tv.transitions} transitions` });

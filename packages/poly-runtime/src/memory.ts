@@ -3,6 +3,7 @@
 // (PF13.3). No item body, query value or credential enters the journal or the ledger (S310): a retrieval's record is its
 // item set's reference and count, and a body a decision reads is kept in the erasable content store, with its taint.
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { canonical } from '@cognitive-fab/polyflow-kernel/canonical';
 import type { LedgerStore } from './ledger-store.js';
 import { canonicalize } from '@poly/core';
@@ -26,6 +27,15 @@ export const join = (a: Taint, b: Taint): Taint => {
 
 /** PS17.0: a source's descriptor, as the build wrote it and admission certified it (PT10i); `credential` when it names one (S460). */
 export interface SourceDescriptor { v: 1; module: string; source: string; kind: string; adapter: string | null; audience: string; class: number; owned: boolean; freshnessMs: number | null; stale: 'escalate' | 'deny'; credential?: string }
+/**
+ * PS17.0, PT10j (S461): the retrieval an adapter call runs in, its source and its owner (null with no owner predicate),
+ * carried across the adapter's own async calls. The runtime sets it around each call of a source adapter's retrieve,
+ * envelope and resolve, and a credential handle reads it at each request: the routing handle sends under the grant of
+ * this owner, and an owner's handle refuses a request inside a retrieval for another owner. Outside any call it is
+ * undefined, so the routing handle sends nothing there.
+ */
+export const RETRIEVAL = new AsyncLocalStorage<Readonly<{ source: string; owner: string | null }>>();
+
 /** PS17.3: a module's flow descriptor (PT10i). */
 export interface FlowDescriptor { v: 1; module: string; audience: string[]; sources: Record<string, { class: number; owned: boolean }>; claims?: Record<string, { class: string; principal: string | null }> }
 
@@ -363,7 +373,8 @@ export class Memory {
     if (key && (typeof key.value !== 'string' || key.value === '')) throw new SourceRefused(`the retrieval from ${source} names no ${key.name} key`);
     const adapter = d.kind === 'memory' ? this.memoryAdapter(source) : this.adapters.get(source);
     if (!adapter) throw new Error(`source ${source} has no adapter connected (PT26): connect one with rt.connectSource`);
-    const got: (ItemRef & { provenance?: string })[] = await adapter.retrieve({ ...(owner !== undefined ? { owner: owner as string } : {}), ...(key ? { key: { name: key.name, value: key.value as string } } : {}), limit: spec.limit });
+    // S461: the adapter runs inside this retrieval, so a routing credential handle sends under this owner's grant only.
+    const got: (ItemRef & { provenance?: string })[] = await RETRIEVAL.run({ source, owner: owner === undefined ? null : owner as string }, () => adapter.retrieve({ ...(owner !== undefined ? { owner: owner as string } : {}), ...(key ? { key: { name: key.name, value: key.value as string } } : {}), limit: spec.limit }));
     if (!Array.isArray(got) || got.length > spec.limit) throw new SourceRefused(`source ${source} answered ${Array.isArray(got) ? got.length : 'no list of'} items for a limit of ${spec.limit} (K14)`);
     const items: Item[] = [];
     for (const i of got) {
@@ -398,7 +409,9 @@ export class Memory {
     const adapter = d.kind === 'memory' ? null : this.adapters.get(source);
     if (d.kind !== 'memory' && !adapter) throw new Error(`source ${source} has no adapter connected (PT26): connect one with rt.connectSource`);
     if (!adapter || typeof adapter.envelope !== 'function') throw new SourceRefused(`source ${source}'s adapter gives no envelope (S459)`);
-    const got: EnvelopeAnswer | null = await adapter.envelope({ ...(owner !== undefined ? { owner: owner as string } : {}), key: { name: spec.key.name, value } });
+    // S461: an envelope retrieval is a retrieval: its adapter call runs under this owner's grant only.
+    const envelope = adapter.envelope.bind(adapter);
+    const got: EnvelopeAnswer | null = await RETRIEVAL.run({ source, owner: owner === undefined ? null : owner as string }, () => envelope({ ...(owner !== undefined ? { owner: owner as string } : {}), key: { name: spec.key.name, value } }));
     // PT10j: null fails the retrieval, its failed completion, as for any refusal: with no item there is no reply to address.
     if (got === null) throw new SourceRefused(`source ${source} holds no item whose ${spec.key.name} key is the one asked, so there is no envelope (S459)`);
     if (!got || typeof got !== 'object' || typeof got.id !== 'string' || !Number.isFinite(got.asOf)) throw new SourceRefused(`source ${source} answered an envelope with no id or asOf (K14)`);
@@ -478,7 +491,8 @@ export class Memory {
         if (!adapter) throw new Error(`source ${set.source} has no adapter connected (PT26)`);
         const out: { id: string; body: string | null }[] = [];
         for (const it of set.items) {
-          const b = await adapter.resolve(it.id);
+          // S461: a body is read for the retrieval that kept the item, under the grant of the item's owner.
+          const b = await RETRIEVAL.run({ source: set.source, owner: it.owner }, () => adapter.resolve(it.id));
           // A body read is kept erasable, with the item's taint, so forgetting its owner erases it (PS17.7).
           // Review B3: the body, its taint and its source are stored in one transaction.
           // S326: an item's body under Ω is Ω for the flow rule, and keeps its real owner for a forget.
