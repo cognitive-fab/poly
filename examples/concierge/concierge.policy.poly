@@ -1,7 +1,13 @@
 // expected: CLEAN
 // The concierge's policy (plan-ex.md E1). A refund above 100 waits for a person, who approves it with a signed record
 // (PF9.6); one approved after the customer's thread has moved on is judged on the later state too (S401). The guard
-// proposal.kind == "effect" keeps the rule off the sends between the concierge's scopes, where effect is unknown.
+// proposal.kind == "effect" keeps the rules off the sends between the concierge's scopes, where effect is unknown.
+// Every model call is gated by its audience (ruled 2026-10-10): a decision sends its inputs to a model provider, so
+// polycheck's credential-egress region would reach it with no gate crossed (PL7001). A decision a customer's message
+// reaches is denied when any input is above the customer audience, and the staff's decision when any input is above
+// the staff audience; a decision's taint is the join of its inputs' (PS17.2), so one class names them all. No never
+// statement: S149 reads an escalation an approval would allow as an allow, so "never without a person" is violated by
+// design (decisions-ex.md, a limit after v1); the obligation is the control.
 module concierge_policy
 
 policy refunds {
@@ -11,5 +17,14 @@ policy refunds {
     require false else escalate
     on unknown escalate
   }
-  never large-refund-unreviewed "A refund above 100 is never allowed without a person.": allow when proposal.kind == "effect" && effect.kind == "payments.refund" && machine("concierge.Desk").large
+  obligation customer-decisions "A model answering a customer is given nothing above the customer audience." rule {
+    when proposal.kind == "effect" && effect.kind in { "decision.classify", "decision.amount", "decision.answer", "decision.reply", "decision.ack" } && !(effect.taint.class in { "public", "customer" })
+    require false else deny
+    on unknown deny
+  }
+  obligation staff-decisions "A model answering the staff is given nothing above the staff audience." rule {
+    when proposal.kind == "effect" && effect.kind == "decision.noted" && !(effect.taint.class in { "public", "customer", "staff" })
+    require false else deny
+    on unknown deny
+  }
 }
