@@ -1,0 +1,70 @@
+// S460 (PS17.0, PT10j): a source names its credential. The help index is reached under the service's own credential
+// `reports`, the files index under `payments`, a person's credential that names no holder (S457), and the notes index
+// under none. No effect uses either credential. The provider is the tests' test-oauth, found under the test-only std.
+module srccred
+
+audience { public < staff }
+
+credential payments: oauth2 {
+  provider "test-oauth"
+  grant authorization_code pkce
+  scopes { charges.read }
+}
+
+credential reports: oauth2 {
+  provider "test-oauth"
+  grant client_credentials
+  scopes { reports.read }
+}
+
+source help: documents {
+  adapter "opensearch"
+  audience staff
+  credential reports
+}
+
+source files: documents {
+  adapter "opensearch"
+  audience staff
+  credential payments
+}
+
+source notes: documents {
+  adapter "opensearch"
+  audience staff
+}
+
+enum Phase { Idle, Searching }
+
+machine Desk {
+  state {
+    phase : Phase = Idle
+    found : 0..2  = 0
+  }
+
+  action Search()
+  action Found(items: Items)
+  action SearchFailed()
+
+  on Search {
+    require phase == Idle else reject "busy"
+    phase' = Searching
+    emit search()
+  }
+  on Found(items) {
+    require phase == Searching else reject "not-searching"
+    phase' = Idle
+    found' = 1
+  }
+  on SearchFailed {
+    require phase == Searching else reject "not-searching"
+    phase' = Idle
+    found' = 2
+  }
+
+  effect search() {
+    retrieve help limit 1
+    ok(r) -> Found(items: r.items)
+    failed -> SearchFailed()
+  }
+}
