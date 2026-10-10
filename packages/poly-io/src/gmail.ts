@@ -1,17 +1,19 @@
 // plan-ex.md E2.0, S451, S452: the Gmail source. An account's mail is a source owned by its account's principal: the
 // adapter syncs a mailbox through the Gmail API's history (users.history.list from the stored cursor, users.messages.get
 // with format=raw), keeps each message's text in a mail store by reference, and answers a retrieval by owner, newest
-// first, as the other sources do (K14). Every request goes through the host's `request` for that account, which the
-// host binds to the account's read credential through the vault (`withToken`, K13), so no token reaches this file.
+// first, as the other sources do (K14). Every request goes through the runtime's handle for the source's credential
+// (S460, rt.credentialHandle), which sends it through the vault under the grant, or, until S461 gives a grant per owner,
+// through the host's `request` for an account, bound to its read grant in a vault the host keeps (`withToken`, K13).
+// Either way no token reaches this file.
 // The adapter only ever sends a GET under the Gmail API's base: it holds no code path that could send mail (S455).
 //
 // The read credential holds `gmail.readonly` alone, which every method used here accepts (PROVENANCE.md).
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import type { HttpRequest, HttpResponse, ItemRef, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
+import type { HttpRequest, HttpResponse, HttpTransport, ItemRef, SourceAdapter, SourceQuery } from '@poly/runtime/adapters';
 import { readMime } from './mime.js';
-import { made } from './util.js';
+import { builtWith, made } from './util.js';
 
 export const GMAIL_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 /** One page of a list or of the history, the API's default (at most 500). */
@@ -32,12 +34,21 @@ export interface GmailAccount {
   owner: string;
   /** An opaque label the owner gives the account, used in item ids in place of its address (S191, plan-ex 4.5). */
   label: string;
-  /** The host's request function for this account, which attaches the read grant's token in the vault. */
-  request(r: HttpRequest): Promise<HttpResponse>;
+  /**
+   * The host's request function for this account, which attaches the read grant's token in the vault; absent when the
+   * source is built with `transport`.
+   */
+  request?(r: HttpRequest): Promise<HttpResponse>;
 }
 
 export interface GmailSourceConfig {
   accounts: GmailAccount[];
+  /**
+   * S460: the runtime's handle for the credential the source names (rt.credentialHandle), which sends each request
+   * through the vault under the credential's one grant. A grant reaches one mailbox, so a source built with it has one
+   * account, which gives no request of its own; the adapter records the handle, so rt.connectSource can ask.
+   */
+  transport?: HttpTransport;
   store: MailStore;
   /** The most characters of a message's text kept; longer text is cut and marked. */
   maxBody?: number;
@@ -75,12 +86,13 @@ interface ItemRecord { id: string; owner: string; thread: string; correspondent:
 export function gmailSource(c: GmailSourceConfig): GmailSource {
   const A = 'gmail source';
   if (!Array.isArray(c.accounts) || c.accounts.length === 0) throw new Error(`${A}: at least one account`);
+  if (c.transport !== undefined && (typeof c.transport?.request !== 'function' || c.accounts.length !== 1)) throw new Error(`${A}: a transport is the runtime's handle for the source's credential, whose one grant reaches one account (S460)`);
   const byOwner = new Map<string, GmailAccount>();
   const labels = new Set<string>();
   for (const a of c.accounts) {
     if (typeof a.owner !== 'string' || a.owner === '') throw new Error(`${A}: an account's owner is its principal, not empty`);
     if (typeof a.label !== 'string' || !LABEL.test(a.label)) throw new Error(`${A}: label ${JSON.stringify(a.label)} is lower-case letters, digits and hyphens, from a letter`);
-    if (typeof a.request !== 'function') throw new Error(`${A}: an account's request is the host's function, bound to its read grant`);
+    if (c.transport !== undefined ? a.request !== undefined : typeof a.request !== 'function') throw new Error(`${A}: an account's request is the host's function, bound to its read grant, and a source built with a transport gives none`);
     if (byOwner.has(a.owner) || labels.has(a.label)) throw new Error(`${A}: an owner or a label named twice`);
     byOwner.set(a.owner, a);
     labels.add(a.label);
@@ -97,7 +109,7 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
 
   /** The one way out: a GET under the API's base, with no header that could carry a credential of its own. */
   const getJson = async (a: GmailAccount, path: string): Promise<{ status: number; json: Record<string, any> | null }> => {
-    const r = await a.request({ method: 'GET', url: `${GMAIL_BASE}${path}`, headers: { accept: 'application/json' }, body: '' });
+    const r = await (c.transport ?? a).request!({ method: 'GET', url: `${GMAIL_BASE}${path}`, headers: { accept: 'application/json' }, body: '' });
     let json: Record<string, any> | null = null;
     try { json = r.body ? JSON.parse(r.body) : null; } catch { json = null; }
     return { status: r.status, json };
@@ -243,7 +255,8 @@ export function gmailSource(c: GmailSourceConfig): GmailSource {
       return { removed: keys.length };
     },
   };
-  return made(adapter);
+  // S460: the adapter records the handle it is built with, so the runtime's connectSource can ask.
+  return made(builtWith(adapter, c.transport));
 }
 
 /** A mail store in memory, for tests and for a host that keeps nothing across restarts. */

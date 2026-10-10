@@ -6,8 +6,9 @@
 // created through the compose credential at the exact drafts URL, which admits no send (S455). Every model call is
 // reserved against the monthly budget before it runs (PS18.4, S454; IAC6).
 //
-// The host (examples/inbox/host) syncs each mailbox through the Gmail source with a read-only grant it keeps in its own
-// vault (gmail.readonly; no program effect uses it, so the runtime certifies no vault for it, decisions-ex.md), creates one
+// The host (examples/inbox/host) syncs each mailbox through the Gmail source with a read-only grant (gmail.readonly). Under
+// S460 the mail source names that credential and the runtime holds its one grant; until S461 gives an owned source's
+// credential a grant per owner, three accounts read through a vault the host keeps (decisions-ex.md). It creates one
 // Message per new item, opens the thread's Todo when a Message is actionable, and serves the local page. It holds no
 // rule: it forwards facts the machines record.
 module inbox
@@ -36,15 +37,6 @@ credential gmail_draft: oauth2 {
 }
 
 source mail: records {
-  adapter "gmail"
-  audience account owned
-  freshness 720h
-  keys { message, thread, correspondent }
-}
-
-// The same mailboxes, read by thread: a retrieval's key and limit are not part of its kind's signature, so a second
-// retrieval of mail by another key would share the first one's (decisions-ex.md, a defect for the release session).
-source threads: records {
   adapter "gmail"
   audience account owned
   freshness 720h
@@ -172,8 +164,7 @@ machine Message {
     emit read(owner: account, k: id)
   }
 
-  // Every retrieval of one source shares one kind, source.<s>.retrieve, so one payload and one pair of completions
-  // (S41); the Todo reads threads through a second source over the same mailboxes (decisions-ex.md).
+  // Each machine runs its own retrieval of mail (PS17.2, (a)): the Message reads its one item, the Todo its thread.
   effect read(owner: Principal, k: Key) {
     retrieve mail where owner == owner and message == k limit 1
     ok(r) -> Read(items: r.items)
@@ -366,7 +357,7 @@ machine Todo {
   }
 
   effect read(owner: Principal, k: Key) {
-    retrieve threads where owner == owner and thread == k limit 5
+    retrieve mail where owner == owner and thread == k limit 5
     ok(r) -> Read(items: r.items)
     failed -> ReadFailed()
   }
