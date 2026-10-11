@@ -27,7 +27,7 @@ import { loadRun } from '@poly/runtime';
 import { syncAccount, openTodos } from './inbox.mjs';
 import { guarded, COMPOSE, ReadOnlyRefusal } from './guard.mjs';
 import { readDigest, formatDigest } from './digest.mjs';
-import { anthropicProvider } from './providers.mjs';
+import { anthropicProvider, countFailures } from './providers.mjs';
 import { loadFixtures, fakeGoogle, recordedModel } from './fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -83,17 +83,26 @@ export function checkSizing(buildDir, results, samples) {
   if (small.length) throw new HostError(`the program's token limits are not sized for ${samples} asks: ${small.join('; ')}. Run setup.mjs with --samples ${samples}, or lower model.samples`);
 }
 
-/** A callback server for Google's redirect, on loopback only: the code and state arrive in the query of a GET. */
+/**
+ * A callback server for Google's redirect, on loopback only: the code and state arrive in the query of a GET. The redirect
+ * names `localhost`, which a browser may resolve to the IPv4 or the IPv6 loopback, so both are listened on (the IPv6 one
+ * only where the machine has it). Returns a function that closes them.
+ */
 function serveCallback(handle, port) {
-  const server = createServer((req, res) => {
+  const make = () => createServer((req, res) => {
     const m = /^\/credentials\/([A-Za-z_][A-Za-z0-9_]*)(?:[/?]|$)/.exec(req.url ?? '');
     if (!m || req.method !== 'GET') { res.writeHead(404).end(); return; }
     handle(m[1], { method: 'GET', url: `http://localhost:${port}${req.url}`, headers: {}, body: '' })
       .then((a) => res.writeHead(a.status, { 'content-type': a.contentType }).end(a.status === 200 ? 'Linked. You can close this tab and go back to the terminal.' : a.body))
       .catch(() => res.writeHead(500).end());
   });
-  server.listen(port, '127.0.0.1');
-  return server;
+  const servers = [['127.0.0.1', true], ['::1', false]].map(([host, required]) => {
+    const server = make();
+    server.on('error', (e) => { if (required) throw e; });
+    server.listen(port, host);
+    return server;
+  });
+  return () => Promise.all(servers.map((sv) => new Promise((res) => { if (sv.listening) sv.close(res); else res(); })));
 }
 
 const env = (name, what) => {
@@ -142,7 +151,7 @@ export async function startHost(opts, io) {
   const fixtures = opts.fixtures ? loadFixtures(opts.fixtures) : null;
   const run = await loadRun(project);
   const { rt } = run;
-  let server = null;
+  let closeServer = null;
   try {
     const host = guarded(rt, { drafts });
     const profile = JSON.parse(readFileSync(join(ROOT, 'std', 'credentials', 'providers', 'google.json'), 'utf8'));
@@ -158,7 +167,7 @@ export async function startHost(opts, io) {
       host.connectVault(credential, vaults[credential]);
     }
     const callback = credentialIngress(rt, vaults, () => rt.now());
-    if (!fixtures) server = serveCallback(callback, config.port);
+    if (!fixtures) closeServer = serveCallback(callback, config.port);
 
     const accounts = config.accounts;
     const source = gmailSource({
@@ -170,9 +179,11 @@ export async function startHost(opts, io) {
 
     const build = join(project, '.poly', 'build');
     const results = decisionResults(build);
-    const state = { authFailed: false };
+    // failures: model calls that failed since held messages were last asked again; the host starts owing one such round, so a
+    // restart asks again for what was held.
+    const state = { authFailed: false, failures: 1 };
     if (!fixtures && config.model.provider === 'anthropic') checkSizing(build, results, config.model.samples);
-    const providers = await providersFor(config, { fixtures, results, onAuthFailure: () => { state.authFailed = true; } });
+    const providers = countFailures(await providersFor(config, { fixtures, results, onAuthFailure: () => { state.authFailed = true; } }), state);
     rt.provideTier('small', providers.tiers.small);
     rt.provideTier('large', providers.tiers.large);
     for (const d of drafts ? ['summary', 'when', 'write'] : ['summary', 'when']) rt.provide(d, providers.decisions[d]);
@@ -247,8 +258,11 @@ export async function startHost(opts, io) {
       const opened = await openTodos(rt, pending);
       if (opened.length) await settle(rt);
 
-      // Held messages are asked again, a few times a run, and not while the key is known to be refused.
-      if (!state.authFailed) {
+      // Held messages are asked again only after a pass in which the model failed (and at the start of a run), a few times a
+      // message, and not while the key is known to be refused: a message held because the model was unsure is not asked again
+      // just to pay for the same doubt.
+      if (!state.authFailed && state.failures > 0) {
+        state.failures = 0;
         for (const { instance_id: id } of rt.store.db.prepare("SELECT instance_id FROM pr_instance WHERE machine_id = 'inbox.Message'").all()) {
           if ((await rt.getState(id)).state.seen !== 'Held' || (retries.get(id) ?? 0) >= RETRIES) continue;
           retries.set(id, (retries.get(id) ?? 0) + 1);
@@ -264,12 +278,12 @@ export async function startHost(opts, io) {
     return {
       rt, host, source, google, state, pass, drafts,
       async close() {
-        if (server) await new Promise((res) => server.close(res));
+        if (closeServer) await closeServer();
         await run.close();
       },
     };
   } catch (e) {
-    if (server) server.close();
+    if (closeServer) await closeServer();
     await run.close();
     throw e;
   }

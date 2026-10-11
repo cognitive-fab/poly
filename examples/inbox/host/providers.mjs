@@ -69,10 +69,11 @@ function objectIn(text) {
  * - `models`: `{ small, large }`, the model ids the owner set.
  * - `results`: each decision's result, read from the certified build: a list of the allowed answers, or `'content'`.
  * - `samples`: n, the number of asks for a decision with a few answers. The limits the program declares for such a call
- *   are for all n asks together, so each ask gets a share of them; `charsPerToken` estimates the prompt's tokens, high on purpose.
+ *   are for all n asks together, so each ask gets a share of them; `charsPerToken` estimates the prompt's tokens, high on purpose (2 characters a token is worse than English, code or most other
+ *   languages), and the first ask checks the estimate against the tokens the API counts before the others are sent.
  * - `onAuthFailure(error)`: called when the key is refused, so the host can tell the owner once.
  */
-export function anthropicProvider({ transport, apiKey, models, results, samples = 5, charsPerToken = 3, defaults = { maxInputTokens: 4000, maxTokens: 200 }, onAuthFailure = () => {} }) {
+export function anthropicProvider({ transport, apiKey, models, results, samples = 5, charsPerToken = 2, defaults = { maxInputTokens: 4000, maxTokens: 200 }, onAuthFailure = () => {} }) {
   if (!Number.isInteger(samples) || samples < 3 || samples > 9) throw new Error('samples is a whole number from 3 to 9');
   if (typeof apiKey !== 'string' || apiKey === '') throw new Error('the model provider has no key');
   const requests = [];
@@ -134,7 +135,16 @@ export function anthropicProvider({ transport, apiKey, models, results, samples 
     const perOutput = Math.floor(limits.maxTokens / samples);
     if (perOutput < 8) throw new ProviderError(`the declared output limit (${limits.maxTokens}) is too small for ${samples} asks`);
     const { system, user } = prompt(q, materials, allowed, perInput);
-    const settled = await Promise.allSettled(Array.from({ length: samples }, () => ask(model, system, user, perOutput, 1)));
+    // The asks are one prompt, so the first one's counted input is every one's. If it is over its share, the other asks are not
+    // sent: the API has no input cap of its own, and an estimate that undercounted would make the money spent differ from
+    // the budget charged. That one ask's tokens are spent and not reported; the decision fails and the mail is held.
+    let first;
+    try { first = await ask(model, system, user, perOutput, 1); } catch (e) {
+      if (e instanceof ProviderAuthError) onAuthFailure(e);
+      throw e;
+    }
+    if (first.input > perInput) throw new ProviderError(`the email counts ${first.input} tokens, over its share of ${perInput} (the declared input limit, ${limits.maxInputTokens}, over ${samples} asks); nothing more was asked`);
+    const settled = [{ status: 'fulfilled', value: first }, ...(await Promise.allSettled(Array.from({ length: samples - 1 }, () => ask(model, system, user, perOutput, 1))))];
     const failed = settled.find((s) => s.status === 'rejected');
     if (failed) {
       const auth = settled.find((s) => s.status === 'rejected' && s.reason instanceof ProviderAuthError);
@@ -162,5 +172,19 @@ export function anthropicProvider({ transport, apiKey, models, results, samples 
     requests,
     tiers: { small: tier('small'), large: tier('large') },
     decisions: { summary: decision('small'), when: decision('small'), write: decision('large') },
+  };
+}
+
+/**
+ * Wraps a provider's functions so that each failure is counted in `state.failures` before it is thrown again. The host
+ * asks held messages again only after a pass in which the model failed: a message held because the model was unsure is not
+ * asked again just to pay for the same doubt.
+ */
+export function countFailures(providers, state) {
+  const count = (f) => async (...args) => { try { return await f(...args); } catch (e) { state.failures += 1; throw e; } };
+  return {
+    ...providers,
+    tiers: Object.fromEntries(Object.entries(providers.tiers).map(([k, f]) => [k, count(f)])),
+    decisions: Object.fromEntries(Object.entries(providers.decisions).map(([k, d]) => [k, { ...d, provider: count(d.provider) }])),
   };
 }

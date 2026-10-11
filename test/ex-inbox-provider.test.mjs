@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ROOT } from './helpers.mjs';
 
-const { anthropicProvider, ProviderAuthError, ProviderError, API_URL, API_VERSION } = await import(pathToFileURL(join(ROOT, 'examples', 'inbox', 'host', 'providers.mjs')).href);
+const { anthropicProvider, countFailures, ProviderAuthError, ProviderError, API_URL, API_VERSION } = await import(pathToFileURL(join(ROOT, 'examples', 'inbox', 'host', 'providers.mjs')).href);
 const TRIAGE = ['ActNowReply', 'ActNow', 'WeekReply', 'Week', 'Fyi', 'Ignore'];
 const RESULTS = { triage: TRIAGE, kind: ['Request', 'Other'], when: ['Unstated', 'Today', 'ThisWeek', 'Later'], summary: 'content', write: 'content' };
 const KEY = 'canary-key-0123456789';
@@ -63,9 +63,9 @@ test('the limits are for all n asks together: each ask gets an nth of both, the 
   for (const r of t.seen) {
     const body = JSON.parse(r.body);
     assert.equal(body.max_tokens, 20, 'an nth of the output limit');
-    // The estimate is 3 characters a token, so an ask's prompt is at most an nth of the input limit.
+    // The estimate is 2 characters a token, so an ask's prompt is at most an nth of the input limit.
     const chars = body.system.length + body.messages[0].content.length;
-    assert.ok(chars / 3 <= limits.maxInputTokens / 5, `${chars} characters`);
+    assert.ok(chars / 2 <= limits.maxInputTokens / 5, `${chars} characters`);
     assert.match(body.messages[0].content, /\[truncated\]/);
   }
   // At the fake's reported usage per ask (1,500 in, 12 out), the five asks are 7,500 and 60: within 20,000 and 100.
@@ -123,4 +123,36 @@ test('the provider is built only with what it needs', () => {
   assert.throws(() => anthropicProvider({ transport: transport([]), apiKey: '', models: MODELS, results: RESULTS }), /no key/);
   assert.throws(() => anthropicProvider({ transport: transport([]), apiKey: KEY, models: MODELS, results: RESULTS, samples: 2 }), /from 3 to 9/);
   assert.throws(() => anthropicProvider({ transport: transport([]), apiKey: KEY, models: MODELS, results: RESULTS, samples: 12 }), /from 3 to 9/);
+});
+
+/** A transport that counts the prompt's tokens itself, at `ratio` characters a token, as the real API would. */
+function counting(ratio) {
+  const seen = [];
+  return { seen, async request(r) { seen.push(r); const b = JSON.parse(r.body); const input = Math.ceil((b.system.length + b.messages[0].content.length) / ratio); return { status: 200, headers: {}, body: JSON.stringify({ content: [{ type: 'text', text: '{"answer": "Fyi"}' }], usage: { input_tokens: input, output_tokens: 6 } }) }; } };
+}
+
+test('the API counts the tokens, not the provider: an email that counts over its share stops after the first ask, and the usage reported stays within the limits', async () => {
+  const long = 'x'.repeat(200_000);
+  // At 2.5 characters a token the estimate of 2 holds: five asks, each within an nth of the limit, together within it.
+  const good = counting(2.5);
+  const a = await ask(make(good), 'triage', mail(long));
+  assert.equal(good.seen.length, 5);
+  assert.ok(a.usage.input <= TRIAGE_LIMITS.maxInputTokens, `${a.usage.input} counted tokens`);
+  // At 1.5 characters a token (code, URLs, other scripts) the estimate undercounts: the first ask finds it, and no other is sent.
+  const bad = counting(1.5);
+  await assert.rejects(ask(make(bad), 'triage', mail(long)), (e) => e instanceof ProviderError && /counts \d+ tokens, over its share of 4000/.test(e.message) && /nothing more was asked/.test(e.message));
+  assert.equal(bad.seen.length, 1, 'one ask was spent, and no more');
+});
+
+test('each failure of a provider is counted before it is thrown again, so the host can tell a pass in which the model failed', async () => {
+  const state = { failures: 0 };
+  const wrapped = countFailures(make(transport([{ status: 529, headers: {}, body: 'overloaded' }, say('Fyi')])), state);
+  await assert.rejects(ask(wrapped, 'triage', mail('x')), ProviderError);
+  assert.equal(state.failures, 1);
+  const good = await ask(countFailures(make(transport([say('Fyi')])), state), 'triage', mail('x'));
+  assert.equal(good.answer, 'Fyi');
+  assert.equal(state.failures, 1, 'an answer is no failure');
+  const text = countFailures(make(transport([{ status: 529, headers: {}, body: 'overloaded' }])), state);
+  await assert.rejects(text.decisions.summary.provider({ decision: 'summary', payload: {}, intent: 'i', limits: { maxInputTokens: 4000, maxTokens: 200 } }, mail('x')), ProviderError);
+  assert.equal(state.failures, 2);
 });

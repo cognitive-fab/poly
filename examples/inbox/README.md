@@ -221,7 +221,7 @@ node <REPO>/examples/inbox/host/run.mjs link --project <DRY_PROJECT> --account h
 node <REPO>/examples/inbox/host/run.mjs run --project <DRY_PROJECT> --once --fixtures <REPO>/examples/inbox/dry-run/fixtures.json
 ```
 
-Each `# step:` line above names a block that `test/after/ex-inbox-dry-run.test.mjs` reads from this file and runs, with the placeholders filled in, so the steps cannot drift from the test. The test is in the serial group because the admission takes minutes and a large heap. It asserts that the read-only run emits no draft: no `gmail.createDraft`, no `decision.write` and no envelope retrieval in the outbox. It was written with the steps and has not been run yet; do not take the steps as tested end to end until it has been.
+Each `# step:` line above names a block that `test/after/ex-inbox-dry-run.test.mjs` reads from this file and runs, with the placeholders filled in, so the steps cannot drift from the test. The test is in the serial group because the admission takes minutes and a large heap. It asserts that the read-only run emits no draft: no `gmail.createDraft`, no `decision.write` and no envelope retrieval in the outbox. It was written with the steps and has not been run yet, so it is held back as waiting (set `POLY_RUN_INBOX_DRY_RUN=1` to run it, alone, and remove the hold once it passes); do not take the steps as tested end to end until it has been.
 
 ## What it costs
 
@@ -235,6 +235,8 @@ A decision with a few answers is asked n times, so it costs n asks. The estimate
 - **A draft:** one ask on the large tier, 3,000 input and 200 output tokens: 0.012 usd.
 - **A stated volume:** 10 messages a day (300 a month), 3 in 10 of them to-dos (90), and 15 drafts a month.
 - **The month:** 300 x 0.02964 + 90 x 0.0094 + 15 x 0.012 = 8.89 + 0.85 + 0.18, about **10 usd a month**.
+- **The worst case.** The threshold is high on purpose: with the identity maps and five asks, only a unanimous vote clears 0.9, so the 30 in 100 above is a hope, not a bound. If every decision goes on to the large tier, a message costs 2 x (7,800 + 23,400) = 62,400 micro-usd, and the month is 300 x 0.0624 + 0.85 + 0.18 = 18.72 + 1.03, about **19.75 usd**, which is within a quarter of a usd of the 20 usd default cap, before any retry. In that case the cap will be reached before the month ends and the rest of the mail waits; raise the cap, lower `--samples` (three asks cost three fifths of five), or lower the volume.
+- **A retry.** A held message is asked again at the start of a run and after a pass in which a model call failed, at most three times a run (the count starts again at a restart). A retry runs both decisions again, up to 0.0624 usd at these prices, so a message the model is unsure of costs that much again each time it is asked.
 
 The cap you set (20 usd by default) is the limit, not the estimate: before each call the largest cost it can have (its reservation) is set aside, a call that does not fit is denied and its message waits, and the real cost replaces the reservation after the call. With these prices and five asks the reservations are 0.0205 usd for a small-tier classification, 0.0615 for a large-tier one, 0.0050 for a title and 0.039 for a draft; setup prints yours. `poly cost --db <PROJECT>/.poly/run/store.sqlite` sums what was spent.
 
@@ -260,6 +262,8 @@ Each function takes `question` (`{ decision, limits: { maxInputTokens, maxTokens
 - **Uncalibrated confidence,** and no way yet in the host to record the adjudications a refit needs. The thresholds are conservative for that reason.
 - **The vault is the development keychain,** the one store that needs no cloud key service. Your tokens are encrypted under a key in a file beside them, so anything that can read your key directory can read your tokens. Admission refuses it in a production project (`PL6826`), so the anchor must not be marked production.
 - **Single user, single process.** One host owns the store at a time.
+- **The input limit rests on an estimate.** The model provider's API has no input cap of its own. The provider cuts each email to its share of the declared limit, estimating two characters a token (worse than English, code or most other scripts), and the first ask checks that against the tokens the API counts: if the email is over its share, no other ask is sent and the decision fails. That one ask's tokens are spent and not reported, so they are not charged to the budget. A decision whose result is text (a title, a draft) is asked once and is not checked first; if the API counts more than its limit, the runtime charges its whole reservation.
+- **The redirect names `localhost`.** The host listens on 127.0.0.1 and, where the machine has it, ::1, because a browser may resolve `localhost` to either. Confirm on the first live link that Google's redirect reaches the host.
 - **The program is tailored, and checked again on your machine.** Its `CLEAN` is for the example; yours is the verdict of `poly admit`.
 - **The first live run is yours.** The recorded model and fake Google are the only ones this repository has run against.
 - **IAC3's check evidence is a cut-down copy,** as stated above.
