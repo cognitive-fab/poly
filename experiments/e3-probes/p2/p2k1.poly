@@ -1,0 +1,60 @@
+module p2k1
+
+type ObsState = Empty | Pending | Full | Handled | Released
+type ArchState = Free | Held | Gone
+
+machine Archive {
+  state { st : ArchState = Free  refs : 0..2 = 0 }
+  terminal st is Gone
+  action Store(from: Ref<Observation>)
+  action Drop()
+  on Store(from) {
+    require st is Free else reject "not-free"
+    st' = Held
+    refs' = 1
+    send from <- Stored()
+  }
+  on Drop {
+    require st is Held else reject "not-held"
+    st' = Gone
+    refs' = 0
+  }
+}
+
+machine Observation {
+  state { st : ObsState = Empty  sent : 0..3 = 0  arch : Ref<Archive> = none }
+  terminal st is Released
+  action Put()
+  action Stored()
+  action Sent()
+  action Release()
+  on Put { require st is Empty else reject "not-empty"  st' = Pending  send arch <- Store(from: self) }
+  on Stored { require st is Pending else reject "not-pending"  st' = Full }
+  on Sent {
+    require st is Full else reject "not-full"
+    sent' = sent + 1
+    if sent + 1 >= 3 { st' = Handled }
+  }
+  on Release { require st is Handled else reject "not-handled"  st' = Released  send arch <- Drop() }
+}
+
+machine Session {
+  state { requests : 0..3 = 0 o1 : Ref<Observation> = none }
+  terminal requests in { 3 }
+  action Req()
+  on Req {
+    require requests < 3 else reject "cap"
+    requests' = requests + 1
+    send o1 <- Sent()
+  }
+}
+
+configuration pack {
+  a1 : Archive
+  o1 : Observation { arch: a1 }
+  s : Session { o1: o1 }
+  inputs { s.Req, o1.Put, o1.Release }
+  bounds { transit 5 }
+  invariant handled-resolves-1: o1 is Handled implies a1 is Held
+  invariant twice-then-handle-1: (o1 is Handled implies o1.sent == 3) && (o1 is Full implies o1.sent <= 2)
+}
