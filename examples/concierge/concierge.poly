@@ -22,6 +22,9 @@ enum Branch { Refund, Status, Other }
 // What a reply tells the customer; the decision that writes it reads this and the customer's message.
 enum Outcome { Refunded, Declined, Unsure, Status, Other }
 
+// AC30, PT28.3a: the extracted amount, a record of one field with a strict domain.
+type Amount = { value: 0..500 }
+
 enum Phase { Idle, Classifying, Looking, Finding, Citing, Extracting, Refunding, Answering }
 
 // S450: the bound action's claims, a field of the WhatsApp kind's Sender claims.
@@ -278,15 +281,13 @@ service machine Desk {
 
   // Reads the message and the customer's orders, and cites the order the message is about (PS17.6): an answer that
   // cites none is uncited and takes the failed path.
-  // AC30: the amount is typed by a strict domain, 0..500, and an answer outside it is refused at dispatch and journaled.
-  // A bare range, not PT28.3a's record { value: 0..500 }: a record result checks with r.conf.value (PD1.2b), but the
-  // runtime gives a decision one scalar conf, so the completion is outside its type (decisions-ex.md, a defect).
-  decision amount(text: Content, context: Items) -> 0..500 {
+  // AC30: the amount is typed by a strict domain, and an answer outside it is refused at dispatch and journaled.
+  decision amount(text: Content, context: Items) -> Amount {
     provider "small"
     labels { egress:external, read:private }
     timeout 800ms
     cites context
-    ok(r) -> Amounted(value: r.answer, conf: r.conf, cites: r.cites)
+    ok(r) -> Amounted(value: r.answer.value, conf: r.conf.value, cites: r.cites)
     failed -> Unextracted()
   }
 

@@ -439,6 +439,16 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 
 **So it is a defect for the release session,** not a missing property in the concierge, and the property is not added to the real concierge: it would pass with the stuck Desk, and so say nothing. **Proposal:** a finding for a rejected completion of the application's own decision or effect in its generated configuration, as `PL5406` is for a receipt, since the intent is consumed and no other completion will come. A handler that can reject a completion's data, as `require cites.count == 1` can, is then a finding, and the `if` guard is the fix.
 
+## Back to PT28.3a's record, and S463 (owner's reviewer, 2026-10-10)
+
+**Ruled.** The liveness finding is accepted and goes to the release session as **S463**: a rejected completion of the program's own decision or effect becomes a finding in the generated configuration. `test/ex-concierge-liveness.test.mjs` stays as the reproduction. The heavy runs wait for S463.
+
+**Done.** `ex` is rebased on `v1` at `5d07916f`, which carries 958ce6d2 (PT10k, the text) and its code and tests (`c01b347c`, `3f579829`). The amount decision is back to PT28.3a's record, `decision amount(text: Content, context: Items) -> Amount` with `type Amount = { value: 0..500 }`, and `Amounted(value: r.answer.value, conf: r.conf.value, cites: r.cites)`. The recorded provider gives the whole record as its answer and a distribution over whole answers (`{ value: 40 }` at 0.93, `{ value: 0 }` at the rest); the runtime computes the per-field confidence and margin from it (PT10k).
+
+**The light tests pass, 21 of 21:** `ex-concierge-host`, `ex-concierge-refund` (the control, the amount above what was paid, two orders, an order the customer lacks, AC30's 650, and the `require` variant that strands the Desk), `ex-concierge-liveness` and `ex-concierge-policy`. The run-time tests, which failed with `conf` undefined on the range workaround's predecessor, now run the record end to end.
+
+**Still to run, after S463 lands:** rebase, one project check with the policy (expected `CLEAN`, and the `if` guard should keep it free of the new finding), and AC27.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy. The inbox meets IAC1 to IAC9 on recorded traffic, IAC5 in full once the release session's citation fix lands.

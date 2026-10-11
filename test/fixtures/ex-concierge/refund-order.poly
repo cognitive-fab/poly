@@ -27,6 +27,8 @@ enum Phase { Idle, Finding, Extracting, Refunding, Answering }
 
 enum Outcome { Refunded, Declined, Unsure }
 
+type Amount = { value: 0..500 }
+
 service machine Desk {
   state {
     phase    : Phase     = Idle
@@ -118,12 +120,12 @@ service machine Desk {
     failed -> LookupFailed()
   }
 
-  decision amount(text: Content, context: Items) -> 0..500 {
+  decision amount(text: Content, context: Items) -> Amount {
     provider "small"
     labels { egress:external, read:private }
     timeout 800ms
     cites context
-    ok(r) -> Amounted(value: r.answer, conf: r.conf, cites: r.cites)
+    ok(r) -> Amounted(value: r.answer.value, conf: r.conf.value, cites: r.cites)
     failed -> Unextracted()
   }
 
