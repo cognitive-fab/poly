@@ -63,4 +63,14 @@ No test that asserts only a refusal counted as a fail-first: the refusal tests a
 
 **Not covered, said plainly.** `omitted.erasedRuns` is 0 in every test (a run's `$create` row names no body, so no run loses every step; the arithmetic is asserted). `omitted.archivedRuns` has no test (no fixture archives a run). A gate `denied` or `escalated` as the last word is in no recorded run, so only `allowed` is asserted against a real gate; the other words are checked as members of the set. No consumer reads the corpus yet (polyvers, polyx): that is M7.2's port. The privacy file has editor warnings for unused declarations.
 
+**M7.1 accepted by the owner's reviewer (2026-10-11), with conditions.** The mutation evidence is good and the two files I wrote stay. A separate writer audits them (see the audit below). The earlier writer's claim that the canary, erasure and advice cases were untestable is rejected: the substance file shows it was wrong.
+
+**Open items, to close before the M7 gate (M7.7), with synthetic fixtures.**
+1. Audit by a separate writer of `test/trace-export-substance.test.mjs` and `test/after/ex-trace-export.test.mjs`, given PS19 and PT29 and the two files, not the code: list each spec clause with no test or with a test that asserts the wrong thing, and write the missing tests, each shown failing against the stashed build or a mutation before it passes. Open.
+2. `omitted.erasedRuns`: a run counts as erased when every one of its steps is erased. A fixture that erases a whole run. If the spec text says otherwise, bring it to the reviewer; the field is not dropped. Open.
+3. `omitted.archivedRuns`: a fixture. Open.
+4. A gate `denied` and a gate `escalated` as the last word: one fixture for each. Open.
+5. The editor warnings in `test/trace-export-privacy.test.mjs`. Open.
+6. The full suite before M7.2 starts, with JJ's confirmation that E3 runs no heavy job at the same time. Open.
+
 **Repository.** `schemas/grant-revoke.input.json` was stale on main (the registry had gained `credential` and `db`), so `PF9.2` failed there. It is regenerated with `scripts/publish-schemas.mjs` as its own commit. `certifiedProgram` was lifted out of `replayRuntime` so the export and replay read the same modules.
