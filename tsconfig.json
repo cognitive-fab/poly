@@ -30,6 +30,9 @@
     },
     {
       "path": "packages/poly-io"
+    },
+    {
+      "path": "packages/poly-mine"
     }
   ]
 }

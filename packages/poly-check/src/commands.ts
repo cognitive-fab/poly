@@ -23,7 +23,7 @@ import { signPolicy } from './policy-sign.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
 import { journalCommand } from './journal.js';
 import { exportTraces, TraceUsageError } from './traces.js';
-import { MineUsageError, mineTraces } from './mine.js';
+import { MineUsageError, mineTraces, pinPolyx } from './mine.js';
 import { adjudicate } from './adjudicate.js';
 import { promote, PromoteUsageError } from './promote.js';
 import { benchGate } from './bench.js';
@@ -475,11 +475,15 @@ export const COMMANDS: Command[] = [
   {
     name: 'mine', mcp: null, lsp: false,
     summary: 'Runs polyx, a separately installed tool, over a trace corpus and writes the candidate rules it proposes, with their support, counter-evidence and the source that would carry them (PF10.2, PS20, PT30). The corpus is private, so never over MCP.',
-    input: obj({ traces: str('the trace corpus (poly export traces)'), project: str('the poly project the corpus came from'), polyx: str('the directory of a polyx checkout'), out: str('the candidates file; an existing file is refused'), synthetic: { type: 'boolean', description: 'the corpus was made for the purpose, and the candidates say so (PS20.5)' }, all: { type: 'boolean', description: 'also the rules polyx suppresses as subsumed' } }, ['traces', 'project', 'polyx', 'out']),
-    output: obj({ path: str('the candidates written'), candidates: { type: 'integer' }, promotable: { type: 'integer' }, gappedLeftOut: { type: 'integer' } }, ['path', 'candidates', 'promotable']),
+    input: obj({ pin: { type: 'boolean', description: 'record the polyx at --polyx as the one this project trusts (S507), and mine nothing' }, repin: { type: 'boolean', description: 'with pin, replace a different pin' }, polyxPin: str('the pin file (default: polyx.pin.json in the project)'), timeoutSeconds: { type: 'integer', description: 'stop polyx after this many seconds (default 600)' }, maxOutput: { type: 'integer', description: 'stop polyx when it has written this many bytes (default 64 MiB)' }, traces: str('the trace corpus (poly export traces)'), project: str('the poly project the corpus came from'), polyx: str('the directory of a polyx checkout'), out: str('the candidates file; an existing file is refused'), synthetic: { type: 'boolean', description: 'the corpus was made for the purpose, and the candidates say so (PS20.5)' }, all: { type: 'boolean', description: 'also the rules polyx suppresses as subsumed' } }, ['project', 'polyx']),
+    output: obj({ path: str('the candidates written'), candidates: { type: 'integer' }, promotable: { type: 'integer' }, gappedLeftOut: { type: 'integer' } }, []),
     async run(input) {
       try {
-        const r = await mineTraces({ traces: need(input, 'traces'), project: need(input, 'project'), polyx: need(input, 'polyx'), out: need(input, 'out'), synthetic: input.synthetic === true, all: input.all === true });
+        if (input.pin === true) {
+          const p = await pinPolyx({ project: need(input, 'project'), polyx: need(input, 'polyx'), polyxPin: opt(input, 'polyxPin'), repin: input.repin === true });
+          return { exit: EXIT_CODES.CLEAN, result: { path: p.path }, text: `${p.path}: polyx ${(p.pin as { version: string }).version} pinned${p.changed ? '' : ' (already)'}\n` };
+        }
+        const r = await mineTraces({ traces: need(input, 'traces'), project: need(input, 'project'), polyx: need(input, 'polyx'), out: need(input, 'out'), synthetic: input.synthetic === true, all: input.all === true, polyxPin: opt(input, 'polyxPin'), timeoutMs: typeof input.timeoutSeconds === 'number' ? input.timeoutSeconds * 1000 : undefined, maxOutput: typeof input.maxOutput === 'number' ? input.maxOutput : undefined });
         return { exit: EXIT_CODES.CLEAN, result: { ...r }, text: `${r.path}: ${r.candidates} candidate(s), ${r.promotable} promotable; ${r.gappedLeftOut} gapped run(s) left out\n` };
       } catch (e) { if (e instanceof MineUsageError) throw new CommandUsageError(e.message); throw e; }
     },

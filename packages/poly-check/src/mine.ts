@@ -4,7 +4,6 @@
 // vendored and not imported: it is run by path with a configuration, a corpus and an alphabet that live in a temporary
 // directory, and no language model is called (the environment polyx sees holds no key, and `annotate` is never run).
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,10 +11,38 @@ import { canonicalize, loadProject } from '@poly/core';
 import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
 import { buildMachine, type RMachine, type RType } from '@poly/ref';
+import { AdmitError } from './admit.js';
 
 export class MineUsageError extends Error {}
 
-export interface MineOptions { traces: string; project: string; polyx: string; out: string; synthetic?: boolean; all?: boolean }
+export interface MineOptions { traces: string; project: string; polyx: string; out: string; synthetic?: boolean; all?: boolean; polyxPin?: string; timeoutMs?: number; maxOutput?: number }
+
+/** What poly-mine gives (it is loaded by name, so that this package never imports a module that starts a process). */
+interface MineSeam {
+  pinOf(dir: string): { v: 1; name: 'polyx'; version: string; entry: string };
+  runPolyxMine(o: { polyx: string; pin: unknown; config: string; cwd: string; all?: boolean; timeoutMs?: number; maxOutput?: number }): string;
+}
+const loadSeam = async (): Promise<MineSeam> => {
+  const pkg = '@poly/mine';
+  return (await import(pkg)) as MineSeam;
+};
+const pinFile = (project: string, given?: string) => given ?? join(project, 'polyx.pin.json');
+
+/** `poly mine --pin-polyx`: records the polyx at a path as the one this project trusts (S507). An existing pin that differs needs `repin`. */
+export async function pinPolyx(o: { project: string; polyx: string; polyxPin?: string; repin?: boolean }): Promise<{ path: string; pin: unknown; changed: boolean }> {
+  for (const [k, v] of [['--project', o.project], ['--polyx', o.polyx]] as const) if (!v) throw new MineUsageError(`poly mine --pin-polyx needs ${k} <value>`);
+  const seam = await loadSeam();
+  let pin: ReturnType<MineSeam['pinOf']>;
+  try { pin = seam.pinOf(o.polyx); } catch (e) { throw new MineUsageError((e as Error).message); }
+  const path = pinFile(o.project, o.polyxPin);
+  if (existsSync(path)) {
+    const had = JSON.parse(readFileSync(path, 'utf8')) as typeof pin;
+    if (had.entry === pin.entry && had.version === pin.version) return { path, pin, changed: false };
+    if (!o.repin) throw new MineUsageError(`${path} pins another polyx (${had.version} ${had.entry}); poly mine --repin-polyx replaces it`);
+  }
+  writeFileSync(path, JSON.stringify(pin, null, 2) + '\n');
+  return { path, pin, changed: true };
+}
 
 interface Step { seq: number; action: string; stepKind: string; pre: Record<string, unknown>; post: Record<string, unknown>; effects: { kind: string; consequence: string; gate: { outcome: string } | null }[] }
 interface Episode { episode: string; machine: string; gapped: boolean; steps: Step[] }
@@ -27,17 +54,13 @@ const scalar = (v: unknown): string | number | boolean | null => (v === null || 
 /** PS20.1: the digest of a candidate is that of its canonical form without the digest field. */
 export const candidateDigest = (c: Record<string, unknown>): string => { const { digest: _d, ...rest } = c; return sha(canonicalize(rest)); };
 
-/** What polyx may see of this process: nothing that looks like a key, a token or a secret, and nothing of polyx's own settings. */
-function polyxEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^POLYX_|KEY|TOKEN|SECRET|PASSWORD/i.test(k)) env[k] = v;
-  return env;
-}
-
 export async function mineTraces(o: MineOptions): Promise<{ path: string; candidates: number; promotable: number; gappedLeftOut: number }> {
   for (const [k, v] of [['--traces', o.traces], ['--project', o.project], ['--polyx', o.polyx], ['--out', o.out]] as const) if (!v) throw new MineUsageError(`poly mine needs ${k} <value>`);
   if (!existsSync(join(o.polyx, 'bin', 'polyx.mjs'))) throw new MineUsageError(`--polyx ${o.polyx} has no bin/polyx.mjs: it is the directory of a polyx checkout`);
   if (existsSync(o.out)) throw new MineUsageError(`${o.out} exists: poly mine does not overwrite a file`);
+  const pinPath = pinFile(o.project, o.polyxPin);
+  if (!existsSync(pinPath)) throw new MineUsageError(`no polyx pin at ${pinPath}: record the polyx you trust with poly mine --pin-polyx (S507)`);
+  const pin = JSON.parse(readFileSync(pinPath, 'utf8')) as unknown;
   if (!existsSync(o.traces)) throw new MineUsageError(`${o.traces}: no such trace corpus`);
 
   const bytes = readFileSync(o.traces);
@@ -122,10 +145,11 @@ export async function mineTraces(o: MineOptions): Promise<{ path: string; candid
     writeFileSync(configFile, JSON.stringify({ workspace: join(work, 'workspace'), policies: [], segmenter: 'null', seed: 1, corpora: { 'poly-traces': { adapter: 'synthetic', source: corpusFile, alphabet: alphabetFile } } }));
     let out: string;
     try {
-      out = execFileSync(process.execPath, [join(o.polyx, 'bin', 'polyx.mjs'), 'mine', 'poly-traces', '--json', '--config', configFile, ...(o.all ? ['--all'] : [])], { encoding: 'utf8', cwd: o.polyx, env: polyxEnv(), maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
+      out = (await loadSeam()).runPolyxMine({ polyx: o.polyx, pin, config: configFile, cwd: o.polyx, all: o.all, timeoutMs: o.timeoutMs, maxOutput: o.maxOutput });
     } catch (e) {
-      const err = e as { stderr?: string; message: string };
-      throw new Error(`polyx failed: ${(err.stderr ?? err.message).toString().trim().split('\n').slice(0, 5).join(' | ')}`);
+      // The pin not matching, a timeout and a cap on the output are refusals; any other failure is polyx's.
+      if ((e as Error).constructor?.name === 'PolyxRefused') throw new AdmitError((e as Error).message);
+      throw e;
     }
     const report = JSON.parse(out) as { manifest: Record<string, unknown>; rules: Rule[] };
 

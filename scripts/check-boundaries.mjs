@@ -21,6 +21,13 @@
 // 4. poly new is the only place a model is called (PF9.3, S169). poly-new may start a subprocess (Claude Code, headless);
 //    no other package imports it, except poly-agent, which serves it, and the command line, which loads it by name.
 //
+// 6. poly-mine is the only package besides poly-new that may start a process (S507, ruled 2026-10-11): polyx, run by path.
+//    It imports node:child_process, node:crypto, node:fs and node:path and nothing else; it starts a process only with
+//    execFileSync, so with a fixed argument vector and no shell; it reads the environment by name, never whole, so the
+//    child's environment is built fresh from an allowlist; and it never names a polyx command but mine (the word
+//    annotate, the command that calls a model, appears nowhere in it). The pin, the timeout and the cap on output are
+//    tested by running it (test/polyx-seam.test.mjs). Only packages/poly-check/src/mine.ts may name @poly/mine.
+//
 // A file that cannot be read is an error, never a pass (no silent clean).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, posix, relative, sep } from 'node:path';
@@ -132,8 +139,20 @@ export function violationsOf(pkg, file, text) {
   // Review finding P8: indirect routes. A subprocess or a computed global can reach the network, and a
   // require made at run time, a template literal or a concatenated name can reach the compiler.
   for (const imp of importsOf(text)) {
-    if (PROCESS_MODULES.includes(imp.spec) && pkg !== 'poly-new') v.push(`${file}:${imp.line} imports '${imp.spec}' (a subprocess can reach a model; no model call on a check path)`);
+    if (PROCESS_MODULES.includes(imp.spec) && pkg !== 'poly-new' && !(pkg === 'poly-mine' && /^(node:)?child_process$/.test(imp.spec))) v.push(`${file}:${imp.line} imports '${imp.spec}' (a subprocess can reach a model; no model call on a check path)`);
   }
+  // Rule 6: what poly-mine may import and how it may start a process.
+  if (pkg === 'poly-mine') {
+    const ok = ['node:child_process', 'node:crypto', 'node:fs', 'node:path'];
+    for (const imp of importsOf(text)) if (!ok.includes(imp.spec)) v.push(`${file}:${imp.line} poly-mine imports '${imp.spec}'; it imports ${ok.join(', ')} only (S507)`);
+    if (/\b(spawn|spawnSync|exec|execSync|execFile|fork)\s*\(/.test(text)) v.push(`${file} starts a process other than with execFileSync; poly-mine uses a fixed argument vector and no shell (S507)`);
+    if (/\bshell\s*:/.test(text)) v.push(`${file} sets a shell option; poly-mine starts its process with no shell (S507)`);
+    if (/process\s*\.\s*env(?!\s*[.\[])/.test(text)) v.push(`${file} reads the whole environment; poly-mine builds the child's environment fresh from an allowlist, by name (S507)`);
+    if (/annotate/i.test(text)) v.push(`${file} names annotate, the polyx command that calls a model; the only polyx command poly-mine runs is mine (S507)`);
+    if (!/execFileSync\s*\(/.test(text)) v.push(`${file} does not start its process with execFileSync (S507)`);
+  }
+  // Rule 6: the way to poly-mine is poly-check's mine command alone.
+  if (pkg !== 'poly-mine' && file !== 'packages/poly-check/src/mine.ts' && (/['"`]@poly\/mine(\/[^'"`]*)?['"`]/.test(text) || importsOf(text).some((i) => /(^|\/)poly-mine(\/|$)/.test(i.spec)))) v.push(`${file} names @poly/mine, the package that starts polyx; only poly-check's mine command may load it (S507)`);
   // Review D-F2: a builtin reached without an import statement, by a name the import check cannot see.
   if (pkg !== 'poly-new' && /\bgetBuiltinModule\b|\bprocess\s*\.\s*binding\b/.test(text)) v.push(`${file} loads a builtin module by name at run time (it can reach a subprocess or the network)`);
   if (/\bglobalThis\s*\[/.test(text)) v.push(`${file} reads a global by a computed name (it can reach fetch)`);

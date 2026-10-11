@@ -134,7 +134,8 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
   {
     const all = (name: string) => args.flatMap((x, i) => (x === name && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : []));
     const need = (name: string, what: string) => option(args, name) ?? (() => { throw new UsageError(`${cmd} needs ${name} <${what}>`); })();
-    if (cmd === 'mine' && positional.length === 1) return { name: 'mine', input: { traces: need('--traces', 'corpus'), project: need('--project', 'dir'), polyx: need('--polyx', 'dir'), out: need('--out', 'file'), synthetic: args.includes('--synthetic'), all: args.includes('--all') } };
+    if (cmd === 'mine' && positional.length === 1 && (args.includes('--pin-polyx') || args.includes('--repin-polyx'))) return { name: 'mine', input: { pin: true, repin: args.includes('--repin-polyx'), project: need('--project', 'dir'), polyx: need('--polyx', 'dir'), polyxPin: option(args, '--polyx-pin') ?? undefined } };
+    if (cmd === 'mine' && positional.length === 1) return { name: 'mine', input: { traces: need('--traces', 'corpus'), project: need('--project', 'dir'), polyx: need('--polyx', 'dir'), out: need('--out', 'file'), synthetic: args.includes('--synthetic'), all: args.includes('--all'), polyxPin: option(args, '--polyx-pin') ?? undefined, ...(option(args, '--timeout') ? { timeoutSeconds: Number(option(args, '--timeout')) } : {}), ...(option(args, '--max-output') ? { maxOutput: Number(option(args, '--max-output')) } : {}) } };
     if (cmd === 'adjudicate' && positional.length === 2) return { name: 'adjudicate', input: { candidates: a, candidate: need('--candidate', 'id'), verdict: need('--verdict', 'real|spurious|defer'), by: need('--by', 'keyId'), key: need('--key', 'private key file'), out: need('--out', 'file'), project: option(args, '--project') ?? undefined } };
     if (cmd === 'promote' && positional.length === 2) return { name: 'promote', input: { project: a, candidates: need('--candidates', 'file'), adjudications: all('--adjudication'), scope: option(args, '--scope') ?? undefined } };
   }
@@ -233,7 +234,7 @@ export async function main(argv: string[]): Promise<number> {
   const json = args.includes('--json');
   const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1, args.indexOf('--credential') + 1, args.indexOf('--for') + 1, args.indexOf('--grant') + 1].filter((i) => i > 0));
   // PT29.1: options that repeat or are new with export traces, whose values are no positional argument.
-  args.forEach((x, i) => { if (['--build', '--certificate', '--trust', '--run', '--traces', '--polyx', '--candidates', '--candidate', '--verdict', '--adjudication'].includes(x)) valued.add(i + 1); });
+  args.forEach((x, i) => { if (['--build', '--certificate', '--trust', '--run', '--traces', '--polyx', '--candidates', '--candidate', '--verdict', '--adjudication', '--polyx-pin', '--timeout', '--max-output'].includes(x)) valued.add(i + 1); });
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();

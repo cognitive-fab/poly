@@ -18,6 +18,7 @@
     "packages/poly-agent",
     "packages/poly-new",
     "packages/poly-io",
+    "packages/poly-mine",
     "vendor/sam-pattern",
     "vendor/polygraph",
     "vendor/polyflow/platform/packages/kernel",
