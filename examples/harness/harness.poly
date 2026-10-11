@@ -23,6 +23,11 @@
 // out of turn.
 module harness
 
+// The classes of the memory model (PS17), declared so that the runtime records a taint for every body it stores: a decision
+// reads Content only if each body has a taint record, and a program with no audience has none (E3.4, S566). A body the host
+// stores with putContent carries the bottom class, whatever the class here; the harness does not rely on the classes.
+audience { clean < secret }
+
 enum TurnMode { Idle, Thinking, Continuing, Acting, Observing, Checking, Done, Failed }
 
 enum Stop { End, Tool, Length }
@@ -58,7 +63,7 @@ machine Turn {
 
   terminal mode in { Done, Failed }
 
-  action Start(task: Content)
+  action Start(task: Content, tr: Ref<Trial>, led: Ref<Ledger>)
   action Metered(s: Stop)
   action Stepped(calls: Content, conf: Conf, margin: Conf)
   action StepFailed()
@@ -73,9 +78,12 @@ machine Turn {
   action Logged()
   action Fault()
 
-  on Start(task) {
+  on Start(task, tr, led) {
     require mode is Idle else reject "not-idle"
+    require !(tr == none) && !(led == none) else reject "unwired"
     mode' = Thinking
+    trial' = tr
+    ledger' = led
     decide agent(task: task)
   }
 
@@ -193,14 +201,16 @@ machine Turn {
 
   effect classify(calls: Content) {
     kind "tool.classify"
-    labels { read:private }
+    labels { write:store }
+    targets { store: ["calls"] }
     ok -> Fusable()
     failed -> Separate()
   }
 
   effect act(fused: bool) {
     kind "tool.act"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["calls", "output", "recorded-tool"] }
     ok -> Ran()
     failed -> Ran()
   }
@@ -208,29 +218,32 @@ machine Turn {
   // The one tool here that needs the network. An offline run denies it (HF3.10, harness.policy.poly).
   effect fetch() {
     kind "tool.fetch"
-    labels { egress:external }
-    targets { egress: exact "https://example.com/fetch" }
+    labels { egress:external, write:store }
+    targets { egress: exact "https://example.com/fetch", store: ["output", "recorded-tool"] }
     ok -> Ran()
     failed -> Ran()
   }
 
   effect scan() {
     kind "tool.scan"
-    labels { read:private }
+    labels { read:private, read:store, write:store }
+    targets { secrets: ["known-secrets"], store: ["output", "redacted"] }
     ok -> Clean()
     failed -> Flagged()
   }
 
   effect storeClean() {
     kind "tool.store"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["output", "archive"] }
     ok -> Logged()
     failed -> Fault()
   }
 
   effect storeRedacted() {
     kind "tool.store-redacted"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["output", "redacted", "archive"] }
     ok -> Logged()
     failed -> Fault()
   }
@@ -259,6 +272,7 @@ machine Context {
 
   terminal mode is Closed
 
+  action Wire(tr: Ref<Trial>)
   action Grew(by: 0..2)
   action StepFinished()
   action StepReset()
@@ -267,8 +281,14 @@ machine Context {
   action Begun()
   action Summarised(text: Content, conf: Conf, margin: Conf)
   action Compacted()
+  action SummaryFailed()
   action CompactFailed()
   action Ended()
+
+  on Wire(tr) {
+    require trial == none && !(tr == none) else reject "wired"
+    trial' = tr
+  }
 
   on Grew(by) {
     require mode is Working else reject "not-working"
@@ -322,21 +342,30 @@ machine Context {
     }
   }
 
+  // The pin of the transcript is advisory, and its completion races the summary decision's: it may arrive after the
+  // compaction ended. It is taken whenever it arrives, so a late completion is never a rejected one.
   on Begun {
-    require mode is Compacting && !begun else reject "not-compacting"
+    require !begun else reject "begun"
     begun' = true
   }
 
   on Summarised(text, conf, margin) {
     require mode is Compacting && !summarised else reject "not-compacting"
     summarised' = true
-    emit compact()
+    emit compact(summary: text)
   }
 
   // S561: a compaction shrinks the window, to the summary's size (two buckets here).
   on Compacted {
     require mode is Compacting && summarised else reject "not-compacting"
     ctx' = 2
+    mode' = Working
+  }
+
+  // K10: an action that completes a decision is delivered only by the worker with the decision's event, so the decision and
+  // the effects of the compaction do not share a failure action (found in E3.4: the runtime refused CompactFailed).
+  on SummaryFailed {
+    require mode is Compacting && !summarised else reject "not-compacting"
     mode' = Working
   }
 
@@ -356,26 +385,29 @@ machine Context {
     labels { egress:external, read:private }
     timeout 60s
     ok(r) -> Summarised(text: r.answer, conf: r.conf, margin: r.margin)
-    failed -> CompactFailed()
+    failed -> SummaryFailed()
   }
 
   effect startCompaction() {
     kind "tool.start-compaction"
-    labels { read:private }
+    labels { write:store }
+    targets { store: ["transcript"] }
     ok -> Begun()
-    failed -> CompactFailed()
+    failed -> Begun()
   }
 
-  effect compact() {
+  effect compact(summary: Content) {
     kind "tool.compact"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["transcript", "archive"] }
     ok -> Compacted()
     failed -> CompactFailed()
   }
 
   effect stopOverflow() {
     kind "trial.stop-overflow"
-    labels { read:private }
+    labels { write:store }
+    targets { store: ["trial"] }
     ok -> Ended()
     failed -> Ended()
   }
@@ -388,8 +420,9 @@ machine Context {
 machine Trial {
   state {
     mode     : TrialMode = Idle
-    step     : 0..2      = 0
-    failedAt : 0..3      = 3
+    step     : 0..3      = 0
+    last     : 1..3      = 1
+    failedAt : 0..4      = 4
     capped   : bool      = false
     saved    : bool      = false
     why      : Why       = None
@@ -398,7 +431,7 @@ machine Trial {
 
   terminal mode in { Done, Stopped }
 
-  action Begin()
+  action Begin(cx: Ref<Context>, n: 2..4)
   action Stored()
   action StagePassed()
   action StageFailed()
@@ -410,9 +443,12 @@ machine Trial {
   action OverflowEnd()
   action Close()
 
-  on Begin {
+  on Begin(cx, n) {
     require mode is Idle else reject "not-idle"
+    require !(cx == none) else reject "no-context"
     mode' = Running
+    context' = cx
+    last' = n - 1
   }
 
   on Stored {
@@ -429,7 +465,7 @@ machine Trial {
 
   on StageFailed {
     require mode is Checking else reject "not-checking"
-    if failedAt == 3 {
+    if failedAt == 4 {
       failedAt' = step
     }
     send context <- StepFinished()
@@ -437,7 +473,7 @@ machine Trial {
 
   on NextStep {
     require mode is Checking else reject "not-checking"
-    if step == 2 {
+    if step == last {
       mode' = Done
       why' = PlanDone
       emit finishTrial()
@@ -463,14 +499,16 @@ machine Trial {
     why' = Cap
   }
 
+  // A failure that reaches a trial not yet begun is kept (found by the joint check of Turn and Trial, E3.4): taken as a
+  // lost message it would leave the trial waiting for a turn that is already over.
   on BudgetStop {
-    require mode is Running else reject "not-running"
+    require mode is Running || mode is Idle else reject "not-running"
     mode' = Failing
     why' = Budget
   }
 
   on Faulted {
-    require mode is Running else reject "not-running"
+    require mode is Running || mode is Idle else reject "not-running"
     mode' = Failing
     why' = Fault
   }
@@ -493,35 +531,40 @@ machine Trial {
 
   effect stageCheck() {
     kind "tool.stage-check"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["recorded-stage"] }
     ok -> StagePassed()
     failed -> StageFailed()
   }
 
   effect saveWork() {
     kind "tool.save-work"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["work"] }
     ok -> Saved()
     failed -> Saved()
   }
 
   effect stopCap() {
     kind "trial.stop-cap"
-    labels { read:private }
+    labels { write:store }
+    targets { store: ["trial"] }
     ok -> Close()
     failed -> Close()
   }
 
   effect stopTrial() {
     kind "trial.stop"
-    labels { read:private }
+    labels { write:store }
+    targets { store: ["trial"] }
     ok -> Close()
     failed -> Close()
   }
 
   effect finishTrial() {
     kind "trial.finish"
-    labels { read:private }
+    labels { write:store }
+    targets { store: ["trial"] }
     ok -> Close()
     failed -> Close()
   }
@@ -562,10 +605,16 @@ service machine Observation {
     arch : Ref<Archive> = none
   }
 
+  action Wire(a: Ref<Archive>)
   action Put()
   action Stored()
   action Sent()
   action Release()
+
+  on Wire(a) {
+    require arch == none && !(a == none) else reject "wired"
+    arch' = a
+  }
 
   on Put { require st is Empty else reject "not-empty"  st' = Pending  send arch <- Store(from: self) }  // @HF3.3
 
@@ -597,7 +646,13 @@ service machine Ledger {
     obs      : Ref<Observation> = none
   }
 
+  action Wire(o: Ref<Observation>)
   action Tick()
+
+  on Wire(o) {
+    require obs == none && !(o == none) else reject "wired"
+    obs' = o
+  }
 
   on Tick {
     require requests < 3 else reject "cap"
@@ -684,21 +739,24 @@ service machine Receipt {
 
   effect verify(receipt: Content) {
     kind "tool.verify"
-    labels { read:private }
+    labels { read:store }
+    targets { store: ["archive"] }
     ok -> Verified()
     failed -> Refused()
   }
 
   effect showReceipt() {
     kind "tool.show-receipt"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["archive", "shown"] }
     ok -> Presented()
     failed -> Presented()
   }
 
   effect showOriginal() {
     kind "tool.show-original"
-    labels { read:private }
+    labels { read:store, write:store }
+    targets { store: ["archive", "shown"] }
     ok -> Presented()
     failed -> Presented()
   }

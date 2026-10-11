@@ -53,12 +53,12 @@ export function verifyReceipt({ receiptText, log, exitStatus }) {
 
 /**
  * The effect handler of tool.verify. The receipt is the effect's Content payload; the log and the command's exit status
- * come from the turn's archive, through the store capability the effect's label grants. A rejection is a permanent
+ * come from the receipt's row of the archive table, through the store capability the effect's label and target grant (read:store, table archive). A rejection is a permanent
  * failure, which the runtime completes as the effect's failed outcome without a retry (the runtime test is E3.4's).
  */
 export async function verify(payload, caps, ctx) {
   const receiptText = await caps.content.read(payload.receipt);
-  const kept = await caps.store.read(`archive/${ctx.instanceId}`);
+  const kept = await caps.store.read('archive', ctx.instanceId);
   const v = verifyReceipt({ receiptText, log: Buffer.from(kept.log, 'base64'), exitStatus: kept.exitStatus });
   if (!v.ok) throw Object.assign(new Error(`receipt refused: ${v.reasons.join(', ')}`), { permanent: true });
   return { ok: true };

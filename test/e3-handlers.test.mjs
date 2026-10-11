@@ -120,7 +120,7 @@ for (const [tag, what, rewrite] of MUTANTS) {
 test('HAC4: a receipt whose quote is not in the original log is rejected by the handler, as a permanent failure, with no retry', async () => {
   const caps = {
     content: { read: async (h) => h },
-    store: { read: async () => ({ log: Buffer.from(LOG).toString('base64'), exitStatus: 1 }) },
+    store: { read: async (table, key) => { assert.deepEqual([table, key], ['archive', 'receipt:t:1']); return { log: Buffer.from(LOG).toString('base64'), exitStatus: 1 }; } },
   };
   await verify({ receipt: receiptOf() }, caps, { instanceId: 'receipt:t:1' });
   await assert.rejects(verify({ receipt: receiptOf({ quotes: ['invented'] }) }, caps, { instanceId: 'receipt:t:1' }), (e) => e.permanent === true && /quote-not-in-log/.test(e.message));
@@ -190,8 +190,11 @@ test('S554: the scan handler writes the redacted copy only, and a flagged output
   const token = CANARY();
   const written = {};
   const caps = {
-    store: { read: async () => ({ text: `ran ok\nTOKEN ${token} leaked\n` }), write: async (k, v) => { written[k] = v; } },
-    secrets: { known: async () => [token] },
+    store: {
+      read: async (table, key) => { assert.deepEqual([table, key], ['output', 'turn:t:1']); return { text: `ran ok\nTOKEN ${token} leaked\n` }; },
+      write: async (table, key, v) => { written[`${table}/${key}`] = v; },
+    },
+    secrets: { get: async (name) => { assert.equal(name, 'known-secrets'); return JSON.stringify([token]); } },
   };
   await assert.rejects(scan({}, caps, { instanceId: 'turn:t:1' }), (e) => e.permanent === true && /known-secret/.test(e.message));
   assert.deepEqual(Object.keys(written), ['redacted/turn:t:1']);
@@ -260,9 +263,11 @@ test('S559: an edit then a declared runner is fusable; every other shape stays s
 });
 
 test('S559: the classify handler completes ok for a fusable call and as a permanent failure for the rest', async () => {
-  const caps = (text) => ({ content: { read: async () => text } });
-  await classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'npm test' }])));
-  await assert.rejects(classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'cat x' }]))), (e) => e.permanent === true);
+  const kept = [];
+  const caps = (text) => ({ content: { read: async () => text }, store: { write: async (t, k, v) => { kept.push([t, k, v]); } } });
+  await classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'npm test' }])), { instanceId: 'turn:t:1' });
+  await assert.rejects(classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'cat x' }])), { instanceId: 'turn:t:2' }), (e) => e.permanent === true);
+  assert.deepEqual(kept.map(([t, k]) => [t, k]), [['calls', 'turn:t:1'], ['calls', 'turn:t:2']], 'the calls are kept for the act effect either way');
 });
 
 // ---------------------------------------------------------------- the archive and the compaction (HF3.3, S561)
@@ -337,7 +342,7 @@ test('PT6.5: the handler files pass `poly lint handlers`, which refuses ambient 
     mkdirSync(join(dir, 'src', 'handlers'), { recursive: true });
     cpSync(H, join(dir, 'src', 'handlers'), { recursive: true });
     cpSync(join(ROOT, 'examples', 'hello', 'hello.poly'), join(dir, 'src', 'hello.poly'));
-    const names = ['verify', 'scan', 'classify', 'archive', 'compact', 'intake'].map((n) => `src/handlers/${n}.mjs`);
+    const names = ['verify', 'scan', 'classify', 'tools', 'archive', 'compact', 'intake'].map((n) => `src/handlers/${n}.mjs`);
     writeFileSync(join(dir, 'poly.json'), JSON.stringify({ poly: '1', name: 'harness-handlers', modules: ['src/*.poly'], handlers: names }));
     const r = await commandNamed('lint').run({ project: dir });
     assert.equal(r.result.verdict, 'CLEAN', JSON.stringify(r.result.diagnostics));

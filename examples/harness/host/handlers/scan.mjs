@@ -59,15 +59,16 @@ export function redact(text, matches) {
 }
 
 /**
- * The effect handler of tool.scan. The tool output of the turn is read through the store capability; a flagged output
+ * The effect handler of tool.scan. The tool output of the turn is read from the output table and the vault's known secrets from the secret known-secrets (read:store, write:store, read:private; the effect declares both targets); a flagged output
  * is a permanent failure, which completes as the effect's failed outcome (Flagged), and the redacted copy is written for
  * the store step. The unredacted output is never written anywhere by this handler.
  */
 export async function scan(_payload, caps, ctx) {
-  const out = await caps.store.read(`output/${ctx.instanceId}`);
-  const secrets = await caps.secrets.known();
+  const out = await caps.store.read('output', ctx.instanceId);
+  const given = await caps.secrets.get('known-secrets');
+  const secrets = typeof given === 'string' ? JSON.parse(given) : given;
   const r = scanText(out.text, secrets);
   if (r.clean) return { ok: true };
-  await caps.store.write(`redacted/${ctx.instanceId}`, { text: redact(out.text, r.matches), kinds: [...new Set(r.matches.map((m) => m.kind))] });
+  await caps.store.write('redacted', ctx.instanceId, { text: redact(out.text, r.matches), kinds: [...new Set(r.matches.map((m) => m.kind))] });
   throw Object.assign(new Error(`the output holds ${r.matches.length} credential span(s): ${[...new Set(r.matches.map((m) => m.kind))].join(', ')}`), { permanent: true });
 }

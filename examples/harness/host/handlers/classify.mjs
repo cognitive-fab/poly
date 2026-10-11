@@ -39,9 +39,11 @@ export function classifyCalls(callsText) {
   return { fusable: true, reason: 'an edit then a declared runner' };
 }
 
-/** The effect handler of tool.classify: ok is Fusable, a permanent failure is Separate. */
-export async function classify(payload, caps) {
+/** The effect handler of tool.classify: ok is Fusable, a permanent failure is Separate. The calls are kept either way. */
+export async function classify(payload, caps, ctx) {
   const calls = await caps.content.read(payload.calls);
+  // the calls are kept for the act effect of the same turn, which reads them by instance (write:store, table calls)
+  await caps.store.write('calls', ctx.instanceId, calls);
   const r = classifyCalls(calls);
   if (!r.fusable) throw Object.assign(new Error(`separate: ${r.reason}`), { permanent: true });
   return { ok: true };

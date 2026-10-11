@@ -5,64 +5,102 @@
     {
       "id": "stop-reason",
       "assumption": "The stop reason in Metered(s) is the provider's, for the call whose answer is Stepped (S550).",
-      "actions": ["Metered"],
+      "actions": [
+        "Metered"
+      ],
       "status": "open",
       "evidence": "host test on recorded provider metadata (E3.4)"
     },
     {
       "id": "token-buckets",
       "assumption": "Grew(by), Measured(saving, rewrite) and the limit are the host's token counts, bucketed by the stated unit (a bucket is a sixth of the window, S551).",
-      "actions": ["Grew", "Measured", "Overflowed"],
+      "actions": [
+        "Grew",
+        "Measured",
+        "Overflowed"
+      ],
       "status": "open",
       "evidence": "bucketing function tested at its boundaries (E3.4); the count itself is the provider's usage figure"
     },
     {
       "id": "classifier-verdict",
       "assumption": "tool.classify completes ok only for a call whose edit and follow-up may run as one, and failed otherwise (S559). The machine proves fusion follows the verdict, not that the verdict is right.",
-      "effects": ["tool.classify"],
+      "effects": [
+        "tool.classify"
+      ],
       "status": "open",
       "evidence": "table-driven tests of the classifier over the declared set of fusable commands (E3.3)"
     },
     {
       "id": "scan-verdict",
       "assumption": "tool.scan completes ok only for a log with no credential in it, and failed for any log a pattern or a known secret matches (S554). A credential the scan cannot recognise is not caught.",
-      "effects": ["tool.scan"],
+      "effects": [
+        "tool.scan"
+      ],
       "status": "open",
-      "evidence": "canary tests over the context, the archive, the receipt and the journal, with a seeded control (E3.3)"
+      "evidence": "the AC18 canary scan over the real runtime store (every table, the outbox payloads, the content store, the project and its build), with a token in four encodings in a tool output, finds nothing; its seeded control, a scan that does not know the secret, is found (E3.4, test/e3-loop.test.mjs). Open still: a credential of no common shape that the vault does not know is not recognised, and the owner may rule the entry discharged"
     },
     {
       "id": "verifier-verdict",
       "assumption": "tool.verify completes ok only for a receipt whose source hash matches the archived log, whose every quote occurs in the log byte for byte, whose exit status matches the command's, and which is smaller than the log (HT3, S553).",
-      "effects": ["tool.verify"],
+      "effects": [
+        "tool.verify"
+      ],
       "status": "open",
-      "evidence": "property tests and four seeded mutant verifiers, each caught (E3.3)"
+      "evidence": "property tests and four seeded mutant verifiers, each caught (E3.3); under poly-runtime a permanent error from the handler completes as the effect's failed outcome (Refused) with no retry, the handler running once (E3.4 gate 1, test/e3-runtime.test.mjs)"
     },
     {
       "id": "stage-check-verdict",
       "assumption": "tool.stage-check completes ok only when the task's check for that stage passes (HF2.7).",
-      "effects": ["tool.stage-check"],
+      "effects": [
+        "tool.stage-check"
+      ],
       "status": "open",
       "evidence": "the tasks' own stage checks, run on the scratch copies (E3.7)"
     },
     {
       "id": "compaction-size",
       "assumption": "A compaction that completes ok leaves the window at the summary's size, two buckets (S561). The machine sets the window to two buckets on Compacted; the host's real size is read at the next Grew.",
-      "effects": ["tool.compact"],
+      "effects": [
+        "tool.compact"
+      ],
       "status": "open",
       "evidence": "host test that a compacted transcript is smaller than the original (E3.4)"
     },
     {
       "id": "dispatch-order",
-      "assumption": "The host dispatches Go, StoreLog, Measured, Overflowed, CapReached, Close and Show after it has seen the facts each needs. A require rejects an action out of turn; a host that never dispatches one leaves the run stuck, which is a stuck run and not a broken rule.",
-      "actions": ["Go", "StoreLog", "CapReached", "Close", "Show"],
+      "assumption": "The host dispatches Begin before any Start, and Go, StoreLog, Measured, Overflowed, CapReached, Close and Show after it has seen the facts each needs. A require rejects an action out of turn; a host that never dispatches one leaves the run stuck, which is a stuck run and not a broken rule. A failure that reaches a trial not yet begun is kept (the joint check of Turn and Trial found it lost). The host also tells each live observation Sent once per request, and reads nothing back (PS13.8a conditions 2 and 3); in E3.4 no observation is wired yet (E3.5).",
+      "actions": [
+        "Go",
+        "StoreLog",
+        "CapReached",
+        "Close",
+        "Show"
+      ],
       "status": "open",
       "evidence": "the loop's tests on recorded tasks (E3.4); liveness of the loop is not claimed"
+    },
+    {
+      "id": "recorded-world",
+      "assumption": "In E3.4 the tool outputs and the stage results come from the task's recording (tables recorded-tool and recorded-stage), and the provider answers from it. Nothing a real tool or a real model does is checked by a recorded run; E3.7 replaces act and stageCheck with real execution in a scratch copy, and the live run (E3.9) uses a real model.",
+      "effects": [
+        "tool.act",
+        "tool.fetch"
+      ],
+      "status": "open",
+      "evidence": "recorded runs only (E3.4); real execution in E3.7"
+    },
+    {
+      "id": "staging-rows",
+      "assumption": "The raw tool output is staged in the output table until it is scanned, and the staging row is cleared once the clean copy or the redaction is stored. The recording (recorded-tool) holds the world's own raw output and is the one place the canary scan does not look; a live run has no such table.",
+      "status": "open",
+      "evidence": "test/e3-loop.test.mjs: the staging row reads cleared after the store step; the canary scan excludes only recorded-tool"
     },
     {
       "id": "joint-configuration",
       "assumption": "The rules hold for each of Turn, Context, Trial and Receipt alone. The machines coordinate by messages (Turn to Trial, Trial to Context, Context to Trial), and the three are not yet checked as one configuration (owner, 2026-10-11).",
       "status": "open",
-      "evidence": "E3.4 gate item: the joint configuration of Turn, Context and Trial must be checked CLEAN, or its bound reported, before this entry may read discharged"
+      "evidence": "E3.4 gate item, attempted (decisions-e3.md). Trial with Context, transit 2: INCONCLUSIVE (PL5301 transit bound hit; 90,024 global states, 4.5M steps), and transit 3 ran the checker out of memory at 3.5 GB; Turn with Trial, transit 2 and 3: PL5301, and a STUCK that is the undriven Context of the probe; the first run of each found two real faults, both fixed (a Ref passed as none, a failure lost before Begin). The entry stays open: no pair has a CLEAN verdict at a bound that is not hit"
     },
     {
       "id": "one-slot-projection",
