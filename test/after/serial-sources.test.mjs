@@ -15,10 +15,12 @@ const FILES = SERIAL.flatMap((d) => (existsSync(join(ROOT, d)) ? exampleFiles(jo
 const OUT = join(ROOT, '.poly', 'test-build', 'standing-serial');
 
 test('the serial group holds only the paths it names', () => {
-  assert.deepEqual(SERIAL, ['examples/concierge/']);
+  assert.deepEqual(SERIAL, ['examples/concierge/', 'examples/inbox/']);
   assert.ok(FILES.every(serial));
   assert.ok(!serial(join(ROOT, 'examples', 'hello', 'hello.poly')));
   assert.ok(!serial(join(ROOT, 'examples', 'concierge-old', 'x.poly')));
+  assert.ok(serial(join(ROOT, 'examples', 'inbox', 'inbox.poly')));
+  assert.ok(!serial(join(ROOT, 'examples', 'inbox-old', 'x.poly')));
 });
 
 for (const file of FILES) {
