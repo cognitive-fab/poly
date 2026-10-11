@@ -40,3 +40,19 @@ Set-up: `npm ci` and `tsc -b` in `poly-e3`; no `node --test` ran on the machine 
 - **S561, new.** A compaction must shrink the context and may fail; failure ends the trial with the overflow reason after one attempt. Both are properties of the harness module (HF3.8), not core changes.
 
 No count reached the checker's bound in the design chosen, and no probe failed without a fallback, so E3.1 starts. Next: E3.1, the failing tests of HAC1.
+
+## S552, the projection: ruled with conditions, written and evidenced (owner, 2026-10-11)
+
+Ruled: the projection is accepted if the PS13 paragraph carries three conditions (per-slot properties; identical messages from the session; nothing the session does depends on how many slots exist or which answered), says that where the session waits for or aggregates slots the projection does not apply and K stays a bound, and is backed by a seeded per-slot violation agreeing at K = 1, 2 and 3 with the clean module clean at all three.
+
+Written as **PS13.8a** in `docs/04-semantics.md`, after PS13.8 (spec text only; no code or checker change; the checker does not apply the projection, the author writes the one-slot configuration).
+
+Evidence (`experiments/e3-probes/p2/gen.mjs`; the machines are service machines, the transit bound is K·R + 2K, R = 3; this replaces the E3.0 figures, which had `PL5402 STUCK` and `PL5301` findings of the probe's own making):
+
+| K | clean module | seeded module (a slot is handled after 2 sends, not 3) |
+|---|---|---|
+| 1 | CLEAN, 52 global states | FINDINGS: `PL5401 twice-then-handle-1`, 7-step witness |
+| 2 | CLEAN, 898 | FINDINGS: `PL5401` on slots 1 and 2, slot 1's witness the same 7 steps |
+| 3 | CLEAN, 17,992 | FINDINGS: `PL5401` on slots 1, 2 and 3, slot 1's witness the same 7 steps |
+
+The 7 steps are `Req@s`, `Req@s`, `Put@o1`, `Store(o1) -> a1`, `Stored() -> o1`, `Sent() -> o1`, `Sent() -> o1`. The other slots' witnesses have the same shape on their own slot. A condition of the harness, to be stated in its README: the real `Session` sends each observation the same `Sent` per request and reads nothing from the slots, so (1) to (3) hold for the handle and twice-sent properties; the budget and the context size are properties of `Session` alone and are not projected.

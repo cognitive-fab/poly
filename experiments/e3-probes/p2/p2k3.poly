@@ -3,9 +3,8 @@ module p2k3
 type ObsState = Empty | Pending | Full | Handled | Released
 type ArchState = Free | Held | Gone
 
-machine Archive {
+service machine Archive {
   state { st : ArchState = Free  refs : 0..2 = 0 }
-  terminal st is Gone
   action Store(from: Ref<Observation>)
   action Drop()
   on Store(from) {
@@ -21,9 +20,8 @@ machine Archive {
   }
 }
 
-machine Observation {
+service machine Observation {
   state { st : ObsState = Empty  sent : 0..3 = 0  arch : Ref<Archive> = none }
-  terminal st is Released
   action Put()
   action Stored()
   action Sent()
@@ -38,9 +36,8 @@ machine Observation {
   on Release { require st is Handled else reject "not-handled"  st' = Released  send arch <- Drop() }
 }
 
-machine Session {
+service machine Session {
   state { requests : 0..3 = 0 o1 : Ref<Observation> = none  o2 : Ref<Observation> = none  o3 : Ref<Observation> = none }
-  terminal requests in { 3 }
   action Req()
   on Req {
     require requests < 3 else reject "cap"
@@ -60,7 +57,7 @@ configuration pack {
   o3 : Observation { arch: a3 }
   s : Session { o1: o1, o2: o2, o3: o3 }
   inputs { s.Req, o1.Put, o2.Put, o3.Put, o1.Release, o2.Release, o3.Release }
-  bounds { transit 11 }
+  bounds { transit 15 }
   invariant handled-resolves-1: o1 is Handled implies a1 is Held
   invariant twice-then-handle-1: (o1 is Handled implies o1.sent == 3) && (o1 is Full implies o1.sent <= 2)
   invariant handled-resolves-2: o2 is Handled implies a2 is Held

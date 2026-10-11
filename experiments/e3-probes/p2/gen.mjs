@@ -1,14 +1,16 @@
+// S552 evidence: K observation slots, one session. Usage: node gen.mjs K [R] [bug]
+// `bug` seeds one per-slot violation: a slot is handled after two sends, not three.
 import { writeFileSync } from 'node:fs';
-const K = Number(process.argv[2]), R = Number(process.argv[3] ?? 3);
+const K = Number(process.argv[2]), R = Number(process.argv[3] ?? 3), bug = process.argv[4] === 'bug';
 const idx = [...Array(K).keys()].map(i => i + 1);
-let s = `module p2k${K}
+const name = `p2k${K}${bug ? 'bug' : ''}`;
+const s = `module ${name}
 
 type ObsState = Empty | Pending | Full | Handled | Released
 type ArchState = Free | Held | Gone
 
-machine Archive {
+service machine Archive {
   state { st : ArchState = Free  refs : 0..2 = 0 }
-  terminal st is Gone
   action Store(from: Ref<Observation>)
   action Drop()
   on Store(from) {
@@ -24,9 +26,8 @@ machine Archive {
   }
 }
 
-machine Observation {
+service machine Observation {
   state { st : ObsState = Empty  sent : 0..3 = 0  arch : Ref<Archive> = none }
-  terminal st is Released
   action Put()
   action Stored()
   action Sent()
@@ -36,14 +37,13 @@ machine Observation {
   on Sent {
     require st is Full else reject "not-full"
     sent' = sent + 1
-    if sent + 1 >= 3 { st' = Handled }
+    if sent + 1 >= ${bug ? 2 : 3} { st' = Handled }
   }
   on Release { require st is Handled else reject "not-handled"  st' = Released  send arch <- Drop() }
 }
 
-machine Session {
+service machine Session {
   state { requests : 0..${R} = 0 ${idx.map(i => `o${i} : Ref<Observation> = none`).join('  ')} }
-  terminal requests in { ${R} }
   action Req()
   on Req {
     require requests < ${R} else reject "cap"
@@ -57,9 +57,9 @@ configuration pack {
   ${idx.map(i => `o${i} : Observation { arch: a${i} }`).join('\n  ')}
   s : Session { ${idx.map(i => `o${i}: o${i}`).join(', ')} }
   inputs { s.Req, ${idx.map(i => `o${i}.Put`).join(', ')}, ${idx.map(i => `o${i}.Release`).join(', ')} }
-  bounds { transit ${K * R + 2} }
+  bounds { transit ${K * R + 2 * K} }
 ${idx.map(i => `  invariant handled-resolves-${i}: o${i} is Handled implies a${i} is Held
   invariant twice-then-handle-${i}: (o${i} is Handled implies o${i}.sent == 3) && (o${i} is Full implies o${i}.sent <= 2)`).join('\n')}
 }
 `;
-writeFileSync(new URL(`./p2k${K}.poly`, import.meta.url), s);
+writeFileSync(new URL(`./${name}.poly`, import.meta.url), s);
