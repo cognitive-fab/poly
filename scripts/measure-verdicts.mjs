@@ -58,7 +58,7 @@ async function worker() {
     mkdirSync(root, { recursive: true });
     const text = await new Promise((res) => {
       let s = '';
-      const c = spawn(process.execPath, [fileURLToPath(import.meta.url), '--one', f, root], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] });
+      const c = spawn(process.execPath, ['--max-old-space-size=8192', fileURLToPath(import.meta.url), '--one', f, root], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] });
       c.stdout.on('data', (b) => { s += b; });
       c.on('exit', () => res(s));
     });
