@@ -3411,7 +3411,8 @@ const CLASSES = new Set(['none', 'reversible', 'compensable', 'irreversible']);
 
 /** PS17.0: the kinds of source, and the source adapters poly-io makes (PS17.0, S308). */
 export const SOURCE_KINDS = new Set(['records', 'documents', 'memory']);
-export const SOURCE_ADAPTERS = new Set(['postgres', 'opensearch']);
+// S452 (decisions-ex.md): gmail, the inbox assistant's source, added on the examples branch.
+export const SOURCE_ADAPTERS = new Set(['postgres', 'opensearch', 'gmail']);
 
 /**
  * S41: an effect with no `kind` has its name as its kind; PS17.2, PS17.5: a retrieval's and a remember's are the

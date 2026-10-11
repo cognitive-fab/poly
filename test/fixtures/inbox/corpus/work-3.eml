@@ -1,0 +1,16 @@
+From: The Weekly Digest <news@digest.example.net>
+To: owner@work.example.com
+Subject: This week in logistics
+Date: Tue, 06 Oct 2026 07:00:00 +0000
+Message-ID: <digest-2026-41@digest.example.net>
+List-Unsubscribe: <https://digest.example.net/u/41>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<html><head><style>p { color: #333; }</style></head><body>
+<h1>This week in logistics</h1>
+<p>Three stories &amp; one chart.</p>
+<p>Read more on <a href="https://digest.example.net/41">our site</a>.</p>
+<script>track()</script>
+</body></html>
