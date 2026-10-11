@@ -419,6 +419,26 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 
 **The serial group and the runtime type check after the change.** `test/after/*.test.mjs`: 12 tests, 11 passed. The concierge has no toolchain fault (87 s), its translation validation agrees (56 s), and AC27 passes again (121 s). The one failure is the known harness finding: the policy file checked alone is `REFUSED` (`PL1001`), which no expected line can state. `test/runtime-type.test.mjs` passes 6 of 6, with the `Items` and `Principal` of the refund among the actions it reads.
 
+## The merge held, and why a require that rejects a completion checks CLEAN (owner's reviewer, 2026-10-10)
+
+**Ruled.** The merge is held. The release session is fixing per-field confidence; when it lands, this branch rebases, switches the `amount` decision back to PT28.3a's record `{ value: 0..500 }`, and reruns the project check and AC27. **Accepted:**
+- `if cites.count == 1` in place of `require`, with the Unsure reply on two orders.
+- The owner refusal shown at the handler only, since the retrieval by owner stops it earlier.
+- The amount refusal recorded as **no refund is sent**; one read of the charge is expected.
+
+**The question.** The `require` version checked CLEAN, yet at run time a rejected completion leaves the Desk in `Extracting` with no reply. Would a liveness property, "every message the Desk takes is worked through to its end", have found it? The property is `phase != Idle leads to phase == Idle under fair { Classified | Unclassified, Found | LookupFailed, Amounted | Unextracted, Refunded | RefundFailed, Answered | Cited | AnswerFailed }`. Nothing heavy was running.
+
+**The answer: the checker still says CLEAN.**
+- **On a copy of the real concierge with the `require` version and the property,** the project check with the policy is CLEAN in 91 s (2,358 MB). Desk has 2,114 states, and the staff configuration 3,620.
+- **The support configuration has 32,547 global states,** against 29,379 for the `if` version. Consistent with that, the configuration reaches states the `if` version does not, and reports none of them.
+- **The property is not vacuous.** Without `Amounted | Unextracted` in the fair set, the same copy fails `PL3301` on Desk with a lasso. The cut-down refund path gives the same results, and `test/ex-concierge-liveness.test.mjs` keeps both (2 passing).
+
+**Why.** The two models of a rejected completion are not the same:
+- **The machine check offers a decision's completions as free inputs** (PS4.4), so the failed completion `Unextracted` is always still there. Under weak fairness of the group `Amounted | Unextracted` the adversary must take one, and does. At run time a decision gives one completion and its intent is consumed, so after a rejected `Amounted` nothing is left to take. That is the difference between the checker's model of a rejected completion and the runtime's.
+- **The generated configuration matches the runtime.** PS15.5 (S456) says a completion, whatever its verdict, takes its pending intent off. But that configuration evaluates no liveness property of the application, and it has no finding for a rejected completion as it has for a rejected receipt (`PL5406`). So the stuck state is reachable there and nothing reports it.
+
+**So it is a defect for the release session,** not a missing property in the concierge, and the property is not added to the real concierge: it would pass with the stuck Desk, and so say nothing. **Proposal:** a finding for a rejected completion of the application's own decision or effect in its generated configuration, as `PL5406` is for a receipt, since the intent is consumed and no other completion will come. A handler that can reject a completion's data, as `require cites.count == 1` can, is then a finding, and the `if` guard is the fix.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy. The inbox meets IAC1 to IAC9 on recorded traffic, IAC5 in full once the release session's citation fix lands.
