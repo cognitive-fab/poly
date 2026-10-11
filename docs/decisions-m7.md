@@ -74,3 +74,11 @@ No test that asserts only a refusal counted as a fail-first: the refusal tests a
 6. The full suite before M7.2 starts, with JJ's confirmation that E3 runs no heavy job at the same time: **open**, asked of JJ.
 
 **Repository.** `schemas/grant-revoke.input.json` was stale on main (the registry had gained `credential` and `db`), so `PF9.2` failed there. It is regenerated with `scripts/publish-schemas.mjs` as its own commit. `certifiedProgram` was lifted out of `replayRuntime` so the export and replay read the same modules.
+
+### Full suite before M7.2 (45888243)
+
+`scripts/suite-summary.mjs --run m71`, alone on the machine (JJ confirmed E3 idle): run 1, 2543 tests, 2537 passed, 0 failed, 2 skipped, 4 waiting; run 2 (the after group), 16 tests, 16 passed; check-memory passed. Log: `.poly/logs/45888243-2026-10-11T20-18-08-561Z-m71.log`.
+
+### M7.2 · the S508 check (read-only, before anything is built)
+
+polyx's `synthetic` adapter (`@cognitive-fab/polyx-lens` 0.3.0, `src/ingest/synthetic.ts`) reads `{corpus, interactions:[{id, operator, team, agent, startedAt, outcome, turns:[{speaker, intent|button|event, slots, result}]}]}`. A turn with `speaker: system` and an `event` is a state event: the alphabet (`alphabet.synthetic-state.yaml`) gives its type `identity` and `state` slots, and `no-X-unless-state` reads the latest state event whose identity slot equals X's. The adapter carries `result` (`ok | failed | refused`) and an `outcome`. It reads slots as scalars. So it can carry what a poly trace has: **S508 passes, nothing is stopped, and the lens is not changed.** Limits found, to be written into the port text: slots are scalars only (a value or a token is one; a union with a payload is not, so the port flattens it as the journal does); one interaction is one episode (`expected_episodes: 1`), which is S506's "an interaction is a run"; `consequence` is declared per type in the alphabet, not per event, so the port gives each action one consequence from the effects it emits (or `unknown`).
