@@ -26,11 +26,17 @@ Every `.poly` file here begins with its expected verdict (V10 item 4, ruled 2026
 - `evidence/`: the outbox intent in its forms, checked against the review's evidence scripts.
 - `field-studies/`: hatchet, raft and the turnstile of the polygraph field studies, each with its negative control.
 - `oms/` and `orders/`: the order management machines.
+- `concierge/`: a small business's customer assistant on WhatsApp and Slack, with refunds through a Stripe grant that a person approves above 100; checked `CLEAN` with its policy and run end to end on recorded traffic (`concierge/README.md`).
+- `inbox/`: the owner's daily Gmail assistant, which triages mail, keeps one to-do per thread and prepares drafts the owner approves; checked `CLEAN` with its policy, with steps to run it on your own mailboxes (`inbox/README.md`).
 
 ## Glossary
 
 - **Expected-verdict line:** the first line of an example, stating the verdict its check must give.
 - **Project (of an example):** a program and the policy beside it, checked together.
 - **Teaching variant:** an example with a defect put in on purpose, whose expected verdict is a finding.
+- **Recorded traffic:** the answers of a provider (a channel, a mail service, a payment service, a model) written down in advance, so that a test runs the whole program with nothing leaving the machine. The mail and the customers in it are made up.
+- **Serial group:** the checks that run apart from the rest of the suite, one at a time, because each takes minutes and a large heap; the concierge's are in it.
+- **Dry run:** the host started on recorded traffic, through the same steps as a live run, with no key of yours.
+- **Read-only run:** the inbox host started without `--drafts`, so that no draft can be proposed.
 - **Field study:** a machine taken from a real project's corpus, written in poly and checked against it.
 - **Negative control:** a field study with one line changed, as the corpus's broken reference is; its expected line says what the check gives it.

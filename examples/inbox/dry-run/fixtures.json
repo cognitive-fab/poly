@@ -1,0 +1,9 @@
+{
+  "about": "The dry run's world (README.md, Run it yourself, step 9): each account's recorded Gmail exchanges, and the recorded model's answers. Synthetic mail and recorded traffic only; nothing here is a real account, and nothing leaves the machine.",
+  "gmail": {
+    "work": "../../../test/fixtures/traffic/gmail/work.json",
+    "home": "../../../test/fixtures/traffic/gmail/home.json"
+  },
+  "passes": ["initial"],
+  "answers": "answers.json"
+}

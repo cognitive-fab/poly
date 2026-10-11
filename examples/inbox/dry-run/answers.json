@@ -1,0 +1,14 @@
+{
+  "about": "The recorded model's answers for the synthetic corpus (test/fixtures/inbox): the triage and the kind of each message by its item id. No model was called.",
+  "triage": {
+    "work/19a2f0c4d1e70a01": ["ActNowReply", "Invoice"],
+    "work/19a2f0c4d1e70a02": ["WeekReply", "Invoice"],
+    "work/19a2f0c4d1e70a03": ["Ignore", "Newsletter"],
+    "work/19a2f0c4d1e70a04": ["Fyi", "Other"],
+    "home/19a2f1aa00b30b01": ["WeekReply", "Personal"],
+    "home/19a2f1aa00b30b02": ["Fyi", "Notification"]
+  },
+  "summary": "Reply about the invoice ({n} message(s))",
+  "when": "ThisWeek",
+  "write": "Hello, thank you for the invoice. It is approved and will be paid this week."
+}
