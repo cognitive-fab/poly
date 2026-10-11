@@ -143,7 +143,7 @@ The anchor fixes the first keyrings outside the project, and is named in your pe
 Until the calibration maps are refitted on your own mail, the model's confidence is uncalibrated: a vote share is only a vote share. Two things you can do, and the first is already done for you:
 
 - The thresholds are conservative (above), so an uncertain decision escalates to you.
-- A map is fitted on adjudicated outcomes (PD2.4) by `poly journal fit --db <PROJECT>/.poly/run/store.sqlite --decision triage --model <small model id>`, and is put in `src/maps/` with its `fittedFor` and admitted again. This host does not collect adjudications yet, so until you have a way to record them, treat the confidence as uncalibrated and leave the thresholds where they are. The example's own maps, in this repository, are the tests' and are fitted for no real model.
+- A map is fitted on adjudicated outcomes (PD2.4) by `poly journal fit --db <PROJECT>/.poly/run/store.sqlite --decision triage --model <small model id>`, and is put in `src/maps/` with its `fittedFor` and admitted again. This host does not collect adjudications yet, so until you have a way to record them, treat the confidence as uncalibrated and leave the thresholds where they are. The example's own maps, in this repository, are the tests' and are fitted for no real model; they have a point at every low raw value, so that no band above 0 is sent to 0 (`poly check` warns of one wider than 100 thousandths).
 
 ### 6. Link each account
 
