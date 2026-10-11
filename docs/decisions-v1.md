@@ -465,3 +465,24 @@ Measured on `v1` at 8a1488fb, one at a time, with no suite or test run beside th
 | With the second principal | 4 | 48,470 | 4,507,710 | 594,820 | 55,318,260 | 0.55 GiB (396 s) |
 
 The flow rule's states grow 31.7 times. The state space is small, so the 12 GB limit is the edges a full check keeps (55 million steps), not the states; I did not measure which stage ran out. The stated limit stands, and the remedy is on the After v1 list.
+
+## Per-field confidence at run time (owner's reviewer, 2026-10-10), built
+
+**Defect.** Found by the concierge's first AC27 run. PD1.2b and PT28.3a give `r.conf.f` for each field of a record result, and the checker requires it, but the runtime computed one scalar `conf`. A program that follows PT28.3a completed with `conf` undefined, the step was refused, and every record decision took the failed path. **Ruled:** the runtime gives a conf for each field as the text says.
+
+**Text** 958ce6d2 (PT10k). The text did not say how the runtime derives the numbers, so it now does: for a record result, a field's probability for a value is the sum of the provider's probabilities of the answers that hold it, `conf.f` is its calibrated probability for the value returned, and `margin.f` is that minus the calibrated highest probability of any other value, floored at 0. This is the marginal of the provider's joint distribution; a provider that gave a distribution for each field would need new text. A result that is not a record keeps one `conf` and one `margin`. **Tests** 3f579829, `test/decision-field-conf.test.mjs` with the fixtures in `test/fixtures/field-conf/`, written from the text by a writer that read docs, test and std only. Its harness was wrong in two places and the release session corrected it: its provider returned `conf` and `margin` itself, which tests the provider, and its machine was terminal in `Classifying`. The cases, with the joint distribution `{A,2}` 0.5, `{A,3}` 0.3, `{B,2}` 0.2: the answer `{A,2}` gives `conf.branch` 800, `margin.branch` 600, `conf.value` 700, `margin.value` 400; the answer `{B,3}` gives 200, 0, 300 and 0; the answer `{A,4}` (a value the distribution does not list) gives `conf.value` 0; the decision event holds the same as records; a scalar result is the control, `conf` 930 and `margin` 890. **Built** c01b347c: the manifest names a record result's fields, and `decisionHandler` gives `conf` and `margin` as records for them.
+
+**Fail-first, shown.** Against the runtime before the fix the three record cases fail with the step refused and the failed path taken (`phase` is `Failed`, the decision's intent `dead`), and the scalar control passes. With the fix all five pass. Run one at a time, with no failure: `decisions`, `decision-budget`, `review-m2`, `routing`, `provenance-pd5`, `memory-runtime`, `session-replay` and `runtime-decisions`. No full suite has run since.
+
+**For the examples session.** A record decision's recorded provider gives an answer and a distribution over whole answers; the runtime computes the per-field numbers from it, so a field whose value the distribution does not list has conf 0.
+
+## S462, the mutant check (owner's reviewer, 2026-10-10)
+
+**Asked.** A mutant of `items.read` with no origin or payload checks, the three refusal tests run against it, each failing for its own reason.
+
+**The mutant.** In `capabilities.ts`, the refusal of a reference that is not an `Items` of the intent's own payload and the refusal of a set the runtime does not hold were removed, so `items.read` read whatever reference it was given. It was built, the three tests run, and the file restored and rebuilt; it was not committed. Against the mutant:
+- the forged-reference test fails with `no refusal: {"read":null}`: the read of `items:forged` returned null instead of being refused;
+- the unstored-reference test fails the same way, the read of a well-formed reference the runtime never stored returned null;
+- the outside-the-payload test fails with `gave no refusal`, and the read returned both of c-a's orders (`o-2` and `o-1`, with their owner and keys): the handler read a stored set that is not its own.
+
+**A finding in the tests, fixed.** The third test as first written, "another intent's set", read a made-up reference that no one stored, so it repeated the unstored case and could not tell a missing payload check from a missing store check. It now reads the set the retrieval kept for the same desk (both orders, a real stored set that the refund's payload does not hold), asserts that it differs from the payload's own, and asserts that the payload's own set still reads. With that, the mutant fails the three tests for three reasons: nothing refused a forged reference, nothing refused an unstored one, and a stored set outside the payload was read. The tests also now print what the read returned. Against the real code all 11 pass, and `capabilities.ts` is as committed.
