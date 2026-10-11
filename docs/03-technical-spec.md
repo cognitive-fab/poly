@@ -1242,6 +1242,36 @@ decision classify(text: string) -> Branch {
 - **Providers (S356).** `recordedProvider(calls)` is the one provider poly ships: each question is answered by the first recorded call whose `match` holds every field it names, or fails; `fail` makes a call fail. It calls no model.
 - **Both surfaces.** The embedded forms are `route(name, { tiers: [{ name, provider, prices, calibration?, maxTokens }], escalate: [['conf', 0.8], ['margin', 0.1], ['failed']], budget? })`, `budget(name, { caps: [{ currency, amount, per, scope? }], onExhausted? })`, the amount a decimal literal read by its text, and the decision item `route(name)`. **An unrouted decision's budget (S454, ruled 2026-10-09).** The clause `prices "f" max input tokens I max tokens N budget b` is the decision item `budget(b, { prices: "f", maxInputTokens: I, maxTokens: N })`, written after `provider(…)` as the clause is written after `provider`. Each key of the object may be left out, and is then read as the part left out of the clause, so the checker gives the same `PL1201` in either surface; the keys are these three only, each written once, `prices` a string literal and the limits integer literals (`PL0301` otherwise, as for every embedded form, PT2). The printer writes the item for a clause that names its budget; a clause with no budget name has no embedded form, and printing one says so (it is `PL1201` in either surface). In a declaration list, `budget(name, { caps, onExhausted? })` is the budget itself; in a decision's items, `budget(b, { … })` is the clause.
 
+## PT29. The trace corpus (M7.1, PF10.1, PS19, S500 to S506)
+
+- **PT29.1** **The command.** `poly export traces --db <store> --build <dir> --certificate <file> --trust <keyId>=<public key file> … --out <file> [--run <id> …]`. It loads the certified build as `poly journal replay` does, so a tampered artefact is refused as the runtime refuses it, and it reads the store and writes no chain (the heads are the same before and after). `--out` is required, the file is the only output, and an existing file is refused. The command is not served over MCP (the corpus is private): the registry lists it as not exposed, as `poly approve` is. Without `--run`, every run of the build is exported.
+- **PT29.2** **The format.** One JSON object per line (ndjson). The first line is the header, then one line per episode, in the order of the runs' ids before tokenising.
+
+  ```json
+  { "v": 1, "kind": "poly.traces", "project": "<name>", "certificate": "<certificate digest>",
+    "episodes": 65,
+    "omitted": { "adviceEvents": 0, "runtimeRuns": 0, "archivedRuns": 0, "erasedSteps": 0, "gappedRuns": 0, "erasedRuns": 0 },
+    "unknown": { "consequence": 0 } }
+  ```
+
+  ```json
+  { "episode": "d:<32 hex>", "machine": "inbox.Message", "gapped": false,
+    "steps": [ { "seq": 1, "action": "Arrive", "stepKind": "accepted", "rejectReason": null,
+                 "pre": { }, "data": { }, "post": { },
+                 "effects": [ { "kind": "mail.draft", "labels": ["write:store"], "consequence": "reversible",
+                                "gate": { "outcome": "allowed", "reason": "…" } } ],
+                 "outsideCheckDomain": [] } ],
+    "outcomes": [ { "decision": "Classify", "outcome": "Correct" } ] }
+  ```
+
+  `pre` and `post` are the state as the machine's declared fields, each a value or a token (PS19.4). `data` is the action's parameters, with the reserved `$claims` and any other `$` key left out. `gate` is `null` when the effect was not proposed to a gate (a build without policies), and its `outcome` is one of the gate's `allowed`, `denied`, `escalated`, `late`, `held`. A step with no effect has `effects: []`. `outcomes` lists the `outcome` ledger events of the run (PD2.4). `episodes` counts the episode lines. `gappedRuns` counts the episodes with `gapped: true`.
+- **PT29.3** **Where each field is read.** The steps from the run's journal rows (`getJournal`); the effects from the runtime's outbox rows of the step and the manifest entry of each kind in the certified build (`labels`, `class`); the gate decision from the run's gate `verdict` event for that intent; `outsideCheckDomain` from the check domain of the parameter in the certified source (the sources are read and checked against the certificate's digests, as `replay` does; the certificate's `domains` are the same facts as text, not a form a program can read); outcomes from the run's chain.
+- **PT29.4** **The salt.** 32 random bytes from the system's source of randomness, held in memory for the duration of the export and then dropped. No option sets it, and the header does not carry it. A test that needs a repeatable export compares exports by structure, not by token.
+- **PT29.5** **The canary rule.** A canary written in a `Content` body, in a taint's subject, in a source item, in a principal or in a string state field outside a check domain appears in no field of the corpus. The tests cover every field of the header, every episode and every step, and the file as bytes.
+- **PT29.6** **Consequence is the effect's `class` (S503, as ruled and corrected).** The ruling asked for an optional `consequence` declaration on an effect. The language already has it, as `class`: the same four words, in the grammar (`Class`), in the manifest (PT6.1) and read by the gate. No new declaration is added. An effect with no `class` exports as `unknown` and is counted in the header.
+- **PT29.7** **`poly journal export`** (PT14) is unchanged: it writes one run's raw ledger events and the bodies of its step records, for audit. It is not the trace corpus and is not used to make one.
+- **PT29.8** **Not exported.** The salt, any digest, any `Content` body, the claims, the principal of any run, a time of day, a run id, a project path. The `project` in the header is the build's declared project name.
+
 ## PT11. Versions and migration
 
 ```poly
@@ -1451,7 +1481,7 @@ The experiment is milestone M3 (PT18). It runs on the M0 to M2 toolchain and nee
 | `poly journal fit --decision d` | `poly_journal` | Fits a monotone calibration map by isotonic regression from `decision` events and their outcomes (PD1.6, S132). Writes to no chain. |
 | `poly try <file> --machine M --ops <file> [--out trace]` | `poly_try` | A playground over one machine (PT28.2, M11). Admits, signs, runs and writes nothing but the trace asked for. |
 | `poly cost [--run r] [--scope s] [--period p] [--prices f] --db <store>` | `poly_cost` | Cost per run, scope and day from the ledger alone, and priced again under another table (PT24.4, PT10r). Writes nothing. |
-| `poly export traces` | `poly_export` | PF10.1. |
+| `poly export traces --db <store> --build <dir> --certificate <file> --out <file>` | (not exposed over MCP) | PF10.1, PT29. Writes the trace corpus of a certified build's journals: no body, salted tokens, erased steps left out and counted. Writes no chain. |
 | `poly mine` | `poly_mine` | Passes journals to Polyx. Returns proposed obligations. |
 | `poly propose` | `poly_propose` | Passes agent journals to polyness. Returns proposed workflows. |
 

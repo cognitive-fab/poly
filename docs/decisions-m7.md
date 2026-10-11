@@ -24,3 +24,12 @@ Rulings are by the owner's reviewer. Results and decisions of each step follow t
 ## M7.1 · `poly export traces`
 
 (open)
+
+### M7.1 spec text (PS19, PT29)
+
+Committed alone, before any test or code (rule 7a).
+
+- **A correction of the inventory, affecting S503.** The M7.0 inventory said it was open whether a poly effect declares reversibility. It does: an effect's `class` is `none | reversible | compensable | irreversible` (grammar `Class`, PT6.1, the manifest, the gate). The ruling for S503 asked for an optional `consequence` declaration with those four words. Adding a second declaration of the same thing would be a duplicate, so the spec text makes the consequence of an effect its `class`, and an effect with no `class` exports as `unknown` (PT29.6). This is the ruling's intent with no grammar change. Reviewer to confirm.
+- **A correction affecting S504.** The certificate's `domains` are text (`field ∈ 0..3`), not a form a program can read. The check domain of a parameter is read from the certified sources, which the certificate binds by digest and `replay` already reads (PT29.3). No runtime change, as ruled.
+- **Run ids are tokenised.** An instance id can be built from a message id or a key, so the episode id is a salted token (PS19.1, PS19.4). No time of day is exported.
+- **Command shape.** `poly export traces` takes `--db --build --certificate --trust --out`, refuses an existing file, and is not served over MCP (PT29.1).
