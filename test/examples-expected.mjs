@@ -65,5 +65,6 @@ export async function checkExample(file, root, name = 'example') {
     machines: files.flatMap((f) => f.machines),
     configurations: files.flatMap((f) => f.configurations ?? []),
     policies: files.flatMap((f) => f.policies ?? []),
+    warnings: files.flatMap((f) => f.warnings ?? []),
   };
 }

@@ -566,3 +566,15 @@ The new certificate tests (`test/rejected-completion.test.mjs` and the fixtures 
    **All four committed maps of the inbox warn** (`kind-large`, `kind-small`, `triage-large`, `triage-small`: raw 0 to 499 goes to 0 because each starts `(0,0), (500, …)`). That is the warning's finding about the examples, and the examples session's to answer; no verdict changes.
 
 **Run, one at a time, no failure:** `shadow-warning`, `routing`, `routing-decl`, `routing-rulings`, `routing-swap`, `std-routing`, and the first round's list.
+
+## v1.0.1, third round: the calibration threshold, the inbox's maps, the tag (owner's reviewer, 2026-10-11)
+
+**Ruled.** The calibration warning is for a band of raw values wider than 100 thousandths sent to 0, starting above raw 0, not for two consecutive values: raw 0, or a narrow band near it, sent to 0 is harmless. The second rule (points on the diagonal but more than 100 thousandths from the identity) stays. One map just under the limit stays quiet, one just over warns.
+
+**Text** 6b78de3a (PT24). **Tests** 95dd186e (`test/calibration-warning.test.mjs`, 15): the map `[[0,0],[101,50],[1000,900]]`, whose raw values 1 to 100 go to 0, is quiet; `[[0,0],[102,50],...]`, 1 to 101, warns, with the reason `101 raw values 1 to 101`; a map from `(1,1)` and one with a band of 29 near raw 0 are quiet; the diagonal map with points 100 apart from `(0,0)`, which used to warn for its zero band of 99, is quiet. **Code** b7f89561: `calibrationWarning` takes the longest run of raw values from 1 to 1000 calibrated to 0, and warns when it is more than 100. The test edits were made by the release session, not by the test writer. The tests ran with the home guard: `~/.poly/anchors.json` was not touched by them.
+
+**The examples' maps.** ddaa7fb5 (merged as 4ff14f97, on 6b78de3a) gives the inbox's four maps a dense low range, so no band above raw 0 goes to 0, and adds `test/ex-inbox-maps.test.mjs`. **Verified at 4ff14f97 plus the harness change below:** the inbox as a project (program and policy, checked as one) is `CLEAN` with no `warnings` (84 s); `poly check examples/inbox/inbox.poly` is `CLEAN` and prints no `warning:` line (89 s); every `ex-inbox*` file passes, one at a time, with the home guard (`ex-inbox` 3, `ex-inbox-drafts` 7, `ex-inbox-read-grant` 2, `ex-inbox-host` 3, `ex-inbox-maps` 1, `ex-inbox-no-test-anchor` 2, `ex-inbox-provider` 9, `ex-inbox-readme` 3, `ex-inbox-readonly` 4, `ex-inbox-setup` 4, `ex-inbox-startup` 1), as do `ex-gmail-source` (11) and `ex-gmail-traffic` (2); and the inbox dry run, which the maps change what the host computes for, passes (`test/after/ex-inbox-dry-run.test.mjs`, 94 s). `checkExample` now also returns the project's `warnings`.
+
+**One thing for the owner.** `~/.poly/anchors.json` was still there, dated 04:18, when I checked at 07:54, after the message that it was deleted; nothing of mine wrote to it (the guard would have failed the process).
+
+**Tag.** `v1.0.1`, annotated, local, on the commit this record is in; not pushed.

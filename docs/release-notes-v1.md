@@ -82,7 +82,7 @@ Each is a program with `// expected: CLEAN` on its first line and its policy bes
 - **`serveIngress` listens on 127.0.0.1** unless `opts.host` names another address, `0.0.0.0` for every interface included.
 - **`cli.js` runs no command when it is imported.**
 - **`POLY_ANCHORS_CONFIG`** names a keyring configuration file for a test process only (one that accepts test anchors, S194). Any other process ignores it, says so with `PL6410`, and reads the configuration under the home directory, so the environment cannot redirect the owner's anchor.
-- **A calibration-map warning.** A map is a step function: a raw probability is calibrated to the `y` of the last point at or below it, and to 0 below the first, so a two-point map `(0,0), (1000,1000)` sends every raw probability under 1 to 0. `poly check` warns, beside the verdict, of a map that sends two or more consecutive raw values to 0, and of one on the diagonal that is more than 100 thousandths from the identity somewhere. The map is used as it is.
+- **A calibration-map warning.** A map is a step function: a raw probability is calibrated to the `y` of the last point at or below it, and to 0 below the first, so a two-point map `(0,0), (1000,1000)` sends every raw probability under 1 to 0. `poly check` warns, beside the verdict, of a map that sends to 0 a band of more than 100 consecutive raw values above raw 0 (raw 0 itself, or a narrow band near it, is harmless), and of one on the diagonal that is more than 100 thousandths from the identity somewhere. The map is used as it is.
 - **No test writes under the real home.** A guard in the test preload fails a process that changes the owner's `.poly` folder.
 
 ### Formats a reader must expect
