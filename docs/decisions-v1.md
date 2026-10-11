@@ -537,3 +537,5 @@ The new certificate tests (`test/rejected-completion.test.mjs` and the fixtures 
 **Changed by the gate, on the way.** `scripts/measure-verdicts.mjs` measures a program with its policy as one project and gives each child 8 GB. The counts of the concierge are above its first report, as the release notes say.
 
 **Waiting for the owner.** The word for main to be fast-forwarded to `v1` and for the local tag `v1.0.0` (Q-V1).
+
+**Item 5, the spot check (2026-10-11).** `outbox-intent` alone 163 s (gate2 223 s) and `m4f-recheck` alone 373 s (gate2 289 s, 1.29 times), each under 1.5 times its gate2 time with nothing else running: the gate's slowdown was contention, and item 5 passes. The gate is accepted (items 1 to 4 and 6 to 7) by the owner's reviewer. Main is fast-forwarded to `v1` and the local tag `v1.0.0` made; not pushed.
