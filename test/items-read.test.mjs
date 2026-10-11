@@ -140,7 +140,7 @@ const itemsDigest = (items) => {
   return createHash('sha256').update(canon(sorted)).digest('hex');
 };
 
-const refused = async (p) => { try { await p; return null; } catch (e) { return e; } };
+const outcome = (p) => p.then((v) => ({ read: v }), (e) => e);
 const verifier = (c) => (c ? { principal: c.principal } : null);
 
 /**
@@ -235,13 +235,13 @@ test('S462, PS17.4b: items.read refuses a forged ref (PL6406, audited)', async (
   const a = await admitted('items-read-forged', ['test/fixtures/items-read/refund.poly']);
   const { rt, refunds } = await deskWithRefund(a, {
     script: async (payload, caps) => ({
-      forged: await refused(caps.items.read({ ref: 'items:forged', count: 1 })),
+      forged: await outcome(caps.items.read({ ref: 'items:forged', count: 1 })),
     }),
   });
   try {
     await askForRefund(rt, 'desk-forged');
     assert.equal(refunds.length, 1);
-    assert.ok(refunds[0].out.forged instanceof CapabilityRefused, String(refunds[0].out.forged));
+    assert.ok(refunds[0].out.forged instanceof CapabilityRefused, `no refusal: ${JSON.stringify(refunds[0].out.forged)}`);
     const audit = await rt.audit('desk-forged');
     const rows = audit.filter((r) => r.rule === 'PL6406');
     assert.ok(rows.length > 0, JSON.stringify(audit));
@@ -252,35 +252,40 @@ test('S462, PS17.4b: items.read refuses an unstored ref (PL6406, audited)', asyn
   const a = await admitted('items-read-unstored', ['test/fixtures/items-read/refund.poly']);
   const { rt, refunds } = await deskWithRefund(a, {
     script: async (payload, caps) => ({
-      unstored: await refused(caps.items.read({ ref: 'items:0000000000000000000000000000000000000000000000000000000000000000', count: 1 })),
+      unstored: await outcome(caps.items.read({ ref: 'items:0000000000000000000000000000000000000000000000000000000000000000', count: 1 })),
     }),
   });
   try {
     await askForRefund(rt, 'desk-unstored');
     assert.equal(refunds.length, 1);
-    assert.ok(refunds[0].out.unstored instanceof CapabilityRefused, String(refunds[0].out.unstored));
+    assert.ok(refunds[0].out.unstored instanceof CapabilityRefused, `no refusal: ${JSON.stringify(refunds[0].out.unstored)}`);
     const audit = await rt.audit('desk-unstored');
     const rows = audit.filter((r) => r.rule === 'PL6406');
     assert.ok(rows.length > 0, JSON.stringify(audit));
   } finally { await rt.close(); }
 });
 
-test('S462, PS17.4b: items.read refuses a ref pointing to another instance\'s items (PL6406, audited)', async () => {
+test("S462, PS17.4b: items.read refuses a stored set that is not in the intent's own payload (PL6406, audited)", async () => {
   const a = await admitted('items-read-other-instance', ['test/fixtures/items-read/refund.poly']);
+  // The set the retrieval kept, of both of c-a's orders, is stored by the runtime but is not the refund's order, which
+  // is the one cited. The handler reads it from the journal of the step that carried it.
+  const box = {};
   const { rt, refunds } = await deskWithRefund(a, {
     script: async (payload, caps) => {
-      // Construct a valid-looking items ref for a different instance.
-      // The ref format is 'items:<hash>', but it will not be in this intent's payload.
-      const otherRef = { ref: 'items:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', count: 1 };
-      return {
-        other: await refused(caps.items.read(otherRef)),
-      };
+      const found = journal(box.rt, 'desk-other').find((s) => s.action === 'Found');
+      const stored = JSON.parse(found.data).items;
+      return { stored, other: await outcome(caps.items.read(stored)), own: await caps.items.read(payload.order) };
     },
   });
+  box.rt = rt;
   try {
     await askForRefund(rt, 'desk-other');
     assert.equal(refunds.length, 1);
-    assert.ok(refunds[0].out.other instanceof CapabilityRefused, String(refunds[0].out.other));
+    const { stored, other, own } = refunds[0].out;
+    assert.equal(stored.count, 2, 'the retrieval kept both orders');
+    assert.notEqual(stored.ref, refunds[0].payload.order.ref, "a set other than the payload's");
+    assert.ok(other instanceof CapabilityRefused, `read of a stored set outside the payload gave no refusal: ${JSON.stringify(other)}`);
+    assert.equal(own.length, 1, "the payload's own set still reads");
     const audit = await rt.audit('desk-other');
     const rows = audit.filter((r) => r.rule === 'PL6406');
     assert.ok(rows.length > 0, JSON.stringify(audit));
