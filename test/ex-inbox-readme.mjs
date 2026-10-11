@@ -42,12 +42,12 @@ export function fill(line, vars) {
   return out;
 }
 
-/** Runs one filled command line as a child process; `anchors` is the folder standing for the per-user configuration. */
-export function runCommand(line, { anchors, cwd = ROOT, env = {} }) {
+/** Runs one filled command line as a child process; `anchors` is the folder standing for the per-user configuration. `preload: false` runs it bare, as the owner's own shell would (the S194 test). */
+export function runCommand(line, { anchors, cwd = ROOT, env = {}, preload = true }) {
   const [node, script, ...args] = argumentsOf(line);
   if (node !== 'node') throw new Error(`a README command starts with node: ${line}`);
-  const r = spawnSync(process.execPath, ['--max-old-space-size=8192', '--import', pathToFileURL(PRELOAD).href, script, ...args], {
-    cwd, encoding: 'utf8', env: { ...process.env, POLY_TEST_ANCHORS: anchors, ...env }, maxBuffer: 64 * 1024 * 1024,
+  const r = spawnSync(process.execPath, ['--max-old-space-size=8192', ...(preload ? ['--import', pathToFileURL(PRELOAD).href] : []), script, ...args], {
+    cwd, encoding: 'utf8', env: { ...process.env, ...(preload ? { POLY_TEST_ANCHORS: anchors } : {}), ...env }, maxBuffer: 64 * 1024 * 1024,
   });
   return { line, status: r.status, stdout: r.stdout, stderr: r.stderr };
 }

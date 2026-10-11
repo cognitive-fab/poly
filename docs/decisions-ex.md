@@ -533,3 +533,12 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy and meets AC27 end to end; the inbox meets IAC1 to IAC9 on recorded traffic.
+
+## The test anchor stays in the harness (S194), 2026-10-11
+
+The dry run's preload calls `acceptTestAnchors` so that its host can load a certificate admitted under a test keyring anchor. A live run has no such anchor and must never accept one. `test/ex-inbox-no-test-anchor.test.mjs` (light) holds both halves.
+
+- The README's own startup command (the dry run's host step, filled for a scaffolded project), run with no preload against a certificate that names a test anchor, exits non-zero with `PL6410 KEYRING_NOT_SIGNED` and "only a test process accepts (S194)", and never prints "inbox host started". The same command with the preload passes that check, so the test sees the flag it guards.
+- No file under `examples/` mentions `acceptTestAnchors`; the only caller is `test/ex-inbox-preload.mjs`.
+
+The command runner in `test/ex-inbox-readme.mjs` gained `preload: false` for the bare run. Nothing in the core changed.
