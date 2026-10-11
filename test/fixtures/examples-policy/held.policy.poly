@@ -1,0 +1,12 @@
+// S459 (PS17.3a): a policy that allows every effect of the held reply. The envelope origin check is final whatever a
+// policy says, so a draft whose envelope is not one the runtime stored is denied with this policy in force.
+module mail_reply_held_policy
+
+policy allow-all {
+  scope "mail_reply_held"
+  obligation anything "Every effect is allowed." rule {
+    when proposal.kind == "effect"
+    require proposal.kind == "effect" else deny
+    on unknown deny
+  }
+}

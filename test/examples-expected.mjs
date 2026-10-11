@@ -23,3 +23,46 @@ export function mismatch(expected, report) {
   if (expected.verdict === 'INCONCLUSIVE' && expected.codes.some((c) => !codes.includes(c))) return `the codes are ${codes.join(' ')}, and the file expects ${expected.codes.join(' ')}`;
   return null;
 }
+
+// V10 item 4, as clarified on 2026-10-10: a policy file in examples/ is never checked alone. The program and its policy
+// are one project, `<name>.poly` with `<name>.policy.poly` beside it, and the expected line lives in the program.
+import { cpSync, existsSync } from 'node:fs';
+import { basename, dirname, join, relative, sep } from 'node:path';
+import { checkFile, checkProject } from '@poly/check';
+import { ROOT, polyFiles } from './helpers.mjs';
+import { makeKey, project, signPolicies } from './runtime-helpers.mjs';
+
+/** Whether a file is a policy, which belongs to its program's project and is never checked alone. */
+export const isPolicy = (file) => file.endsWith('.policy.poly');
+
+/** The files of a directory that are checked on their own: every program, and no policy. */
+export const exampleFiles = (dir) => polyFiles(dir).filter((f) => !isPolicy(f));
+
+/** The policy file beside a program, or null. */
+export function policyOf(file) {
+  const p = join(dirname(file), `${basename(file, '.poly')}.policy.poly`);
+  return existsSync(p) ? p : null;
+}
+
+/**
+ * The check of an example as the gate takes it: the program alone, or, when a policy sits beside it, the project of the
+ * two with the policy signed as a person signs it, the program's maps and prices copied beside them. The report has the
+ * shape `mismatch` reads, with the policies' diagnostics in `diagnostics`.
+ */
+export async function checkExample(file, root, name = 'example') {
+  const policy = policyOf(file);
+  if (!policy) return checkFile(file, { root });
+  const key = makeKey(name);
+  const slashed = (f) => relative(ROOT, f).split(sep).join('/');
+  const dir = project(name, [slashed(file), slashed(policy)], key, 'test-examples-project');
+  for (const d of ['maps', 'prices']) if (existsSync(join(dirname(file), d))) cpSync(join(dirname(file), d), join(dir, 'src', d), { recursive: true });
+  await signPolicies(dir);
+  const r = await checkProject(dir, { root: dir });
+  const files = r.files ?? [];
+  return {
+    verdict: r.verdict,
+    diagnostics: [...(r.diagnostics ?? []), ...files.flatMap((f) => [...f.diagnostics, ...(f.policies ?? []).flatMap((p) => p.diagnostics ?? [])])],
+    machines: files.flatMap((f) => f.machines),
+    configurations: files.flatMap((f) => f.configurations ?? []),
+  };
+}

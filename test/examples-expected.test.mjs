@@ -3,12 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, relative } from 'node:path';
-import { checkFile } from '@poly/check';
-import { ROOT, polyFiles } from './helpers.mjs';
+import { ROOT } from './helpers.mjs';
 import { serial } from './serial-sources.mjs';
-import { expectedOf, mismatch } from './examples-expected.mjs';
+import { expectedOf, mismatch, exampleFiles, checkExample } from './examples-expected.mjs';
 
-const FILES = polyFiles(join(ROOT, 'examples'));
+const FILES = exampleFiles(join(ROOT, 'examples'));
 const OUT = join(ROOT, '.poly', 'test-build', 'examples-expected');
 
 test('every file in examples/ states its expected verdict on its first line', () => {
@@ -21,7 +20,7 @@ for (const file of FILES.filter((f) => !serial(f))) {
   test(`the verdict is the one stated: ${relative(ROOT, file)}`, async () => {
     const expected = expectedOf(file);
     assert.ok(expected, 'the file states its expected verdict');
-    const r = await checkFile(file, { root: OUT });
+    const r = await checkExample(file, OUT, relative(ROOT, file).replace(/[^a-z0-9]+/gi, '-'));
     assert.equal(mismatch(expected, r), null);
   });
 }
