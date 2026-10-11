@@ -1,5 +1,6 @@
 // Shared by the M4 tests: admission keys generated at test time, outside the repository (S126), project
 // directories under .poly, and an admitted build loaded into poly-runtime.
+import './fixtures/home-guard.mjs';
 import { generateKeyPairSync } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

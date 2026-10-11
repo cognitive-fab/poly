@@ -2,6 +2,7 @@
 // certificates the test admitted with its own keyring anchors only when it accepts them, as the test process does
 // (runtime-helpers). Preloaded with `node --import`; a production runtime never preloads it. S210: load verifies the
 // chain from the anchor, so the child reads the test's anchor folder, which the preload's URL names (`?anchors=`).
+import './home-guard.mjs';
 import { acceptTestAnchors } from '@poly/runtime';
 import { useTestAnchors } from '@poly/core';
 
