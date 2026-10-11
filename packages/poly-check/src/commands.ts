@@ -22,6 +22,7 @@ import { setProduction, signKeyrings, writeAnchor } from './keyrings.js';
 import { signPolicy } from './policy-sign.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
 import { journalCommand } from './journal.js';
+import { exportTraces, TraceUsageError } from './traces.js';
 import { benchGate } from './bench.js';
 import { checkHost, type HostCheck } from './host.js';
 import { editCheck } from './edit-check.js';
@@ -449,6 +450,26 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'export', mcp: null, lsp: false,
+    summary: 'Writes the trace corpus of the journals of a certified build to a file: values for declared domains, salted tokens for the rest, erased steps left out and counted, no chain written (PF10.1, PS19, PT29). The corpus is private, so never over MCP.',
+    input: obj({ sub: { type: 'string', enum: ['traces'] }, db: str('the store'), build: str('the certified build directory'), certificate: str('the certificate'), trust: { type: 'array', items: { type: 'string' }, description: 'keyId=public key file, as journal replay takes them' }, out: str('the corpus file; an existing file is refused'), runs: { type: 'array', items: { type: 'string' }, description: 'only these runs' } }, ['sub', 'db', 'build', 'certificate', 'out']),
+    output: obj({ path: str('the corpus written'), header: { type: 'object', description: 'the corpus header: counts of episodes and of what was left out' } }, ['path', 'header']),
+    async run(input) {
+      if (need(input, 'sub') !== 'traces') throw new CommandUsageError('poly export takes traces');
+      const trust = Object.fromEntries((Array.isArray(input.trust) ? (input.trust as unknown[]).map(String) : []).map((t) => {
+        const eq = t.indexOf('=');
+        if (eq <= 0) throw new CommandUsageError(`--trust takes <keyId>=<public key file>, not ${t}`);
+        return [t.slice(0, eq), readFileSync(t.slice(eq + 1), 'utf8')];
+      }));
+      try {
+        const r = await exportTraces({ db: need(input, 'db'), build: need(input, 'build'), certificate: need(input, 'certificate'), trust, out: need(input, 'out'), runs: Array.isArray(input.runs) ? (input.runs as unknown[]).map(String) : undefined });
+        const h = r.header;
+        return { exit: EXIT_CODES.CLEAN, result: { path: r.path, header: h as unknown as Record<string, unknown> }, text: `${r.path}: ${h.episodes} episode(s); left out: ${h.omitted.erasedSteps} erased step(s), ${h.omitted.erasedRuns} erased run(s); ${h.omitted.gappedRuns} gapped run(s); consequence unknown for ${h.unknown.consequence} effect(s)
+` };
+      } catch (e) { if (e instanceof TraceUsageError) throw new CommandUsageError(e.message); throw e; }
+    },
+  },
+  {
     name: 'journal', mcp: 'poly_journal', lsp: false,
     summary: 'Ledger verification, replay, export, evaluation and fitting (PF8.6, PD3.3): its arguments are those of the command line.',
     input: obj({ sub: { type: 'string', enum: ['verify', 'replay', 'export', 'eval', 'fit'] }, args: { type: 'array', items: { type: 'string' }, description: 'the options, as on the command line (--db, --run, --trust …)' } }, ['sub']),
@@ -494,7 +515,6 @@ export const NOT_BUILT: { name: string; mcp: string; when: string }[] = [
   { name: 'grade', mcp: 'poly_grade', when: 'not scheduled: polynv adequacy (PF7.7)' },
   { name: 'deploy', mcp: 'poly_deploy', when: 'not scheduled: the version gate at load (PF8.7)' },
   { name: 'dispatch', mcp: 'poly_dispatch', when: 'not scheduled: the development runtime' },
-  { name: 'export', mcp: 'poly_export', when: 'M7 (PF10.1)' },
   { name: 'mine', mcp: 'poly_mine', when: 'M7 (PF10.2)' },
   { name: 'propose', mcp: 'poly_propose', when: 'M7 (PF10.3)' },
 ];

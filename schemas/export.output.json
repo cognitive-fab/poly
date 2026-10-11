@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the corpus written"
+    },
+    "header": {
+      "type": "object",
+      "description": "the corpus header: counts of episodes and of what was left out"
+    }
+  },
+  "required": [
+    "path",
+    "header"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "properties": {
+    "sub": {
+      "type": "string",
+      "enum": [
+        "traces"
+      ]
+    },
+    "db": {
+      "type": "string",
+      "description": "the store"
+    },
+    "build": {
+      "type": "string",
+      "description": "the certified build directory"
+    },
+    "certificate": {
+      "type": "string",
+      "description": "the certificate"
+    },
+    "trust": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "keyId=public key file, as journal replay takes them"
+    },
+    "out": {
+      "type": "string",
+      "description": "the corpus file; an existing file is refused"
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "only these runs"
+    }
+  },
+  "required": [
+    "sub",
+    "db",
+    "build",
+    "certificate",
+    "out"
+  ]
+}

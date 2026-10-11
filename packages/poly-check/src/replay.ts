@@ -164,8 +164,8 @@ export async function replaySessions(rt: PolyRuntime): Promise<{ session: string
   return (await rt.replaySessions()).map((s) => ({ ...s, diagnostics: s.diagnostics.map((d) => diag(d.code, { node: s.session }, d.message)) }));
 }
 
-/** Every run a runtime's store holds, replayed: its journal, its snapshot, and the certified module it ran. */
-export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } = {}): Promise<RunReplay[]> {
+/** The certified modules of a build and the std modules it was made from (PS18.0), each checked against the certificate. */
+export function certifiedProgram(rt: PolyRuntime): { modules: Map<string, A.Module>; program: A.Module[] } {
   const modules = certifiedModules(rt.root, rt.certificate.poly.sources);
   // PS18.0, S190: the std modules the build was made from, each read from std and checked against the certificate.
   const std: A.Module[] = [];
@@ -179,7 +179,12 @@ export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } =
     const m = parse(bytes.toString('utf8')).module;
     if (m) std.push(m);
   }
-  const program = [...modules.values(), ...std];
+  return { modules, program: [...modules.values(), ...std] };
+}
+
+/** Every run a runtime's store holds, replayed: its journal, its snapshot, and the certified module it ran. */
+export async function replayRuntime(rt: PolyRuntime, opts: { runs?: string[] } = {}): Promise<RunReplay[]> {
+  const { modules, program } = certifiedProgram(rt);
   const instances = await rt.instances();
   const out: RunReplay[] = [];
   // Review B7: an archived run has no journal to fold; it is listed as not replayed, never skipped.
