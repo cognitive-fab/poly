@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "provider": "cheap",
+  "model": "cheap-tier-placeholder",
+  "currency": "usd",
+  "perMillionTokens": {
+    "input": 100000,
+    "output": 400000
+  },
+  "source": "https://example.com/pricing",
+  "readOn": "2026-10-11"
+}

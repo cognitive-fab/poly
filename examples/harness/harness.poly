@@ -1,0 +1,725 @@
+// expected: CLEAN
+// The checked harness (plan-e3.md E3.2; proposals/example-harness.md, HF3 and HT2). The control loop around a model,
+// with the rules of HF3 as properties: compaction only at a finished step or at the limit (HF3.1), only verified
+// receipts shown (HF3.2), handles issued after the archive holds the output (HF3.3), fusion only after the classifier
+// said so (HF3.4), a flagged log never stored as clean (HF3.5), a reservation inside the cap (HF3.6), no step ended on an
+// output cutoff before a reprompt (HF3.7), overflow compacts once before the trial ends (HF3.8), a cap saves the work
+// before it ends the trial (HF3.9). HF3.10 is the policy's (harness.policy.poly) and HF3.11 is host code.
+//
+// Three machines carry the loop, not one (E3.0 and E3.2, decisions-e3.md). The loop as a single machine of 18 fields ran
+// the checker out of memory at 3 GB; each rule reads the fields of one concern, so each concern is its own machine and
+// they coordinate by messages: Turn (one model call and its tool, per plan step), Context (the window and its
+// compactions) and Trial (the plan, the stage checks, the caps and the end).
+//
+// What the checker sees and what it trusts (S550, S551, S553, S559). Numbers are buckets of a stated unit: a bucket is a
+// sixth of the context window and the limit is 5. The host measures them. The stop reason of a model call is the host's
+// fact Metered, since a decision's result cannot hold text and a stop reason together. The classifier, the verifier and the
+// credential scan are certified handlers whose verdict is the effect's completion: the machines prove what follows from
+// each verdict, not that the verdict is right. A rule's guard is one tagged line (// @HF3.n) so that
+// test/e3-hac1.test.mjs can seed its violation.
+//
+// Actions the host dispatches after it has seen the facts they need: Metered, Grew, Go, StoreLog, Measured, Overflowed,
+// CapReached, Close, Show. None is trusted: every rule is on the machine's own state, and a require rejects the action
+// out of turn.
+module harness
+
+enum TurnMode { Idle, Thinking, Continuing, Acting, Observing, Checking, Done, Failed }
+
+enum Stop { End, Tool, Length }
+
+enum Plan { Unplanned, Fusable, Separate }
+
+enum TrialMode { Idle, Running, Checking, Capped, Failing, Done, Stopped }
+
+enum Why { None, PlanDone, Budget, Overflow, Cap, Fault }
+
+enum CtxMode { Working, Compacting, Closed }
+
+enum ObsState { Empty, Pending, Full, Handled, Released }
+
+enum ArchState { Free, Held, Gone }
+
+enum RState { Pending, Reading, Checking, Verified, Rejected, Shown, Original }
+
+// One model call and its tool, for one plan step (HF2.1, HF2.2).
+machine Turn {
+  state {
+    mode      : TurnMode = Idle
+    stop      : Stop     = End
+    stepped   : bool     = false
+    metered   : bool     = false
+    plan      : Plan     = Unplanned
+    reprompts : 0..1     = 0
+    scanned   : bool     = false
+    secret    : bool     = false
+    trial     : Ref<Trial>  = none
+    ledger    : Ref<Ledger> = none
+  }
+
+  terminal mode in { Done, Failed }
+
+  action Start(task: Content)
+  action Metered(s: Stop)
+  action Stepped(calls: Content, conf: Conf, margin: Conf)
+  action StepFailed()
+  action Fusable()
+  action Separate()
+  action Reprompt(note: Content)
+  action Go(net: bool)
+  action Ran()
+  action Clean()
+  action Flagged()
+  action StoreLog()
+  action Logged()
+  action Fault()
+
+  on Start(task) {
+    require mode is Idle else reject "not-idle"
+    mode' = Thinking
+    decide agent(task: task)
+  }
+
+  // The host's measurement of the call just made: why the model stopped.
+  on Metered(s) {
+    require mode is Thinking && !metered else reject "not-thinking"
+    metered' = true
+    stop' = s
+  }
+
+  // The model's answer: the classifier reads the calls and says whether the edit and its follow-up may run as one.
+  on Stepped(calls, conf, margin) {
+    require mode is Thinking && !stepped else reject "not-thinking"
+    stepped' = true
+    emit classify(calls: calls)
+  }
+
+  on StepFailed {
+    require mode is Thinking else reject "not-thinking"
+    mode' = Failed
+    send trial <- BudgetStop()
+  }
+
+  on Fusable {
+    require mode is Thinking && plan is Unplanned else reject "not-unplanned"
+    plan' = Fusable
+  }
+
+  on Separate {
+    require mode is Thinking && plan is Unplanned else reject "not-unplanned"
+    plan' = Separate
+  }
+
+  // HF3.7: a cutoff is answered by one more prompt asking the model to continue.
+  on Reprompt(note) {
+    require mode is Continuing else reject "no-cutoff"
+    reprompts' = 1
+    stepped' = false
+    metered' = false
+    plan' = Unplanned
+    mode' = Thinking
+    decide agent(task: note)
+  }
+
+  // The step's tool call runs, unless the model was cut off and has not been asked to continue yet: then the step waits
+  // for the reprompt (HF3.7). The tool is never run on a truncated call.
+  on Go(net) {
+    require mode is Thinking && stepped && metered && !(plan is Unplanned) else reject "not-ready"
+    if stop is Length && reprompts < 1 {  // @HF3.7
+      mode' = Continuing
+    } else {
+      mode' = Acting
+      send ledger <- Tick()
+      if net {
+        emit fetch()
+      } else {
+        if plan is Fusable {  // @HF3.4
+          emit act(fused: true)
+        } else {
+          emit act(fused: false)
+        }
+      }
+    }
+  }
+
+  on Ran {
+    require mode is Acting else reject "not-acting"
+    mode' = Observing
+    emit scan()
+  }
+
+  on Clean {
+    require mode is Observing && !scanned else reject "not-scanning"
+    scanned' = true
+    secret' = false
+  }
+
+  on Flagged {
+    require mode is Observing && !scanned else reject "not-scanning"
+    scanned' = true
+    secret' = true
+  }
+
+  // HF3.5: a log the scan flagged is redacted, and the unredacted bytes never become a stored output.
+  on StoreLog {
+    require mode is Observing && scanned else reject "not-scanned"
+    mode' = Checking
+    if !secret {  // @HF3.5
+      emit storeClean()
+    } else {
+      emit storeRedacted()
+    }
+  }
+
+  on Logged {
+    require mode is Checking else reject "not-checking"
+    mode' = Done
+    send trial <- Stored()
+  }
+
+  on Fault {
+    require mode is Acting || mode is Observing || mode is Checking else reject "not-running"
+    mode' = Failed
+    send trial <- Faulted()
+  }
+
+  decision agent(task: Content) -> Content {
+    provider "main"
+    prices "prices/main.json" max input tokens 100000 max tokens 8000 budget task  // @HF3.6
+    labels { egress:external, read:private }
+    timeout 120s
+    ok(r) -> Stepped(calls: r.answer, conf: r.conf, margin: r.margin)
+    failed -> StepFailed()
+  }
+
+  effect classify(calls: Content) {
+    kind "tool.classify"
+    labels { read:private }
+    ok -> Fusable()
+    failed -> Separate()
+  }
+
+  effect act(fused: bool) {
+    kind "tool.act"
+    labels { read:private }
+    ok -> Ran()
+    failed -> Ran()
+  }
+
+  // The one tool here that needs the network. An offline run denies it (HF3.10, harness.policy.poly).
+  effect fetch() {
+    kind "tool.fetch"
+    labels { egress:external }
+    targets { egress: exact "https://example.com/fetch" }
+    ok -> Ran()
+    failed -> Ran()
+  }
+
+  effect scan() {
+    kind "tool.scan"
+    labels { read:private }
+    ok -> Clean()
+    failed -> Flagged()
+  }
+
+  effect storeClean() {
+    kind "tool.store"
+    labels { read:private }
+    ok -> Logged()
+    failed -> Fault()
+  }
+
+  effect storeRedacted() {
+    kind "tool.store-redacted"
+    labels { read:private }
+    ok -> Logged()
+    failed -> Fault()
+  }
+
+  never fuse-needs-the-classifier: emit act(fused: true) while !(plan is Fusable)
+  never flagged-log-never-clean: emit storeClean() while secret
+  never no-act-on-a-cutoff: emit act() while stop is Length && reprompts < 1
+}
+
+// The window (HF2.3, HF3.1, HF3.8, S561). A compaction starts at a finished step when it pays, or at the limit, once,
+// before the trial may end on overflow. The gate is a typed decision over measured numbers, always taken and recorded: a
+// step the gate declines is an accepted step that starts nothing (so the rules below are exercised, not vacuous). A
+// compaction may fail or leave the window over the limit; the next Overflowed then ends the trial, after the one attempt.
+machine Context {
+  state {
+    mode        : CtxMode = Working
+    ctx         : 0..6    = 0
+    finished    : bool    = false
+    skipped     : bool    = false
+    attempts    : 0..1    = 0
+    compactions : 0..2    = 0
+    begun       : bool    = false
+    summarised  : bool    = false
+    trial       : Ref<Trial> = none
+  }
+
+  terminal mode is Closed
+
+  action Grew(by: 0..2)
+  action StepFinished()
+  action StepReset()
+  action Measured(saving: 0..2, rewrite: 0..2, context: Content)
+  action Overflowed(context: Content)
+  action Begun()
+  action Summarised(text: Content, conf: Conf, margin: Conf)
+  action Compacted()
+  action CompactFailed()
+  action Ended()
+
+  on Grew(by) {
+    require mode is Working else reject "not-working"
+    if ctx + by > 6 {
+      ctx' = 6
+    } else {
+      ctx' = ctx + by
+    }
+  }
+
+  on StepFinished {
+    require mode is Working && !finished else reject "not-working"
+    finished' = true
+  }
+
+  on StepReset {
+    require mode is Working && finished else reject "not-finished"
+    finished' = false
+    skipped' = false
+  }
+
+  // HF3.1: the pay-gate reads measured numbers, and a compaction starts only at a finished step and only when it pays.
+  on Measured(saving, rewrite, context) {
+    require mode is Working else reject "not-working"
+    if finished && ctx > 2 && compactions < 2 && saving > rewrite {  // @HF3.1
+      compactions' = compactions + 1
+      mode' = Compacting
+      begun' = false
+      summarised' = false
+      emit startCompaction()
+      decide summarise(context: context)
+    } else {
+      skipped' = true
+    }
+  }
+
+  // HF3.8: at the limit one compaction is tried first. Over the limit again after it, the trial ends on overflow.
+  on Overflowed(context) {
+    require mode is Working && ctx >= 5 else reject "not-over"
+    if attempts == 0 {  // @HF3.8
+      attempts' = 1
+      mode' = Compacting
+      begun' = false
+      summarised' = false
+      emit startCompaction()
+      decide summarise(context: context)
+    } else {
+      mode' = Closed
+      emit stopOverflow()
+      send trial <- OverflowEnd()
+    }
+  }
+
+  on Begun {
+    require mode is Compacting && !begun else reject "not-compacting"
+    begun' = true
+  }
+
+  on Summarised(text, conf, margin) {
+    require mode is Compacting && !summarised else reject "not-compacting"
+    summarised' = true
+    emit compact()
+  }
+
+  // S561: a compaction shrinks the window, to the summary's size (two buckets here).
+  on Compacted {
+    require mode is Compacting && summarised else reject "not-compacting"
+    ctx' = 2
+    mode' = Working
+  }
+
+  on CompactFailed {
+    require mode is Compacting else reject "not-compacting"
+    mode' = Working
+  }
+
+  on Ended {
+    require mode is Closed else reject "not-closed"
+    begun' = false
+  }
+
+  decision summarise(context: Content) -> Content {
+    provider "cheap"
+    prices "prices/cheap.json" max input tokens 100000 max tokens 4000 budget task
+    labels { egress:external, read:private }
+    timeout 60s
+    ok(r) -> Summarised(text: r.answer, conf: r.conf, margin: r.margin)
+    failed -> CompactFailed()
+  }
+
+  effect startCompaction() {
+    kind "tool.start-compaction"
+    labels { read:private }
+    ok -> Begun()
+    failed -> CompactFailed()
+  }
+
+  effect compact() {
+    kind "tool.compact"
+    labels { read:private }
+    ok -> Compacted()
+    failed -> CompactFailed()
+  }
+
+  effect stopOverflow() {
+    kind "trial.stop-overflow"
+    labels { read:private }
+    ok -> Ended()
+    failed -> Ended()
+  }
+
+  never compact-at-step-end-or-limit: emit startCompaction() while !finished && ctx < 5
+  never overflow-compacts-first: emit stopOverflow() while attempts == 0
+}
+
+// The plan, the stage checks, the caps and the end (HF2.7, HF3.9).
+machine Trial {
+  state {
+    mode     : TrialMode = Idle
+    step     : 0..2      = 0
+    failedAt : 0..3      = 3
+    capped   : bool      = false
+    saved    : bool      = false
+    why      : Why       = None
+    context  : Ref<Context> = none
+  }
+
+  terminal mode in { Done, Stopped }
+
+  action Begin()
+  action Stored()
+  action StagePassed()
+  action StageFailed()
+  action NextStep()
+  action CapReached()
+  action Saved()
+  action BudgetStop()
+  action Faulted()
+  action OverflowEnd()
+  action Close()
+
+  on Begin {
+    require mode is Idle else reject "not-idle"
+    mode' = Running
+  }
+
+  on Stored {
+    require mode is Running else reject "not-running"
+    mode' = Checking
+    emit stageCheck()
+  }
+
+  // HF2.7: a stage's score comes from the check journaled in its state; the failing stage is the first failed one.
+  on StagePassed {
+    require mode is Checking else reject "not-checking"
+    send context <- StepFinished()
+  }
+
+  on StageFailed {
+    require mode is Checking else reject "not-checking"
+    if failedAt == 3 {
+      failedAt' = step
+    }
+    send context <- StepFinished()
+  }
+
+  on NextStep {
+    require mode is Checking else reject "not-checking"
+    if step == 2 {
+      mode' = Done
+      why' = PlanDone
+      emit finishTrial()
+    } else {
+      step' = step + 1
+      mode' = Running
+      send context <- StepReset()
+    }
+  }
+
+  // HF3.9: a cap saves the work on disk first, then ends the trial reporting the cap.
+  on CapReached {
+    require mode is Running || mode is Checking else reject "not-running"
+    capped' = true
+    mode' = Capped
+    emit saveWork()  // @HF3.9
+  }
+
+  on Saved {
+    require mode is Capped else reject "not-capped"
+    saved' = true
+    mode' = Failing
+    why' = Cap
+  }
+
+  on BudgetStop {
+    require mode is Running else reject "not-running"
+    mode' = Failing
+    why' = Budget
+  }
+
+  on Faulted {
+    require mode is Running else reject "not-running"
+    mode' = Failing
+    why' = Fault
+  }
+
+  on OverflowEnd {
+    require mode is Running || mode is Checking else reject "not-running"
+    mode' = Stopped
+    why' = Overflow
+  }
+
+  on Close {
+    require mode is Failing else reject "not-failing"
+    mode' = Stopped
+    if capped {
+      emit stopCap()
+    } else {
+      emit stopTrial()
+    }
+  }
+
+  effect stageCheck() {
+    kind "tool.stage-check"
+    labels { read:private }
+    ok -> StagePassed()
+    failed -> StageFailed()
+  }
+
+  effect saveWork() {
+    kind "tool.save-work"
+    labels { read:private }
+    ok -> Saved()
+    failed -> Saved()
+  }
+
+  effect stopCap() {
+    kind "trial.stop-cap"
+    labels { read:private }
+    ok -> Close()
+    failed -> Close()
+  }
+
+  effect stopTrial() {
+    kind "trial.stop"
+    labels { read:private }
+    ok -> Close()
+    failed -> Close()
+  }
+
+  effect finishTrial() {
+    kind "trial.finish"
+    labels { read:private }
+    ok -> Close()
+    failed -> Close()
+  }
+
+  never cap-saves-first: emit stopCap() while !saved
+}
+
+// The archive of large outputs (HF2.4, HF3.3). A handle is issued only after the archive holds the output: Observation
+// moves to Full on the archive's ack, never on its own word.
+service machine Archive {
+  state {
+    st   : ArchState = Free
+    refs : 0..2      = 0
+  }
+
+  action Store(from: Ref<Observation>)
+  action Drop()
+
+  on Store(from) {
+    require st is Free else reject "not-free"
+    st' = Held
+    refs' = 1
+    send from <- Stored()
+  }
+
+  on Drop {
+    require st is Held else reject "not-held"
+    st' = Gone
+    refs' = 0
+  }
+}
+
+// One tool result: sent in full for two requests, then replaced by its handle on the third (HF2.4, HF3.3).
+service machine Observation {
+  state {
+    st   : ObsState     = Empty
+    sent : 0..3         = 0
+    arch : Ref<Archive> = none
+  }
+
+  action Put()
+  action Stored()
+  action Sent()
+  action Release()
+
+  on Put { require st is Empty else reject "not-empty"  st' = Pending  send arch <- Store(from: self) }  // @HF3.3
+
+  on Stored {
+    require st is Pending else reject "not-pending"
+    st' = Full
+  }
+
+  on Sent {
+    require st is Full else reject "not-full"
+    sent' = sent + 1
+    if sent + 1 >= 3 {
+      st' = Handled
+    }
+  }
+
+  on Release {
+    require st is Handled else reject "not-handled"
+    st' = Released
+    send arch <- Drop()
+  }
+}
+
+// The request counter: it tells the slot, once per request, that the output went out (S552, PS13.8a). It sends every slot
+// the same message and reads nothing back, so the configuration below is checked on one slot.
+service machine Ledger {
+  state {
+    requests : 0..3 = 0
+    obs      : Ref<Observation> = none
+  }
+
+  action Tick()
+
+  on Tick {
+    require requests < 3 else reject "cap"
+    requests' = requests + 1
+    send obs <- Sent()
+  }
+}
+
+// One log reading (HF2.5, HF3.2, HT3): the cheaper model writes the receipt, the verifier checks it against the original
+// log, and only a verified receipt over an unflagged log is shown. Anything else shows the original, redacted when flagged.
+service machine Receipt {
+  state {
+    st     : RState = Pending
+    secret : bool   = false
+    presented : bool = false
+  }
+
+  action Open(log: Content, flagged: bool)
+  action Receipted(text: Content, conf: Conf, margin: Conf)
+  action ReadFailed()
+  action Verified()
+  action Refused()
+  action Show()
+  action Presented()
+
+  on Open(log, flagged) {
+    require st is Pending else reject "not-pending"
+    secret' = flagged
+    if flagged {
+      st' = Rejected
+    } else {
+      st' = Reading
+      decide read(log: log)
+    }
+  }
+
+  on Receipted(text, conf, margin) {
+    require st is Reading else reject "not-reading"
+    st' = Checking
+    emit verify(receipt: text)
+  }
+
+  on ReadFailed {
+    require st is Reading else reject "not-reading"
+    st' = Rejected
+  }
+
+  on Verified {
+    require st is Checking else reject "not-checking"
+    st' = Verified
+  }
+
+  on Refused {
+    require st is Checking else reject "not-checking"
+    st' = Rejected
+  }
+
+  // HF3.2: the agent sees the receipt only when the verifier passed it and the log was not flagged. Otherwise it sees the
+  // original log (redacted when flagged), and the refusal is journaled.
+  on Show {
+    require st is Verified || st is Rejected else reject "not-decided"
+    if st is Verified && !secret {  // @HF3.2
+      st' = Shown
+      emit showReceipt()
+    } else {
+      st' = Original
+      emit showOriginal()
+    }
+  }
+
+  on Presented {
+    require st is Shown || st is Original else reject "not-shown"
+    presented' = true
+  }
+
+  decision read(log: Content) -> Content {
+    provider "cheap"
+    prices "prices/cheap.json" max input tokens 100000 max tokens 2000 budget task
+    labels { egress:external, read:private }
+    timeout 60s
+    ok(r) -> Receipted(text: r.answer, conf: r.conf, margin: r.margin)
+    failed -> ReadFailed()
+  }
+
+  effect verify(receipt: Content) {
+    kind "tool.verify"
+    labels { read:private }
+    ok -> Verified()
+    failed -> Refused()
+  }
+
+  effect showReceipt() {
+    kind "tool.show-receipt"
+    labels { read:private }
+    ok -> Presented()
+    failed -> Presented()
+  }
+
+  effect showOriginal() {
+    kind "tool.show-original"
+    labels { read:private }
+    ok -> Presented()
+    failed -> Presented()
+  }
+
+  never only-verified-reach-the-agent: emit showReceipt() while !(st is Verified) || secret
+}
+
+// The check instance of HF3.3 (S552): one slot of the observations, checked as PS13.8a allows. Conditions: (1) both
+// invariants are about the slot and its archive; (2) the ledger sends every slot the same Sent; (3) nothing the ledger does
+// depends on the number of slots or on which one answered.
+configuration pack {
+  a : Archive
+  o : Observation { arch: a }
+  l : Ledger { obs: o }
+  inputs { l.Tick, o.Put, o.Release }
+  bounds { transit 5 }
+  invariant handled-resolves: o is Handled implies a is Held
+  invariant twice-then-handle: (o is Handled implies o.sent == 3) && (o is Full implies o.sent <= 2)
+}
+
+budget task {
+  cap usd 2 per run
+  cap usd 25 per month per scope
+}

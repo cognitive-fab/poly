@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "provider": "main",
+  "model": "main-tier-placeholder",
+  "currency": "usd",
+  "perMillionTokens": {
+    "input": 3000000,
+    "output": 15000000
+  },
+  "source": "https://example.com/pricing",
+  "readOn": "2026-10-11"
+}
