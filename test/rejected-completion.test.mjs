@@ -13,10 +13,10 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from '@poly/lang';
-import { checkFile, resolveUses } from '@poly/check';
+import { admit, checkFile, resolveUses } from '@poly/check';
 import { checkConfiguration } from '@poly/ref';
 import { ROOT } from './helpers.mjs';
-import { admitted } from './runtime-helpers.mjs';
+import { admitted, makeKey, project } from './runtime-helpers.mjs';
 
 const FIX = join(ROOT, 'test', 'fixtures', 'rejected-completion');
 const STD = join(FIX, 'std');
@@ -89,11 +89,40 @@ test('S463, PS15.5: a completion rejected terminal, because the application has 
   assert.ok(hit.length > 0, 'a completion that reaches the ended application is explored');
 });
 
-test('S463, certificate: a build with a liveness property states what machine-level liveness assumes, and a build without one does not', { timeout: 300_000 }, async () => {
-  const live = await admitted('rc-live', ['test/fixtures/rejected-completion/machine-live.poly']);
-  const mine = (a) => a.cert.poly.limits.filter((l) => /liveness/.test(l) && /completion/.test(l) && /rejected/.test(l));
-  assert.equal(mine(live).length, 1, JSON.stringify(live.cert.poly.limits));
-  assert.match(mine(live)[0], /PL5409/);
-  const plain = await admitted('rc-plain', ['conformance/m1/records.poly']);
-  assert.equal(mine(plain).length, 0, JSON.stringify(plain.cert.poly.limits));
+/** Admits a fixture of this directory, or a path from the root, with the tests' channel kind found in std. */
+async function admitFixture(name, source, opts = {}) {
+  const key = makeKey(name);
+  const dir = project(name, [source], key, 'test-rejected-completion');
+  if (opts.credentials) writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8')), credentials: opts.credentials }, null, 2));
+  return (await admit(dir, 'std' in opts ? {} : { std: STD })).certificate.poly;
+}
+const live = (poly) => (poly.assumptions ?? []).filter((x) => x.id === 'liveness-completions');
+const bare = (poly) => poly.limits.filter((l) => /liveness/.test(l));
+
+test('S463, certificate: the liveness assumption is discharged when the generated configuration that covers the machine was checked with no PL5409', { timeout: 300_000 }, async () => {
+  const poly = await admitFixture('rc-discharged', 'test/fixtures/rejected-completion/if-live.poly');
+  assert.deepEqual(live(poly).map((x) => [x.machine, x.status, x.by]), [['rc.Agent', 'discharged', 'rc.support']], JSON.stringify(poly.assumptions));
+  assert.match(live(poly)[0].assumption, /no completion of the program's own decisions and effects is rejected/);
+  assert.deepEqual(bare(poly), [], 'the assumption is not a bare limit');
+});
+
+test('S463, certificate: the assumption is open when no generated configuration covers the machine', { timeout: 300_000 }, async () => {
+  const poly = await admitFixture('rc-open', 'test/fixtures/rejected-completion/machine-live.poly');
+  assert.deepEqual(live(poly).map((x) => [x.machine, x.status, x.by]), [['ml.Asker', 'open', null]], JSON.stringify(poly.assumptions));
+  assert.deepEqual(bare(poly), []);
+});
+
+test('S463, certificate: the std machines of a credential carry the assumption, open while no generated configuration covers them', { timeout: 300_000 }, async () => {
+  const poly = await admitFixture('rc-grant', 'test/fixtures/m9/stripe-refund.poly', { credentials: { payments: { store: 'kms' } }, std: null });
+  const mine = live(poly);
+  assert.ok(mine.length > 0, JSON.stringify(poly.assumptions));
+  assert.ok(mine.every((x) => x.status === 'open' && x.by === null), JSON.stringify(mine));
+  assert.ok(mine.some((x) => /Grant$/.test(x.machine)), JSON.stringify(mine));
+  assert.deepEqual(bare(poly), []);
+});
+
+test('S463, certificate: a build without a liveness property states no such assumption', { timeout: 300_000 }, async () => {
+  const a = await admitted('rc-plain', ['conformance/m1/records.poly']);
+  assert.equal(live(a.cert.poly).length, 0, JSON.stringify(a.cert.poly.assumptions));
+  assert.deepEqual(bare(a.cert.poly), []);
 });
