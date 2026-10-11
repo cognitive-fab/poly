@@ -56,3 +56,24 @@ test('the joint configuration of Turn, Context and Trial is open until a configu
   const hasConfig = /configuration\s+\w+\s*\{[^}]*:\s*Turn\b[^}]*:\s*Context\b[^}]*:\s*Trial\b/s.test(SRC);
   assert.equal(joint.status, hasConfig ? 'discharged' : 'open', 'discharged only if the module checks such a configuration (E3.4)');
 });
+
+test('the scan verdict is two entries: known secrets and the seven shapes are discharged by a named test, unrecognised shapes stay open', () => {
+  const known = A.find((a) => a.id === 'scan-verdict-known');
+  const unknown = A.find((a) => a.id === 'scan-verdict-unrecognised');
+  assert.ok(known && unknown);
+  assert.equal(known.status, 'discharged');
+  assert.match(known.by, /test\/e3-loop\.test\.mjs/);
+  assert.match(known.by, /seeded control/);
+  assert.equal(unknown.status, 'open');
+  assert.ok(!A.some((a) => a.id === 'scan-verdict'), 'the single entry is gone');
+  // the test it cites exists, by its title
+  const loop = readFileSync(join(ROOT, 'test', 'e3-loop.test.mjs'), 'utf8');
+  assert.ok(loop.includes('AC18, S554, gates 2 and 3: a token in a tool output reaches nothing'));
+});
+
+test('the statements the certificate carries: rules per machine, the pairs, the unused audience, and the two lints', () => {
+  const all = JSON.parse(readFileSync(join(DIR, 'assumptions.json'), 'utf8')).statements;
+  assert.deepEqual(all.map((s) => s.id), ['rules-proved-per-machine', 'pairs-were-worth-checking', 'audience-unused', 'lint-not-proof']);
+  assert.match(all[0].text, /not proved for the machines together/);
+  assert.match(all[2].text, /held by the scan, the redaction and the step property/);
+});

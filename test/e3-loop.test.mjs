@@ -157,3 +157,42 @@ test('AC18, S554, seeded control: a scan that does not know the secret leaves it
 });
 
 void FUSED;
+
+// ---------------------------------------------------------------- runtime behaviours the checker does not see (E3.4)
+
+const overflowRecording = () => {
+  const rec = recording();
+  rec.steps[0].model[0].grew = 6;
+  rec.steps[0].gate = { saving: 0, rewrite: 1 };
+  return rec;
+};
+const outboxCount = (rt) => rt.store.db.prepare('SELECT COUNT(*) AS n FROM pr_outbox').get().n;
+
+test('K10: the runtime refuses a decision and an effect that complete through one action (the checker does not see it)', { timeout: 600_000 }, async () => {
+  // the summary decision fails into CompactFailed, as the first draft of the module had it, and so does the compact effect
+  const shared = (s) => {
+    const from = '    failed -> SummaryFailed()';
+    assert.equal(s.split(from).length, 2);
+    return s.replace(from, '    failed -> CompactFailed()');
+  };
+  await assert.rejects(run('e3-loop-k10', overflowRecording(), { edit: shared }), (e) => /K10/.test(String(e.message)) && /CompactFailed/.test(String(e.message)));
+});
+
+test('E3.4: a late Begun, after the plan is done or the trial ended on overflow, reopens nothing and emits no effect', { timeout: 600_000 }, async () => {
+  for (const [name, rec, mode, why] of [['done', recording(), 'Done', 'PlanDone'], ['overflow', overflowRecording(), 'Stopped', 'Overflow']]) {
+    const { rt } = await run(`e3-loop-late-begun-${name}`, rec);
+    try {
+      const before = { trial: (await rt.getState('trial:t1')).state, context: (await rt.getState('context:t1')).state, outbox: outboxCount(rt) };
+      assert.deepEqual([before.trial.mode, before.trial.why], [mode, why]);
+      // the dispatch may be accepted (the pin is taken whenever it arrives) or rejected (the context is closed); either way:
+      await rt.dispatch('context:t1', 'Begun', {}).catch(() => {});
+      await rt.advance(8);
+      const after = { trial: (await rt.getState('trial:t1')).state, context: (await rt.getState('context:t1')).state, outbox: outboxCount(rt) };
+      assert.deepEqual(after.trial, before.trial, `${name}: the trial was touched`);
+      assert.equal(after.context.mode, before.context.mode, `${name}: the context was reopened`);
+      assert.equal(after.outbox, before.outbox, `${name}: a late Begun emitted an effect`);
+    } finally {
+      await rt.close();
+    }
+  }
+});

@@ -180,3 +180,14 @@ M7 reported its suite line (2,537 of 2,543 passed, 0 failed, 2 skipped, 4 waitin
 **State counts after the changes** (checker, seconds each): Turn 1,783 states (39,650 transitions after the `none` guards), Context 2,064, Trial 742, Receipt 12, Observation 21, Ledger 12, Archive 3, the one-slot configuration 52 global.
 
 Next: E3.5, the mechanisms (Action Fusion, compaction, ObservationPack, the Evidence-Preserving Reducer) on recorded trajectories, with the trigger rates of HAC2. The joint configuration and `scan-verdict` stay open for the owner.
+
+## E3.4 accepted (owner, 2026-10-11)
+
+- **scan-verdict, split in two.** `scan-verdict-known` (the host's known secrets and the seven shapes) is **discharged** by the AC18 canary over the real store (`test/e3-loop.test.mjs`, "AC18, S554, gates 2 and 3: a token in a tool output reaches nothing the runtime, the store, the journal or the effect payloads hold", with its seeded control) and by the handler tests (`test/e3-handlers.test.mjs`) for the shapes, encodings and redaction. `scan-verdict-unrecognised` **stays open**: the canary cannot show that a credential of no known shape is caught. `test/e3-assumptions.test.mjs` holds both entries.
+- **The joint configuration stays open**, with the E3.4 numbers as its evidence. No more attempts above pairs at transit 2: the 3.5 GB runs are too close to the 4 GB line. In the certificate the rules are proved per machine (the statement `rules-proved-per-machine` of assumptions.json). The two faults the pairs found are recorded as evidence that the pairs were worth checking (`pairs-were-worth-checking`).
+- **S566 accepted.** The certificate says the audience classes are declared but unused, and that HF3.5 is held by the scan, the redaction and the step property, not by the flow rule (`audience-unused`).
+- **S567, for a later release.** `putContent` always stores the bottom class, so a host cannot give a body a class: a tool output cannot be tainted `secret`, and the audience lattice cannot carry HF3.5.
+- **K10: a later-release candidate**, listed with S563 to S565 and S567 (the candidate list: S563 vacuity diagnostic, S564 a pairing of a decision and its effect, S565 application assumptions in the certificate, S567 putContent's class, K10 a decision and an effect sharing one completion action). A test is kept that the runtime refuses it (`test/e3-loop.test.mjs`, "K10": the first draft's sharing restored in a variant is refused by the runtime with the action named).
+- **Late completions.** `test/e3-loop.test.mjs` holds that a late `Begun`, after the plan is done or after the trial ended on overflow, reopens nothing (the trial and the context mode are unchanged) and emits no effect (the outbox is unchanged).
+- **Plan length: accepted.**
+- **E3.5: go**, with the order: single checks and recorded runs only until JJ says M7's suite has finished. No whole-suite run of the E3 tests (the gate-reach file alone is 13 checks) before then.

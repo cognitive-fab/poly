@@ -32,13 +32,19 @@
       "evidence": "table-driven tests of the classifier over the declared set of fusable commands (E3.3)"
     },
     {
-      "id": "scan-verdict",
-      "assumption": "tool.scan completes ok only for a log with no credential in it, and failed for any log a pattern or a known secret matches (S554). A credential the scan cannot recognise is not caught.",
+      "id": "scan-verdict-known",
+      "assumption": "tool.scan completes ok only for a log with none of the host's known secrets (in four encodings) and none of the seven credential shapes, and failed for any log that has one (S554).",
       "effects": [
         "tool.scan"
       ],
+      "status": "discharged",
+      "by": "the AC18 canary over the real runtime store: test/e3-loop.test.mjs, \"AC18, S554, gates 2 and 3: a token in a tool output reaches nothing the runtime, the store, the journal or the effect payloads hold\", with its seeded control (a scan that does not know the secret leaves it in the archive and the same scan finds it); and test/e3-handlers.test.mjs for the shapes, the encodings, the benign corpus and the redaction (owner, 2026-10-11)"
+    },
+    {
+      "id": "scan-verdict-unrecognised",
+      "assumption": "A credential of no common shape that the vault does not know is not recognised by the scan, and so reaches the model, the archive and the journal. The canary cannot show that such a credential is caught.",
       "status": "open",
-      "evidence": "the AC18 canary scan over the real runtime store (every table, the outbox payloads, the content store, the project and its build), with a token in four encodings in a tool output, finds nothing; its seeded control, a scan that does not know the secret, is found (E3.4, test/e3-loop.test.mjs). Open still: a credential of no common shape that the vault does not know is not recognised, and the owner may rule the entry discharged"
+      "evidence": "none can exist: the canary knows only the tokens it was given. The limit is stated here and in the README"
     },
     {
       "id": "verifier-verdict",
@@ -107,6 +113,24 @@
       "assumption": "The observation slot is checked as one slot of K (PS13.8a): the properties are per slot, the ledger sends every slot the same message, and nothing the ledger does depends on the number of slots.",
       "status": "discharged",
       "by": "PS13.8a conditions 1 to 3, read off the module (Ledger sends Sent to its one reference and reads nothing back), and the K = 1, 2, 3 evidence of decisions-e3.md"
+    }
+  ],
+  "statements": [
+    {
+      "id": "rules-proved-per-machine",
+      "text": "The rules of HF3 are proved for each machine alone (Turn, Context, Trial, Receipt, and the observation slot as one slot, PS13.8a). They are not proved for the machines together: the joint configuration is open (see joint-configuration). In E3.4 the pairs Trial with Context and Turn with Trial were checked at transit 2 and gave an inconclusive verdict (the transit bound), and transit 3 for Trial with Context ran out of memory at 3.5 GB, so no pair has a verdict at a bound that is not hit; no more attempts above pairs at transit 2 are made (owner, 2026-10-11)."
+    },
+    {
+      "id": "pairs-were-worth-checking",
+      "text": "The first check of each pair found two faults in a machine that checked CLEAN alone: a reference passed as none made a machine send to nothing, and a failure that reached a trial before it began was lost. Both are fixed. They are recorded as evidence that the pairs were worth checking, and as the reason the entry joint-configuration is not treated as a formality."
+    },
+    {
+      "id": "audience-unused",
+      "text": "The audience classes (clean < secret) are declared in harness.poly and unused. The runtime requires an audience declaration before a decision may read Content, and a body the host stores with putContent always carries the bottom class (S566, S567). HF3.5 is held by the scan, the redaction and the step property (never emit storeClean while secret), not by the flow rule."
+    },
+    {
+      "id": "lint-not-proof",
+      "text": "Two properties are held by a source lint and not a proof: every model decision names its budget (S562) and the effect startCompaction and the summary decision are emitted in the same branch of the same handler (S564)."
     }
   ]
 }
