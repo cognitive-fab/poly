@@ -1,0 +1,69 @@
+// S463, PS15.5: the same application with an if, so no completion is ever rejected.
+module rc
+
+channel support: test {
+  adapter "test"
+  thread "{from}"
+  starts Agent.Start on inbound
+  Message -> Agent.Got
+  Delivered -> Agent.Delivered
+  Rejected -> Agent.SendRejected
+  Failed -> Agent.SendFailed
+}
+
+enum Phase { Idle, Asking, Replied, Done }
+
+service machine Agent {
+  state {
+    started : bool  = false
+    phase   : Phase = Idle
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Answered(answer: Content, conf: Conf)
+  action AnswerFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+  on Got(body) {
+    require phase is Idle else reject "busy"
+    phase' = Asking
+    decide answer(question: body)
+  }
+  on Answered(answer, conf) {
+    require phase is Asking else reject "not-asking"
+    if conf >= 0.5 {
+      phase' = Replied
+      emit support.reply(body: answer)
+    } else {
+      phase' = Done
+    }
+  }
+  on AnswerFailed {
+    require phase is Asking else reject "not-asking"
+    phase' = Done
+  }
+  on Delivered {
+    require started else reject "not-started"
+  }
+  on SendRejected(reason) {
+    require started else reject "not-started"
+  }
+  on SendFailed {
+    require started else reject "not-started"
+  }
+
+  decision answer(question: Content) -> Content {
+    provider "flash"
+    labels { egress:external }
+    timeout 2s
+    ok(r) -> Answered(answer: r.answer, conf: r.conf)
+    failed -> AnswerFailed()
+  }
+}

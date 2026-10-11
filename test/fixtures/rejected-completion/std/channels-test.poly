@@ -1,0 +1,92 @@
+// S456 (PS15.5, PS5.2a): the tests' channel kind for the application's completions. It is found through the test-only
+// std option and never ships in std/. The conversation takes one inbound message, which opens its window and arms the
+// window's timer; the timer's firing closes it. Its one rule, free-when-closed, is tested in a configuration only when
+// the application replies (Reply is the only action of the conversation that can emit send), so a configuration in
+// which the application never replies leaves it untested (vacuous). Kept small: one thread, one inbound message.
+module std.channels.test
+
+enum Window { Closed, Open }
+
+machine Peer {
+  state { }
+  action Message(body: Content)
+  action Delivered()
+  action Rejected(reason: string check { "window-closed" })
+  action Failed()
+}
+
+service machine Conversation {
+  state {
+    window  : Window = Closed
+    heard   : bool = false
+    pending : 0..2 = 0
+    receipt : bool = false
+    app     : Ref<Peer> = none
+  }
+
+  action Open(app: Ref<Peer>)
+  action Inbound(from: string check { "alice" } disclosed, body: Content)
+  action Reply(body: Content)
+  action Template()
+  action Expire()
+  action Sent()
+  action SendFailed()
+  action Ack()
+
+  on Open(app) {
+    require app != none else reject "no-app"
+    app' = app
+  }
+  on Inbound(from, body) {
+    require !heard else reject "heard"
+    heard' = true
+    window' = Open
+    after 1m -> Expire() as w
+    send app <- Message(body: body)
+  }
+  on Expire {
+    require window is Open else reject "closed"
+    window' = Closed
+  }
+  on Reply(body) {
+    require pending == 0 else reject "busy"
+    pending' = 1
+    if window is Open {
+      emit send(body: body)
+    } else {
+      receipt' = true
+      send app <- Rejected(reason: "window-closed")
+    }
+  }
+  on Template {
+    require window is Open else reject "closed"
+    require pending == 0 else reject "busy"
+    pending' = 1
+    emit send(body: none)
+  }
+  on Sent {
+    require pending == 1 && !receipt else reject "idle"
+    receipt' = true
+    send app <- Delivered()
+  }
+  on SendFailed {
+    require pending == 1 && !receipt else reject "idle"
+    receipt' = true
+    send app <- Failed()
+  }
+  on Ack {
+    require receipt else reject "no-receipt"
+    receipt' = false
+    pending' = 0
+  }
+
+  effect send(body: Content) {
+    kind "channel.send"
+    labels { egress:external }
+    ok -> Sent()
+    failed -> SendFailed()
+    exhausted -> SendFailed()
+  }
+
+  never free-when-closed: emit send while window is Closed
+}
