@@ -513,7 +513,7 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 
 ## The dry run, run (2026-10-11)
 
-`test/after/ex-inbox-dry-run.test.mjs` was run for the first time on request, alone, with nothing else running. It found four bugs in three runs, each fixed with a test of its own, and then passed; it is out of waiting, so the serial group runs it.
+`test/after/ex-inbox-dry-run.test.mjs` was run for the first time on request, alone, with nothing else running. Three runs failed, each on one defect (one of the test harness and two of the host and its setup), each fixed with a test of its own; the fourth passed; it is out of waiting, so the serial group runs it.
 
 | Run | What it found | Fix and test |
 |---|---|---|
