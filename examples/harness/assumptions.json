@@ -1,0 +1,74 @@
+{
+  "v": 1,
+  "about": "The harness module proves its rules relative to facts the host supplies and verdicts that certified handlers give (examples/harness/harness.poly, header). Each is a named assumption with a status, as S463 states the assumption of liveness: discharged (a check the build runs closes it) or open (nothing the build runs closes it; the evidence column says what tests it). The poly certificate lists only the assumptions poly's own checks name (poly.assumptions), so these are listed here and by the harness certificate (E3.10), which hashes this file.",
+  "assumptions": [
+    {
+      "id": "stop-reason",
+      "assumption": "The stop reason in Metered(s) is the provider's, for the call whose answer is Stepped (S550).",
+      "actions": ["Metered"],
+      "status": "open",
+      "evidence": "host test on recorded provider metadata (E3.4)"
+    },
+    {
+      "id": "token-buckets",
+      "assumption": "Grew(by), Measured(saving, rewrite) and the limit are the host's token counts, bucketed by the stated unit (a bucket is a sixth of the window, S551).",
+      "actions": ["Grew", "Measured", "Overflowed"],
+      "status": "open",
+      "evidence": "bucketing function tested at its boundaries (E3.4); the count itself is the provider's usage figure"
+    },
+    {
+      "id": "classifier-verdict",
+      "assumption": "tool.classify completes ok only for a call whose edit and follow-up may run as one, and failed otherwise (S559). The machine proves fusion follows the verdict, not that the verdict is right.",
+      "effects": ["tool.classify"],
+      "status": "open",
+      "evidence": "table-driven tests of the classifier over the declared set of fusable commands (E3.3)"
+    },
+    {
+      "id": "scan-verdict",
+      "assumption": "tool.scan completes ok only for a log with no credential in it, and failed for any log a pattern or a known secret matches (S554). A credential the scan cannot recognise is not caught.",
+      "effects": ["tool.scan"],
+      "status": "open",
+      "evidence": "canary tests over the context, the archive, the receipt and the journal, with a seeded control (E3.3)"
+    },
+    {
+      "id": "verifier-verdict",
+      "assumption": "tool.verify completes ok only for a receipt whose source hash matches the archived log, whose every quote occurs in the log byte for byte, whose exit status matches the command's, and which is smaller than the log (HT3, S553).",
+      "effects": ["tool.verify"],
+      "status": "open",
+      "evidence": "property tests and four seeded mutant verifiers, each caught (E3.3)"
+    },
+    {
+      "id": "stage-check-verdict",
+      "assumption": "tool.stage-check completes ok only when the task's check for that stage passes (HF2.7).",
+      "effects": ["tool.stage-check"],
+      "status": "open",
+      "evidence": "the tasks' own stage checks, run on the scratch copies (E3.7)"
+    },
+    {
+      "id": "compaction-size",
+      "assumption": "A compaction that completes ok leaves the window at the summary's size, two buckets (S561). The machine sets the window to two buckets on Compacted; the host's real size is read at the next Grew.",
+      "effects": ["tool.compact"],
+      "status": "open",
+      "evidence": "host test that a compacted transcript is smaller than the original (E3.4)"
+    },
+    {
+      "id": "dispatch-order",
+      "assumption": "The host dispatches Go, StoreLog, Measured, Overflowed, CapReached, Close and Show after it has seen the facts each needs. A require rejects an action out of turn; a host that never dispatches one leaves the run stuck, which is a stuck run and not a broken rule.",
+      "actions": ["Go", "StoreLog", "CapReached", "Close", "Show"],
+      "status": "open",
+      "evidence": "the loop's tests on recorded tasks (E3.4); liveness of the loop is not claimed"
+    },
+    {
+      "id": "joint-configuration",
+      "assumption": "The rules hold for each of Turn, Context, Trial and Receipt alone. The machines coordinate by messages (Turn to Trial, Trial to Context, Context to Trial), and the three are not yet checked as one configuration (owner, 2026-10-11).",
+      "status": "open",
+      "evidence": "E3.4 gate item: the joint configuration of Turn, Context and Trial must be checked CLEAN, or its bound reported, before this entry may read discharged"
+    },
+    {
+      "id": "one-slot-projection",
+      "assumption": "The observation slot is checked as one slot of K (PS13.8a): the properties are per slot, the ledger sends every slot the same message, and nothing the ledger does depends on the number of slots.",
+      "status": "discharged",
+      "by": "PS13.8a conditions 1 to 3, read off the module (Ledger sends Sent to its one reference and reads nothing back), and the K = 1, 2, 3 evidence of decisions-e3.md"
+    }
+  ]
+}

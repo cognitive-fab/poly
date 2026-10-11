@@ -73,7 +73,10 @@ test('HAC1 control: the harness module is CLEAN with its policy, and no rule is 
 // [tag, rule, the replacement line, expected code, where the witness is required, file to mutate, verdict (FINDINGS unless a
 // static refusal)]
 const VARIANTS = [
-  ['HF3.1', 'compaction in the middle of a plan step', 'if compactions < 2 && saving > rewrite {', 'PL3002', true, 'program'],
+  ['HF3.1', 'compaction in the middle of a plan step', 'if compactions < 2 && saving > rewrite {', 'PL3002', true, 'program', 'FINDINGS', 'compact-at-step-end-or-limit'],
+  // The gate with its counter guard dropped as well: the finding on the compaction rule itself must be there beside the
+  // domain escape of the counter (PL3102), and not instead of it (owner, 2026-10-11).
+  ['HF3.1b', 'compaction in the middle of a plan step, with the counter guard dropped too', 'if saving > rewrite {', ['PL3002', 'PL3102'], true, 'program', 'FINDINGS', 'compact-at-step-end-or-limit'],
   ['HF3.2', 'a receipt the verifier did not pass is shown', 'if st is Verified || st is Rejected {', 'PL3002', true, 'program'],
   ['HF3.3', 'a handle issued before the archive holds the output', 'on Put { require st is Empty else reject "not-empty"  st\' = Full  send arch <- Store(from: self) }', 'PL5401', true, 'program'],
   ['HF3.4', 'a command fused without the classifier word', 'if plan is Fusable || plan is Separate {', 'PL3002', true, 'program'],
@@ -85,9 +88,10 @@ const VARIANTS = [
   ['HF3.10', 'an offline run that allows a network effect', 'when proposal.kind == "effect" && effect.kind == "tool.stage-check"', ['PL6503', 'PL7001'], true, 'policy'],
 ];
 
-for (const [tag, what, line, code, witness, file, verdict = 'FINDINGS'] of VARIANTS) {
-  test(`HAC1 ${tag}: ${what} is ${code}${witness ? ' with a witness' : ''}`, async () => {
-    const r = await checkVariant(tag, file === 'program' ? (s) => seed(s, tag, line) : keep, file === 'policy' ? (s) => seed(s, tag, line) : keep);
+for (const [id, what, line, code, witness, file, verdict = 'FINDINGS', rule] of VARIANTS) {
+  const tag = id.replace(/[a-z]$/, '');
+  test(`HAC1 ${id}: ${what} is ${code}${witness ? ' with a witness' : ''}`, async () => {
+    const r = await checkVariant(id, file === 'program' ? (s) => seed(s, tag, line) : keep, file === 'policy' ? (s) => seed(s, tag, line) : keep);
     assert.equal(r.verdict, verdict, `${tag}: ${r.verdict} ${codesOf(r).join(' ')}`);
     assert.deepEqual(codesOf(r), [].concat(code).sort(), `${tag} must give exactly ${[].concat(code).join(' ')}`);
     if (witness) {
@@ -95,6 +99,7 @@ for (const [tag, what, line, code, witness, file, verdict = 'FINDINGS'] of VARIA
       assert.ok(w.length > 0, `${tag}: no witness`);
       assert.ok(w.every((x) => (x.trace?.length ?? x.length ?? 0) > 0), `${tag}: an empty witness`);
     }
+    if (rule) assert.ok(findings(r).some((d) => d.code === 'PL3002' && `${d.property ?? ''} ${d.message}`.includes(rule)), `${id}: no finding on the rule ${rule} itself`);
   });
 }
 
