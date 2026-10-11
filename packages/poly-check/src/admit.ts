@@ -28,6 +28,24 @@ export class AdmitError extends Error {
 /** Deliberately broken certificate writers, for the read-back's test only (test/toolchain-faults.mjs). */
 /** Review C8 (M11): what a route's cost does not count, listed in every certificate with a route (K15, PS18.3). */
 /** S463, PS6.4: what a machine's liveness assumes; the certificate states it with its status, and PL5409 discharges it (PS15.5). */
+/** The statement that can reject: a require or a reject, in any branch (PS6.4, S463). */
+function rejects(body: A.Stmt[]): boolean {
+  return body.some((s) => s.kind === 'Require' || s.kind === 'Reject' || (s.kind === 'If' && (rejects(s.then) || rejects(s.else ?? []))) || (s.kind === 'Match' && s.arms.some((a) => rejects(a.body))) || (s.kind === 'For' && rejects(s.body)));
+}
+
+/**
+ * S463, PS6.4: whether no completion handler of a machine can reject, by the syntax of its handlers alone: none of the
+ * handlers of the actions that the ok, failed and exhausted outcomes of its own decisions and effects name has a require
+ * or a reject, and the machine declares no guard (which rejects every action). Sound, not complete.
+ */
+export function noRejectingCompletion(machine: A.Machine | undefined): boolean {
+  if (!machine) return false;
+  if (machine.items.some((i) => i.kind === 'Guard')) return false;
+  const completions = new Set<string>();
+  for (const i of machine.items) if (i.kind === 'EffectDecl' || i.kind === 'Decision') for (const x of i.items) if (x.kind === 'EffOutcome') completions.add(x.action);
+  return !machine.items.some((i) => i.kind === 'Handler' && completions.has(i.action) && rejects(i.body));
+}
+
 const LIVENESS_ASSUMPTION = "machine-level liveness assumes that no completion of the program's own decisions and effects is rejected: the machine check offers a completion as an ordinary action in any state (PS4.4), and at run time a rejected completion consumes its intent";
 const ROUTING_LIMIT = "a call's cost is its provider's usage report at the certified prices (K15): a call whose provider gave no answer reports no usage and its reservation is released, so what a provider bills for such a call is not counted; a usage report that is not whole token counts fails the call; a reservation covers the token limit at the highest price, which a call over its input tokens may exceed, recorded as an overrun";
 
@@ -313,7 +331,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const memoryFlows: { module: string; descriptor: string; want: string }[] = [];
   // PT10r: each route's and each budget's descriptor, which the runtime reads to run the tiers and hold the caps.
   const routes: { name: string; descriptor: string; want: string }[] = [];
-  const livenessMachines: string[] = [];
+  const livenessMachines: { id: string; form: boolean }[] = [];
   const budgets: { name: string; descriptor: string; want: string }[] = [];
   const routingOwners = new Map<string, string>();
   for (const r of report.files) {
@@ -370,7 +388,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
       instances[id] = m.instance;
       domains[id] = m.instance.domains;
       for (const k of m.instance.kernelAssumptions) kernel.add(k);
-      if (m.stages.some((s) => s.stage === 'liveness' && s.status === 'ran')) livenessMachines.push(id);
+      if (m.stages.some((s) => s.stage === 'liveness' && s.status === 'ran')) livenessMachines.push({ id, form: noRejectingCompletion(ast?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === m.machine)) });
       // Only a program's certificate claims every check clean; a witness certificate records the clean ones it has.
       for (const s of m.stages) if (s.status === 'ran' && s.verdict === 'CLEAN') checks.push({ name: `${id}:${s.stage}`, ok: true, engine: s.engine, verdict: 'CLEAN' });
       const decl = ast?.decls.find((d): d is A.Machine => d.kind === 'Machine' && d.name === m.machine);
@@ -406,10 +424,10 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   if (decisions.length) kernel.add('K10');
   // S463, PS6.4, PS15.5: a machine's liveness assumption is discharged by a generated configuration whose application it is,
   // checked, with no PL5409; it is open when none covers the machine, or the one that does reported PL5409 (accepted).
-  const assumptions: NonNullable<Certificate['poly']['assumptions']> = livenessMachines.map((machine) => {
+  const assumptions: NonNullable<Certificate['poly']['assumptions']> = livenessMachines.map(({ id: machine, form }) => {
     const covering = report.files.flatMap((r) => r.configurations.filter((k) => channels.some((ch) => ch.name === k.configuration && ch.application === machine)).map((k) => ({ name: `${r.module}.${k.configuration}`, k })));
     const clean = covering.find(({ k }) => k.instance && !k.diagnostics.some((d) => d.code === 'PL5409'));
-    return { id: 'liveness-completions' as const, machine, assumption: LIVENESS_ASSUMPTION, status: clean ? 'discharged' as const : 'open' as const, by: clean ? clean.name : null };
+    return { id: 'liveness-completions' as const, machine, assumption: LIVENESS_ASSUMPTION, status: clean || form ? 'discharged' as const : 'open' as const, by: clean ? clean.name : form ? 'no rejecting completion handler' : null };
   });
 
   // Review A1, A2: certify what the check checked. Each source is the text the check read, and each artefact the
