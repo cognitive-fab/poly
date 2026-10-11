@@ -94,6 +94,26 @@ test('PT12 warnings, S19: a map with first point [1,1] does not warn for zero-in
   if (warns.length === 1) assert.ok(!/interval/.test(warns[0].why), 'not the zero-interval reason');
 });
 
+test('PT12 warnings, S19: a band of exactly 100 raw values above raw 0 sent to 0 is quiet, and one value wider warns', { timeout: 300_000 }, async () => {
+  // [[0,0],[101,50],...]: the raw values 1..100 are 0, a band of 100 (the value 0 itself is left out). Not on the diagonal.
+  // [[0,0],[102,50],...]: the raw values 1..101 are 0, a band of 101. Just under the limit stays quiet, just over warns.
+  for (const [firstStep, warns] of [[101, false], [102, true]]) {
+    const map = { decision: 'classify', version: 1, fittedFor: 'flash-2026-09', points: [[0, 0], [firstStep, 50], [1000, 900]] };
+    const { r } = await check(DESK, { 'maps/flash.json': { ...map, digest: mapDigest(map) } });
+    assert.equal(r.verdict, 'CLEAN', text(r));
+    const w = (r.warnings ?? []).filter((x) => x.kind === 'calibration' && x.tier === 'small');
+    assert.equal(w.length, warns ? 1 : 0, JSON.stringify([firstStep, r.warnings]));
+    if (warns) { assert.match(w[0].why, /101 raw values 1 to 101/); assert.doesNotMatch(w[0].why, /diagonal/); }
+  }
+  // Raw 0 alone, or the narrow band near it from a map that starts higher, is harmless.
+  for (const points of [[[1, 1], [1000, 1000]], [[0, 0], [30, 20], [1000, 900]]]) {
+    const map = { decision: 'classify', version: 1, fittedFor: 'flash-2026-09', points };
+    const { r } = await check(DESK, { 'maps/flash.json': { ...map, digest: mapDigest(map) } });
+    const w = (r.warnings ?? []).filter((x) => x.kind === 'calibration' && x.tier === 'small');
+    assert.ok(!w.some((x) => /to 0/.test(x.why)), JSON.stringify([points, r.warnings]));
+  }
+});
+
 test('PT12 warnings, S19: a map that never reaches 0 does not warn for zero-interval', { timeout: 300_000 }, async () => {
   const map = { decision: 'classify', version: 1, fittedFor: 'flash-2026-09', points: [[0, 10], [500, 480], [1000, 990]] };
   const body = { ...map, digest: mapDigest(map) };
@@ -133,11 +153,9 @@ test('PT12 warnings, S19: identity-looking maps warn for different lag tolerance
   assert.equal(r100.verdict, 'CLEAN', text(r100));
   const warns100 = (r100.warnings ?? []).filter((w) => w.kind === 'calibration' && w.tier === 'small');
   // Lag at raw 99: calibrated is 0, expected 99. Lag is 99, within tolerance of 100, so no identity warning.
-  // But raw 0..99 maps to 0, a whole interval, so warns for zero-interval.
-  assert.equal(warns100.length, 1, JSON.stringify(r100.warnings));
-  assert.match(warns100[0].why, /to 0/, 'the zero interval is its reason');
-  assert.doesNotMatch(warns100[0].why, /diagonal/, 'the lag is 99, within the tolerance of 100');
-  // Each reason alone. From (1, 1) only the raw value 0 is calibrated to 0, which is not an interval, so the diagonal is the
+  // Raw 1..99 maps to 0, 99 values, a band of at most 100 (ruled 2026-10-11), so it is quiet for the zero band as well.
+  assert.equal(warns100.length, 0, JSON.stringify(r100.warnings));
+  // Each reason alone. From (1, 1) only the raw value 0 is calibrated to 0, which is harmless, so the diagonal is the
   // one reason: spacing 250 lags by 249 thousandths and warns; points 100 apart lag by 99 or less and do not.
   for (const [step, warns] of [[250, true], [100, false]]) {
     const points = [[1, 1]];
@@ -149,7 +167,6 @@ test('PT12 warnings, S19: identity-looking maps warn for different lag tolerance
     assert.equal(w.length, warns ? 1 : 0, JSON.stringify([points, r.warnings]));
     if (warns) { assert.match(w[0].why, /diagonal/); assert.doesNotMatch(w[0].why, /to 0/); }
   }
-  if (warns100.length === 1) assert.ok(/interval|0/.test(warns100[0].why), 'warns for zero-interval, not identity');
 });
 
 test('PT12 warnings, S19: a two-tier route with two warned maps has two warning entries', { timeout: 300_000 }, async () => {
