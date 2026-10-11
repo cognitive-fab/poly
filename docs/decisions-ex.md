@@ -511,6 +511,25 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 
 **Light tests, 69 of 69:** the provider, setup, read-only, README and host tests for the inbox, the Gmail source and MIME reader, and the concierge's host, liveness, refund and policy tests, with `examples-check`.
 
+## The dry run, run (2026-10-11)
+
+`test/after/ex-inbox-dry-run.test.mjs` was run for the first time on request, alone, with nothing else running. It found four bugs in three runs, each fixed with a test of its own, and then passed; it is out of waiting, so the serial group runs it.
+
+| Run | What it found | Fix and test |
+|---|---|---|
+| 1 | Steps 1 to 5 (the scaffold, the anchor, the policy signature, the admission, the signed grant requests) passed. The host refused to load: the certificate was admitted with a test keyring anchor, which only a test process accepts (S194). | A defect of the test harness, not the host: the preload that keeps the per-user keyring configuration away from the real user's now also calls `acceptTestAnchors`, as every test that loads does. Covered by the dry run itself. |
+| 2 | The host stopped at its keychain: "the store directory is named file:PATH, never by value or env: (S200)". The config gave the blobs' directory as a plain path. | `keychainFor(config, credential)` gives the key and the directory as `file:PATH`. `test/ex-inbox-startup.test.mjs`: the keychain round-trips a token, keeps each credential's grants apart, and writes no token in the clear. |
+| 3 | The host ran, linked both accounts and synced four messages, and every one was held: all eight triage and kind decisions ended `route-exhausted`. Setup's "identity" calibration map had two points, (0,0) and (1000,1000), and the runtime reads a map as a step function (the calibrated value of the last point at or below the raw one), so a raw 0.97 became 0 and nothing cleared any threshold. A live run would have held every message. | Setup writes a point at every thousandth. `test/ex-inbox-setup.test.mjs` calibrates 0, 0.001, 0.2, 0.4, 0.6, 0.8, 0.9, 0.97, 0.999 and 1 through each generated map and expects each back. |
+| 4 | Passed: 256 s. | |
+
+**What the passing run holds.** Every README dry-run step exits clean. The host links both accounts, syncs them, triages the mail (two to-dos, two filed), and prints its digest. In the read-only run the outbox holds decisions of triage and kind and **no `gmail.createDraft`, no `decision.write` and no `source.mail.envelope` row**, on the real runtime. A command to draft is refused by a second read-only run, with the reason, and the outbox is still free of them. Only the read requests were taken from the approvals folder. No private key and no token is in any project file.
+
+**Step 8 is in the same test**, run with the README's own live commands for this project: `link --drafts`, `ask` (draft, then propose), `approve`. The host accepts the draft request, the proposal waits ("Waiting for your approval", with the intent), the signed approval dropped in the approvals folder is taken, the next pass creates the draft in the thread (the fake Gmail is asked to create it in thread 19a2f0c4d1e70a01, to the supplier's address from the mailbox's envelope), the `createDraft` intent is `done` and the to-do reads `[created]`. The digest now shows a to-do's status when it is not Open.
+
+**What this does and does not show.** It shows the host and the README's steps, run by a test, against a fake Google and a recorded model. It does not show the live side: the real Google consent screen and redirect (`localhost` against the two loopbacks the host listens on), the real token endpoint, the Anthropic API, and the real price tables. Those are the owner's first run.
+
+**Light tests, 70 of 70**, and `npm run check:boundaries` passes.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy and meets AC27 end to end; the inbox meets IAC1 to IAC9 on recorded traffic.

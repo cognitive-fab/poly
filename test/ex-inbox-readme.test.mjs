@@ -17,7 +17,7 @@ const DRY = ['dry-1-setup', 'dry-2-anchor', 'dry-3-sign', 'dry-4-admit', 'dry-5-
 test('the dry run\'s steps are in the README, in order, and every command is a node script that exists with its placeholders filled', () => {
   const { steps, live } = readmeSteps(TEXT);
   assert.deepEqual(steps.map((s) => s.name), DRY);
-  assert.deepEqual(live, ['environment, bash', 'environment, PowerShell', 'setup', 'anchor', 'sign', 'admit', 'link', 'run', 'drafts', 'ask', 'approve']);
+  assert.deepEqual(live.map((s) => s.name), ['environment, bash', 'environment, PowerShell', 'setup', 'anchor', 'sign', 'admit', 'link', 'run', 'drafts', 'ask', 'approve']);
   const vars = { REPO: ROOT, DRY_PROJECT: join(tmpdir(), 'p'), DRY_KEYS: join(tmpdir(), 'k') };
   for (const s of steps) {
     assert.ok(s.commands.length >= 1, s.name);

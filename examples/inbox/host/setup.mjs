@@ -145,9 +145,11 @@ export async function main(argv, io = { out: (s) => process.stdout.write(s), err
       writeFileSync(join(projectDir, 'src', 'prices', `${name}.json`), JSON.stringify({ v: 1, provider: name, model, currency: 'usd', perMillionTokens: price, source, readOn }, null, 2) + '\n');
     }
     // Identity maps: the raw probability is the calibrated one, until `poly journal fit` writes a map fitted on your own mail.
+    // A map is a step function (the calibrated value of the last point at or below the raw one), so the identity has a point
+    // at every thousandth; two points at 0 and 1000 would read every raw probability under 1 as 0.
     const { mapDigest } = await import(pathToFileURL(join(ROOT, 'packages', 'poly-runtime', 'dist', 'src', 'index.js')).href);
     for (const [file, decision, model] of [['triage-small', 'triage', models.small], ['triage-large', 'triage', models.large], ['kind-small', 'kind', models.small], ['kind-large', 'kind', models.large]]) {
-      const body = { decision, version: 1, fittedFor: model, points: [[0, 0], [1000, 1000]] };
+      const body = { decision, version: 1, fittedFor: model, points: Array.from({ length: 1001 }, (_, i) => [i, i]) };
       writeFileSync(join(projectDir, 'src', 'maps', `${file}.json`), JSON.stringify({ ...body, digest: mapDigest(body) }, null, 2) + '\n');
     }
 

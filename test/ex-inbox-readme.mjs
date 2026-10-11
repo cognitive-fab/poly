@@ -13,7 +13,7 @@ import { ROOT } from './helpers.mjs';
 export const README = join(ROOT, 'examples', 'inbox', 'README.md');
 const PRELOAD = join(ROOT, 'test', 'ex-inbox-preload.mjs');
 
-/** The test steps of the README, in order: { name, commands: [line] }, and the live steps' names. */
+/** The test steps of the README, in order, and the live steps the owner runs on his own accounts: each { name, commands: [line] }. */
 export function readmeSteps(text = readFileSync(README, 'utf8')) {
   const steps = [];
   const live = [];
@@ -22,7 +22,7 @@ export function readmeSteps(text = readFileSync(README, 'utf8')) {
     for (const raw of block[1].split(/\r?\n/)) {
       const line = raw.trim();
       const m = /^# (step|live): (.+)$/.exec(line);
-      if (m) { current = m[1] === 'step' ? { name: m[2], commands: [] } : null; if (current) steps.push(current); else live.push(m[2]); continue; }
+      if (m) { current = { name: m[2], commands: [] }; (m[1] === 'step' ? steps : live).push(current); continue; }
       if (current && line && !line.startsWith('#')) current.commands.push(line);
     }
   }

@@ -49,7 +49,7 @@ export function formatDigest(model, { drafts }) {
   }
   if (model.todos.length) {
     out.push('To do:');
-    for (const t of model.todos) out.push(`  [${t.label}] ${t.title ?? '(no title yet)'}${t.due && t.due !== 'Unstated' ? ` (due: ${t.due})` : ''}${t.reply ? ', a reply is wanted' : ''}  <${t.id}>`);
+    for (const t of model.todos) out.push(`  [${t.label}] ${t.title ?? '(no title yet)'}${t.status !== 'Open' ? ` [${t.status.toLowerCase()}]` : ''}${t.due && t.due !== 'Unstated' ? ` (due: ${t.due})` : ''}${t.reply ? ', a reply is wanted' : ''}  <${t.id}>`);
   }
   if (model.held.length) {
     out.push('Held for you (the assistant was unsure, or the model could not be asked):');

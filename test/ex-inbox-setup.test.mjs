@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { commandNamed } from '@poly/check';
+import { calibrate } from '@poly/runtime';
 import { mapProblem, parseManifest } from '@poly/core';
 import { parse } from '@poly/lang';
 import { ROOT } from './helpers.mjs';
@@ -54,7 +55,9 @@ test('setup scaffolds a project and keys, prints paths and no key, and leaves no
     for (const [f, model] of [['triage-small', 'small-model-id'], ['triage-large', 'large-model-id'], ['kind-small', 'small-model-id'], ['kind-large', 'large-model-id']]) {
       const m = JSON.parse(readFileSync(join(project, 'src', 'maps', `${f}.json`), 'utf8'));
       assert.equal(mapProblem(m), null, f);
-      assert.deepEqual([m.fittedFor, m.points], [model, [[0, 0], [1000, 1000]]]);
+      assert.equal(m.fittedFor, model);
+      // The map is the identity as the runtime reads it: a step function, so a raw probability maps to itself at every thousandth.
+      for (const p of [0, 0.001, 0.2, 0.4, 0.6, 0.8, 0.9, 0.97, 0.999, 1]) assert.equal(calibrate(m, p), Math.round(p * 1000), `${f} at ${p}`);
     }
     assert.deepEqual(JSON.parse(readFileSync(join(project, 'src', 'prices', 'small.json'), 'utf8')), { v: 1, provider: 'small', model: 'small-model-id', currency: 'usd', perMillionTokens: { input: 1000000, output: 5000000 }, source: 'https://example.com/prices', readOn: '2026-10-11' });
     // The handler file is the host's drafts handler, and it passes the lint that refuses ambient authority.

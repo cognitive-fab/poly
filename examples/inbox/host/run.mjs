@@ -83,6 +83,13 @@ export function checkSizing(buildDir, results, samples) {
   if (small.length) throw new HostError(`the program's token limits are not sized for ${samples} asks: ${small.join('; ')}. Run setup.mjs with --samples ${samples}, or lower model.samples`);
 }
 
+/** The development keychain of one credential: its key is `file:PATH` and its blobs are in a directory of its own, `file:PATH` too (S200). */
+export function keychainFor(config, credential) {
+  const dir = join(config.vault.dir, credential);
+  mkdirSync(dir, { recursive: true });
+  return devKeychain({ key: config.vault.key, dir: `file:${dir}` });
+}
+
 /**
  * A callback server for Google's redirect, on loopback only: the code and state arrive in the query of a GET. The redirect
  * names `localhost`, which a browser may resolve to the IPv4 or the IPv6 loopback, so both are listened on (the IPv6 one
@@ -161,9 +168,7 @@ export async function startHost(opts, io) {
     const clientSecret = fixtures ? 'dry-run-secret' : env(config.google.clientSecretEnv, 'your OAuth client secret');
     const vaults = {};
     for (const credential of drafts ? [READ, COMPOSE] : [READ]) {
-      const dir = join(config.vault.dir, credential);
-      mkdirSync(dir, { recursive: true });
-      vaults[credential] = oauthVault(profile, { clientId, redirectUri: `${config.publicBase}/credentials/${credential}`, clientSecret }, devKeychain({ key: config.vault.key, dir }), { http });
+      vaults[credential] = oauthVault(profile, { clientId, redirectUri: `${config.publicBase}/credentials/${credential}`, clientSecret }, keychainFor(config, credential), { http });
       host.connectVault(credential, vaults[credential]);
     }
     const callback = credentialIngress(rt, vaults, () => rt.now());
@@ -270,6 +275,8 @@ export async function startHost(opts, io) {
         }
         await settle(rt);
       }
+      // The dry run shows what the fake Gmail was asked to do, which a live run sees in Gmail's Drafts.
+      if (google) for (const d of google.created.splice(0)) say(`dry run: Gmail was asked to create a draft in thread ${d.threadId}, to ${/^To: ([^\r\n]*)/m.exec(d.raw)?.[1] ?? '?'}`);
       say(formatDigest(await readDigest(rt, { accounts, source }), { drafts }));
       if (state.authFailed) say('The model provider refused the key (expired or revoked). Messages wait, and nothing is guessed. Set a fresh key and restart the host (README.md, "If the model key expires").');
       return { created, opened };
