@@ -56,3 +56,25 @@ Evidence (`experiments/e3-probes/p2/gen.mjs`; the machines are service machines,
 | 3 | CLEAN, 17,992 | FINDINGS: `PL5401` on slots 1, 2 and 3, slot 1's witness the same 7 steps |
 
 The 7 steps are `Req@s`, `Req@s`, `Put@o1`, `Store(o1) -> a1`, `Stored() -> o1`, `Sent() -> o1`, `Sent() -> o1`. The other slots' witnesses have the same shape on their own slot. A condition of the harness, to be stated in its README: the real `Session` sends each observation the same `Sent` per request and reads nothing from the slots, so (1) to (3) hold for the handle and twice-sent properties; the budget and the context size are properties of `Session` alone and are not projected.
+
+## E3.1: the rules, tests first (2026-10-11)
+
+`test/e3-hac1.test.mjs`: 12 tests, all failing, each because `examples/harness/harness.poly` does not exist (ENOENT): one control (the module is `CLEAN` with its policy, and no rule is vacuous), ten seeded variants (HF3.1 to HF3.10) and the change gate (HF3.11). A variant replaces the one line tagged `// @HF3.n` in the module, so E3.2 must write each guard as one tagged line; the test header is the contract (rule, place, guard, expected code).
+
+| Rule | Variant | Expected |
+|---|---|---|
+| HF3.1 | the gate allows compaction mid-step below the limit | `PL3002` with a witness |
+| HF3.2 | `Show` accepts a rejected receipt | `PL3002` with a witness |
+| HF3.3 | `Put` makes an observation `Full` before the archive stores | `PL5401` in the 1-slot configuration, with a witness (PS13.8a) |
+| HF3.4 | fusion without the classifier's word | `PL3002` with a witness |
+| HF3.5 | a flagged log stored as clean | `PL3002` with a witness (the canary of E3.3 is the other half) |
+| HF3.6 | a reservation above the per-run cap | `PL6845` (a static refusal, no witness) |
+| HF3.7 | a step ended on a cutoff with no reprompt | `PL3002` with a witness |
+| HF3.8 | overflow ends the trial with no compaction tried | `PL3002` with a witness |
+| HF3.9 | a cap ends the trial before the work is saved | `PL3002` with a witness |
+| HF3.10 | the offline deny rule no longer matches network effects | `PL6503` with a witness |
+| HF3.11 | `checkChange` refuses a rule file, the policy, a price table, the gate itself or a path outside `editable/` | a unit test (host code) |
+
+**A limit found while writing HF3.6 (S562, for the record, no ruling asked).** A model decision that names no `budget` is not a finding: the checker proves the `Budget` invariant for the decisions that name it, and `PL6845` for a reservation that cannot fit, but nothing flags a decision with no budget clause, and the policy inputs (`effect.kind`, `labels`, `class`, `taint`, `items`, `provenance`) do not carry the budget. So HF3.6's variant is the reservation above the cap, and the unbudgeted decision is covered by a source test (E3.2: every `decision` in the module names `budget task`), which is a lint, not a proof. The certificate and README state this. A core check (a decision with no budget in a module that declares one) would close it; it is a core change, so E3 does not make it. The owner may rule it into a later release.
+
+The tests are not committed to the measured set: nothing under `examples/` exists yet. Next: E3.2, the machines and the policy.
