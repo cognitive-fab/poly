@@ -144,3 +144,11 @@ E3.2 accepted, with its contract changes (the Turn, Context, Trial and Receipt m
 **Not here, and where it goes.** `stageCheck` needs the tasks and their checks: E3.7. `saveWork` needs the sandbox and the scratch folders: E3.4. The effects' labels, targets and payloads in `harness.poly` (they are payload-free now: `scan()`, `classify(calls)`, `verify(receipt)`; the handlers read the turn's output, log and archive through a store capability keyed by the instance) are made to match the capabilities the runtime grants when the handlers first run under it, in E3.4. If that changes the module, the HAC1 tests and the gate-reach tests run again.
 
 Next: E3.4, the host and the loop. Its gate items, as ruled: the joint configuration of Turn, Context and Trial checked CLEAN (or its bound reported); the handlers' failure mapping against the runtime; the standing canary scan over the real journal and store; the record of a recorded task replayed.
+
+## E3.3 accepted (owner, 2026-10-11)
+
+- **Gate branches: accepted.** All 13 are reached, each with its witness.
+- **S564, added to the record.** The pairing of `startCompaction` with the summary decision can be held by a lint (the same branch of the same handler) but not proved: a path property must be prefix closed (`PL1701`), and an equality of two counts is not. The same-branch source lint stands in place of a path property.
+- **S565: accepted.** `examples/harness/assumptions.json` holds the host facts and the harness certificate hashes it. A core field for application-declared assumptions in the poly certificate is for a later release, listed with S562 and S563. E3 makes no core change.
+- **E3.4 gate items.** (1) Failure mapping: test that a verifier's permanent error completes as the effect's failed outcome with no retry; if the runtime retries, stop and report, and do not work around it in the harness. (2) Module effects: when the effects get their labels, targets and payloads, re-run the HAC1 and gate tests, and extend the canary to the effect payloads. (3) The canary sink: run the AC18 scan over the real journal store; `scan-verdict` stays open until it passes. (4) The joint configuration stays an open assumption, as recorded.
+- **Order.** Hold E3.4 until M7 reports its suite line. Then run the 12-test HAC1 file once as the E3.4 baseline, and begin.
