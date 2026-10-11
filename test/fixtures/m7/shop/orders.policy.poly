@@ -1,0 +1,17 @@
+// M7.2 fixture: the shop's policy before anything is promoted. One mandate (stock is reserved before a session ends) and
+// a fee rule; the promotion tests add to it.
+module orders_policy
+
+policy orders-governance {
+  scope "orders"
+  obligation reserved-by-end "Every session reserves stock before it ends." machine {
+    states waiting, reserved
+    initial waiting
+    from waiting when effect.kind == "stock.reserve" -> reserved
+    end reserved
+  }
+  obligation fee-free "No fee is charged." rule {
+    when effect.kind == "payment.fee"
+    require false else deny
+  }
+}
