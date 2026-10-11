@@ -1,0 +1,24 @@
+// S463, PS6.4: no completion handler of the machine can reject, so its liveness assumption is discharged by its form.
+module mf
+
+enum S { Waiting, Asking, Done }
+
+machine Asker {
+  state { s : S = Waiting }
+  terminal s == Done
+  action Ask()
+  action Answered()
+  action Failed()
+  on Ask { require s == Waiting else reject "asked"   s' = Asking   emit fetch() }
+  on Answered { s' = Done }
+  on Failed { s' = Done }
+  liveness settles: s == Asking leads to s == Done
+    under fair { Answered | Failed }
+  effect fetch() {
+    kind "ml.fetch"
+    labels { egress:external }
+    targets { egress: "https://example.org/" }
+    ok -> Answered()
+    failed -> Failed()
+  }
+}

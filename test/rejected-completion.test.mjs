@@ -106,13 +106,20 @@ test('S463, certificate: the liveness assumption is discharged when the generate
   assert.deepEqual(bare(poly), [], 'the assumption is not a bare limit');
 });
 
-test('S463, certificate: the assumption is open when no generated configuration covers the machine', { timeout: 300_000 }, async () => {
-  const poly = await admitFixture('rc-open', 'test/fixtures/rejected-completion/machine-live.poly');
-  assert.deepEqual(live(poly).map((x) => [x.machine, x.status, x.by]), [['ml.Asker', 'open', null]], JSON.stringify(poly.assumptions));
+test('S463, certificate: a machine none of whose completion handlers can reject is discharged by its form', { timeout: 300_000 }, async () => {
+  const poly = await admitFixture('rc-form', 'test/fixtures/rejected-completion/machine-form.poly');
+  assert.deepEqual(live(poly).map((x) => [x.machine, x.status, x.by]), [['mf.Asker', 'discharged', 'no rejecting completion handler']], JSON.stringify(poly.assumptions));
   assert.deepEqual(bare(poly), []);
 });
 
-test('S463, certificate: the std machines of a credential carry the assumption, open while no generated configuration covers them', { timeout: 300_000 }, async () => {
+test('S463, certificate: a completion handler that rejects in a branch, or a guard, leaves the assumption open when no configuration covers the machine', { timeout: 300_000 }, async () => {
+  for (const [name, file, machine] of [['rc-nested', 'machine-form-nested.poly', 'mn.Asker'], ['rc-guard', 'machine-form-guard.poly', 'mg.Asker'], ['rc-require', 'machine-live.poly', 'ml.Asker']]) {
+    const poly = await admitFixture(name, `test/fixtures/rejected-completion/${file}`);
+    assert.deepEqual(live(poly).map((x) => [x.machine, x.status, x.by]), [[machine, 'open', null]], `${file}: ${JSON.stringify(poly.assumptions)}`);
+  }
+});
+
+test('S463, certificate: the std machines of a credential are open, since their completion handlers have a require (the form does not discharge them) and no generated configuration covers them', { timeout: 300_000 }, async () => {
   const poly = await admitFixture('rc-grant', 'test/fixtures/m9/stripe-refund.poly', { credentials: { payments: { store: 'kms' } }, std: null });
   const mine = live(poly);
   assert.ok(mine.length > 0, JSON.stringify(poly.assumptions));

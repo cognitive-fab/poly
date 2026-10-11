@@ -1,0 +1,25 @@
+// S463, PS6.4: a machine alone with a liveness property; its certificate states what machine-level liveness assumes.
+module mg
+
+enum S { Waiting, Asking, Done }
+
+machine Asker {
+  state { s : S = Waiting }
+  terminal s == Done
+  action Ask()
+  action Answered()
+  action Failed()
+  guard all when s == Done reject "over"
+  on Ask { require s == Waiting else reject "asked"   s' = Asking   emit fetch() }
+  on Answered { s' = Done }
+  on Failed { s' = Done }
+  liveness settles: s == Asking leads to s == Done
+    under fair { Answered | Failed }
+  effect fetch() {
+    kind "ml.fetch"
+    labels { egress:external }
+    targets { egress: "https://example.org/" }
+    ok -> Answered()
+    failed -> Failed()
+  }
+}
