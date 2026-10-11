@@ -1,0 +1,25 @@
+From: Alice Moreau <alice@supplier.example.com>
+To: Owner <owner@work.example.com>
+Subject: Re: Invoice 4471 for the October delivery
+Date: Tue, 06 Oct 2026 14:30:00 +0000
+Message-ID: <inv-4471-2@supplier.example.com>
+In-Reply-To: <inv-4471@supplier.example.com>
+References: <inv-4471@supplier.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-0001"
+
+This is a multi-part message in MIME format.
+
+--alt-0001
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+A short reminder: invoice 4471 is due on Friday. The total is 1=2C240.00 =E2=
+=82=AC.
+Thank you =E2=80=93 Alice
+--alt-0001
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<p>A short reminder: invoice 4471 is due on Friday.</p>
+--alt-0001--

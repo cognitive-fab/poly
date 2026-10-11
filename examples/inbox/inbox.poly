@@ -1,0 +1,462 @@
+// expected: CLEAN
+// The inbox assistant (plan-ex.md E2; proposals/example-inbox.md, Q-I1 to Q-I5 and Q-EX1 to Q-EX5 ruled). Gmail only
+// for v1 (S453 deferred). Each account's mail is a source owned by the account's principal and keyed by message,
+// thread and correspondent (S451), so every body a decision reads carries its account as taint, and a draft for one
+// account can carry no other account's mail (IAC3, PL6831). No machine reads a body: a message reaches the program only
+// through typed decisions (IF3.3). Every Gmail draft waits for the owner's signed approval (PT12.5, IAC2), and is
+// created through the compose credential at the exact drafts URL, which admits no send (S455). Every model call is
+// reserved against the monthly budget before it runs (PS18.4, S454; IAC6).
+//
+// The host (examples/inbox/host) syncs each mailbox through the Gmail source under the read-only credential the mail
+// source names (gmail.readonly), whose grants the runtime holds, one per account (S460, S461): revoking one stops that
+// account's sync and no other. No token reaches the host or the adapter. It creates one
+// Message per new item, opens the thread's Todo when a Message is actionable, and serves the local page. It holds no
+// rule: it forwards facts the machines record.
+module inbox
+
+audience { public < account }
+
+enum Triage { ActNowReply, ActNow, WeekReply, Week, Fyi, Ignore }
+
+enum Kind { Request, Question, Meeting, Invoice, Personal, Notification, Newsletter, Other }
+
+enum Due { Unstated, Today, ThisWeek, Later }
+
+enum Snooze { Day, ThreeDays, Week }
+
+enum Seen { Pending, Actionable, Filed, Held }
+
+enum Step { Reading, Asking, Done }
+
+enum Status { Opening, Summing, Open, Reading, Drafting, Enveloping, Drafted, Proposed, Created, Snoozed, Done, Dismissed }
+
+credential gmail_draft: oauth2 {
+  provider "google"
+  grant authorization_code pkce
+  scopes { gmail.compose }
+  holder Principal
+}
+
+// The read credential: one grant per account, each held by the account's principal (S461), reached only through the
+// runtime's handle, never by a token the host holds.
+credential gmail_read: oauth2 {
+  provider "google"
+  grant authorization_code pkce
+  scopes { gmail.readonly }
+  holder Principal
+}
+
+source mail: records {
+  adapter "gmail"
+  credential gmail_read
+  audience account owned
+  freshness 720h
+  keys { message, thread, correspondent }
+  envelope thread
+}
+
+// Message: one per received message, created by the host at <account label>:<message id> (IT2.3), so a message
+// delivered twice is one instance. Its triage and kind are two routed decisions over its own item (Q-EX1).
+machine Message {
+  state {
+    seen    : Seen      = Pending
+    step    : Step      = Reading
+    account : Principal = none
+    id      : Key       = none
+    triaged : bool      = false
+    kinded  : bool      = false
+    lost    : bool      = false
+    urgent  : bool      = false
+    reply   : bool      = false
+    request : bool      = false
+  }
+
+  terminal seen in { Actionable, Filed }
+
+  action Arrived(owner: Principal, item: Key)
+  action Read(items: Items)
+  action ReadFailed()
+  action Triaged(t: Triage, conf: Conf, margin: Conf)
+  action Untriaged()
+  action Kinded(k: Kind, conf: Conf, margin: Conf)
+  action Unkinded()
+  action Retry()
+
+  // A parameter is not named after a field: inside the handler it would hide the field (account == none read the
+  // parameter, and every arrival was refused).
+  on Arrived(owner, item) {
+    require step == Reading && account == none else reject "arrived"
+    account' = owner
+    id' = item
+    emit read(owner: owner, k: item)
+  }
+
+  on Read(items) {
+    require step == Reading && seen == Pending else reject "not-reading"
+    step' = Asking
+    decide triage(m: items)
+    decide kind(m: items)
+  }
+
+  on ReadFailed {
+    require step == Reading && seen == Pending else reject "not-reading"
+    seen' = Held
+  }
+
+  // IT3.2: act-now or this-week, or a request, makes the message actionable; fyi and ignore file it. Both decisions
+  // answer before the message moves on, so a retry never leaves one pending behind it. One that failed (a route
+  // exhausted, or a budget refused, IAC6) holds the message until the host retries it.
+  on Triaged(t, conf, margin) {
+    require step == Asking && !triaged else reject "not-asking"
+    triaged' = true
+    urgent' = t == ActNowReply || t == ActNow || t == WeekReply || t == Week
+    reply' = t == ActNowReply || t == WeekReply
+    if kinded {
+      step' = Done
+      if lost {
+        seen' = Held
+      } else {
+        if t == ActNowReply || t == ActNow || t == WeekReply || t == Week || request {
+          seen' = Actionable
+        } else {
+          seen' = Filed
+        }
+      }
+    }
+  }
+
+  on Kinded(k, conf, margin) {
+    require step == Asking && !kinded else reject "not-asking"
+    kinded' = true
+    request' = k == Request
+    if triaged {
+      step' = Done
+      if lost {
+        seen' = Held
+      } else {
+        if urgent || k == Request {
+          seen' = Actionable
+        } else {
+          seen' = Filed
+        }
+      }
+    }
+  }
+
+  on Untriaged {
+    require step == Asking && !triaged else reject "not-asking"
+    triaged' = true
+    lost' = true
+    if kinded {
+      step' = Done
+      seen' = Held
+    }
+  }
+
+  on Unkinded {
+    require step == Asking && !kinded else reject "not-asking"
+    kinded' = true
+    lost' = true
+    if triaged {
+      step' = Done
+      seen' = Held
+    }
+  }
+
+  on Retry {
+    require seen == Held else reject "not-held"
+    seen' = Pending
+    step' = Reading
+    triaged' = false
+    kinded' = false
+    lost' = false
+    urgent' = false
+    reply' = false
+    request' = false
+    emit read(owner: account, k: id)
+  }
+
+  // Each machine runs its own retrieval of mail (PS17.2, (a)): the Message reads its one item, the Todo its thread.
+  effect read(owner: Principal, k: Key) {
+    retrieve mail where owner == owner and message == k limit 1
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  decision triage(m: Items) -> Triage {
+    route triage
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Triaged(t: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Untriaged()
+  }
+
+  decision kind(m: Items) -> Kind {
+    route kinds
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Kinded(k: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Unkinded()
+  }
+}
+
+// Todo: one per thread, at <account label>:<thread id>, so a thread has at most one to-do (IT5). The host opens it when
+// a Message of the thread is actionable. Its title and due bucket are decisions over the thread; its draft cites the
+// thread (IT4.2) and is created in Gmail only after the owner's signed approval (IAC2).
+machine Todo {
+  state {
+    status  : Status    = Opening
+    account : Principal = none
+    thread  : Key       = none
+    reply   : bool      = false
+    title   : Content   = none
+    due     : Due       = Unstated
+    summed  : bool      = false
+    dated   : bool      = false
+    draft   : Content   = none
+  }
+
+  terminal status in { Done, Dismissed }
+
+  action Open(owner: Principal, at: Key, answer: bool)
+  action Read(items: Items)
+  action ReadFailed()
+  action Summed(text: Content)
+  action Unsummed()
+  action Dated(d: Due, conf: Conf, margin: Conf)
+  action Undated()
+  action WriteDraft()
+  action Written(text: Content, cites: Items)
+  action Unwritten()
+  action Enveloped(e: Content)
+  action Unenveloped()
+  action Edit(body: Content)
+  action Propose()
+  action Created()
+  action NotCreated()
+  action Snoozed(d: Snooze)
+  action Wake()
+  action Finish()
+  action Dismiss()
+
+  on Open(owner, at, answer) {
+    require status == Opening && account == none else reject "opened"
+    account' = owner
+    thread' = at
+    reply' = answer
+    emit read(owner: owner, k: at)
+  }
+
+  // The thread is read twice: when the to-do opens, for its title and due bucket, and when a draft is asked for.
+  on Read(items) {
+    require status == Opening || status == Reading else reject "not-reading"
+    if status == Opening {
+      status' = Summing
+      decide summary(context: items)
+      decide when(context: items)
+    } else {
+      status' = Drafting
+      decide write(thread: items)
+    }
+  }
+
+  on ReadFailed {
+    require status == Opening || status == Reading else reject "not-reading"
+    status' = Open
+  }
+
+  on Summed(text) {
+    require status == Summing && !summed else reject "not-summing"
+    summed' = true
+    title' = text
+    if dated {
+      status' = Open
+    }
+  }
+
+  on Unsummed {
+    require status == Summing && !summed else reject "not-summing"
+    summed' = true
+    if dated {
+      status' = Open
+    }
+  }
+
+  on Dated(d, conf, margin) {
+    require status == Summing && !dated else reject "not-summing"
+    dated' = true
+    if conf >= 0.8 {
+      due' = d
+    }
+    if summed {
+      status' = Open
+    }
+  }
+
+  on Undated {
+    require status == Summing && !dated else reject "not-summing"
+    dated' = true
+    if summed {
+      status' = Open
+    }
+  }
+
+  // The owner asks for a draft from the page; the draft reads the thread again, since Items is passed, not stored.
+  on WriteDraft {
+    require status == Open && reply else reject "no-reply"
+    status' = Reading
+    emit read(owner: account, k: thread)
+  }
+
+  // IT4.2, IAC5: a draft rests on messages of its thread; the runtime refuses an answer citing a message it was not
+  // given, or none (uncited, PS17.6).
+  on Written(text, cites) {
+    require status == Drafting else reject "not-drafting"
+    status' = Drafted
+    draft' = text
+  }
+
+  on Unwritten {
+    require status == Drafting else reject "not-drafting"
+    status' = Open
+  }
+
+  on Edit(body) {
+    require status == Drafted else reject "not-drafted"
+    draft' = body
+  }
+
+  // IAC2: the draft is proposed; the policy escalates it, and only the owner's signed approval lets it through.
+  // S459: its recipient, subject and threading headers come from the source when it is proposed, never from the
+  // draft's text or the thread's mail: the envelope of a reply to the thread's newest message, passed unchanged from
+  // the retrieval's completion. With no envelope the draft stays as it is.
+  on Propose {
+    require status == Drafted else reject "not-drafted"
+    status' = Enveloping
+    emit envelope_of(owner: account, k: thread)
+  }
+
+  on Enveloped(e) {
+    require status == Enveloping else reject "not-enveloping"
+    status' = Proposed
+    emit createDraft(account: account, t: thread, e: e, body: draft)
+  }
+
+  on Unenveloped {
+    require status == Enveloping else reject "not-enveloping"
+    status' = Drafted
+  }
+
+  on Created {
+    require status == Proposed else reject "not-proposed"
+    status' = Created
+  }
+
+  on NotCreated {
+    require status == Proposed else reject "not-proposed"
+    status' = Drafted
+  }
+
+  on Snoozed(d) {
+    require status == Open || status == Drafted else reject "not-open"
+    status' = Snoozed
+    if d == Day {
+      after 24h -> Wake() as w
+    } else {
+      if d == ThreeDays {
+        after 72h -> Wake() as w
+      } else {
+        after 168h -> Wake() as w
+      }
+    }
+  }
+
+  on Wake {
+    require status == Snoozed else reject "not-snoozed"
+    status' = Open
+  }
+
+  on Finish {
+    require !(status == Done || status == Dismissed) else reject "closed"
+    status' = Done
+  }
+
+  on Dismiss {
+    require !(status == Done || status == Dismissed) else reject "closed"
+    status' = Dismissed
+  }
+
+  effect read(owner: Principal, k: Key) {
+    retrieve mail where owner == owner and thread == k limit 5
+    ok(r) -> Read(items: r.items)
+    failed -> ReadFailed()
+  }
+
+  effect envelope_of(owner: Principal, k: Key) {
+    retrieve mail envelope where owner == owner and thread == k
+    ok(r) -> Enveloped(e: r.envelope)
+    failed -> Unenveloped()
+  }
+
+  decision summary(context: Items) -> Content {
+    provider "small"
+    prices "prices/small.json" max input tokens 4000 max tokens 200 budget monthly
+    labels { egress:external, read:private }
+    timeout 5s
+    ok(r) -> Summed(text: r.answer)
+    failed -> Unsummed()
+  }
+
+  decision when(context: Items) -> Due {
+    provider "small"
+    prices "prices/small.json" max input tokens 4000 max tokens 20 budget monthly
+    labels { egress:external, read:private }
+    timeout 5s
+    ok(r) -> Dated(d: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Undated()
+  }
+
+  // IT4.1, IT4.2: on the strong tier, citing the messages of the thread it read; one citing nothing is uncited.
+  decision write(thread: Items) -> Content {
+    provider "large"
+    prices "prices/large.json" max input tokens 8000 max tokens 1000 budget monthly
+    labels { egress:external, read:private }
+    timeout 20s
+    cites thread
+    ok(r) -> Written(text: r.answer, cites: r.cites)
+    failed -> Unwritten()
+  }
+
+  // S455: the compose credential, bound to the drafts URL exactly, so drafts/send is outside the gate. S459: the draft
+  // goes to its envelope's recipient, in the thread t names (examples/inbox/host/drafts.mjs).
+  effect createDraft(account: Principal, t: Key, e: Content, body: Content) {
+    kind "gmail.createDraft"
+    labels { egress:external, read:private }
+    targets { egress: exact "https://gmail.googleapis.com/gmail/v1/users/me/drafts" }
+    uses gmail_draft { gmail.compose } for account
+    to account
+    envelope e
+    class irreversible
+    ok -> Created()
+    failed -> NotCreated()
+  }
+}
+
+route triage {
+  tier small provider "small" prices "prices/small.json" calibration "maps/triage-small.json" max input tokens 4000 max tokens 20
+  tier large provider "large" prices "prices/large.json" calibration "maps/triage-large.json" max input tokens 4000 max tokens 20
+  escalate when conf < 0.8 or failed
+  budget monthly
+}
+
+route kinds {
+  tier small provider "small" prices "prices/small.json" calibration "maps/kind-small.json" max input tokens 4000 max tokens 20
+  tier large provider "large" prices "prices/large.json" calibration "maps/kind-large.json" max input tokens 4000 max tokens 20
+  escalate when conf < 0.8 or failed
+  budget monthly
+}
+
+// IF3.5: the owner's monthly limit; a call whose reservation does not fit is denied, and its message waits (IAC6).
+budget monthly {
+  cap usd 20 per month
+}

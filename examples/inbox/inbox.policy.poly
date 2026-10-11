@@ -1,0 +1,20 @@
+// The inbox assistant's policy (plan-ex.md E2, IAC2, PT12.5). Every Gmail draft waits for the owner, who approves it
+// with a signed record; nothing an email says, and no agent, can approve it. A draft carries the account's mail out,
+// so without this obligation polycheck's credential-egress region reaches gmail.createDraft with no gate crossed
+// (PL7001), which is IAC2's witness at check; a never statement cannot say "only with an approval" (S149). Every model
+// call over mail is gated too: it reads mail the source holds no older than thirty days.
+module inbox_policy
+
+policy drafts {
+  scope "inbox"
+  obligation owner-approves-drafts "A Gmail draft is created only after the owner approves it." rule {
+    when proposal.kind == "effect" && effect.kind == "gmail.createDraft"
+    require false else escalate
+    on unknown escalate
+  }
+  obligation fresh-mail "A model is asked only about mail no older than thirty days." rule {
+    when proposal.kind == "effect" && effect.kind in { "decision.triage", "decision.kind", "decision.summary", "decision.when", "decision.write" } && effect.items.age > 2592000000
+    require false else deny
+    on unknown deny
+  }
+}

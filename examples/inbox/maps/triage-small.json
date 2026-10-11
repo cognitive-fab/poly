@@ -1,0 +1,24 @@
+{
+  "decision": "triage",
+  "version": 1,
+  "fittedFor": "flash-2026-09",
+  "points": [
+    [
+      0,
+      0
+    ],
+    [
+      500,
+      400
+    ],
+    [
+      800,
+      700
+    ],
+    [
+      950,
+      880
+    ]
+  ],
+  "digest": "sha256:db7729f6201a0074aebb60875e41427f83edeed5b44753b1eb0ed44fb7c438d5"
+}

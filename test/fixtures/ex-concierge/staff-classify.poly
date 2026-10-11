@@ -1,0 +1,145 @@
+// A variant of the concierge for its policy's audience rule (decisions-ex.md, ruled 2026-10-10): the staff's Slack
+// message, of the staff audience, is fed into decision.classify, the decision that answers a customer. The module is
+// named concierge, so the concierge's policy governs it unchanged, and Desk keeps the field `large` the refund rule
+// reads. With the policy, the customer-decisions obligation denies the call; without the two audience obligations,
+// polycheck's credential-egress region reaches decision.classify with no gate crossed (PL7001), its witness.
+module concierge
+
+audience { public < customer < staff }
+
+channel staff: slack {
+  adapter "slack"
+  thread "{channel}"
+  audience staff
+  starts Desk.Start on inbound
+  Message -> Desk.Got
+  Delivered -> Desk.Delivered
+  Rejected -> Desk.SendRejected
+  Failed -> Desk.SendFailed
+}
+
+// The concierge's credential, so the refund rule's kind is one of the program's.
+credential payments: oauth2 {
+  provider "stripe-connect"
+  grant authorization_code
+  scopes { read_write }
+}
+
+service machine Desk {
+  state {
+    started : bool = false
+    asking  : bool = false
+    large   : bool = false
+    sending : 0..3 = 0
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Classified(text: Content)
+  action Unclassified()
+  action Delivered()
+  action SendRejected(reason: string check { "channel-archived", "rate-limited" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+
+  on Got(body) {
+    require !asking else reject "busy"
+    asking' = true
+    decide classify(body: body)
+  }
+
+  on Classified(text) {
+    require asking else reject "not-asking"
+    asking' = false
+    if sending < 3 {
+      sending' = sending + 1
+    }
+    emit staff.reply(body: text)
+  }
+
+  on Unclassified {
+    require asking else reject "not-asking"
+    asking' = false
+  }
+
+  on Delivered {
+    if sending > 0 {
+      sending' = sending - 1
+    }
+  }
+
+  on SendRejected(reason) {
+    if sending > 0 {
+      sending' = sending - 1
+    }
+  }
+
+  on SendFailed {
+    if sending > 0 {
+      sending' = sending - 1
+    }
+  }
+
+  decision classify(body: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Classified(text: r.answer)
+    failed -> Unclassified()
+  }
+
+  // The concierge's other decisions, by kind only, so the policy's rules name kinds of the program.
+  decision amount(body: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Classified(text: r.answer)
+    failed -> Unclassified()
+  }
+
+  decision answer(body: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Classified(text: r.answer)
+    failed -> Unclassified()
+  }
+
+  decision reply(body: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Classified(text: r.answer)
+    failed -> Unclassified()
+  }
+
+  decision ack(body: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Classified(text: r.answer)
+    failed -> Unclassified()
+  }
+
+  decision noted(body: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Classified(text: r.answer)
+    failed -> Unclassified()
+  }
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    uses payments { read_write }
+    class irreversible
+    ok -> Unclassified()
+    failed -> Unclassified()
+  }
+}

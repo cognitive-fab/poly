@@ -8,5 +8,7 @@ export { submit, dotStuff, type Submission } from './smtp.js';
 export { ingress, type IngressAnswer } from './ingress.js';
 export { oauthVault, devKeychain, kmsStore, credentialIngress } from './vault.js';
 export { postgresSource, openSearchSource, type PostgresSourceConfig, type OpenSearchSourceConfig } from './sources.js';
+export { gmailSource, memoryMailStore, fileMailStore, GMAIL_BASE, type GmailSource, type GmailSourceConfig, type GmailAccount, type MailStore, type SyncReport } from './gmail.js';
+export { readMime, MIME_LIMITS, type Mail, type MailAddress, type MailAttachment } from './mime.js';
 export { ADAPTER_FAULTS, madeHere, credentialHandleOf, type AdapterFault } from './util.js';
 export { httpsTransport, smtpsTransport, serveIngress, publicUrl } from './net.js';
