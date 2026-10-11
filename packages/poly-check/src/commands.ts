@@ -346,10 +346,24 @@ export const COMMANDS: Command[] = [
   {
     name: 'grant-revoke', mcp: null, lsp: false,
     summary: 'Signs the revocation of a grant with a person key given by file, a record of the kind revocation over the grant\'s instance id, for rt.takeApprovals or rt.revokeGrant (PS16.4, PT10g). Never over MCP.',
-    input: obj({ grant: str('the grant\'s instance id'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record') }, ['grant', 'by', 'key']),
+    input: obj({ grant: str('the grant\'s instance id'), credential: str('or the credential, whose one live grant in the store is revoked'), db: str('the store, read without being written, with credential'), by: str('the key id'), key: str('the private key file'), out: str('where to write the record') }, ['by', 'key']),
     output: obj({ record: { type: 'object', description: 'the signed revocation' }, path: str('where it was written, when out was given') }, ['record']),
     async run(input) {
-      const record = signRecord({ kind: 'revocation', subject: revocationSubject(need(input, 'grant')), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
+      // PS16.4, PT10g (ruled 2026-10-11): the grant is named by its instance id, or by its credential in a store, which must
+      // hold exactly one live grant of it; with a grant for each owner (S461) the ids are printed and nothing is signed.
+      const named = opt(input, 'grant');
+      const credential = opt(input, 'credential');
+      if ((named === undefined) === (credential === undefined)) throw new CommandUsageError('grant-revoke names the grant by --grant <instance id>, or by --credential <c> with --db <store>, one of them');
+      let grant = named;
+      if (credential !== undefined) {
+        const { liveGrants } = await import('@poly/runtime');
+        const db = need(input, 'db');
+        const live = liveGrants(db, credential);
+        if (live.length === 0) throw new CommandUsageError(`credential ${credential} has no live grant in ${db}`);
+        if (live.length > 1) throw new CommandUsageError(`credential ${credential} has ${live.length} live grants, one for each holder; name one with --grant:\n${live.map((g) => `  ${g}`).join('\n')}`);
+        grant = live[0];
+      }
+      const record = signRecord({ kind: 'revocation', subject: revocationSubject(grant!), by: need(input, 'by'), at: new Date().toISOString() }, personKey(need(input, 'key')));
       const text = JSON.stringify(record, null, 2) + '\n';
       const out = opt(input, 'out');
       if (out) writeFileSync(out, text);

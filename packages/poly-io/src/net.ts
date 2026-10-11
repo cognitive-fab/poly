@@ -64,8 +64,12 @@ export function publicUrl(publicBase: string, path: string): string {
 /**
  * The ingress endpoint: a POST or GET to /channels/<name> becomes a Webhook with the public URL the provider called
  * (publicBase and the request's path), and handle's answer is sent back. Bodies over limit bytes are refused.
+ *
+ * PT21.4 (ruled 2026-10-11): it listens on the loopback address, 127.0.0.1, unless `host` names another. A personal host is
+ * not reachable from the network by default; listening on every interface (`0.0.0.0`, `::`) or on one network address is the
+ * host's explicit choice, and the provider reaches the endpoint through publicBase, a tunnel or a proxy.
  */
-export function serveIngress(handle: (channel: string, w: Webhook) => Promise<IngressAnswer>, opts: { port: number; publicBase: string; limit?: number; credentials?: (credential: string, w: Webhook) => Promise<IngressAnswer> }): Server {
+export function serveIngress(handle: (channel: string, w: Webhook) => Promise<IngressAnswer>, opts: { port: number; host?: string; publicBase: string; limit?: number; credentials?: (credential: string, w: Webhook) => Promise<IngressAnswer> }): Server {
   const limit = opts.limit ?? 1_000_000;
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -83,6 +87,6 @@ export function serveIngress(handle: (channel: string, w: Webhook) => Promise<In
         .catch(() => res.writeHead(500).end());
     });
   });
-  server.listen(opts.port);
+  server.listen(opts.port, opts.host ?? '127.0.0.1');
   return server;
 }

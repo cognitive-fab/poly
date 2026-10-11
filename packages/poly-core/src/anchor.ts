@@ -3,8 +3,9 @@
 // verifies the chain as admission does (S210, D1) and neither trusts the project's own files for it.
 //
 // The anchor's location is read from the owner's per-user configuration (.poly/anchors.json under the home directory
-// the operating system gives the user), never from poly.json and never from the environment, so an agent confined to
-// the project cannot redirect it. The anchor itself is `{ v: 2, id, project, first, head, policies, production }`
+// the operating system gives the user, or the file POLY_ANCHORS_CONFIG names, ruled 2026-10-11), never from poly.json,
+// so an agent confined to the project cannot redirect it; one that can set the environment of the owner's processes can
+// (PT12.5). The anchor itself is `{ v: 2, id, project, first, head, policies, production }`
 // (PT12.5): its first rings, the last rings admitted, the highest policy sequence admitted per scope, and whether the
 // project is production. Admission only moves `head` and `policies` forward (S210, D2, D7).
 import { randomBytes } from 'node:crypto';
@@ -39,6 +40,15 @@ function configFile(source?: AnchorSource): { file: string; source: AnchorSource
   if (source === 'test' || (source === undefined && testConfig)) {
     if (!testConfig) throw new KeyringError('the certificate was admitted with a test anchor, and this process names no test configuration');
     return { file: join(testConfig, 'anchors.json'), source: 'test' };
+  }
+  // PT12.5 (ruled 2026-10-11): POLY_ANCHORS_CONFIG names the configuration file itself, for an owner whose home is not where
+  // it should live. It is read from this process's environment only; a relative path, or one in a tree under version
+  // control, is refused. A test process's own folder, above, wins.
+  const named = process.env.POLY_ANCHORS_CONFIG;
+  if (named !== undefined && named !== '') {
+    if (!isAbsolute(named)) throw new KeyringError(`POLY_ANCHORS_CONFIG is ${named}, which is not an absolute path`);
+    if (underVersionControl(named)) throw new KeyringError(`POLY_ANCHORS_CONFIG is ${resolve(named)}, inside a tree under version control; the owner's configuration is never committed`);
+    return { file: resolve(named), source: 'user' };
   }
   // os.userInfo reads the account's home directory from the operating system, not from HOME or USERPROFILE.
   return { file: join(userInfo().homedir, '.poly', 'anchors.json'), source: 'user' };

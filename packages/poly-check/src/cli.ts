@@ -9,7 +9,8 @@
 //   poly bench gate [--sizes 1,8,64] [--out <file>]
 //
 // `poly check` writes its report to <root>/.poly/report.json, which `poly witness` and `poly fix` read (S69).
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { EXIT_CODES, ManifestError } from '@poly/core';
 import { WitnessExportError } from './witness.js';
 import { AdmitError } from './admit.js';
@@ -38,6 +39,8 @@ const USAGE = `usage: poly check <file.poly | project dir> [--json] [--root <dir
        poly sign policy <scope> --by <keyId> --key <private key file> [--project <dir>]
        poly memory-verify --item <id> --by <keyId> --key <private key file> [--out <file>] [--project <dir>]
        poly forget --subject <principal> | --source <source> --by <keyId> --key <private key file> [--out <file>] [--project <dir>]
+       poly grant-request --credential <c> [--for <holder>] --by <keyId> --key <private key file> --out <file>   (a request for the runtime's approvals folder)
+       poly grant-revoke --grant <instance id> | --credential <c> --db <store> --by <keyId> --key <private key file> [--out <file>]
        poly journal verify --db <store> --trust <keyId>=<public key file> [--run <id>]
        poly journal replay --db <store> --build <dir> --certificate <file> --trust <keyId>=<file> [--run <id>]
        poly journal export --db <store> --run <id>
@@ -148,6 +151,23 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
     if (!by || !key || !item) throw new UsageError('memory-verify needs --item <id>, --by <keyId> and --key <private key file>');
     return { name: 'memory-verify', input: { item, by, key, out, project: option(args, '--project') ?? undefined } };
   }
+  // PS16.4, PT10g (ruled 2026-10-11): a grant request and a revocation, each a signed record for the runtime's approvals folder.
+  if (cmd === 'grant-request' && positional.length === 1) {
+    const by = option(args, '--by');
+    const key = option(args, '--key');
+    const credential = option(args, '--credential');
+    if (!by || !key || !credential || !out) throw new UsageError('grant-request needs --credential <c>, --by <keyId>, --key <private key file> and --out <file>');
+    return { name: 'grant-request', input: { credential, for: option(args, '--for') ?? undefined, by, key, out } };
+  }
+  if (cmd === 'grant-revoke' && positional.length === 1) {
+    const by = option(args, '--by');
+    const key = option(args, '--key');
+    const grant = option(args, '--grant') ?? undefined;
+    const credential = option(args, '--credential') ?? undefined;
+    const db = option(args, '--db') ?? undefined;
+    if (!by || !key || (grant === undefined) === (credential === undefined) || (credential !== undefined && db === undefined)) throw new UsageError('grant-revoke needs --by <keyId>, --key <private key file>, and --grant <instance id> or --credential <c> with --db <store>');
+    return { name: 'grant-revoke', input: { grant, credential, db, by, key, out } };
+  }
   if (cmd === 'forget' && positional.length === 1) {
     const by = option(args, '--by');
     const key = option(args, '--key');
@@ -190,7 +210,7 @@ function inputOf(positional: string[], args: string[]): { name: string; input: R
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = args.includes('--json');
-  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1].filter((i) => i > 0));
+  const valued = new Set([args.indexOf('--into') + 1, args.indexOf('--host') + 1, args.indexOf('--project') + 1, args.indexOf('--root') + 1, args.indexOf('--out') + 1, args.indexOf('--key') + 1, args.indexOf('--by') + 1, args.indexOf('--db') + 1, args.indexOf('--sizes') + 1, args.indexOf('--old') + 1, args.indexOf('--new') + 1, args.indexOf('--text') + 1, args.indexOf('--item') + 1, args.indexOf('--subject') + 1, args.indexOf('--source') + 1, args.indexOf('--run') + 1, args.indexOf('--scope') + 1, args.indexOf('--period') + 1, args.indexOf('--prices') + 1, args.indexOf('--machine') + 1, args.indexOf('--ops') + 1, args.indexOf('--credential') + 1, args.indexOf('--for') + 1, args.indexOf('--grant') + 1].filter((i) => i > 0));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valued.has(i));
   const usage = () => { process.stderr.write(USAGE + '\n'); return EXIT_CODES.USAGE; };
   if (option(args, '--root') === null || option(args, '--out') === null) return usage();
@@ -237,4 +257,11 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
-main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
+// PT14 (ruled 2026-10-11): the command runs only when this file is the process's entry point, so importing it, as a host or
+// a test does, starts nothing and sets no exit code. Both paths are real paths, so a link to the file is the file.
+const isEntry = (): boolean => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try { return realpathSync.native(entry) === realpathSync.native(fileURLToPath(import.meta.url)); } catch { return false; }
+};
+if (isEntry()) main(process.argv.slice(2)).then((code) => { process.exitCode = code; });

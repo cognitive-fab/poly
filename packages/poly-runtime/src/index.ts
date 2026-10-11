@@ -3,6 +3,7 @@ export { calibrate, mapDigest, answerProbability, decisionHandler, recordedProvi
 export { periodKey, type BudgetCheck, type ReservationPlan } from './routing.js';
 export { load, PolyRuntime, RUNTIME_FAULTS, IO_ADAPTERS, adapterPackagePin, RefusedDispatch, ApprovalRefused, OutcomeWithoutDecision, LoadError, APPROVALS_RUN, type LoadOptions, type Handler, type WorkOrder, type ApprovalRefusal, type HostAction, type DataOf } from './runtime.js';
 export { LedgerStore, openLedgerStore, type StepEvents } from './ledger-store.js';
+export { liveGrants } from './grants-read.js';
 export { countersignHeads, countersignaturesOf, verifyCountersignatures, type CountersignAdapter, type Countersignature } from './journal.js';
 export { readerOf, ledgerProblems, type JournalReader, signHeads, headsOf, publishAnchor, verifyAnchor, verifyRun, merkleRoot, anchorMessage, type LedgerSigner, type SignedHead, type Anchor, type RunVerification, type RunVerdict } from './journal.js';
 export { KINDS, POLY_KINDS, runOf, nextEvent, verifyRunChain, verifyWithPolyflow, polyflowAcceptsPolyKinds, type LedgerEvent, type Run, type ChainResult } from './ledger.js';
