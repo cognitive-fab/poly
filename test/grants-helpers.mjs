@@ -20,13 +20,13 @@ export function memoryWrap() {
 }
 
 /** The desk of step 5, admitted with both credentials in the KMS store, loaded, and given a vault per credential. */
-export async function desk(name, poly = {}, sources = ['test/fixtures/m9/credentials.poly']) {
+export async function desk(name, poly = {}, sources = ['test/fixtures/m9/credentials.poly'], extra = {}) {
   const key = makeKey(name);
   const dir = project(name, sources, key, 'test-grants');
   if (sources.length > 1) await signPolicies(dir);
   writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8')), credentials: { payments: { store: 'kms' }, reports: { store: 'kms' } }, ...poly }, null, 2));
   const r = await admit(dir, { std: TEST_STD });
-  const { rt, clock } = await loaded({ build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey } }, { std: TEST_STD });
+  const { rt, clock } = await loaded({ build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey } }, { std: TEST_STD, ...extra });
   const sent = [];
   const answers = [];
   const http = { async request(q) { sent.push(q); const a = answers.shift(); if (!a) throw new Error(`no recorded answer for ${q.method} ${q.url}`); return a(q); } };
