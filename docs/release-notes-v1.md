@@ -134,6 +134,7 @@ What is ruled for after the release (`decisions-v1.md`, "After v1"):
 - **The journal records of a provider revocation are named in the spec.** In v1 each attempt is journaled, and the spec does not yet say by which records.
 - **The full inbox checked with its cross-account variant (IAC3).** It runs out of a 12 GB heap; in v1 IAC3's witness comes from a cut-down copy of the inbox.
 - **A declared configuration offers the completions of its instances' pending intents.** Only a channel's generated configuration covers its application, so the liveness assumption of a `Grant` or `Route` machine is `open` in the certificate until a declared configuration covers it.
+- **Nothing collects adjudications for a calibration refit.** `poly journal fit` fits a calibration map from `decision` events and their outcomes; nothing gathers a person's adjudication of an answer to feed it.
 - **The checker keeps every edge of a flow-rule exploration.** Keeping only state keys plus one predecessor for witnesses would let the full inbox (IAC3) and larger configurations reach a verdict.
 - **E3: the checked harness example** (Q-V2), and M7, which follows the release.
 

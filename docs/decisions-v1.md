@@ -327,6 +327,7 @@ What is ruled for after the release, in one place:
 - **The full inbox checked with its cross-account variant (IAC3)** (ruled 2026-10-10). That check runs out of a 12 GB heap, so in v1 IAC3's witness comes from a cut-down copy of the inbox. The variant is measured in the release session's probes, after the concierge's.
 - **The checker keeps every edge of a flow-rule exploration** (ruled 2026-10-10, from probe 2): keeping only state keys plus one predecessor for witnesses would let the full inbox (IAC3) and larger configurations reach a verdict.
 - **A declared configuration offers the completions of its instances' pending intents** (ruled 2026-10-10, from S463): only a channel's generated configuration covers its application, so the liveness assumption of a `Grant` or `Route` machine is `open` in the certificate until a declared configuration covers it.
+- **Nothing collects adjudications for a calibration refit** (ruled 2026-10-11): `poly journal fit` fits a map from `decision` events and their outcomes, and no part of the runtime or the commands gathers a person's adjudication of a decision's answer to feed it.
 
 ## (a), S460 and (c), built
 
