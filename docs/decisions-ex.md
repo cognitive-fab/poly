@@ -469,6 +469,16 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 - **The light tests pass, 45 of 45:** `ex-concierge-host`, `ex-concierge-refund`, `ex-concierge-liveness`, `ex-concierge-policy`, `ex-inbox-host`, `ex-gmail-source` and `ex-mime`. The liveness test is unchanged by the discharge by form: the `require` copy has a rejecting completion handler, so nothing is discharged for it.
 - **Not rerun:** the project check, AC27, the serial group and the inbox's heavy tests, which the gate run covers.
 
+## The inbox moves into examples/inbox, on v1 at 4b9b80d5 (2026-10-10)
+
+`ex` is rebased on `v1` at `4b9b80d5` with no conflict, and the inbox leaves `docs/ex/inbox-draft/`, which is removed:
+- `examples/inbox/inbox.poly`, the program, whose first line is `// expected: CLEAN`.
+- `examples/inbox/inbox.policy.poly`, the policy beside it, with no expected line (V10 item 4).
+- `examples/inbox/maps/` and `examples/inbox/prices/`, and the host code already in `examples/inbox/host/`.
+- The tests' helper reads the program, the policy, the maps and the prices from `examples/inbox`, so every inbox test follows the new paths with no other change. The harness lists `examples/inbox/inbox.poly` and `examples/concierge/concierge.poly` as programs with their policies beside them, each with the expected line `CLEAN`.
+
+**Light tests only, 55 of 55:** the concierge's host, refund, liveness and policy tests; the inbox host, the Gmail source and the MIME reader; `runtime-type` (which now reads the inbox's actions too) and `examples-check`. **Not run:** the inbox's heavy tests (admission, IAC1 to IAC9), whose last full run, 35 of 35, was on the S462 rebase, and the checks of the inbox as an example. The inbox is now under the standing rule and the expected-line test, and its check takes about 2 minutes and at most 8 GB, so it belongs in the serial group, which the release session adds `examples/inbox/` to when it merges.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy and meets AC27 end to end; the inbox meets IAC1 to IAC9 on recorded traffic.

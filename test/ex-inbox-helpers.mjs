@@ -1,5 +1,5 @@
 // plan-ex.md E2.2: the inbox assistant admitted, loaded and connected over recorded traffic only. The module is the
-// draft in docs/ex/inbox-draft until the example checks resolve std, profiles and route files (decisions-ex.md). Both
+// example in examples/inbox, the program with the policy beside it (V10 item 4). Both
 // credentials' vaults are the runtime's and speak to a fake Google token endpoint whose tokens the test makes; the Gmail
 // source replays the recorded tapes through the runtime's handles for the read credential, one grant per account
 // (S461); every decision is answered by a recorded provider. No test reaches Google or calls a model.
@@ -14,9 +14,9 @@ import { grantRequestSubject, signRecord } from '@poly/core';
 import { ROOT } from './helpers.mjs';
 import { PERSON, handleWith, loaded, makeKey, project, signPolicies } from './runtime-helpers.mjs';
 
-export const DRAFT = join(ROOT, 'docs', 'ex', 'inbox-draft');
-export const SOURCE = readFileSync(join(DRAFT, 'inbox.poly.draft'), 'utf8');
-export const POLICY = readFileSync(join(DRAFT, 'inbox.policy.poly.draft'), 'utf8');
+export const DRAFT = join(ROOT, 'examples', 'inbox');
+export const SOURCE = readFileSync(join(DRAFT, 'inbox.poly'), 'utf8');
+export const POLICY = readFileSync(join(DRAFT, 'inbox.policy.poly'), 'utf8');
 export const GOOGLE = JSON.parse(readFileSync(join(ROOT, 'std', 'credentials', 'providers', 'google.json'), 'utf8'));
 export const ACCOUNTS = JSON.parse(readFileSync(join(ROOT, 'test', 'fixtures', 'inbox', 'corpus.json'), 'utf8')).accounts;
 export const tape = (label) => JSON.parse(readFileSync(join(ROOT, 'test', 'fixtures', 'traffic', 'gmail', `${label}.json`), 'utf8'));
