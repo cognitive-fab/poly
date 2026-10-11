@@ -5,6 +5,14 @@
       "type": "string",
       "description": "the grant's instance id"
     },
+    "credential": {
+      "type": "string",
+      "description": "or the credential, whose one live grant in the store is revoked"
+    },
+    "db": {
+      "type": "string",
+      "description": "the store, read without being written, with credential"
+    },
     "by": {
       "type": "string",
       "description": "the key id"
@@ -19,7 +27,6 @@
     }
   },
   "required": [
-    "grant",
     "by",
     "key"
   ]
