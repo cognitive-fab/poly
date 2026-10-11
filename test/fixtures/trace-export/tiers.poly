@@ -1,0 +1,26 @@
+// M7.1 fixture: one value of every tier PS19.4 names, a disclosed parameter and a strict one.
+module tiers
+
+enum Mood { Calm, Loud }
+
+machine Rec {
+  state {
+    n    : int check { 0, 1, 2 } = 0
+    word : string check { "a", "b" } = "a"
+    mood : Mood = Calm
+    flag : bool = false
+    who  : Principal = none
+    body : Content = none
+  }
+  action Set(n2: int check { 0, 1, 2 } disclosed, w: string check { "a", "b" } disclosed, m: Mood, f: bool, p: Principal, b: Content)
+  on Set(n2, w, m, f, p, b) {
+    n' = n2
+    word' = w
+    mood' = m
+    flag' = f
+    who' = p
+    body' = b
+  }
+  action Strict(v: int check { 0, 1 })
+  on Strict(v) { n' = v }
+}
