@@ -138,6 +138,7 @@ const CODE = {
   PL5406: ['RECEIPT_REJECTED', 'finding'],
   PL5407: ['REPLY_REFUSED', 'finding'],
   PL5408: ['MESSAGE_OUTSIDE_DOMAIN', 'finding'],
+  PL5409: ['COMPLETION_REJECTED', 'finding'],
   PL3301: ['LIVENESS_LASSO', 'finding'],
   PL6831: ['AUDIENCE_LEAK', 'finding'],
   PL6832: ['TAINT_DOWNGRADE', 'finding'],
@@ -679,6 +680,23 @@ export function checkConfiguration(module: Module, name: string, opts: { maxStat
         ? `${inst.name} rejects the receipt ${l.action} (${reason}); a rejected step sends no Ack, so its conversation's slot is never freed (PS15.5)`
         : `${inst.name} refuses ${l.action} from its application (${reason}); the application is not told, and the message is lost (PS15.5)`, [...pathTo(g, e.from), e], { property: key }));
     }
+  }
+  // PS15.5 (S463, ruled 2026-10-10): a step of the application that is the completion of an intent pending in its pre-state
+  // and that its handler rejects. The step takes the intent off, as at run time, and nothing completes it again, so the
+  // application may wait for it for ever; machine-level liveness assumes this never happens (PS6.4). One finding per
+  // action, at its first step in BFS order, whatever the reason except terminal: a completion that reaches an ended
+  // application leaves nothing waiting.
+  const completionFindings = new Set<string>();
+  for (const e of g.edges) {
+    const l = e.label as GlobalLabel;
+    if (l.via !== 'input' || l.verdict.kind !== 'rejected' || l.verdict.reason === 'terminal' || !completing.has(l.instance)) continue;
+    const inst = instances[l.instance];
+    const kind = (g.states[e.from].intents ?? []).find((q) => q.instance === l.instance && (inst.machine.outcomes.get(q.kind) ?? []).includes(l.action))?.kind;
+    if (kind === undefined) continue;
+    const key = `${inst.machine.name}.${l.action}`;
+    if (completionFindings.has(key)) continue;
+    completionFindings.add(key);
+    findings.push(finding('PL5409', inst.machine.handlers.get(l.action)?.id, `${inst.name} rejects ${l.action} (${l.verdict.reason}), the completion of its pending ${kind}; a rejected step takes the intent off and nothing completes it again, so ${inst.name} may wait for it for ever (PS15.5, S463)`, [...pathTo(g, e.from), e], { property: key }));
   }
   // PS13.6, F4: a message its receiver rejects outside its strict check domain, which the sender is never told of; one
   // finding per receiving machine's action, at its first delivery in BFS order.

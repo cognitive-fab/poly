@@ -120,6 +120,8 @@ export const CODES: Record<string, CodeInfo> = {
   PL5407: { name: 'REPLY_REFUSED', stage: 'configuration', severity: 'finding' },
   // PS13.6, F4: a message its receiver's strict check domain refuses, in a configuration and on a machine alone.
   PL5408: { name: 'MESSAGE_OUTSIDE_DOMAIN', stage: 'configuration', severity: 'finding' },
+  // PS15.5, S463: a completion of the application's own decision or effect that its handler rejects, which takes the intent off.
+  PL5409: { name: 'COMPLETION_REJECTED', stage: 'configuration', severity: 'finding' },
   PL6101: { name: 'COMPLETION_WITHOUT_HANDLER', stage: 'types', severity: 'error' },
   PL6401: { name: 'AMBIENT_EFFECT_IN_HANDLER', stage: 'lint', severity: 'error' },
   // S142: an import of a handler file that the certificate cannot name (no such file, outside the project, a URL).
