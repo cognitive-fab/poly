@@ -81,7 +81,9 @@ Each is a program with `// expected: CLEAN` on its first line and its policy bes
 - **`poly grant-request` and `poly grant-revoke` on the command line.** A grant revoked in the provider's own account settings, a Google account's say, is not seen by the runtime: its `Grant` stays `Granted`. The owner signs a revocation with `poly grant-revoke --grant <id>`, or `--credential <c> --db <store>` for the credential's one live grant, and puts the file in the approvals folder; `rt.takeApprovals` takes it, the `Grant` is `Revoked` in its own step, and the provider's revocation follows. A grant for each owner is named by `--grant`; a host reads its id with `rt.grantOf`.
 - **`serveIngress` listens on 127.0.0.1** unless `opts.host` names another address, `0.0.0.0` for every interface included.
 - **`cli.js` runs no command when it is imported.**
-- **`POLY_ANCHORS_CONFIG`** names the per-user keyring configuration file: absolute, and outside a tree under version control. This weakens the rule that the anchor's location is never read from the environment: a process that can set the environment of the owner's commands can redirect the anchor, as one that can write the configuration file can.
+- **`POLY_ANCHORS_CONFIG`** names a keyring configuration file for a test process only (one that accepts test anchors, S194). Any other process ignores it, says so with `PL6410`, and reads the configuration under the home directory, so the environment cannot redirect the owner's anchor.
+- **A calibration-map warning.** A map is a step function: a raw probability is calibrated to the `y` of the last point at or below it, and to 0 below the first, so a two-point map `(0,0), (1000,1000)` sends every raw probability under 1 to 0. `poly check` warns, beside the verdict, of a map that sends two or more consecutive raw values to 0, and of one on the diagonal that is more than 100 thousandths from the identity somewhere. The map is used as it is.
+- **No test writes under the real home.** A guard in the test preload fails a process that changes the owner's `.poly` folder.
 
 ### Formats a reader must expect
 
