@@ -1,5 +1,6 @@
-// M7.2 fixture: the shop's policy before anything is promoted. One mandate (stock is reserved before a session ends) and
-// a fee rule; the promotion tests add to it.
+// M7.2 fixture: the shop's policy before anything is promoted. One mandate (stock is reserved before a session ends), a
+// rule that stock is reserved only while the order is Reserving (the state the reserving step leaves it in), and a fee
+// rule. The promotion tests add to it; a promoted rule that reads the same field and disagrees traps the mandate.
 module orders_policy
 
 policy orders-governance {
@@ -9,6 +10,11 @@ policy orders-governance {
     initial waiting
     from waiting when effect.kind == "stock.reserve" -> reserved
     end reserved
+  }
+  obligation reserve-while-reserving "Stock is reserved only while the order is being reserved." rule {
+    when proposal.kind == "effect" && effect.kind == "stock.reserve"
+    require machine("orders.Order").status in { Reserving } else deny
+    on unknown escalate
   }
   obligation fee-free "No fee is charged." rule {
     when effect.kind == "payment.fee"
