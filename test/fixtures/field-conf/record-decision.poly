@@ -1,0 +1,42 @@
+// A decision whose result is a record with two fields: branch and value.
+// Tests that conf and margin are calculated per-field from the provider's distribution (PD1.2b, PT28.3a).
+module classify
+
+enum Branch { A, B, C }
+enum ClassifyState { Waiting, Classifying, Done, Failed }
+
+type Result = { branch: Branch, value: 0..4 }
+
+machine Classifier {
+  state {
+    phase : ClassifyState = Waiting
+  }
+  terminal phase == Done || phase == Failed
+
+  action Ask()
+  action Classified(branch: Branch, value: 0..4, confBranch: Conf, margBranch: Conf, confValue: Conf, margValue: Conf)
+  action ClassifyFailed()
+
+  on Ask {
+    require phase == Waiting else reject "not-waiting"
+    phase' = Classifying
+    decide classify()
+  }
+  on Classified(branch, value, confBranch, margBranch, confValue, margValue) {
+    require phase == Classifying else reject "not-classifying"
+    require confBranch >= 0 else reject "unsure"
+    phase' = Done
+  }
+  on ClassifyFailed {
+    require phase == Classifying else reject "not-classifying"
+    phase' = Failed
+  }
+
+  decision classify() -> Result {
+    provider "test-classifier"
+    labels { egress:external }
+    timeout 500ms
+    ok(r) -> Classified(branch: r.answer.branch, value: r.answer.value, confBranch: r.conf.branch, margBranch: r.margin.branch, confValue: r.conf.value, margValue: r.margin.value)
+    failed -> ClassifyFailed()
+  }
+}

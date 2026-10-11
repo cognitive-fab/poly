@@ -1,0 +1,39 @@
+// The control: a decision whose result is not a record keeps one conf and one margin (PT10k).
+module scalar_conf
+
+enum Branch { A, B, C }
+enum S { Waiting, Classifying, Done, Failed }
+
+machine Classifier {
+  state {
+    phase : S = Waiting
+  }
+  terminal phase == Done || phase == Failed
+
+  action Ask()
+  action Classified(branch: Branch, conf: Conf, margin: Conf)
+  action ClassifyFailed()
+
+  on Ask {
+    require phase == Waiting else reject "not-waiting"
+    phase' = Classifying
+    decide classify()
+  }
+  on Classified(branch, conf, margin) {
+    require phase == Classifying else reject "not-classifying"
+    require conf >= 0 else reject "unsure"
+    phase' = Done
+  }
+  on ClassifyFailed {
+    require phase == Classifying else reject "not-classifying"
+    phase' = Failed
+  }
+
+  decision classify() -> Branch {
+    provider "test-classifier"
+    labels { egress:external }
+    timeout 500ms
+    ok(r) -> Classified(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> ClassifyFailed()
+  }
+}
