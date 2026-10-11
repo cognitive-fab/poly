@@ -3,9 +3,9 @@
 // verifies the chain as admission does (S210, D1) and neither trusts the project's own files for it.
 //
 // The anchor's location is read from the owner's per-user configuration (.poly/anchors.json under the home directory
-// the operating system gives the user, or the file POLY_ANCHORS_CONFIG names, ruled 2026-10-11), never from poly.json,
-// so an agent confined to the project cannot redirect it; one that can set the environment of the owner's processes can
-// (PT12.5). The anchor itself is `{ v: 2, id, project, first, head, policies, production }`
+// the operating system gives the user), never from poly.json and never from the environment, so an agent confined to the
+// project cannot redirect it. The one exception is a test process, which already accepts test anchors (S194) and may name
+// the file with POLY_ANCHORS_CONFIG (ruled 2026-10-11, PT12.5); any other process ignores the variable and says so. The anchor itself is `{ v: 2, id, project, first, head, policies, production }`
 // (PT12.5): its first rings, the last rings admitted, the highest policy sequence admitted per scope, and whether the
 // project is production. Admission only moves `head` and `policies` forward (S210, D2, D7).
 import { randomBytes } from 'node:crypto';
@@ -36,19 +36,25 @@ let testConfig: string | null = null;
  */
 export function useTestAnchors(dir: string | null): string | null { const prev = testConfig; testConfig = dir === null ? null : resolve(dir); return prev; }
 
+let noticed = false;
+
 function configFile(source?: AnchorSource): { file: string; source: AnchorSource } {
+  const named = process.env.POLY_ANCHORS_CONFIG;
+  const variable = named !== undefined && named !== '';
   if (source === 'test' || (source === undefined && testConfig)) {
     if (!testConfig) throw new KeyringError('the certificate was admitted with a test anchor, and this process names no test configuration');
+    // PT12.5 (ruled 2026-10-11): a test process may name the file; it must be absolute and outside version control.
+    if (variable) {
+      if (!isAbsolute(named)) throw new KeyringError(`POLY_ANCHORS_CONFIG is ${named}, which is not an absolute path`);
+      if (underVersionControl(named)) throw new KeyringError(`POLY_ANCHORS_CONFIG is ${resolve(named)}, inside a tree under version control; the configuration is never committed`);
+      return { file: resolve(named), source: 'test' };
+    }
     return { file: join(testConfig, 'anchors.json'), source: 'test' };
   }
-  // PT12.5 (ruled 2026-10-11): POLY_ANCHORS_CONFIG names the configuration file itself, for an owner whose home is not where
-  // it should live. It is read from this process's environment only; a relative path, or one in a tree under version
-  // control, is refused. A test process's own folder, above, wins.
-  const named = process.env.POLY_ANCHORS_CONFIG;
-  if (named !== undefined && named !== '') {
-    if (!isAbsolute(named)) throw new KeyringError(`POLY_ANCHORS_CONFIG is ${named}, which is not an absolute path`);
-    if (underVersionControl(named)) throw new KeyringError(`POLY_ANCHORS_CONFIG is ${resolve(named)}, inside a tree under version control; the owner's configuration is never committed`);
-    return { file: resolve(named), source: 'user' };
+  // Any other process: the environment cannot redirect the owner's anchor. It says so once, and reads the home configuration.
+  if (variable && !noticed) {
+    noticed = true;
+    process.stderr.write("poly: PL6410 KEYRING_NOT_SIGNED: POLY_ANCHORS_CONFIG is not honoured outside a test process (S194); the owner's configuration under the home directory is used\n");
   }
   // os.userInfo reads the account's home directory from the operating system, not from HOME or USERPROFILE.
   return { file: join(userInfo().homedir, '.poly', 'anchors.json'), source: 'user' };
