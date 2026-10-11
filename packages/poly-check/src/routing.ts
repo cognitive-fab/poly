@@ -6,6 +6,36 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { routePathOk, type Module, type RoutingFiles } from '@poly/core';
 
+/**
+ * PT24 (ruled 2026-10-11): why a calibration map deserves a warning, or null. A map is a step function: a raw probability,
+ * in thousandths, is calibrated to the y of the last point whose x is at most the raw value, and to 0 below the first
+ * point (provider.ts's calibrate, which the tests hold to the same). It deserves a warning when it sends two or more
+ * consecutive raw values to 0 (a whole open interval, those below its first point included), and when its points all lie
+ * on the diagonal, so that it seems to declare the identity, but it is more than 100 thousandths from the identity at some
+ * raw value, having too few points to approximate it. A map that does not have well formed points is PL1201 elsewhere.
+ */
+export function calibrationWarning(map: unknown): string | null {
+  const pts = (map as { points?: unknown } | null)?.points;
+  if (!Array.isArray(pts) || pts.length === 0 || !pts.every((p) => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))) return null;
+  const points = pts as [number, number][];
+  const at = (raw: number): number => { let out = 0; for (const [x, y] of points) { if (x <= raw) out = y; else break; } return out; };
+  const why: string[] = [];
+  let run = 0;
+  let best = 0;
+  let bestFrom = 0;
+  for (let raw = 0; raw <= 1000; raw++) {
+    if (at(raw) === 0) { run++; if (run > best) { best = run; bestFrom = raw - run + 1; } } else run = 0;
+  }
+  if (best >= 2) why.push(`it sends the ${best} raw values ${bestFrom} to ${bestFrom + best - 1} (thousandths) to 0`);
+  if (points.every(([x, y]) => x === y)) {
+    let worst = 0;
+    let worstAt = 0;
+    for (let raw = 0; raw <= 1000; raw++) { const d = Math.abs(at(raw) - raw); if (d > worst) { worst = d; worstAt = raw; } }
+    if (worst > 100) why.push(`its ${points.length} points all lie on the diagonal, so it seems to declare the identity, but a step function through them is ${worst} thousandths from it at the raw value ${worstAt}`);
+  }
+  return why.length ? why.join('; and ') : null;
+}
+
 /** The files of each route of `module`, the source at `file`; a path that is not well formed or has no file is left out, and is PL1201 or PL1001 at check. */
 export function resolveRouting(module: Module, file: string): RoutingFiles {
   const out: RoutingFiles = { prices: {}, maps: {} };

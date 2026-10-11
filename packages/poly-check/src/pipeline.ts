@@ -33,7 +33,7 @@ import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects
 import { checkProduct } from '@cognitive-fab/polygraph/polyrun/src/check-product.mjs';
 import { resolveUses, STD } from './uses.js';
 import { resolveProviders } from './providers.js';
-import { resolveRouting } from './routing.js';
+import { resolveRouting, calibrationWarning } from './routing.js';
 
 export type StageName = 'parse-type' | 'lower' | 'validate' | 'translation-validation' | 'model-check' | 'deadlock' | 'liveness' | 'effects' | 'decisions' | 'composition' | 'configuration' | 'flow';
 
@@ -149,7 +149,7 @@ export interface CheckReport {
   /** S190: each module whose enums a machine's build uses: the file it was read from, and its AST digest. */
   typeModules?: Record<string, { file: string; digest: string }>;
   /** PT12 (v1, ruled 2026-10-09): each action parameter named after a state field of its machine; never in the verdict. */
-  warnings?: { machine: string; action: string; param: string; field: string }[];
+  warnings?: ({ machine: string; action: string; param: string; field: string } | { kind: 'calibration'; route: string; tier: string; map: string; why: string })[];
   error?: string;
   engines: Record<string, string>;
   /** Stage 5 (PT8): the module's policies, one report per trust scope. */
@@ -279,6 +279,10 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   const providers = resolveProviders(program, opts.std ?? STD);
   // PT10r: the price tables and calibration maps the routes name, beside the source.
   const routing = resolveRouting(original, file);
+  // PT24 (ruled 2026-10-11): a calibration map that sends a whole interval of raw values to 0, or seems to declare the identity
+  // with too few points, is a warning beside the verdict; the map is used as it is.
+  const calibrations = original.decls.flatMap((d) => (d.kind !== 'Route' ? [] : d.tiers.flatMap((t) => { const m = t.calibration === null ? undefined : routing.maps[t.calibration]; const why = m ? calibrationWarning(m.map) : null; return why ? [{ kind: 'calibration' as const, route: d.name, tier: t.name, map: t.calibration!, why }] : []; })));
+  if (calibrations.length) report.warnings = [...(report.warnings ?? []), ...calibrations];
   opts = { ...opts, uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans, providers, routing, sourceDir: dirname(resolve(file)) };
   const checked = checkModule(module, { program, providers, routing });
   report.diagnostics.push(...checked.diagnostics);
