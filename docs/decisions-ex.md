@@ -542,3 +542,9 @@ The dry run's preload calls `acceptTestAnchors` so that its host can load a cert
 - No file under `examples/` mentions `acceptTestAnchors`; the only caller is `test/ex-inbox-preload.mjs`.
 
 The command runner in `test/ex-inbox-readme.mjs` gained `preload: false` for the bare run. Nothing in the core changed.
+
+## The committed maps and the calibration warning (PT24), 2026-10-11
+
+The four maps in `examples/inbox/maps/` began (0,0), (500,...), so raw 1 to 499 calibrated to 0 and `poly check` warned of each. They now have points at raw 0, 1, 50, 100, 200, 300 and 400 below the old ones (the small model's calibrate to about 0.8 of raw, the large model's to about 0.95), with their digests recomputed by `mapDigest`. No value is above its raw value, so confidence stays conservative. `poly check examples/inbox/inbox.poly` is CLEAN with no calibration warning. `test/ex-inbox-maps.test.mjs` holds the band, the digests and the conservatism.
+
+A finding for the release session: v1's head (6b78de3a) changes only the spec text. `packages/poly-check/src/routing.ts` still warns of two or more consecutive raw values sent to 0, not more than 100. The raw 1 point makes the maps quiet under both rules; the code needs the ruled threshold.
