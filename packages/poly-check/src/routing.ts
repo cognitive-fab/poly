@@ -9,9 +9,9 @@ import { routePathOk, type Module, type RoutingFiles } from '@poly/core';
 /**
  * PT24 (ruled 2026-10-11): why a calibration map deserves a warning, or null. A map is a step function: a raw probability,
  * in thousandths, is calibrated to the y of the last point whose x is at most the raw value, and to 0 below the first
- * point (provider.ts's calibrate, which the tests hold to the same). It deserves a warning when it sends two or more
- * consecutive raw values to 0 (a whole open interval, those below its first point included), and when its points all lie
- * on the diagonal, so that it seems to declare the identity, but it is more than 100 thousandths from the identity at some
+ * point (provider.ts's calibrate, which the tests hold to the same). It deserves a warning when it sends to 0 a band of
+ * more than 100 consecutive raw values above raw 0 (ruled 2026-10-11: raw 0 itself, or a narrow band near it, is harmless;
+ * the values below its first point and above its last count when they are 0), and when its points all lie on the diagonal, so that it seems to declare the identity, but it is more than 100 thousandths from the identity at some
  * raw value, having too few points to approximate it. A map that does not have well formed points is PL1201 elsewhere.
  */
 export function calibrationWarning(map: unknown): string | null {
@@ -23,10 +23,10 @@ export function calibrationWarning(map: unknown): string | null {
   let run = 0;
   let best = 0;
   let bestFrom = 0;
-  for (let raw = 0; raw <= 1000; raw++) {
+  for (let raw = 1; raw <= 1000; raw++) {
     if (at(raw) === 0) { run++; if (run > best) { best = run; bestFrom = raw - run + 1; } } else run = 0;
   }
-  if (best >= 2) why.push(`it sends the ${best} raw values ${bestFrom} to ${bestFrom + best - 1} (thousandths) to 0`);
+  if (best > 100) why.push(`it sends the ${best} raw values ${bestFrom} to ${bestFrom + best - 1} (thousandths) to 0, a band wider than 100`);
   if (points.every(([x, y]) => x === y)) {
     let worst = 0;
     let worstAt = 0;
