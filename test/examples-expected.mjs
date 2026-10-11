@@ -64,5 +64,6 @@ export async function checkExample(file, root, name = 'example') {
     diagnostics: [...(r.diagnostics ?? []), ...files.flatMap((f) => [...f.diagnostics, ...(f.policies ?? []).flatMap((p) => p.diagnostics ?? [])])],
     machines: files.flatMap((f) => f.machines),
     configurations: files.flatMap((f) => f.configurations ?? []),
+    policies: files.flatMap((f) => f.policies ?? []),
   };
 }

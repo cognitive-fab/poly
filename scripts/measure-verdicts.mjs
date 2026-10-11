@@ -20,7 +20,10 @@ if (process.argv[2] === '--one') {
   const t0 = Date.now();
   let rec;
   try {
-    const r = await checkFile(file, { root });
+    // V10 item 4, clarified 2026-10-10: a program in examples/ with a policy beside it is one project with it, and the
+    // policy file is never measured alone.
+    const { policyOf, checkExample } = await import('../test/examples-expected.mjs');
+    const r = policyOf(file) && rel(file).startsWith('examples/') ? await checkExample(file, root, rel(file).replace(/[^a-z0-9]+/gi, '-')) : await checkFile(file, { root });
     rec = {
       verdict: r.verdict,
       error: r.error ?? null,
@@ -41,7 +44,7 @@ assertNotExperimentTree(ROOT);
 const out = process.argv[2];
 const jobs = Number(process.argv[process.argv.indexOf('--jobs') + 1]) || 6;
 const walk = (d) => readdirSync(d).flatMap((e) => (statSync(join(d, e)).isDirectory() ? (e === 'node_modules' || e === '.poly' ? [] : walk(join(d, e))) : [join(d, e)]));
-const files = ['conformance', 'examples'].flatMap((d) => walk(join(ROOT, d))).filter((f) => f.endsWith('.poly') || (f.endsWith('.ts') && /from ['"]@poly\/embed['"]|^import \{\s*$\s*module,/m.test(readFileSync(f, 'utf8')))).sort();
+const files = ['conformance', 'examples'].flatMap((d) => walk(join(ROOT, d))).filter((f) => !(rel(f).startsWith('examples/') && f.endsWith('.policy.poly'))).filter((f) => f.endsWith('.poly') || (f.endsWith('.ts') && /from ['"]@poly\/embed['"]|^import \{\s*$\s*module,/m.test(readFileSync(f, 'utf8')))).sort();
 const scratch = join(ROOT, '.poly', 'measure-verdicts');
 rmSync(scratch, { recursive: true, force: true });
 const results = {};
