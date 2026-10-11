@@ -39,8 +39,11 @@ export function recordedConcierge(fixture) {
     asked.push({ decision: q.decision, tier: null, message: m.id });
     if (!m.amount) throw new Error(`no recorded amount for ${m.id}`);
     const read = Object.values(materials?.items ?? {}).flat().map((i) => i.id);
-    const other = m.amount.answer === 0 ? 1 : 0;
-    return { answer: m.amount.answer, distribution: [[m.amount.answer, m.amount.p], [other, Math.max(0, 1 - m.amount.p)]], cites: (m.amount.cites ?? []).filter((id) => read.includes(id)), usage: m.amount.usage, reported: fixture.models.small, latencyMs: 0 };
+    // The answer is the whole record and the distribution is over whole answers; the runtime computes the per-field
+    // confidence and margin from it (PT10k).
+    const answer = m.amount.answer;
+    const other = { value: answer.value === 0 ? 1 : 0 };
+    return { answer, distribution: [[answer, m.amount.p], [other, Math.max(0, 1 - m.amount.p)]], cites: (m.amount.cites ?? []).filter((id) => read.includes(id)), usage: m.amount.usage, reported: fixture.models.small, latencyMs: 0 };
   };
   const reply = (q, materials) => {
     const m = messageOf(fixture, materials);

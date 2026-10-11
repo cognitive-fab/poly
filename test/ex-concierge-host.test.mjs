@@ -35,9 +35,9 @@ test('E1: each tier answers a message from its recording, on the side of the rou
 test('E1, AC30: the amount decision\'s recordings hold one answer outside 0..500 and one below the program\'s 0.8', () => {
   const r = recordedConcierge(FIXTURE);
   const a = (id) => r.decisions.amount.provider({ decision: 'amount', payload: {} }, materials(id));
-  assert.equal(a('refund-small').answer, 40);
-  assert.ok(a('refund-large').answer > 100, 'above the policy\'s limit');
-  assert.ok(a('refund-outside').answer > 500, 'outside the strict domain, refused at dispatch');
+  assert.deepEqual(a('refund-small').answer, { value: 40 });
+  assert.ok(a('refund-large').answer.value > 100, 'above the policy\'s limit');
+  assert.ok(a('refund-outside').answer.value > 500, 'outside the strict domain, refused at dispatch');
   assert.ok(a('vague-amount').distribution[0][1] < 0.8, 'unsure, so no refund is proposed');
   // S462: it cites the order its message is about when the customer's orders hold it, and nothing otherwise, so the call
   // takes the failed path (PS17.6) rather than citing an order it did not use.
@@ -47,7 +47,7 @@ test('E1, AC30: the amount decision\'s recordings hold one answer outside 0..500
   assert.deepEqual(given('refund-large', 'cust-b').cites, ['o-2001']);
   assert.deepEqual(given('refund-small', 'cust-b').cites, [], 'an order the customer does not have is not cited');
   assert.deepEqual(given('vague-amount', 'cust-a').cites, [], 'a message about no order in particular cites none');
-  const values = FIXTURE.messages.filter((m) => m.amount).map((m) => m.amount.answer);
+  const values = FIXTURE.messages.filter((m) => m.amount).map((m) => m.amount.answer.value);
   assert.ok(values.filter((v) => v < 0 || v > 500).length === 1, 'exactly one recorded amount is outside the domain');
 });
 

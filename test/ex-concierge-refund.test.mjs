@@ -164,7 +164,7 @@ async function desk(name, src, fixture = FIXTURE, charges = {}) {
 const withAmount = (value, cites) => {
   const f = structuredClone(FIXTURE);
   const m = f.messages.find((x) => x.id === 'refund-small');
-  if (value !== undefined) m.amount.answer = value;
+  if (value !== undefined) m.amount.answer = { value };
   if (cites) m.amount.cites = cites;
   m.replies.Unsure = 'We could not work out the refund you asked for. A member of staff will contact you.';
   return f;
