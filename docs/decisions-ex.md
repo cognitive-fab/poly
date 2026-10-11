@@ -461,6 +461,14 @@ At run time over the cut-down path: the control reaches Stripe with the order's 
 
 **E1 and E2 are done.** E1: the concierge is `CLEAN` with its policy and meets AC15, AC18, AC22, AC27 and AC30. E2: the inbox meets IAC1 to IAC9 on recorded traffic, IAC3 at check on the cut-down copy, with the 12 GB limit stated. The inbox was last rerun in full, 35 of 35, on the S462 rebase; nothing the inbox runs has changed since, and S463 touches channel applications only, which the inbox is not.
 
+## Rebase on v1 at 53f93736 (2026-10-10)
+
+`ex` is rebased on `v1` at `53f93736`, which holds f75c0eed to eaad513b (S463: a machine with no rejecting completion handler discharges the liveness assumption by its form) and 5c2b58b0 (V10 item 4: a program and the policy beside it are one project, and a policy is never checked alone). The build is clean.
+
+- **The expected line is the program's.** The README says a policy file carries no expected line, so `// expected: CLEAN` is removed from `examples/concierge/concierge.policy.poly`, and from the inbox policy draft before it moves into `examples/`. The programs keep theirs. This supersedes the earlier entry that put the line on the policy files. The serial group's `PL1001` failure on the policy file alone should be gone, since the harness no longer lists a policy; the serial group has not been rerun, as ruled.
+- **The light tests pass, 45 of 45:** `ex-concierge-host`, `ex-concierge-refund`, `ex-concierge-liveness`, `ex-concierge-policy`, `ex-inbox-host`, `ex-gmail-source` and `ex-mime`. The liveness test is unchanged by the discharge by form: the `require` copy has a rejecting completion handler, so nothing is discharged for it.
+- **Not rerun:** the project check, AC27, the serial group and the inbox's heavy tests, which the gate run covers.
+
 ## Conclusion
 
 The examples branch holds the plan and its ruling, the inbox's synthetic corpus and recorded Gmail traffic, the MIME reader and the Gmail source kind, the concierge in `examples/concierge` (CLEAN at 0..500, checked in the serial after-suite group) with its recorded answers and host code, and the inbox draft on one source with a read grant per account (S460, S461). The suites after S459 and S461 count as clean, apart from one harness finding for the release session. The concierge checks CLEAN with its policy and meets AC27 end to end; the inbox meets IAC1 to IAC9 on recorded traffic.

@@ -1,4 +1,3 @@
-// expected: CLEAN
 // The inbox assistant's policy (plan-ex.md E2, IAC2, PT12.5). Every Gmail draft waits for the owner, who approves it
 // with a signed record; nothing an email says, and no agent, can approve it. A draft carries the account's mail out,
 // so without this obligation polycheck's credential-egress region reaches gmail.createDraft with no gate crossed

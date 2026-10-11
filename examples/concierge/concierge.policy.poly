@@ -1,4 +1,3 @@
-// expected: CLEAN
 // The concierge's policy (plan-ex.md E1). A refund above 100 waits for a person, who approves it with a signed record
 // (PF9.6); one approved after the customer's thread has moved on is judged on the later state too (S401). The guard
 // proposal.kind == "effect" keeps the rules off the sends between the concierge's scopes, where effect is unknown.
