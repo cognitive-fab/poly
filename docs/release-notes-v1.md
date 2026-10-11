@@ -76,6 +76,13 @@ Each is a program with `// expected: CLEAN` on its first line and its policy bes
   - AC27: a run of the concierge with a delegated refund replays every post-state, gate decision and tier choice, the grant included, from the runtime's own store, with no diagnostic.
   - The whole check took 114 s with four checks running together.
 - **The inbox assistant** (`examples/inbox`, E2): Gmail by key, three accounts with a read grant each (S460, S461), triage, to-dos, and drafts only, each draft escalated to its owner and addressed by the source's envelope (S459). It checks `CLEAN` with its policy: `Todo` 7,294 states, `Message` 200, `gmail_draft.Grant` and `gmail_read.Grant` 13 each, `triage.Route` and `kinds.Route` 6 each, `monthly.Budget` 96. The check took 70 s with four running together. IAC1 to IAC9 pass on recorded traffic, including IAC9's replay of the inbox's own journal. **Stated limit (IAC3):** the full inbox with a second principal for the cross-account variant runs out of a 12 GB heap, so its witness at check, `PL6831` with `Open -> Read -> Written -> Propose -> Enveloped`, comes from a cut-down copy; at run time the full inbox denies the work draft that carries the home account's mail, `audience`, and creates nothing.
+### v1.0.1
+
+- **`poly grant-request` and `poly grant-revoke` on the command line.** A grant revoked in the provider's own account settings, a Google account's say, is not seen by the runtime: its `Grant` stays `Granted`. The owner signs a revocation with `poly grant-revoke --grant <id>`, or `--credential <c> --db <store>` for the credential's one live grant, and puts the file in the approvals folder; `rt.takeApprovals` takes it, the `Grant` is `Revoked` in its own step, and the provider's revocation follows. A grant for each owner is named by `--grant`; a host reads its id with `rt.grantOf`.
+- **`serveIngress` listens on 127.0.0.1** unless `opts.host` names another address, `0.0.0.0` for every interface included.
+- **`cli.js` runs no command when it is imported.**
+- **`POLY_ANCHORS_CONFIG`** names the per-user keyring configuration file: absolute, and outside a tree under version control. This weakens the rule that the anchor's location is never read from the environment: a process that can set the environment of the owner's commands can redirect the anchor, as one that can write the configuration file can.
+
 ### Formats a reader must expect
 
 - **Claims and grants.**
