@@ -61,6 +61,12 @@ export interface Certificate {
     /** What this build's runtime does not do, printed with every verdict about it (S118, S134, S135). */
     limits: string[];
     /**
+     * S463, PS6.4: for each machine with a liveness property, the assumption that no completion of the program's own
+     * intents is rejected, with its status: discharged by the generated configuration that covers the machine and
+     * reported no PL5409, or open.
+     */
+    assumptions?: { id: 'liveness-completions'; machine: string; assumption: string; status: 'discharged' | 'open'; by: string | null }[];
+    /**
      * S142: the handlers the certificate binds. `files` holds each handler file poly.json names (`roots`) and every
      * file reached from them through relative imports, by path relative to the project root and SHA-256; `load`
      * refuses any difference, and `rt.handle` takes only exports of the roots as loaded. The lint ran over `files`.
