@@ -106,8 +106,9 @@ export interface DecisionRecord {
   inputs: string[];
   answer: unknown;
   raw: number;
-  conf: number;
-  margin: number;
+  /** PD1.2b, PT10k: one number for a scalar result, and for a record result one for each field. */
+  conf: number | Record<string, number>;
+  margin: number | Record<string, number>;
   distribution: [unknown, number][];
   /** PS17.6: the item set the answer cites, by reference, so a step's cites is checked against its record. */
   cites?: { ref: string; count: number };
@@ -116,6 +117,28 @@ export interface DecisionRecord {
 }
 
 const sameAnswer = (x: unknown, y: unknown): boolean => digest(x ?? null) === digest(y ?? null);
+
+/**
+ * PD1.2b, PT28.3a, PT10k (ruled 2026-10-10): the conf and margin of each field of a record answer. A field's probability
+ * for a value is the sum of the distribution's probabilities of the answers that hold it, so a value the distribution
+ * does not list has probability 0; conf is the calibrated probability of the value returned, and margin that minus the
+ * calibrated highest probability of any other value, floored at 0, as for a scalar (review B3).
+ */
+export function fieldConfidence(map: CalibrationMap | null | undefined, distribution: [unknown, number][], answer: unknown, fields: string[]): { conf: Record<string, number>; margin: Record<string, number> } {
+  const conf: Record<string, number> = {};
+  const margin: Record<string, number> = {};
+  const of = (x: unknown, f: string): unknown => (x !== null && typeof x === 'object' ? (x as Record<string, unknown>)[f] : undefined);
+  for (const f of fields) {
+    const mass = new Map<string, number>();
+    for (const [x, p] of distribution) { const k = digest(of(x, f) ?? null); mass.set(k, (mass.get(k) ?? 0) + p); }
+    const mine = digest(of(answer, f) ?? null);
+    const first = mass.get(mine) ?? 0;
+    const second = Math.max(0, ...[...mass].filter(([k]) => k !== mine).map(([, p]) => p));
+    conf[f] = calibrate(map, first);
+    margin[f] = Math.max(0, conf[f] - calibrate(map, second));
+  }
+  return { conf, margin };
+}
 
 /** The raw probability the distribution gives an answer, 0 when it does not list it (review B3). */
 export function answerProbability(distribution: [unknown, number][], answer: unknown): number {
@@ -151,7 +174,7 @@ export interface DecisionBudgetHost {
 }
 
 /** The adapter: the effect handler for `decision.<d>`, recording the full record for the ledger by intent id. */
-export function decisionHandler(decision: string, providerKind: string | null, config: ProviderConfig, records: Map<string, DecisionRecord>, memory?: { content: boolean; cites: string | null; mem: DecisionMemory }, budget?: DecisionBudgetHost | null) {
+export function decisionHandler(decision: string, providerKind: string | null, config: ProviderConfig, records: Map<string, DecisionRecord>, memory?: { content: boolean; cites: string | null; mem: DecisionMemory }, budget?: DecisionBudgetHost | null, fields?: string[] | null) {
   return async (payload: unknown, _caps: unknown, ctx: { idempotencyKey: string; instanceId?: string }) => {
     // PS18.4a, K15: a decision under a budget gives its provider both token limits with the question, as a tier does.
     const question = { decision, payload, intent: ctx.idempotencyKey, ...(budget ? { limits: { maxInputTokens: budget.maxInputTokens, maxTokens: budget.maxTokens } } : {}) };
@@ -167,8 +190,8 @@ export function decisionHandler(decision: string, providerKind: string | null, c
     // highest of any other answer, floored at 0; an answer the distribution does not list has probability 0.
     const first = answerProbability(dist, a.answer);
     const second = Math.max(0, ...dist.filter(([x]) => !sameAnswer(x, a.answer)).map(([, p]) => p));
-    const conf = calibrate(config.calibration, first);
-    const margin = Math.max(0, conf - calibrate(config.calibration, second));
+    // PT10k: a record result has a conf and a margin for each field; any other result has one.
+    const { conf, margin } = fields?.length ? fieldConfidence(config.calibration, dist, a.answer, fields) : (() => { const c = calibrate(config.calibration, first); return { conf: c, margin: Math.max(0, c - calibrate(config.calibration, second)) }; })();
     const map = config.calibration;
     const record: DecisionRecord = {
       decision, intent: ctx.idempotencyKey, provider: providerKind,

@@ -1749,7 +1749,7 @@ export class PolyRuntime {
       scope: (instance: string) => { const id = this.store.db.prepare('SELECT machine_id FROM pr_instance WHERE instance_id = ?').get(instance)?.machine_id as string | undefined ?? ''; return id.slice(0, id.lastIndexOf('.')); },
       keep: (intent: string, record: DecisionRecord & Record<string, unknown>) => this.#routing.keep(intent, record),
     } : null;
-    this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records, { content: entry.decision?.result === 'content', cites: entry.decision?.cites ?? null, mem }, budget));
+    this.#handlers.set(kind, decisionHandler(decision, entry.decision?.provider ?? null, config, this.records, { content: entry.decision?.result === 'content', cites: entry.decision?.cites ?? null, mem }, budget, entry.decision?.result && typeof entry.decision.result === 'object' && !Array.isArray(entry.decision.result) ? Object.keys(entry.decision.result) : null));
   }
 
   /**
