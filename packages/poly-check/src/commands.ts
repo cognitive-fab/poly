@@ -23,6 +23,9 @@ import { signPolicy } from './policy-sign.js';
 import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js';
 import { journalCommand } from './journal.js';
 import { exportTraces, TraceUsageError } from './traces.js';
+import { MineUsageError, mineTraces } from './mine.js';
+import { adjudicate } from './adjudicate.js';
+import { promote, PromoteUsageError } from './promote.js';
 import { benchGate } from './bench.js';
 import { checkHost, type HostCheck } from './host.js';
 import { editCheck } from './edit-check.js';
@@ -470,6 +473,41 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'mine', mcp: null, lsp: false,
+    summary: 'Runs polyx, a separately installed tool, over a trace corpus and writes the candidate rules it proposes, with their support, counter-evidence and the source that would carry them (PF10.2, PS20, PT30). The corpus is private, so never over MCP.',
+    input: obj({ traces: str('the trace corpus (poly export traces)'), project: str('the poly project the corpus came from'), polyx: str('the directory of a polyx checkout'), out: str('the candidates file; an existing file is refused'), synthetic: { type: 'boolean', description: 'the corpus was made for the purpose, and the candidates say so (PS20.5)' }, all: { type: 'boolean', description: 'also the rules polyx suppresses as subsumed' } }, ['traces', 'project', 'polyx', 'out']),
+    output: obj({ path: str('the candidates written'), candidates: { type: 'integer' }, promotable: { type: 'integer' }, gappedLeftOut: { type: 'integer' } }, ['path', 'candidates', 'promotable']),
+    async run(input) {
+      try {
+        const r = await mineTraces({ traces: need(input, 'traces'), project: need(input, 'project'), polyx: need(input, 'polyx'), out: need(input, 'out'), synthetic: input.synthetic === true, all: input.all === true });
+        return { exit: EXIT_CODES.CLEAN, result: { ...r }, text: `${r.path}: ${r.candidates} candidate(s), ${r.promotable} promotable; ${r.gappedLeftOut} gapped run(s) left out\n` };
+      } catch (e) { if (e instanceof MineUsageError) throw new CommandUsageError(e.message); throw e; }
+    },
+  },
+  {
+    name: 'adjudicate', mcp: null, lsp: false,
+    summary: 'Signs a person\'s verdict (real, spurious or defer) on one candidate rule with a person key given by file, a record of the kind adjudication (PF9.6, PS20.3, PT30.4). Never over MCP.',
+    input: obj({ candidates: str('the candidates file'), candidate: str('the candidate\'s id'), verdict: str('real, spurious or defer'), by: str('the key id'), key: str('the private key file'), project: str('the project whose anchor the record is bound to'), out: str('where to write the adjudication') }, ['candidates', 'candidate', 'verdict', 'by', 'key', 'out']),
+    output: obj({ path: str('the adjudication written'), adjudication: { type: 'object', description: 'the poly.adjudication file' } }, ['path', 'adjudication']),
+    async run(input) {
+      const r = adjudicate({ candidates: need(input, 'candidates'), candidate: need(input, 'candidate'), verdict: need(input, 'verdict'), by: need(input, 'by'), key: need(input, 'key'), project: opt(input, 'project'), out: need(input, 'out') });
+      return { exit: EXIT_CODES.CLEAN, result: { path: r.path, adjudication: r.file as unknown as Record<string, unknown> }, text: `${r.path}: ${r.file.verdict} on ${r.file.id}, signed by ${r.file.record.by}\n` };
+    },
+  },
+  {
+    name: 'promote', mcp: null, lsp: false,
+    summary: 'Adds the rules a person adjudicated real to the project\'s sources, checks the project, and refuses a promotion that makes a mandate undischargeable (PF4.4, PF4.5, PS20.4, PT30.5). Never over MCP.',
+    input: obj({ project: str('the project directory'), candidates: str('the candidates file'), adjudications: { type: 'array', items: { type: 'string' }, description: 'the adjudication files, in the order to promote' }, scope: str('the policy scope that receives a policy rule') }, ['project', 'candidates', 'adjudications']),
+    output: obj({ promoted: { type: 'array', items: { type: 'object' } } }, ['promoted']),
+    async run(input) {
+      const adjudications = Array.isArray(input.adjudications) ? (input.adjudications as unknown[]).map(String) : [];
+      if (!adjudications.length) throw new CommandUsageError('promote needs at least one --adjudication <file>');
+      let r;
+      try { r = await promote({ project: need(input, 'project'), candidates: need(input, 'candidates'), adjudications, scope: opt(input, 'scope') }); } catch (e) { if (e instanceof PromoteUsageError) throw new CommandUsageError(e.message); throw e; }
+      return { exit: r.exit, result: { promoted: r.promoted as unknown as Record<string, unknown>[] }, text: r.lines.join('\n') + '\n' };
+    },
+  },
+  {
     name: 'journal', mcp: 'poly_journal', lsp: false,
     summary: 'Ledger verification, replay, export, evaluation and fitting (PF8.6, PD3.3): its arguments are those of the command line.',
     input: obj({ sub: { type: 'string', enum: ['verify', 'replay', 'export', 'eval', 'fit'] }, args: { type: 'array', items: { type: 'string' }, description: 'the options, as on the command line (--db, --run, --trust …)' } }, ['sub']),
@@ -515,7 +553,6 @@ export const NOT_BUILT: { name: string; mcp: string; when: string }[] = [
   { name: 'grade', mcp: 'poly_grade', when: 'not scheduled: polynv adequacy (PF7.7)' },
   { name: 'deploy', mcp: 'poly_deploy', when: 'not scheduled: the version gate at load (PF8.7)' },
   { name: 'dispatch', mcp: 'poly_dispatch', when: 'not scheduled: the development runtime' },
-  { name: 'mine', mcp: 'poly_mine', when: 'M7 (PF10.2)' },
   { name: 'propose', mcp: 'poly_propose', when: 'M7 (PF10.3)' },
 ];
 

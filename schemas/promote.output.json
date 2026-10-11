@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "promoted": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": [
+    "promoted"
+  ]
+}

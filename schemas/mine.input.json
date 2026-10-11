@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "properties": {
+    "traces": {
+      "type": "string",
+      "description": "the trace corpus (poly export traces)"
+    },
+    "project": {
+      "type": "string",
+      "description": "the poly project the corpus came from"
+    },
+    "polyx": {
+      "type": "string",
+      "description": "the directory of a polyx checkout"
+    },
+    "out": {
+      "type": "string",
+      "description": "the candidates file; an existing file is refused"
+    },
+    "synthetic": {
+      "type": "boolean",
+      "description": "the corpus was made for the purpose, and the candidates say so (PS20.5)"
+    },
+    "all": {
+      "type": "boolean",
+      "description": "also the rules polyx suppresses as subsumed"
+    }
+  },
+  "required": [
+    "traces",
+    "project",
+    "polyx",
+    "out"
+  ]
+}

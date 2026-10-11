@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the adjudication written"
+    },
+    "adjudication": {
+      "type": "object",
+      "description": "the poly.adjudication file"
+    }
+  },
+  "required": [
+    "path",
+    "adjudication"
+  ]
+}

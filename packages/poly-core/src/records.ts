@@ -13,7 +13,7 @@ import { canonicalize } from './jcs.js';
 /** `keyring` (S194, M9): a person's signature on a change of the people or agents ring, over { parent, rings }. */
 /** `policy` (S194, Q8, M9): a person's signature on a policy scope, over its document, source and engine. */
 /** `grant-request` (S210, B3, D6): a person's signature on asking a holder for a grant, over { credential, holder }. */
-export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation' | 'grant-request' | 'verify' | 'forget';
+export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation' | 'grant-request' | 'verify' | 'forget' | 'adjudication';
 
 export interface SignedRecord {
   v: 1;
@@ -76,6 +76,11 @@ export function verifyRecord(record: unknown, keyrings: Keyrings, expect: { kind
 export function keyringDigest(k: Keyrings): string {
   const norm = (l: KeyHolder[]) => [...l].map((p) => ({ name: p.name, keyId: p.keyId, publicKey: createPublicKey(p.publicKey).export({ type: 'spki', format: 'pem' }).toString().trim() })).sort((x, y) => (x.keyId < y.keyId ? -1 : x.keyId > y.keyId ? 1 : 0));
   return 'sha256:' + createHash('sha256').update(canonicalize({ people: norm(k.people), agents: norm(k.agents) }), 'utf8').digest('hex');
+}
+
+/** PS20.3, S512: what a person signs to judge one candidate rule: the project's anchor id, the candidate's digest and the verdict. */
+export function adjudicationSubject(anchor: string, candidate: string, verdict: string): string {
+  return 'sha256:' + createHash('sha256').update(canonicalize({ anchor, candidate, verdict }), 'utf8').digest('hex');
 }
 
 /** S194, Q8: what a person signs for a policy scope. */

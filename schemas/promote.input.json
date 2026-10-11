@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "the project directory"
+    },
+    "candidates": {
+      "type": "string",
+      "description": "the candidates file"
+    },
+    "adjudications": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "the adjudication files, in the order to promote"
+    },
+    "scope": {
+      "type": "string",
+      "description": "the policy scope that receives a policy rule"
+    }
+  },
+  "required": [
+    "project",
+    "candidates",
+    "adjudications"
+  ]
+}

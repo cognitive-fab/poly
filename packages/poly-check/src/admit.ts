@@ -20,6 +20,9 @@ import { secretShapes } from './secrets.js';
 import { LINT_VERSION, handlerClosure } from './handlers.js';
 import { KeyringError, keyringChain } from './keyrings.js';
 import { policySignaturePath } from './policy-sign.js';
+import { readPromotions } from './promotions.js';
+
+const PROMOTION_NAMES = { PL6510: 'PROMOTION_NOT_IN_SOURCE', PL6511: 'PROMOTION_RECORD_INVALID', PL6512: 'SYNTHETIC_PROMOTION' } as const;
 
 export class AdmitError extends Error {
   constructor(message: string) { super(message); this.name = 'AdmitError'; }
@@ -261,7 +264,7 @@ function acceptedFindings(c: Checked): NonNullable<Certificate['boundAccepted']>
         const good = verdicts.find((v) => v.ok);
         if (good && good.ok) out.push({ code: d.code, property: d.property ?? null, subject: name, witness: d.witness.id, by: good.person.keyId, record: good.digest });
         else if (verdicts.length) problems.push(`${name} ${d.code}: ${(verdicts[0] as { problem: string }).problem}`);
-        else missing.push(`${name} ${d.code}${d.property ? ` ${d.property}` : ''} (witness ${d.witness.id.slice(7, 19)}) has no signed acceptance`);
+        else missing.push(`${name} ${d.code}${d.property ? ` ${d.property}` : ''} (witness ${d.witness.id.slice(7, 19)}) has no signed acceptance${d.code === 'PL6501' ? `: ${d.message}` : ''}`);
       }
     }
     if (r.diagnostics.length) throw new AdmitError(`not admitted: ${r.file} has diagnostics no acceptance covers`);
@@ -309,6 +312,9 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
   const { dir, files, report } = c;
   const projectDir = existsSync(join(c.dir, 'poly.json')) ? c.dir : null;
   const verified = verifiedChain(projectDir);
+  // PS20.7, PT30.6: the promotions are read back from the sources, the people ring and the corpus kinds; a bad one admits nothing.
+  const promos = projectDir && verified ? readPromotions(projectDir, c.keyrings, verified.anchor.id, verified.source) : { list: [], files: {}, problems: [] };
+  if (promos.problems.length) throw new AdmitError(`not admitted: ${promos.problems.map((p) => `${p.code} ${PROMOTION_NAMES[p.code]}: ${p.message}`).join('; ')}`);
   const chain = verified ? { anchor: verified.anchor.first, head: verified.head, source: verified.source } : null;
   // S210, D9: production is the anchor's, never poly.json's.
   const production = verified?.anchor.production === true;
@@ -606,7 +612,7 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     toolchain,
     issuedAt: (opts.now ?? (() => new Date()))().toISOString(),
     buildId: buildIdOf(artefacts, { ...sources, ...Object.fromEntries(Object.entries(certifiedHandlers.files).map(([p, d]) => [`handler:${p}`, d])) }, toolchain),
-    poly: { sources, moduleDigests, ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(routes.length ? [ROUTING_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], ...(assumptions.length ? { assumptions } : {}), handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(routes.length ? { routes: routes.map((c, i) => ({ name: opts.fault === 'rename-route' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(budgets.length ? { budgets: budgets.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
+    poly: { sources, moduleDigests, ...(promos.list.length ? { promotions: promos.list, promotionFiles: promos.files } : {}), ...(Object.keys(typeModules).length ? { typeModules } : {}), instances, kernelAssumptions: [...kernel].sort(), decisions, limits: [...M4_LIMITS, ...(routes.length ? [ROUTING_LIMIT] : []), ...(lint?.status === 'ran' && lint.packageUnresolved.length ? [`imports inside installed packages that resolve to no file are not certified (an optional dependency, say): ${lint.packageUnresolved.join('; ')} (S154)`] : []), ...(c.isolation === 'openshell' ? ['the OpenShell sandbox policies are generated and certified, and this runtime does not enforce them: handlers run in process, and enforcement needs an OpenShell gateway (not run, S152)'] : [])], ...(assumptions.length ? { assumptions } : {}), handlers: certifiedHandlers, keyrings: c.keyrings, ...(chain ? { keyringChain: opts.fault === 'stale-keyring-chain' ? { ...chain, head: `sha256:${'0'.repeat(64)}` } : chain } : {}), policies: policyReports.map((p) => ({ scope: p.scope, policies: p.policies, path: p.artefact!.path, reads: p.reads, source: opts.fault === 'swap-policy-source' ? Object.keys(sources).find((f) => f !== policyFile.get(p.scope))! : policyFile.get(p.scope)!, sequence: sequences.get(p.scope)!, ...(opts.fault === 'omit-policy-signature' ? {} : { signature: opts.fault === 'stale-policy-signature' ? { ...signatures.get(p.scope)!, subject: `sha256:${'0'.repeat(64)}` } : signatures.get(p.scope)! }) })), ...(workflows.length ? { workflows } : {}), ...(channels.length ? { channels } : {}), ...(credentials.length ? { credentials: credentials.map((c, i) => ({ name: opts.fault === 'rename-credential' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(routes.length ? { routes: routes.map((c, i) => ({ name: opts.fault === 'rename-route' && i === 0 ? `${c.name}x` : c.name, descriptor: c.descriptor })) } : {}), ...(budgets.length ? { budgets: budgets.map((c) => ({ name: c.name, descriptor: c.descriptor })) } : {}), ...(vaults.length ? { vaults } : {}), ...(memory.sources.length || memory.flows.length ? { memory } : {}), ...(policyEngine ? { policyEngine } : {}), ...(adapters.length ? { adapters } : {}) },
   };
   const digest = opts.fault === 'digest-before-limits' ? certificateDigest({ ...body, poly: { ...body.poly, limits: [] } }) : certificateDigest(body);
   const signature = signDigest(opts.fault === 'sign-wrong-message' ? digest.slice(7) : digest, key.id, key.privateKeyPem);

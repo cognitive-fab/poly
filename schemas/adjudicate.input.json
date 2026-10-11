@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "properties": {
+    "candidates": {
+      "type": "string",
+      "description": "the candidates file"
+    },
+    "candidate": {
+      "type": "string",
+      "description": "the candidate's id"
+    },
+    "verdict": {
+      "type": "string",
+      "description": "real, spurious or defer"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project whose anchor the record is bound to"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the adjudication"
+    }
+  },
+  "required": [
+    "candidates",
+    "candidate",
+    "verdict",
+    "by",
+    "key",
+    "out"
+  ]
+}

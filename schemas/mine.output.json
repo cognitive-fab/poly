@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the candidates written"
+    },
+    "candidates": {
+      "type": "integer"
+    },
+    "promotable": {
+      "type": "integer"
+    },
+    "gappedLeftOut": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "path",
+    "candidates",
+    "promotable"
+  ]
+}

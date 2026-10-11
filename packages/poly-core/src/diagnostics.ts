@@ -188,6 +188,10 @@ export const CODES: Record<string, CodeInfo> = {
   PL6502: { name: 'UNKNOWABLE_MACHINE_READ', stage: 'policy', severity: 'finding' },
   // S149: a policy allows a proposal its own `never` statement forbids.
   PL6503: { name: 'NEVER_VIOLATED', stage: 'policy', severity: 'finding' },
+  // PS20.7, PT30.6: a promotion the sources, the record or the corpus kind do not bear out.
+  PL6510: { name: 'PROMOTION_NOT_IN_SOURCE', stage: 'policy', severity: 'error' },
+  PL6511: { name: 'PROMOTION_RECORD_INVALID', stage: 'policy', severity: 'error' },
+  PL6512: { name: 'SYNTHETIC_PROMOTION', stage: 'policy', severity: 'error' },
   // S150: at load, a people or agents keyring that differs from the one the certificate binds.
   PL6405: { name: 'KEYRING_CHANGED', stage: 'runtime', severity: 'error' },
   PL6408: { name: 'ADAPTER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },

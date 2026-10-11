@@ -49,6 +49,10 @@ export interface Certificate {
      * its AST digest, which each contract records too. Absent when no build uses another module's types.
      */
     typeModules?: Record<string, { path: string; file: string; digest: string }>;
+    /** PS20.7, PT30.6: the mined rules promoted into the sources, in promotion order. Absent when there is none. */
+    promotions?: { candidate: string; id: string; record: string; corpus: { digest: string; kind: string }; tool: unknown }[];
+    /** PT30.6: each promotion entry file by its path in the project, and the SHA-256 of its bytes. */
+    promotionFiles?: Record<string, string>;
     /** The checked instance of each machine and configuration (PT12.3a). */
     instances: Record<string, unknown>;
     kernelAssumptions: string[];
