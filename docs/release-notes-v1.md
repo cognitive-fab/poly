@@ -65,16 +65,17 @@ Each milestone's formats, commands and limits are in `docs/release-notes.md`.
 - **A routed decision reads `Content` and `Items` (S402).** Each tier's call carries the decision's taint and items.
 - **An unrouted decision may name a budget (S454).** It has its embedded form.
 
-### The examples (E1 in part, E2 waiting)
+### The examples (E1 and E2)
 
-- **The concierge** (`examples/concierge`, E1): a WhatsApp customer desk with a staff thread on Slack. A routed classification over the message body, a refund through Stripe Connect under a person's grant with no holder named (S457), an escalation above 100, a reply written by a decision, an acknowledgement for a message that arrives while the desk is busy, and a staff notice. Its module checks `CLEAN`, with both generated configurations, at the AC30 domain `0..500` (on `ex`, 2026-10-09):
-  - `Desk`: 1,826 states, and its flow rule 2,978; translation validation agrees on 107,734 transitions. The refund's amount is explored at `{0, 101}`, cut by 100 (S458).
-  - `Notice`: 28 states. `support.Conversation`: 342. `staff.Conversation`: 666. `payments.Grant`: 13. `triage.Route`: 6. `spend.Budget`: 96.
-  - The configuration `support`: 26,211 global states and 650,210 global steps, its flow rule 34,179. The configuration `staff`: 3,620 global states and 194,795 global steps.
-  - Every rule of both conversations is tested, and no `PL6838` remains. The check took 6 min 27 s on `ex` with other tests running, an upper bound; the release session's probe took 69 s alone.
-  - **Pending:** the project's check with its policy, which waits on the audience rule; its move to `examples/concierge/` and its run in the serial after-suite group; and AC27's replay.
-- **The inbox assistant** (`examples/inbox`, E2): Gmail by key, triage, to-dos, and drafts only, each draft escalated to its owner. Its acceptance tests IAC1 to IAC9 run on recorded traffic. It is in progress on `ex`.
+Each is a program with `// expected: CLEAN` on its first line and its policy beside it, checked as one project (`examples/README.md`). Both run in the serial after-suite group.
 
+- **The concierge** (`examples/concierge`, E1): a WhatsApp customer desk with a staff thread on Slack. A routed classification over the message body, a refund through Stripe Connect under a person's grant with no holder named (S457), acting on the one order it names (S462), an escalation above 100, a reply written by a decision, an acknowledgement for a message that arrives while the desk is busy, and a staff notice. At the AC30 domain `0..500`, with its policy, it checks `CLEAN` (the V10 gate, 2026-10-11):
+  - `Desk`: 2,114 states. `Notice`: 28. `support.Conversation`: 342. `staff.Conversation`: 666. `payments.Grant`: 13. `triage.Route`: 6. `spend.Budget`: 96.
+  - The configuration `support`: 29,379 global states and 755,058 global steps. The configuration `staff`: 3,620 global states and 194,795 global steps.
+  - The refund's amount is explored at `{0, 101}`, cut by 100 (S458). The counts are above those of the first report on `ex` (`Desk` 1,826, `support` 26,211) because the refund now carries its order (S462) and the amount decision returns a record with a conf for each field (PD1.2b).
+  - AC27: a run of the concierge with a delegated refund replays every post-state, gate decision and tier choice, the grant included, from the runtime's own store, with no diagnostic.
+  - The whole check took 114 s with four checks running together.
+- **The inbox assistant** (`examples/inbox`, E2): Gmail by key, three accounts with a read grant each (S460, S461), triage, to-dos, and drafts only, each draft escalated to its owner and addressed by the source's envelope (S459). It checks `CLEAN` with its policy: `Todo` 7,294 states, `Message` 200, `gmail_draft.Grant` and `gmail_read.Grant` 13 each, `triage.Route` and `kinds.Route` 6 each, `monthly.Budget` 96. The check took 70 s with four running together. IAC1 to IAC9 pass on recorded traffic, including IAC9's replay of the inbox's own journal. **Stated limit (IAC3):** the full inbox with a second principal for the cross-account variant runs out of a 12 GB heap, so its witness at check, `PL6831` with `Open -> Read -> Written -> Propose -> Enveloped`, comes from a cut-down copy; at run time the full inbox denies the work draft that carries the home account's mail, `audience`, and creates nothing.
 ### Formats a reader must expect
 
 - **Claims and grants.**

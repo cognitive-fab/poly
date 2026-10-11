@@ -527,3 +527,13 @@ The flow rule's states grow 31.7 times. The state space is small, so the 12 GB l
 ## Discharge by form, fail-first (owner's reviewer, 2026-10-10)
 
 The new certificate tests (`test/rejected-completion.test.mjs` and the fixtures `machine-form*.poly` at ea64afda) were run against 456f9249, S463 before discharge by form, rebuilt: 8 of 9 pass and the one that fails is the one that must. "A machine none of whose completion handlers can reject is discharged by its form" fails there with the machine `mf.Asker` `open` and `by` null, where `discharged` by `no rejecting completion handler` is expected. The tests that pass there are those of states the build already had: the rejecting handler in a branch, the guard and the `require` are `open`; the channel application is `discharged` by its configuration; the std machines of a credential are `open`; a build without a liveness property has no entry. The build was restored to 53f93736 afterwards, with the tree clean.
+
+## The V10 gate (2026-10-11)
+
+**The run.** Merge ba54b994 of 5a1e535f, the head the examples session reported (it had first run on 46517f51 and then a6e5e5ed, and was stopped and reset to 4b9b80d5 when the owner said neither was final), the measure-verdicts change reapplied (84822f54) and the inbox added to the serial group (1f02fbfa). A clean build, alone on the machine. The record is in `docs/v1/gate-v10.md`: the suite 2,452 tests with no failure (2 skipped, 4 waiting), the after group 12 of 12, check-memory passed, the 160 measured programs identical and three new entries (the `PL6830` error source, the concierge and the inbox, both CLEAN with their policies), every example meeting its expected line, per-file times compared (the load of 54 more files, no file's result changed).
+
+**Commits since the last record.** Documents: 4b9b80d5. Merge: ba54b994. Measure: 84822f54 and a5b7892a. Serial group: 1f02fbfa. **Not pushed.** The ex branch and `aside-measure-verdicts` are local branches.
+
+**Changed by the gate, on the way.** `scripts/measure-verdicts.mjs` measures a program with its policy as one project and gives each child 8 GB. The counts of the concierge are above its first report, as the release notes say.
+
+**Waiting for the owner.** The word for main to be fast-forwarded to `v1` and for the local tag `v1.0.0` (Q-V1).
