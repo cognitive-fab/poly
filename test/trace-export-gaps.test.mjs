@@ -132,10 +132,9 @@ test('PS19.6: an archived run is no episode and is counted exactly, and every ru
   } finally { clean(tmp); }
 });
 
-test('PS19.5: a run all of whose steps are erased is not exported and is counted in erasedRuns; the other run is whole', async () => {
-  // No run the runtime makes can lose every step: its creation row names no body (a Content field starts at none). So the
-  // fixture is synthetic: after the run is made, every journal row of one run is given a data field that names a body,
-  // and that body is erased. Reported to the reviewer: PS19.5 as written is met only by a store altered in this way.
+test('PS19.5: a run all of whose steps after its creation row are erased is not exported and is counted in erasedRuns; the other run is whole', async () => {
+  // The creation row names no body and is no step for this purpose (PS19.5, amended 2026-10-11). The body is erased through
+  // the runtime, as a forget does; nothing in the store is altered.
   const a = await admitted('trace-erased-run', ['test/fixtures/trace-export/tiers.poly']);
   const tmp = scratch(); const db = join(tmp, 'store.db');
   try {
@@ -147,11 +146,12 @@ test('PS19.5: a run all of whose steps are erased is not exported and is counted
       await rt.create('tiers.Rec', { id: 'doomed' });
       digest = await rt.putContent('doomed body');
       await rt.dispatch('doomed', 'Set', { n2: 2, w: 'b', m: 'Loud', f: true, p: 'someone-else', b: digest });
+      await rt.dispatch('doomed', 'Set', { n2: 0, w: 'a', m: 'Calm', f: false, p: 'someone-else', b: digest });
       const rows = await rt.getJournal('doomed');
-      assert.ok(rows.length >= 2 && rows.some((r) => r.action === '$create'), 'a creation row and a step');
-      assert.ok(!JSON.stringify(rows[0]).includes(digest), 'the creation row names no body, as the runtime writes it');
-      rt.store.db.prepare('UPDATE pr_journal SET data = ? WHERE instance_id = ? AND action = ?').run(JSON.stringify({ note: digest }), 'doomed', '$create');
-      assert.ok((await rt.getJournal('doomed')).every((r) => JSON.stringify([r.data, r.pre, r.post]).includes(digest)), 'every row of the run now names the body');
+      const named = (r) => JSON.stringify([r.data, r.pre, r.post]).includes(digest);
+      assert.equal(rows[0].action, '$create');
+      assert.ok(!named(rows[0]), 'the creation row names no body, as the runtime writes it');
+      assert.ok(rows.length >= 3 && rows.slice(1).every(named), 'every step after the creation row names the body');
       await rt.erase(digest);
       runs = (await rt.runs()).length;
     } finally { await rt.close(); }
@@ -163,7 +163,20 @@ test('PS19.5: a run all of whose steps are erased is not exported and is counted
     assert.equal(x.episodes.length, 1);
     assert.equal(x.episodes[0].gapped, false);
     assert.ok(x.episodes[0].steps.some((s) => s.data.n2 === 1), 'the other run is whole');
-    assert.ok(!x.bytes.includes(digest) && !x.bytes.includes(digest.replace('sha256:', '')) && !x.bytes.includes('doomed'));
+    assert.ok(!x.bytes.includes(digest) && !x.bytes.includes(digest.replace('sha256:', '')));
     assert.equal(x.header.episodes + x.header.omitted.erasedRuns + x.header.omitted.runtimeRuns + x.header.omitted.archivedRuns, runs);
+  } finally { clean(tmp); }
+});
+
+test('PS19.5: a run with only its creation row is not erased: it is exported', async () => {
+  const a = await admitted('trace-created-only', ['test/fixtures/trace-export/tiers.poly']);
+  const tmp = scratch(); const db = join(tmp, 'store.db');
+  try {
+    const { rt } = await loaded(a, { store: { sqlite: db } });
+    try { await rt.create('tiers.Rec', { id: 'fresh' }); await rt.erase(await rt.putContent('unrelated')); } finally { await rt.close(); }
+    const x = exportOf(a, db, join(tmp, 'fresh.ndjson'));
+    assert.equal(x.header.omitted.erasedRuns, 0);
+    assert.equal(x.header.episodes, 1);
+    assert.deepEqual(x.episodes[0].steps.map((s) => s.action), ['$create']);
   } finally { clean(tmp); }
 });

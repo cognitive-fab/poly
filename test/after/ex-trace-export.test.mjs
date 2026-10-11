@@ -301,7 +301,8 @@ test('IAC8, PS19.5: after an account is forgotten its steps are left out and cou
     const naming = (row) => (JSON.stringify([row.data, row.pre, row.post]).match(/sha256:[0-9a-f]{64}/g) ?? []).some((d) => erased.has(d));
     let steps = 0; let gapped = 0; let whole = 0; let all = 0;
     for (const inst of (await rt.instances()).filter((x) => !rt.modelOf(x.machineId))) {
-      const journal = await rt.getJournal(inst.id);
+      // PS19.5: the creation row is no step; a run is erased when every step after it is.
+      const journal = (await rt.getJournal(inst.id)).filter((r) => r.action !== '$create');
       const n = journal.filter(naming).length;
       steps += n;
       if (n === 0) whole++; else if (n === journal.length) all++; else gapped++;

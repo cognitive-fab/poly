@@ -41,6 +41,8 @@ before(async () => {
   try {
     // Run r1: one Set inside the domains, one outside both (disclosed, so accepted), one strict value outside (rejected).
     await rt.create('tiers.Rec', { id: 'r1' });
+    // A step before the body enters the state, so that erasing the body leaves the run gapped, not erased (PS19.5).
+    await rt.dispatch('r1', 'Strict', { v: 1 });
     digest1 = await rt.putContent(canary);
     await rt.dispatch('r1', 'Set', { n2: 1, w: 'a', m: 'Loud', f: true, p: principalCanary, b: digest1 });
     await rt.dispatch('r1', 'Set', { n2: 7, w: outsideWord, m: 'Calm', f: false, p: principalCanary, b: digest1 });
@@ -73,7 +75,7 @@ test('PS19.2, PS19.4: values for declared domains, tokens for Principal and Cont
   assert.deepEqual(set2.outsideCheckDomain.slice().sort(), ['n2', 'w']);
   assert.match(set2.data.w, /^d:[0-9a-f]{32}$/, 'a string outside its domain leaves as a token');
 
-  const strict = steps.find((s) => s.action === 'Strict');
+  const strict = steps.find((s) => s.action === 'Strict' && s.stepKind === 'rejected');
   assert.equal(strict.stepKind, 'rejected');
   assert.equal(strict.rejectReason, 'outside-check-domain');
   assert.deepEqual(strict.outsideCheckDomain, [], 'a strict parameter is rejected at dispatch and never outside');

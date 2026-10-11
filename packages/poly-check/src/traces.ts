@@ -172,7 +172,9 @@ export async function exportTraces(o: TraceOptions): Promise<{ header: TraceHead
         });
         steps.push({ seq: row.seq, action: row.action, stepKind: row.step_kind, rejectReason: row.reject_reason ?? null, pre: state(row.pre), data, post: state(row.post), effects, outsideCheckDomain: outside });
       }
-      if (rows.length && !steps.length) { header.omitted.erasedRuns++; continue; }
+      // PS19.5 (amended 2026-10-11): the creation row is no step here, so a run is erased when every step after it is.
+      const after = rows.filter((r) => r.action !== '$create').length;
+      if (after > 0 && !(steps as { action: string }[]).some((s) => s.action !== '$create')) { header.omitted.erasedRuns++; continue; }
       if (gapped) header.omitted.gappedRuns++;
       const outcomes = chain.filter((e) => e.kind === 'outcome').map((e) => { const b = e.body as { decision?: string; outcome?: string }; return { decision: b.decision ?? null, outcome: b.outcome ?? null }; });
       header.episodes++;
