@@ -51,6 +51,13 @@ export function registerHandlers(rt, base = 'src/handlers') {
   }
 }
 
+/**
+ * The window of a live run, in tokens (E3.9, owner 2026-10-12): under the agent decision's input limit of 50,000, so that the
+ * harness compacts at its limit bucket (five sixths, 40,000) before a request would be refused. Recorded runs keep the small
+ * default of runTask, which the fixtures were written for.
+ */
+export const LIVE_WINDOW_TOKENS = 48000;
+
 export const ALL_ON = Object.freeze({ fusion: true, compaction: true, pack: true, reducer: true });
 export const ALL_OFF = Object.freeze({ fusion: false, compaction: false, pack: false, reducer: false });
 export const THRESHOLDS = Object.freeze({ logBytes: 4096, handleBytes: 10240, excerptBytes: 512 });

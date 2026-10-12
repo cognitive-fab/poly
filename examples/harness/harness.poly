@@ -192,7 +192,7 @@ machine Turn {
 
   decision agent(task: Content) -> Content {
     provider "main"
-    prices "prices/main.json" max input tokens 100000 max tokens 8000 budget task  // @HF3.6
+    prices "prices/main.json" max input tokens 50000 max tokens 4000 budget task  // @HF3.6
     labels { egress:external, read:private }
     timeout 120s
     ok(r) -> Stepped(calls: r.answer, conf: r.conf, margin: r.margin)
@@ -796,6 +796,6 @@ configuration pack {
 }
 
 budget task {
-  cap usd 2 per run
+  cap usd 0.60 per run
   cap usd 25 per month per scope
 }

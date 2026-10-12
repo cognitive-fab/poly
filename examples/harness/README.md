@@ -47,6 +47,7 @@ On the corpus, with the placeholder price table (a write over read ratio of 12.5
 One bounded live run is planned (E3.9), reported as a result and not as a test, capped at $25 by poly's own budget, with the owner's key. The preparation is in `docs/e3/e3-9-plan.md`: the price tables, the isolation (a disposable environment, because a model can edit a test that `npm` or `go` then runs), and the cost plan. The live report will state, whatever it shows:
 
 - the verdict, which at 12 pairs will almost certainly be INCONCLUSIVE: the smallest gain detected at 80% power is 0.50;
+- **completion under a cap partly measures cost.** Every run has a fixed cap (0.60 USD, of which the spendable part is 0.32 USD, about 18 steps at the assumed sizes), and a configuration that spends fewer tokens per step gets more steps inside it. "Completed under the cap" therefore measures skill and cost together, and the report says so beside the verdict. It also reports which runs a cap stopped, and compares completion again on the tasks that fit inside the cap in both configurations (`instance.underCap` of `host/paired.mjs`), which does not depend on cost. That second comparison has fewer tasks and detects less;
 - the noise floor, measured from reruns with the model frozen (a replay of a recording has a floor of zero by construction, which is not a measurement);
 - Action Fusion's saving, with the fused action exposed in the tool schema;
 - the cost terms on a live model: the preamble, the cache read and write, the tokens a step adds;

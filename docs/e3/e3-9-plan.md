@@ -2,7 +2,7 @@
 
 *Cognitive Fab, October 2026. Written 2026-10-12 for the owner's check. Nothing in this document has been run against a model, a container or the network. Everything computed here is computed from the committed price tables and tested without a model.*
 
-Status: the owner's choices of 2026-10-12 are applied: **Opus 5.5 for the main tier and Haiku 4.5 for the cheap tier, isolation option A (approved, and stricter than the gate item's wording), and the staged plan at $0.60 per run with $25 for the month.** Recomputing the plan with Opus prices shows that the module's reservation leaves almost no steps, so section 3 proposes a fix for the owner to rule on. No cap or limit of the module has been edited. The expected verdict of the run is INCONCLUSIVE, and the report says so (section 4).
+Status: the owner's choices of 2026-10-12 are applied: **Opus 5.5 for the main tier and Haiku 4.5 for the cheap tier, isolation option A (approved, and stricter than the gate item's wording), and the staged plan at $0.60 per run with $25 for the month.** Recomputing the plan with Opus prices showed that the module's reservation of $0.56 left one step, and the owner ruled the fix: **50,000 input and 4,000 output on the agent decision, the host window at 48,000 (`LIVE_WINDOW_TOKENS`), and the per-run cap from $2 to $0.60.** The module carries them. The fallback is accepted: if the pilot shows 20 to 26 steps, the staged plan on 4 tasks (32 runs at $0.78, worst case $24.96, with the noise floor from 4 tasks stated). The expected verdict of the run is INCONCLUSIVE, and the report says so (section 4).
 
 ## 1. The price tables
 
@@ -111,6 +111,10 @@ Assumed: a preamble of 5,000 tokens, 300 output tokens and 1,200 tool tokens a s
 - **Opus against Sonnet** is the other lever, and the owner has ruled on it: Sonnet 5.5 halves the cost of a step ($0.14 for 16 steps) and the same plan buys 32 steps. It is not proposed again.
 
 At the assumed sizes the expected cost is 40 runs at $0.17 to $0.32 each (a trial longer than 18 steps costs its $0.32 spendable amount, and stops), $7 to $13. The guarantee is $24.
+
+### Completion under a cap partly measures cost
+
+Under a fixed cap a configuration that spends fewer tokens per step gets more steps, so "completed under the cap" measures skill and cost together. The README and the report say so plainly. The report also gives the runs a cap stopped, and compares completion again on the tasks that fit inside the cap in both configurations (`instance.underCap` in `host/paired.mjs`, with its own exact test); that comparison does not depend on cost, has fewer tasks and detects less. It is reported beside the verdict and does not decide it.
 
 ### The pilot
 

@@ -216,3 +216,30 @@ test('the rule of the module answers each seeded table as the proposal says (HAC
   ];
   for (const [name, t, expected] of rows) assert.equal(decide({ ...t, source: 'recording' }).verdict, expected, name);
 });
+
+test('under a fixed cap, completion partly measures cost: capped runs are reported and completion is compared again where both fit', () => {
+  const capped = (...s) => ({ ...run(...s), ended: { mode: 'Stopped', why: 'Budget' } });
+  const done = (...s) => ({ ...run(...s), ended: { mode: 'Done', why: 'PlanDone' } });
+  // six tasks the base could not finish inside the cap (it was stopped by the budget) and the candidate finished; six both finish
+  const t = table((i) => (i < 6 ? capped(1, 0, 0) : done(1, 1, 1)), () => done(1, 1, 1));
+  const r = decide({ ...t, source: 'recording' });
+  assert.equal(r.verdict, 'ACCEPT', 'the primary comparison is unchanged: 6 of 6 discordant favour the candidate');
+  const u = r.instance.underCap;
+  assert.equal(u.baseCapped.length, 6);
+  assert.equal(u.candidateCapped.length, 0);
+  assert.equal(u.bothFit, 6, 'only the tasks where neither configuration was stopped');
+  assert.deepEqual([u.better.length, u.worse.length], [0, 0], 'on those, the two configurations complete alike: the gain was the cap');
+  assert.match(u.note, /spends fewer tokens per step gets more steps/);
+  assert.match(u.note, /partly measures cost/);
+  assert.ok(r.reasons.some((x) => /cap stopped 6 task\(s\) of the base and 0 of the candidate/.test(x) && /partly measures cost/.test(x) && /not deciding it/.test(x)));
+  // a cap that stopped a run in either configuration takes the task out of the second comparison
+  const both = table((i) => (i < 5 ? capped(1, 0, 0) : done(1, 1, 1)), (i) => (i === 7 ? capped(1, 1, 0) : done(1, 1, 1)));
+  const b = decide({ ...both, source: 'recording' });
+  assert.equal(b.instance.underCap.bothFit, 12 - 5 - 1);
+  // no run stopped by a cap: the comparison is the whole set, and there is nothing to say
+  const none = decide({ ...table((i) => (i < 5 ? FAIL3 : PASS), () => PASS), source: 'recording' });
+  assert.deepEqual([none.instance.underCap.baseCapped, none.instance.underCap.candidateCapped, none.instance.underCap.bothFit, none.instance.underCap.line], [[], [], 12, null]);
+  // the Cap reason counts as well as Budget
+  const c2 = { ...run(1, 0, 0), ended: { mode: 'Stopped', why: 'Cap' } };
+  assert.equal(decide({ ...table(() => c2, () => PASS), source: 'recording' }).instance.underCap.baseCapped.length, 12);
+});

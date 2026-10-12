@@ -107,3 +107,19 @@ test('the expected cost at Opus 5.5 prices and the assumed sizes: 0.28 USD for 1
   assert.ok(p.expected[60].runUsd <= p.capUsd);
   assert.ok(40 * p.expected[16].trialUsd < 25 / 2, 'expected total under half the month cap, when trials take 16 steps');
 });
+
+test('the module carries the ruled limits: 50,000 input and 4,000 output on the agent decision, 0.60 USD per run, and the live window under the input limit', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { ROOT } = await import('../helpers.mjs');
+  const { LIVE_WINDOW_TOKENS } = await import('../../examples/harness/host/loop.mjs');
+  const poly = readFileSync(join(ROOT, 'examples', 'harness', 'harness.poly'), 'utf8');
+  assert.match(poly, /decision agent\(task: Content\) -> Content \{\s*provider "main"\s*prices "prices\/main\.json" max input tokens 50000 max tokens 4000 budget task/);
+  assert.match(poly, /budget task \{\s*cap usd 0\.60 per run\s*cap usd 25 per month per scope\s*\}/);
+  // the reservation at the live Opus table is 0.28 USD, inside the cap, and the cap buys 18 steps
+  const p = plan({ name: 'ruled', tasks: 12, trials: 40, capUsd: 0.6, maxInput: 50000, maxOutput: 4000, assume: ASSUMED });
+  assert.deepEqual([p.reservationUsd, p.spendableUsd, p.stepsBeforeCap, p.worstUsd], [0.28, 0.32, 18, 24]);
+  // the window leaves room: the limit bucket (five sixths) starts under the input limit, so a compaction comes before a refusal
+  assert.equal(LIVE_WINDOW_TOKENS, 48000);
+  assert.ok((LIVE_WINDOW_TOKENS * 5) / 6 < 50000);
+});

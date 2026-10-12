@@ -18,6 +18,11 @@
 // recordings a replay repeats exactly, so its floor is zero by construction. That is not a measurement, and `noiseFloor`
 // says so (`measured: false`) instead of returning a number a reader could take for one. The real floor is measured at E3.9.
 //
+// Under a fixed cap a configuration that spends fewer tokens per step gets more steps, so "completed under the cap" partly measures
+// cost and not only skill. A run the budget or a cap stopped (the scorer's ended.why is Budget or Cap) is reported, and completion is
+// compared again on the tasks where no rerun of either configuration was stopped by a cap: `instance.underCap`. That second
+// comparison is reported beside the verdict (and a line of `reasons` says so); it does not decide it, and it is smaller.
+//
 // No model is called here and nothing is random. Costs, when given, are reported beside the verdict and never decide it.
 import { checkChange } from './change-gate.mjs';
 
@@ -162,6 +167,30 @@ export function noiseFloor(runs, { source }) {
 
 const sum = (xs, f) => xs.reduce((a, x) => a + f(x), 0);
 
+const STOPPED_BY_CAP = new Set(['Budget', 'Cap']);
+const stoppedByCap = (reruns) => reruns.some((r) => r.ended && STOPPED_BY_CAP.has(r.ended.why));
+
+/**
+ * The tasks a cap stopped in either configuration, and completion compared on those where it stopped neither. The note says why
+ * the second comparison exists. `line` is the sentence added to the verdict's reasons, or null when no cap stopped a run.
+ */
+function underCap(ids, base, candidate, tasks) {
+  const baseCapped = ids.filter((id) => stoppedByCap(base[id]));
+  const candidateCapped = ids.filter((id) => stoppedByCap(candidate[id]));
+  const fit = tasks.filter((t) => !baseCapped.includes(t.id) && !candidateCapped.includes(t.id));
+  const better = fit.filter((t) => t.b.completed && !t.a.completed).map((t) => t.id);
+  const worse = fit.filter((t) => t.a.completed && !t.b.completed).map((t) => t.id);
+  const test = mcnemarExact(better.length, worse.length);
+  const note = 'under a fixed cap a configuration that spends fewer tokens per step gets more steps, so "completed under the cap" partly measures cost; the comparison on the tasks that fit inside the cap in both configurations does not';
+  const anyCapped = baseCapped.length + candidateCapped.length > 0;
+  return {
+    baseCapped, candidateCapped, bothFit: fit.length, better, worse, ...test, note,
+    line: anyCapped
+      ? `a cap stopped ${baseCapped.length} task(s) of the base and ${candidateCapped.length} of the candidate, so completion under the cap partly measures cost; on the ${fit.length} task(s) that fit in both, ${better.length} favour the candidate and ${worse.length} the base (exact one-sided p ${test.pGain.toPrecision(3)}, reported beside the verdict and not deciding it)`
+      : null,
+  };
+}
+
 /**
  * @param {{ base: Record<string, object[]>, candidate: Record<string, object[]>, source: 'recording'|'live',
  *   changed?: string[], alpha?: number, costs?: { base: object, candidate: object } }} input
@@ -171,8 +200,11 @@ const sum = (xs, f) => xs.reduce((a, x) => a + f(x), 0);
  */
 export function decide({ base, candidate, source, changed, alpha = ALPHA, costs }) {
   const reasons = [];
-  const verdict = (v) => ({ verdict: v, reasons, instance });
-  const instance = { source, alpha, tasks: 0, pairs: null, regressions: [], noise: null, detectableGap: null, detectableGapNote: null, costs: costs ?? null };
+  const verdict = (v) => {
+    if (instance.underCap?.line) reasons.push(instance.underCap.line);
+    return { verdict: v, reasons, instance };
+  };
+  const instance = { source, alpha, tasks: 0, pairs: null, regressions: [], noise: null, detectableGap: null, detectableGapNote: null, underCap: null, costs: costs ?? null };
 
   if (changed) {
     const gate = checkChange({ changed });
@@ -194,6 +226,7 @@ export function decide({ base, candidate, source, changed, alpha = ALPHA, costs 
   const worse = tasks.filter((t) => t.a.completed && !t.b.completed).map((t) => t.id);
   const test = mcnemarExact(better.length, worse.length);
   instance.pairs = { n: tasks.length, baseCompleted: sum(tasks, (t) => +t.a.completed), candidateCompleted: sum(tasks, (t) => +t.b.completed), better, worse, ...test };
+  instance.underCap = underCap(ids, base, candidate, tasks);
   instance.detectableGap = detectableGap(tasks.length, null, { alpha });
   instance.detectableGapNote = `the smallest difference of completion rates detected at 80% power with ${tasks.length} pairs, if every discordant pair favours the candidate (a pair against it is a regressed stage and is refused); less if fewer pairs are discordant`;
 

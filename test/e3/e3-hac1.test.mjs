@@ -84,7 +84,7 @@ const VARIANTS = [
   ['HF3.3', 'a handle issued before the archive holds the output', 'on Put { require st is Empty else reject "not-empty"  st\' = Full  send arch <- Store(from: self) }', 'PL5401', true, 'program'],
   ['HF3.4', 'a command fused without the classifier word', 'if plan is Fusable || plan is Separate {', 'PL3002', true, 'program'],
   ['HF3.5', 'a flagged log stored as clean', 'if scanned {', 'PL3002', true, 'program'],
-  ['HF3.6', 'a reservation above the task\'s cap', 'prices "prices/main.json" max input tokens 100000 max tokens 8000000 budget task', 'PL6845', false, 'program', 'REFUSED'],
+  ['HF3.6', 'a reservation above the task\'s cap', 'prices "prices/main.json" max input tokens 50000 max tokens 4000000 budget task', 'PL6845', false, 'program', 'REFUSED'],
   ['HF3.7', 'a step run on an output cutoff', 'if stop is Tool && reprompts < 1 {', 'PL3002', true, 'program'],
   ['HF3.8', 'a trial ended on overflow with no compaction tried', 'if attempts == 1 {', 'PL3002', true, 'program'],
   ['HF3.9', 'a trial ended at a cap without saving the work', 'emit stopCap()', 'PL3002', true, 'program'],
