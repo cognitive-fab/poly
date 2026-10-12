@@ -113,6 +113,12 @@
       "assumption": "The observation slot is checked as one slot of K (PS13.8a): the properties are per slot, the ledger sends every slot the same message, and nothing the ledger does depends on the number of slots.",
       "status": "discharged",
       "by": "PS13.8a conditions 1 to 3, read off the module (Ledger sends Sent to its one reference and reads nothing back), and the K = 1, 2, 3 evidence of decisions-e3.md"
+    },
+    {
+      "id": "live-run-isolation",
+      "assumption": "The live run (E3.9) executes in an isolated, disposable environment whose only network route is to the model API. On the owner's Windows host the three rules (scratch copies, offline, no key) are held by an environment, a command allowlist and a path check, with no sandbox; a model can edit a test or a script that npm or go then runs, so on that host \"offline\" is a setting, not a barrier. The isolation of the live run (a WSL distro made for the run, Windows Sandbox or a container, destroyed afterwards, holding the repositories' copies and no credential but the run's key for the model API) is what makes the rules hold against code the agent wrote.",
+      "status": "open",
+      "evidence": "E3.9 gate item: the option and its setup are proposed at E3.9 and the run is refused until the isolated environment is named in the record, with a check from inside it that only the model API is reachable"
     }
   ],
   "statements": [

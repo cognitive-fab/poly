@@ -8,11 +8,20 @@
 // replaces `act` and `stageCheck` in E3.7. The other handlers are the same in a recorded and a live run.
 import { applyCompaction } from './compact.mjs';
 
-/** tool.act: run the turn's calls. The recording gives the output and the exit status. */
+/**
+ * tool.act: run the turn's calls. A recorded run has a row in recorded-tool, which gives the output and the exit status. A live run
+ * has none: the calls go to the host's `harness-tool` command (E3.7), which runs them in the task's scratch copy. The copy is the
+ * host's, never the handler's or a payload's, so nothing here names a path.
+ */
 export async function act(_payload, caps, ctx) {
   const calls = await caps.store.read('calls', ctx.instanceId);
+  if (typeof calls !== 'string') throw Object.assign(new Error(`no calls for ${ctx.instanceId}`), { permanent: true });
   const rec = await caps.store.read('recorded-tool', ctx.instanceId);
-  if (!rec || typeof calls !== 'string') throw Object.assign(new Error(`no recorded tool for ${ctx.instanceId}`), { permanent: true });
+  if (!rec) {
+    const r = await caps.exec.run('harness-tool', [calls]);
+    await caps.store.write('output', ctx.instanceId, { text: String(r.text), exitStatus: Number(r.exitStatus) });
+    return { ok: true };
+  }
   await caps.store.write('output', ctx.instanceId, { text: rec.output, exitStatus: rec.exitStatus });
   return { ok: true };
 }
@@ -44,9 +53,17 @@ export async function storeRedacted(_payload, caps, ctx) {
   return { ok: true };
 }
 
-/** tool.stage-check: the next recorded result of the trial's stage checks. Failing is a permanent error: the stage failed. */
-export async function stageCheck(_payload, caps, ctx) {
+/**
+ * tool.stage-check: the next recorded result of the trial's stage checks, or, in a live run (no recorded queue), the host's
+ * `harness-check` command for the stage the Trial is at. Failing is a permanent error: the stage failed.
+ */
+export async function stageCheck(payload, caps, ctx) {
   const queue = (await caps.store.read('recorded-stage', ctx.instanceId)) ?? [];
+  if (!queue.length && Number.isInteger(payload?.stage)) {
+    const r = await caps.exec.run('harness-check', [String(payload.stage)]);
+    if (!r.passed) throw Object.assign(new Error('the stage check failed'), { permanent: true });
+    return { ok: true };
+  }
   if (!queue.length) throw Object.assign(new Error(`no recorded stage result for ${ctx.instanceId}`), { permanent: true });
   const [passed, ...rest] = queue;
   await caps.store.write('recorded-stage', ctx.instanceId, rest);

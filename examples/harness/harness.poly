@@ -209,8 +209,8 @@ machine Turn {
 
   effect act(fused: bool) {
     kind "tool.act"
-    labels { read:store, write:store }
-    targets { store: ["calls", "output", "recorded-tool"] }
+    labels { read:store, write:store, exec }
+    targets { store: ["calls", "output", "recorded-tool"], exec: ["harness-tool"] }
     ok -> Ran()
     failed -> Ran()
   }
@@ -472,7 +472,7 @@ machine Trial {
   on Stored {
     require mode is Running else reject "not-running"
     mode' = Checking
-    emit stageCheck()
+    emit stageCheck(stage: step)
   }
 
   // HF2.7: a stage's score comes from the check journaled in its state; the failing stage is the first failed one.
@@ -547,10 +547,10 @@ machine Trial {
     }
   }
 
-  effect stageCheck() {
+  effect stageCheck(stage: 0..3) {
     kind "tool.stage-check"
-    labels { read:store, write:store }
-    targets { store: ["recorded-stage"] }
+    labels { read:store, write:store, exec }
+    targets { store: ["recorded-stage"], exec: ["harness-check"] }
     ok -> StagePassed()
     failed -> StageFailed()
   }

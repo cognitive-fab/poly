@@ -50,6 +50,15 @@ test('an open assumption says what tests it, a discharged one what discharges it
   }
 });
 
+test('the live run needs an isolated, disposable environment with network to the model API only: an open assumption naming the E3.9 gate', () => {
+  const iso = A.find((a) => a.id === 'live-run-isolation');
+  assert.ok(iso, 'the entry exists');
+  assert.equal(iso.status, 'open', 'discharged only by naming the environment and a check made from inside it');
+  assert.match(iso.assumption, /disposable/);
+  assert.match(iso.assumption, /model API/);
+  assert.match(iso.evidence, /E3\.9/);
+});
+
 test('the joint configuration of Turn, Context and Trial is open until a configuration of the three has been checked', () => {
   const joint = A.find((a) => a.id === 'joint-configuration');
   assert.ok(joint, 'the entry exists');
