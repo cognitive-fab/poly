@@ -47,7 +47,7 @@ const NORMATIVE_EVIDENCE = {
   corpus: { kind: 'synthetic', sessions: 15 }
 };
 
-// Normative proposal source (simplified, similar to docs/m7/proposal-example.poly)
+// Normative proposal source (simplified, similar to test/fixtures/m7/proposal-example.poly)
 const NORMATIVE_SOURCE = `module git_push
 
 enum Phase { Idle, AwaitingNpmTest, AwaitingGitAdd, AwaitingGitCommit, AwaitingGitPush, Done, Blocked }

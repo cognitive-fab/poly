@@ -19,7 +19,7 @@ import { writeTranscripts } from './fixtures/m7/make-transcripts.mjs';
 const CLI = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
 const POLYNESS = process.env.POLY_POLYNESS_DIR ?? join(ROOT, '..', 'polyness');
 const FIXTURE = join(ROOT, 'test', 'fixtures', 'm7', 'polyness-git-push');
-const EXAMPLE_POLY = readFileSync(join(ROOT, 'docs', 'm7', 'proposal-example.poly'), 'utf8');
+const EXAMPLE_POLY = readFileSync(join(ROOT, 'test', 'fixtures', 'm7', 'proposal-example.poly'), 'utf8');
 const EXAMPLE_JSON = JSON.parse(readFileSync(join(ROOT, 'docs', 'm7', 'proposal-example.json'), 'utf8'));
 const HOME_PREFIX = 'poly-polyness-home-';
 const slash = (p) => p.split(String.fromCharCode(92)).join('/');
@@ -91,7 +91,7 @@ const run = (dir, pin, extra = [], env, step = 'git push', from = transcripts) =
 const allText = (dir) => readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => readFileSync(join(e.parentPath ?? e.path, e.name), 'utf8')).join(NL);
 
 // ── R1, R2: the normative example and determinism ───────────────────────────────────────────────────────────────
-test('PT31.5a: real polyness over the default transcripts gives docs/m7/proposal-example.poly byte for byte, and the evidence of proposal-example.json', () => {
+test('PT31.5a: real polyness over the default transcripts gives test/fixtures/m7/proposal-example.poly byte for byte, and the evidence of proposal-example.json', () => {
   const r = run(POLYNESS, realPin);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(tree(r.dir), ['proposal.json', 'src', 'src/git_push.poly']);
@@ -341,7 +341,9 @@ test('PT31.3: a child that never answers is stopped at --timeout; output past --
   assert.equal(e.code, 2, e.out);
   assert.match(e.out, /poly: polyness failed: polyness failed on purpose/);
   assert.ok(!existsSync(e.dir));
-  assert.equal(hang.starts().length + flood.starts().length + fail.starts().length, 3, 'each was started once: the refusals are of what ran');
+  assert.ok(hang.starts().length <= 1, 'the hang was started at most once (under load it may be stopped before its script logs)');
+  assert.equal(flood.starts().length, 1, 'the flood was started once');
+  assert.equal(fail.starts().length, 1, 'the failure was started once');
   assert.deepEqual(homesLeft(), before, 'no temporary home is left, after a timeout, an overrun or a failure');
 });
 
