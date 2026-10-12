@@ -214,6 +214,9 @@ machine Todo {
     summed  : bool      = false
     dated   : bool      = false
     draft   : Content   = none
+    // IT4.4: a draft was created, for certain (Created, or the owner's DraftFound). Once set it is never cleared, and
+    // nothing proposes a draft again (IAC10).
+    made    : bool      = false
   }
 
   terminal status in { Done, Dismissed }
@@ -340,7 +343,7 @@ machine Todo {
   }
 
   on Enveloped(e) {
-    require status == Enveloping else reject "not-enveloping"
+    require status == Enveloping && !made else reject "not-enveloping"
     status' = Proposed
     emit createDraft(account: account, t: thread, e: e, body: draft)
   }
@@ -353,6 +356,7 @@ machine Todo {
   on Created {
     require status == Proposed else reject "not-proposed"
     status' = Created
+    made' = true
   }
 
   on NotCreated {
@@ -371,6 +375,7 @@ machine Todo {
   on DraftFound {
     require status == Uncertain else reject "not-uncertain"
     status' = Created
+    made' = true
   }
 
   on DraftMissing {
