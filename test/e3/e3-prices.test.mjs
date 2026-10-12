@@ -67,7 +67,10 @@ test('E3.9: the tables proposed for the live run (prices-live) pass the gate, an
   assert.equal(r.ok, true);
   const t = (f) => JSON.parse(readFileSync(join(dir, f), 'utf8'));
   // https://platform.claude.com/docs/en/about-claude/pricing, read 2026-10-12, in micro-units per million tokens
-  assert.deepEqual([t('main.json').model, t('main.json').perMillionTokens], ['claude-sonnet-5-5', { input: 2000000, output: 10000000, cache_write: 2500000, cache_read: 100000 }]);
+  assert.deepEqual([t('main.json').model, t('main.json').perMillionTokens], ['claude-opus-5-5', { input: 4000000, output: 20000000, cache_write: 5000000, cache_read: 200000 }]);
+  // the page prices a cache hit on Opus 5.5 at 0.05 times the input price (and 0.1 times on Haiku 4.5)
+  assert.equal(t('main.json').perMillionTokens.cache_read * 20, t('main.json').perMillionTokens.input);
+  assert.equal(t('cheap.json').perMillionTokens.cache_read * 10, t('cheap.json').perMillionTokens.input);
   assert.deepEqual([t('cheap.json').model, t('cheap.json').perMillionTokens], ['claude-haiku-4-5-20251001', { input: 1000000, output: 5000000, cache_write: 1250000, cache_read: 100000 }]);
   for (const f of ['main.json', 'cheap.json']) {
     assert.equal(t(f).source, 'https://platform.claude.com/docs/en/about-claude/pricing');

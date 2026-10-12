@@ -50,10 +50,10 @@ export function stepsBeforeCap(t, a, capMicro, reservationMicro) {
 }
 
 /** One plan: trials = tasks x configs x reruns (or the stated count), a per-run cap and the month's cap. */
-export function plan({ name, tasks, configs = 2, reruns, trials, capUsd, monthUsd = 25, pilotTrials = 0, assume, tables = { main: table('main.json'), cheap: table('cheap.json') } }) {
+export function plan({ name, tasks, configs = 2, reruns, trials, capUsd, monthUsd = 25, pilotTrials = 0, assume, maxInput = 100000, maxOutput = 8000, tables = { main: table('main.json'), cheap: table('cheap.json') } }) {
   const n = trials ?? tasks * configs * reruns;
   const capMicro = Math.round(capUsd * 1e6);
-  const res = reservation(tables.main, 100000, 8000);
+  const res = reservation(tables.main, maxInput, maxOutput);
   const worst = (n + pilotTrials) * capMicro;
   const spendable = capMicro - res;
   const expected = Object.fromEntries(assume.steps.map((s) => {
@@ -64,6 +64,9 @@ export function plan({ name, tasks, configs = 2, reruns, trials, capUsd, monthUs
     name, tasks, trials: n, pilotTrials, capUsd, reservationUsd: usd(res), spendableUsd: usd(Math.max(spendable, 0)),
     worstUsd: usd(worst), fits: worst <= monthUsd * 1e6, monthUsd,
     stepsBeforeCap: spendable > 0 ? stepsBeforeCap(tables.main, assume, capMicro, res) : 0,
+    // a request is refused above the input limit: request i carries the preamble and i - 1 steps of transcript
+    stepsBeforeInputLimit: maxInput >= assume.preamble ? Math.floor((maxInput - assume.preamble) / (assume.output + assume.tool)) + 1 : 0,
+    maxInput, maxOutput,
     expected,
     pairs: tasks, detectableGap: detectableGap(tasks), discordantNeeded: minDiscordant(),
   };
@@ -72,14 +75,19 @@ export function plan({ name, tasks, configs = 2, reruns, trials, capUsd, monthUs
 /** The assumptions about a trial that the expected cost rests on. They are guesses to be replaced by the pilot's figures. */
 export const ASSUMED = Object.freeze({ preamble: 5000, output: 300, tool: 1200, steps: [10, 16, 30, 60] });
 
-/** The options put to the owner for E3.9 (docs/e3/e3-9-plan.md). Each is within 25 USD at worst. */
+/**
+ * The options put to the owner for E3.9 (docs/e3/e3-9-plan.md), at the limits proposed for the agent decision (50,000 input
+ * tokens, 4,000 output): the module's own 100,000 and 8,000 make the reservation 0.56 USD at Opus 5.5 prices, which leaves no
+ * step under a 0.60 USD cap. Each is within 25 USD at worst.
+ */
+const LIMITS = { maxInput: 50000, maxOutput: 4000 };
 export const OPTIONS = [
-  { name: 'full', tasks: 12, reruns: 2, capUsd: 0.5 },
-  { name: 'staged', tasks: 12, trials: 40, capUsd: 0.6 },
-  { name: 'eight-tasks', tasks: 8, reruns: 2, capUsd: 0.75 },
-  { name: 'single-run', tasks: 12, reruns: 1, capUsd: 1 },
+  { name: 'staged', tasks: 12, trials: 40, capUsd: 0.6, ...LIMITS },
+  { name: 'staged-on-4', tasks: 12, trials: 32, capUsd: 0.78, ...LIMITS },
+  { name: 'full', tasks: 12, reruns: 2, capUsd: 0.5, ...LIMITS },
+  { name: 'eight-tasks', tasks: 8, reruns: 2, capUsd: 0.75, ...LIMITS },
+  { name: 'single-run', tasks: 12, reruns: 1, capUsd: 1, ...LIMITS },
 ];
-
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   for (const o of OPTIONS) console.log(JSON.stringify(plan({ ...o, assume: ASSUMED })));
 }

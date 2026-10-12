@@ -6,6 +6,7 @@ import { ASSUMED, OPTIONS, plan, reservation, stepsBeforeCap, trialCost } from '
 import { detectableGap } from '../../examples/harness/host/paired.mjs';
 
 const MAIN = { perMillionTokens: { input: 2000000, output: 10000000, cache_write: 2500000, cache_read: 100000 } };
+const OPUS = { perMillionTokens: { input: 4000000, output: 20000000, cache_write: 5000000, cache_read: 200000 } };
 const CHEAP = { perMillionTokens: { input: 1000000, output: 5000000, cache_write: 1250000, cache_read: 100000 } };
 
 test('the reservation of PS18.3: input limit at the input price plus output limit at the highest other price', () => {
@@ -13,6 +14,9 @@ test('the reservation of PS18.3: input limit at the input price plus output limi
   assert.equal(reservation(MAIN, 100000, 8000), 280000, '0.20 + 0.08 USD');
   assert.equal(reservation(CHEAP, 100000, 4000), 120000, 'summaries: 0.10 + 0.02 USD');
   assert.equal(reservation(CHEAP, 100000, 2000), 110000, 'receipts: 0.10 + 0.01 USD');
+  // Opus 5.5: the module's limits cost 0.40 + 0.16 USD, the proposed 50,000 and 4,000 cost 0.20 + 0.08
+  assert.equal(reservation(OPUS, 100000, 8000), 560000);
+  assert.equal(reservation(OPUS, 50000, 4000), 280000);
 });
 
 test('the cost of a trial, by hand: one step, and three steps with the cache read and written', () => {
@@ -45,24 +49,45 @@ test('the worst case is the number of runs times the per-run cap, and every opti
   assert.equal(big.fits, false);
 });
 
-test('a run stops when spent plus the reservation would pass the cap: the spendable part of a cap is the cap less 0.28 USD', () => {
-  const p = plan({ name: 'full', tasks: 12, reruns: 2, capUsd: 0.5, assume: ASSUMED });
+test('a run stops when spent plus the reservation would pass the cap: the spendable part of a cap is the cap less the reservation', () => {
+  const p = plan({ name: 'full', tasks: 12, reruns: 2, capUsd: 0.5, maxInput: 50000, maxOutput: 4000, assume: ASSUMED });
   assert.equal(p.reservationUsd, 0.28);
   assert.equal(p.spendableUsd, 0.22);
-  assert.equal(p.stepsBeforeCap, 23);
-  // 23 steps cost no more than the spendable part and 24 cost more
+  assert.equal(p.stepsBeforeCap, 12);
   const room = 220000;
-  assert.ok(trialCost(MAIN, { ...ASSUMED, steps: 23 }) <= room && trialCost(MAIN, { ...ASSUMED, steps: 24 }) > room);
-  assert.equal(stepsBeforeCap(MAIN, ASSUMED, 500000, 280000), 23);
+  assert.ok(trialCost(OPUS, { ...ASSUMED, steps: 12 }) <= room && trialCost(OPUS, { ...ASSUMED, steps: 13 }) > room);
+  assert.equal(stepsBeforeCap(OPUS, ASSUMED, 500000, 280000), 12);
   // a cap at or under the reservation lets no call through
-  assert.equal(plan({ name: 'tight', tasks: 12, reruns: 2, capUsd: 0.25, assume: ASSUMED }).stepsBeforeCap, 0);
-  assert.equal(plan({ name: 'tight', tasks: 12, reruns: 2, capUsd: 0.25, assume: ASSUMED }).spendableUsd, 0);
+  const tight = plan({ name: 'tight', tasks: 12, reruns: 2, capUsd: 0.25, maxInput: 50000, maxOutput: 4000, assume: ASSUMED });
+  assert.deepEqual([tight.stepsBeforeCap, tight.spendableUsd], [0, 0]);
 });
 
+test('at Opus 5.5 prices the module\'s own limits leave one step under the staged cap: the reservation is 0.56 USD', () => {
+  const asIs = plan({ name: 'staged-as-is', tasks: 12, trials: 40, capUsd: 0.6, assume: ASSUMED });
+  assert.deepEqual([asIs.maxInput, asIs.maxOutput, asIs.reservationUsd, asIs.spendableUsd, asIs.stepsBeforeCap], [100000, 8000, 0.56, 0.04, 1]);
+  // the largest cap 40 runs allow is 25 / 40 = 0.625, and it buys three steps
+  const top = plan({ name: 'staged-top', tasks: 12, trials: 40, capUsd: 0.625, assume: ASSUMED });
+  assert.deepEqual([top.worstUsd, top.fits, top.spendableUsd, top.stepsBeforeCap], [25, true, 0.065, 3]);
+});
+
+test('the fix: lowering the agent decision\'s limits buys steps, and the input limit stops being what binds at 50,000 and 4,000', () => {
+  const row = (maxInput, maxOutput) => { const p = plan({ name: 'x', tasks: 12, trials: 40, capUsd: 0.6, maxInput, maxOutput, assume: ASSUMED }); return [p.reservationUsd, p.spendableUsd, p.stepsBeforeCap, p.stepsBeforeInputLimit]; };
+  assert.deepEqual(row(60000, 4000), [0.32, 0.28, 16, 37]);
+  assert.deepEqual(row(50000, 4000), [0.28, 0.32, 18, 31]);
+  assert.deepEqual(row(40000, 4000), [0.24, 0.36, 20, 24]);
+  assert.deepEqual(row(40000, 2000), [0.2, 0.4, 22, 24]);
+  assert.deepEqual(row(30000, 2000), [0.16, 0.44, 23, 17], 'at 30,000 the input limit binds first (17 steps)');
+  const proposed = row(50000, 4000);
+  assert.ok(proposed[2] < proposed[3], 'the cap, not the input limit, ends a trial');
+});
 test('what each option leaves of the paired test: 12 pairs detect a gain of half the tasks, 8 pairs only 0.70; a single run measures no noise floor', () => {
+  assert.deepEqual(OPTIONS.map((o) => o.name), ['staged', 'staged-on-4', 'full', 'eight-tasks', 'single-run']);
   const by = Object.fromEntries(OPTIONS.map((o) => [o.name, plan({ ...o, assume: ASSUMED })]));
   assert.equal(by.full.detectableGap, 0.5);
   assert.equal(by.staged.detectableGap, 0.5);
+  assert.equal(by['staged-on-4'].detectableGap, 0.5);
+  assert.deepEqual([by.staged.stepsBeforeCap, by['staged-on-4'].stepsBeforeCap, by.full.stepsBeforeCap, by['eight-tasks'].stepsBeforeCap, by['single-run'].stepsBeforeCap], [18, 26, 12, 25, 36]);
+  assert.equal(by['staged-on-4'].trials, 24 + 8);
   assert.equal(by['eight-tasks'].detectableGap, 0.7);
   assert.equal(by['single-run'].detectableGap, 0.5);
   assert.equal(by.full.detectableGap, detectableGap(12));
@@ -73,11 +98,12 @@ test('what each option leaves of the paired test: 12 pairs detect a gain of half
   assert.equal(by.full.discordantNeeded, 5);
 });
 
-test('the expected cost is far under the worst case: at the assumed sizes a 16-step trial costs about 0.14 USD', () => {
-  const p = plan({ name: 'staged', tasks: 12, trials: 40, capUsd: 0.6, assume: ASSUMED });
-  assert.equal(+p.expected[16].trialUsd.toFixed(2), 0.14);
+test('the expected cost at Opus 5.5 prices and the assumed sizes: 0.28 USD for 16 steps, and a longer trial is stopped by its cap', () => {
+  const p = plan({ name: 'staged', tasks: 12, trials: 40, capUsd: 0.6, maxInput: 50000, maxOutput: 4000, assume: ASSUMED });
+  assert.deepEqual([10, 16, 30, 60].map((s) => +p.expected[s].trialUsd.toFixed(2)), [0.17, 0.28, 0.57, 1.4]);
   assert.equal(p.expected[16].capped, false);
-  assert.equal(p.expected[60].capped, true, 'a 60-step trial is stopped by its cap');
+  assert.equal(p.expected[30].capped, true, 'a 30-step trial costs more than the 0.32 spendable and stops at 18 steps');
+  assert.equal(p.expected[60].capped, true);
   assert.ok(p.expected[60].runUsd <= p.capUsd);
-  assert.ok(40 * p.expected[16].trialUsd < 25 / 4, 'expected total under a quarter of the month cap');
+  assert.ok(40 * p.expected[16].trialUsd < 25 / 2, 'expected total under half the month cap, when trials take 16 steps');
 });

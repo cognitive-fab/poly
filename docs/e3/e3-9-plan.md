@@ -2,7 +2,7 @@
 
 *Cognitive Fab, October 2026. Written 2026-10-12 for the owner's check. Nothing in this document has been run against a model, a container or the network. Everything computed here is computed from the committed price tables and tested without a model.*
 
-Status: a proposal with three parts for the owner to check (the price tables, the isolation, the cost plan) and the list of what the run is refused for. The expected verdict of the run is INCONCLUSIVE, and the report says so (section 4).
+Status: the owner's choices of 2026-10-12 are applied: **Opus 5.5 for the main tier and Haiku 4.5 for the cheap tier, isolation option A (approved, and stricter than the gate item's wording), and the staged plan at $0.60 per run with $25 for the month.** Recomputing the plan with Opus prices shows that the module's reservation leaves almost no steps, so section 3 proposes a fix for the owner to rule on. No cap or limit of the module has been edited. The expected verdict of the run is INCONCLUSIVE, and the report says so (section 4).
 
 ## 1. The price tables
 
@@ -10,16 +10,15 @@ Read from the vendor's page, https://platform.claude.com/docs/en/about-claude/pr
 
 | Tier | Model (API id) | Input | Output | Cache write (5 minute) | Cache read |
 |---|---|---|---|---|---|
-| main (the agent) | Claude Sonnet 5.5 (`claude-sonnet-5-5`) | $2 | $10 | $2.50 | $0.10 |
+| main (the agent) | Claude Opus 5.5 (`claude-opus-5-5`) | $4 | $20 | $5 | $0.20 |
 | cheap (summaries and receipts) | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | $1 | $5 | $1.25 | $0.10 |
 
 Dollars per million tokens, as the page gives them. The files are `examples/harness/prices-live/main.json` and `cheap.json`.
 
-Three things for the owner to check or choose:
+Re-read on 2026-10-12 against the same page, including the cache-read column. The cache-read prices are right and not low: the page prices a cache hit on Opus 5.5 and Sonnet 5.5 at **0.05 times the base input price** (footnote 2 of the table, and the cache section: "$0.20 USD per million tokens on Claude Opus 5.5, $0.10 USD on Claude Sonnet 5.5"), against 0.1 times for Haiku 4.5 ($0.10 on $1). Opus 5.5 is therefore $4 input and $0.20 cache read, which is 0.05.
 
-- **The choice of models is the owner's.** The page also lists Opus 5.5 ($4 input, $20 output) and Haiku 5.5 ($0.10 input and $0.50 output up to 100,000 tokens of prompt). Sonnet 5.5 and Haiku 4.5 are chosen because they are the mid-priced agent and the cheap tier whose API ids are known to this repository's tooling. A different choice changes the two files only.
-- **The cache write price is the 5 minute one.** The 1 hour write ($4 for Sonnet 5.5) is on the page and is not used. The pay-gate's ratio is write over read: 25 for Sonnet 5.5 (the placeholder tables had 12.5). At 25 a compaction has to save more to pay, so the recorded finding "the gate chooses no compaction on this corpus" holds more strongly. A live prompt that is not re-sent within five minutes pays a write again; the live run's calls are seconds apart.
-- **These tables do not replace `prices/`.** The module reads `prices/main.json` and `prices/cheap.json`, and the committed cost report is computed from them. Adopting the live tables means copying them over `prices/`, regenerating `docs/e3/cost-report.json` (`UPDATE_E3=1`) and running the files that read prices again, one at a time. That step waits for the owner's check.
+- **The cache write price is the 5 minute one** ($5 for Opus 5.5; the 1 hour write, $8, is on the page and is not used). The pay-gate's ratio is write over read: 25 for Opus 5.5 (the placeholder tables had 12.5). At 25 a compaction has to save more to pay. A live prompt that is not re-sent within five minutes pays a write again; the live run's calls are seconds apart.
+- **These tables do not replace `prices/`.** The module reads `prices/main.json` and `prices/cheap.json`, and the committed cost report is computed from them. Adopting the live tables means copying them over `prices/`, regenerating `docs/e3/cost-report.json` (`UPDATE_E3=1`) and running the files that read prices again, one at a time. That step waits until the plan is settled, because the module's limits change in the same step.
 
 ## 2. The isolation
 
@@ -36,9 +35,9 @@ Model-written code runs: a test or a script the agent edited, which `npm` or `go
 | C. A WSL distro made for the run | Nothing built in; WSL2 has outbound NAT, so a filter by address would have to be written and kept | In the distro | Weaker barrier. Note that the owner's existing `Ubuntu` distro mounts the Windows drives and must not be used. |
 | D. Windows Sandbox | `<Networking>Disable</Networking>` in the .wsb file | In the sandbox | Not installed here (`WindowsSandbox.exe` is absent) and needs a Windows feature and a restart |
 
-**Proposed: A.** The reason is that it needs no filter. A container with no network cannot reach the model API, and it does not need to: the driver (the poly runtime, the harness loop and the calls to the API) stays on the host, and only the effect `harness-tool` and the effect `harness-check` cross into the container. Those are the two commands the module already declares (`exec: ["harness-tool"]`, `exec: ["harness-check"]`), served by the host's exec transport, so the module does not change. The key never enters the container, so a program there cannot read it from an environment, a file or `/proc`.
+**Chosen by the owner: A.** The reason is that it needs no filter. A container with no network cannot reach the model API, and it does not need to: the driver (the poly runtime, the harness loop and the calls to the API) stays on the host, and only the effect `harness-tool` and the effect `harness-check` cross into the container. Those are the two commands the module already declares (`exec: ["harness-tool"]`, `exec: ["harness-check"]`), served by the host's exec transport, so the module does not change. The key never enters the container, so a program there cannot read it from an environment, a file or `/proc`.
 
-**A deviation to approve.** The gate item reads "network to the model API only". Under A the environment that runs model-written code has no network, and the API is reached by the driver, which runs no model-written code. If the owner wants the driver inside the isolated environment as well, that is B, with the cost stated above. The decision is the owner's.
+**The deviation is approved by the owner.** The gate item reads "network to the model API only". Under A the environment that runs model-written code has no network at all, and the API is reached by the driver, which runs no model-written code. A is stricter than the wording.
 
 ### The setup under A
 
@@ -56,50 +55,66 @@ What this does not give, stated: the barrier is the container runtime's, the sam
 
 `host/isolation-check.mjs` is tested on the loopback only (6 of 6): its control, a barrier and a breach, a credential variable, a host mount, and that an unreadable mount table fails. It has not been run in any container.
 
-## 3. The cost plan
+## 3. The cost plan, recomputed with Opus 5.5
 
-### The worst case is a guarantee, not an estimate
+### What changed
 
-A run's budget gate admits a call only when what the run has spent plus that call's reservation stays inside the run's cap, and a call within its limits costs no more than its reservation (PS18.3, K15). So a run spends at most its cap, and N runs cost at most N times the cap. The reservation of the agent decision, from its declared limits (100,000 input tokens, 8,000 output) at the live prices, is $0.28. The month's cap of $25 is a second hard stop: no call is admitted past it, so the run cannot overspend. What it can do is run out of month before the plan is done. The plan below is chosen so that it cannot.
+The worst case is a guarantee, not an estimate. A run's budget gate admits a call only when what the run has spent plus that call's reservation stays inside the run's cap, and a call within its limits costs no more than its reservation (PS18.3, K15). So a run spends at most its cap, N runs cost at most N times the cap, and the month's cap of $25 is a second hard stop. The reservation is `ceil((I x P_in + N x P_out) / 10^6)`, with I the decision's input limit and N its output limit at the highest price of any class but input. A run stops when spent plus the reservation would pass its cap, so **the spendable part of a cap is the cap less the reservation.**
 
-**The reservation also limits a run in practice.** A run stops when spent plus $0.28 would pass its cap, so the spendable part of a cap is the cap less $0.28. A cap of $0.25 or less lets no call through.
+The agent decision declares `max input tokens 100000` and `max tokens 8000`. At the Opus 5.5 prices:
 
-### The expected cost, from assumptions
+> reservation = 100,000 x $4 + 8,000 x $20, per million = **$0.40 + $0.16 = $0.56**
 
-Assumed (to be replaced by the pilot's measured figures, not measured): a preamble of 5,000 tokens (system prompt and tool schemas, with the fused action), 300 output tokens and 1,200 tool tokens a step, the previous request's whole input read from the cache and the new tokens written to it.
+Under the staged plan's cap of $0.60 the spendable amount is **$0.04, which buys 1 step.** At the largest cap 40 runs allow ($25 / 40 = $0.625) it is $0.065, which buys 3 steps. As the module stands, the staged plan at Opus prices runs nothing useful. (With Sonnet 5.5 the reservation was $0.28 and the same cap bought 32 steps.)
+
+### The cost of a step at Opus prices (assumptions, not measurements)
+
+Assumed: a preamble of 5,000 tokens, 300 output tokens and 1,200 tool tokens a step, the previous request's whole input read from the cache and the new tokens written to it.
 
 | Steps in a trial | 10 | 16 | 30 | 60 |
 |---|---|---|---|---|
-| Cost at the live prices | $0.086 | $0.14 | $0.29 | $0.70 |
+| Cost at Opus 5.5 | $0.17 | $0.28 | $0.57 | $1.40 |
 
-The 31 stages of the 12 tasks are checked after a few steps each, so a trial of 10 to 30 steps is the range to expect. The cheap tier's calls (summaries, receipts) are a few cents.
+### The fix proposed: lower the declared limits of the agent decision
 
-### The options
+`max input tokens 100000` is more window than the tasks use, and `max tokens 8000` is more than a step writes. The reservation is made from these limits, not from what a step uses, so they are the cheapest lever. Other limits at the staged plan's $0.60 cap (40 runs, worst case $24):
 
-48 runs at the $1 cap is $48 at worst, over the month's cap. Four plans fit $25 at worst:
+| Max input | Max output | Reservation | Spendable | Steps the cap buys | Steps before the input limit |
+|---|---|---|---|---|---|
+| 100,000 (module now) | 8,000 | $0.56 | $0.04 | 1 | 64 |
+| 60,000 | 4,000 | $0.32 | $0.28 | 16 | 37 |
+| **50,000** | **4,000** | **$0.28** | **$0.32** | **18** | 31 |
+| 40,000 | 4,000 | $0.24 | $0.36 | 20 | 24 |
+| 40,000 | 2,000 | $0.20 | $0.40 | 22 | 24 |
+| 30,000 | 2,000 | $0.16 | $0.44 | 23 | 17 |
 
-| Option | Runs | Per-run cap | Worst case | Spendable per run | Steps before the cap | Pairs | Smallest gain detected (80% power) | Noise floor |
+**Proposed: 50,000 input and 4,000 output.** The reservation is $0.28, the cap buys 18 steps, and the input limit (31 steps) is not what binds, so the cap is the only limit a trial meets. It also requires the host's window to be set under the limit so that the harness compacts before a request is refused: the loop's `windowTokens` is 48,000 live (its limit bucket starts at five sixths of that, 40,000). The cheap tier's decisions (summaries and receipts) can keep their limits or take the same 50,000 input, which lowers their reservation from $0.12 and $0.11 to $0.07 and $0.06.
+
+**What it costs the plan.**
+
+- **A trial that needs more than 18 steps is stopped by its cap** and counts as not completed, in both configurations. At the assumed sizes a 16-step trial costs $0.28 and a 30-step trial $0.57, so a task whose stages need more than about 18 steps cannot finish under this cap. This is the real price of Opus at $25. The pilot measures the steps a task takes before the plan goes on.
+- **A step may write at most 4,000 tokens.** A whole-file write above that is cut off (the harness reprompts after a cutoff, HF3.7) and costs a step.
+- It is a module edit (two limits of one decision, and the per-run cap from `cap usd 2 per run` to `cap usd 0.60 per run`). The gate-reach file and the HAC1 file are then run again, one at a time, and the reservation test of HF3.6 (the cap check, PL6845) is checked at the new values. Nothing is edited until the owner rules.
+
+### The plans with the proposed limits
+
+| Option | Runs | Per-run cap | Worst case | Spendable | Steps the cap buys | Pairs | Smallest gain detected (80% power) | Noise floor |
 |---|---|---|---|---|---|---|---|---|
-| **Staged** (proposed) | 24 first runs (12 tasks, both configurations), then 16 reruns (8 tasks, both configurations) | $0.60 | $24.00 | $0.32 | 32 | 12 | 0.50 | from 8 tasks, two runs each |
-| Full | 48 (12 tasks, both configurations, two reruns) | $0.50 | $24.00 | $0.22 | 23 | 12 | 0.50 | from 12 tasks |
-| Eight tasks | 32 (8 tasks, both configurations, two reruns) | $0.75 | $24.00 | $0.47 | 44 | 8 | 0.70 | from 8 tasks |
-| Single run | 24 (12 tasks, both configurations, once) | $1.00 | $24.00 | $0.72 | 61 | 12 | 0.50 | none |
+| **Staged** (the owner's choice) | 24, then 16 reruns of 8 tasks | $0.60 | $24.00 | $0.32 | 18 | 12 | 0.50 | from 8 tasks |
+| Staged on 4 | 24, then 8 reruns of 4 tasks | $0.78 | $24.96 | $0.50 | 26 | 12 | 0.50 | from 4 tasks (steps of 1/4) |
+| Full | 48 | $0.50 | $24.00 | $0.22 | 12 | 12 | 0.50 | from 12 tasks |
+| Eight tasks | 32 | $0.75 | $24.00 | $0.47 | 25 | 8 | 0.70 | from 8 tasks |
+| Single run | 24 | $1.00 | $24.00 | $0.72 | 36 | 12 | 0.50 | none |
 
-What each costs in power:
+- **Staged on 4** is the alternative if the pilot shows trials of 20 to 26 steps: a larger cap for the same $25, at the price of a noise floor measured on 4 tasks, which can only say 0, 25, 50, 75 or 100 percent of tasks disagree. It keeps all 12 pairs.
+- **Full, Eight tasks and Single run** are as before: Full's cap buys 12 steps, Eight tasks detects only a gain of 0.70, Single run has no floor.
+- **Opus against Sonnet** is the other lever, and the owner has ruled on it: Sonnet 5.5 halves the cost of a step ($0.14 for 16 steps) and the same plan buys 32 steps. It is not proposed again.
 
-- **Staged** keeps all 12 pairs, so the detectable gain is the same 0.50 as the full plan, and gives each run a larger cap. It measures the noise floor on 8 tasks rather than 12, so the floor has a coarser resolution (steps of 1/8). The 8 tasks for the reruns are fixed before the run, by a rule that does not look at results: the four tasks of each repository with the most stages. Choosing reruns by outcome (rerun the discordant tasks) would bias the floor and is not proposed.
-- **Full** has the best floor and the tightest cap: a trial longer than 23 steps is stopped by its cap and counts as not completed in both configurations. If the pilot shows trials near that length it should not be chosen.
-- **Eight tasks** is cheaper per pair and detects only a gain of 0.70, which no plausible harness change reaches. It is listed to show what dropping tasks costs; it is not proposed.
-- **Single run** is the only plan with a large cap and it measures no noise floor, which the gate item of the run exists to measure (HAC3 asks for at least two runs of each configuration). Not proposed.
-- **A lower reservation** is a separate lever. The module declares a reservation of $0.28 through `max input tokens 100000` and `max tokens 8000`. Lowering them (to 40,000 and 4,000, a reservation of $0.12) raises the spendable part of every cap by $0.16 and allows a smaller per-run cap with the same steps. It is a module edit: the gate-reach file and the HAC1 file have to be run again, one at a time. It also has to be checked against the real size of a request (a transcript over 40,000 tokens would be refused).
-
-The per-run cap in the module is `cap usd 2 per run`. Any plan above needs it changed to the plan's cap, which is also a module edit with the same two files run again. The change is made when the owner chooses the plan.
+At the assumed sizes the expected cost is 40 runs at $0.17 to $0.32 each (a trial longer than 18 steps costs its $0.32 spendable amount, and stops), $7 to $13. The guarantee is $24.
 
 ### The pilot
 
-The first two trials are task 1 under the base and under the full configuration, with the plan's settings, and they are real trials of the plan (they count in it, so the pilot costs nothing extra). After them the run stops and reports: steps, tokens by class, cost, whether a cap stopped either, and the preamble measured from the request. The assumptions of this section are then replaced by those figures, the plan is recomputed (`host/cost-plan.mjs`), and the run goes on only if the recomputed worst case still fits and the owner agrees.
-
-Expected cost at the assumed sizes: a 16-step trial costs about $0.14, so 40 runs cost about $6 to $12 in the likely range of 16 to 30 steps. The worst case of $24 is the guarantee.
+The first two trials are task 1 under the base and under the full configuration, with the plan's settings, and they are real trials of the plan (they count in it, so the pilot costs nothing extra). After them the run stops and reports: steps, tokens by class, cost, whether a cap stopped either, and the preamble measured from the request. The assumptions above are replaced by those figures, the plan is recomputed (`host/cost-plan.mjs`), and the run goes on only if the recomputed worst case still fits and the owner agrees.
 
 ## 4. What the run will and will not show
 
@@ -114,14 +129,14 @@ Every figure carries its labels: the task set of 12 from the owner's repositorie
 ## 5. The run is refused until
 
 1. The owner has checked the price tables and `node examples/harness/host/price-gate.mjs` exits 0 on the tables the module reads.
-2. The owner has chosen the isolation and the plan, and the module carries the plan's per-run cap.
+2. The owner has ruled on the limits of section 3, and the module carries the plan's per-run cap and the agent decision's limits.
 3. The image is built, the oracle passes inside the container (31 of 31 stages), and `isolation-check.mjs` exits 0 inside it, with its output recorded in `decisions-e3.md`.
 4. The owner has set the key, in the host's driver only, and the pilot's two trials have been read.
 5. The gate-reach file and the HAC1 file have been run again after any module edit, one at a time.
 
 ## Conclusion
 
-The price tables, the isolation and the cost plan are ready for the owner's check, and nothing has been run. The tables pass the gate. The proposed isolation is a container with no network for every command a model causes, with the key kept on the host. The proposed plan is 40 runs in two stages at a $0.60 cap, a worst case of $24, which keeps all 12 pairs and measures the noise floor on 8 tasks. The verdict at 12 pairs will be INCONCLUSIVE, and the run is worth its cost for the noise floor, the saving of fusion and the cost terms.
+The price tables, the isolation and the cost plan are ready for the owner's check, and nothing has been run. The tables pass the gate. The isolation is a container with no network for every command a model causes, with the key kept on the host (the owner's choice). The plan is 40 runs in two stages at a $0.60 cap, a worst case of $24, which keeps all 12 pairs and measures the noise floor on 8 tasks. At Opus 5.5 prices the module's reservation of $0.56 leaves 1 step under that cap; lowering the agent decision's limits to 50,000 input and 4,000 output makes it $0.28 and buys 18 steps, which the owner is asked to rule on. The verdict at 12 pairs will be INCONCLUSIVE, and the run is worth its cost for the noise floor, the saving of fusion and the cost terms.
 
 ## Glossary
 

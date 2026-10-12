@@ -1,13 +1,13 @@
 {
   "v": 1,
   "provider": "main",
-  "model": "claude-sonnet-5-5",
+  "model": "claude-opus-5-5",
   "currency": "usd",
   "perMillionTokens": {
-    "input": 2000000,
-    "output": 10000000,
-    "cache_write": 2500000,
-    "cache_read": 100000
+    "input": 4000000,
+    "output": 20000000,
+    "cache_write": 5000000,
+    "cache_read": 200000
   },
   "source": "https://platform.claude.com/docs/en/about-claude/pricing",
   "readOn": "2026-10-12"
