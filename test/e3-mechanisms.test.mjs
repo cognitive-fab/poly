@@ -95,7 +95,8 @@ test('HAC2, the Evidence-Preserving Reducer (HF2.5, HF3.2): a log from 4 KiB is 
   const verified = { 't02-fix-build': 1, 't04-big-build-log': 1, 't08-long-session': 3, 't10-mixed': 1 };
   for (const [n, { t, runs }] of Object.entries(m)) {
     const on = runs.reducer;
-    const logs = t.recording.steps.filter((s) => s.tool.log !== false && Buffer.byteLength(s.tool.output) >= 4096).length;
+    // the reducer reads the logs of a predefined set of commands (the declared runners); a file read or a search bypasses it
+    const logs = t.recording.steps.filter((s, k) => FUSED.has(t.specs[k]) && Buffer.byteLength(s.tool.output) >= 4096).length;
     assert.equal(on.metrics.reducer.opportunities, logs, `${n}: opportunities`);
     assert.equal(on.metrics.reducer.receipts, logs, `${n}: every log is given to the reducer`);
     assert.equal(on.metrics.reducer.verified, verified[n] ?? 0, `${n}: verified`);
@@ -119,6 +120,13 @@ test('HAC2, the Evidence-Preserving Reducer (HF2.5, HF3.2): a log from 4 KiB is 
   }
 });
 
+test('t12-many-reads, a reported finding: ObservationPack alone does not rescue a window filled before any output has had its third request; compaction does', { timeout: 1_800_000 }, async () => {
+  const { runs } = (await matrix())['t12-many-reads'];
+  assert.deepEqual([runs.pack.mode, runs.pack.why, runs.pack.metrics.pack.observations, runs.pack.metrics.pack.handled], ['Stopped', 'Overflow', 3, 0], 'pack alone: three observations, none handled yet, the window overflows');
+  assert.deepEqual([runs.compaction.mode, runs.base.mode, runs.base.why], ['Done', 'Stopped', 'Overflow']);
+  assert.deepEqual([runs.all.mode, runs.all.metrics.pack.observations], ['Done', 3]);
+});
+
 test('HAC2: the trigger rates, printed, and held in docs/e3/trigger-rates.json', { timeout: 1_800_000 }, async () => {
   const m = await matrix();
   const sum = (f) => Object.values(m).reduce((a, { runs }) => [a[0] + f(runs)[0], a[1] + f(runs)[1]], [0, 0]);
@@ -134,6 +142,28 @@ test('HAC2: the trigger rates, printed, and held in docs/e3/trigger-rates.json',
       return [c, { reachedEndOfPlan: rs.filter((r) => r.mode === 'Done').length, endedOnOverflow: rs.filter((r) => r.why === 'Overflow').length, inputTokens: tot('input'), outputTokens: tot('output'), microUsd: tot('units') }];
     })),
   };
+  // SoL-Pi (3.4): the trigger rate is the fraction of tasks on which a mechanism activates, the intensity the mean number of
+  // activations per triggered task. The per-opportunity rates above are this harness's own; these are the paper's definitions.
+  const paper = (mech) => {
+    const fired = Object.values(rates[mech].perTrajectory).map(([f]) => f);
+    const triggered = fired.filter((f) => f > 0);
+    return { triggerRate: [triggered.length, fired.length], triggerIntensity: triggered.length ? Math.round((100 * triggered.reduce((a, b) => a + b, 0)) / triggered.length) / 100 : 0 };
+  };
+  for (const mech of ['fusion', 'compaction', 'pack', 'reducer']) rates[mech].paperDefinition = paper(mech);
+  // the same two measures in the full stack, as the paper's figure 7 compares them with the standalone ones
+  const FIELD = { fusion: (r) => r.metrics.fusion.fired, compaction: (r) => r.metrics.compaction.chosen, pack: (r) => r.metrics.pack.observations, reducer: (r) => r.metrics.reducer.receipts };
+  for (const mech of ['fusion', 'compaction', 'pack', 'reducer']) {
+    const fired = Object.values(m).map(({ runs }) => FIELD[mech](runs.all));
+    const triggered = fired.filter((f) => f > 0);
+    rates[mech].fullStack = { triggerRate: [triggered.length, fired.length], triggerIntensity: triggered.length ? Math.round((100 * triggered.reduce((x, y) => x + y, 0)) / triggered.length) / 100 : 0 };
+  }
+  rates.labels = {
+    corpus: 'a synthetic corpus of 12 trajectories, with tokens estimated at four characters each',
+    completion: '"reached the end of the plan", not "solved the task"',
+    scope: 'the token and cost figures hold for recordings only; the saving of Action Fusion cannot show on recordings and is measured at the live run',
+    expectations: 'the HF2.2 to HF2.5 definitions of the proposal; the trigger rate and intensity are those of SoL-Pi (section 3.4); the thresholds of the paper itself were re-checked on 2026-10-11 (decisions-e3.md)',
+  };
+  rates.findings = ['t12-many-reads: ObservationPack alone does not rescue a window filled before the third request; compaction does'];
   const line = (label, [f, o]) => `${label}: ${f} of ${o} (${o ? Math.round((100 * f) / o) : 0}%)`;
   console.log(['', 'HAC2 trigger rates over 12 recorded trajectories:', line('  Action Fusion        ', rates.fusion.total), line('  Online Context Compact', rates.compaction.total), line('  ObservationPack      ', rates.pack.total), line('  Evidence-Preserving Reducer', rates.reducer.total), JSON.stringify(rates.byConfig, null, 1)].join('\n'));
   for (const [, v] of Object.entries(rates.byConfig)) assert.ok(v.inputTokens > 0);

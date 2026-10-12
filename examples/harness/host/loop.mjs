@@ -6,7 +6,8 @@
 // dispatch or a stuck run, and never a broken rule (assumptions.json, dispatch-order).
 //
 // The four mechanisms can each be switched off (Q-E3-2: the base harness is this harness with all four off):
-//   fusion      off: the classifier says separate for every call (handlers/classify.mjs reads the row mechanisms/config)
+//   fusion      off: the classifier says separate for every call (handlers/classify.mjs reads the host's setting through the
+//               secrets capability, which has no write; the host sets all four once, before the trial: transports.mjs)
 //   compaction  off: the host never takes the pay-gate's measure, so no compaction is chosen (the limit still compacts, HF3.8)
 //   pack        off: a large output stays in the transcript in full
 //   reducer     off: a log is shown to the agent whole, and the cheaper model is never asked
@@ -16,8 +17,10 @@
 //                               stage: { passed }, cap? } ],
 //     summaries?: [text], receipts?: [text] }
 // A step's model entries are the model's answers for that step in order: a second one answers a reprompt after a cutoff.
-// `tool.log` is false for a command that is not a build or test run (a file read): the reducer reads only logs.
+// The reducer reads the output of a build or test command of a predefined set (the declared runners of handlers/classify.mjs);
+// a file read or a search bypasses it (SoL-Pi, the Evidence-Preserving Reducer).
 import { ArchiveStore, handleText } from './handlers/archive.mjs';
+import { isRunnerCall } from './handlers/classify.mjs';
 
 export const KINDS = {
   'tool.verify': ['verify', 'verify'],
@@ -55,17 +58,21 @@ export const THRESHOLDS = Object.freeze({ logBytes: 4096, handleBytes: 10240, ex
 /** A token is estimated at four characters. The provider's own usage figure replaces this in a live run (assumption token-buckets). */
 export const tokensOf = (text) => Math.ceil(String(text).length / 4);
 
-const PREAMBLE = `You are a coding agent working in a copy of a repository. Tools: edit(path, new), bash(command). ${'The tool schemas are part of every request. '.repeat(24)}`;
+export const PREAMBLE = `You are a coding agent working in a copy of a repository. Tools: edit(path, new), bash(command). ${'The tool schemas are part of every request. '.repeat(24)}`;
 const KEEP_LAST = 2;
 
 /** A provider that answers from a queue of recorded texts, in order, with the usage its question implies (input from what it was shown). */
-function queueProvider(name, texts, materialOf) {
+function queueProvider(name, texts, materialOf, preamble, calls) {
   const asked = [];
   const fn = (q, m) => {
     asked.push(q);
     const text = texts.shift();
     if (text === undefined) throw new Error(`no recorded answer left for ${name}`);
-    const input = tokensOf(m?.bodies?.[materialOf] ?? '');
+    const shown = m?.bodies?.[materialOf] ?? '';
+    const input = tokensOf(shown);
+    // HAC6: the request's input is the preamble (the system prompt and the tool schemas, the first message) and the rest (the transcript)
+    const pre = shown.startsWith(preamble) ? Math.min(input, tokensOf(preamble)) : 0;
+    calls.push({ kind: name, preamble: pre, transcript: input - pre, output: tokensOf(text) });
     return { answer: text, distribution: [[text, 1]], usage: { input, output: tokensOf(text) } };
   };
   fn.asked = asked;
@@ -89,10 +96,12 @@ function receiptView(receiptJson, logBytes) {
 }
 
 /**
- * @param {{ rt: object, store: import('./store.mjs').MemoryStore, recording: object, models: { main: string, cheap: string },
- *   mechanisms?: object, thresholds?: object, windowTokens?: number }} input
+ * @param {{ rt: object, host: ReturnType<typeof import('./transports.mjs').makeHost>, recording: object, models: { main: string, cheap: string },
+ *   mechanisms?: object, thresholds?: object, windowTokens?: number, preamble?: string }} input
  */
-export async function runTask({ rt, store, recording, models, mechanisms = ALL_ON, thresholds = THRESHOLDS, windowTokens = 6000 }) {
+export async function runTask({ rt, host, recording, models, mechanisms = ALL_ON, thresholds = THRESHOLDS, windowTokens = 6000, preamble = PREAMBLE }) {
+  const calls = []; // every model call, in order, with the terms of its cost (HAC6)
+  const store = host.store;
   const task = recording.task;
   const bucketTokens = windowTokens / 6;
   const bucketOf = (tokens) => Math.max(0, Math.min(6, Math.floor(tokens / bucketTokens)));
@@ -106,11 +115,11 @@ export async function runTask({ rt, store, recording, models, mechanisms = ALL_O
     if (!(await until())) throw new Error(`the run did not reach: ${what}`);
   };
   const agentTexts = recording.steps.flatMap((s) => s.model.map((m) => m.calls));
-  rt.provide('agent', { provider: queueProvider('agent', agentTexts, 'task'), model: models.main });
-  rt.provide('summarise', { provider: queueProvider('summarise', [...(recording.summaries ?? [])], 'context'), model: models.cheap });
-  rt.provide('read', { provider: queueProvider('read', [...(recording.receipts ?? [])], 'log'), model: models.cheap });
+  rt.provide('agent', { provider: queueProvider('agent', agentTexts, 'task', preamble, calls), model: models.main });
+  rt.provide('summarise', { provider: queueProvider('summarise', [...(recording.summaries ?? [])], 'context', preamble, calls), model: models.cheap });
+  rt.provide('read', { provider: queueProvider('read', [...(recording.receipts ?? [])], 'log', preamble, calls), model: models.cheap });
   registerHandlers(rt);
-  store.put('mechanisms', 'config', { ...mechanisms });
+  host.setMechanisms(mechanisms);
 
   await rt.create('harness.Trial', { id: ids.trial });
   await rt.create('harness.Context', { id: ids.context });
@@ -120,7 +129,7 @@ export async function runTask({ rt, store, recording, models, mechanisms = ALL_O
   store.put('recorded-stage', ids.trial, recording.steps.map((s) => s.stage?.passed !== false));
 
   const archive = new ArchiveStore();
-  const messages = [{ role: 'system', text: PREAMBLE, pinned: true }, { role: 'user', text: recording.prompt, pinned: true }];
+  const messages = [{ role: 'system', text: preamble, pinned: true }, { role: 'user', text: recording.prompt, pinned: true }];
   const live = []; // observations the transcript still refers to: { id, message, fullSends }
   const turns = [];
   const receipts = [];
@@ -207,9 +216,11 @@ export async function runTask({ rt, store, recording, models, mechanisms = ALL_O
     const logBytes = Buffer.byteLength(logText, 'utf8');
     if (archived.redacted) metrics.reducer.flagged += 1;
     let shown = logText;
+    let shownIsReceipt = false;
 
     // the Evidence-Preserving Reducer: a log over the threshold is read by the cheaper model, and only a verified receipt is shown
-    if (step.tool.log !== false && logBytes >= thresholds.logBytes) {
+    const reducible = isRunnerCall(step.model[step.model.length - 1].calls);
+    if (reducible && logBytes >= thresholds.logBytes) {
       metrics.reducer.opportunities += 1;
       if (mechanisms.reducer) {
         const receipt = `receipt:${task}:${i}`;
@@ -226,12 +237,16 @@ export async function runTask({ rt, store, recording, models, mechanisms = ALL_O
         else metrics.reducer.rejected += 1;
         await rt.dispatch(receipt, 'Show', {});
         await pump(async () => (await state(receipt)).presented, `${receipt} shown`);
-        if (store.read('shown', receipt).what === 'receipt') shown = receiptView(mine, logBytes);
+        if (store.read('shown', receipt).what === 'receipt') {
+          shown = receiptView(mine, logBytes);
+          shownIsReceipt = true;
+        }
       }
     }
     // ObservationPack: an output over the threshold is archived, sent in full for two requests and then shown as its handle
     const message = { role: 'tool', text: shown };
-    if (Buffer.byteLength(shown, 'utf8') > thresholds.handleBytes) {
+    // a verified receipt is never packed: the evidence it holds is what the agent must keep (SoL-Pi: the pack skips the reducer's marker)
+    if (!shownIsReceipt && Buffer.byteLength(shown, 'utf8') > thresholds.handleBytes) {
       metrics.pack.opportunities += 1;
       if (mechanisms.pack) {
         const obs = `obs:${task}:${i}`;
@@ -292,6 +307,6 @@ export async function runTask({ rt, store, recording, models, mechanisms = ALL_O
   return {
     ids, trial: await state(ids.trial), context: await state(ids.context), turns, receipts,
     compactions: compactions.map(({ before, after, released }) => ({ before, after, released })),
-    metrics, requests, live: live.map((o) => ({ id: o.id, handle: o.message.handleId, fullSends: o.fullSends })), archive, transcript: messages,
+    metrics, requests, calls, live: live.map((o) => ({ id: o.id, handle: o.message.handleId, fullSends: o.fullSends })), archive, transcript: messages,
   };
 }

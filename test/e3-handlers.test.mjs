@@ -19,7 +19,7 @@ mkdirSync(OUT, { recursive: true });
 
 const { verifyReceipt, hashOf, parseReceipt, verify } = await import(url('verify.mjs'));
 const { scanText, redact, encodings, scan } = await import(url('scan.mjs'));
-const { classifyCalls, classify } = await import(url('classify.mjs'));
+const { classifyCalls, classify, isRunnerCall } = await import(url('classify.mjs'));
 const { ArchiveStore, handleText, handlesIn } = await import(url('archive.mjs'));
 const { applyCompaction } = await import(url('compact.mjs'));
 const { intake } = await import(url('intake.mjs'));
@@ -265,7 +265,7 @@ test('S559: an edit then a declared runner is fusable; every other shape stays s
 test('S559: the classify handler completes ok for a fusable call and as a permanent failure for the rest', async () => {
   const kept = [];
   let mech;
-  const caps = (text) => ({ content: { read: async () => text }, store: { read: async (t, k) => (t === 'mechanisms' ? mech : undefined), write: async (t, k, v) => { kept.push([t, k, v]); } } });
+  const caps = (text) => ({ content: { read: async () => text }, secrets: { get: async () => mech }, store: { write: async (t, k, v) => { kept.push([t, k, v]); } } });
   await classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'npm test' }])), { instanceId: 'turn:t:1' });
   await assert.rejects(classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'cat x' }])), { instanceId: 'turn:t:2' }), (e) => e.permanent === true);
   assert.deepEqual(kept.map(([t, k]) => [t, k]), [['calls', 'turn:t:1'], ['calls', 'turn:t:2']], 'the calls are kept for the act effect either way');
@@ -362,7 +362,28 @@ void createHash;
 
 test('Q-E3-2: with action fusion switched off the classifier says separate for a call it would otherwise fuse', async () => {
   const calls = JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'npm test' }]);
-  const caps = (cfg) => ({ content: { read: async () => calls }, store: { read: async (t) => (t === 'mechanisms' ? cfg : undefined), write: async () => {} } });
+  const caps = (cfg) => ({ content: { read: async () => calls }, secrets: { get: async (n) => (n === 'mechanisms' ? JSON.stringify(cfg) : undefined) }, store: { write: async () => {} } });
   assert.deepEqual(await classify({ calls: 'c' }, caps({ fusion: true }), { instanceId: 'turn:t:1' }), { ok: true });
   await assert.rejects(classify({ calls: 'c' }, caps({ fusion: false }), { instanceId: 'turn:t:1' }), (e) => e.permanent === true && /switched off/.test(e.message));
+});
+
+test('SoL-Pi, ObservationPack: the excerpt of a handle is complete head and tail lines, each side within its budget', () => {
+  const lines = Array.from({ length: 200 }, (_, i) => `line ${String(i).padStart(3, '0')}: some build output`);
+  const buf = Buffer.from(lines.join('\n'));
+  const t = handleText('0123456789abcdef', buf, 100);
+  const body = t.split('\n').slice(1);
+  const shown = body.filter((l) => l.startsWith('line '));
+  assert.ok(shown.length >= 4 && shown.every((l) => lines.includes(l)), 'every line shown is a whole line of the output');
+  assert.ok(t.includes('line 000') && t.includes('line 199'));
+  assert.match(t, /\[\.\.\. \d+ bytes omitted \.\.\.\]/);
+  assert.ok(Buffer.byteLength(t) < 100 * 2 + 200);
+  // a short output has nothing omitted
+  assert.ok(!/omitted/.test(handleText('0123456789abcdef', Buffer.from('a\nb\nc'), 100)));
+});
+
+test('SoL-Pi, the Reducer: the commands whose logs it reads are the declared runners; a file read or a search bypasses it', () => {
+  const cmd = (command) => JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command }]);
+  for (const c of ['npm test', 'npm run build', 'node --test test/a.test.mjs', 'pytest -q', 'cargo test', 'make']) assert.equal(isRunnerCall(cmd(c)), true, c);
+  for (const c of ['cat src/a.ts', 'grep -rn foo .', 'ls', 'node scripts/check.js', 'npm test | tee x']) assert.equal(isRunnerCall(cmd(c)), false, c);
+  assert.equal(isRunnerCall('not json'), false);
 });

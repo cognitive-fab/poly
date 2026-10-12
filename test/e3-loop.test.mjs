@@ -186,3 +186,59 @@ test('E3.4: a late Begun, after the plan is done or the trial ended on overflow,
     }
   }
 });
+
+// ---------------------------------------------------------------- the off switches are the host's alone (owner, 2026-10-11)
+
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { capabilitiesFor } from '@poly/runtime';
+import { makeHost } from '../examples/harness/host/transports.mjs';
+import { sharedBuild } from './e3-loop-helpers.mjs';
+
+test('the mechanisms are the host\'s alone: no effect of the module can write them, and none declares the table', { timeout: 600_000 }, async () => {
+  const a = await sharedBuild();
+  const program = readFileSync(join(a.dir, 'src', 'harness.poly'), 'utf8');
+  assert.ok(!/store:\s*\[[^\]]*"mechanisms"/.test(program), 'no effect declares a store table named mechanisms');
+  // every effect of every machine, with the capabilities the runtime would give it
+  const wrote = [];
+  const transports = { store: { read: () => ({}), write: (t, k) => wrote.push([t, k]) }, secrets: () => '{"fusion":true}' };
+  let effects = 0;
+  let readers = [];
+  for (const dir of readdirSync(a.build).filter((d) => d.startsWith('harness.') && !d.includes('.task.'))) {
+    const manifest = JSON.parse(readFileSync(join(a.build, dir, 'effects.manifest.json'), 'utf8'));
+    for (const [kind, decl] of Object.entries(manifest.effects)) {
+      if (kind.startsWith('decision.')) continue;
+      effects += 1;
+      const caps = capabilitiesFor({ labels: decl.labels, targets: decl.targets }, transports, async () => {});
+      if (caps.store?.write) await assert.rejects(caps.store.write('mechanisms', 'config', { fusion: false }), /PL6406|not among the declared tables/, `${kind}: wrote the mechanisms`);
+      if (caps.store?.read) await assert.rejects(caps.store.read('mechanisms', 'config'), /PL6406|not among the declared tables/, `${kind}: read the mechanisms row`);
+      // a secret is only read: the capability has no write
+      if (caps.secrets) assert.deepEqual(Object.keys(caps.secrets), ['get'], `${kind}: the secrets capability has only get`);
+      if (caps.secrets && (decl.targets?.secrets ?? []).includes('mechanisms')) readers.push(kind);
+    }
+  }
+  assert.ok(effects >= 17, `${effects} effects checked`);
+  assert.deepEqual(readers, ['tool.classify'], 'only the classifier reads the setting');
+  assert.deepEqual(wrote, []);
+});
+
+test('the mechanisms are the host\'s alone: set once before the trial, and no handler wrote them during a run', { timeout: 600_000 }, async () => {
+  const { rt, store, host, result } = await run('e3-loop-switches', recording(), { mechanisms: { fusion: false, compaction: true, pack: false, reducer: true } });
+  try {
+    assert.deepEqual({ ...host.mechanisms }, { fusion: false, compaction: true, pack: false, reducer: true });
+    assert.throws(() => host.setMechanisms({ fusion: true, compaction: true, pack: true, reducer: true }), /set once/);
+    assert.ok(Object.isFrozen(host.mechanisms));
+    assert.deepEqual(store.handlerWrites.filter(([t]) => t === 'mechanisms'), [], 'a handler wrote the mechanisms');
+    assert.ok(store.handlerWrites.length >= 10, `the handlers did write other tables (${store.handlerWrites.length} writes)`);
+    assert.equal(result.metrics.fusion.fired, 0, 'the switch the host set held for the whole trial');
+  } finally {
+    await rt.close();
+  }
+});
+
+test('the host cannot set the mechanisms after the trial has begun (a second runTask on the same host is refused)', () => {
+  const host = makeHost();
+  host.setMechanisms({ fusion: true, compaction: true, pack: true, reducer: true });
+  assert.throws(() => host.setMechanisms({ fusion: false, compaction: false, pack: false, reducer: false }), /set once/);
+  assert.equal(host.transports.secrets('mechanisms'), '{"fusion":true,"compaction":true,"pack":true,"reducer":true}');
+});

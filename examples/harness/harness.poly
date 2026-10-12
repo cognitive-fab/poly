@@ -201,8 +201,8 @@ machine Turn {
 
   effect classify(calls: Content) {
     kind "tool.classify"
-    labels { read:store, write:store }
-    targets { store: ["calls", "mechanisms"] }
+    labels { read:private, write:store }
+    targets { secrets: ["mechanisms"], store: ["calls"] }
     ok -> Fusable()
     failed -> Separate()
   }

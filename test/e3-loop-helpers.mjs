@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { admittedHarness, loaded } from './e3-runtime-helpers.mjs';
-import { MemoryStore } from '../examples/harness/host/store.mjs';
+import { makeHost } from '../examples/harness/host/transports.mjs';
 import { runTask } from '../examples/harness/host/loop.mjs';
 import { hashOf } from '../examples/harness/host/handlers/verify.mjs';
 
@@ -41,14 +41,15 @@ export function recording(over = {}) {
 /** Admits the harness, loads it over a memory store, and runs a recording to its end. */
 let shared = null;
 /** One admission of the unedited module, shared by the tests that need no variant (admission is most of a run's time). */
-export const sharedBuild = () => (shared ??= admittedHarness('e3-shared'));
+export const sharedBuild = () => (shared ??= admittedHarness(`e3-shared-${process.pid}`));
 
-export async function run(name, rec = recording(), { edit: editProgram, secrets = [], mechanisms, windowTokens } = {}) {
+export async function run(name, rec = recording(), { edit: editProgram, secrets = [], mechanisms, windowTokens, preamble } = {}) {
   const a = editProgram ? await admittedHarness(name, { edit: editProgram }) : await sharedBuild();
-  const store = new MemoryStore();
-  const { rt } = await loaded(a, { transports: { store, secrets: (n) => (n === 'known-secrets' ? JSON.stringify(secrets) : undefined) } });
-  const result = await runTask({ rt, store, recording: rec, models: MODELS, ...(mechanisms ? { mechanisms } : {}), ...(windowTokens ? { windowTokens } : {}) });
-  return { rt, store, result, a };
+  const host = makeHost({ known: secrets });
+  const { rt } = await loaded(a, { transports: host.transports });
+  const store = host.store;
+  const result = await runTask({ rt, host, recording: rec, models: MODELS, ...(mechanisms ? { mechanisms } : {}), ...(windowTokens ? { windowTokens } : {}), ...(preamble ? { preamble } : {}) });
+  return { rt, store, host, result, a };
 }
 
 /** A canary token and its four encodings (AC18, S554). */

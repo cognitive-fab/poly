@@ -131,6 +131,10 @@
     {
       "id": "lint-not-proof",
       "text": "Two properties are held by a source lint and not a proof: every model decision names its budget (S562) and the effect startCompaction and the summary decision are emitted in the same branch of the same handler (S564)."
+    },
+    {
+      "id": "recordings-evidence",
+      "text": "The measured results of the recorded runs (the trigger rates, the token and cost figures) are recordings evidence, and wherever they appear (the README, this certificate, the E3 report) they carry three labels. (1) They come from a synthetic corpus of 12 trajectories, with tokens estimated at four characters each. (2) A run that \"reached the end of the plan\" did not \"solve the task\": the model, the tools and the stage checks are recorded. (3) The figures of 12% fewer input tokens and 46% less cost hold for recordings only, and the saving of Action Fusion cannot show on recordings and is measured at the live run. The expectations for each mechanism are the HF2.2 to HF2.5 definitions of the proposal, checked against the SoL-Pi paper (docs/research) on 2026-10-11 with the differences listed in decisions-e3.md."
     }
   ]
 }

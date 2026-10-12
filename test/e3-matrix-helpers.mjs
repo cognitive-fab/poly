@@ -3,7 +3,21 @@
 // outbox, the decision events), never from the host's counters alone.
 import { trajectories } from './fixtures/harness/trajectories.mjs';
 import { ALL_OFF, ALL_ON } from '../examples/harness/host/loop.mjs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { run } from './e3-loop-helpers.mjs';
+import { costReport } from '../examples/harness/host/cost-report.mjs';
+import { ROOT } from './helpers.mjs';
+
+const PRICES = { main: JSON.parse(readFileSync(join(ROOT, 'examples', 'harness', 'prices', 'main.json'), 'utf8')), cheap: JSON.parse(readFileSync(join(ROOT, 'examples', 'harness', 'prices', 'cheap.json'), 'utf8')) };
+
+/** The decision events of a run, in the order the runtime wrote them. */
+export function decisionEvents(rt) {
+  return rt.store.db.prepare("SELECT event FROM poly_ledger WHERE kind = 'decision' ORDER BY rowid").all().map((r) => JSON.parse(r.event).body);
+}
+
+/** The cost report of a run (HAC6): the terms of every call, against the runtime's own usage and cost. */
+export const reportOf = (rt, result) => costReport({ calls: result.calls, events: decisionEvents(rt), prices: PRICES, steps: result.turns.length });
 
 export const CONFIGS = {
   base: ALL_OFF,
@@ -59,6 +73,8 @@ export function matrix() {
             metrics: result.metrics,
             requests: result.requests,
             cost: costOf(rt),
+            report: reportOf(rt, result),
+            modelEntries: t.recording.steps.slice(0, result.turns.length).reduce((n, s) => n + s.model.length, 0),
             acts: actsOf(rt),
             gate: await gateRows(rt, result.ids.context),
             context: result.context,

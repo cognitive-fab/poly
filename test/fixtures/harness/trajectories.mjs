@@ -44,14 +44,14 @@ export function buildLog(seed, bytes, { secret = null, badReceipt = false } = {}
 }
 
 export const step = {
-  fuse: (n) => ({ spec: 'fuse', model: [{ calls: calls(n, 'npm test'), stop: 'Tool', usage: { output: 90 } }], tool: { output: `PASS src/m${n}.test.ts (${n + 3} tests)\n`, exitStatus: 0, log: true }, stage: { passed: true } }),
-  noRunner: (n) => ({ spec: 'noRunner', model: [{ calls: calls(n, 'node scripts/check.js'), stop: 'Tool', usage: { output: 90 } }], tool: { output: 'checked 3 files\n', exitStatus: 0, log: false }, stage: { passed: true } }),
-  inspect: (n, bytes) => ({ spec: 'inspect', model: [{ calls: JSON.stringify([{ tool: 'bash', command: `cat src/big${n}.ts` }]), stop: 'End', usage: { output: 60 } }], tool: { output: code(n, bytes), exitStatus: 0, log: false }, stage: { passed: true } }),
+  fuse: (n) => ({ spec: 'fuse', model: [{ calls: calls(n, 'npm test'), stop: 'Tool', usage: { output: 90 } }], tool: { output: `PASS src/m${n}.test.ts (${n + 3} tests)\n`, exitStatus: 0 }, stage: { passed: true } }),
+  noRunner: (n) => ({ spec: 'noRunner', model: [{ calls: calls(n, 'node scripts/check.js'), stop: 'Tool', usage: { output: 90 } }], tool: { output: 'checked 3 files\n', exitStatus: 0 }, stage: { passed: true } }),
+  inspect: (n, bytes) => ({ spec: 'inspect', model: [{ calls: JSON.stringify([{ tool: 'bash', command: `cat src/big${n}.ts` }]), stop: 'End', usage: { output: 60 } }], tool: { output: code(n, bytes), exitStatus: 0 }, stage: { passed: true } }),
   build: (n, bytes, opts = {}) => {
     const { log, receipt } = buildLog(n, bytes, opts);
-    return { spec: opts.secret ? 'leak' : 'build', model: [{ calls: calls(n, 'npm run build'), stop: 'Tool', usage: { output: 110 } }], tool: { output: log, exitStatus: 1, log: true }, stage: { passed: false }, receipt: opts.secret ? null : receipt };
+    return { spec: opts.secret ? 'leak' : 'build', model: [{ calls: calls(n, 'npm run build'), stop: 'Tool', usage: { output: 110 } }], tool: { output: log, exitStatus: 1 }, stage: { passed: false }, receipt: opts.secret ? null : receipt };
   },
-  cut: (n) => ({ spec: 'fuse', model: [{ calls: '[{"tool":"edit","path":"src/a.ts","new":"export const x = ', stop: 'Length', usage: { output: 400 } }, { calls: calls(n, 'npm test'), stop: 'Tool', usage: { output: 90 } }], tool: { output: 'PASS\n', exitStatus: 0, log: true }, stage: { passed: true } }),
+  cut: (n) => ({ spec: 'fuse', model: [{ calls: '[{"tool":"edit","path":"src/a.ts","new":"export const x = ', stop: 'Length', usage: { output: 400 } }, { calls: calls(n, 'npm test'), stop: 'Tool', usage: { output: 90 } }], tool: { output: 'PASS\n', exitStatus: 0 }, stage: { passed: true } }),
 };
 
 /** The corpus: [name, features, steps]. `secret` is the known secret the leaking trajectory's log holds. */

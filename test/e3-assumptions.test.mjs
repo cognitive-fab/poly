@@ -73,7 +73,17 @@ test('the scan verdict is two entries: known secrets and the seven shapes are di
 
 test('the statements the certificate carries: rules per machine, the pairs, the unused audience, and the two lints', () => {
   const all = JSON.parse(readFileSync(join(DIR, 'assumptions.json'), 'utf8')).statements;
-  assert.deepEqual(all.map((s) => s.id), ['rules-proved-per-machine', 'pairs-were-worth-checking', 'audience-unused', 'lint-not-proof']);
+  assert.deepEqual(all.map((s) => s.id), ['rules-proved-per-machine', 'pairs-were-worth-checking', 'audience-unused', 'lint-not-proof', 'recordings-evidence']);
   assert.match(all[0].text, /not proved for the machines together/);
   assert.match(all[2].text, /held by the scan, the redaction and the step property/);
+});
+
+test('the recordings evidence carries its three labels, in the certificate statements and in the committed table', () => {
+  const s = JSON.parse(readFileSync(join(DIR, 'assumptions.json'), 'utf8')).statements.find((x) => x.id === 'recordings-evidence').text;
+  for (const must of ['synthetic corpus of 12 trajectories', 'four characters each', 'did not \"solve the task\"', 'recordings only', 'cannot show on recordings', 'live run']) assert.ok(s.includes(must), must);
+  const table = JSON.parse(readFileSync(join(ROOT, 'docs', 'e3', 'trigger-rates.json'), 'utf8'));
+  assert.match(table.labels.corpus, /synthetic corpus of 12 trajectories, with tokens estimated at four characters each/);
+  assert.match(table.labels.completion, /reached the end of the plan.*not.*solved the task/);
+  assert.match(table.labels.scope, /recordings only.*Action Fusion cannot show on recordings|recordings only; the saving of Action Fusion cannot show on recordings/);
+  assert.equal(table.findings.length, 1);
 });

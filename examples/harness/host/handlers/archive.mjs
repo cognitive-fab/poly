@@ -55,12 +55,34 @@ export class ArchiveStore {
   }
 }
 
-/** The text that replaces a full output in the context: the handle, the size and a head-and-tail excerpt of whole lines of bytes. */
+/**
+ * The text that replaces a full output in the context: the handle, the original size and a head-and-tail excerpt of
+ * complete lines (SoL-Pi: "a short excerpt of complete head and tail lines"), each side within `excerptBytes`. A single line
+ * longer than the budget is cut at the budget, since there is no complete line to give.
+ */
 export function handleText(id, bytes, excerptBytes = 512) {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes), 'utf8');
-  const head = buf.subarray(0, excerptBytes).toString('utf8');
-  const tail = buf.length > 2 * excerptBytes ? buf.subarray(buf.length - excerptBytes).toString('utf8') : '';
-  return `[output archived: handle=${id} size=${buf.length} bytes; fetch a range with the handle]\n${head}${tail ? `\n[... ${buf.length - 2 * excerptBytes} bytes omitted ...]\n${tail}` : ''}`;
+  const lines = buf.toString('utf8').split('\n');
+  const size = (l) => Buffer.byteLength(l, 'utf8') + 1;
+  let head = [];
+  let used = 0;
+  for (const l of lines) {
+    if (used + size(l) > excerptBytes) break;
+    head.push(l);
+    used += size(l);
+  }
+  let tail = [];
+  used = 0;
+  for (let i = lines.length - 1; i >= head.length; i--) {
+    if (used + size(lines[i]) > excerptBytes) break;
+    tail.unshift(lines[i]);
+    used += size(lines[i]);
+  }
+  const headText = head.length ? head.join('\n') : buf.subarray(0, excerptBytes).toString('utf8');
+  const tailText = tail.length ? tail.join('\n') : (head.length < lines.length ? buf.subarray(Math.max(buf.length - excerptBytes, 0)).toString('utf8') : '');
+  const omitted = buf.length - Buffer.byteLength(headText, 'utf8') - Buffer.byteLength(tailText, 'utf8');
+  const gap = omitted > 0 && tailText ? `\n[... ${omitted} bytes omitted ...]\n` : omitted > 0 ? `\n[... ${omitted} bytes omitted ...]` : '\n';
+  return `[output archived: handle=${id} size=${buf.length} bytes; fetch a range with the handle]\n${headText}${gap}${tailText}`;
 }
 
 /** The handles a text refers to. */

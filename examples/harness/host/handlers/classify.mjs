@@ -21,6 +21,19 @@ export const FUSABLE_COMMANDS = [
 const SHELL_META = /[;&|<>`$(){}\n\r\\]/;
 const EDITS = new Set(['edit', 'write']);
 
+/** Whether the last call of a step is a single plain command of the declared runners: the commands whose logs the reducer reads. */
+export function isRunnerCall(callsText) {
+  try {
+    const calls = JSON.parse(callsText);
+    const last = Array.isArray(calls) ? calls[calls.length - 1] : null;
+    if (!last || last.tool !== 'bash' || typeof last.command !== 'string') return false;
+    const cmd = last.command.trim();
+    return !SHELL_META.test(cmd) && FUSABLE_COMMANDS.some((re) => re.test(cmd));
+  } catch {
+    return false;
+  }
+}
+
 /** @returns {{ fusable: boolean, reason: string }} */
 export function classifyCalls(callsText) {
   let calls;
@@ -45,7 +58,9 @@ export async function classify(payload, caps, ctx) {
   // the calls are kept for the act effect of the same turn, which reads them by instance (write:store, table calls)
   await caps.store.write('calls', ctx.instanceId, calls);
   // the mechanism can be switched off for the base harness of a paired comparison (Q-E3-2): then nothing is fused
-  const cfg = await caps.store.read('mechanisms', 'config');
+  // read-only: the mechanisms are the host's setting, given through the secrets capability, which a handler cannot write
+  const raw = await caps.secrets.get('mechanisms');
+  const cfg = raw ? JSON.parse(raw) : null;
   const r = cfg && cfg.fusion === false ? { fusable: false, reason: 'action fusion is switched off' } : classifyCalls(calls);
   if (!r.fusable) throw Object.assign(new Error(`separate: ${r.reason}`), { permanent: true });
   return { ok: true };
