@@ -57,3 +57,23 @@ test('Q-E3-5: a directory passes only when every table passes, and an empty one 
   writeFileSync(join(dir, 'cheap.json'), 'not json');
   assert.equal(checkPrices(dir, TODAY).ok, false);
 });
+
+test('E3.9: the tables proposed for the live run (prices-live) pass the gate, and name the figures read from the vendor page on 2026-10-12', async () => {
+  const { readFileSync } = await import('node:fs');
+  const dir = join(ROOT, 'examples', 'harness', 'prices-live');
+  const day = new Date('2026-10-13T12:00:00Z'); // the date is pinned so that the 90-day age limit does not make this test age
+  const r = checkPrices(dir, day);
+  assert.deepEqual(r.tables.map((t) => [t.file, t.refusals]), [['cheap.json', []], ['main.json', []]]);
+  assert.equal(r.ok, true);
+  const t = (f) => JSON.parse(readFileSync(join(dir, f), 'utf8'));
+  // https://platform.claude.com/docs/en/about-claude/pricing, read 2026-10-12, in micro-units per million tokens
+  assert.deepEqual([t('main.json').model, t('main.json').perMillionTokens], ['claude-sonnet-5-5', { input: 2000000, output: 10000000, cache_write: 2500000, cache_read: 100000 }]);
+  assert.deepEqual([t('cheap.json').model, t('cheap.json').perMillionTokens], ['claude-haiku-4-5-20251001', { input: 1000000, output: 5000000, cache_write: 1250000, cache_read: 100000 }]);
+  for (const f of ['main.json', 'cheap.json']) {
+    assert.equal(t(f).source, 'https://platform.claude.com/docs/en/about-claude/pricing');
+    assert.equal(t(f).readOn, '2026-10-12');
+  }
+  // and the committed placeholder tables are still refused, so the module's own paths are not live until they are replaced
+  const placeholders = checkPrices(join(ROOT, 'examples', 'harness', 'prices'), day);
+  assert.equal(placeholders.ok, false);
+});

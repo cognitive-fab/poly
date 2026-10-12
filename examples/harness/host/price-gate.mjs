@@ -55,9 +55,11 @@ export function checkPrices(dir, today = new Date()) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const dir = join(fileURLToPath(new URL('..', import.meta.url)), 'prices');
+  // a directory name under examples/harness may be given (prices-live holds the tables proposed for the live run, E3.9)
+  const name = process.argv[2] ?? 'prices';
+  const dir = join(fileURLToPath(new URL('..', import.meta.url)), name);
   const r = checkPrices(dir);
-  for (const t of r.tables) console.log(`${t.refusals.length ? 'REFUSED' : 'ok     '} prices/${t.file}${t.refusals.length ? `: ${t.refusals.join('; ')}` : ''}`);
+  for (const t of r.tables) console.log(`${t.refusals.length ? 'REFUSED' : 'ok     '} ${name}/${t.file}${t.refusals.length ? `: ${t.refusals.join('; ')}` : ''}`);
   if (!r.ok) console.log('the live run does not start until every price table passes (Q-E3-5)');
   process.exit(r.ok ? 0 : 1);
 }
