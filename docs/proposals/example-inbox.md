@@ -53,6 +53,7 @@ A local web page served by the host on the owner's machine: the to-do list, a me
 | IAC7 | A canary placed in a message body and in an OAuth token never appears in state, journal, ledger, logs, proposals or reports. |
 | IAC8 | `poly forget` for an account erases its bodies from the content store; the journal still replays every step, with the bodies marked erased. |
 | IAC9 | The assistant is checked `CLEAN`, and its journal replays every post-state, gate decision and tier choice from recorded providers. |
+| IAC10 | A draft Gmail may already hold is never created twice. A creation whose outcome is ambiguous (a timeout, a dropped connection or a server error after the request left) is not retried and leaves the to-do in `Uncertain` until the owner reports whether the draft exists; a definite refusal (400, 401, 403, 404 or 429) leaves it to propose again. `poly check` proves that a to-do reaches `Created` at most once. Found by the loop of M7: the mined rule `count("gmail.createDraft") <= 1` was violated by the first version of this program. |
 
 # Part B. Technical specification
 
@@ -89,6 +90,8 @@ Plus the std machines the surfaces bring: `Grant` (M9) for each account's creden
 - **IT4.2** A draft with no citation into its thread is rejected `uncited` (PT23.2).
 - **IT4.3** For Gmail, an approved draft becomes the effect `gmail.createDraft`, gated, so the owner sends it from Gmail. Where sending is enabled, `gmail.send` follows a second approval. For SES, the approved draft becomes `ses.send` from an identity on the account's list.
 
+- **IT4.4** **Creating a draft once (M7, S526).** Gmail drafts carry no idempotency key, so a second post of a draft whose first post may have succeeded leaves two drafts. `gmail.createDraft` is attempted once (`retry { attempts 1 }`), and the handler classifies the answer: 200 is `ok`; 400, 401, 403, 404 and 429 are **permanent** (a definite refusal, delivered as `failed -> NotCreated()`, from which the to-do may propose again); 408, any other status, and any transport error or timeout are **ambiguous** (delivered as `exhausted -> DraftUncertain()`). `DraftUncertain` takes the to-do from `Proposed` to `Uncertain`, which no automatic step leaves. The owner looks in Gmail and reports it: `DraftFound` (the draft exists) takes `Uncertain` to `Created`, and `DraftMissing` takes it to `Drafted`. The classification is a function of the status (`classifyDraftStatus`) and is tested for every status class.
+
 ## IT5. Rules, as properties the checker proves
 
 | Rule | Form |
@@ -97,6 +100,7 @@ Plus the std machines the surfaces bring: `Grant` (M9) for each account's creden
 | No cross-account content | every `Content` carries its account as taint (M10); `PL6831` if a draft for account A can carry account B's taint; the gate's `audience` check at run time |
 | Email is data | no machine reads `Content`; effects come only from typed decisions and owner actions; no handler can be reached from a message body |
 | One open to-do per thread | an invariant over `Todo` instances keyed by thread |
+| At most one draft created per to-do | the `Created` completion is reached at most once; `Uncertain` is left only by the owner (IT4.4, IAC10) |
 | Every draft cited | reject `uncited` (PT23.2) |
 | Budget never overspent | `Budget` reservations (PT24.3): reserved before each model call, settled after |
 | Nothing processed twice | instance ids by provider id; creation of an existing id refused |
