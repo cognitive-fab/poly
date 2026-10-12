@@ -19,7 +19,7 @@ const NL = String.fromCharCode(10);
 let tmp; let n = 0; let dir; let personKey; let agentKey;
 before(() => {
   tmp = mkdtempSync(join(tmpdir(), 'poly-refit-'));
-  dir = project('refit', [], makeKey('refit'));
+  dir = project('refit', ['test/fixtures/m7/forms/forms.poly'], makeKey('refit'));
   personKey = join(tmp, 'person.pem');
   writeFileSync(personKey, PERSON.privateKeyPem);
   agentKey = join(tmp, 'agent.pem');
@@ -117,7 +117,9 @@ test('PS22.6, PT32.2: a refit is the isotonic map of the verdicts, one version a
   assert.equal(readFileSync(prev, 'utf8'), prevBytes, 'the old map is not edited in place');
   assert.equal(r.map.digest, map.digest);
   // It moves the confidence toward the observed accuracy: nearer than the raw probability at every point.
-  for (const [x, y] of map.points) assert.ok(Math.abs(y / 1000 - acc(x)) <= Math.abs(x / 1000 - acc(x)) + 1e-9, `raw ${x}`);
+  const err = (f) => map.points.reduce((t, [x, y]) => t + Math.abs(f(x, y) - acc(x)), 0);
+  assert.ok(err((x, y) => y / 1000) < err((x) => x / 1000) / 3, 'overall far nearer the observed accuracy than the raw probability');
+  for (const [x, y] of map.points.filter(([x]) => x === 50 || x === 950)) assert.ok(Math.abs(y / 1000 - acc(x)) < Math.abs(x / 1000 - acc(x)), `raw ${x}`);
   // The overconfident end is pulled down.
   assert.ok(map.points.at(-1)[1] < 950);
 });

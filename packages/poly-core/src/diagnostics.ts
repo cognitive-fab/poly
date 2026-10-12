@@ -195,6 +195,8 @@ export const CODES: Record<string, CodeInfo> = {
   // PS21.4, PT31.6: a proposed rule its own history does not support, and an evidence file that does not describe its sources.
   PL6520: { name: 'PROPOSAL_RULE_UNSUPPORTED', stage: 'policy', severity: 'error' },
   PL6521: { name: 'PROPOSAL_RULE_WITHOUT_EVIDENCE', stage: 'policy', severity: 'error' },
+  // PS22.5, PT32.3: a refit record that does not bear out the map beside it.
+  PL6513: { name: 'REFIT_RECORD_INVALID', stage: 'policy', severity: 'error' },
   // S150: at load, a people or agents keyring that differs from the one the certificate binds.
   PL6405: { name: 'KEYRING_CHANGED', stage: 'runtime', severity: 'error' },
   PL6408: { name: 'ADAPTER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },

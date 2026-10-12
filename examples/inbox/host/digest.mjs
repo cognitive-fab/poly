@@ -13,7 +13,7 @@ export function headersOf(body) {
  * The digest's model: counts per account, the open to-dos, and the messages the assistant could not decide. `accounts`
  * is the config's list of { label, owner }; `source` is the Gmail source (for the stored headers).
  */
-export async function readDigest(rt, { accounts, source, now = new Date() }) {
+export async function readDigest(rt, { accounts, source, now = new Date(), judged = new Set() }) {
   const labelOf = (owner) => accounts.find((a) => a.owner === owner)?.label ?? 'unknown';
   const ids = (machine) => rt.store.db.prepare('SELECT instance_id FROM pr_instance WHERE machine_id = ? ORDER BY instance_id').all(machine).map((r) => r.instance_id);
   const perAccount = Object.fromEntries(accounts.map((a) => [a.label, { messages: 0, actionable: 0, filed: 0, held: 0, pending: 0 }]));
@@ -38,7 +38,14 @@ export async function readDigest(rt, { accounts, source, now = new Date() }) {
   for (const r of rt.store.db.prepare("SELECT intent_id, instance_id FROM pr_outbox WHERE kind = 'gmail.createDraft' AND status IN ('pending', 'inflight') ORDER BY intent_id").all()) {
     if (await rt.escalationOf(r.intent_id).catch(() => null)) approvals.push({ intent: r.intent_id, todo: r.instance_id });
   }
-  return { at: now.toISOString(), accounts: perAccount, todos, held, approvals };
+  // PT32.4: each decision event no person has judged, once: its name, the start of its hash and its model. Never a question or an answer.
+  const toAdjudicate = [];
+  for (const r of rt.store.db.prepare("SELECT hash, event FROM poly_ledger WHERE kind = 'decision' ORDER BY run, seq").all()) {
+    if (typeof r.hash !== 'string' || typeof r.event !== 'string' || judged.has(r.hash)) continue;
+    const b = JSON.parse(r.event).body ?? {};
+    toAdjudicate.push({ decision: String(b.decision ?? '?'), event: r.hash, model: String(b.model?.reported ?? b.model?.id ?? '?') });
+  }
+  return { at: now.toISOString(), accounts: perAccount, todos, held, approvals, toAdjudicate };
 }
 
 /** The digest as text: a line for each account, each open to-do, and each message that needs the owner's eyes. */
@@ -58,6 +65,11 @@ export function formatDigest(model, { drafts }) {
   if (model.approvals?.length) {
     out.push('Waiting for your approval (sign it with poly approve, README.md, step 8):');
     for (const a of model.approvals) out.push(`  the draft of ${a.todo}: intent ${a.intent}`);
+  }
+  if (model.toAdjudicate?.length) {
+    out.push(`To adjudicate (was the answer right? run.mjs ask --do adjudicate --event <hash> --verdict right|wrong): ${model.toAdjudicate.length} answer(s)`);
+    for (const a of model.toAdjudicate.slice(0, 20)) out.push(`  ${a.decision} ${String(a.event).replace(/^sha256:/, '').slice(0, 12)} (${a.model})`);
+    if (model.toAdjudicate.length > 20) out.push(`  and ${model.toAdjudicate.length - 20} more`);
   }
   return out.join('\n');
 }

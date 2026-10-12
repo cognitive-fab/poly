@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the verdict written"
+    },
+    "verdict": {
+      "type": "object",
+      "description": "the poly.verdict file"
+    }
+  },
+  "required": [
+    "path",
+    "verdict"
+  ]
+}

@@ -54,6 +54,8 @@ export interface Certificate {
     /** PT30.6: each promotion entry file by its path in the project, and the SHA-256 of its bytes. */
     promotionFiles?: Record<string, string>;
     /** PS21.6, PT31.6: the proposals admitted with their sources, in file order, each by the digest of its evidence file. Absent when there is none. */
+    /** PS22.5, PT32.3: the refit records admitted beside their maps, in path order. Absent when there is none. */
+    refits?: { map: string; digest: string; record: string }[];
     proposals?: { name: string; evidence: string; tool: { name: string; version: string; pin: string } }[];
     /** The checked instance of each machine and configuration (PT12.3a). */
     instances: Record<string, unknown>;

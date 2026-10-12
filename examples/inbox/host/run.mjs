@@ -23,7 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { commandNamed } from '@poly/check';
 import { devKeychain, oauthVault, credentialIngress, gmailSource, fileMailStore, httpsTransport } from '@poly/io';
-import { loadRun } from '@poly/runtime';
+import { loadRun, openJournal } from '@poly/runtime';
 import { syncAccount, openTodos } from './inbox.mjs';
 import { guarded, COMPOSE, ReadOnlyRefusal } from './guard.mjs';
 import { readDigest, formatDigest } from './digest.mjs';
@@ -277,7 +277,7 @@ export async function startHost(opts, io) {
       }
       // The dry run shows what the fake Gmail was asked to do, which a live run sees in Gmail's Drafts.
       if (google) for (const d of google.created.splice(0)) say(`dry run: Gmail was asked to create a draft in thread ${d.threadId}, to ${/^To: ([^\r\n]*)/m.exec(d.raw)?.[1] ?? '?'}`);
-      say(formatDigest(await readDigest(rt, { accounts, source }), { drafts }));
+      say(formatDigest(await readDigest(rt, { accounts, source, judged: judged(project) }), { drafts }));
       if (state.authFailed) say('The model provider refused the key (expired or revoked). Messages wait, and nothing is guessed. Set a fresh key and restart the host (README.md, "If the model key expires").');
       return { created, opened };
     }
@@ -316,9 +316,43 @@ async function link(args, io) {
   io.out('the running host takes it on its next pass and prints the address to open\n');
 }
 
+/** The hashes of the decision events a person has already judged: the verdict files of <project>/verdicts (PT32.4). */
+export function judged(project) {
+  const dir = join(project, 'verdicts');
+  if (!existsSync(dir)) return new Set();
+  const out = new Set();
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.json'))) {
+    try { const v = JSON.parse(readFileSync(join(dir, f), 'utf8')); if (typeof v.event === 'string') out.add(v.event); } catch { /* a file that is not a verdict judges nothing */ }
+  }
+  return out;
+}
+
+/** `ask --do adjudicate` (S521, PT32.4): signs the owner's verdict on one recorded answer with the person key the config names. */
+async function adjudicate(args, io, project) {
+  const config = readConfig(project);
+  const prefix = option(args, '--event');
+  const verdict = option(args, '--verdict');
+  if (!prefix || !['right', 'wrong'].includes(verdict)) throw new HostError('ask --do adjudicate needs --event <hash> and --verdict right|wrong');
+  const db = option(args, '--db') ?? join(project, '.poly', 'run', 'store.sqlite');
+  const reader = openJournal(db);
+  let event;
+  try {
+    const hits = [];
+    for (const r of await reader.runs()) for (const e of await reader.chain(r.run)) if (e.kind === 'decision' && e.hash.replace(/^sha256:/, '').startsWith(prefix.replace(/^sha256:/, ''))) hits.push(e.hash);
+    if (hits.length !== 1) throw new HostError(hits.length ? `${prefix} names ${hits.length} decisions: give more of the hash` : `no decision event begins with ${prefix}`);
+    event = hits[0];
+  } finally { await reader.close(); }
+  const dir = join(project, 'verdicts');
+  mkdirSync(dir, { recursive: true });
+  const out = join(dir, `${String(readdirSync(dir).length + 1).padStart(4, '0')}-${event.replace(/^sha256:/, '').slice(0, 12)}.json`);
+  const r = await commandNamed('verdict').run({ db, event, verdict, correct: option(args, '--correct'), by: option(args, '--by') ?? config.personKey.keyId, key: option(args, '--key') ?? config.personKey.file, project, out });
+  io.out(`${r.result.path}\n`);
+}
+
 /** `ask`: a command for the running host. */
 async function ask(args, io) {
   const project = resolve(option(args, '--project') ?? '');
+  if (option(args, '--do') === 'adjudicate') return adjudicate(args, io, project);
   const todo = option(args, '--todo');
   const what = option(args, '--do');
   if (!todo || !['draft', 'propose', 'finish', 'dismiss'].includes(what)) throw new HostError('ask needs --todo <id> and --do draft|propose|finish|dismiss');

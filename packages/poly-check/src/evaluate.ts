@@ -70,14 +70,9 @@ export async function evaluate(reader: JournalReader, decision: string, candidat
   };
 }
 
-/**
- * PD1.6a: a monotone map from raw to calibrated confidence, by isotonic regression (pool adjacent violators) of
- * whether each recorded answer was Correct on its raw probability, for the decisions of one model.
- */
-export async function fit(reader: JournalReader, decision: string, model: string, version: number): Promise<CalibrationMap> {
-  const pts = (await samples(reader, decision)).filter((s) => s.outcome && (s.model.reported ?? s.model.id) === model)
-    .map((s) => ({ x: Math.round(s.raw * 1000), y: s.outcome === 'Correct' ? 1 : 0 })).sort((a, b) => a.x - b.x);
-  if (!pts.length) throw new Error(`no adjudicated ${decision} decision of ${model} to fit a map on`);
+/** PD1.6a: the steps of the monotone map by pool-adjacent-violators over (raw in thousandths, 1 if right else 0), sorted by raw. */
+export function isotonicPoints(input: { x: number; y: number }[]): [number, number][] {
+  const pts = [...input].sort((a, b) => a.x - b.x);
   const blocks: { x: number; sum: number; n: number }[] = [];
   for (const p of pts) {
     // Review B4: samples at one raw value are one block before any violator is pooled, so order cannot matter.
@@ -89,7 +84,18 @@ export async function fit(reader: JournalReader, decision: string, model: string
       a.sum += b.sum; a.n += b.n;
     }
   }
-  const points: [number, number][] = blocks.map((b) => [b.x, Math.round((b.sum / b.n) * 1000)]);
+  return blocks.map((b) => [b.x, Math.round((b.sum / b.n) * 1000)] as [number, number]);
+}
+
+/**
+ * PD1.6a: a monotone map from raw to calibrated confidence, by isotonic regression (pool adjacent violators) of
+ * whether each recorded answer was Correct on its raw probability, for the decisions of one model.
+ */
+export async function fit(reader: JournalReader, decision: string, model: string, version: number): Promise<CalibrationMap> {
+  const pts = (await samples(reader, decision)).filter((s) => s.outcome && (s.model.reported ?? s.model.id) === model)
+    .map((s) => ({ x: Math.round(s.raw * 1000), y: s.outcome === 'Correct' ? 1 : 0 })).sort((a, b) => a.x - b.x);
+  if (!pts.length) throw new Error(`no adjudicated ${decision} decision of ${model} to fit a map on`);
+  const points = isotonicPoints(pts);
   const body = { decision, version, fittedFor: model, points };
   // The runtime is loaded only by the commands that use it, so `poly check` runs without it.
   const { mapDigest } = await import('@poly/runtime');

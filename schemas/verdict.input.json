@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "properties": {
+    "db": {
+      "type": "string",
+      "description": "the store"
+    },
+    "event": {
+      "type": "string",
+      "description": "the hash of the decision event"
+    },
+    "verdict": {
+      "type": "string",
+      "description": "right or wrong"
+    },
+    "correct": {
+      "type": "string",
+      "description": "the correct answer, as JSON, when known"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project whose anchor the record is bound to"
+    },
+    "out": {
+      "type": "string",
+      "description": "where to write the verdict"
+    }
+  },
+  "required": [
+    "db",
+    "event",
+    "verdict",
+    "by",
+    "key",
+    "out"
+  ]
+}

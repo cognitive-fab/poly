@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "properties": {
+    "db": {
+      "type": "string",
+      "description": "the store"
+    },
+    "decision": {
+      "type": "string",
+      "description": "the decision"
+    },
+    "model": {
+      "type": "string",
+      "description": "the model id the map is for"
+    },
+    "verdicts": {
+      "type": "string",
+      "description": "the folder of verdict files"
+    },
+    "previous": {
+      "type": "string",
+      "description": "the map to replace; it is read and never written"
+    },
+    "project": {
+      "type": "string",
+      "description": "the project whose people ring verifies the verdicts"
+    },
+    "by": {
+      "type": "string",
+      "description": "the key id"
+    },
+    "key": {
+      "type": "string",
+      "description": "the private key file"
+    },
+    "out": {
+      "type": "string",
+      "description": "the new map; an existing file is refused"
+    },
+    "synthetic": {
+      "type": "boolean",
+      "description": "the verdicts were made for a test (PS20.5)"
+    }
+  },
+  "required": [
+    "db",
+    "decision",
+    "model",
+    "verdicts",
+    "previous",
+    "by",
+    "key",
+    "out"
+  ]
+}

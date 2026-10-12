@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the map written"
+    },
+    "refit": {
+      "type": "string",
+      "description": "the refit record written"
+    },
+    "version": {
+      "type": "integer"
+    },
+    "verdicts": {
+      "type": "integer"
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": [
+    "path",
+    "refit"
+  ]
+}

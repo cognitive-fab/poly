@@ -25,6 +25,8 @@ import { journalCommand } from './journal.js';
 import { exportTraces, TraceUsageError } from './traces.js';
 import { MineUsageError, mineTraces, pinPolyx } from './mine.js';
 import { pinPolyness, proposeWorkflow } from './propose.js';
+import { signVerdict } from './verdict.js';
+import { refitMap } from './refit.js';
 import { adjudicate } from './adjudicate.js';
 import { promote, PromoteUsageError } from './promote.js';
 import { benchGate } from './bench.js';
@@ -534,6 +536,26 @@ export const COMMANDS: Command[] = [
         return { exit: EXIT_CODES.CLEAN, result: { ...r }, text: `${r.out}: ${r.name}, ${r.steps.length} step(s), ${r.rules} rule(s) proposed, ${r.notTranslatable} not translatable
 ` };
       } catch (e) { if (e instanceof MineUsageError) throw new CommandUsageError(e.message); throw e; }
+    },
+  },
+  {
+    name: 'verdict', mcp: null, lsp: false,
+    summary: 'Signs a person\'s verdict on one recorded answer of a decision (right or wrong, with the correct answer when known), a record of the kind verdict bound to the project\'s anchor and the decision event (PF8.6, PS22.1, PT32.1). The journal is read and never written. Never over MCP.',
+    input: obj({ db: str('the store'), event: str('the hash of the decision event'), verdict: str('right or wrong'), correct: str('the correct answer, as JSON, when known'), by: str('the key id'), key: str('the private key file'), project: str('the project whose anchor the record is bound to'), out: str('where to write the verdict') }, ['db', 'event', 'verdict', 'by', 'key', 'out']),
+    output: obj({ path: str('the verdict written'), verdict: { type: 'object', description: 'the poly.verdict file' } }, ['path', 'verdict']),
+    async run(input) {
+      const r = await signVerdict({ db: need(input, 'db'), event: need(input, 'event'), verdict: need(input, 'verdict'), correct: opt(input, 'correct'), by: need(input, 'by'), key: need(input, 'key'), project: opt(input, 'project'), out: need(input, 'out') });
+      return { exit: EXIT_CODES.CLEAN, result: { path: r.path, verdict: r.file as unknown as Record<string, unknown> }, text: `${r.path}: ${r.file.verdict} on ${r.file.event}, signed by ${r.file.record.by}\n` };
+    },
+  },
+  {
+    name: 'refit', mcp: null, lsp: false,
+    summary: 'Fits a new calibration map for a decision and a model from a person\'s signed verdicts alone, refusing below the floor and when the map would earn the calibration warning; writes a new map and a signed refit record beside it, and edits nothing (PF8.6, PS22, PT32.2). Never over MCP.',
+    input: obj({ db: str('the store'), decision: str('the decision'), model: str('the model id the map is for'), verdicts: str('the folder of verdict files'), previous: str('the map to replace; it is read and never written'), project: str('the project whose people ring verifies the verdicts'), by: str('the key id'), key: str('the private key file'), out: str('the new map; an existing file is refused'), synthetic: { type: 'boolean', description: 'the verdicts were made for a test (PS20.5)' } }, ['db', 'decision', 'model', 'verdicts', 'previous', 'by', 'key', 'out']),
+    output: obj({ path: str('the map written'), refit: str('the refit record written'), version: { type: 'integer' }, verdicts: { type: 'integer' }, skipped: { type: 'array', items: { type: 'object' } } }, ['path', 'refit']),
+    async run(input) {
+      const r = await refitMap({ db: need(input, 'db'), decision: need(input, 'decision'), model: need(input, 'model'), verdictsDir: need(input, 'verdicts'), previous: need(input, 'previous'), project: opt(input, 'project') ?? process.cwd(), by: need(input, 'by'), key: need(input, 'key'), out: need(input, 'out'), synthetic: input.synthetic === true });
+      return { exit: EXIT_CODES.CLEAN, result: { path: r.path, refit: r.refit, version: r.map.version, verdicts: r.used, skipped: r.skipped }, text: `${r.path}: version ${r.map.version} from ${r.used} verdicts (${r.skipped.length} left out), signed record ${r.refit}\n` };
     },
   },
   {

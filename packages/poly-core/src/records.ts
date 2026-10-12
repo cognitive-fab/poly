@@ -13,7 +13,7 @@ import { canonicalize } from './jcs.js';
 /** `keyring` (S194, M9): a person's signature on a change of the people or agents ring, over { parent, rings }. */
 /** `policy` (S194, Q8, M9): a person's signature on a policy scope, over its document, source and engine. */
 /** `grant-request` (S210, B3, D6): a person's signature on asking a holder for a grant, over { credential, holder }. */
-export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation' | 'grant-request' | 'verify' | 'forget' | 'adjudication';
+export type RecordKind = 'approval' | 'acceptance' | 'invocation' | 'keyring' | 'policy' | 'revocation' | 'grant-request' | 'verify' | 'forget' | 'adjudication' | 'verdict' | 'refit';
 
 export interface SignedRecord {
   v: 1;
@@ -81,6 +81,16 @@ export function keyringDigest(k: Keyrings): string {
 /** PS20.3, S512: what a person signs to judge one candidate rule: the project's anchor id, the candidate's digest and the verdict. */
 export function adjudicationSubject(anchor: string, candidate: string, verdict: string): string {
   return 'sha256:' + createHash('sha256').update(canonicalize({ anchor, candidate, verdict }), 'utf8').digest('hex');
+}
+
+/** PS22.1: what a person signs to judge one recorded answer: the project's anchor id, the decision event's hash, the verdict and the correct answer (null when none is given). */
+export function verdictSubject(anchor: string, event: string, verdict: string, correct: unknown): string {
+  return 'sha256:' + createHash('sha256').update(canonicalize({ anchor, event, verdict, correct: correct ?? null }), 'utf8').digest('hex');
+}
+
+/** PS22.5: what a person signs for a refit: the project's anchor id, the new map's digest and the sorted digests of the verdict records it used. */
+export function refitSubject(anchor: string, map: string, verdicts: string[]): string {
+  return 'sha256:' + createHash('sha256').update(canonicalize({ anchor, map, verdicts }), 'utf8').digest('hex');
 }
 
 /** S194, Q8: what a person signs for a policy scope. */

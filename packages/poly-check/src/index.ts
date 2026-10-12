@@ -14,7 +14,10 @@ export { policySubjects, signPolicy, policySignaturePath, type PolicyScopeSubjec
 export { admit, admitWitness, witnessKey, artefactsOnDisk, AdmitError, CERTIFICATE_FAULTS, MAX_ATTEMPTS, M4_LIMITS, type AdmitOptions, type AdmitResult, type CertificateFault } from './admit.js';
 export { replayRun, replayRuntime, replaySessions, certifiedModules, type RunReplay, type JournalRowLike } from './replay.js';
 export { workerConformance, workerActions, type Conformance } from './conformance.js';
-export { evaluate, fit, samples, type Evaluation, type Sample } from './evaluate.js';
+export { signVerdict, verdictFilesIn, decisionEvents, ANSWER_VERDICTS, type VerdictFile, type SignVerdictOptions } from './verdict.js';
+export { refitMap, readRefits, REFIT_FLOOR, type RefitOptions, type RefitFile } from './refit.js';
+export { calibrationWarning } from './routing.js';
+export { evaluate, fit, isotonicPoints, samples, type Evaluation, type Sample } from './evaluate.js';
 export { policyReports, policySlug, type PolicyReport, type PolicyStage } from './policies.js';
 export { COMMANDS, NOT_BUILT, commandNamed, CommandUsageError, type Command, type Outcome, type Schema } from './commands.js';
 export { proposeWorkflow, pinPolyness, transcriptsFromCorpus, PROPOSAL_THRESHOLDS, type ProposeOptions, type ProposeResult } from './propose.js';
