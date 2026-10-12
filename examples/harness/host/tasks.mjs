@@ -98,7 +98,7 @@ const once = (text, needle, what) => {
   if (n !== 1) throw new Error(`${what}: the text to replace occurs ${n} times, not once`);
 };
 
-function inside(root, file) {
+export function inside(root, file) {
   const p = resolve(root, file);
   const rel = relative(root, p);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) throw new Error(`${file} is outside the copy`);
