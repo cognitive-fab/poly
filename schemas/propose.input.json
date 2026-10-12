@@ -25,6 +25,25 @@
       "type": "string",
       "description": "a folder of .jsonl transcripts of repeated work"
     },
+    "runs": {
+      "type": "string",
+      "description": "a store, in place of transcripts: its work orders are exported (PS19) and converted (PT31.10)"
+    },
+    "build": {
+      "type": "string",
+      "description": "with runs, the certified build directory"
+    },
+    "certificate": {
+      "type": "string",
+      "description": "with runs, the certificate"
+    },
+    "trust": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "with runs, keyId=public key file, as export traces takes them"
+    },
     "out": {
       "type": "string",
       "description": "the proposal folder; an existing one is refused"

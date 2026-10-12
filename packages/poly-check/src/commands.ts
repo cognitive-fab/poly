@@ -515,7 +515,7 @@ export const COMMANDS: Command[] = [
   {
     name: 'propose', mcp: null, lsp: false,
     summary: 'Runs polyness, a separately installed tool, over the transcripts of repeated work and writes a proposed workflow for one step: poly source with its mined rules as path properties, and the evidence for each (PF10.3, PS21, PT31). The transcripts are private, so never over MCP.',
-    input: obj({ pin: { type: 'boolean', description: 'record the polyness at --polyness as the one this person trusts (PT31.3), and propose nothing' }, repin: { type: 'boolean', description: 'with pin, replace a different pin' }, polyness: str('the directory of a polyness checkout'), polynessPin: str('the pin file (default: polyness.pin.json beside --out)'), step: str('the step to propose a workflow for: one to four words'), transcripts: str('a folder of .jsonl transcripts of repeated work'), out: str('the proposal folder; an existing one is refused'), synthetic: { type: 'boolean', description: 'the transcripts were made for the purpose, and the evidence says so (PS20.5)' }, timeoutSeconds: { type: 'integer', description: 'stop polyness after this many seconds (default 600)' }, maxOutput: { type: 'integer', description: 'stop polyness when it has written this many bytes (default 64 MiB)' } }, ['polyness']),
+    input: obj({ pin: { type: 'boolean', description: 'record the polyness at --polyness as the one this person trusts (PT31.3), and propose nothing' }, repin: { type: 'boolean', description: 'with pin, replace a different pin' }, polyness: str('the directory of a polyness checkout'), polynessPin: str('the pin file (default: polyness.pin.json beside --out)'), step: str('the step to propose a workflow for: one to four words'), transcripts: str('a folder of .jsonl transcripts of repeated work'), runs: str('a store, in place of transcripts: its work orders are exported (PS19) and converted (PT31.10)'), build: str('with runs, the certified build directory'), certificate: str('with runs, the certificate'), trust: { type: 'array', items: { type: 'string' }, description: 'with runs, keyId=public key file, as export traces takes them' }, out: str('the proposal folder; an existing one is refused'), synthetic: { type: 'boolean', description: 'the transcripts were made for the purpose, and the evidence says so (PS20.5)' }, timeoutSeconds: { type: 'integer', description: 'stop polyness after this many seconds (default 600)' }, maxOutput: { type: 'integer', description: 'stop polyness when it has written this many bytes (default 64 MiB)' } }, ['polyness']),
     output: obj({ out: str('the proposal folder'), name: str('the step as a name'), steps: { type: 'array', items: { type: 'string' } }, rules: { type: 'integer' }, notTranslatable: { type: 'integer' } }, []),
     async run(input) {
       try {
@@ -524,7 +524,13 @@ export const COMMANDS: Command[] = [
           return { exit: EXIT_CODES.CLEAN, result: { path: p.path }, text: `${p.path}: polyness ${p.pin.version} pinned${p.changed ? '' : ' (already)'}
 ` };
         }
-        const r = await proposeWorkflow({ polyness: need(input, 'polyness'), step: need(input, 'step'), transcripts: need(input, 'transcripts'), out: need(input, 'out'), polynessPin: opt(input, 'polynessPin'), synthetic: input.synthetic === true, timeoutMs: typeof input.timeoutSeconds === 'number' ? input.timeoutSeconds * 1000 : undefined, maxOutput: typeof input.maxOutput === 'number' ? input.maxOutput : undefined });
+        const trust = Object.fromEntries((Array.isArray(input.trust) ? (input.trust as unknown[]).map(String) : []).map((t) => {
+          const eq = t.indexOf('=');
+          if (eq <= 0) throw new CommandUsageError(`--trust takes <keyId>=<public key file>, not ${t}`);
+          return [t.slice(0, eq), readFileSync(t.slice(eq + 1), 'utf8')];
+        }));
+        const runs = opt(input, 'runs') ? { db: opt(input, 'runs')!, build: opt(input, 'build') ?? '', certificate: opt(input, 'certificate') ?? '', trust } : undefined;
+        const r = await proposeWorkflow({ polyness: need(input, 'polyness'), step: need(input, 'step'), transcripts: opt(input, 'transcripts'), runs, out: need(input, 'out'), polynessPin: opt(input, 'polynessPin'), synthetic: input.synthetic === true, timeoutMs: typeof input.timeoutSeconds === 'number' ? input.timeoutSeconds * 1000 : undefined, maxOutput: typeof input.maxOutput === 'number' ? input.maxOutput : undefined });
         return { exit: EXIT_CODES.CLEAN, result: { ...r }, text: `${r.out}: ${r.name}, ${r.steps.length} step(s), ${r.rules} rule(s) proposed, ${r.notTranslatable} not translatable
 ` };
       } catch (e) { if (e instanceof MineUsageError) throw new CommandUsageError(e.message); throw e; }

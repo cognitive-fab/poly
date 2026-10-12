@@ -20,7 +20,7 @@ const poly = (...args) => {
   try { return { code: 0, out: execFileSync(process.execPath, [...ACCEPT_TEST_ANCHORS, CLI, ...args], { encoding: 'utf8' }) }; } catch (e) { return { code: e.status, out: `${e.stdout}${e.stderr}` }; }
 };
 const lines = (text) => text.trim().split(NL).filter(Boolean).map((l) => JSON.parse(l));
-const calls = (text) => lines(text).flatMap((l) => (l.message?.content ?? []).filter((c) => c?.type === 'tool_use').map((c) => c.input.command));
+const calls = (text) => lines(text).flatMap((l) => (Array.isArray(l.message?.content) ? l.message.content : []).filter((c) => c?.type === 'tool_use').map((c) => c.input.command));
 
 test('PT31.10: the corpus becomes one session per episode, five episodes to a file, each effect a tool call named by its kind, in order', () => {
   assert.equal(typeof check.transcriptsFromCorpus, 'function');
@@ -51,12 +51,12 @@ test('PT31.10: a hyphen of a kind reads as a space; an effect the gate denied is
   corpus[1] = JSON.stringify(ep);
   const out = check.transcriptsFromCorpus(corpus.join(NL));
   const rows = lines(out.files['runs-0.jsonl']);
-  const use = rows.flatMap((l) => (l.message?.content ?? []).filter((c) => c?.type === 'tool_use' && c.input.command === 'git push'));
+  const use = rows.flatMap((l) => (Array.isArray(l.message?.content) ? l.message.content : []).filter((c) => c?.type === 'tool_use' && c.input.command === 'git push'));
   assert.equal(use.length, 1);
-  const result = rows.flatMap((l) => (l.message?.content ?? []).filter((c) => c?.type === 'tool_result' && c.tool_use_id === use[0].id));
+  const result = rows.flatMap((l) => (Array.isArray(l.message?.content) ? l.message.content : []).filter((c) => c?.type === 'tool_result' && c.tool_use_id === use[0].id));
   assert.equal(result.length, 1);
   assert.equal(result[0].is_error, true, 'denied');
-  const others = rows.flatMap((l) => (l.message?.content ?? []).filter((c) => c?.type === 'tool_result' && c.tool_use_id !== use[0].id));
+  const others = rows.flatMap((l) => (Array.isArray(l.message?.content) ? l.message.content : []).filter((c) => c?.type === 'tool_result' && c.tool_use_id !== use[0].id));
   assert.ok(others.length > 0 && others.every((c) => c.is_error !== true), 'allowed effects are not errors');
 });
 
@@ -115,10 +115,10 @@ test('PT31.10: --runs exports the store in memory, gives polyness the converted 
   const ok = poly('propose', '--polyness', r.dir, '--step', 'git push', ...runsArgs(db), '--polyness-pin', r.pin, '--out', out);
   assert.equal(ok.code, 0, ok.out);
   const seen = r.seen();
-  assert.deepEqual(Object.keys(seen), ['runs-0.jsonl'], 'six runs, one file');
-  const cmds = calls(seen['runs-0.jsonl']);
+  assert.deepEqual(Object.keys(seen).sort(), ['runs-0.jsonl', 'runs-1.jsonl'], 'six runs, five to a file');
+  const cmds = calls(Object.values(seen).join(NL));
   assert.ok(cmds.some((c) => /^billing\./.test(c)), cmds.join(','));
-  assert.ok(!seen['runs-0.jsonl'].includes('acc-'), 'no run id or instance id');
+  assert.ok(!Object.values(seen).join(NL).includes('acc-'), 'no run id or instance id');
   assert.deepEqual(readdirSync(tmpdir()).filter((x) => x.startsWith('poly-propose-runs-') && !x.startsWith('poly-propose-runs-test-')), before, 'the converted folder is removed');
   assert.ok(existsSync(join(out, 'proposal.json')));
 });

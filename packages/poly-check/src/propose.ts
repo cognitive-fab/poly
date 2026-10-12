@@ -7,11 +7,13 @@
 // and no word of a transcript, a prompt, an argument, a path, a branch, a session id or a project name can reach the output:
 // the source and the evidence are written from fixed text, the checked names of steps and rules, and numbers (PS21.5, C4).
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { canonicalize } from '@poly/core';
 import { AdmitError } from './admit.js';
 import { MineUsageError, loadSeam } from './mine.js';
+import { TraceUsageError, exportTraces } from './traces.js';
 
 export const PROPOSAL_THRESHOLDS = { minInstances: 5, ownSupport: 0.6 } as const;
 
@@ -28,7 +30,8 @@ const TEMPLATES = {
   verify: new RegExp(`^\\(path\\) => path\\.emitted\\.every\\(\\(e, i\\) => e\\.kind !== '${KIND}' \\|\\| path\\.actionBefore\\('VERIFY_PASSED', i\\)\\)$`),
 };
 
-export interface ProposeOptions { polyness: string; step: string; transcripts: string; out: string; polynessPin?: string; synthetic?: boolean; timeoutMs?: number; maxOutput?: number }
+export interface ProposeRuns { db: string; build: string; certificate: string; trust: Record<string, string> }
+export interface ProposeOptions { polyness: string; step: string; transcripts?: string; /** PT31.10: a store, in place of transcripts. */ runs?: ProposeRuns; out: string; polynessPin?: string; synthetic?: boolean; timeoutMs?: number; maxOutput?: number }
 export interface ProposeResult { out: string; name: string; steps: string[]; rules: number; notTranslatable: number }
 
 const sha = (b: Buffer | string) => `sha256:${createHash('sha256').update(b).digest('hex')}`;
@@ -127,6 +130,37 @@ function emitSource(name: string, steps: string[], instances: number, rules: { n
   return L.join('\n');
 }
 
+/**
+ * PT31.10: the trace corpus of PS19 as transcripts polyness reads: one session per episode (the export's own token is the
+ * session id), five episodes to a file, and for each effect of each step, in step order, one tool call named by the effect's
+ * kind and its result, an error when the gate denied the effect. Nothing else of the corpus is carried: no state, no data, no
+ * machine or project name, no consequence. A gapped episode is not converted, as the miner leaves it out.
+ */
+export function transcriptsFromCorpus(corpus: string): { files: Record<string, string>; sessions: number } {
+  const [, ...rows] = corpus.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) as [unknown, ...{ episode: string; gapped?: boolean; steps: { effects?: { kind: string; gate?: { outcome?: string } | null }[] }[] }[]];
+  const episodes = rows.filter((e) => !e.gapped);
+  const files: Record<string, string> = {};
+  let t = Date.parse('2026-01-01T00:00:00.000Z');
+  const at = () => new Date((t += 1000)).toISOString();
+  for (let f = 0; f * 5 < episodes.length; f++) {
+    const out: string[] = [];
+    episodes.slice(f * 5, f * 5 + 5).forEach((ep, e) => {
+      out.push(JSON.stringify({ type: 'user', sessionId: ep.episode, timestamp: at(), message: { role: 'user', content: 'run' } }));
+      let k = 0;
+      for (const step of ep.steps) for (const fx of step.effects ?? []) {
+        const id = `call-${f}-${e}-${k++}`;
+        const command = fx.kind.replace(/-/g, ' ').replace(/[^A-Za-z0-9._: ]/g, '_');
+        const ts = at();
+        const denied = fx.gate?.outcome === 'denied';
+        out.push(JSON.stringify({ type: 'assistant', sessionId: ep.episode, timestamp: ts, message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } }));
+        out.push(JSON.stringify({ type: 'user', sessionId: ep.episode, timestamp: ts, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: denied ? 'denied' : 'ok', ...(denied ? { is_error: true } : {}) }] }, toolUseResult: { stdout: '', stderr: '' } }));
+      }
+    });
+    files[`runs-${f}.jsonl`] = out.join('\n') + '\n';
+  }
+  return { files, sessions: episodes.length };
+}
+
 const sessionsOf = (files: string[]): number => {
   const ids = new Set<string>();
   for (const f of files) for (const line of readFileSync(f, 'utf8').split('\n')) {
@@ -137,12 +171,33 @@ const sessionsOf = (files: string[]): number => {
 };
 
 export async function proposeWorkflow(o: ProposeOptions): Promise<ProposeResult> {
-  for (const [k, v] of [['--polyness', o.polyness], ['--step', o.step], ['--transcripts', o.transcripts], ['--out', o.out]] as const) if (!v) throw new MineUsageError(`poly propose needs ${k} <value>`);
+  for (const [k, v] of [['--polyness', o.polyness], ['--step', o.step], ['--out', o.out]] as const) if (!v) throw new MineUsageError(`poly propose needs ${k} <value>`);
+  if (o.transcripts && o.runs) throw new MineUsageError('poly propose takes --transcripts or --runs, not both');
+  if (!o.transcripts && !o.runs) throw new MineUsageError('poly propose needs --transcripts <folder> or --runs <store>');
+  if (o.runs) for (const [k, v] of [['--runs', o.runs.db], ['--build', o.runs.build], ['--certificate', o.runs.certificate]] as const) if (!v) throw new MineUsageError(`poly propose --runs needs ${k} <value>`);
+  if (o.runs && !Object.keys(o.runs.trust).length) throw new MineUsageError('poly propose --runs needs --trust <keyId>=<public key file>');
   if (o.step.length > 32 || !STEP_ARG.test(o.step)) throw new MineUsageError('--step is one to four words of lower-case letters and digits, at most 32 characters');
   if (existsSync(o.out)) throw new MineUsageError(`propose does not overwrite a file or folder: ${o.out} exists`);
+  if (!o.runs) return proposeFrom(o, o.transcripts!);
+  // PT31.10: a store is exported to a corpus in a folder of its own and converted; the folder is removed whatever happens.
+  const work = mkdtempSync(join(tmpdir(), 'poly-propose-runs-'));
+  try {
+    const corpus = join(work, 'corpus.ndjson');
+    await exportTraces({ db: o.runs.db, build: o.runs.build, certificate: o.runs.certificate, trust: o.runs.trust, out: corpus });
+    const from = join(work, 'transcripts');
+    mkdirSync(from);
+    for (const [name, text] of Object.entries(transcriptsFromCorpus(readFileSync(corpus, 'utf8')).files)) writeFileSync(join(from, name), text);
+    return await proposeFrom(o, from);
+  } catch (e) {
+    if (e instanceof TraceUsageError) throw new MineUsageError(e.message);
+    throw e;
+  } finally { rmSync(work, { recursive: true, force: true }); }
+}
+
+async function proposeFrom(o: ProposeOptions, from: string): Promise<ProposeResult> {
   let transcripts: string[] = [];
-  try { if (statSync(o.transcripts).isDirectory()) transcripts = readdirSync(o.transcripts, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.jsonl')).map((e) => join(o.transcripts, e.name)).sort(); } catch { transcripts = []; }
-  if (!transcripts.length) throw new MineUsageError(`--transcripts ${o.transcripts} is not a folder holding .jsonl transcripts`);
+  try { if (statSync(from).isDirectory()) transcripts = readdirSync(from, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.jsonl')).map((e) => join(from, e.name)).sort(); } catch { transcripts = []; }
+  if (!transcripts.length) throw new MineUsageError(`--transcripts ${o.transcripts ?? from} is not a folder holding .jsonl transcripts`);
   if (!existsSync(join(o.polyness, 'bin', 'polyness.mjs'))) throw new AdmitError(`${o.polyness} has no bin/polyness.mjs: it is the directory of a polyness checkout`);
   const pinPath = o.polynessPin ?? join(dirname(resolve(o.out)), 'polyness.pin.json');
   if (!existsSync(pinPath)) throw new MineUsageError(`no polyness pin at ${pinPath}: run poly propose --pin-polyness first`);
