@@ -198,3 +198,8 @@ The reviewer accepted C1 to C6, with these conditions, all in PS21 and PT31 now:
 - A rule the machine breaks is refused by the ordinary check with `PL4001` and its name, with evidence or without; a rule that holds but has no evidence is `PL6521`.
 - Admission order, found by the test: the ordinary check runs before the proposals are read, so a contradicted rule is `PL4001` even with no evidence.
 - Code names follow PS21.4: `PL6520 PROPOSAL_RULE_UNSUPPORTED`, `PL6521 PROPOSAL_RULE_WITHOUT_EVIDENCE`.
+
+### The inbox witness for `count("gmail.createDraft") <= 1` (JJ's order of 2026-10-12, E3 free; nothing fixed)
+
+One `poly check` of a scratch copy (the original `inbox.poly` and policy with `path property at-most-one-draft: count("gmail.createDraft") <= 1` in `Todo`), alone: exit 1, 4 m 18 s, PL4001 on that property and nothing else. The witness, ten steps on one Todo: `Open(p1)`, `ReadFailed`, `WriteDraft`, `Read`, `Written`, `Propose`, `Enveloped` (emits `gmail.createDraft`, status `Proposed`), then **`NotCreated`** (back to `Drafted`), `Propose`, `Enveloped` (emits `gmail.createDraft` a second time).
+`NotCreated` is the completion of a createDraft whose outcome was `failed` (inbox.poly:443, handler at 357): the first draft was not created. So the path is a retry after a failed creation, and the property counts the effect *proposed*, not drafts *created*. Whether this is a defect of the program (a second proposal after a failure is allowed) or an artefact of the rule (the effect count is not the draft count) is the reviewer's to say; per Q1 this is the case that goes to the reviewer before any fix. Witness file: the check output of the scratch copy, kept in the session scratchpad only.
