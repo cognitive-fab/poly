@@ -167,11 +167,11 @@ test('PT30.10: a failing polyx is reported with its own message, no candidates w
   assert.ok(!existsSync(r.out));
 });
 
-test('PT30.10: poly-mine imports node:child_process, node:crypto, node:fs and node:path only; no other package of poly starts a process but poly-new', () => {
+test('PT30.10: poly-mine imports node:child_process, node:crypto, node:fs, node:os and node:path only (node:os since M7.3, for polyness's temporary home); no other package of poly starts a process but poly-new', () => {
   const imports = (dir) => readdirSync(dir, { recursive: true }).filter((f) => String(f).endsWith('.ts')).flatMap((f) => [...readFileSync(join(dir, String(f)), 'utf8').matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]));
   const mineImports = imports(join(ROOT, 'packages', 'poly-mine', 'src'));
   assert.ok(mineImports.length >= 3);
-  for (const spec of mineImports) assert.ok(['node:child_process', 'node:crypto', 'node:fs', 'node:path'].includes(spec), spec);
+  for (const spec of mineImports) assert.ok(['node:child_process', 'node:crypto', 'node:fs', 'node:os', 'node:path'].includes(spec), spec);
   for (const pkg of readdirSync(join(ROOT, 'packages'))) {
     if (pkg === 'poly-mine' || pkg === 'poly-new') continue;
     assert.ok(!imports(join(ROOT, 'packages', pkg, 'src')).some((s) => /child_process|worker_threads/.test(s)), `${pkg} starts a process`);

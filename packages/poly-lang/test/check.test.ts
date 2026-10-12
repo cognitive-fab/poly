@@ -66,8 +66,9 @@ test('each error source raises exactly the code it names', () => {
   // the project (PS18.3, PT10r); a source checked here has none. They are tested by test/routing*.test.mjs.
   // PL6839 is raised over a routed decision, whose route names those files too; tested by test/routed-materials.test.mjs.
   // PL6510 to PL6512 are raised by admission over a project's promotions (PS20.7, PT30.6), not by a source; tested by
-  // test/promotion-admission.test.mjs and test/synthetic-refusal.test.mjs.
-  const routed = compileErrors.filter((c) => !/^PL684[1-9]$/.test(c) && c !== 'PL6839' && !/^PL651[0-2]$/.test(c));
+  // test/promotion-admission.test.mjs and test/synthetic-refusal.test.mjs. PL6520 and PL6521 are raised by admission over a
+  // project's proposals (PS21.4, PT31.6); tested by test/proposal-admission.test.mjs.
+  const routed = compileErrors.filter((c) => !/^PL684[1-9]$/.test(c) && c !== 'PL6839' && !/^PL651[0-2]$/.test(c) && !/^PL652[01]$/.test(c));
   assert.deepEqual(routed.filter((c) => !seen.has(c)), []);
 });
 

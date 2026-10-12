@@ -192,6 +192,9 @@ export const CODES: Record<string, CodeInfo> = {
   PL6510: { name: 'PROMOTION_NOT_IN_SOURCE', stage: 'policy', severity: 'error' },
   PL6511: { name: 'PROMOTION_RECORD_INVALID', stage: 'policy', severity: 'error' },
   PL6512: { name: 'SYNTHETIC_PROMOTION', stage: 'policy', severity: 'error' },
+  // PS21.4, PT31.6: a proposed rule its own history does not support, and an evidence file that does not describe its sources.
+  PL6520: { name: 'PROPOSED_RULE_UNSUPPORTED', stage: 'policy', severity: 'error' },
+  PL6521: { name: 'PROPOSAL_EVIDENCE_MISMATCH', stage: 'policy', severity: 'error' },
   // S150: at load, a people or agents keyring that differs from the one the certificate binds.
   PL6405: { name: 'KEYRING_CHANGED', stage: 'runtime', severity: 'error' },
   PL6408: { name: 'ADAPTER_NOT_CERTIFIED', stage: 'runtime', severity: 'error' },

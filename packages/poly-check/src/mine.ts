@@ -18,11 +18,16 @@ export class MineUsageError extends Error {}
 export interface MineOptions { traces: string; project: string; polyx: string; out: string; synthetic?: boolean; all?: boolean; polyxPin?: string; timeoutMs?: number; maxOutput?: number; /** Where the project's anchor came from; the command line reads it, a test names it (PS20.5). */ anchorSource?: 'user' | 'test' }
 
 /** What poly-mine gives (it is loaded by name, so that this package never imports a module that starts a process). */
-interface MineSeam {
+export interface MineSeam {
   pinOf(dir: string): { v: 1; name: 'polyx'; version: string; entry: string };
   runPolyxMine(o: { polyx: string; pin: unknown; config: string; cwd: string; all?: boolean; timeoutMs?: number; maxOutput?: number }): string;
+  /** PT31.3: the second tool, polyness, through the same seam. */
+  polynessPinOf(dir: string): { v: 1; name: 'polyness'; version: string; files: Record<string, string> };
+  checkPolynessPin(dir: string, pin: unknown): unknown;
+  runPolyness(o: { polyness: string; pin: unknown; step: string; transcripts: string[]; timeoutMs?: number; maxOutput?: number }): { status: number; stdout: string; stderr: string; proposals: Record<string, Record<string, string>> };
 }
-const loadSeam = async (): Promise<MineSeam> => {
+/** The one place poly-check names @poly/mine (scripts/check-boundaries.mjs); `poly propose` reaches the seam through here. */
+export const loadSeam = async (): Promise<MineSeam> => {
   const pkg = '@poly/mine';
   return (await import(pkg)) as MineSeam;
 };

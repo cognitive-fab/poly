@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "properties": {
+    "pin": {
+      "type": "boolean",
+      "description": "record the polyness at --polyness as the one this person trusts (PT31.3), and propose nothing"
+    },
+    "repin": {
+      "type": "boolean",
+      "description": "with pin, replace a different pin"
+    },
+    "polyness": {
+      "type": "string",
+      "description": "the directory of a polyness checkout"
+    },
+    "polynessPin": {
+      "type": "string",
+      "description": "the pin file (default: polyness.pin.json beside --out)"
+    },
+    "step": {
+      "type": "string",
+      "description": "the step to propose a workflow for: one to four words"
+    },
+    "transcripts": {
+      "type": "string",
+      "description": "a folder of .jsonl transcripts of repeated work"
+    },
+    "out": {
+      "type": "string",
+      "description": "the proposal folder; an existing one is refused"
+    },
+    "synthetic": {
+      "type": "boolean",
+      "description": "the transcripts were made for the purpose, and the evidence says so (PS20.5)"
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "description": "stop polyness after this many seconds (default 600)"
+    },
+    "maxOutput": {
+      "type": "integer",
+      "description": "stop polyness when it has written this many bytes (default 64 MiB)"
+    }
+  },
+  "required": [
+    "polyness"
+  ]
+}

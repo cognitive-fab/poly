@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "out": {
+      "type": "string",
+      "description": "the proposal folder"
+    },
+    "name": {
+      "type": "string",
+      "description": "the step as a name"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rules": {
+      "type": "integer"
+    },
+    "notTranslatable": {
+      "type": "integer"
+    }
+  },
+  "required": []
+}

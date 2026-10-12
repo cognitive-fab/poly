@@ -24,6 +24,7 @@ import { approvalRecord, acceptanceRecord, writeAcceptance } from './records.js'
 import { journalCommand } from './journal.js';
 import { exportTraces, TraceUsageError } from './traces.js';
 import { MineUsageError, mineTraces, pinPolyx } from './mine.js';
+import { pinPolyness, proposeWorkflow } from './propose.js';
 import { adjudicate } from './adjudicate.js';
 import { promote, PromoteUsageError } from './promote.js';
 import { benchGate } from './bench.js';
@@ -512,6 +513,24 @@ export const COMMANDS: Command[] = [
     },
   },
   {
+    name: 'propose', mcp: null, lsp: false,
+    summary: 'Runs polyness, a separately installed tool, over the transcripts of repeated work and writes a proposed workflow for one step: poly source with its mined rules as path properties, and the evidence for each (PF10.3, PS21, PT31). The transcripts are private, so never over MCP.',
+    input: obj({ pin: { type: 'boolean', description: 'record the polyness at --polyness as the one this person trusts (PT31.3), and propose nothing' }, repin: { type: 'boolean', description: 'with pin, replace a different pin' }, polyness: str('the directory of a polyness checkout'), polynessPin: str('the pin file (default: polyness.pin.json beside --out)'), step: str('the step to propose a workflow for: one to four words'), transcripts: str('a folder of .jsonl transcripts of repeated work'), out: str('the proposal folder; an existing one is refused'), synthetic: { type: 'boolean', description: 'the transcripts were made for the purpose, and the evidence says so (PS20.5)' }, timeoutSeconds: { type: 'integer', description: 'stop polyness after this many seconds (default 600)' }, maxOutput: { type: 'integer', description: 'stop polyness when it has written this many bytes (default 64 MiB)' } }, ['polyness']),
+    output: obj({ out: str('the proposal folder'), name: str('the step as a name'), steps: { type: 'array', items: { type: 'string' } }, rules: { type: 'integer' }, notTranslatable: { type: 'integer' } }, []),
+    async run(input) {
+      try {
+        if (input.pin === true) {
+          const p = await pinPolyness({ polyness: need(input, 'polyness'), polynessPin: opt(input, 'polynessPin'), repin: input.repin === true });
+          return { exit: EXIT_CODES.CLEAN, result: { path: p.path }, text: `${p.path}: polyness ${p.pin.version} pinned${p.changed ? '' : ' (already)'}
+` };
+        }
+        const r = await proposeWorkflow({ polyness: need(input, 'polyness'), step: need(input, 'step'), transcripts: need(input, 'transcripts'), out: need(input, 'out'), polynessPin: opt(input, 'polynessPin'), synthetic: input.synthetic === true, timeoutMs: typeof input.timeoutSeconds === 'number' ? input.timeoutSeconds * 1000 : undefined, maxOutput: typeof input.maxOutput === 'number' ? input.maxOutput : undefined });
+        return { exit: EXIT_CODES.CLEAN, result: { ...r }, text: `${r.out}: ${r.name}, ${r.steps.length} step(s), ${r.rules} rule(s) proposed, ${r.notTranslatable} not translatable
+` };
+      } catch (e) { if (e instanceof MineUsageError) throw new CommandUsageError(e.message); throw e; }
+    },
+  },
+  {
     name: 'journal', mcp: 'poly_journal', lsp: false,
     summary: 'Ledger verification, replay, export, evaluation and fitting (PF8.6, PD3.3): its arguments are those of the command line.',
     input: obj({ sub: { type: 'string', enum: ['verify', 'replay', 'export', 'eval', 'fit'] }, args: { type: 'array', items: { type: 'string' }, description: 'the options, as on the command line (--db, --run, --trust …)' } }, ['sub']),
@@ -557,7 +576,6 @@ export const NOT_BUILT: { name: string; mcp: string; when: string }[] = [
   { name: 'grade', mcp: 'poly_grade', when: 'not scheduled: polynv adequacy (PF7.7)' },
   { name: 'deploy', mcp: 'poly_deploy', when: 'not scheduled: the version gate at load (PF8.7)' },
   { name: 'dispatch', mcp: 'poly_dispatch', when: 'not scheduled: the development runtime' },
-  { name: 'propose', mcp: 'poly_propose', when: 'M7 (PF10.3)' },
 ];
 
 export const commandNamed = (name: string): Command | undefined => COMMANDS.find((c) => c.name === name);

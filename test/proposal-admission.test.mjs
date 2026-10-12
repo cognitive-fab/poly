@@ -509,6 +509,7 @@ test('A5.5: PL6521 when proposals file has no matching src source', async () => 
   const dir = project('a5.5-no-src', [], key);
 
   mkdirSync(join(dir, 'src'), { recursive: true });
+  writeFileSync(join(dir, 'src', 'empty.poly'), 'module empty' + String.fromCharCode(10));
 
   const evidence = JSON.parse(JSON.stringify(NORMATIVE_EVIDENCE));
 

@@ -452,7 +452,8 @@ test('PS21.2, PT31.5a: a two-step workflow gets the machine derived from the sam
   const r = run(f.dir, pinOf(f.dir), [], undefined, 'deploy');
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(tree(r.dir), ['proposal.json', 'src', 'src/deploy.poly']);
-  const want = readFileSync(join(ROOT, 'test', 'proposal-admission.test.mjs'), 'utf8').split('const SECOND_SOURCE = `')[1].split('`;')[0];
+  const header = '// Proposed by poly propose from 10 instances of deploy (PS21). Every effect is declared with the label exec and no class: a person declares each consequence (S503).' + NL;
+  const want = header + readFileSync(join(ROOT, 'test', 'proposal-admission.test.mjs'), 'utf8').split('const SECOND_SOURCE = `')[1].split('`;')[0];
   assert.equal(readFileSync(join(r.dir, 'src', 'deploy.poly'), 'utf8'), want);
   const proj = join(tmp, `proj-${++n}`);
   mkdirSync(join(proj, 'src'), { recursive: true });

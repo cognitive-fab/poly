@@ -28,8 +28,8 @@ test('S507: the real poly-mine passes the boundary check, and so does the clean 
 });
 
 test('S507: poly-mine may not import anything that reaches a network, another process module, or another package of poly', () => {
-  for (const imp of ["import https from 'node:https';", "import net from 'node:net';", "import { Worker } from 'node:worker_threads';", "import { x } from '@poly/check';", "import { y } from './other.js';", "import os from 'node:os';", "import z from 'undici';"]) {
-    assert.ok(caught(imp, /poly-mine imports '[^']+'; it imports node:child_process, node:crypto, node:fs, node:path only/) >= 1, imp);
+  for (const imp of ["import https from 'node:https';", "import net from 'node:net';", "import { Worker } from 'node:worker_threads';", "import { x } from '@poly/check';", "import { y } from './other.js';", "import v8 from 'node:v8';", "import z from 'undici';"]) {
+    assert.ok(caught(imp, /poly-mine imports '[^']+'; it imports node:child_process, node:crypto, node:fs, node:os, node:path only/) >= 1, imp);
   }
 });
 

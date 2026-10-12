@@ -21,8 +21,9 @@
 // 4. poly new is the only place a model is called (PF9.3, S169). poly-new may start a subprocess (Claude Code, headless);
 //    no other package imports it, except poly-agent, which serves it, and the command line, which loads it by name.
 //
-// 6. poly-mine is the only package besides poly-new that may start a process (S507, ruled 2026-10-11): polyx, run by path.
-//    It imports node:child_process, node:crypto, node:fs and node:path and nothing else; it starts a process only with
+// 6. poly-mine is the only package besides poly-new that may start a process (S507, ruled 2026-10-11): polyx and, since
+//    M7.3, polyness (PT31.3), each run by path. The list of the two tools is POLY_MINE_TOOLS below.
+//    It imports node:child_process, node:crypto, node:fs, node:os and node:path and nothing else; it starts a process only with
 //    execFileSync, so with a fixed argument vector and no shell; it reads the environment by name, never whole, so the
 //    child's environment is built fresh from an allowlist; and it never names a polyx command but mine (the word
 //    annotate, the command that calls a model, appears nowhere in it). The pin, the timeout and the cap on output are
@@ -33,6 +34,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// PT31.3: the two tools poly-mine may start.
+const POLY_MINE_TOOLS = ['polyx', 'polyness'];
 const MODEL_SDKS = [/^@anthropic-ai\//, /^openai$/, /^@openai\//, /^@google\/genai$/, /^@google\/generative-ai$/, /^cohere-ai$/, /^@mistralai\//, /^ollama$/, /^langchain/, /^@langchain\//];
 // Review C-F8 (M8b): node:dns resolves names over the network, so it is a network module too.
 const NETWORK_MODULES = ['node:http', 'node:https', 'node:http2', 'node:net', 'node:tls', 'node:dgram', 'node:dns', 'node:dns/promises', 'http', 'https', 'http2', 'net', 'tls', 'dgram', 'dns', 'dns/promises'];
@@ -143,13 +146,17 @@ export function violationsOf(pkg, file, text) {
   }
   // Rule 6: what poly-mine may import and how it may start a process.
   if (pkg === 'poly-mine') {
-    const ok = ['node:child_process', 'node:crypto', 'node:fs', 'node:path'];
+    const ok = ['node:child_process', 'node:crypto', 'node:fs', 'node:os', 'node:path'];
     for (const imp of importsOf(text)) if (!ok.includes(imp.spec)) v.push(`${file}:${imp.line} poly-mine imports '${imp.spec}'; it imports ${ok.join(', ')} only (S507)`);
     if (/\b(spawn|spawnSync|exec|execSync|execFile|fork)\s*\(/.test(text)) v.push(`${file} starts a process other than with execFileSync; poly-mine uses a fixed argument vector and no shell (S507)`);
     if (/\bshell\s*:/.test(text)) v.push(`${file} sets a shell option; poly-mine starts its process with no shell (S507)`);
     if (/process\s*\.\s*env(?!\s*[.\[])/.test(text)) v.push(`${file} reads the whole environment; poly-mine builds the child's environment fresh from an allowlist, by name (S507)`);
     if (/annotate/i.test(text)) v.push(`${file} names annotate, the polyx command that calls a model; the only polyx command poly-mine runs is mine (S507)`);
     if (!/execFileSync\s*\(/.test(text)) v.push(`${file} does not start its process with execFileSync (S507)`);
+    // PT31.3 (C4, 2026-10-11): exactly two tools, polyx and polyness, are listed here and nowhere else; an entry point of any
+    // other name is a third tool, and the other commands of polyness (audit, replay) are never run.
+    for (const m of text.matchAll(/['"`]bin['"`]\s*,\s*['"`]([\w-]+)\.mjs['"`]|\bbin\/([\w-]+)\.mjs/g)) if (!POLY_MINE_TOOLS.includes(m[1] ?? m[2])) v.push(`${file} names the entry point ${m[1] ?? m[2]}.mjs; poly-mine starts ${POLY_MINE_TOOLS.join(' and ')} and no other tool (PT31.3)`);
+    if (/['"`](audit|replay)['"`]/.test(text)) v.push(`${file} names a polyness command other than propose; propose is the only one poly-mine runs (PT31.3)`);
   }
   // Rule 6: the way to poly-mine is poly-check's mine command alone.
   if (pkg !== 'poly-mine' && file !== 'packages/poly-check/src/mine.ts' && (/['"`]@poly\/mine(\/[^'"`]*)?['"`]/.test(text) || importsOf(text).some((i) => /(^|\/)poly-mine(\/|$)/.test(i.spec)))) v.push(`${file} names @poly/mine, the package that starts polyx; only poly-check's mine command may load it (S507)`);
