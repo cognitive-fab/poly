@@ -460,7 +460,7 @@ machine Todo {
     class irreversible
     // IT4.4, S526: attempted once. A definite refusal is permanent and delivered as failed; any other outcome is
     // ambiguous and delivered as exhausted (examples/inbox/host/drafts.mjs, classifyDraftStatus).
-    retry { attempts 1, base 200ms, timeout 30s }
+    retry { attempts 1, base 200ms, timeout 45s }
     ok -> Created()
     failed -> NotCreated()
     exhausted -> DraftUncertain()
