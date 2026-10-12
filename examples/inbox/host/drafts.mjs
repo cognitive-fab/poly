@@ -37,12 +37,42 @@ export const threadIdOf = (key) => {
   return m[1];
 };
 
-/** The handler: reads its payload's envelope and body, and creates the draft in the thread. */
+/**
+ * IT4.4, S526: what an answer to drafts.create means for the draft. Gmail drafts carry no idempotency key, so the difference
+ * between "it was not created" and "it may have been" is the whole question. 200 created it. 400, 401, 403, 404 and 429 are
+ * definite refusals: Gmail did not create it. Every other status, and any status that is not a number, is ambiguous.
+ */
+export function classifyDraftStatus(status) {
+  if (status === 200) return 'ok';
+  if (status === 400 || status === 401 || status === 403 || status === 404 || status === 429) return 'permanent';
+  return 'ambiguous';
+}
+
+/** An error the runtime will not retry: the draft was not created (S138). */
+const definite = (message) => Object.assign(new Error(message), { permanent: true });
+/** An error that says the draft may exist: not permanent, so the effect's attempts are used up and it is delivered as exhausted. */
+const ambiguous = (message) => Object.assign(new Error(message), { ambiguous: true });
+
+/** The handler: reads its payload's envelope and body, and creates the draft in the thread, once. */
 export async function createDraft(payload, caps) {
-  const envelope = await caps.content.read(payload.e);
-  const body = await caps.content.read(payload.body);
-  const raw = Buffer.from(draftMessage(envelope, body), 'utf8').toString('base64url');
-  const res = await caps.api.post(DRAFTS_URL, { message: { raw, threadId: threadIdOf(payload.t) } });
-  if (res.status !== 200) throw new Error(`drafts.create answered ${res.status}`);
-  return { ok: true };
+  // Nothing has left yet: a failure here means no draft was created.
+  let raw; let threadId;
+  try {
+    const envelope = await caps.content.read(payload.e);
+    const body = await caps.content.read(payload.body);
+    raw = Buffer.from(draftMessage(envelope, body), 'utf8').toString('base64url');
+    threadId = threadIdOf(payload.t);
+  } catch (e) { throw definite(String(e?.message ?? e)); }
+  let res;
+  try {
+    res = await caps.api.post(DRAFTS_URL, { message: { raw, threadId } });
+  } catch (e) {
+    // A refusal by the capability layer is final; a transport error or a timeout after the request left may have created it.
+    if (e?.permanent === true) throw e;
+    throw ambiguous(`drafts.create did not answer: ${String(e?.message ?? e)}`);
+  }
+  const kind = classifyDraftStatus(res?.status);
+  if (kind === 'ok') return { ok: true };
+  if (kind === 'permanent') throw definite(`drafts.create answered ${res.status}`);
+  throw ambiguous(`drafts.create answered ${res?.status}`);
 }

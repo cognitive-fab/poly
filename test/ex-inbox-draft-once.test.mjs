@@ -72,7 +72,8 @@ test('IT4.4, the witness: after a definite refusal the to-do may propose again (
 test('IT4.4, the witness: after an ambiguous outcome the to-do is Uncertain and cannot propose again; only the owner leaves Uncertain', async () => {
   const r = await run([...TO_PROPOSED, dispatch('DraftUncertain'), { op: 'state' }, dispatch('Propose'), dispatch('NotCreated'), dispatch('Created'), dispatch('Enveloped', { e: null })]);
   const dispatched = r.results.filter((x) => x.op === 'dispatch');
-  const at = (name) => dispatched.find((x) => x.action === name);
+  const after = dispatched.slice(dispatched.findIndex((x) => x.action === 'DraftUncertain'));
+  const at = (name) => after.find((x) => x.action === name);
   assert.equal(at('DraftUncertain').stepKind, 'accepted');
   assert.equal(r.results.find((x) => x.op === 'state').state.status, 'Uncertain');
   for (const name of ['Propose', 'NotCreated', 'Created', 'Enveloped']) assert.notEqual(at(name).stepKind, 'accepted', `${name} must not leave Uncertain`);

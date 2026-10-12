@@ -28,7 +28,7 @@ enum Seen { Pending, Actionable, Filed, Held }
 
 enum Step { Reading, Asking, Done }
 
-enum Status { Opening, Summing, Open, Reading, Drafting, Enveloping, Drafted, Proposed, Created, Snoozed, Done, Dismissed }
+enum Status { Opening, Summing, Open, Reading, Drafting, Enveloping, Drafted, Proposed, Uncertain, Created, Snoozed, Done, Dismissed }
 
 credential gmail_draft: oauth2 {
   provider "google"
@@ -234,6 +234,9 @@ machine Todo {
   action Propose()
   action Created()
   action NotCreated()
+  action DraftUncertain()
+  action DraftFound()
+  action DraftMissing()
   action Snoozed(d: Snooze)
   action Wake()
   action Finish()
@@ -357,6 +360,24 @@ machine Todo {
     status' = Drafted
   }
 
+  // IT4.4, IAC10, S526: the creation may have succeeded (a timeout, a dropped connection, a server error after the request
+  // left), and Gmail drafts carry no idempotency key, so nothing here proposes again. Only the owner, who looks in Gmail,
+  // leaves Uncertain: the draft is there (DraftFound) or it is not (DraftMissing).
+  on DraftUncertain {
+    require status == Proposed else reject "not-proposed"
+    status' = Uncertain
+  }
+
+  on DraftFound {
+    require status == Uncertain else reject "not-uncertain"
+    status' = Created
+  }
+
+  on DraftMissing {
+    require status == Uncertain else reject "not-uncertain"
+    status' = Drafted
+  }
+
   on Snoozed(d) {
     require status == Open || status == Drafted else reject "not-open"
     status' = Snoozed
@@ -437,8 +458,12 @@ machine Todo {
     to account
     envelope e
     class irreversible
+    // IT4.4, S526: attempted once. A definite refusal is permanent and delivered as failed; any other outcome is
+    // ambiguous and delivered as exhausted (examples/inbox/host/drafts.mjs, classifyDraftStatus).
+    retry { attempts 1, base 200ms, timeout 30s }
     ok -> Created()
     failed -> NotCreated()
+    exhausted -> DraftUncertain()
   }
 }
 
