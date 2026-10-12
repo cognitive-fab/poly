@@ -191,3 +191,35 @@ Next: E3.5, the mechanisms (Action Fusion, compaction, ObservationPack, the Evid
 - **Late completions.** `test/e3-loop.test.mjs` holds that a late `Begun`, after the plan is done or after the trial ended on overflow, reopens nothing (the trial and the context mode are unchanged) and emits no effect (the outbox is unchanged).
 - **Plan length: accepted.**
 - **E3.5: go**, with the order: single checks and recorded runs only until JJ says M7's suite has finished. No whole-suite run of the E3 tests (the gate-reach file alone is 13 checks) before then.
+
+## E3.5: the mechanisms on recorded trajectories (2026-10-11)
+
+Run under the owner's order (single checks and recorded runs only while M7's full suite runs): no build, no whole-suite run, and the gate-reach file (13 checks) is **not re-run yet**, see the end.
+
+**What was built.** The host loop (`examples/harness/host/loop.mjs`) now composes each request's context from the transcript, wires an `Archive` and an `Observation` for a large output (ObservationPack), tells each live observation `Sent` once per request and shows it full or as its handle by the observation's state, creates a `Receipt` for a log (the Reducer), takes the pay-gate's numbers (saving and rewrite, in buckets) and reports the window as a `Level` before each request. Each mechanism has an off switch, so the base harness (Q-E3-2) is the same harness with the four off: fusion off is read by the classifier from a row (`mechanisms/config`), the others are the host not invoking them. The model's input tokens are what it was shown (four characters a token), so the provider's usage, the runtime's cost record and the budget all follow the composed context. Module changes: `Context.Level(to)` (the host's measure of the window, which a handle in place of a large output can lower, as `Grew` cannot), and `classify` reads the mechanisms row (`read:store`, target `mechanisms`).
+
+**The corpus.** `test/fixtures/harness/trajectories.mjs`: twelve synthetic trajectories (no real repository, name, secret or answer), named for what they exercise: fixing tests (fused), a 6 KiB build log, a 12 KiB file read, a 14 KiB build log, a receipt that quotes a line the log lacks, a log holding a known secret, a cutoff, four 5 KiB logs, reads only, a mix, an edit followed by a command that is not a declared runner, three 11 KiB reads. The window is 6,000 tokens (1,000 a bucket).
+
+**HAC2: the trigger rates** (`test/e3-mechanisms.test.mjs`; the table is committed in `docs/e3/trigger-rates.json` and the test fails if the corpus gives another; 72 runs, each in a fresh runtime, 52 to 90 s):
+
+| Mechanism | Fired of opportunities | Where |
+|---|---|---|
+| Action Fusion (HF2.2) | 21 of 22 (95%) | every edit then a declared runner (`npm test`, `npm run build`) is fused; the one not fused is `t11-no-runner`'s `node scripts/check.js`. With fusion off: 0 of 22, and no `act` in the outbox carries `fused`. |
+| Online Context Compact (HF2.3, HF3.8) | 6 of 10 finished steps with a window over two buckets (60%); 3 compactions forced at the limit in the base | chosen exactly when the step is finished, the window is over two buckets, fewer than two have been chosen and the saving beats the rewrite (checked on every accepted `Measured` row of every run's journal, 5 rows or more of each outcome); `t12-many-reads` in the base fills the window, one compaction is tried, and the trial ends on overflow with the reason; with the pay-gate on it reaches the end of its plan. |
+| ObservationPack (HF2.4, HF3.3) | 6 of 6 outputs over 10 KiB | each is archived; sent in full exactly twice and shown as its handle on the third send (`t03`: 1 handled, full sends 2; the third request after the read is smaller); the handle resolves (bytes held, a reference) while referred to. 2 of the 6 reached their third request in the runs of this corpus. |
+| Evidence-Preserving Reducer (HF2.5, HF3.2) | 8 of 8 logs from 4 KiB | 6 verified and shown as receipts; `t05` rejected (the invented quote) and the original shown; `t06` flagged, the cheaper model never asked, the redaction shown. A verified receipt makes a smaller request than the log (`t04`, `t08`). |
+
+**Over the corpus, by configuration** (trials that reached the end of the plan of 12; ended on overflow; input tokens; micro-usd): base 11, 1, 65,117, 172,556; fusion alone 11, 1, 65,117, 172,556; compaction alone 12, 0, 68,188, 132,237; pack alone 11, 1, 54,917, 156,509; reducer alone 11, 1, 56,373, 125,673; **all four 12, 0, 57,233, 92,590**. All four reach the end of every plan the base reaches, and the one the base ends on overflow, on 12% fewer input tokens and 46% less cost. (Compaction alone shows more input tokens than the base only because the base ended `t12` early.)
+
+**What these numbers are not.**
+- **Fusion saves nothing here.** Its tokens equal the base's: a recording already holds the model's two calls as one answer, so fusing them changes no request. Its saving is a step and a request the live model does not spend, which a recorded trajectory cannot show (Q-E3-1). The same holds in part for ObservationPack (a live model may ask for the same file again). The trigger is measured; the saving of these two is for the live run.
+- **"Reached the end of the plan" is not "solved the task".** The model, the tool and the stage checks are recorded, so a run that reaches the end is a harness that did not end a recorded run. Completion as HAC3 means it is the live run's.
+- **Where the paper says it should.** The expectations are the proposal's definitions (HF2.2 to HF2.5). The SoL-Pi paper's own thresholds and trigger conditions were not read; if its conditions differ from the proposal's, the rates change. Recorded as a limit; the owner may supply the paper's conditions.
+- **The corpus is synthetic.** Twelve trajectories built to have opportunities and non-opportunities. The rates are properties of this corpus, not of real tasks; the 12 real ones are E3.7.
+- **A token is four characters.** The provider's usage replaces the estimate in the live run (assumption `token-buckets`).
+
+**A finding.** ObservationPack alone does not save `t12-many-reads`: three 11 KiB reads in three steps fill the window before any observation has had its third request, and the trial ends on overflow as in the base. Only the pay-gate's compaction does. The rule that an output is full for two requests is what makes a handle late; the proposal's own rule (HF2.4) is kept.
+
+**Not yet re-run, as the order requires.** After `Level` and the classifier change: the HAC1 file (13 single checks), the lint, prices, assumptions, handlers, runtime and loop tests, and the new mechanism tests all pass (the last batch: 57 of 58, the one failure a handler unit test's fake store, fixed: 23 of 23). **`test/e3-gates.test.mjs` (13 checks of about 14 s each) has not been re-run since the module changed, and waits for JJ to say M7's suite has finished.** The module's state counts after the changes: Turn 793, Context 2,712, Trial 499.
+
+Next: E3.6, the cost report (the preamble, the transcript and the output of each call, and the step count), on this corpus.

@@ -43,11 +43,11 @@ let shared = null;
 /** One admission of the unedited module, shared by the tests that need no variant (admission is most of a run's time). */
 export const sharedBuild = () => (shared ??= admittedHarness('e3-shared'));
 
-export async function run(name, rec = recording(), { edit: editProgram, secrets = [] } = {}) {
+export async function run(name, rec = recording(), { edit: editProgram, secrets = [], mechanisms, windowTokens } = {}) {
   const a = editProgram ? await admittedHarness(name, { edit: editProgram }) : await sharedBuild();
   const store = new MemoryStore();
   const { rt } = await loaded(a, { transports: { store, secrets: (n) => (n === 'known-secrets' ? JSON.stringify(secrets) : undefined) } });
-  const result = await runTask({ rt, store, recording: rec, models: MODELS });
+  const result = await runTask({ rt, store, recording: rec, models: MODELS, ...(mechanisms ? { mechanisms } : {}), ...(windowTokens ? { windowTokens } : {}) });
   return { rt, store, result, a };
 }
 

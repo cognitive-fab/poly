@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { replayRuntime } from '@poly/check';
 import { buildLog, canary, found, outputs, recording, run, FUSED } from './e3-loop-helpers.mjs';
+import { ALL_OFF } from '../examples/harness/host/loop.mjs';
+import { step, trajectories } from './fixtures/harness/trajectories.mjs';
 
 const decisions = async (rt, id) => (await rt.chain(id)).filter((e) => e.kind === 'decision').map((e) => e.body);
 
@@ -52,22 +54,16 @@ test('HAC5: the journal replays every state of the run, and every model call is 
   }
 });
 
-test('HF2.3, S561, HAC5: a chosen compaction starts at a finished step, shrinks the transcript and replays', { timeout: 600_000 }, async () => {
-  const rec = recording();
-  rec.steps[0].model[0].grew = 2;
-  rec.steps[1].model = rec.steps[1].model.map((m) => ({ ...m, grew: 1 }));
-  rec.steps[1].gate = { saving: 2, rewrite: 1 };
-  const { rt, store, result } = await run('e3-loop-compact', rec);
+test('HF2.3, S561, HAC5: a chosen compaction starts at a finished step when it pays, shrinks the transcript and replays', { timeout: 600_000 }, async () => {
+  const t08 = trajectories().find((t) => t.name === 't08-long-session').recording;
+  const { rt, store, result } = await run('e3-loop-compact', t08, { mechanisms: { fusion: false, compaction: true, pack: false, reducer: false } });
   try {
     assert.equal(result.trial.mode, 'Done');
-    const c = (await rt.getState('context:t1')).state;
-    assert.equal(c.compactions, 1, 'the gate paid once');
-    assert.equal(c.ctx, 2, 'the window is the summary\'s size');
-    assert.equal(result.compactions.length, 1);
-    const [k] = result.compactions;
-    assert.ok(k.after < k.before, `${k.after} of ${k.before}`);
-    assert.ok(store.read('transcript', 'context:t1').messages.some((m) => m.role === 'summary' && m.text === 'summary of the work so far'));
-    assert.equal((await decisions(rt, 'context:t1')).length, 1, 'the summary was a decision event');
+    assert.ok(result.metrics.compaction.chosen >= 1, JSON.stringify(result.metrics.compaction));
+    assert.ok(result.compactions.length >= result.metrics.compaction.chosen, "every chosen compaction was adopted");
+    for (const k of result.compactions) assert.ok(k.after < k.before, "a compaction shrinks the transcript");
+    assert.ok(result.transcript.some((m) => m.role === 'summary'));
+    assert.ok((await decisions(rt, 'context:t08')).length >= 1, 'the summary was a decision event');
     for (const r of await replayRuntime(rt)) assert.deepEqual(r.diagnostics.map((d) => d.message), [], r.run);
   } finally {
     await rt.close();
@@ -75,11 +71,10 @@ test('HF2.3, S561, HAC5: a chosen compaction starts at a finished step, shrinks 
 });
 
 test('S561, HF3.8: over the limit, one compaction is tried; when it cannot shrink the window the next Overflowed ends the trial, with the reason', { timeout: 600_000 }, async () => {
-  const rec = recording();
-  // the window reaches 6 of 6 in the first step, and nothing in the transcript can be dropped to make a summary smaller
-  rec.steps[0].model[0].grew = 6;
-  rec.steps[0].gate = { saving: 0, rewrite: 1 };
-  const { rt, store, result } = await run('e3-loop-overflow', rec);
+  // one 26 KiB read fills the window (6 of 6) and is the last thing said, so nothing in the transcript can be dropped to make a summary smaller
+  const rec = recording({ steps: [step.inspect(20, 26000), step.fuse(2)].map(({ spec, receipt, ...s }) => s) });
+  rec.task = 't1';
+  const { rt, store, result } = await run('e3-loop-overflow', rec, { mechanisms: ALL_OFF });
   try {
     assert.equal(result.trial.mode, 'Stopped');
     assert.equal(result.trial.why, 'Overflow');
@@ -160,12 +155,7 @@ void FUSED;
 
 // ---------------------------------------------------------------- runtime behaviours the checker does not see (E3.4)
 
-const overflowRecording = () => {
-  const rec = recording();
-  rec.steps[0].model[0].grew = 6;
-  rec.steps[0].gate = { saving: 0, rewrite: 1 };
-  return rec;
-};
+const overflowRecording = () => recording({ steps: [step.inspect(20, 26000), step.fuse(2)].map(({ spec, receipt, ...s }) => s) });
 const outboxCount = (rt) => rt.store.db.prepare('SELECT COUNT(*) AS n FROM pr_outbox').get().n;
 
 test('K10: the runtime refuses a decision and an effect that complete through one action (the checker does not see it)', { timeout: 600_000 }, async () => {

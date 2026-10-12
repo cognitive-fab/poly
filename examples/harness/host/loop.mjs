@@ -1,14 +1,23 @@
-// plan-e3.md E3.4: the host's loop for one task, over a loaded poly-runtime. It holds no rule. The machines (Turn, Context,
-// Trial, Receipt) decide; this file creates their instances, wires them, dispatches the facts it has measured or read from a
-// recording (the stop reason, the growth of the window, the next tool call), registers the effect handlers, and polls the
-// runtime's worker until a state is reached. A require in a machine rejects an action out of turn, so a mistake here is a
-// rejected dispatch or a stuck run, and never a broken rule (assumptions.json, dispatch-order).
+// plan-e3.md E3.4 and E3.5: the host's loop for one task, over a loaded poly-runtime. It holds no rule. The machines (Turn,
+// Context, Trial, Receipt, Observation, Archive) decide; this file creates their instances, wires them, composes each
+// request's context from the transcript, reports the measures it has taken (the stop reason, the window in buckets, the
+// gate's numbers), dispatches the actions the machines wait for, registers the effect handlers, and polls the runtime's
+// worker until a state is reached. A require in a machine rejects an action out of turn, so a mistake here is a rejected
+// dispatch or a stuck run, and never a broken rule (assumptions.json, dispatch-order).
+//
+// The four mechanisms can each be switched off (Q-E3-2: the base harness is this harness with all four off):
+//   fusion      off: the classifier says separate for every call (handlers/classify.mjs reads the row mechanisms/config)
+//   compaction  off: the host never takes the pay-gate's measure, so no compaction is chosen (the limit still compacts, HF3.8)
+//   pack        off: a large output stays in the transcript in full
+//   reducer     off: a log is shown to the agent whole, and the cheaper model is never asked
 //
 // A recording is a task as one recorded run saw it:
-//   { task, prompt, steps: [ { model: [ { calls, stop, grew, usage } ], tool: { output, exitStatus, net? },
-//                               stage: { passed }, gate?: { saving, rewrite }, cap?: true } ],
+//   { task, prompt, steps: [ { model: [ { calls, stop, usage? } ], tool: { output, exitStatus, net?, log? },
+//                               stage: { passed }, cap? } ],
 //     summaries?: [text], receipts?: [text] }
 // A step's model entries are the model's answers for that step in order: a second one answers a reprompt after a cutoff.
+// `tool.log` is false for a command that is not a build or test run (a file read): the reducer reads only logs.
+import { ArchiveStore, handleText } from './handlers/archive.mjs';
 
 export const KINDS = {
   'tool.verify': ['verify', 'verify'],
@@ -39,27 +48,54 @@ export function registerHandlers(rt, base = 'src/handlers') {
   }
 }
 
-/** A provider that answers from a queue of recorded texts, in order, and says so when it runs out. */
-function queueProvider(name, texts, usage) {
+export const ALL_ON = Object.freeze({ fusion: true, compaction: true, pack: true, reducer: true });
+export const ALL_OFF = Object.freeze({ fusion: false, compaction: false, pack: false, reducer: false });
+export const THRESHOLDS = Object.freeze({ logBytes: 4096, handleBytes: 10240, excerptBytes: 512 });
+
+/** A token is estimated at four characters. The provider's own usage figure replaces this in a live run (assumption token-buckets). */
+export const tokensOf = (text) => Math.ceil(String(text).length / 4);
+
+const PREAMBLE = `You are a coding agent working in a copy of a repository. Tools: edit(path, new), bash(command). ${'The tool schemas are part of every request. '.repeat(24)}`;
+const KEEP_LAST = 2;
+
+/** A provider that answers from a queue of recorded texts, in order, with the usage its question implies (input from what it was shown). */
+function queueProvider(name, texts, materialOf) {
   const asked = [];
-  const fn = (q) => {
+  const fn = (q, m) => {
     asked.push(q);
     const text = texts.shift();
     if (text === undefined) throw new Error(`no recorded answer left for ${name}`);
-    return { answer: text, distribution: [[text, 1]], usage: usage ?? { input: 1000, output: 100 } };
+    const input = tokensOf(m?.bodies?.[materialOf] ?? '');
+    return { answer: text, distribution: [[text, 1]], usage: { input, output: tokensOf(text) } };
   };
   fn.asked = asked;
   return fn;
 }
 
-const THRESHOLDS = { logBytes: 4096 };
+/** Whether a step's calls are an edit then any command: the opportunity of Action Fusion, read without the classifier. */
+function fusionOpportunity(calls) {
+  try {
+    const c = JSON.parse(calls);
+    return Array.isArray(c) && c.length === 2 && (c[0]?.tool === 'edit' || c[0]?.tool === 'write') && c[1]?.tool === 'bash';
+  } catch {
+    return false;
+  }
+}
+
+/** What the agent is shown in place of a verified log: the receipt's status and exact quotes, and the log's size. */
+function receiptView(receiptJson, logBytes) {
+  const r = JSON.parse(receiptJson);
+  return `[verified receipt of a log of ${logBytes} bytes, status ${r.status}]\n${r.quotes.join('\n')}`;
+}
 
 /**
- * @param {{ rt: object, store: import('./store.mjs').MemoryStore, recording: object, models: { main: string, cheap: string }, thresholds?: object }} input
- * @returns {Promise<{ ids: object, trial: object, context: object, turns: object[], receipts: object[] }>}
+ * @param {{ rt: object, store: import('./store.mjs').MemoryStore, recording: object, models: { main: string, cheap: string },
+ *   mechanisms?: object, thresholds?: object, windowTokens?: number }} input
  */
-export async function runTask({ rt, store, recording, models, thresholds = THRESHOLDS }) {
+export async function runTask({ rt, store, recording, models, mechanisms = ALL_ON, thresholds = THRESHOLDS, windowTokens = 6000 }) {
   const task = recording.task;
+  const bucketTokens = windowTokens / 6;
+  const bucketOf = (tokens) => Math.max(0, Math.min(6, Math.floor(tokens / bucketTokens)));
   const ids = { trial: `trial:${task}`, context: `context:${task}`, ledger: `ledger:${task}` };
   const state = async (id) => (await rt.getState(id)).state;
   const pump = async (until, what, limit = 60) => {
@@ -70,10 +106,11 @@ export async function runTask({ rt, store, recording, models, thresholds = THRES
     if (!(await until())) throw new Error(`the run did not reach: ${what}`);
   };
   const agentTexts = recording.steps.flatMap((s) => s.model.map((m) => m.calls));
-  rt.provide('agent', { provider: queueProvider('agent', agentTexts), model: models.main });
-  rt.provide('summarise', { provider: queueProvider('summarise', [...(recording.summaries ?? [])]), model: models.cheap });
-  rt.provide('read', { provider: queueProvider('read', [...(recording.receipts ?? [])]), model: models.cheap });
+  rt.provide('agent', { provider: queueProvider('agent', agentTexts, 'task'), model: models.main });
+  rt.provide('summarise', { provider: queueProvider('summarise', [...(recording.summaries ?? [])], 'context'), model: models.cheap });
+  rt.provide('read', { provider: queueProvider('read', [...(recording.receipts ?? [])], 'log'), model: models.cheap });
   registerHandlers(rt);
+  store.put('mechanisms', 'config', { ...mechanisms });
 
   await rt.create('harness.Trial', { id: ids.trial });
   await rt.create('harness.Context', { id: ids.context });
@@ -81,16 +118,61 @@ export async function runTask({ rt, store, recording, models, thresholds = THRES
   await rt.dispatch(ids.context, 'Wire', { tr: ids.trial });
   await rt.dispatch(ids.trial, 'Begin', { cx: ids.context, n: recording.steps.length });
   store.put('recorded-stage', ids.trial, recording.steps.map((s) => s.stage?.passed !== false));
-  const messages = [{ role: 'system', text: 'system prompt', pinned: true }, { role: 'user', text: recording.prompt, pinned: true }];
+
+  const archive = new ArchiveStore();
+  const messages = [{ role: 'system', text: PREAMBLE, pinned: true }, { role: 'user', text: recording.prompt, pinned: true }];
+  const live = []; // observations the transcript still refers to: { id, message, fullSends }
   const turns = [];
   const receipts = [];
   const compactions = [];
-  // after a compaction the transcript is the one the handler wrote, so the host reads it back and keeps it
+  const requests = [];
+  let reads = 0; // the cheaper model's readings used so far, which index the recording's receipts
+  const metrics = {
+    fusion: { opportunities: 0, fired: 0 },
+    compaction: { opportunities: 0, chosen: 0, forced: 0 },
+    pack: { opportunities: 0, observations: 0, handled: 0, fullSends: [] },
+    reducer: { opportunities: 0, receipts: 0, verified: 0, rejected: 0, flagged: 0 },
+  };
+  const shownText = (m) => (m.obs ? m.shown : m.text);
+
+  /** The request's context: each live observation is told one more request has gone out and shown full or as its handle. */
+  const compose = async () => {
+    for (const o of live) {
+      await rt.dispatch(o.id, 'Sent', {});
+      const st = (await state(o.id)).st;
+      o.message.shown = st === 'Full' ? o.message.full : o.message.handle;
+      if (st === 'Full') o.fullSends += 1;
+    }
+    const text = messages.map(shownText).join('\n');
+    const tokens = tokensOf(text);
+    requests.push({ n: requests.length + 1, tokens, bucket: bucketOf(tokens) });
+    return { text, tokens };
+  };
+  /** The window in buckets, reported before a request (assumption token-buckets). */
+  const level = async (tokens) => {
+    if ((await state(ids.context)).mode === 'Working') await rt.dispatch(ids.context, 'Level', { to: bucketOf(tokens) });
+  };
+  const plainText = () => messages.map((m) => (m.obs ? (m.shown ?? m.full) : m.text)).join('\n');
+  /** The pay-gate's numbers, in buckets: what a compaction would save over the steps left, and what rewriting the cached prefix costs. */
+  const measuredNumbers = (stepsLeft) => {
+    const cut = messages.length - KEEP_LAST;
+    const dropped = messages.filter((m, i) => !m.pinned && i < cut);
+    const kept = messages.filter((m, i) => m.pinned || i >= cut);
+    const clamp = (n) => Math.max(0, Math.min(2, n));
+    return {
+      saving: clamp(bucketOf((tokensOf(dropped.map(shownText).join('\n')) - 250) * Math.max(1, stepsLeft))),
+      rewrite: clamp(bucketOf((tokensOf(kept.map(shownText).join('\n')) + 250) / 2)),
+    };
+  };
+  const publish = () => store.put('transcript', ids.context, { messages: messages.map((m) => ({ role: m.role, text: m.obs ? m.shown : m.text, pinned: m.pinned })), keepLast: KEEP_LAST });
   const adopt = () => {
     const row = store.read('transcript', ids.context);
-    if (row && row.after !== undefined && !compactions.some((c) => c.row === row.messages.length + ':' + row.after)) {
-      compactions.push({ before: row.before, after: row.after, released: row.released, row: row.messages.length + ':' + row.after });
+    const key = row ? `${row.messages.length}:${row.after}:${row.before}` : null;
+    if (row && row.after !== undefined && !compactions.some((c) => c.key === key)) {
+      compactions.push({ key, before: row.before, after: row.after, released: row.released });
       messages.splice(0, messages.length, ...row.messages);
+      // an observation whose handle the new transcript no longer mentions is no longer referred to
+      for (let k = live.length - 1; k >= 0; k--) if (!row.messages.some((x) => x.text.includes(live[k].message.handleId))) live.splice(k, 1);
     }
   };
 
@@ -100,37 +182,72 @@ export async function runTask({ rt, store, recording, models, thresholds = THRES
     turns.push(turn);
     await rt.create('harness.Turn', { id: turn });
     store.put('recorded-tool', turn, step.tool);
-    await rt.dispatch(turn, 'Start', { task: await rt.putContent(i === 0 ? recording.prompt : `continue with step ${i + 1}`), tr: ids.trial, led: ids.ledger });
+    const first = await compose();
+    await level(first.tokens);
+    await rt.dispatch(turn, 'Start', { task: await rt.putContent(first.text), tr: ids.trial, led: ids.ledger });
     for (let m = 0; m < step.model.length; m++) {
       const e = step.model[m];
       await rt.dispatch(turn, 'Metered', { s: e.stop });
-      // the check domain of Grew is 0..2 buckets, so a larger growth is reported as several facts
-      for (let left = e.grew ?? 0; left > 0; left -= 2) await rt.dispatch(ids.context, 'Grew', { by: Math.min(2, left) });
-      messages.push({ role: 'assistant', text: e.calls });
       await pump(async () => { const s = await state(turn); return s.stepped && !(s.plan === 'Unplanned'); }, `${turn} planned`);
+      messages.push({ role: 'assistant', text: e.calls });
       if (e.stop === 'Length' && m + 1 < step.model.length) {
         await rt.dispatch(turn, 'Go', { net: false });
-        await rt.dispatch(turn, 'Reprompt', { note: await rt.putContent('continue') });
+        const again = await compose();
+        await rt.dispatch(turn, 'Reprompt', { note: await rt.putContent(again.text) });
       }
     }
+    if (fusionOpportunity(step.model[step.model.length - 1].calls)) metrics.fusion.opportunities += 1;
     await rt.dispatch(turn, 'Go', { net: step.tool.net === true });
+    if ((await state(turn)).plan === 'Fusable') metrics.fusion.fired += 1;
     await pump(async () => (await state(turn)).mode === 'Observing' && (await state(turn)).scanned, `${turn} scanned`);
     await rt.dispatch(turn, 'StoreLog', {});
     await pump(async () => ['Done', 'Failed'].includes((await state(turn)).mode), `${turn} stored`);
     const archived = store.read('archive', turn);
-    messages.push({ role: 'tool', text: Buffer.from(archived.log, 'base64').toString('utf8') });
+    const logText = Buffer.from(archived.log, 'base64').toString('utf8');
+    const logBytes = Buffer.byteLength(logText, 'utf8');
+    if (archived.redacted) metrics.reducer.flagged += 1;
+    let shown = logText;
 
-    // a log over the threshold is read by the cheaper model, and the receipt is shown only if the verifier passed it
-    if (Buffer.from(archived.log, 'base64').length >= thresholds.logBytes) {
-      const receipt = `receipt:${task}:${i}`;
-      receipts.push(receipt);
-      await rt.create('harness.Receipt', { id: receipt });
-      store.put('archive', receipt, archived);
-      await rt.dispatch(receipt, 'Open', { log: await rt.putContent(Buffer.from(archived.log, 'base64').toString('utf8')), flagged: archived.redacted === true });
-      await pump(async () => ['Verified', 'Rejected'].includes((await state(receipt)).st), `${receipt} decided`);
-      await rt.dispatch(receipt, 'Show', {});
-      await pump(async () => (await state(receipt)).presented, `${receipt} shown`);
+    // the Evidence-Preserving Reducer: a log over the threshold is read by the cheaper model, and only a verified receipt is shown
+    if (step.tool.log !== false && logBytes >= thresholds.logBytes) {
+      metrics.reducer.opportunities += 1;
+      if (mechanisms.reducer) {
+        const receipt = `receipt:${task}:${i}`;
+        receipts.push(receipt);
+        metrics.reducer.receipts += 1;
+        const flagged = archived.redacted === true;
+        const mine = flagged ? null : recording.receipts[reads++];
+        await rt.create('harness.Receipt', { id: receipt });
+        store.put('archive', receipt, archived);
+        await rt.dispatch(receipt, 'Open', { log: await rt.putContent(logText), flagged });
+        await pump(async () => ['Verified', 'Rejected'].includes((await state(receipt)).st), `${receipt} decided`);
+        const verdict = (await state(receipt)).st;
+        if (verdict === 'Verified') metrics.reducer.verified += 1;
+        else metrics.reducer.rejected += 1;
+        await rt.dispatch(receipt, 'Show', {});
+        await pump(async () => (await state(receipt)).presented, `${receipt} shown`);
+        if (store.read('shown', receipt).what === 'receipt') shown = receiptView(mine, logBytes);
+      }
     }
+    // ObservationPack: an output over the threshold is archived, sent in full for two requests and then shown as its handle
+    const message = { role: 'tool', text: shown };
+    if (Buffer.byteLength(shown, 'utf8') > thresholds.handleBytes) {
+      metrics.pack.opportunities += 1;
+      if (mechanisms.pack) {
+        const obs = `obs:${task}:${i}`;
+        const arch = `archive:${task}:${i}`;
+        const handleId = archive.put(Buffer.from(shown, 'utf8'));
+        await rt.create('harness.Archive', { id: arch });
+        await rt.create('harness.Observation', { id: obs });
+        await rt.dispatch(obs, 'Wire', { a: arch });
+        await rt.dispatch(obs, 'Put', {});
+        await pump(async () => (await state(obs)).st === 'Full', `${obs} stored`);
+        metrics.pack.observations += 1;
+        Object.assign(message, { obs: true, full: shown, handle: handleText(handleId, shown, thresholds.excerptBytes), handleId, shown });
+        live.push({ id: obs, message, fullSends: 0 });
+      }
+    }
+    messages.push(message);
 
     await pump(async () => (await state(ids.context)).finished || ['Failing', 'Stopped'].includes((await state(ids.trial)).mode), `${ids.context} finished`);
     if (step.cap) {
@@ -140,15 +257,25 @@ export async function runTask({ rt, store, recording, models, thresholds = THRES
       await pump(async () => (await state(ids.trial)).mode === 'Stopped', 'the trial stopped');
       break;
     }
-    store.put('transcript', ids.context, { messages, keepLast: 2 });
-    const gate = step.gate ?? { saving: 0, rewrite: 1 };
-    await rt.dispatch(ids.context, 'Measured', { saving: gate.saving, rewrite: gate.rewrite, context: await rt.putContent(messages.map((x) => x.text).join('\n')) });
-    await pump(async () => (await state(ids.context)).mode !== 'Compacting', `${ids.context} compaction settled`);
-    adopt();
+    await level(tokensOf(plainText()));
+    if (mechanisms.compaction) {
+      const ctxNow = await state(ids.context);
+      if (ctxNow.finished && ctxNow.ctx > 2) metrics.compaction.opportunities += 1;
+      publish();
+      const nums = measuredNumbers(recording.steps.length - i - 1);
+      await rt.dispatch(ids.context, 'Measured', { saving: nums.saving, rewrite: nums.rewrite, context: await rt.putContent(plainText()) });
+      await pump(async () => (await state(ids.context)).mode !== 'Compacting', `${ids.context} compaction settled`);
+      const before = compactions.length;
+      adopt();
+      if (compactions.length > before) metrics.compaction.chosen += 1;
+    }
     if ((await state(ids.context)).ctx >= 5) {
-      await rt.dispatch(ids.context, 'Overflowed', { context: await rt.putContent(messages.map((x) => x.text).join('\n')) });
+      publish();
+      await rt.dispatch(ids.context, 'Overflowed', { context: await rt.putContent(plainText()) });
       await pump(async () => (await state(ids.context)).mode !== 'Compacting', `${ids.context} overflow settled`);
       adopt();
+      metrics.compaction.forced += 1;
+      await level(tokensOf(plainText()));
       if ((await state(ids.context)).ctx >= 5) {
         await rt.dispatch(ids.context, 'Overflowed', { context: await rt.putContent('over the limit') });
         await pump(async () => (await state(ids.trial)).mode === 'Stopped', 'the trial ended on overflow');
@@ -157,12 +284,14 @@ export async function runTask({ rt, store, recording, models, thresholds = THRES
     }
     await pump(async () => (await state(ids.trial)).mode === 'Checking', 'the trial is checking');
     await rt.dispatch(ids.trial, 'NextStep', {});
-    const t = await state(ids.trial);
-    if (t.mode === 'Done') {
-      await pump(async () => false || true, 'done');
-      break;
-    }
+    if ((await state(ids.trial)).mode === 'Done') break;
   }
   await rt.advance(8);
-  return { ids, trial: await state(ids.trial), context: await state(ids.context), turns, receipts, compactions: compactions.map(({ before, after, released }) => ({ before, after, released })) };
+  for (const o of live) metrics.pack.fullSends.push(o.fullSends);
+  for (const o of live) if ((await state(o.id)).st === 'Handled') metrics.pack.handled += 1;
+  return {
+    ids, trial: await state(ids.trial), context: await state(ids.context), turns, receipts,
+    compactions: compactions.map(({ before, after, released }) => ({ before, after, released })),
+    metrics, requests, live: live.map((o) => ({ id: o.id, handle: o.message.handleId, fullSends: o.fullSends })), archive, transcript: messages,
+  };
 }

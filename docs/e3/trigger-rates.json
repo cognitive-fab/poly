@@ -1,0 +1,273 @@
+{
+  "fusion": {
+    "total": [
+      21,
+      22
+    ],
+    "perTrajectory": {
+      "t01-fix-tests": [
+        2,
+        2
+      ],
+      "t02-fix-build": [
+        2,
+        2
+      ],
+      "t03-read-big-file": [
+        2,
+        2
+      ],
+      "t04-big-build-log": [
+        2,
+        2
+      ],
+      "t05-rejected-receipt": [
+        2,
+        2
+      ],
+      "t06-secret-log": [
+        2,
+        2
+      ],
+      "t07-cutoff": [
+        2,
+        2
+      ],
+      "t08-long-session": [
+        4,
+        4
+      ],
+      "t09-inspect-only": [
+        0,
+        0
+      ],
+      "t10-mixed": [
+        2,
+        2
+      ],
+      "t11-no-runner": [
+        1,
+        2
+      ],
+      "t12-many-reads": [
+        0,
+        0
+      ]
+    }
+  },
+  "compaction": {
+    "total": [
+      6,
+      10
+    ],
+    "forcedAtTheLimit": 3,
+    "perTrajectory": {
+      "t01-fix-tests": [
+        0,
+        0
+      ],
+      "t02-fix-build": [
+        0,
+        0
+      ],
+      "t03-read-big-file": [
+        1,
+        2
+      ],
+      "t04-big-build-log": [
+        1,
+        2
+      ],
+      "t05-rejected-receipt": [
+        0,
+        0
+      ],
+      "t06-secret-log": [
+        0,
+        0
+      ],
+      "t07-cutoff": [
+        0,
+        0
+      ],
+      "t08-long-session": [
+        1,
+        1
+      ],
+      "t09-inspect-only": [
+        0,
+        0
+      ],
+      "t10-mixed": [
+        1,
+        2
+      ],
+      "t11-no-runner": [
+        0,
+        0
+      ],
+      "t12-many-reads": [
+        2,
+        3
+      ]
+    }
+  },
+  "pack": {
+    "total": [
+      6,
+      6
+    ],
+    "handled": 2,
+    "perTrajectory": {
+      "t01-fix-tests": [
+        0,
+        0
+      ],
+      "t02-fix-build": [
+        0,
+        0
+      ],
+      "t03-read-big-file": [
+        1,
+        1
+      ],
+      "t04-big-build-log": [
+        1,
+        1
+      ],
+      "t05-rejected-receipt": [
+        0,
+        0
+      ],
+      "t06-secret-log": [
+        0,
+        0
+      ],
+      "t07-cutoff": [
+        0,
+        0
+      ],
+      "t08-long-session": [
+        0,
+        0
+      ],
+      "t09-inspect-only": [
+        0,
+        0
+      ],
+      "t10-mixed": [
+        1,
+        1
+      ],
+      "t11-no-runner": [
+        0,
+        0
+      ],
+      "t12-many-reads": [
+        3,
+        3
+      ]
+    }
+  },
+  "reducer": {
+    "total": [
+      8,
+      8
+    ],
+    "verified": 6,
+    "perTrajectory": {
+      "t01-fix-tests": [
+        0,
+        0
+      ],
+      "t02-fix-build": [
+        1,
+        1
+      ],
+      "t03-read-big-file": [
+        0,
+        0
+      ],
+      "t04-big-build-log": [
+        1,
+        1
+      ],
+      "t05-rejected-receipt": [
+        1,
+        1
+      ],
+      "t06-secret-log": [
+        1,
+        1
+      ],
+      "t07-cutoff": [
+        0,
+        0
+      ],
+      "t08-long-session": [
+        3,
+        3
+      ],
+      "t09-inspect-only": [
+        0,
+        0
+      ],
+      "t10-mixed": [
+        1,
+        1
+      ],
+      "t11-no-runner": [
+        0,
+        0
+      ],
+      "t12-many-reads": [
+        0,
+        0
+      ]
+    }
+  },
+  "byConfig": {
+    "base": {
+      "reachedEndOfPlan": 11,
+      "endedOnOverflow": 1,
+      "inputTokens": 65117,
+      "outputTokens": 626,
+      "microUsd": 172556
+    },
+    "fusion": {
+      "reachedEndOfPlan": 11,
+      "endedOnOverflow": 1,
+      "inputTokens": 65117,
+      "outputTokens": 626,
+      "microUsd": 172556
+    },
+    "compaction": {
+      "reachedEndOfPlan": 12,
+      "endedOnOverflow": 0,
+      "inputTokens": 68188,
+      "outputTokens": 726,
+      "microUsd": 132237
+    },
+    "pack": {
+      "reachedEndOfPlan": 11,
+      "endedOnOverflow": 1,
+      "inputTokens": 54917,
+      "outputTokens": 601,
+      "microUsd": 156509
+    },
+    "reducer": {
+      "reachedEndOfPlan": 11,
+      "endedOnOverflow": 1,
+      "inputTokens": 56373,
+      "outputTokens": 953,
+      "microUsd": 125673
+    },
+    "all": {
+      "reachedEndOfPlan": 12,
+      "endedOnOverflow": 0,
+      "inputTokens": 57233,
+      "outputTokens": 1028,
+      "microUsd": 92590
+    }
+  }
+}

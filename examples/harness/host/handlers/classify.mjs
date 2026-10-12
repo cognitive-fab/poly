@@ -44,7 +44,9 @@ export async function classify(payload, caps, ctx) {
   const calls = await caps.content.read(payload.calls);
   // the calls are kept for the act effect of the same turn, which reads them by instance (write:store, table calls)
   await caps.store.write('calls', ctx.instanceId, calls);
-  const r = classifyCalls(calls);
+  // the mechanism can be switched off for the base harness of a paired comparison (Q-E3-2): then nothing is fused
+  const cfg = await caps.store.read('mechanisms', 'config');
+  const r = cfg && cfg.fusion === false ? { fusable: false, reason: 'action fusion is switched off' } : classifyCalls(calls);
   if (!r.fusable) throw Object.assign(new Error(`separate: ${r.reason}`), { permanent: true });
   return { ok: true };
 }

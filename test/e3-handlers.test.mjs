@@ -264,7 +264,8 @@ test('S559: an edit then a declared runner is fusable; every other shape stays s
 
 test('S559: the classify handler completes ok for a fusable call and as a permanent failure for the rest', async () => {
   const kept = [];
-  const caps = (text) => ({ content: { read: async () => text }, store: { write: async (t, k, v) => { kept.push([t, k, v]); } } });
+  let mech;
+  const caps = (text) => ({ content: { read: async () => text }, store: { read: async (t, k) => (t === 'mechanisms' ? mech : undefined), write: async (t, k, v) => { kept.push([t, k, v]); } } });
   await classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'npm test' }])), { instanceId: 'turn:t:1' });
   await assert.rejects(classify({ calls: 'c' }, caps(JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'cat x' }])), { instanceId: 'turn:t:2' }), (e) => e.permanent === true);
   assert.deepEqual(kept.map(([t, k]) => [t, k]), [['calls', 'turn:t:1'], ['calls', 'turn:t:2']], 'the calls are kept for the act effect either way');
@@ -358,3 +359,10 @@ test('PT6.5: the handler files pass `poly lint handlers`, which refuses ambient 
 });
 
 void createHash;
+
+test('Q-E3-2: with action fusion switched off the classifier says separate for a call it would otherwise fuse', async () => {
+  const calls = JSON.stringify([{ tool: 'edit' }, { tool: 'bash', command: 'npm test' }]);
+  const caps = (cfg) => ({ content: { read: async () => calls }, store: { read: async (t) => (t === 'mechanisms' ? cfg : undefined), write: async () => {} } });
+  assert.deepEqual(await classify({ calls: 'c' }, caps({ fusion: true }), { instanceId: 'turn:t:1' }), { ok: true });
+  await assert.rejects(classify({ calls: 'c' }, caps({ fusion: false }), { instanceId: 'turn:t:1' }), (e) => e.permanent === true && /switched off/.test(e.message));
+});

@@ -201,8 +201,8 @@ machine Turn {
 
   effect classify(calls: Content) {
     kind "tool.classify"
-    labels { write:store }
-    targets { store: ["calls"] }
+    labels { read:store, write:store }
+    targets { store: ["calls", "mechanisms"] }
     ok -> Fusable()
     failed -> Separate()
   }
@@ -274,6 +274,7 @@ machine Context {
 
   action Wire(tr: Ref<Trial>)
   action Grew(by: 0..2)
+  action Level(to: 0..6)
   action StepFinished()
   action StepReset()
   action Measured(saving: 0..2, rewrite: 0..2, context: Content)
@@ -288,6 +289,13 @@ machine Context {
   on Wire(tr) {
     require trial == none && !(tr == none) else reject "wired"
     trial' = tr
+  }
+
+  // The host's measure of the window before a request, in buckets. A handle in place of a large output shrinks it, which
+  // Grew alone cannot say (E3.5).
+  on Level(to) {
+    require mode is Working else reject "not-working"
+    ctx' = to
   }
 
   on Grew(by) {
