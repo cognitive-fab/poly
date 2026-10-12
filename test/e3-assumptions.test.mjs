@@ -73,7 +73,7 @@ test('the scan verdict is two entries: known secrets and the seven shapes are di
 
 test('the statements the certificate carries: rules per machine, the pairs, the unused audience, and the two lints', () => {
   const all = JSON.parse(readFileSync(join(DIR, 'assumptions.json'), 'utf8')).statements;
-  assert.deepEqual(all.map((s) => s.id), ['rules-proved-per-machine', 'pairs-were-worth-checking', 'audience-unused', 'lint-not-proof', 'recordings-evidence']);
+  assert.deepEqual(all.map((s) => s.id), ['rules-proved-per-machine', 'pairs-were-worth-checking', 'audience-unused', 'lint-not-proof', 'recordings-evidence', 'paper-differences']);
   assert.match(all[0].text, /not proved for the machines together/);
   assert.match(all[2].text, /held by the scan, the redaction and the step property/);
 });

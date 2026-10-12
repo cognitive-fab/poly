@@ -18,11 +18,11 @@
         "microUsd": 171450
       },
       "cheap": {
-        "calls": 2,
-        "preamble": 578,
-        "transcript": 10269,
-        "output": 50,
-        "microUsd": 1106
+        "calls": 3,
+        "preamble": 867,
+        "transcript": 15830,
+        "output": 75,
+        "microUsd": 1701
       }
     },
     "fusion": {
@@ -36,11 +36,11 @@
         "microUsd": 171450
       },
       "cheap": {
-        "calls": 2,
-        "preamble": 578,
-        "transcript": 10269,
-        "output": 50,
-        "microUsd": 1106
+        "calls": 3,
+        "preamble": 867,
+        "transcript": 15830,
+        "output": 75,
+        "microUsd": 1701
       }
     },
     "compaction": {
@@ -49,16 +49,16 @@
       "main": {
         "calls": 34,
         "preamble": 9826,
-        "transcript": 30421,
+        "transcript": 44444,
         "output": 576,
-        "microUsd": 129381
+        "microUsd": 171450
       },
       "cheap": {
-        "calls": 6,
-        "preamble": 1734,
-        "transcript": 26207,
-        "output": 150,
-        "microUsd": 2856
+        "calls": 3,
+        "preamble": 867,
+        "transcript": 15830,
+        "output": 75,
+        "microUsd": 1701
       }
     },
     "pack": {
@@ -72,11 +72,11 @@
         "microUsd": 155838
       },
       "cheap": {
-        "calls": 1,
-        "preamble": 289,
-        "transcript": 5536,
-        "output": 25,
-        "microUsd": 593
+        "calls": 2,
+        "preamble": 578,
+        "transcript": 11097,
+        "output": 50,
+        "microUsd": 1188
       }
     },
     "reducer": {
@@ -90,11 +90,11 @@
         "microUsd": 123717
       },
       "cheap": {
-        "calls": 8,
-        "preamble": 289,
-        "transcript": 17725,
-        "output": 377,
-        "microUsd": 1956
+        "calls": 9,
+        "preamble": 578,
+        "transcript": 23286,
+        "output": 402,
+        "microUsd": 2551
       }
     },
     "all": {
@@ -103,16 +103,16 @@
       "main": {
         "calls": 34,
         "preamble": 9826,
-        "transcript": 17085,
+        "transcript": 23330,
         "output": 576,
-        "microUsd": 89373
+        "microUsd": 108108
       },
       "cheap": {
-        "calls": 11,
-        "preamble": 1156,
-        "transcript": 29166,
-        "output": 452,
-        "microUsd": 3217
+        "calls": 9,
+        "preamble": 578,
+        "transcript": 23286,
+        "output": 402,
+        "microUsd": 2551
       }
     }
   },
@@ -308,17 +308,11 @@
         "main": {
           "calls": 4,
           "preamble": 1156,
-          "transcript": 3191,
+          "transcript": 9165,
           "output": 62,
-          "microUsd": 13971
+          "microUsd": 31893
         },
-        "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 3051,
-          "output": 25,
-          "microUsd": 344
-        }
+        "cheap": null
       },
       "pack": {
         "steps": 4,
@@ -350,17 +344,11 @@
         "main": {
           "calls": 4,
           "preamble": 1156,
-          "transcript": 3191,
+          "transcript": 6447,
           "output": 62,
-          "microUsd": 13971
+          "microUsd": 23739
         },
-        "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 3051,
-          "output": 25,
-          "microUsd": 344
-        }
+        "cheap": null
       }
     },
     "t04-big-build-log": {
@@ -398,13 +386,7 @@
           "output": 39,
           "microUsd": 13029
         },
-        "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 3583,
-          "output": 25,
-          "microUsd": 398
-        }
+        "cheap": null
       },
       "pack": {
         "steps": 2,
@@ -720,17 +702,11 @@
         "main": {
           "calls": 4,
           "preamble": 1156,
-          "transcript": 5269,
+          "transcript": 7842,
           "output": 79,
-          "microUsd": 20460
+          "microUsd": 28179
         },
-        "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 3907,
-          "output": 25,
-          "microUsd": 430
-        }
+        "cheap": null
       },
       "pack": {
         "steps": 4,
@@ -898,16 +874,16 @@
         "main": {
           "calls": 4,
           "preamble": 1156,
-          "transcript": 6473,
+          "transcript": 11949,
           "output": 63,
-          "microUsd": 23832
+          "microUsd": 40260
         },
         "cheap": {
           "calls": 1,
           "preamble": 289,
-          "transcript": 4569,
+          "transcript": 4733,
           "output": 25,
-          "microUsd": 496
+          "microUsd": 513
         }
       },
       "pack": {
@@ -946,16 +922,16 @@
         "main": {
           "calls": 4,
           "preamble": 1156,
-          "transcript": 2995,
+          "transcript": 5984,
           "output": 63,
-          "microUsd": 13398
+          "microUsd": 22365
         },
         "cheap": {
-          "calls": 2,
-          "preamble": 289,
-          "transcript": 4605,
-          "output": 78,
-          "microUsd": 521
+          "calls": 1,
+          "preamble": 0,
+          "transcript": 1776,
+          "output": 53,
+          "microUsd": 199
         }
       }
     },
@@ -1045,11 +1021,11 @@
           "microUsd": 19896
         },
         "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 5536,
-          "output": 25,
-          "microUsd": 593
+          "calls": 2,
+          "preamble": 578,
+          "transcript": 11097,
+          "output": 50,
+          "microUsd": 1188
         }
       },
       "fusion": {
@@ -1063,11 +1039,11 @@
           "microUsd": 19896
         },
         "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 5536,
-          "output": 25,
-          "microUsd": 593
+          "calls": 2,
+          "preamble": 578,
+          "transcript": 11097,
+          "output": 50,
+          "microUsd": 1188
         }
       },
       "compaction": {
@@ -1099,11 +1075,11 @@
           "microUsd": 19896
         },
         "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 5536,
-          "output": 25,
-          "microUsd": 593
+          "calls": 2,
+          "preamble": 578,
+          "transcript": 11097,
+          "output": 50,
+          "microUsd": 1188
         }
       },
       "reducer": {
@@ -1117,11 +1093,11 @@
           "microUsd": 19896
         },
         "cheap": {
-          "calls": 1,
-          "preamble": 289,
-          "transcript": 5536,
-          "output": 25,
-          "microUsd": 593
+          "calls": 2,
+          "preamble": 578,
+          "transcript": 11097,
+          "output": 50,
+          "microUsd": 1188
         }
       },
       "all": {

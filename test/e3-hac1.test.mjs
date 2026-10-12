@@ -8,7 +8,7 @@
 // the module's own (E3.2 writes them and may change a replacement, recording why in decisions-e3.md).
 //
 //   rule    where it lives                 the guard (tagged line, as E3.2 wrote it)                    expected finding
-//   HF3.1   Context.Measured               the pay-gate: finished step, over the floor, under 2 tries   PL3002
+//   HF3.1   Context.Measured               the pay-gate: finished step, over the floor, saving above the rewrite by the margin   PL3002
 //   HF3.2   Receipt.Show                   the receipt is shown only when verified and not flagged       PL3002
 //   HF3.3   Observation.Put                a handle is issued after the archive stores                   PL5401 (configuration pack)
 //   HF3.4   Turn.Go                        fused only when the classifier said Fusable                   PL3002
@@ -73,10 +73,10 @@ test('HAC1 control: the harness module is CLEAN with its policy, and no rule is 
 // [tag, rule, the replacement line, expected code, where the witness is required, file to mutate, verdict (FINDINGS unless a
 // static refusal)]
 const VARIANTS = [
-  ['HF3.1', 'compaction in the middle of a plan step', 'if compactions < 2 && saving > rewrite {', 'PL3002', true, 'program', 'FINDINGS', 'compact-at-step-end-or-limit'],
+  ['HF3.1', 'compaction in the middle of a plan step', 'if compactions < 3 && gain > 2 * (compactions + 1) {', 'PL3002', true, 'program', 'FINDINGS', 'compact-at-step-end-or-limit'],
   // The gate with its counter guard dropped as well: the finding on the compaction rule itself must be there beside the
   // domain escape of the counter (PL3102), and not instead of it (owner, 2026-10-11).
-  ['HF3.1b', 'compaction in the middle of a plan step, with the counter guard dropped too', 'if saving > rewrite {', ['PL3002', 'PL3102'], true, 'program', 'FINDINGS', 'compact-at-step-end-or-limit'],
+  ['HF3.1b', 'compaction in the middle of a plan step, with the margin and the counter guard dropped too', 'if gain > 0 {', ['PL3002', 'PL3102'], true, 'program', 'FINDINGS', 'compact-at-step-end-or-limit'],
   ['HF3.2', 'a receipt the verifier did not pass is shown', 'if st is Verified || st is Rejected {', 'PL3002', true, 'program'],
   ['HF3.3', 'a handle issued before the archive holds the output', 'on Put { require st is Empty else reject "not-empty"  st\' = Full  send arch <- Store(from: self) }', 'PL5401', true, 'program'],
   ['HF3.4', 'a command fused without the classifier word', 'if plan is Fusable || plan is Separate {', 'PL3002', true, 'program'],

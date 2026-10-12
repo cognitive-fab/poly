@@ -60,6 +60,7 @@ export const tokensOf = (text) => Math.ceil(String(text).length / 4);
 
 export const PREAMBLE = `You are a coding agent working in a copy of a repository. Tools: edit(path, new), bash(command). ${'The tool schemas are part of every request. '.repeat(24)}`;
 const KEEP_LAST = 2;
+const SUMMARY_TOKENS = 250;
 
 /** A provider that answers from a queue of recorded texts, in order, with the usage its question implies (input from what it was shown). */
 function queueProvider(name, texts, materialOf, preamble, calls) {
@@ -97,9 +98,9 @@ function receiptView(receiptJson, logBytes) {
 
 /**
  * @param {{ rt: object, host: ReturnType<typeof import('./transports.mjs').makeHost>, recording: object, models: { main: string, cheap: string },
- *   mechanisms?: object, thresholds?: object, windowTokens?: number, preamble?: string }} input
+ *   mechanisms?: object, thresholds?: object, windowTokens?: number, preamble?: string, cacheRatio?: number }} input
  */
-export async function runTask({ rt, host, recording, models, mechanisms = ALL_ON, thresholds = THRESHOLDS, windowTokens = 6000, preamble = PREAMBLE }) {
+export async function runTask({ rt, host, recording, models, mechanisms = ALL_ON, thresholds = THRESHOLDS, windowTokens = 6000, preamble = PREAMBLE, cacheRatio = 12.5 }) {
   const calls = []; // every model call, in order, with the terms of its cost (HAC6)
   const store = host.store;
   const task = recording.task;
@@ -162,16 +163,32 @@ export async function runTask({ rt, host, recording, models, mechanisms = ALL_ON
     if ((await state(ids.context)).mode === 'Working') await rt.dispatch(ids.context, 'Level', { to: bucketOf(tokens) });
   };
   const plainText = () => messages.map((m) => (m.obs ? (m.shown ?? m.full) : m.text)).join('\n');
-  /** The pay-gate's numbers, in buckets: what a compaction would save over the steps left, and what rewriting the cached prefix costs. */
-  const measuredNumbers = (stepsLeft) => {
+  /**
+   * The pay-gate's measure, as the SoL-Pi paper structures it (section 2.4). The requests still to come are estimated from the
+   * observed rate (the requests per completed step, times the steps left) and capped by the requests that would fill the
+   * window at the observed growth. The saving is what a compaction would not send again, over those requests. The rewrite is
+   * the extra cost of the prompt cache: the summary and the messages after the first dropped one are written again, at the
+   * write price for what would have been read, so the context rewritten times the cache write/read price ratio less one. The
+   * pinned head stays cached. The summary call is not priced (as in the paper). The host reports the ratio of the two in
+   * halves, rounded down, so a borderline case is never compacted.
+   */
+  const gateLog = [];
+  const measuredNumbers = (stepsDone) => {
+    const stepsLeft = recording.steps.length - stepsDone;
+    const tokensNow = tokensOf(plainText());
+    const rps = Math.max(1, requests.length / stepsDone);
+    const growth = requests.length > 1 ? (tokensNow - requests[0].tokens) / (requests.length - 1) : 0;
+    const fill = growth > 0 ? Math.floor((windowTokens - tokensNow) / growth) : Number.POSITIVE_INFINITY;
+    const remaining = Math.max(0, Math.min(Math.round(rps * stepsLeft), fill));
     const cut = messages.length - KEEP_LAST;
-    const dropped = messages.filter((m, i) => !m.pinned && i < cut);
-    const kept = messages.filter((m, i) => m.pinned || i >= cut);
-    const clamp = (n) => Math.max(0, Math.min(2, n));
-    return {
-      saving: clamp(bucketOf((tokensOf(dropped.map(shownText).join('\n')) - 250) * Math.max(1, stepsLeft))),
-      rewrite: clamp(bucketOf((tokensOf(kept.map(shownText).join('\n')) + 250) / 2)),
-    };
+    const dropped = messages.filter((m, k) => !m.pinned && k < cut);
+    const tail = messages.filter((m, k) => !m.pinned && k >= cut);
+    const savingTokens = Math.max(0, tokensOf(dropped.map(shownText).join('\n')) - SUMMARY_TOKENS) * remaining;
+    const rewriteTokens = dropped.length ? (SUMMARY_TOKENS + tokensOf(tail.map(shownText).join('\n'))) * (cacheRatio - 1) : 0;
+    // the ratio of the two, in halves, rounded down: the check domain is one number of 0..8 (Context.Measured)
+    const gain = rewriteTokens > 0 ? Math.max(0, Math.min(8, Math.floor((2 * savingTokens) / rewriteTokens))) : savingTokens > 0 ? 8 : 0;
+    gateLog.push({ step: stepsDone, remaining, savingTokens, rewriteTokens, gain });
+    return { gain };
   };
   const publish = () => store.put('transcript', ids.context, { messages: messages.map((m) => ({ role: m.role, text: m.obs ? m.shown : m.text, pinned: m.pinned })), keepLast: KEEP_LAST });
   const adopt = () => {
@@ -277,8 +294,8 @@ export async function runTask({ rt, host, recording, models, mechanisms = ALL_ON
       const ctxNow = await state(ids.context);
       if (ctxNow.finished && ctxNow.ctx > 2) metrics.compaction.opportunities += 1;
       publish();
-      const nums = measuredNumbers(recording.steps.length - i - 1);
-      await rt.dispatch(ids.context, 'Measured', { saving: nums.saving, rewrite: nums.rewrite, context: await rt.putContent(plainText()) });
+      const nums = measuredNumbers(i + 1);
+      await rt.dispatch(ids.context, 'Measured', { gain: nums.gain, context: await rt.putContent(plainText()) });
       await pump(async () => (await state(ids.context)).mode !== 'Compacting', `${ids.context} compaction settled`);
       const before = compactions.length;
       adopt();
@@ -307,6 +324,6 @@ export async function runTask({ rt, host, recording, models, mechanisms = ALL_ON
   return {
     ids, trial: await state(ids.trial), context: await state(ids.context), turns, receipts,
     compactions: compactions.map(({ before, after, released }) => ({ before, after, released })),
-    metrics, requests, calls, live: live.map((o) => ({ id: o.id, handle: o.message.handleId, fullSends: o.fullSends })), archive, transcript: messages,
+    metrics, requests, calls, gateLog, live: live.map((o) => ({ id: o.id, handle: o.message.handleId, fullSends: o.fullSends })), archive, transcript: messages,
   };
 }

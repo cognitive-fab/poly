@@ -55,15 +55,16 @@ test('HAC5: the journal replays every state of the run, and every model call is 
 });
 
 test('HF2.3, S561, HAC5: a chosen compaction starts at a finished step when it pays, shrinks the transcript and replays', { timeout: 600_000 }, async () => {
-  const t08 = trajectories().find((t) => t.name === 't08-long-session').recording;
-  const { rt, store, result } = await run('e3-loop-compact', t08, { mechanisms: { fusion: false, compaction: true, pack: false, reducer: false } });
+  // the paper's gate pays on t03 (a 12 KiB read dropped after two quiet steps) when the cache write is little dearer than a read
+  const t03 = trajectories().find((t) => t.name === 't03-read-big-file').recording;
+  const { rt, store, result } = await run('e3-loop-compact', t03, { mechanisms: { fusion: false, compaction: true, pack: false, reducer: false }, cacheRatio: 2 });
   try {
     assert.equal(result.trial.mode, 'Done');
     assert.ok(result.metrics.compaction.chosen >= 1, JSON.stringify(result.metrics.compaction));
     assert.ok(result.compactions.length >= result.metrics.compaction.chosen, "every chosen compaction was adopted");
     for (const k of result.compactions) assert.ok(k.after < k.before, "a compaction shrinks the transcript");
     assert.ok(result.transcript.some((m) => m.role === 'summary'));
-    assert.ok((await decisions(rt, 'context:t08')).length >= 1, 'the summary was a decision event');
+    assert.ok((await decisions(rt, 'context:t03')).length >= 1, 'the summary was a decision event');
     for (const r of await replayRuntime(rt)) assert.deepEqual(r.diagnostics.map((d) => d.message), [], r.run);
   } finally {
     await rt.close();

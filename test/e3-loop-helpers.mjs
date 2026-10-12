@@ -3,10 +3,15 @@
 import { randomBytes } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { ROOT } from './helpers.mjs';
 import { admittedHarness, loaded } from './e3-runtime-helpers.mjs';
 import { makeHost } from '../examples/harness/host/transports.mjs';
 import { runTask } from '../examples/harness/host/loop.mjs';
 import { hashOf } from '../examples/harness/host/handlers/verify.mjs';
+
+/** The cache write/read price ratio of the main tier's price table: what the pay-gate prices a cache rewrite with (SoL-Pi, 2.4). */
+const MAIN_PRICES = JSON.parse(readFileSync(join(ROOT, 'examples', 'harness', 'prices', 'main.json'), 'utf8')).perMillionTokens;
+export const CACHE_RATIO = MAIN_PRICES.cache_write / MAIN_PRICES.cache_read;
 
 export const MODELS = { main: 'main-tier-placeholder', cheap: 'cheap-tier-placeholder' };
 const edit = { tool: 'edit', path: 'src/a.ts' };
@@ -43,12 +48,12 @@ let shared = null;
 /** One admission of the unedited module, shared by the tests that need no variant (admission is most of a run's time). */
 export const sharedBuild = () => (shared ??= admittedHarness(`e3-shared-${process.pid}`));
 
-export async function run(name, rec = recording(), { edit: editProgram, secrets = [], mechanisms, windowTokens, preamble } = {}) {
+export async function run(name, rec = recording(), { edit: editProgram, secrets = [], mechanisms, windowTokens, preamble, cacheRatio = CACHE_RATIO } = {}) {
   const a = editProgram ? await admittedHarness(name, { edit: editProgram }) : await sharedBuild();
   const host = makeHost({ known: secrets });
   const { rt } = await loaded(a, { transports: host.transports });
   const store = host.store;
-  const result = await runTask({ rt, host, recording: rec, models: MODELS, ...(mechanisms ? { mechanisms } : {}), ...(windowTokens ? { windowTokens } : {}), ...(preamble ? { preamble } : {}) });
+  const result = await runTask({ rt, host, recording: rec, models: MODELS, ...(mechanisms ? { mechanisms } : {}), ...(windowTokens ? { windowTokens } : {}), ...(preamble ? { preamble } : {}), cacheRatio });
   return { rt, store, host, result, a };
 }
 

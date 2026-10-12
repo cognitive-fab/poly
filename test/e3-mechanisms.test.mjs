@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT } from './helpers.mjs';
-import { CONFIGS, matrix } from './e3-matrix-helpers.mjs';
+import { CONFIGS, matrix, sensitivity } from './e3-matrix-helpers.mjs';
 
 const TABLE = join(ROOT, 'docs', 'e3', 'trigger-rates.json');
 const FUSED = new Set(['fuse', 'build', 'leak']);
@@ -44,29 +44,39 @@ test('HAC2, Action Fusion (HF2.2): an edit then a declared runner is fused, a co
   }
 });
 
-test('HAC2, Online Context Compact (HF2.3, HF3.8): a compaction is chosen only at a finished step where it pays, and one is tried at the limit before the trial may end', { timeout: 1_800_000 }, async () => {
+test('HAC2, Online Context Compact (HF2.3, HF3.8): a compaction is chosen only at a finished step where the saving beats the rewrite by the margin of its turn, and one is tried at the limit before the trial may end', { timeout: 1_800_000 }, async () => {
   const m = await matrix();
+  const s = await sensitivity(2);
   let chosen = 0;
   let declined = 0;
+  // the paper's gate (SoL-Pi 2.4): the saving must exceed the rewrite, and by more for each later compaction
+  const rule = (g) => g.pre.finished && g.pre.ctx > 2 && g.pre.compactions < 3 && g.data.gain > 2 * (g.pre.compactions + 1);
+  const check = (label, gate) => {
+    for (const g of gate) {
+      const pays = rule(g);
+      assert.equal(g.post.compactions - g.pre.compactions, pays ? 1 : 0, `${label}: the gate ${JSON.stringify({ pre: g.pre.ctx, ...g.data })}`);
+      if (pays) chosen += 1;
+      else declined += 1;
+    }
+  };
   for (const [n, { runs }] of Object.entries(m)) {
     for (const [cfg, r] of Object.entries(runs)) {
-      for (const g of r.gate) {
-        const pays = g.pre.finished && g.pre.ctx > 2 && g.pre.compactions < 2 && g.data.saving > g.data.rewrite;
-        assert.equal(g.post.compactions - g.pre.compactions, pays ? 1 : 0, `${n}/${cfg}: the gate ${JSON.stringify({ pre: g.pre.ctx, ...g.data })}`);
-        if (pays) chosen += 1;
-        else declined += 1;
-      }
+      check(`${n}/${cfg}`, r.gate);
       if (!CONFIGS[cfg].compaction) assert.equal(r.gate.length, 0, `${n}/${cfg}: the pay-gate is off, so it takes no measure`);
     }
   }
-  assert.ok(chosen >= 4 && declined >= 4, `chosen ${chosen}, declined ${declined}: both outcomes occur over the corpus`);
-  // at the limit: the many-reads task fills the window; the base harness tries one compaction, and ends the trial on overflow with the reason
-  const base = m['t12-many-reads'].runs.base;
-  assert.deepEqual([base.mode, base.why, base.context.attempts], ['Stopped', 'Overflow', 1]);
-  assert.ok(base.metrics.compaction.forced >= 1);
-  // with the pay-gate on, the same task is compacted at its finished steps and reaches the end of its plan
-  assert.equal(m['t12-many-reads'].runs.compaction.mode, 'Done');
-  assert.ok(m['t12-many-reads'].runs.compaction.metrics.compaction.chosen >= 1);
+  const atTable = chosen;
+  for (const [n, r] of Object.entries(s)) check(`${n}/ratio 2`, r.gate);
+  assert.ok(declined >= 10, `declined ${declined}`);
+  assert.ok(chosen - atTable >= 1, 'at a cache ratio of 2 the gate pays at least once over the corpus (t03)');
+  // the gate is the paper's, so a later compaction needs a larger margin: the same numbers pay the first time and not the second
+  assert.ok(s['t03-read-big-file'].gate.some((g) => rule(g) && g.pre.compactions === 0));
+  // at the limit, whatever the gate says: the many-reads task fills the window twice, and each time one compaction is tried first
+  for (const cfg of Object.keys(CONFIGS)) {
+    const r = m['t12-many-reads'].runs[cfg];
+    assert.equal(r.metrics.compaction.forced, 2, `t12/${cfg}: compactions forced at the limit`);
+    assert.deepEqual([r.mode, r.context.attempts], ['Done', 0], `t12/${cfg}: each success clears the attempt, so the second overflow is owed its own`);
+  }
 });
 
 test('HAC2, ObservationPack (HF2.4, HF3.3): an output over 10 KiB is archived, sent in full for exactly two requests, then shown as a handle that resolves', { timeout: 1_800_000 }, async () => {
@@ -120,15 +130,16 @@ test('HAC2, the Evidence-Preserving Reducer (HF2.5, HF3.2): a log from 4 KiB is 
   }
 });
 
-test('t12-many-reads, a reported finding: ObservationPack alone does not rescue a window filled before any output has had its third request; compaction does', { timeout: 1_800_000 }, async () => {
+test('t12-many-reads, a reported finding: ObservationPack alone makes no handle in time; the compaction at the limit carries the task, in every configuration', { timeout: 1_800_000 }, async () => {
   const { runs } = (await matrix())['t12-many-reads'];
-  assert.deepEqual([runs.pack.mode, runs.pack.why, runs.pack.metrics.pack.observations, runs.pack.metrics.pack.handled], ['Stopped', 'Overflow', 3, 0], 'pack alone: three observations, none handled yet, the window overflows');
-  assert.deepEqual([runs.compaction.mode, runs.base.mode, runs.base.why], ['Done', 'Stopped', 'Overflow']);
-  assert.deepEqual([runs.all.mode, runs.all.metrics.pack.observations], ['Done', 3]);
+  assert.deepEqual([runs.pack.metrics.pack.observations, runs.pack.metrics.pack.handled], [3, 0], 'pack alone: three observations, none has had its third request yet');
+  for (const cfg of Object.keys(CONFIGS)) assert.deepEqual([runs[cfg].mode, runs[cfg].metrics.compaction.forced], ['Done', 2], cfg);
+  assert.equal(runs.compaction.metrics.compaction.chosen, 0, 'the pay-gate, with the cache ratio of the price table, chooses none');
 });
 
 test('HAC2: the trigger rates, printed, and held in docs/e3/trigger-rates.json', { timeout: 1_800_000 }, async () => {
   const m = await matrix();
+  const s = await sensitivity(2);
   const sum = (f) => Object.values(m).reduce((a, { runs }) => [a[0] + f(runs)[0], a[1] + f(runs)[1]], [0, 0]);
   const per = (cfg, f) => Object.fromEntries(Object.entries(m).map(([n, { runs }]) => [n, f(runs[cfg])]));
   const rates = {
@@ -163,7 +174,8 @@ test('HAC2: the trigger rates, printed, and held in docs/e3/trigger-rates.json',
     scope: 'the token and cost figures hold for recordings only; the saving of Action Fusion cannot show on recordings and is measured at the live run',
     expectations: 'the HF2.2 to HF2.5 definitions of the proposal; the trigger rate and intensity are those of SoL-Pi (section 3.4); the thresholds of the paper itself were re-checked on 2026-10-11 (decisions-e3.md)',
   };
-  rates.findings = ['t12-many-reads: ObservationPack alone does not rescue a window filled before the third request; compaction does'];
+  rates.findings = ['t12-many-reads: ObservationPack alone makes no handle in time for a window filled before the third request (three observations, none handled); the compaction at the limit carries the task, in the base too, since a successful compaction clears the attempt. An earlier reading, in which the base ended on overflow and the pay-gate rescued it, came from a defect (the attempt was never cleared) and is withdrawn.'];
+  rates.compaction.atCacheRatio2 = { total: [Object.values(s).reduce((x, r) => x + r.metrics.compaction.chosen, 0), Object.values(s).reduce((x, r) => x + r.metrics.compaction.opportunities, 0)], perTrajectory: Object.fromEntries(Object.entries(s).map(([n, r]) => [n, [r.metrics.compaction.chosen, r.metrics.compaction.opportunities]])), note: 'the same corpus, compaction alone, with the cache write/read price ratio at 2 instead of the 12.5 of the price table: the gate pays where the saving beats the rewrite' };
   const line = (label, [f, o]) => `${label}: ${f} of ${o} (${o ? Math.round((100 * f) / o) : 0}%)`;
   console.log(['', 'HAC2 trigger rates over 12 recorded trajectories:', line('  Action Fusion        ', rates.fusion.total), line('  Online Context Compact', rates.compaction.total), line('  ObservationPack      ', rates.pack.total), line('  Evidence-Preserving Reducer', rates.reducer.total), JSON.stringify(rates.byConfig, null, 1)].join('\n'));
   for (const [, v] of Object.entries(rates.byConfig)) assert.ok(v.inputTokens > 0);

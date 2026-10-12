@@ -13,7 +13,7 @@
     },
     {
       "id": "token-buckets",
-      "assumption": "Grew(by), Measured(saving, rewrite) and the limit are the host's token counts, bucketed by the stated unit (a bucket is a sixth of the window, S551).",
+      "assumption": "Level(to), Grew(by), Overflowed and Measured(gain) are the host's token counts. The window is read in sixths (Level, Overflowed, limit 5). The pay-gate's measure is one number, gain, 0 to 8: the ratio, in halves and rounded down, of the saving to the rewrite. The saving is the input not sent again over the requests still to come, estimated from the observed rate and capped by the requests that would fill the window; the rewrite is the context rewritten times the cache write/read price ratio of the main tier's price table, less one (S551, SoL-Pi 2.4). The machine decides on it: a gain above twice (compactions + 1).",
       "actions": [
         "Grew",
         "Measured",
@@ -134,7 +134,11 @@
     },
     {
       "id": "recordings-evidence",
-      "text": "The measured results of the recorded runs (the trigger rates, the token and cost figures) are recordings evidence, and wherever they appear (the README, this certificate, the E3 report) they carry three labels. (1) They come from a synthetic corpus of 12 trajectories, with tokens estimated at four characters each. (2) A run that \"reached the end of the plan\" did not \"solve the task\": the model, the tools and the stage checks are recorded. (3) The figures of 12% fewer input tokens and 46% less cost hold for recordings only, and the saving of Action Fusion cannot show on recordings and is measured at the live run. The expectations for each mechanism are the HF2.2 to HF2.5 definitions of the proposal, checked against the SoL-Pi paper (docs/research) on 2026-10-11 with the differences listed in decisions-e3.md."
+      "text": "The measured results of the recorded runs (the trigger rates, the token and cost figures) are recordings evidence, and wherever they appear (the README, this certificate, the E3 report) they carry three labels. (1) They come from a synthetic corpus of 12 trajectories, with tokens estimated at four characters each. (2) A run that \"reached the end of the plan\" did not \"solve the task\": the model, the tools and the stage checks are recorded. (3) The figures of 20% fewer input tokens and 36% less cost (all four mechanisms against none, over the corpus) hold for recordings only, and the saving of Action Fusion cannot show on recordings and is measured at the live run. The expectations for each mechanism are the HF2.2 to HF2.5 definitions of the proposal, checked against the SoL-Pi paper (docs/research) on 2026-10-11 with the differences listed in decisions-e3.md."
+    },
+    {
+      "id": "paper-differences",
+      "text": "The pay-gate has the structure of the SoL-Pi paper (the requests to come from the observed rate, the cache rewrite from the write/read price ratio, a larger margin for each later compaction). Where it differs, by this harness's choice: the machine takes one measured number, the saving to rewrite ratio in halves, where the paper compares two (two numbers of 0..12 made the check of Context take six minutes and 2.5 GB, and of 0..6 four minutes; one of 0..8 takes seconds, see decisions-e3.md); the margin is multiplicative (a saving above the rewrite times the number of compactions so far plus one) where the paper accounts the rewrite costs not yet recovered; the summary is estimated at 250 tokens; the cache ratio is the placeholder price table's (12.5), to be read from the vendor's page at E3.9; the Reducer reads the logs of the declared runners, where the paper's own set of commands is not in the text read; the handle excerpt is 512 bytes of complete lines each side where the paper says about 1 KB. At the table's ratio the gate chooses no compaction over the corpus (the corpus is short); at a ratio of 2 it chooses one, on t03."
     }
   ]
 }

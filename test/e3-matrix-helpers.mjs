@@ -91,3 +91,26 @@ export function matrix() {
   })();
   return cache;
 }
+
+let sens = null;
+/**
+ * The pay-gate's sensitivity to the cache write/read price ratio, which the gate takes from the price table (12.5 for the
+ * placeholder tables). The compaction mechanism alone, on every trajectory, at a ratio of 2 (a provider whose cache write is
+ * little dearer than a read): the corpus is short, so at the table's ratio the gate rarely pays, and this shows it paying
+ * where the paper's structure says it should.
+ */
+export function sensitivity(cacheRatio = 2) {
+  sens ??= (async () => {
+    const out = {};
+    for (const t of trajectories()) {
+      const { rt, result } = await run(`e3-sens-${t.name}`, structuredClone(t.recording), { mechanisms: CONFIGS.compaction, cacheRatio });
+      try {
+        out[t.name] = { mode: result.trial.mode, metrics: result.metrics, gate: await gateRows(rt, result.ids.context), gateLog: result.gateLog, compactions: result.compactions, context: result.context };
+      } finally {
+        await rt.close();
+      }
+    }
+    return out;
+  })();
+  return sens;
+}

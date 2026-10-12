@@ -264,7 +264,7 @@ machine Context {
     finished    : bool    = false
     skipped     : bool    = false
     attempts    : 0..1    = 0
-    compactions : 0..2    = 0
+    compactions : 0..3    = 0
     begun       : bool    = false
     summarised  : bool    = false
     trial       : Ref<Trial> = none
@@ -277,7 +277,7 @@ machine Context {
   action Level(to: 0..6)
   action StepFinished()
   action StepReset()
-  action Measured(saving: 0..2, rewrite: 0..2, context: Content)
+  action Measured(gain: 0..8, context: Content)
   action Overflowed(context: Content)
   action Begun()
   action Summarised(text: Content, conf: Conf, margin: Conf)
@@ -318,10 +318,16 @@ machine Context {
     skipped' = false
   }
 
-  // HF3.1: the pay-gate reads measured numbers, and a compaction starts only at a finished step and only when it pays.
-  on Measured(saving, rewrite, context) {
+  // HF3.1: the pay-gate reads a measured number, and a compaction starts only at a finished step and only when it pays. The
+  // structure is the SoL-Pi paper's (section 2.4): the saving is the projected input saving over the requests still to come,
+  // estimated from the observed rate; the rewrite is the extra cost of rewriting the prompt cache, from the context size and
+  // the cache write/read price ratio; each later compaction needs a larger margin. The host measures both and reports their
+  // ratio, gain, in halves (0 to 8; 8 is eight halves or more, or a saving with nothing to rewrite), rounded down. The gate
+  // asks for a saving above (compactions + 1) times the rewrite, that is a gain above twice that. The two numbers were first
+  // two parameters of 0..12: the check of Context then took six minutes and 2.5 GB, against seconds (decisions-e3.md).
+  on Measured(gain, context) {
     require mode is Working else reject "not-working"
-    if finished && ctx > 2 && compactions < 2 && saving > rewrite {  // @HF3.1
+    if finished && ctx > 2 && compactions < 3 && gain > 2 * (compactions + 1) {  // @HF3.1
       compactions' = compactions + 1
       mode' = Compacting
       begun' = false
@@ -364,9 +370,13 @@ machine Context {
   }
 
   // S561: a compaction shrinks the window, to the summary's size (two buckets here).
+  // A compaction that succeeded clears the attempt: a later overflow is a new one, and is owed its own attempt (HF3.8). Found
+  // when the gate followed the paper: the second overflow of a long task ended the trial at once, since the one attempt of the
+  // first had been spent for good.
   on Compacted {
     require mode is Compacting && summarised else reject "not-compacting"
     ctx' = 2
+    attempts' = 0
     mode' = Working
   }
 

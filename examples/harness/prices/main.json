@@ -5,7 +5,9 @@
   "currency": "usd",
   "perMillionTokens": {
     "input": 3000000,
-    "output": 15000000
+    "output": 15000000,
+    "cache_write": 3750000,
+    "cache_read": 300000
   },
   "source": "https://example.com/pricing",
   "readOn": "2026-10-11"

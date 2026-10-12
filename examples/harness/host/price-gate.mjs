@@ -21,6 +21,8 @@ export function refusalsOf(table, today = new Date()) {
   if (typeof table?.currency !== 'string' || !/^[a-z]{3}$/.test(table.currency)) why.push('no currency');
   const p = table?.perMillionTokens;
   if (!p || !Number.isInteger(p.input) || p.input <= 0 || !Number.isInteger(p.output) || p.output <= 0) why.push('input and output prices are not positive integers of micro-units');
+  // the pay-gate prices a cache rewrite from the write/read ratio (SoL-Pi 2.4), so both cache classes are read from the vendor's page
+  else if (!Number.isInteger(p.cache_write) || p.cache_write <= 0 || !Number.isInteger(p.cache_read) || p.cache_read <= 0 || p.cache_write < p.cache_read) why.push('cache_write and cache_read are not positive integers of micro-units with the write at least the read');
   let host = null;
   try {
     const u = new URL(String(table?.source));

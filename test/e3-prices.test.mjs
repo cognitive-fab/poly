@@ -15,7 +15,7 @@ const GOOD = {
   provider: 'main',
   model: 'a-vendor-model',
   currency: 'usd',
-  perMillionTokens: { input: 3000000, output: 15000000 },
+  perMillionTokens: { input: 3000000, output: 15000000, cache_write: 3750000, cache_read: 300000 },
   source: 'https://vendor.test-pricing.com/pricing',
   readOn: '2026-10-09',
 };
@@ -38,6 +38,9 @@ test('Q-E3-5: a table with a source that is not an https page, no date, a stale 
   assert.ok(refusalsOf({ ...GOOD, readOn: '2026-05-01' }, TODAY).some((w) => /days old/.test(w)));
   assert.ok(refusalsOf({ ...GOOD, model: 'main-tier-placeholder' }, TODAY).some((w) => /placeholder/.test(w)));
   assert.ok(refusalsOf({ ...GOOD, perMillionTokens: { input: 0, output: 1 } }, TODAY).some((w) => /positive integers/.test(w)));
+  const { cache_write, cache_read, ...noCache } = GOOD.perMillionTokens;
+  assert.ok(refusalsOf({ ...GOOD, perMillionTokens: noCache }, TODAY).some((w) => /cache_write and cache_read/.test(w)), 'the pay-gate needs the cache prices');
+  assert.ok(refusalsOf({ ...GOOD, perMillionTokens: { ...noCache, cache_write: 100, cache_read: 300000 } }, TODAY).some((w) => /write at least the read/.test(w)));
 });
 
 test('Q-E3-5: a directory passes only when every table passes, and an empty one is refused', () => {
