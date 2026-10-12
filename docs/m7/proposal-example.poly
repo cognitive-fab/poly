@@ -1,0 +1,88 @@
+// Proposed by poly propose from 16 instances of git-push (PS21). Every effect is declared with the label exec and no class: a person declares each consequence (S503).
+module git_push
+
+enum Phase { Idle, AwaitingNpmTest, AwaitingGitAdd, AwaitingGitCommit, AwaitingGitPush, Done, Blocked }
+
+machine Run {
+  state {
+    phase : Phase = Idle
+  }
+  terminal phase in { Done, Blocked }
+
+  action Start()
+  action NpmTestDone()
+  action NpmTestFailed()
+  action GitAddDone()
+  action GitAddFailed()
+  action GitCommitDone()
+  action GitCommitFailed()
+  action GitPushDone()
+  action GitPushFailed()
+
+  on Start {
+    require phase == Idle else reject "not-awaiting"
+    phase' = AwaitingNpmTest
+    emit npm_test()
+  }
+  on NpmTestDone {
+    require phase == AwaitingNpmTest else reject "not-awaiting"
+    phase' = AwaitingGitAdd
+    emit git_add()
+  }
+  on NpmTestFailed {
+    require phase == AwaitingNpmTest else reject "not-awaiting"
+    phase' = Blocked
+  }
+  on GitAddDone {
+    require phase == AwaitingGitAdd else reject "not-awaiting"
+    phase' = AwaitingGitCommit
+    emit git_commit()
+  }
+  on GitAddFailed {
+    require phase == AwaitingGitAdd else reject "not-awaiting"
+    phase' = Blocked
+  }
+  on GitCommitDone {
+    require phase == AwaitingGitCommit else reject "not-awaiting"
+    phase' = AwaitingGitPush
+    emit git_push()
+  }
+  on GitCommitFailed {
+    require phase == AwaitingGitCommit else reject "not-awaiting"
+    phase' = Blocked
+  }
+  on GitPushDone {
+    require phase == AwaitingGitPush else reject "not-awaiting"
+    phase' = Done
+  }
+  on GitPushFailed {
+    require phase == AwaitingGitPush else reject "not-awaiting"
+    phase' = Blocked
+  }
+
+  // proposed: git-push-implies-a-prior-git-add
+  path property git-push-implies-a-prior-git-add: before("git-add", "git-push")
+  // proposed: git-push-implies-a-prior-git-commit
+  path property git-push-implies-a-prior-git-commit: before("git-commit", "git-push")
+  // proposed: at-most-one-git-push-per-run
+  path property at-most-one-git-push-per-run: count("git-push") <= 1
+  // proposed: no-git-push-without-a-passing-verify
+  path property no-git-push-without-a-passing-verify: before("npm-test", "git-push")
+
+  effect npm_test() {
+    kind "npm-test"
+    labels { exec }
+  }
+  effect git_add() {
+    kind "git-add"
+    labels { exec }
+  }
+  effect git_commit() {
+    kind "git-commit"
+    labels { exec }
+  }
+  effect git_push() {
+    kind "git-push"
+    labels { exec }
+  }
+}

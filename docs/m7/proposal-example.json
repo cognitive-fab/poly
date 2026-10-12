@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "kind": "poly.proposal",
+  "name": "git-push",
+  "steps": ["npm-test", "git-add", "git-commit", "git-push"],
+  "rules": [
+    { "name": "git-push-implies-a-prior-git-add", "pattern": "implies-a-prior", "support": { "holds": 16, "of": 16 }, "window": "run", "provenance": "own" },
+    { "name": "git-push-implies-a-prior-git-commit", "pattern": "implies-a-prior", "support": { "holds": 16, "of": 16 }, "window": "run", "provenance": "own" },
+    { "name": "at-most-one-git-push-per-run", "pattern": "at-most-one-per-run", "support": { "holds": 14, "of": 15 }, "window": "run", "provenance": "own" },
+    { "name": "no-git-push-without-a-passing-verify", "pattern": "no-without-a-prior-verify", "support": { "holds": 14, "of": 16 }, "window": "session", "provenance": "own" }
+  ],
+  "notTranslatable": [
+    { "name": "exactly-one-git-add-per-git-push-run", "pattern": "exactly-one-when-started", "reason": "exactly-one-when-started is not a prefix-closed form (PS5.4)" },
+    { "name": "exactly-one-git-commit-per-git-push-run", "pattern": "exactly-one-when-started", "reason": "exactly-one-when-started is not a prefix-closed form (PS5.4)" }
+  ],
+  "thresholds": { "minInstances": 5, "ownSupport": 0.6 },
+  "tool": { "name": "polyness", "version": "<the pinned version>", "pin": "<sha256 of the canonical JSON of the pin>" },
+  "corpus": { "kind": "recorded or synthetic", "sessions": 15 }
+}
