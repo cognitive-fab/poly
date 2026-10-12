@@ -138,11 +138,16 @@ export interface WorkerOptions {
   sweep?: () => Promise<void>;
   /** S180: the completion's data, marked when a Content in it names no body in the content store. */
   markContent?: (instanceId: string, action: string, data: Record<string, unknown>) => Record<string, unknown>;
+  /** PS18.7 (M7.5): the cap of a re-issued attempt is reserved again, in the transaction of its issue; false, with nothing written, when it does not fit. */
+  reserveAttempt?: (row: OutboxRow, attempt: number) => Promise<boolean>;
+  /** PS18.7: an attempt of a work order ended, by its report (with the usage it gave) or by its deadline (null): its reservation settles for the cap. */
+  orderAttemptEnded?: (row: OutboxRow, attempt: number, report: { usage?: unknown } | null) => Promise<void>;
   /** S173: the tool a workflow maps this intent's kind to, when it is a work order; null otherwise. */
   workOrder?: (row: OutboxRow) => { tool: string; target?: string; why: string } | null;
 }
 
 /** S173: what a work order's report came to. */
+export type OrderReport = { ok: boolean; result?: unknown; error?: string; permanent?: boolean; /** PS18.7: the participant's own count of what the order used, by class. Recorded and reconciled, never trusted. */ usage?: unknown };
 export type ReportOutcome = { status: 'settled' | 'retrying' | 'failed' } | { status: 'refused'; reason: string };
 
 /**
@@ -346,7 +351,11 @@ export class EffectWorker {
         // As at a claim: a row whose machine or manifest is unavailable is parked and takes no transition.
         if (decl === null) await this.store.markEffectRetry(row.intent_id, row.attempts, now + 30_000, `parked: machine or manifest unavailable for effect '${row.kind}', not executed`);
         // S173: an issued work order's claim is its deadline, so an expired one is an order nobody reported in time.
-        else if (st?.intent === 'Running') await this.failed(row, decl, st.intent_attempt!, this.opts.workOrder?.(row) ? `the work order was not reported within ${decl.retry?.timeoutMs ?? 30_000} ms` : 'lease expired while running (a crash)', now, 'lost');
+        else if (st?.intent === 'Running') {
+          // PS18.7: a lapsed attempt spent its cap whatever it did; nothing is released.
+          if (this.opts.workOrder?.(row)) await this.store.txn(() => this.opts.orderAttemptEnded?.(row, st.intent_attempt!, null));
+          await this.failed(row, decl, st.intent_attempt!, this.opts.workOrder?.(row) ? `the work order was not reported within ${decl.retry?.timeoutMs ?? 30_000} ms` : 'lease expired while running (a crash)', now, 'lost');
+        }
         else await this.store.txn(() => this.store.db.prepare(`UPDATE pr_outbox SET status = 'pending', claimed_until = NULL WHERE intent_id = ? AND status = 'inflight'`).run(row.intent_id));
       } catch (e) { if (!(e instanceof StaleClaim)) throw e; }
     }
@@ -619,11 +628,18 @@ export class EffectWorker {
    */
   private async issue(row: OutboxRow, decl: any, attempt: number, tool: { tool: string; target?: string; why: string }, now: number): Promise<void> {
     const deadline = now + (decl.retry?.timeoutMs ?? 30_000);
-    await this.store.txn(() => {
+    let refused = false;
+    await this.store.txn(async () => {
       this.checkFence(row);
+      // PS18.7: a re-issued attempt reserves its cap again, here, and is not issued when it does not fit.
+      if (attempt >= 2 && this.opts.reserveAttempt && !(await this.opts.reserveAttempt(row, attempt))) { refused = true; return; }
       this.store.appendEvent(row.instance_id, 'observation', { stage: 'work-order', intent: row.intent_id, attempt, orderId: orderIdOf(row.intent_id, attempt), outcome: 'issued', order: this.store.keep({ ...tool, args: row.payload }), deadline }, this.now);
       this.store.db.prepare(`UPDATE pr_outbox SET claimed_until = ? WHERE intent_id = ? AND status = 'inflight'`).run(deadline, row.intent_id);
     });
+    if (refused) {
+      await this.store.txn(() => { this.checkFence(row); this.verdict(row, { outcome: 'denied', reason: 'budget', attempt }); });
+      await this.permanent(row, decl, attempt, 'budget');
+    }
   }
 
   /** S173: whether the order with this id was issued: an order exists only once its issue is in the ledger (polywatch). */
@@ -655,7 +671,7 @@ export class EffectWorker {
    * not yet issued, a replaced or lapsed attempt, a second report of one attempt) is refused and audited, so an agent
    * is never credited for an attempt it does not hold (PF8.5a).
    */
-  async report(orderId: string, rep: { ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+  async report(orderId: string, rep: OrderReport): Promise<ReportOutcome> {
     // Two reports of one order taken at once: the second is refused, not raced into the hosted machine.
     if (this.reporting.has(orderId)) {
       await this.store.insertAudit({ at: this.now, instanceId: orderId, action: 'work-order', actionId: `${orderId}:report`, rule: 'S173', reason: `work order ${orderId}: another report of it is being taken` });
@@ -667,7 +683,7 @@ export class EffectWorker {
 
   private readonly reporting = new Set<string>();
 
-  private async takeReport(orderId: string, rep: { ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+  private async takeReport(orderId: string, rep: OrderReport): Promise<ReportOutcome> {
     const now = this.now;
     const parsed = parseOrderId(orderId);
     const raw = parsed ? this.store.db.prepare('SELECT * FROM pr_outbox WHERE intent_id = ?').get(parsed.intent) as (OutboxRow & { claimed_until: number | null; status: string; payload: string }) | undefined : undefined;
@@ -688,6 +704,8 @@ export class EffectWorker {
     if (decl === null) return refuse('its machine or manifest is unavailable');
     const n = st.intent_attempt!;
     const m = await this.boundOf(row);
+    // PS18.7: the attempt ends with its report, whatever the report says; its reservation settles for the cap and the usage is reconciled.
+    await this.store.txn(() => this.opts.orderAttemptEnded?.(row, n, { usage: rep.usage }));
     if (!rep.ok) {
       const message = rep.error || 'the agent reported a failure';
       if (rep.permanent) { await this.permanent(row, decl, n, message); return { status: 'failed' }; }

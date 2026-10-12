@@ -21,6 +21,17 @@ export interface CostCall {
   prices: string;
 }
 
+/** PS18.7: one settled attempt of a work order: its reservation is its cost, and what the participant reported beside it. */
+export interface CostOrder {
+  run: string;
+  scope: string;
+  at: number;
+  cost: number;
+  currency: string;
+  reconciled: 'under' | 'equal' | 'over' | 'unreported' | 'unpriceable';
+  reported: number | null;
+}
+
 export interface CostReport {
   calls: number;
   /** Per currency, in micro-units. */
@@ -29,6 +40,8 @@ export interface CostReport {
   byScope: Record<string, Record<string, number>>;
   /** By UTC day, YYYY-MM-DD. */
   byDay: Record<string, Record<string, number>>;
+  /** PS18.7: the settled attempts of work orders, counted by how the participant's report reconciled with the cap; their costs are in the totals. */
+  orders: { attempts: number; reconciled: Record<CostOrder['reconciled'], number>; reported: Record<string, number> };
   /** Review C3 (M11): the runs whose chain does not verify, which are not summed. */
   refused: { run: string; reason: string }[];
   /** With --prices: the calls of that table's provider and model priced again under it, by its digest. */
@@ -47,7 +60,7 @@ export function periodProblem(p: string): string | null {
 }
 
 /** Every tier's call the ledger records, filtered by run, scope and period (a day YYYY-MM-DD or a month YYYY-MM). */
-export async function costCalls(reader: Reader, filter: { run?: string; scope?: string; period?: string } = {}, verify?: Verify, refused: { run: string; reason: string }[] = []): Promise<CostCall[]> {
+export async function costCalls(reader: Reader, filter: { run?: string; scope?: string; period?: string } = {}, verify?: Verify, refused: { run: string; reason: string }[] = [], orders: CostOrder[] = []): Promise<CostCall[]> {
   const out: CostCall[] = [];
   for (const { run } of await reader.runs()) {
     const chain = await reader.chain(run);
@@ -55,6 +68,15 @@ export async function costCalls(reader: Reader, filter: { run?: string; scope?: 
     const v = verify?.(chain as never[]);
     if (v && !v.ok) { refused.push({ run, reason: v.reason ?? 'the chain does not verify' }); continue; }
     for (const e of chain) {
+      // PS18.7: a settled attempt of a work order (the verdict of its settle carries the order cap).
+      if (e.kind === 'verdict') {
+        const v = e.body as Record<string, any>;
+        if (v?.stage === 'budget' && v.outcome === 'settled' && typeof v.orderCap === 'number' && typeof v.currency === 'string') {
+          const o: CostOrder = { run, scope: String(v.scope ?? ''), at: e.at, cost: v.orderCap, currency: v.currency, reconciled: v.reconciled, reported: typeof v.reported?.units === 'number' ? v.reported.units : null };
+          if ((!filter.run || o.run === filter.run) && (!filter.scope || o.scope === filter.scope) && (!filter.period || new Date(o.at).toISOString().startsWith(filter.period))) orders.push(o);
+        }
+        continue;
+      }
       if (e.kind !== 'decision') continue;
       const b = e.body as Record<string, any>;
       // Only a tier's call carries usage; the decision's own event links it with `via`, and is not counted again.
@@ -72,7 +94,7 @@ export async function costCalls(reader: Reader, filter: { run?: string; scope?: 
 
 const add = (m: Record<string, Record<string, number>>, k: string, cur: string, v: number) => { m[k] ??= {}; m[k][cur] = (m[k][cur] ?? 0) + v; };
 
-export function costReport(calls: CostCall[], table?: { table: PriceTable; digest: string }, refused: { run: string; reason: string }[] = []): CostReport {
+export function costReport(calls: CostCall[], table?: { table: PriceTable; digest: string }, refused: { run: string; reason: string }[] = [], orders: CostOrder[] = []): CostReport {
   const total: Record<string, number> = {};
   const byRun = {}, byScope = {}, byDay = {};
   for (const c of calls) {
@@ -81,7 +103,17 @@ export function costReport(calls: CostCall[], table?: { table: PriceTable; diges
     add(byScope, c.scope, c.currency, c.cost);
     add(byDay, new Date(c.at).toISOString().slice(0, 10), c.currency, c.cost);
   }
-  const report: CostReport = { calls: calls.length, total, byRun, byScope, byDay, refused };
+  const reconciled: Record<CostOrder['reconciled'], number> = { under: 0, equal: 0, over: 0, unreported: 0, unpriceable: 0 };
+  const reported: Record<string, number> = {};
+  for (const o of orders) {
+    total[o.currency] = (total[o.currency] ?? 0) + o.cost;
+    add(byRun, o.run, o.currency, o.cost);
+    add(byScope, o.scope, o.currency, o.cost);
+    add(byDay, new Date(o.at).toISOString().slice(0, 10), o.currency, o.cost);
+    reconciled[o.reconciled] = (reconciled[o.reconciled] ?? 0) + 1;
+    if (o.reported !== null) reported[o.currency] = (reported[o.currency] ?? 0) + o.reported;
+  }
+  const report: CostReport = { calls: calls.length, total, byRun, byScope, byDay, orders: { attempts: orders.length, reconciled, reported }, refused };
   if (table) {
     // Review C2 (M11): a table prices its own provider's model, so a call of another provider is not priced again.
     // S361: a call with no usage to price again keeps its recorded charge, and is not counted among those priced again.

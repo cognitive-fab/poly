@@ -69,8 +69,13 @@ test('S174: the six tools have polyflow\'s names and input schemas', async () =>
   try {
     await flow.c.initialize();
     await run.c.initialize();
-    const shape = (tools) => tools.map((t) => [t.name, [...(t.inputSchema.required ?? [])].sort(), Object.keys(t.inputSchema.properties ?? {}).sort()]).sort();
-    assert.deepEqual(shape((await run.c.request('tools/list')).tools), shape((await flow.c.request('tools/list')).tools));
+    // M7.5 (PS18.7): workflow_report also takes an optional usage, the participant's own count of what an order used; every other
+    // name and every requirement is polyflow's. The comparison leaves that one optional field out, and holds it to being optional.
+    const shape = (tools) => tools.map((t) => [t.name, [...(t.inputSchema.required ?? [])].sort(), Object.keys(t.inputSchema.properties ?? {}).filter((k) => !(t.name === 'workflow_report' && k === 'usage')).sort()]).sort();
+    const ours = (await run.c.request('tools/list')).tools;
+    assert.deepEqual(shape(ours), shape((await flow.c.request('tools/list')).tools));
+    const report = ours.find((t) => t.name === 'workflow_report');
+    assert.ok(report.inputSchema.properties.usage && !(report.inputSchema.required ?? []).includes('usage'), 'usage is an optional field of workflow_report (PS18.7)');
     assert.ok(!(await run.c.request('tools/list')).tools.some((t) => /approve|accept/.test(t.name)), 'no approve or accept tool (S174)');
   } finally { await done(flow); await done(run); }
 });

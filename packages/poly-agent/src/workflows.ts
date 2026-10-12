@@ -92,11 +92,11 @@ export function workflowTools(rt: PolyRuntime): WorkflowTool[] {
     {
       name: 'workflow_report', annotations: { ...WRITE, idempotentHint: false },
       description: 'Report the result of a work order and receive the next one. ok:false is a failure to retry; ok:false with permanent:true is a result that is not a fault (the person declined), which takes the failure branch.',
-      inputSchema: { type: 'object', required: ['order_id'], properties: { order_id: str('order_id from the work order you fulfilled'), ok: { type: 'boolean', description: 'did the tool succeed (default true)' }, result: { type: 'object', description: 'the tool result; its fields become the completion action data' }, error: str('failure message when ok is false'), permanent: { type: 'boolean', description: 'true if this failure is a result, not a fault' } } },
+      inputSchema: { type: 'object', required: ['order_id'], properties: { order_id: str('order_id from the work order you fulfilled'), usage: { type: 'object', description: 'what the order used, by class of the price table you declared, as numbers (optional). It is recorded and compared with the order cap, and never changes what the order cost the budget (PS18.7)' }, ok: { type: 'boolean', description: 'did the tool succeed (default true)' }, result: { type: 'object', description: 'the tool result; its fields become the completion action data' }, error: str('failure message when ok is false'), permanent: { type: 'boolean', description: 'true if this failure is a result, not a fault' } } },
       outputSchema: RUN_VIEW,
-      handler: guard(async ({ order_id, ok = true, result = {}, error = '', permanent = false }) => {
+      handler: guard(async ({ order_id, ok = true, result = {}, error = '', permanent = false, usage }) => {
         const id = String(order_id);
-        const r = await rt.reportWorkOrder(id, { ok: Boolean(ok), result, error: String(error), permanent: Boolean(permanent) });
+        const r = await rt.reportWorkOrder(id, { ok: Boolean(ok), result, error: String(error), permanent: Boolean(permanent), ...(usage === undefined ? {} : { usage }) });
         if (r.status === 'refused') return { error: `order '${id}': ${r.reason}`, hint: 'take the open orders from workflow_state; a replaced or lapsed order is never credited' };
         return runView(rt.orderRun(id)!);
       }),

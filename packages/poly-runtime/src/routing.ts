@@ -7,7 +7,7 @@
 // policy, reserves on each in the transaction that records the allow, settles each in the transaction of the call's
 // completion, and releases each when the intent dies; each step has an action id derived from the intent, so a step
 // repeated after a crash is deduplicated (K4) and no reservation is lost or counted twice.
-import { digest } from '@poly/core';
+import { costOf, digest } from '@poly/core';
 import type { OutboxRow, Runtime } from '@cognitive-fab/polygraph/polyrun/src/index.mjs';
 import type { LedgerStore } from './ledger-store.js';
 import { isItems } from './memory.js';
@@ -56,6 +56,14 @@ export interface DecisionBudget {
   reservation: number;
 }
 
+/** PS18.7 (M7.5): a workflow's budget for its orders: the budget they reserve on, the participant's price table, and the order cap (the reservation). */
+export interface OrderBudget {
+  budget: string;
+  prices: VerifiedTier['prices'];
+  orderCap: number;
+  workflow: string;
+}
+
 type BudgetState = { b?: string; cap?: number; spent?: number; reserved?: number; overrun?: number };
 
 /** PS18.4: the period that holds a time, in UTC: an hour, a day or a month. */
@@ -73,6 +81,12 @@ export class RoutingHost {
 
   /** PS18.4a: each unrouted decision's budget, by its machine and kind, from the certified manifests; the runtime sets it. */
   readonly decisionBudgets = new Map<string, DecisionBudget>();
+
+  /** PS18.7: each work order's budget, by its machine and kind, from the certified workflow descriptors; the runtime sets it. */
+  readonly orderBudgets = new Map<string, OrderBudget>();
+
+  /** K16's broken variant, for the runtime CI only (test/workflow-budget.test.mjs): a report that reduces what an attempt spends. */
+  creditReports = false;
 
   /**
    * Review B2 (M11), PS18.4a: a priced call's record, kept as soon as its provider answered, so the call is charged
@@ -164,7 +178,16 @@ export class RoutingHost {
     if (t) return this.check(row, approved, { route: t.route.name, tier: t.tier.name, reservation: t.tier.reservation }, t.route.budget, t.decision.run, t.tier.reservation);
     // PS18.4a: an unrouted decision's own intent is read against its budget as a tier's call is; its run is its instance.
     const d = this.decisionBudget(row);
-    return d ? this.check(row, approved, null, d.budget, row.instance_id, d.reservation) : null;
+    if (d) return this.check(row, approved, null, d.budget, row.instance_id, d.reservation);
+    // PS18.7: a work order is read against its workflow's budget in the same place, its reservation the order cap.
+    const o = this.orderBudget(row);
+    return o ? this.check(row, approved, null, o.budget, row.instance_id, o.orderCap) : null;
+  }
+
+  /** PS18.7: the budget of a work order's intent, from the certified descriptor of its workflow, or null. */
+  orderBudget(row: Pick<OutboxRow, 'instance_id' | 'kind'>): OrderBudget | null {
+    const machine = this.machineOf(row.instance_id);
+    return machine ? this.orderBudgets.get(`${machine}\u0000${row.kind}`) ?? null : null;
   }
 
   /** PS18.4a: the budget of an unrouted decision's intent, from its certified manifest entry, or null. */
@@ -191,7 +214,7 @@ export class RoutingHost {
    * PS18.4: the reservation, in the transaction that records the allow. Each instance is read again inside it, and
    * the reservation is taken on every one or on none: false when one no longer fits, and nothing is written.
    */
-  async reserve(row: OutboxRow, plan: ReservationPlan[]): Promise<boolean> {
+  async reserve(row: OutboxRow, plan: ReservationPlan[], key: string = row.intent_id): Promise<boolean> {
     if (!plan.every((p) => this.fits(p, p.amount))) return false;
     for (const p of plan) {
       if (!this.machineOf(p.instance)) {
@@ -200,9 +223,9 @@ export class RoutingHost {
       }
       const s = this.stateOf(p.instance)!.state as BudgetState;
       if (s.b === 'Closed') await this.kernel.dispatch(p.instance, 'Open', { limit: p.cap }, 'open');
-      const r = await this.kernel.dispatch(p.instance, 'Reserve', { r: p.amount }, `reserve:${row.intent_id}`);
+      const r = await this.kernel.dispatch(p.instance, 'Reserve', { r: p.amount }, `reserve:${key}`);
       if (r.stepKind !== 'accepted') throw new Error(`the budget ${p.instance} refused a reservation it was read to fit (${r.rejectReason ?? r.stepKind}): PL2401 RUNTIME_MODEL_DRIFT`);
-      this.store.db.prepare('INSERT OR IGNORE INTO poly_reservation (intent, budget, amount, status) VALUES (?, ?, ?, ?)').run(row.intent_id, p.instance, p.amount, 'held');
+      this.store.db.prepare('INSERT OR IGNORE INTO poly_reservation (intent, budget, amount, status) VALUES (?, ?, ?, ?)').run(key, p.instance, p.amount, 'held');
     }
     return true;
   }
@@ -213,6 +236,12 @@ export class RoutingHost {
    */
   async settle(row: OutboxRow, action: string): Promise<void> {
     const intent = row.intent_id;
+    // PS18.7: a work order's attempts that are still held (a crash between the reservation and the report) settle for the cap, never released.
+    if (this.orderBudget(row)) {
+      const open = this.store.db.prepare("SELECT DISTINCT intent FROM poly_reservation WHERE (intent = ? OR intent LIKE ?) AND status = 'held'").all(intent, `${intent}#%`) as { intent: string }[];
+      for (const o of open) await this.orderAttemptEnded(row, o.intent === intent ? 1 : Number(o.intent.slice(intent.length + 1)), null);
+      return;
+    }
     const held = this.store.db.prepare("SELECT budget, amount FROM poly_reservation WHERE intent = ? AND status = 'held'").all(intent) as { budget: string; amount: number }[];
     // Review B2, C1 (M11): a call whose provider answered is settled with its cost whatever ends its intent (a lost
     // completion, a refused settle, a completion outside its type), and only a call with no answer is released. Its
@@ -231,6 +260,54 @@ export class RoutingHost {
         : await this.kernel.dispatch(h.budget, 'Settle', { r: h.amount, actual: cost }, `settle:${intent}`);
       if (r.stepKind !== 'accepted') throw new Error(`the budget ${h.budget} refused to ${cost === null ? 'release' : 'settle'} the reservation of ${intent} (${r.rejectReason ?? r.stepKind}): PL2401 RUNTIME_MODEL_DRIFT`);
       this.store.db.prepare('UPDATE poly_reservation SET status = ? WHERE intent = ? AND budget = ?').run(cost === null ? 'released' : 'settled', intent, h.budget);
+    }
+  }
+
+  /**
+   * PS18.7: a re-issued attempt of a work order reserves its cap again, in the transaction of its issue, under the key
+   * `<intent>#<n>`. False, with nothing written, when it does not fit some cap of the budget (the attempt is not issued).
+   */
+  async reserveAttempt(row: OutboxRow, attempt: number): Promise<boolean> {
+    const o = this.orderBudget(row);
+    if (!o) return true;
+    const b = this.budgets.find((x) => x.name === o.budget);
+    if (!b) return false;
+    const plan = this.addresses(b, row.instance_id, this.now()).map((p) => ({ ...p, amount: o.orderCap }));
+    return this.reserve(row, plan, attempt === 1 ? row.intent_id : `${row.intent_id}#${attempt}`);
+  }
+
+  /**
+   * PS18.7: an attempt of a work order ended, by its report or by its deadline. Its reservation settles for the cap, whatever
+   * was reported: the spend is the reservation, and a report only changes what is recorded. The usage is priced with the
+   * participant's table and reconciled against the cap (S523, K16). Nothing is released, and it is done once per attempt.
+   */
+  async orderAttemptEnded(row: OutboxRow, attempt: number, report: { usage?: unknown } | null): Promise<void> {
+    const o = this.orderBudget(row);
+    if (!o) return;
+    const key = attempt === 1 ? row.intent_id : `${row.intent_id}#${attempt}`;
+    const held = this.store.db.prepare("SELECT budget, amount FROM poly_reservation WHERE intent = ? AND status = 'held'").all(key) as { budget: string; amount: number }[];
+    if (!held.length) return;
+    const usage = report?.usage;
+    let reported: { usage: unknown; units: number | null } | null = null;
+    let reconciled: 'under' | 'equal' | 'over' | 'unreported' | 'unpriceable' = 'unreported';
+    if (usage !== undefined) {
+      const table = o.prices.perMillionTokens;
+      const ok = usage !== null && typeof usage === 'object' && !Array.isArray(usage) && Object.entries(usage as Record<string, unknown>).every(([k, n]) => Object.hasOwn(table, k) && Number.isSafeInteger(n) && (n as number) >= 0);
+      if (!ok) { reported = { usage, units: null }; reconciled = 'unpriceable'; }
+      else {
+        const units = costOf(usage as Record<string, number>, { perMillionTokens: table }).cost;
+        reported = { usage, units };
+        reconciled = units < o.orderCap ? 'under' : units === o.orderCap ? 'equal' : 'over';
+      }
+    }
+    // K16's broken variant: the report, when it is lower, becomes what is spent.
+    const actualOf = (amount: number): number => (this.creditReports && reported && reported.units !== null && reported.units < amount ? reported.units : amount);
+    const machine = this.machineOf(row.instance_id) ?? '';
+    this.store.appendEvent(row.instance_id, 'verdict', { stage: 'budget', intent: row.intent_id, attempt, outcome: 'settled', orderCap: o.orderCap, currency: o.prices.currency, scope: machine.slice(0, machine.lastIndexOf('.')), reported, reconciled, budgets: held.map((h) => ({ instance: h.budget, reserved: h.amount, actual: actualOf(h.amount), overrun: 0 })) }, this.now());
+    for (const h of held) {
+      const r = await this.kernel.dispatch(h.budget, 'Settle', { r: h.amount, actual: actualOf(h.amount) }, `settle:${key}`);
+      if (r.stepKind !== 'accepted') throw new Error(`the budget ${h.budget} refused to settle the reservation of ${key} (${r.rejectReason ?? r.stepKind}): PL2401 RUNTIME_MODEL_DRIFT`);
+      this.store.db.prepare('UPDATE poly_reservation SET status = ? WHERE intent = ? AND budget = ?').run('settled', key, h.budget);
     }
   }
 

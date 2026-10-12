@@ -32,7 +32,7 @@ import { promote, PromoteUsageError } from './promote.js';
 import { benchGate } from './bench.js';
 import { checkHost, type HostCheck } from './host.js';
 import { editCheck } from './edit-check.js';
-import { costCalls, costReport, periodProblem, readPriceTable } from './cost.js';
+import { costCalls, costReport, periodProblem, readPriceTable, type CostOrder } from './cost.js';
 import { trySession, type TryOp } from './try.js';
 
 /** A JSON Schema, in the subset the published schemas use: type, properties, required, items, enum, description. */
@@ -447,10 +447,11 @@ export const COMMANDS: Command[] = [
       const store = openJournal(db);
       try {
         const refused: { run: string; reason: string }[] = [];
-        const calls = await costCalls(store, { run: opt(input, 'run'), scope: opt(input, 'scope'), period }, (events) => verifyRunChain(events as never), refused);
+        const orders: CostOrder[] = [];
+        const calls = await costCalls(store, { run: opt(input, 'run'), scope: opt(input, 'scope'), period }, (events) => verifyRunChain(events as never), refused, orders);
         const prices = opt(input, 'prices');
-        const report = costReport(calls, prices ? readPriceTable(prices) : undefined, refused);
-        const lines = [`${report.calls} call${report.calls === 1 ? '' : 's'}`, ...report.refused.map((x) => `not summed: run ${x.run}, whose chain does not verify (${x.reason})`), ...Object.entries(report.total).map(([c, v]) => `total ${(v / 1_000_000).toFixed(6)} ${c}`), ...(report.repriced ? Object.entries(report.repriced.total).map(([c, v]) => `priced again under ${report.repriced!.prices}: ${(v / 1_000_000).toFixed(6)} ${c} over ${report.repriced!.calls} call(s) of ${report.repriced!.model}`) : [])];
+        const report = costReport(calls, prices ? readPriceTable(prices) : undefined, refused, orders);
+        const lines = [`${report.calls} call${report.calls === 1 ? '' : 's'}`, ...(report.orders.attempts ? [`${report.orders.attempts} work-order attempt${report.orders.attempts === 1 ? '' : 's'} (reconciled: ${Object.entries(report.orders.reconciled).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ')})`] : []), ...report.refused.map((x) => `not summed: run ${x.run}, whose chain does not verify (${x.reason})`), ...Object.entries(report.total).map(([c, v]) => `total ${(v / 1_000_000).toFixed(6)} ${c}`), ...(report.repriced ? Object.entries(report.repriced.total).map(([c, v]) => `priced again under ${report.repriced!.prices}: ${(v / 1_000_000).toFixed(6)} ${c} over ${report.repriced!.calls} call(s) of ${report.repriced!.model}`) : [])];
         return { exit: report.refused.length ? EXIT_CODES.REFUSED : EXIT_CODES.CLEAN, result: report as unknown as Record<string, unknown>, text: lines.join('\n') + '\n' };
       } finally { await store.close(); }
     },

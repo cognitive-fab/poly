@@ -276,6 +276,12 @@ export class PolyRuntime {
     for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
       if (e?.decision?.budget && !e.decision.route) this.#routing.decisionBudgets.set(`${m.id}\u0000${kind}`, e.decision.budget);
     }
+    // PS18.7 (M7.5): each work order's budget, as its workflow's certified descriptor gives it.
+    for (const w of verified.workflows) {
+      if (!w.budget) continue;
+      for (const kind of Object.keys(w.tools ?? {})) this.#routing.orderBudgets.set(`${w.machine}\u0000${kind}`, { budget: w.budget.budget, prices: w.budget.prices, orderCap: w.budget.orderCap, workflow: w.name });
+    }
+    this.#routing.creditReports = (opts as { fault?: string }).fault === 'workflow-report-credits';
     // S402: a tier's call reads its decision's materials, as the decision's own provider would (PS17.2).
     this.#routing.materials = async (payload) => { const m = await this.memory.materials(payload, (d) => this.contentBody(d), (b, t, s) => this.#putTainted(b, t, s)); return { bodies: m.bodies, items: m.items }; };
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
@@ -345,6 +351,8 @@ export class PolyRuntime {
       budgetCheck: (row, approved) => this.#routing.budgetCheck(row, approved),
       reserve: (row, plan) => this.#routing.reserve(row, plan),
       onTerminal: (row, action) => this.#routing.settle(row, action),
+      reserveAttempt: (row, attempt) => this.#routing.reserveAttempt(row, attempt),
+      orderAttemptEnded: (row, attempt, report) => this.#routing.orderAttemptEnded(row, attempt, report),
       issueRoute: (row, decl) => this.#issueRoute(row, decl),
       sweep: () => this.#sweepRoutes(),
       channelOf: (row) => {
@@ -1647,7 +1655,12 @@ export class PolyRuntime {
   }
 
   /** S173: the agent's report of a work order, which settles its intent; any report but the open attempt's is refused and audited. */
-  reportWorkOrder(orderId: string, report: { ok: boolean; result?: unknown; error?: string; permanent?: boolean }): Promise<ReportOutcome> {
+  reportWorkOrder(orderId: string, report: { ok: boolean; result?: unknown; error?: string; permanent?: boolean; usage?: unknown }): Promise<ReportOutcome> {
+    // PS18.7: a usage that is not a map from class to a number is refused with nothing recorded; whether the numbers are whole classes of the table is for the reconciliation.
+    const u = report.usage;
+    if (u !== undefined && (u === null || typeof u !== 'object' || Array.isArray(u) || !Object.values(u as Record<string, unknown>).every((n) => typeof n === 'number' && Number.isFinite(n)))) {
+      return Promise.resolve({ status: 'refused', reason: 'usage is a map from a class of the participant\'s price table to a number (PS18.7)' });
+    }
     return this.worker.report(orderId, report);
   }
 

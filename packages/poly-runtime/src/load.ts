@@ -86,7 +86,7 @@ export interface VerifiedCredential { name: string; machine: string; provider: s
 export interface VerifiedChannel { channel: string; kind: string; application: string; conversation: string; thread: { template: string; fields: string[] }; starts: { action: string; onInbound: boolean }; inbound: { to: string; action: string }; audience?: string | null; principal?: string | null }
 
 export interface WorkOrderTool { tool: string; target?: string; why: string }
-export interface VerifiedWorkflow { name: string; machine: string; inputAction: string; key: { template: string; fields: Record<string, { pattern?: string }> }; tools: Record<string, WorkOrderTool> }
+export interface VerifiedWorkflow { name: string; machine: string; inputAction: string; key: { template: string; fields: Record<string, { pattern?: string }> }; tools: Record<string, WorkOrderTool>; /** PS18.7: the budget of the workflow's orders, as its certified descriptor gives it. */ budget?: { budget: string; prices: { path: string; digest: string; currency: string; perMillionTokens: Record<string, number> }; orderCap: number } }
 
 /** `load('./.poly/build', …)` (PT15) names the build; the certificate's paths are relative to the project above it. */
 export function projectRootOf(buildDir: string): string {
@@ -285,7 +285,12 @@ export function verifyBuild(buildDir: string, certificatePath: string, trust: Re
     for (const kind of Object.keys(d.tools ?? {})) {
       if (!m.manifest?.effects?.[kind]) throw new LoadError(`refused at load: workflow ${w.name} maps ${kind}, which is not an effect of ${w.machine} (S173)`);
     }
-    workflows.push({ name: d.name, machine: w.machine, inputAction: d.inputAction, key: d.key, tools: d.tools });
+    // PS18.7, K16 (M7.5): the certificate's entry for the workflow's budget is the descriptor's, so the runtime reserves what was signed.
+    const claimed = (w as { budget?: { budget: string; prices: { path: string; digest: string; currency: string }; orderCap: number; usage: string; bound: string } }).budget;
+    const ran = (d as { budget?: VerifiedWorkflow['budget'] }).budget;
+    if (!!claimed !== !!ran) throw new LoadError(`refused at load: workflow ${w.name} has ${ran ? 'a budget in its descriptor and none in the certificate' : 'a budget in the certificate and none in its descriptor'} (PS18.7)`);
+    if (claimed && ran && (claimed.budget !== ran.budget || claimed.orderCap !== ran.orderCap || claimed.prices.digest !== ran.prices.digest || claimed.prices.path !== ran.prices.path || claimed.prices.currency !== ran.prices.currency || claimed.usage !== 'self-reported' || claimed.bound !== 'reservation')) throw new LoadError(`refused at load: the budget of workflow ${w.name} in the certificate is not the one its descriptor runs (PS18.7)`);
+    workflows.push({ name: d.name, machine: w.machine, inputAction: d.inputAction, key: d.key, tools: d.tools, ...(ran ? { budget: ran } : {}) });
   }
   const channels: VerifiedChannel[] = [];
   for (const c of certificate.poly?.channels ?? []) {
