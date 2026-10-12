@@ -1,0 +1,161 @@
+{
+  "lang": "javascript",
+  "stateKeys": [
+    {
+      "name": "phase",
+      "type": "enum: 'idle' | 'npm-test' | 'git-add' | 'git-commit' | 'git-push' | 'done' | 'blocked'"
+    },
+    {
+      "name": "reason",
+      "type": "string, why the run ended early ('' otherwise)"
+    }
+  ],
+  "initState": {
+    "phase": "idle",
+    "reason": ""
+  },
+  "actions": {
+    "START": {
+      "dataFields": {}
+    },
+    "VERIFY_PASSED": {
+      "dataFields": {}
+    },
+    "VERIFY_FAILED": {
+      "dataFields": {
+        "reason": "string"
+      }
+    },
+    "GIT_ADD_DONE": {
+      "dataFields": {}
+    },
+    "GIT_ADD_FAILED": {
+      "dataFields": {
+        "reason": "string"
+      }
+    },
+    "GIT_COMMIT_DONE": {
+      "dataFields": {}
+    },
+    "GIT_COMMIT_FAILED": {
+      "dataFields": {
+        "reason": "string"
+      }
+    },
+    "GIT_PUSH_DONE": {
+      "dataFields": {}
+    },
+    "GIT_PUSH_FAILED": {
+      "dataFields": {
+        "reason": "string"
+      }
+    }
+  },
+  "dataDomain": {
+    "START": {},
+    "VERIFY_PASSED": {},
+    "VERIFY_FAILED": {
+      "reason": [
+        "npm-test-failed"
+      ]
+    },
+    "GIT_ADD_DONE": {},
+    "GIT_ADD_FAILED": {
+      "reason": [
+        "git-add-failed"
+      ]
+    },
+    "GIT_COMMIT_DONE": {},
+    "GIT_COMMIT_FAILED": {
+      "reason": [
+        "git-commit-failed"
+      ]
+    },
+    "GIT_PUSH_DONE": {},
+    "GIT_PUSH_FAILED": {
+      "reason": [
+        "git-push-failed"
+      ]
+    }
+  },
+  "terminalKey": "phase",
+  "terminalStates": [
+    "done",
+    "blocked"
+  ],
+  "specialRules": [
+    {
+      "name": "accepted-and-declined-are-disjoint",
+      "note": "Every acceptor has exactly two branches and they never overlap. A DECLINED branch calls reject(reason) and returns BEFORE writing any next-state field, so post == pre. An ACCEPTED branch writes next-state fields and never calls reject. There is no accept-with-reason: a transition that moves the run is not a rejection, even when it is moving the run to a terminal failure state.",
+      "whenState": "every state",
+      "whenAction": "every action"
+    },
+    {
+      "name": "start-only-from-idle",
+      "note": "START is ACCEPTED in 'idle' only, and writes phase='npm-test'. In any other state it is a DECLINED branch: reject('already-started') before writing.",
+      "whenState": "idle",
+      "whenAction": "START"
+    },
+    {
+      "name": "npm-test-completes-into-git-add",
+      "note": "In state 'npm-test' ONLY, VERIFY_PASSED is an ACCEPTED transition: it writes phase='git-add' and does NOT reject.",
+      "whenState": "npm-test",
+      "whenAction": "VERIFY_PASSED"
+    },
+    {
+      "name": "npm-test-failure-ends-the-run",
+      "note": "In state 'npm-test' ONLY, VERIFY_FAILED is an ACCEPTED transition: it writes phase='blocked' and the reason, and does NOT reject. A transition into a terminal failure state is accepted, not a rejection.",
+      "whenState": "npm-test",
+      "whenAction": "VERIFY_FAILED"
+    },
+    {
+      "name": "git-add-completes-into-git-commit",
+      "note": "In state 'git-add' ONLY, GIT_ADD_DONE is an ACCEPTED transition: it writes phase='git-commit' and does NOT reject.",
+      "whenState": "git-add",
+      "whenAction": "GIT_ADD_DONE"
+    },
+    {
+      "name": "git-add-failure-ends-the-run",
+      "note": "In state 'git-add' ONLY, GIT_ADD_FAILED is an ACCEPTED transition: it writes phase='blocked' and the reason, and does NOT reject. A transition into a terminal failure state is accepted, not a rejection.",
+      "whenState": "git-add",
+      "whenAction": "GIT_ADD_FAILED"
+    },
+    {
+      "name": "git-commit-completes-into-git-push",
+      "note": "In state 'git-commit' ONLY, GIT_COMMIT_DONE is an ACCEPTED transition: it writes phase='git-push' and does NOT reject.",
+      "whenState": "git-commit",
+      "whenAction": "GIT_COMMIT_DONE"
+    },
+    {
+      "name": "git-commit-failure-ends-the-run",
+      "note": "In state 'git-commit' ONLY, GIT_COMMIT_FAILED is an ACCEPTED transition: it writes phase='blocked' and the reason, and does NOT reject. A transition into a terminal failure state is accepted, not a rejection.",
+      "whenState": "git-commit",
+      "whenAction": "GIT_COMMIT_FAILED"
+    },
+    {
+      "name": "git-push-completes-into-done",
+      "note": "In state 'git-push' ONLY, GIT_PUSH_DONE is an ACCEPTED transition: it writes phase='done' and does NOT reject.",
+      "whenState": "git-push",
+      "whenAction": "GIT_PUSH_DONE"
+    },
+    {
+      "name": "git-push-failure-ends-the-run",
+      "note": "In state 'git-push' ONLY, GIT_PUSH_FAILED is an ACCEPTED transition: it writes phase='blocked' and the reason, and does NOT reject. A transition into a terminal failure state is accepted, not a rejection.",
+      "whenState": "git-push",
+      "whenAction": "GIT_PUSH_FAILED"
+    },
+    {
+      "name": "stale-completions-reject",
+      "note": "Each completion action is awaited by exactly one state: VERIFY_PASSED and VERIFY_FAILED by 'npm-test', GIT_ADD_DONE and GIT_ADD_FAILED by 'git-add', GIT_COMMIT_DONE and GIT_COMMIT_FAILED by 'git-commit', GIT_PUSH_DONE and GIT_PUSH_FAILED by 'git-push'. In ANY OTHER state that action is a DECLINED branch: reject('stale-completion') and return before writing. Several sessions may share these orders, so a stale report is an ordinary observable event, never a fault.",
+      "whenState": "any state that does not await the action",
+      "whenAction": "VERIFY_PASSED | VERIFY_FAILED | GIT_ADD_DONE | GIT_ADD_FAILED | GIT_COMMIT_DONE | GIT_COMMIT_FAILED | GIT_PUSH_DONE | GIT_PUSH_FAILED"
+    }
+  ],
+  "provenance": {
+    "mined_from": "project",
+    "subject": "git push",
+    "instances": 16,
+    "mined_at": "2026-10-12",
+    "note": "See NOTES.md for the runs this came from."
+  }
+}

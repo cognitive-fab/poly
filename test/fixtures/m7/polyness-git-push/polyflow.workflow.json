@@ -1,0 +1,57 @@
+{
+  "name": "git-push-checked",
+  "description": "npm test → git add → git commit → git push. Proposed by polyness from 16 instances of `git push` in project.",
+  "area": "polyness/proposed",
+  "inputAction": "START",
+  "tools": {
+    "npm-test": {
+      "tool": "Bash",
+      "match": {
+        "argv": [
+          "npm",
+          "test"
+        ]
+      },
+      "why": "the verification your own majority runs first"
+    },
+    "git-add": {
+      "tool": "Bash",
+      "match": {
+        "argv": [
+          "git",
+          "add"
+        ]
+      },
+      "why": "git add, which came first every time"
+    },
+    "git-commit": {
+      "tool": "Bash",
+      "match": {
+        "argv": [
+          "git",
+          "commit"
+        ]
+      },
+      "why": "git commit, which came first every time"
+    },
+    "git-push": {
+      "tool": "Bash",
+      "match": {
+        "argv": [
+          "git",
+          "push"
+        ]
+      },
+      "why": "the step you cannot take back"
+    }
+  },
+  "key": {
+    "template": "{branch}",
+    "fields": {
+      "branch": {
+        "pattern": "^[A-Za-z0-9._/-]+$",
+        "description": "the branch being worked"
+      }
+    }
+  }
+}
