@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { canonicalize, loadProject } from '@poly/core';
+import { canonicalize, loadProject, readAnchor } from '@poly/core';
 import type * as A from '@poly/core';
 import { parse } from '@poly/lang';
 import { buildMachine, type RMachine, type RType } from '@poly/ref';
@@ -15,7 +15,7 @@ import { AdmitError } from './admit.js';
 
 export class MineUsageError extends Error {}
 
-export interface MineOptions { traces: string; project: string; polyx: string; out: string; synthetic?: boolean; all?: boolean; polyxPin?: string; timeoutMs?: number; maxOutput?: number }
+export interface MineOptions { traces: string; project: string; polyx: string; out: string; synthetic?: boolean; all?: boolean; polyxPin?: string; timeoutMs?: number; maxOutput?: number; /** Where the project's anchor came from; the command line reads it, a test names it (PS20.5). */ anchorSource?: 'user' | 'test' }
 
 /** What poly-mine gives (it is loaded by name, so that this package never imports a module that starts a process). */
 interface MineSeam {
@@ -58,6 +58,12 @@ export async function mineTraces(o: MineOptions): Promise<{ path: string; candid
   for (const [k, v] of [['--traces', o.traces], ['--project', o.project], ['--polyx', o.polyx], ['--out', o.out]] as const) if (!v) throw new MineUsageError(`poly mine needs ${k} <value>`);
   if (!existsSync(join(o.polyx, 'bin', 'polyx.mjs'))) throw new MineUsageError(`--polyx ${o.polyx} has no bin/polyx.mjs: it is the directory of a polyx checkout`);
   if (existsSync(o.out)) throw new MineUsageError(`${o.out} exists: poly mine does not overwrite a file`);
+  // PS20.5: a synthetic corpus is a test's; a project whose anchor is not a test anchor mines none.
+  if (o.synthetic) {
+    let source = o.anchorSource;
+    if (source === undefined) { try { source = readAnchor(o.project, loadProject(o.project).manifest.name)?.source; } catch { source = undefined; } }
+    if (source !== 'test') throw new AdmitError('--synthetic: a corpus made for the purpose is mined only for a project with a test anchor, since a certificate that cites a promotion from it is a test certificate (PS20.5)');
+  }
   const pinPath = pinFile(o.project, o.polyxPin);
   if (!existsSync(pinPath)) throw new MineUsageError(`no polyx pin at ${pinPath}: record the polyx you trust with poly mine --pin-polyx (S507)`);
   const pin = JSON.parse(readFileSync(pinPath, 'utf8')) as unknown;

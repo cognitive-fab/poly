@@ -17,6 +17,17 @@ const poly = (...args) => {
   try { return { code: 0, out: execFileSync(process.execPath, [...ACCEPT_TEST_ANCHORS, CLI, ...args], { encoding: 'utf8' }) }; } catch (e) { return { code: e.status, out: `${e.stdout}${e.stderr}` }; }
 };
 
+/** The pin of a polyx directory (S507, PT30.10): recorded afresh for each call, outside the polyx directory. A directory with no entry point gets a pin file that does not exist. */
+let pinCount = 0;
+function pinFor(dir) {
+  const pin = join(tmpdir(), `mine-test-pin-${process.pid}-${++pinCount}.json`);
+  if (existsSync(join(dir, 'bin', 'polyx.mjs'))) {
+    const r = poly('mine', '--pin-polyx', '--project', a.dir, '--polyx', dir, '--polyx-pin', pin);
+    assert.equal(r.code, 0, r.out);
+  }
+  return pin;
+}
+
 let tmp; let a;
 
 /** A polyx that records what it is given (to <dir>/seen/) and finds nothing. */
@@ -56,7 +67,7 @@ function mined(corpusText) {
   process.env.POLYX_JEV_KEY = 'not-a-real-key';
   process.env.MY_SECRET_TOKEN = 'not-a-real-secret';
   let r;
-  try { r = poly('mine', '--traces', traces, '--project', a.dir, '--polyx', dir, '--out', out); } finally { delete process.env.POLYX_JEV_KEY; delete process.env.MY_SECRET_TOKEN; }
+  try { r = poly('mine', '--traces', traces, '--project', a.dir, '--polyx', dir, '--polyx-pin', pinFor(dir), '--out', out); } finally { delete process.env.POLYX_JEV_KEY; delete process.env.MY_SECRET_TOKEN; }
   assert.equal(r.code, 0, r.out);
   return { corpus: JSON.parse(readFileSync(join(seen, 'corpus.json'), 'utf8')), alphabet: readFileSync(join(seen, 'alphabet.yaml'), 'utf8'), config: JSON.parse(readFileSync(join(seen, 'config.json'), 'utf8')), run: JSON.parse(readFileSync(join(seen, 'run.json'), 'utf8')), header: JSON.parse(readFileSync(out, 'utf8')) };
 }

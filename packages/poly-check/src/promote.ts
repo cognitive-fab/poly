@@ -15,7 +15,7 @@ import { checkProject } from './pipeline.js';
 /** A usage error: the command lacks something it needs (exit 64), as against a refusal of a promotion (exit 2). */
 export class PromoteUsageError extends Error {}
 
-export interface PromoteOptions { project: string; candidates: string; adjudications: string[]; scope?: string }
+export interface PromoteOptions { project: string; candidates: string; adjudications: string[]; scope?: string; /** Where the project's anchor came from; the command line reads it, a test names it (PS20.5). */ anchorSource?: 'user' | 'test' }
 export interface PromoteResult { exit: number; promoted: { id: string; file: string; entry: string }[]; lines: string[] }
 
 const sha = (s: string) => `sha256:${createHash('sha256').update(s, 'utf8').digest('hex')}`;
@@ -122,7 +122,7 @@ export async function promote(o: PromoteOptions): Promise<PromoteResult> {
     if (adj.verdict !== 'real') throw new AdmitError(`the adjudication of ${String(adj.id)} is ${String(adj.verdict)}: only a real verdict reaches a program (PS20.3)`);
     if (c.promotable !== true) throw new AdmitError(`the candidate ${String(adj.id)} is not promotable: ${String(c.reason ?? 'no reason given')}`);
     const corpus = doc.corpus as { digest: string; kind: string };
-    if (corpus.kind === 'synthetic' && anchor?.source !== 'test') throw new AdmitError(`the candidate ${String(adj.id)} was mined from a synthetic corpus, which only a test certificate may cite (PS20.5)`);
+    if (corpus.kind === 'synthetic' && (o.anchorSource ?? anchor?.source) !== 'test') throw new AdmitError(`the candidate ${String(adj.id)} was mined from a synthetic corpus, which only a test certificate may cite (PS20.5)`);
     for (const f of existing()) if ((JSON.parse(readFileSync(join(dir, f), 'utf8')) as { id?: string }).id === adj.id) throw new AdmitError(`the candidate ${String(adj.id)} is already promoted (${f})`);
 
     // The edit, kept so it can be undone.

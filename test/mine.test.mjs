@@ -26,6 +26,17 @@ const poly = (...args) => {
   }
 };
 
+/** The pin of a polyx directory (S507, PT30.10): recorded afresh for each call, outside the polyx directory. A directory with no entry point gets a pin file that does not exist. */
+let pinCount = 0;
+function pinFor(dir) {
+  const pin = join(tmpdir(), `mine-test-pin-${process.pid}-${++pinCount}.json`);
+  if (existsSync(join(dir, 'bin', 'polyx.mjs'))) {
+    const r = poly('mine', '--pin-polyx', '--project', a.dir, '--polyx', dir, '--polyx-pin', pin);
+    assert.equal(r.code, 0, r.out);
+  }
+  return pin;
+}
+
 // Create fake polyx that returns a fixed report with recorded invocation.
 function fakePolyxDir() {
   const dir = mkdtempSync(join(tmpdir(), 'fake-polyx-'));
@@ -108,7 +119,7 @@ test('S1: positive control - mine succeeds with all required args', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s1-pos.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, `mine should succeed: ${r.out}`);
   assert.ok(existsSync(out), 'candidates file should exist');
 
@@ -121,10 +132,10 @@ test('S1: positive control - mine succeeds with all required args', () => {
 test('S1: missing --traces is rejected', () => {
   const { dir: polyxDir } = fakePolyxDir();
 
-  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', uniq('pos'));
+  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', uniq('pos'));
   assert.equal(rPos.code, 0, 'positive control should succeed');
 
-  const rRef = poly('mine', '--project', a.dir, '--polyx', polyxDir, '--out', join(tmp, 'fail1.json'));
+  const rRef = poly('mine', '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', join(tmp, 'fail1.json'));
   assert.equal(rRef.code, 64, `should exit 64, got ${rRef.code}`);
   assert.match(rRef.out, /poly:.*--traces/, 'should name --traces');
 
@@ -134,10 +145,10 @@ test('S1: missing --traces is rejected', () => {
 test('S1: missing --project is rejected', () => {
   const { dir: polyxDir } = fakePolyxDir();
 
-  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', uniq('pos'));
+  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', uniq('pos'));
   assert.equal(rPos.code, 0);
 
-  const rRef = poly('mine', '--traces', traceFile, '--polyx', polyxDir, '--out', join(tmp, 'fail2.json'));
+  const rRef = poly('mine', '--traces', traceFile, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', join(tmp, 'fail2.json'));
   assert.equal(rRef.code, 64);
   assert.match(rRef.out, /poly:.*--project/);
 
@@ -147,7 +158,7 @@ test('S1: missing --project is rejected', () => {
 test('S1: missing --polyx is rejected', () => {
   const { dir: polyxDir } = fakePolyxDir();
 
-  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', uniq('pos'));
+  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', uniq('pos'));
   assert.equal(rPos.code, 0);
 
   const rRef = poly('mine', '--traces', traceFile, '--project', a.dir, '--out', join(tmp, 'fail3.json'));
@@ -160,7 +171,7 @@ test('S1: missing --polyx is rejected', () => {
 test('S1: missing --out is rejected', () => {
   const { dir: polyxDir } = fakePolyxDir();
 
-  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', uniq('pos'));
+  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', uniq('pos'));
   assert.equal(rPos.code, 0);
 
   const rRef = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir);
@@ -174,10 +185,10 @@ test('S1: polyx dir without bin/polyx.mjs is rejected', () => {
   const badPolyxDir = mkdtempSync(join(tmpdir(), 'bad-polyx-'));
   const { dir: goodPolyxDir } = fakePolyxDir();
 
-  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', goodPolyxDir, '--out', uniq('pos'));
+  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', goodPolyxDir, '--polyx-pin', pinFor(goodPolyxDir), '--out', uniq('pos'));
   assert.equal(rPos.code, 0);
 
-  const rRef = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', badPolyxDir, '--out', join(tmp, 'fail5.json'));
+  const rRef = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', badPolyxDir, '--polyx-pin', pinFor(badPolyxDir), '--out', join(tmp, 'fail5.json'));
   assert.equal(rRef.code, 64);
   assert.match(rRef.out, /poly:.*bin\/polyx\.mjs/);
 
@@ -191,10 +202,10 @@ test('S1: existing --out file is refused and left unchanged', () => {
   const original = 'original';
   writeFileSync(outFile, original);
 
-  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', uniq('pos'));
+  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', uniq('pos'));
   assert.equal(rPos.code, 0);
 
-  const rRef = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', outFile);
+  const rRef = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', outFile);
   assert.equal(rRef.code, 64);
   assert.match(rRef.out, /poly:.*exists/);
   assert.equal(readFileSync(outFile, 'utf8'), original);
@@ -207,7 +218,7 @@ test('S2: polyx is run as mine with --json and --config', () => {
   const { dir: polyxDir, logFile } = fakePolyxDir();
   const out = join(tmp, 'candidates-s2.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
   assert.ok(existsSync(out));
 
@@ -226,11 +237,11 @@ test('S2: polyx failure (exit 1) is reported; no --out written', () => {
   writeFileSync(join(failPolyxDir, 'package.json'), '{"version":"0.1.1"}');
 
   const { dir: goodPolyxDir } = fakePolyxDir();
-  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', goodPolyxDir, '--out', uniq('pos'));
+  const rPos = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', goodPolyxDir, '--polyx-pin', pinFor(goodPolyxDir), '--out', uniq('pos'));
   assert.equal(rPos.code, 0);
 
   const outFile = join(tmp, 'should-not-exist.json');
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', failPolyxDir, '--out', outFile);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', failPolyxDir, '--polyx-pin', pinFor(failPolyxDir), '--out', outFile);
 
   assert.notEqual(r.code, 0);
   assert.match(r.out, /polyx failed/);
@@ -246,7 +257,7 @@ test('S2: POLYX_JEV_KEY not in polyx environment', () => {
 
   process.env.POLYX_JEV_KEY = 'not-a-real-key';
   let r;
-  try { r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out); } finally { delete process.env.POLYX_JEV_KEY; }
+  try { r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out); } finally { delete process.env.POLYX_JEV_KEY; }
   assert.equal(r.code, 0, r.out);
 
   const log = JSON.parse(readFileSync(logFile, 'utf8'));
@@ -260,7 +271,7 @@ test('S3: polyx not vendored (with positive control)', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s3.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const vendorDir = join(ROOT, 'vendor');
@@ -277,7 +288,7 @@ test('S4: candidates has correct episodic structure from port', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s4.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -292,7 +303,7 @@ test('S5: candidates file matches PT30.3 schema', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s5.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -310,7 +321,7 @@ test('S5: corpus digest equals SHA-256 of file', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s5-digest.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -324,7 +335,7 @@ test('S5: --synthetic marks corpus kind', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s5-synthetic.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out, '--synthetic');
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out, '--synthetic');
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -337,7 +348,7 @@ test('S5: candidate digest is SHA-256 of canonical JSON without digest', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s5-cand.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -356,8 +367,8 @@ test('S5: two runs produce byte-identical files', () => {
   const out1 = join(tmp, 'candidates-s5-run1.json');
   const out2 = join(tmp, 'candidates-s5-run2.json');
 
-  const r1 = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir1, '--out', out1);
-  const r2 = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir2, '--out', out2);
+  const r1 = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir1, '--polyx-pin', pinFor(polyxDir1), '--out', out1);
+  const r2 = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir2, '--polyx-pin', pinFor(polyxDir2), '--out', out2);
 
   assert.equal(r1.code, 0, r1.out);
   assert.equal(r2.code, 0, r2.out);
@@ -378,7 +389,7 @@ test('S7: non-promotable rules have reason field', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s7.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -396,7 +407,7 @@ test('S8: without --all only proposed rules are candidates', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s8-no-all.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -410,7 +421,7 @@ test('S8: with --all both proposed and suppressed rules included', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s8-all.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out, '--all');
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out, '--all');
   assert.equal(r.code, 0, r.out);
 
   const c = JSON.parse(readFileSync(out, 'utf8'));
@@ -425,7 +436,7 @@ test('S9: no absolute paths in candidates output', () => {
   const { dir: polyxDir } = fakePolyxDir();
   const out = join(tmp, 'candidates-s9.json');
 
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--out', out);
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', polyxDir, '--polyx-pin', pinFor(polyxDir), '--out', out);
   assert.equal(r.code, 0, r.out);
 
   const json = readFileSync(out, 'utf8');
@@ -459,7 +470,7 @@ const SHOP_TRUTH = [
 test('real-polyx: the shop corpus gives the planted rules, with their sources, and the unpromotable ones listed', () => {
   assert.ok(existsSync(join(POLYX_DIR, 'bin', 'polyx.mjs')), `polyx is expected at ${POLYX_DIR}`);
   const out = uniq('real-shop');
-  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', POLYX_DIR, '--out', out, '--all');
+  const r = poly('mine', '--traces', traceFile, '--project', a.dir, '--polyx', POLYX_DIR, '--polyx-pin', pinFor(POLYX_DIR), '--out', out, '--all');
   assert.equal(r.code, 0, r.out);
   const c = JSON.parse(readFileSync(out, 'utf8'));
   assert.equal(c.tool.name, 'polyx');
@@ -482,7 +493,7 @@ test('real-polyx: the conflict corpus gives the eligibility rule that contradict
   const conflictFile = join(tmp, 'conflict.ndjson');
   writeFileSync(conflictFile, conflict());
   const out = uniq('real-conflict');
-  const r = poly('mine', '--traces', conflictFile, '--project', a.dir, '--polyx', POLYX_DIR, '--out', out, '--all');
+  const r = poly('mine', '--traces', conflictFile, '--project', a.dir, '--polyx', POLYX_DIR, '--polyx-pin', pinFor(POLYX_DIR), '--out', out, '--all');
   assert.equal(r.code, 0, r.out);
   const c = JSON.parse(readFileSync(out, 'utf8'));
   const hit = c.candidates.filter((x) => x.pattern === 'no-X-unless-state' && x.promotable && /effect\.kind == "stock\.reserve"[\s\S]*status in \{ Cancelled \} else deny/.test(x.source));

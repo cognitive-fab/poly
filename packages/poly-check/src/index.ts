@@ -17,3 +17,7 @@ export { workerConformance, workerActions, type Conformance } from './conformanc
 export { evaluate, fit, samples, type Evaluation, type Sample } from './evaluate.js';
 export { policyReports, policySlug, type PolicyReport, type PolicyStage } from './policies.js';
 export { COMMANDS, NOT_BUILT, commandNamed, CommandUsageError, type Command, type Outcome, type Schema } from './commands.js';
+export { mineTraces, pinPolyx, candidateDigest, MineUsageError, type MineOptions } from './mine.js';
+export { promote, PromoteUsageError, type PromoteOptions, type PromoteResult } from './promote.js';
+export { readPromotions, type Promotion, type PromotionProblem } from './promotions.js';
+export { adjudicate, readCandidates, projectAnchorId, VERDICTS } from './adjudicate.js';
