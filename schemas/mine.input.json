@@ -1,6 +1,26 @@
 {
   "type": "object",
   "properties": {
+    "pin": {
+      "type": "boolean",
+      "description": "record the polyx at --polyx as the one this project trusts (S507), and mine nothing"
+    },
+    "repin": {
+      "type": "boolean",
+      "description": "with pin, replace a different pin"
+    },
+    "polyxPin": {
+      "type": "string",
+      "description": "the pin file (default: polyx.pin.json in the project)"
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "description": "stop polyx after this many seconds (default 600)"
+    },
+    "maxOutput": {
+      "type": "integer",
+      "description": "stop polyx when it has written this many bytes (default 64 MiB)"
+    },
     "traces": {
       "type": "string",
       "description": "the trace corpus (poly export traces)"
@@ -27,9 +47,7 @@
     }
   },
   "required": [
-    "traces",
     "project",
-    "polyx",
-    "out"
+    "polyx"
   ]
 }

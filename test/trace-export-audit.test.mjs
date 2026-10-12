@@ -40,6 +40,8 @@ test('PS19.5: erasure tracking - omitted.erasedSteps and erasedRuns are counted'
   try {
     // Create a run with a step that names a body.
     await rt.create('tiers.Rec', { id: 'erase-test' });
+    // A step before the body enters the state, so that erasing it leaves the run gapped and not erased (PS19.5, amended).
+    await rt.dispatch('erase-test', 'Strict', { v: 1 });
     const body = await rt.putContent(canary);
     await rt.dispatch('erase-test', 'Set', { n2: 0, w: 'a', m: 'Calm', f: false, p: 'none', b: body });
 

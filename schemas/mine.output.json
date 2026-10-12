@@ -15,9 +15,5 @@
       "type": "integer"
     }
   },
-  "required": [
-    "path",
-    "candidates",
-    "promotable"
-  ]
+  "required": []
 }
