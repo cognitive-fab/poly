@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "provider": "agent",
+  "model": "desk-agent",
+  "currency": "usd",
+  "perMillionTokens": {
+    "input": 100000,
+    "output": 400000,
+    "step": 10000000
+  },
+  "source": "https://example.com/agent-pricing",
+  "readOn": "2026-10-12"
+}

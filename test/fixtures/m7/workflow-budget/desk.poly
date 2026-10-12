@@ -1,0 +1,92 @@
+// M7.5 fixture (PS18.7): a desk whose workflow maps two effect kinds to an agent's tools and names a budget for its orders.
+// The agent's price table is the tests' own, not a provider's: a step costs 10 usd per million, so 5,000 steps cost 0.05.
+// A run may draft again (Redo), so a run can ask for more orders than its budget holds: the budget allows 0.10 usd a run, and the
+// order cap is 0.05, so two orders fit a run and a third does not.
+module desk
+
+enum Phase { Idle, Drafting, Reviewing, Sending, Sent, Failed }
+
+machine Desk {
+  state {
+    phase : Phase = Idle
+  }
+
+  terminal phase in { Sent, Failed }
+
+  action Start()
+  action Drafted()
+  action DraftFailed()
+  action Redo()
+  action Approved()
+  action Delivered()
+  action SendFailed()
+
+  on Start {
+    require phase == Idle else reject "busy"
+    phase' = Drafting
+    emit draft(1)
+  }
+
+  on Drafted {
+    require phase == Drafting else reject "not-drafting"
+    phase' = Reviewing
+  }
+
+  on DraftFailed {
+    require phase == Drafting else reject "not-drafting"
+    phase' = Failed
+  }
+
+  on Redo {
+    require phase == Reviewing else reject "not-reviewing"
+    phase' = Drafting
+    emit draft(1)
+  }
+
+  on Approved {
+    require phase == Reviewing else reject "not-reviewing"
+    phase' = Sending
+    emit send(1)
+  }
+
+  on Delivered {
+    require phase == Sending else reject "not-sending"
+    phase' = Sent
+  }
+
+  on SendFailed {
+    require phase == Sending else reject "not-sending"
+    phase' = Failed
+  }
+
+  effect draft(n: 0..1) {
+    kind "desk.draft"
+    labels { read:store }
+    class none
+    retry { attempts 3, base 1s, timeout 30s }
+    ok -> Drafted()
+    failed -> DraftFailed()
+  }
+
+  effect send(n: 0..1) {
+    kind "desk.send"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 3, base 1s, timeout 30s }
+    ok -> Delivered()
+    failed -> SendFailed()
+  }
+}
+
+budget spend {
+  cap usd 0.10 per run
+  cap usd 0.50 per month
+  on exhausted deny
+}
+
+workflow desk runs Desk {
+  input Start
+  tool "desk.draft" -> drafter why "draft the reply"
+  tool "desk.send" -> sender target "#out" why "send the reply"
+  budget spend prices "prices/agent.json" order cap usd 0.05
+}
