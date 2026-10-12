@@ -1,0 +1,32 @@
+// M7.2 fixture: one machine with a field of each type a mined state rule can read (PT30.9): an integer, a checked string, an
+// enum with three constructors and a flag, and one effect. Only its types are read by poly mine.
+module forms
+
+enum Lvl { Low, Mid, High }
+
+machine Gate {
+  state {
+    n   : int check { 0, 1, 2 } = 0
+    w   : string check { "a", "b" } = "a"
+    lvl : Lvl = Low
+    ok  : bool = false
+  }
+  action Go()
+  on Go {
+    require !ok else reject "done"
+    n' = 1
+    w' = "b"
+    lvl' = High
+    ok' = true
+    emit fire(1)
+  }
+  action Idle()
+  on Idle {
+    ok' = false
+  }
+  effect fire(k: 0..1) {
+    kind "gate.fire"
+    labels { write:store }
+    class compensable
+  }
+}

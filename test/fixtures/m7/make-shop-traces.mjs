@@ -46,3 +46,17 @@ if (process.argv[1] && process.argv[1].endsWith('make-shop-traces.mjs') && proce
   writeFileSync(join(process.argv[2], 'shop.traces.ndjson'), shop());
   writeFileSync(join(process.argv[2], 'conflict.traces.ndjson'), conflict());
 }
+
+/** A corpus over test/fixtures/m7/forms/forms.poly: twelve runs fire (an integer 1, a string "b", an enum High or Mid, a flag true) and six idle with other values. */
+export function forms({ twoMachines = false } = {}) {
+  const fire = { kind: 'gate.fire', labels: ['write:store'], consequence: 'compensable', gate: { outcome: 'allowed', reason: 'allowed' } };
+  const st = (n, w, lvl, ok) => ({ n, w, lvl, ok });
+  const step = (seq, action, pre, post, effects = []) => ({ seq, action, stepKind: 'accepted', rejectReason: null, pre, data: {}, post, effects, outsideCheckDomain: [] });
+  const eps = [];
+  let k = 200;
+  const ep = (machine, steps) => ({ episode: token('forms-' + k++), machine, gapped: false, steps });
+  for (let i = 0; i < 12; i++) eps.push(ep('forms.Gate', [step(0, '$create', st(0, 'a', 'Low', false), st(0, 'a', 'Low', false)), step(1, 'Go', st(0, 'a', 'Low', false), st(1, 'b', i % 2 ? 'High' : 'Mid', true), [fire])]));
+  for (let i = 0; i < 6; i++) eps.push(ep('forms.Gate', [step(0, '$create', st(0, 'a', 'Low', false), st(0, 'a', 'Low', false)), step(1, 'Idle', st(0, 'a', 'Low', false), st(0, 'a', 'Low', false))]));
+  if (twoMachines) for (let i = 0; i < 6; i++) eps.push(ep('forms.Other', [step(0, '$create', st(0, 'a', 'Low', false), st(0, 'a', 'Low', false)), step(1, 'Go', st(0, 'a', 'Low', false), st(1, 'b', 'High', true), [fire])]));
+  return corpus(eps);
+}
