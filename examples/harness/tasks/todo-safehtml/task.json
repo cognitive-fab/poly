@@ -1,0 +1,74 @@
+{
+  "id": "todo-safehtml",
+  "repo": "todo-app",
+  "language": "js",
+  "prompt": "This repository is a small local-first task manager. Its unit tests for safe HTML escaping fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "Special characters are escaped",
+    "The html tag escapes values but passes trusted markup through"
+  ],
+  "stages": [
+    {
+      "title": "escapeHtml",
+      "edits": [
+        {
+          "file": "src/utils/safe-html.js",
+          "fixed": ".replace(/&/g, '&amp;')",
+          "broken": ".replace(/&/g, '&')",
+          "origin": "injected"
+        },
+        {
+          "file": "src/utils/safe-html.js",
+          "fixed": ".replace(/'/g, '&#39;');",
+          "broken": ".replace(/'/g, '&apos;');",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/utils/safe-html.test.js",
+          "-t",
+          "escapeHtml"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "the html tag",
+      "edits": [
+        {
+          "file": "src/utils/safe-html.js",
+          "fixed": "result += val instanceof SafeHtml ? val.toString() : escapeHtml(val ?? '');",
+          "broken": "result += escapeHtml(val ?? '');",
+          "origin": "injected"
+        },
+        {
+          "file": "src/utils/safe-html.js",
+          "fixed": "toString() { return this._markup; }",
+          "broken": "toString() { return ''; }",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/utils/safe-html.test.js",
+          "-t",
+          "html tag"
+        ],
+        "timeoutMs": 180000
+      }
+    }
+  ]
+}

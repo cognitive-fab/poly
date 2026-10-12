@@ -1,0 +1,98 @@
+{
+  "id": "todo-fuzzy",
+  "repo": "todo-app",
+  "language": "js",
+  "prompt": "This repository is a small local-first task manager. Its unit tests for fuzzy matching fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "Exact, prefix and substring matches score in their tiers",
+    "A target missing a query character scores zero",
+    "Filtered results are sorted best first"
+  ],
+  "addFiles": [
+    {
+      "path": "tests/unit/utils/fuzzy-order.test.js",
+      "from": "tests/fuzzy-order.test.js"
+    }
+  ],
+  "stages": [
+    {
+      "title": "the score tiers",
+      "edits": [
+        {
+          "file": "src/utils/fuzzy-match.js",
+          "fixed": "if (t === q) return 1000;",
+          "broken": "if (t === q) return 900;",
+          "origin": "injected"
+        },
+        {
+          "file": "src/utils/fuzzy-match.js",
+          "fixed": "if (t.startsWith(q)) return 900;",
+          "broken": "if (t.startsWith(q)) return 800;",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/utils/fuzzy-match.test.js",
+          "-t",
+          "exact match|prefix match|substring match"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "non-matching targets",
+      "edits": [
+        {
+          "file": "src/utils/fuzzy-match.js",
+          "fixed": "if (qi < q.length) return 0;",
+          "broken": "if (qi < q.length) return 1;",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/utils/fuzzy-match.test.js",
+          "-t",
+          "returns 0 when|excludes non-matching"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "the order",
+      "edits": [
+        {
+          "file": "src/utils/fuzzy-match.js",
+          "fixed": ".sort((a, b) => b.score - a.score)",
+          "broken": ".sort((a, b) => a.score - b.score)",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/utils/fuzzy-order.test.js"
+        ],
+        "timeoutMs": 180000
+      }
+    }
+  ]
+}

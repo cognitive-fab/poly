@@ -1,0 +1,98 @@
+{
+  "id": "todo-recurrence",
+  "repo": "todo-app",
+  "language": "js",
+  "prompt": "This repository is a small local-first task manager. Its unit tests for recurring tasks fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "The recurrence text is parsed to the right rule",
+    "The next daily, weekday and weekly dates are right",
+    "A monthly rule clamps to the end of a short month"
+  ],
+  "addFiles": [
+    {
+      "path": "tests/unit/core/recurrence-monthend.test.js",
+      "from": "tests/recurrence-monthend.test.js"
+    }
+  ],
+  "stages": [
+    {
+      "title": "parsing",
+      "edits": [
+        {
+          "file": "src/core/recurrence.js",
+          "fixed": "if (/\\bevery\\s+day\\b|daily/.test(t))      return { type: 'daily',    interval: 1 };",
+          "broken": "if (/\\bevery\\s+day\\b|daily/.test(t))      return { type: 'weekly',   interval: 1 };",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/core/recurrence.test.js",
+          "-t",
+          "parses"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "daily, weekday and weekly",
+      "edits": [
+        {
+          "file": "src/core/recurrence.js",
+          "fixed": "return day === 0 || day === 6;",
+          "broken": "return day === 0;",
+          "origin": "injected"
+        },
+        {
+          "file": "src/core/recurrence.js",
+          "fixed": "if (!rule.daysOfWeek?.length) return _addDays(base, 7 * interval);",
+          "broken": "if (!rule.daysOfWeek?.length) return _addDays(base, interval);",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/core/recurrence.test.js",
+          "-t",
+          "weekdays|weekly rule|daily rule"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "the end of a short month",
+      "edits": [
+        {
+          "file": "src/core/recurrence.js",
+          "fixed": "next.setDate(1); next.setMonth(next.getMonth() + interval); next.setDate(Math.min(rule.dayOfMonth ?? base.getDate(), _daysInMonth(next)));",
+          "broken": "next.setMonth(next.getMonth() + interval);",
+          "origin": "pristine"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/core/recurrence-monthend.test.js"
+        ],
+        "timeoutMs": 180000
+      }
+    }
+  ]
+}

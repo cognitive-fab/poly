@@ -1,0 +1,58 @@
+{
+  "id": "snip-config",
+  "repo": "snip",
+  "language": "go",
+  "prompt": "This Go repository filters command output. Its tests for the configuration loader fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "The defaults are the documented ones",
+    "The configuration path comes from SNIP_CONFIG"
+  ],
+  "stages": [
+    {
+      "title": "defaults",
+      "edits": [
+        {
+          "file": "internal/config/config.go",
+          "fixed": "Mode:        \"failures\",",
+          "broken": "Mode:        \"always\",",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/config",
+          "-run",
+          "^(TestDefaultConfig|TestLoadMissingFile)$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "the path",
+      "edits": [
+        {
+          "file": "internal/config/config.go",
+          "fixed": "os.Getenv(\"SNIP_CONFIG\")",
+          "broken": "os.Getenv(\"SNIP_CONFIG_PATH\")",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/config",
+          "-run",
+          "^TestLoadFromFile$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    }
+  ]
+}

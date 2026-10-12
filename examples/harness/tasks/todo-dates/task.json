@@ -1,0 +1,74 @@
+{
+  "id": "todo-dates",
+  "repo": "todo-app",
+  "language": "js",
+  "prompt": "This repository is a small local-first task manager. Its unit tests for date helpers fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "Relative times read correctly",
+    "Due-soon and start-of-day are right"
+  ],
+  "stages": [
+    {
+      "title": "relative time",
+      "edits": [
+        {
+          "file": "src/utils/dates.js",
+          "fixed": "if (absDiff < MINUTE)  return isPast ? 'just now' : 'in a moment';",
+          "broken": "if (absDiff < MINUTE)  return isPast ? 'in a moment' : 'just now';",
+          "origin": "injected"
+        },
+        {
+          "file": "src/utils/dates.js",
+          "fixed": "const prefix = isPast ? '' : 'in ';",
+          "broken": "const prefix = isPast ? 'in ' : '';",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/utils/dates.test.js",
+          "-t",
+          "relativeTime"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "due soon and start of day",
+      "edits": [
+        {
+          "file": "src/utils/dates.js",
+          "fixed": "return date > now && date.getTime() - now.getTime() < hours * HOUR;",
+          "broken": "return date.getTime() - now.getTime() < hours * HOUR;",
+          "origin": "injected"
+        },
+        {
+          "file": "src/utils/dates.js",
+          "fixed": "d.setHours(0, 0, 0, 0);",
+          "broken": "d.setHours(0, 5, 0, 0);",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/utils/dates.test.js",
+          "-t",
+          "isDueSoon|startOfDay"
+        ],
+        "timeoutMs": 180000
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "todo-app": {
+    "dir": "todo-app",
+    "files": 107,
+    "digest": "22bd1c5a6919354bd45e079f656bb840aa645f16edec180e036ce944e5d42790",
+    "note": "the working tree of the owner's repository on 2026-10-12 (its tests/ folder is not committed there), excluding node_modules, dist and .git"
+  },
+  "snip": {
+    "dir": "snip",
+    "files": 61,
+    "digest": "a03d6ccb7e23344a1e615a0b23fbc032a7659cc268891dcc9b7ac9cb071250a2",
+    "note": "commit 7bde5b6e6096952de48b9c9ebea3c91c98c5710a (a clean tree), excluding .git"
+  }
+}

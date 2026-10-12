@@ -1,0 +1,70 @@
+{
+  "id": "snip-pipeline",
+  "repo": "snip",
+  "language": "go",
+  "prompt": "This Go repository filters command output. Its tests for the filter pipeline fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "The pipeline keeps the last line of its input",
+    "An unknown action or a failing action is reported, with its place"
+  ],
+  "addFiles": [
+    {
+      "path": "internal/engine/task_pipeline_test.go",
+      "from": "tests/task_pipeline_test.go"
+    }
+  ],
+  "stages": [
+    {
+      "title": "trailing newline",
+      "edits": [
+        {
+          "file": "internal/engine/pipeline.go",
+          "fixed": "if len(lines) > 0 && lines[len(lines)-1] == \"\" {",
+          "broken": "if len(lines) > 0 && lines[len(lines)-1] != \"\" {",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/engine",
+          "-run",
+          "^TestApplyPipelineTrailingNewline$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "errors",
+      "edits": [
+        {
+          "file": "internal/engine/pipeline.go",
+          "fixed": "return \"\", fmt.Errorf(\"unknown action %q at pipeline[%d]\", action.ActionName, i)",
+          "broken": "_ = i; continue",
+          "origin": "injected"
+        },
+        {
+          "file": "internal/engine/pipeline.go",
+          "fixed": "return \"\", fmt.Errorf(\"pipeline[%d] %s: %w\", i, action.ActionName, err)",
+          "broken": "return \"\", err",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/engine",
+          "-run",
+          "^(TestApplyPipelineUnknownAction|TestApplyPipelineErrorWrap)$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    }
+  ]
+}

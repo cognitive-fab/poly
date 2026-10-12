@@ -1,0 +1,58 @@
+{
+  "id": "snip-headtail",
+  "repo": "snip",
+  "language": "go",
+  "prompt": "This Go repository filters command output. Its tests for the head and tail actions fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "head reports how many lines it dropped",
+    "tail keeps the last lines"
+  ],
+  "stages": [
+    {
+      "title": "head",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "remaining := len(input.Lines) - n",
+          "broken": "remaining := len(input.Lines) - n - 1",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^(TestHead|TestHeadNoOverflow)$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "tail",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "start := len(input.Lines) - n",
+          "broken": "start := n",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^TestTail$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    }
+  ]
+}
