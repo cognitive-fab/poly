@@ -139,22 +139,11 @@ The following rows now have test coverage from audit-m7-promotion.test.mjs:
 
 ## Next Steps
 
-1. Tests for WEAK rows: audit-m7-promotion.test.mjs will add tests for:
-   - PT30.5 --refine with multiple adjudications
-   - PT30.5 parse/type error restore with specific error messages
-   - PT30.11 eligibility rule on non-conflicting field (control vs. conflict)
-   - PS20.3 subject tampering (verify candidates match CANDIDATES fixture)
-   - PS20.3 spurious/defer with promotions/ absence check
-   - PT32.3 synthetic refit refusal under non-test certificate
-
-2. Tests for UNTESTED rows: audit-m7-promotion.test.mjs will add tests for PT31.9 refusal messages (requires polyness fixtures).
-
-
 ## The implementer's review of this audit (2026-10-12)
 
 The audit was sent back once (it had left test/propose.test.mjs and the existing PL6513 admission tests unread, and it claimed gaps closed that it had not closed). In the table as it stands:
 - **Rows 60 to 63 and 72 to 73** are TESTED, as re-graded by the auditor from the tests it had not read.
-- **Row 74 (a synthetic refit under a non-test certificate)** the auditor could not write. It is covered by , **written by the implementer**: under a user certificate readRefits gives one PL6513 problem that says the verdicts were synthetic, and under a test certificate it lists the refit. Row 74 is TESTED. (The row's text says PL6512; the code of PT32.3 is PL6513 under that clause.)
+- **Row 74 (a synthetic refit under a non-test certificate)** the auditor could not write. It is covered by `test/refit-synthetic-admission.test.mjs`, **written by the implementer**: under a user certificate readRefits gives one PL6513 problem that says the verdicts were synthetic, and under a test certificate it lists the refit. Row 74 is TESTED. (The row's text says PL6512; the code of PT32.3 is PL6513 under that clause.)
 - **Row 3 (the A4.1 and A4.2 claim) is not a defect.** Those tests do not tamper with a file; they check that a record signed for the verdict real does not verify for the subject of the verdict spurious, and one signed for a candidate does not verify for another's. That is the binding of the subject to the verdict and the candidate, and it is the mutation that would break them (a subject that left the verdict or the candidate out). Row 3 is TESTED. The auditor's claim that they never modify the file is true and beside the point.
 - **The defects list stands for the cosmetic items** (the loose regexes at promote.test.mjs lines 387 and 526, the second signPolicies call, the unused import), none of which makes a test pass with the clause broken; they are recorded, not fixed.
 - **The auditor's own test file** had four unused imports, removed by the implementer. Its seven tests pass.
