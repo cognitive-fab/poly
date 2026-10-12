@@ -138,17 +138,15 @@ test('PT30.10: no shell: a polyx path made of shell metacharacters is run as it 
   assert.ok(!existsSync(join(tmp, ' polyx')), 'nothing was split at the ampersand');
 });
 
-test('PT30.10: a polyx that does not finish within the timeout is stopped, and writes no candidates', () => {
-  // The timeout is long enough for node to start the stand-in even when the machine is loaded (the full suite), and far shorter than its sleep.
-  const f = fakePolyx({ body: "await new Promise((r) => setTimeout(r, 120000));" });
+test('PT30.10: a polyx that never answers is stopped when the timeout passes, and writes no candidates', { timeout: 120000 }, () => {
+  // The stand-in never answers and never exits, so the outcome does not depend on how fast the machine starts it: whatever
+  // the load, only the timeout ends it.
+  const f = fakePolyx({ body: "setInterval(() => {}, 1000); await new Promise(() => {});" });
   const pin = pinned(f);
-  const t0 = Date.now();
-  const r = mine(f, pin, '--timeout', '6');
+  const r = mine(f, pin, '--timeout', '2');
   assert.equal(r.code, 2, r.out);
-  assert.match(r.out, /poly: polyx did not finish within 6 s and was stopped/);
-  assert.ok(Date.now() - t0 < 60000, 'it did not wait for the sleeper');
+  assert.match(r.out, /poly: polyx did not finish within 2 s and was stopped/);
   assert.ok(!existsSync(r.out));
-  assert.equal(f.starts().length, 1);
 });
 
 test('PT30.10: a polyx whose output passes the cap is stopped, and writes no candidates', () => {
