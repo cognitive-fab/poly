@@ -3,7 +3,8 @@
 // with at least five instances, and the run holds one consequential effect instance, the draft (6 messages, 2 to-dos). So the loop
 // continues on a SYNTHETIC amplification of the recorded run, labelled so in the candidates and the certificate: its to-do episode
 // that reaches the draft, copied twelve times under fresh episode tokens, beside the recorded episodes. polyx proposes rules on it;
-// one is adjudicated real and promoted into the inbox's own sources, the inbox project is checked (its machines and its policy)
+// one is adjudicated real and promoted into the inbox's own sources (and a second, the count of drafts, is adjudicated real and
+// promoted as the person's refinement of it, the invariant meant: IT4.4), the inbox project is checked (its machines and its policy)
 // and admitted, and the certificate cites the rule; a rule adjudicated spurious never reaches the program. The conflict case is the
 // shop's (test/loop-shop.test.mjs): the inbox's policy has no mandate and no rule on a state field, and the reviewer ruled that no
 // rule is added to it to manufacture one.
@@ -108,7 +109,10 @@ test('M7-AC1 (inbox): the recorded run proposes nothing; a synthetic amplificati
     const spurious = pick(/require machine\("inbox\.Todo"\)\.due in \{ ThisWeek \} else deny/);
     assert.deepEqual(real.target, { machine: 'inbox.Todo' });
     assert.equal(real.text, 'gmail.createDraft only while status is Proposed (mined, 13 of 13 runs)');
-    // The path property the same corpus gives, at most one draft per to-do, is the program's to answer for: see the result in decisions-m7.md.
+    // The same corpus gives the count rule, at most one draft per to-do. Checked against the first version of this program it was
+    // violated (a defect: a creation whose outcome was ambiguous was proposed again). The program is fixed (IT4.4), the rule is too
+    // strong as written, and the person promotes the rule they meant, as a refinement of it, below.
+    const twice = pick(/path property mined-r[0-9a-f]{16}: count\("gmail\.createDraft"\) <= 1/);
     assert.deepEqual(real.support, { holds: 13, of: 13 });
     // A person's verdicts.
     const key = join(tmp, 'person.pem');
@@ -150,5 +154,25 @@ test('M7-AC1 (inbox): the recorded run proposes nothing; a synthetic amplificati
     assert.deepEqual([p.candidate, p.id, p.corpus.kind, p.tool.name], [real.digest, real.id, 'synthetic', 'polyx']);
     assert.match(p.record, /^sha256:[0-9a-f]{64}$/);
     assert.equal(Object.keys(cert.poly.promotionFiles).length, 1);
+    // The count rule: adjudicated real (the miner found a true thing: a to-do could draft twice), too strong as written, and the
+    // person promotes the invariant they meant in its place. The record cites the mined id; the entry keeps the reason.
+    const meant = join(tmp, 'meant.txt');
+    writeFileSync(meant, 'invariant draft-created-once: made implies (status != Drafted && status != Enveloping && status != Proposed && status != Uncertain)');
+    const reason = 'real, and too strong as written: a definite refusal may be proposed again; the rule meant is that once a draft is created the to-do never proposes one again';
+    const t1 = Date.now();
+    const refined = poly('promote', a.dir, '--candidates', candidates, '--adjudication', judge(twice, 'real'), '--refine', meant, '--reason', reason);
+    assert.equal(refined.code, 0, refined.out);
+    console.log(`INBOX refined promote took ${Math.round((Date.now() - t1) / 1000)} s`);
+    const todo = sources()['inbox.poly'];
+    assert.ok(todo.includes(`// promoted: ${twice.id} sha256:`), 'the marker cites the mined id');
+    assert.ok(todo.includes('invariant draft-created-once: made implies'), 'the person\'s text is in the Todo');
+    assert.ok(!todo.includes(`mined-${twice.id}`) && !todo.includes('mined-r'), 'the miner\'s own text is not');
+    const adm2 = await admit(a.dir);
+    assert.equal(adm2.verdict, 'CLEAN');
+    const cert2 = JSON.parse(readFileSync(adm2.certificatePath, 'utf8'));
+    assert.deepEqual(cert2.poly.promotions.map((x) => x.id), [real.id, twice.id]);
+    const entry2 = JSON.parse(readFileSync(join(a.dir, 'promotions', readdirSync(join(a.dir, 'promotions')).sort()[1]), 'utf8'));
+    assert.equal(entry2.refinement.reason, reason);
+    assert.match(entry2.refinement.candidateSource, /count\("gmail\.createDraft"\) <= 1/);
   } finally { try { rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch { /* the store may stay locked a moment on Windows */ } }
 });
