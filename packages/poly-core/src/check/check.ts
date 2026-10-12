@@ -814,7 +814,38 @@ class Checker {
       seen.add(t.effect);
     }
     for (const k of [...kinds].sort()) if (!seen.has(k)) this.err('PL6803', w, `workflow ${w.name}: the effect kind "${k}" has no tool, so polyflow would hand out a work order no tool fulfils (S166)`);
+    this.checkWorkflowBudget(w);
   }
+
+  /**
+   * PS18.7 (M7.5): the budget a workflow's orders reserve on. The budget is the module's (PL1001), the participant's price table is
+   * checked as a tier's (PL6843, PL1201, PL1001), and the order cap is above zero (PL1201), in the currency of the table and of
+   * every cap of the budget (PL6844), and not above a cap of the budget, which would make an order that could never be issued (PL6845).
+   */
+  private checkWorkflowBudget(w: A.Workflow): void {
+    const wb = w.budget;
+    if (!wb) return;
+    const budget = this.module.decls.find((x): x is A.Budget => x.kind === 'Budget' && x.name === wb.name);
+    if (!budget) this.err('PL1001', wb, `workflow ${w.name} names budget ${wb.name}, which the module does not declare`);
+    if (!routePathOk(wb.prices)) this.err('PL1201', wb, `workflow ${w.name}: the price table "${wb.prices}" is not a relative path to a .json file under the source's directory, with no . or .. segment (PS18.3)`);
+    const entry = routePathOk(wb.prices) ? this.opts.routing?.prices[wb.prices] : undefined;
+    let table: PriceTable | null = null;
+    if (routePathOk(wb.prices) && !entry) this.err('PL1001', wb, `workflow ${w.name}: no price table at ${wb.prices} beside the source (PS18.3)`);
+    else if (entry) {
+      const provider = typeof (entry.table as { provider?: unknown } | null)?.provider === 'string' ? (entry.table as { provider: string }).provider : '';
+      const problem = priceTableProblem(entry.table, provider);
+      if (problem) this.err(problem.code, wb, `workflow ${w.name}: the price table ${wb.prices} ${problem.message} (PS18.3, S350)`);
+      else table = entry.table as PriceTable;
+    }
+    if (!(wb.orderCap.amount >= 1) || !Number.isSafeInteger(wb.orderCap.amount)) this.err('PL1201', wb, `workflow ${w.name}: its order cap is above zero, a whole number of micro-units (PS18.7)`);
+    if (table && table.currency !== wb.orderCap.currency) this.err('PL6844', wb, `workflow ${w.name}: its order cap is in ${wb.orderCap.currency}, and the price table ${wb.prices} is in ${table.currency} (PS18.7)`);
+    if (!budget) return;
+    for (const c of budget.caps) {
+      if (c.currency !== wb.orderCap.currency) this.err('PL6844', c, `budget ${budget.name} caps ${c.currency}, and workflow ${w.name}'s order cap is in ${wb.orderCap.currency} (PS18.7)`);
+      else if (wb.orderCap.amount > c.amount) this.err('PL6845', wb, `workflow ${w.name}'s order cap of ${wb.orderCap.amount} micro-units is above budget ${budget.name}'s cap of ${c.amount}, so no order could ever be issued (PS18.7)`);
+    }
+  }
+
 
   // ── configurations (PS13, PT7a) ─────────────────────────────────────────
   private checkConfiguration(c: A.Configuration, machines: Map<string, MachineFacts>): void {

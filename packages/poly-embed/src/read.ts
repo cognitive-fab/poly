@@ -303,7 +303,7 @@ class Reader {
   /** PT10: `workflow(name, { runs, input, key?: { template, where? }, tools: { kind: { tool, target?, why } } })`. */
   private workflow(c: { name: string; node: ts.CallExpression }): A.Workflow {
     const [name, body] = this.argsOf(c, 2, 2);
-    const o = this.opts(body, ['runs', 'input', 'key', 'tools']);
+    const o = this.opts(body, ['runs', 'input', 'key', 'tools', 'budget']);
     if (!o.has('runs') || !o.has('input') || !o.has('tools')) this.fail(body, 'a workflow names runs, input and tools (PT10)');
     let key: A.Workflow['key'] = null;
     if (o.has('key')) {
@@ -317,7 +317,17 @@ class Reader {
       if (!t.has('tool') || !t.has('why')) this.fail(v, 'a tool names tool and why (PT10)');
       return this.mk<A.WorkflowTool>(kn, { kind: 'WorkflowTool', effect, tool: this.str(t.get('tool')!), target: t.has('target') ? this.str(t.get('target')!) : null, why: this.str(t.get('why')!) });
     });
-    return this.mk<A.Workflow>(c.node, { kind: 'Workflow', name: this.str(name), machine: this.str(o.get('runs')!), input: this.str(o.get('input')!), key, tools });
+    // PS18.7 (M7.5): budget: { name, prices, orderCap: { currency, amount } }, the amount a decimal as written.
+    let budget: A.WorkflowBudget | null = null;
+    if (o.has('budget')) {
+      const bn = o.get('budget')!;
+      const b = this.opts(bn, ['name', 'prices', 'orderCap']);
+      if (!b.has('name') || !b.has('prices') || !b.has('orderCap')) this.fail(bn, 'a workflow budget names its name, prices and orderCap (PS18.7)');
+      const oc = this.opts(b.get('orderCap')!, ['currency', 'amount']);
+      if (!oc.has('currency') || !oc.has('amount')) this.fail(b.get('orderCap')!, 'an order cap names its currency and amount (PS18.7)');
+      budget = this.mk<A.WorkflowBudget>(bn, { kind: 'WorkflowBudget', name: this.str(b.get('name')!), prices: this.str(b.get('prices')!), orderCap: { currency: this.str(oc.get('currency')!), amount: this.amount(oc.get('amount')!) } });
+    }
+    return this.mk<A.Workflow>(c.node, { kind: 'Workflow', name: this.str(name), machine: this.str(o.get('runs')!), input: this.str(o.get('input')!), key, tools, budget });
   }
 
   private payload(node: ts.Expression): A.PayloadField[] {

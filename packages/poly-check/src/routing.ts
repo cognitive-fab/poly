@@ -71,5 +71,11 @@ export function resolveRouting(module: Module, file: string): RoutingFiles {
       }
     }
   }
+  // PS18.7 (M7.5): the participant's price table of a workflow's budget, beside the source.
+  for (const w of module.decls) {
+    if (w.kind !== 'Workflow' || !w.budget) continue;
+    const p = read(w.budget.prices);
+    if (p) out.prices[w.budget.prices] = { table: p.json, file: p.file, digest: p.digest };
+  }
   return out;
 }

@@ -116,6 +116,7 @@ class Printer {
     this.out.push(`${INDENT}input ${w.input}`);
     if (w.key) this.emit(w.key, INDENT, [`key ${q(w.key.template)}${w.key.fields.length ? ` where ${w.key.fields.map((f) => `${f.name} matches ${q(f.pattern)}`).join(', ')}` : ''}`]);
     for (const t of w.tools) this.emit(t, INDENT, [`tool ${q(t.effect)} -> ${/^[A-Za-z_][A-Za-z0-9_]*$/.test(t.tool) ? t.tool : q(t.tool)}${t.target === null ? '' : ` target ${q(t.target)}`} why ${q(t.why)}`]);
+    if (w.budget) this.emit(w.budget, INDENT, [`budget ${w.budget.name} prices ${q(w.budget.prices)} order cap ${w.budget.orderCap.currency} ${moneyText(w.budget.orderCap.amount)}`]);
     this.out.push(`}${this.trail(w)}`);
   }
 

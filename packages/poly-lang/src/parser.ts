@@ -346,6 +346,17 @@ class Parser {
     return { on: w, below: this.decimal() };
   }
 
+  /** PS18.3: an amount such as 0.50 or 20 in micro-units, exactly: the lexer gives at most three places, so it is a whole number of them. */
+  private microAmount(): number {
+    const tok = this.peek();
+    if (tok.kind !== 'int' && tok.kind !== 'decimal') this.fail('expected an amount such as 0.50');
+    this.next();
+    const [whole, frac = ''] = tok.text.split('.');
+    const amount = Number(whole) * 1_000_000 + Number(frac.padEnd(6, '0'));
+    if (!Number.isSafeInteger(amount)) this.fail(`the amount ${tok.text} is out of range`, tok);
+    return amount;
+  }
+
   /** `budget b { cap <currency> <amount> per run | per scope | per <period> [per scope] …  [on exhausted deny | escalate] }` (PT10r, PS18.4). */
   private budget(): A.Budget {
     const start = this.next();
@@ -525,8 +536,20 @@ class Parser {
       this.expect('why');
       tools.push(this.node<A.WorkflowTool>(ts, { kind: 'WorkflowTool', effect, tool, target, why: this.str('why the step exists') }, true));
     }
+    // PS18.7 (M7.5): the budget of the workflow's orders, written once, after the tools.
+    let budget: A.WorkflowBudget | null = null;
+    if (this.at('budget')) {
+      const bs = this.next();
+      const bname = this.ident('a budget name');
+      this.expect('prices');
+      const prices = this.str('a price table');
+      this.word('order');
+      this.word('cap');
+      const currency = this.ident('a currency');
+      budget = this.node<A.WorkflowBudget>(bs, { kind: 'WorkflowBudget', name: bname, prices, orderCap: { currency, amount: this.microAmount() } }, true);
+    }
     this.expect('}');
-    return this.node<A.Workflow>(start, { kind: 'Workflow', name, machine, input, key, tools }, true);
+    return this.node<A.Workflow>(start, { kind: 'Workflow', name, machine, input, key, tools, budget }, true);
   }
 
   /** `policy p { scope "s" var … obligation … recalled … never … }` (PT8.1, S149). */

@@ -68,7 +68,8 @@ class Printer {
       case 'Workflow': {
         const key = d.key ? `, key: { template: ${q(d.key.template)}${d.key.fields.length ? `, where: { ${d.key.fields.map((f) => `${this.key(f.name)}: ${q(f.pattern)}`).join(', ')} }` : ''} }` : '';
         const tools = d.tools.map((t) => `${ind}  ${q(t.effect)}: { tool: ${q(t.tool)}${t.target === null ? '' : `, target: ${q(t.target)}`}, why: ${q(t.why)} },\n`).join('');
-        return `${this.use('workflow')}(${q(d.name)}, { runs: ${q(d.machine)}, input: ${q(d.input)}${key}, tools: {\n${tools}${ind}} })`;
+        const budget = d.budget ? `, budget: { name: ${q(d.budget.name)}, prices: ${q(d.budget.prices)}, orderCap: { currency: ${q(d.budget.orderCap.currency)}, amount: ${money(d.budget.orderCap.amount)} } }` : '';
+        return `${this.use('workflow')}(${q(d.name)}, { runs: ${q(d.machine)}, input: ${q(d.input)}${key}, tools: {\n${tools}${ind}}${budget} })`;
       }
     }
   }

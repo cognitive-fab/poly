@@ -168,7 +168,12 @@ export interface Workflow extends NodeBase {
   /** How a run is named from its input; null when the caller names it. */
   key: WorkflowKey | null;
   tools: WorkflowTool[];
+  /** `budget b prices "f" order cap usd 0.05` (PS18.7, M7.5): the budget the workflow's orders reserve on; null when it names none. */
+  budget: WorkflowBudget | null;
 }
+
+/** The participant's price table and the order cap, in micro-units of a currency (PS18.3): the reservation of each work order. */
+export interface WorkflowBudget extends NodeBase { kind: 'WorkflowBudget'; name: string; prices: string; orderCap: { currency: string; amount: number } }
 
 /** `key "{f}…" where f matches "re", …`: the template's fields are parameters of the input action. */
 export interface WorkflowKey extends NodeBase { kind: 'WorkflowKey'; template: string; fields: WorkflowKeyField[] }

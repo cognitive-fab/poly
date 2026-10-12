@@ -59,6 +59,8 @@ machine Desk {
     phase' = Failed
   }
 
+  path property one-send: count("desk.send") <= 1
+
   effect draft(n: 0..1) {
     kind "desk.draft"
     labels { read:store }
@@ -79,9 +81,8 @@ machine Desk {
 }
 
 budget spend {
-  cap usd 0.10 per run
-  cap usd 0.50 per month
-  on exhausted deny
+  cap usd 0.1 per run
+  cap usd 0.5 per month
 }
 
 workflow desk runs Desk {
