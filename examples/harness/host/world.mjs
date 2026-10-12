@@ -10,27 +10,51 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { inside, runIn } from './tasks.mjs';
 
-/** Splits a command line into words, honouring single and double quotes. No expansion, no operators: a shell is never run. */
-export function words(line) {
-  const out = [];
-  let cur = '';
-  let quote = null;
-  let any = false;
-  for (const ch of line) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else cur += ch;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-      any = true;
-    } else if (/\s/.test(ch)) {
-      if (cur !== '' || any) out.push(cur);
-      cur = '';
-      any = false;
-    } else cur += ch;
+// The bash tool is not a shell. It runs one program of a fixed list, from an argv array, and refuses everything else. The list
+// is the classifier's table of declared runners (FUSABLE_COMMANDS, HF3.4, S559) plus vitest through node, which is how the
+// repositories' own checks run. A command is accepted only when it matches the table whole, so there is no quoting, no pipe,
+// no redirection, no substitution, no list and no expansion to parse: a word is made of letters, digits and . / : = @ + - _ only.
+// The limit, stated: npm and go run the repository's own scripts and tests, which the agent may have edited, so the program
+// that runs is bounded by the list and by the environment of tasks.mjs (no key, offline), not by the list alone.
+import { FUSABLE_COMMANDS } from './handlers/classify.mjs';
+
+const WORD = /^[A-Za-z0-9_./:=@+-]+$/;
+// Only the runners the tasks use: npm-family test/build/lint, node --test, go test/build/vet. make, cargo, tsc and the Python
+// runners of the table stay out (make runs a Makefile, which is a shell).
+const ALLOWED = [...FUSABLE_COMMANDS.filter((re) => /^[\^][(]npm[|]|^[\^]node --test|^[\^]go /.test(re.source)), /^node node_modules\/vitest\/vitest\.mjs run( [A-Za-z0-9_./:=@+-]+)*$/];
+
+/**
+ * The argv of a bash call, or the reason it is refused. A call is { argv: [...] } or { command: "word word" }, where a command
+ * is only words joined by single spaces (a string with any other character is refused, so it cannot hide a shell construct).
+ * @returns {{ argv: string[] } | { refused: string }}
+ */
+export function bashArgv(copy, call) {
+  let argv = call.argv;
+  if (argv === undefined) {
+    if (typeof call.command !== 'string') return { refused: 'a bash call needs argv or command' };
+    argv = call.command.split(' ');
   }
-  if (cur !== '' || any) out.push(cur);
-  return out;
+  if (!Array.isArray(argv) || argv.length === 0 || !argv.every((w) => typeof w === 'string' && WORD.test(w))) {
+    return { refused: 'a word holds a character outside letters, digits and . / : = @ + - _ (no shell syntax of any kind)' };
+  }
+  if (!ALLOWED.some((re) => re.test(argv.join(' ')))) return { refused: `${argv[0]} ${argv[1] ?? ''}`.trim() + ' is not among the declared runners' };
+  // node runs a test runner or the repository's vitest, never a script of the agent's choosing by option (-e, -p, --import ...)
+  if (argv[0] === 'node' && argv.slice(1).some((w, i) => w.startsWith('-') && !(i === 0 && w === '--test') && !['-t', '--pool=threads', '--reporter=dot'].includes(w))) {
+    return { refused: 'node takes no option other than --test' };
+  }
+  // go runs another program through these options
+  if (argv[0] === 'go' && argv.slice(2).some((w) => /^-{1,2}(exec|toolexec|o|overlay|modfile|pkgdir)(=|$)/.test(w))) return { refused: 'go takes no option that names a program or a file out of the package' };
+  // a word that is a path stays inside the copy
+  for (const w of argv.slice(1)) {
+    if (!w.includes('/') && !w.includes('..')) continue;
+    if (/^[A-Za-z]:|^[/]/.test(w) || w.split('/').includes('..')) return { refused: `${w} is outside the copy` };
+    try {
+      inside(copy, w.replace(/(^|[/])[.]{3}$/, '$1_'));  // a Go package pattern ends in /...
+    } catch {
+      return { refused: `${w} is outside the copy` };
+    }
+  }
+  return { argv };
 }
 
 const SKIP = new Set(['node_modules', '.git', '.poly', '.gocache', 'dist', 'coverage']);
@@ -78,8 +102,9 @@ export async function runCall(copy, call, { timeoutMs = 120_000 } = {}) {
         return { text: `${hits.join('\n')}\n`, exitStatus: hits.length ? 0 : 1 };
       }
       case 'bash': {
-        const [cmd, ...args] = words(String(call.command ?? ''));
-        if (!cmd) return { text: 'empty command\n', exitStatus: 1 };
+        const v = bashArgv(copy, call);
+        if (v.refused) return { text: `refused: ${v.refused}\n`, exitStatus: 1 };
+        const [cmd, ...args] = v.argv;
         const r = await runIn(copy, cmd, args, { timeoutMs });
         const text = `${r.stdout}${r.stderr}${r.timedOut ? '\n[timed out]\n' : ''}`;
         return { text, exitStatus: r.status ?? 1 };

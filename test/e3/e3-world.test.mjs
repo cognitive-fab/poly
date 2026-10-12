@@ -5,14 +5,43 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { originalsUnchanged, prepare } from '../../examples/harness/host/tasks.mjs';
-import { runCall, runCalls, words } from '../../examples/harness/host/world.mjs';
+import { bashArgv, runCall, runCalls } from '../../examples/harness/host/world.mjs';
 
 const run = `world-${process.pid}`;
 
-test('words: quotes group, nothing expands, no shell is involved', () => {
-  assert.deepEqual(words('go test ./... -run "A B" -count=1'), ['go', 'test', './...', '-run', 'A B', '-count=1']);
-  assert.deepEqual(words("node -e 'x y' ''"), ['node', '-e', 'x y', '']);
-  assert.deepEqual(words('echo $HOME && ls'), ['echo', '$HOME', '&&', 'ls']);
+test('bashArgv: a declared runner is an argv, and a shell metacharacter, an unlisted program or a path out of the copy is refused', async () => {
+  const { copy } = prepare('snip-config', run);
+  for (const command of ['go test ./internal/config -run TestX -count 1', 'go vet ./...', 'npm test', 'npm run test', 'node --test t/a.test.mjs', 'node node_modules/vitest/vitest.mjs run tests/a.test.js']) {
+    assert.ok(bashArgv(copy, { command }).argv, command);
+  }
+  assert.deepEqual(bashArgv(copy, { argv: ['go', 'test', './...'] }).argv, ['go', 'test', './...']);
+  // each of the shell metacharacters, whole or inside a word, in a command that would otherwise pass
+  for (const meta of [';', '&', '&&', '|', '||', '>', '<', '>>', '`x`', '$(x)', '$HOME', '*', '?', '~', '!', '#', '"x"', "'x'", '(', ')', '{', '}', '\n', '\\']) {
+    for (const command of [`go test ./... ${meta}`, `npm test${meta}`, `go test ./...${meta}ls`]) {
+      assert.ok(bashArgv(copy, { command }).refused, JSON.stringify(command));
+    }
+    assert.ok(bashArgv(copy, { argv: ['go', 'test', `./${meta}`] }).refused, `argv with ${JSON.stringify(meta)}`);
+  }
+  assert.ok(bashArgv(copy, { command: 'go  test' }).refused, 'a double space is not a word');
+  // a program that is not on the list, however innocent
+  for (const command of ['ls', 'cat a.txt', 'echo hi', 'git status', 'make test', 'cargo test', 'tsc --noEmit', 'pytest', 'py -m pytest', 'python -m unittest', 'sh run.sh', 'rm -rf x', 'curl x', 'powershell x', 'node', 'node a.js', 'npm install', 'npm exec x', 'go get x', 'go run main.go', 'go mod tidy']) {
+    assert.match(bashArgv(copy, { command }).refused ?? 'accepted', /declared runners|word holds/, command);
+  }
+  // node runs no code by option, go runs no other program
+  for (const command of ['node --test -e x', 'node node_modules/vitest/vitest.mjs run --import x', 'node --test C:/x.test.mjs', 'go test ./... -exec sh', 'go test ./... -toolexec sh', 'go test -o out ./...']) {
+    assert.ok(bashArgv(copy, { command }).refused, command);
+  }
+  // a path out of the copy
+  for (const command of ['node --test ../x.test.mjs', 'node --test /etc/x.test.mjs', 'go test ../other', 'go test ./a/../../b', 'node node_modules/vitest/vitest.mjs run ../../x']) {
+    assert.match(bashArgv(copy, { command }).refused ?? 'accepted', /outside the copy/, command);
+  }
+  assert.ok(bashArgv(copy, { command: 7 }).refused);
+  assert.ok(bashArgv(copy, {}).refused);
+  assert.ok(bashArgv(copy, { argv: [] }).refused);
+  assert.ok(bashArgv(copy, { argv: 'go test' }).refused);
+  // and through the tool: refused, not run
+  const r = await runCall(copy, { tool: 'bash', command: 'go test ./... | cat' });
+  assert.deepEqual([r.exitStatus, r.text.startsWith('refused:')], [1, true]);
 });
 
 test('edit, write, read and search work inside the copy; an edit needs its old text once; a path out of the copy is an error, not an escape', async () => {
@@ -40,21 +69,26 @@ test('edit, write, read and search work inside the copy; an edit needs its old t
   assert.equal((await runCall(copy, { tool: 'nope' })).exitStatus, 1);
 });
 
-test('a bash call runs without a shell, offline, with no key; network commands and shells are refused', async () => {
+test('a listed runner runs in the copy, offline, with no key in its environment', async () => {
   const { copy } = prepare('snip-config', run);
+  const probe = [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "test('env', () => {",
+    "  assert.equal(process.env.ANTHROPIC_API_KEY, undefined);",
+    "  assert.equal(process.env.GOPROXY, 'off');",
+    "  assert.equal(process.cwd().includes('e3-tasks'), true);",
+    '});',
+    '',
+  ].join('\n');
+  assert.equal((await runCall(copy, { tool: 'write', path: 'probe/env.test.mjs', content: probe })).exitStatus, 0);
   process.env.ANTHROPIC_API_KEY = 'canary-world-key';
   try {
-    const r = await runCall(copy, { tool: 'bash', command: 'node -e "console.log(JSON.stringify(process.env))"' });
+    const r = await runCall(copy, { tool: 'bash', command: 'node --test probe/env.test.mjs' });
     assert.equal(r.exitStatus, 0, r.text);
     assert.ok(!r.text.includes('canary-world-key'));
-    assert.match(r.text, /"GOPROXY":"off"/);
   } finally {
     delete process.env.ANTHROPIC_API_KEY;
-  }
-  for (const command of ['curl http://example.com', 'powershell -c x', 'npm install left-pad', 'git push', 'node -e "fetch(\'https://example.com\')"']) {
-    const r = await runCall(copy, { tool: 'bash', command });
-    assert.equal(r.exitStatus, 1, command);
-    assert.match(r.text, /refused/);
   }
 });
 
