@@ -296,3 +296,10 @@ Every two-number form that fit under 4 GB took four to seven minutes, nearly all
 **The main model's tokens** (preamble + transcript + output; 34 requests and 33 steps in every configuration): base 9,826 + 44,444 + 576; fusion alone and compaction alone the same; pack alone 9,826 + 39,240 + 576; reducer alone 9,826 + 28,533 + 576; all four 9,826 + 23,330 + 576. The labels hold: a synthetic corpus of 12 trajectories with tokens at four characters each; "reached the end of the plan", not "solved the task"; recordings only, and the saving of fusion is for the live run.
 
 **Test runs (sequential, one file at a time except where stated):** the whole E3 batch, 92 tests, 17 m 40 s: 91 passed and the one failure was HF3.1b's old variant (above); the HAC1 file after the variant was changed: 13 of 13, 11 m; the gate-reach file and the rest of the batch were in the 91; the mechanisms and cost files again without `UPDATE_E3`, to confirm the committed tables are the ones the corpus gives: 12 of 12, 3 m 57 s.
+
+## Step 3: the two confirmations about the switches (2026-10-12)
+
+`test/e3-switches.test.mjs`, 3 of 3, 2 m 20 s, one process at a time.
+
+- **No credential-egress finding (`PL7001`) for the classifier.** The harness is admitted `CLEAN` and the admission report holds no `PL7001`, with the classifier declaring the secret `mechanisms` and the table `calls` and no egress. The region is polycheck's, a secret read that can leave with no gate between, so it is unreachable for an effect with no egress. **Control:** the same classifier given an egress label and an exact URL reaches the credential-egress region (`PL7001`), so the check can see the case it is confirming absent.
+- **The scan does not treat the switches as secrets.** The known secrets are the vault's list alone (the host's `known-secrets`); the switches are not in it, and a tool output that holds the switches in any form the host writes them is not flagged. By capability, not only by content: the scan can read `known-secrets` and is refused `mechanisms` (`PL6406`), the classifier can read `mechanisms` and is refused `known-secrets`, and no other effect declares a secret at all.
