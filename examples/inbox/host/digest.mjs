@@ -58,6 +58,12 @@ export function formatDigest(model, { drafts }) {
     out.push('To do:');
     for (const t of model.todos) out.push(`  [${t.label}] ${t.title ?? '(no title yet)'}${t.status !== 'Open' ? ` [${t.status.toLowerCase()}]` : ''}${t.due && t.due !== 'Unstated' ? ` (due: ${t.due})` : ''}${t.reply ? ', a reply is wanted' : ''}  <${t.id}>`);
   }
+  // IT4.4: a draft whose creation may have succeeded is not proposed again; only the owner, who looks in Gmail's Drafts, settles it.
+  const uncertain = model.todos.filter((t) => t.status === 'Uncertain');
+  if (uncertain.length) {
+    out.push('Look in Gmail Drafts: the creation of these drafts may have succeeded, and nothing proposes them again until you say (run.mjs ask --todo <id> --do found|missing):');
+    for (const t of uncertain) out.push(`  [${t.label}] ${t.title ?? '(no title)'}: ${t.id}`);
+  }
   if (model.held.length) {
     out.push('Held for you (the assistant was unsure, or the model could not be asked):');
     for (const h of model.held) out.push(`  [${h.label}] ${h.subject || '(no subject)'}${h.from ? ` from ${h.from}` : ''}`);

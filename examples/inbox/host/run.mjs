@@ -2,7 +2,7 @@
 //
 //   node examples/inbox/host/run.mjs run  --project <dir> [--drafts] [--once] [--interval <seconds>] [--fixtures <file>]
 //   node examples/inbox/host/run.mjs link --project <dir> --account <label> [--drafts] [--by <keyId> --key <file>]
-//   node examples/inbox/host/run.mjs ask  --project <dir> --todo <id> --do draft|propose|finish|dismiss
+//   node examples/inbox/host/run.mjs ask  --project <dir> --todo <id> --do draft|propose|finish|dismiss|found|missing
 //
 // `run` is the host: it loads the admitted project (poly.json's run field), connects the Google vaults, the Gmail source
 // and the model providers, serves Google's redirect on loopback, and each pass takes the signed requests dropped in the
@@ -207,8 +207,8 @@ export async function startHost(opts, io) {
         let outcome = 'done';
         try {
           const c = JSON.parse(readFileSync(file, 'utf8'));
-          const action = { draft: 'WriteDraft', propose: 'Propose', finish: 'Finish', dismiss: 'Dismiss' }[c.do];
-          if (!action || typeof c.todo !== 'string') throw new HostError('a command is { "do": "draft" | "propose" | "finish" | "dismiss", "todo": "<id>" }');
+          const action = { draft: 'WriteDraft', propose: 'Propose', finish: 'Finish', dismiss: 'Dismiss', found: 'DraftFound', missing: 'DraftMissing' }[c.do];
+          if (!action || typeof c.todo !== 'string') throw new HostError('a command is { "do": "draft" | "propose" | "finish" | "dismiss" | "found" | "missing", "todo": "<id>" }');
           const r = await host.dispatch(c.todo, action, {});
           say(`${c.do} ${c.todo}: ${r.stepKind ?? 'sent'}`);
           if (r.stepKind === 'rejected') outcome = 'refused';
@@ -355,7 +355,7 @@ async function ask(args, io) {
   if (option(args, '--do') === 'adjudicate') return adjudicate(args, io, project);
   const todo = option(args, '--todo');
   const what = option(args, '--do');
-  if (!todo || !['draft', 'propose', 'finish', 'dismiss'].includes(what)) throw new HostError('ask needs --todo <id> and --do draft|propose|finish|dismiss');
+  if (!todo || !['draft', 'propose', 'finish', 'dismiss', 'found', 'missing'].includes(what)) throw new HostError('ask needs --todo <id> and --do draft|propose|finish|dismiss|found|missing');
   const dir = join(project, 'commands');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${Date.now()}-${what}.json`);

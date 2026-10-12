@@ -105,3 +105,12 @@ test('PT32.4: an event that is not there, a prefix that names several, and a ver
   assert.deepEqual(readdirSync(join(project, 'verdicts').replace(/verdicts$/, '')).includes('verdicts'), false, 'nothing was written');
   mkdirSync(join(tmp, 'x'), { recursive: true });
 });
+
+test('IT4.4: the digest asks the owner to look in Gmail Drafts for a to-do that is Uncertain, and names the two answers', () => {
+  const model = { at: 'now', accounts: {}, todos: [{ id: 'todo:work:t9', label: 'work', status: 'Uncertain', title: 'Reply to Bob', due: 'Unstated', reply: true }, { id: 'todo:work:t1', label: 'work', status: 'Open', title: 'Pay', due: 'Unstated', reply: false }], held: [], approvals: [] };
+  const text = formatDigest(model, { drafts: true });
+  assert.match(text, /Look in Gmail Drafts:[^\n]*--do found\|missing/);
+  assert.match(text, /\[work\] Reply to Bob: todo:work:t9/);
+  assert.ok(!/Look in Gmail Drafts[\s\S]*Pay: todo:work:t1/.test(text), 'an open to-do is not asked about');
+  assert.ok(!formatDigest({ ...model, todos: [model.todos[1]] }, { drafts: true }).includes('Look in Gmail Drafts'));
+});
