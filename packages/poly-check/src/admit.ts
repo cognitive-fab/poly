@@ -23,7 +23,7 @@ import { policySignaturePath } from './policy-sign.js';
 import { readPromotions } from './promotions.js';
 import { readProposals } from './proposals.js';
 
-const PROPOSAL_NAMES = { PL6520: 'PROPOSED_RULE_UNSUPPORTED', PL6521: 'PROPOSAL_EVIDENCE_MISMATCH' } as const;
+const PROPOSAL_NAMES = { PL6520: 'PROPOSAL_RULE_UNSUPPORTED', PL6521: 'PROPOSAL_RULE_WITHOUT_EVIDENCE' } as const;
 const PROMOTION_NAMES = { PL6510: 'PROMOTION_NOT_IN_SOURCE', PL6511: 'PROMOTION_RECORD_INVALID', PL6512: 'SYNTHETIC_PROMOTION' } as const;
 
 export class AdmitError extends Error {

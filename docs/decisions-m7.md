@@ -172,7 +172,7 @@ The reviewer accepted C1 to C6, with these conditions, all in PS21 and PT31 now:
 **Built.**
 - `packages/poly-mine`: `polynessPinOf`, `checkPolynessPin` (the five files of PT31.3, those a checkout has), `runPolyness` (pin checked, a fresh `poly-polyness-home-<random>` in the system temporary directory, the transcripts copied into `.claude/projects/project/`, `HOME` and `USERPROFILE` set to it, the working directory it, the allowlisted environment and nothing else, timeout and cap on output, the home removed in a `finally`). The package now imports `node:os` as well, for the temporary directory; the boundary script's list and `test/boundaries-mine.test.mjs` say so.
 - `packages/poly-check/src/propose.ts`: `proposeWorkflow` and `pinPolyness`. The templates are matched by regular expression over the text of each `effect-invariants.mjs` entry; an entry in a layout the reader does not read is a refusal that says what polyness writes is no longer what poly reads (PT31.4, the shape check); the machine and the path properties are emitted from fixed text (PS21.2, PT31.5a); the output is written only after everything is derived, so a refusal leaves nothing.
-- `packages/poly-check/src/proposals.ts`, `admit.ts`, `diagnostics.ts` (`PL6520 PROPOSED_RULE_UNSUPPORTED`, `PL6521 PROPOSAL_EVIDENCE_MISMATCH`), `certificate.ts` (`poly.proposals`: name, evidence digest, tool).
+- `packages/poly-check/src/proposals.ts`, `admit.ts`, `diagnostics.ts` (`PL6520 PROPOSAL_RULE_UNSUPPORTED`, `PL6521 PROPOSAL_RULE_WITHOUT_EVIDENCE`), `certificate.ts` (`poly.proposals`: name, evidence digest, tool).
 - `poly propose` in the registry (`mcp: null`, out of `NOT_BUILT`), the command line (`--polyness`, `--step`, `--transcripts`, `--out`, `--polyness-pin`, `--pin-polyness`, `--repin-polyness`, `--synthetic`, `--timeout`, `--max-output`) and `schemas/propose.*.json`.
 
 **Choices the spec did not give, made here (PT31.5a and PT31.8 now say them).**
@@ -188,3 +188,13 @@ The reviewer accepted C1 to C6, with these conditions, all in PS21 and PT31 now:
 - `test/boundaries-polyness.test.mjs` (4 cases, mine, written after the script change; 3 of 4 fail against the old script, the fourth restates a rule the old script already had).
 - **Mutation checks on the built `poly-mine`**, each caught: no removal of the home (2 tests fail), the whole environment passed to the child (1), no pin check at the start of a run (3). The mutated `dist` was restored and compared byte for byte.
 - These three files join the independent audit before M7.7: the audit of `propose.test.mjs` is of a file the implementer wrote, so it is named as such.
+
+### M7-AC2 · the acceptance record
+
+`test/propose-ac2.test.mjs` (4 cases, written by the implementer, all passing) runs real polyness, pinned, over **synthetic** transcripts written from the history of polyness's verified-push example (fifteen sessions: twelve verify, add, commit and push; two push without verifying; one pushes twice). No recorded session is used, and the evidence files say `corpus.kind: synthetic` (ruling C6).
+- The proposal arrives as `src/git_push.poly` with four path properties and `proposals/git-push.json`, and is admitted CLEAN; the certificate lists it with its evidence digest and the tool.
+- The careless history (nobody verifies) is admitted too, with no verify rule: the standard is the person's own.
+- A rule whose history does not support it (8 of 16, below 0.6) is refused with `PL6520`, the rule's name and its numbers.
+- A rule the machine breaks is refused by the ordinary check with `PL4001` and its name, with evidence or without; a rule that holds but has no evidence is `PL6521`.
+- Admission order, found by the test: the ordinary check runs before the proposals are read, so a contradicted rule is `PL4001` even with no evidence.
+- Code names follow PS21.4: `PL6520 PROPOSAL_RULE_UNSUPPORTED`, `PL6521 PROPOSAL_RULE_WITHOUT_EVIDENCE`.
