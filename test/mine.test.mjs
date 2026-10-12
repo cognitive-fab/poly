@@ -457,7 +457,7 @@ test('S10: mine in registry with mcp:null AND NOT_BUILT has no mine', () => {
 // === Real polyx tests ===
 // The planted truth of the shop corpus (make-shop-traces.mjs), found by polyx run by hand, as (pattern, status, support, source).
 const SHOP_TRUTH = [
-  ['X-implies-prior-Y', 'proposed', 12, 12, /^path property mined-[0-9a-f]{16}: before\("stock\.reserve", "payment\.charge"\)$/],
+  ['X-implies-prior-Y', 'proposed', 12, 12, /^path property mined-r[0-9a-f]{16}: before\("stock\.reserve", "payment\.charge"\)$/],
   ['no-X-unless-state', 'proposed', 12, 12, /effect\.kind == "stock\.reserve"[\s\S]*machine\("orders\.Order"\)\.status in \{ Reserving \} else deny\n  on unknown escalate\n\}$/],
   ['no-X-unless-state', 'proposed', 12, 12, /effect\.kind == "payment\.charge"[\s\S]*status in \{ Charging \} else deny/],
   ['no-X-unless-state', 'proposed', 6, 6, /effect\.kind == "payment\.fee"[\s\S]*status in \{ Cancelled \} else deny/],
@@ -479,7 +479,7 @@ test('real-polyx: the shop corpus gives the planted rules, with their sources, a
   for (const [pattern, status, holds, of, re] of SHOP_TRUTH) {
     const hit = c.candidates.filter((x) => x.pattern === pattern && x.status === status && x.support.holds === holds && x.support.of === of && x.promotable === true && re.test(x.source));
     assert.equal(hit.length, 1, `${pattern} ${status} ${holds}/${of} ${re}`);
-    assert.match(hit[0].id, /^[0-9a-f]{16}$/);
+    assert.match(hit[0].id, /^r[0-9a-f]{16}$/);
     assert.ok(hit[0].source.includes(`mined-${hit[0].id}`), 'the rule is named mined-<id>');
     assert.deepEqual(hit[0].target, { machine: 'orders.Order' });
   }

@@ -183,7 +183,9 @@ export async function mineTraces(o: MineOptions): Promise<{ path: string; candid
     };
 
     const candidates = report.rules.filter((r) => o.all || r.status === 'proposed').map((r) => {
-      const id = r.id;
+      // PT30.3: polyx's rule id is hexadecimal, and a name of poly that has a segment beginning with a digit is read as a number
+      // with a unit, so a candidate's id is the letter r and then polyx's id.
+      const id = `r${r.id}`;
       const x = kindOf(r.bindings.subject);
       const base = { id, pattern: r.pattern, status: r.status, support: { holds: r.support.holds, of: r.support.of } };
       const counter = (r.counterexamples ?? []).map((c) => { const i = Number(/ep-(\d+)/.exec(c.interactionId)?.[1]); return mined[i] ? { episode: mined[i].episode, seq: turnSeq[i]?.[c.seq - 1] ?? turnSeq[i]?.[c.seq] ?? c.seq } : null; }).filter(Boolean);
