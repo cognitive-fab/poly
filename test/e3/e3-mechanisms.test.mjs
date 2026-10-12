@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './helpers.mjs';
+import { ROOT } from '../helpers.mjs';
 import { CONFIGS, matrix, sensitivity } from './e3-matrix-helpers.mjs';
 
 const TABLE = join(ROOT, 'docs', 'e3', 'trigger-rates.json');

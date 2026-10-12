@@ -1,10 +1,10 @@
 // plan-e3.md E3.7, HAC7 (light: no admission, no checker, no runtime): the scorer reads the journal rows of the Trial and names
 // the failing stage from them. The rows here are built by hand in the shape JournalReader gives, with the Trial's own state in
 // pre and post. The runtime half of HAC7 (a seeded fault in stage k of a real run is reported as stage k, and the scorer agrees
-// with the machine's own failedAt field) is test/e3-stages.test.mjs, which needs the admitted build.
+// with the machine's own failedAt field) is test/e3/e3-stages.test.mjs, which needs the admitted build.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareStages, scoreRun } from '../examples/harness/host/score.mjs';
+import { compareStages, scoreRun } from '../../examples/harness/host/score.mjs';
 
 /** The rows of a Trial that runs `plan` stages, `outcomes[k]` the check of stage k ('pass', 'fail' or undefined if never reached). */
 function trialRows(plan, outcomes, { end = 'Done', why = 'PlanDone', noise = true } = {}) {

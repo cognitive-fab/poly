@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { commandNamed } from '@poly/check';
-import { ROOT } from './helpers.mjs';
+import { ROOT } from '../helpers.mjs';
 
 const H = join(ROOT, 'examples', 'harness', 'host', 'handlers');
 const url = (f) => pathToFileURL(join(H, f)).href;

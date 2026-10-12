@@ -30,8 +30,11 @@ import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ROOT } from './helpers.mjs';
-import { checkExample, expectedOf, mismatch } from './examples-expected.mjs';
+import { ROOT } from '../helpers.mjs';
+import { checkExample as checkOne, expectedOf, mismatch } from '../examples-expected.mjs';
+import { heavy } from './e3-lock.mjs';
+
+const checkExample = (...args) => heavy(() => checkOne(...args));
 
 const DIR = join(ROOT, 'examples', 'harness');
 const PROGRAM = join(DIR, 'harness.poly');

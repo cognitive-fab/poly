@@ -3,8 +3,9 @@
 import { cpSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { admit } from '@poly/check';
-import { ROOT } from './helpers.mjs';
-import { loaded, makeKey, project, signPolicies } from './runtime-helpers.mjs';
+import { ROOT } from '../helpers.mjs';
+import { loaded, makeKey, project, signPolicies } from '../runtime-helpers.mjs';
+import { heavy } from './e3-lock.mjs';
 
 export const EX = join(ROOT, 'examples', 'harness');
 export const HANDLER_FILES = ['verify', 'scan', 'classify', 'tools', 'archive', 'compact', 'intake'].map((n) => `src/handlers/${n}.mjs`);
@@ -24,7 +25,8 @@ export async function admittedHarness(name, { edit = (s) => s, editPolicy = (s) 
   manifest.handlers = handlers;
   writeFileSync(join(dir, 'poly.json'), JSON.stringify(manifest, null, 2));
   await signPolicies(dir);
-  const r = await admit(dir);
+  // an admission checks every machine: never two at once (e3-lock.mjs)
+  const r = await heavy(() => admit(dir));
   return { dir, key, build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey }, cert: r.certificate, result: r };
 }
 

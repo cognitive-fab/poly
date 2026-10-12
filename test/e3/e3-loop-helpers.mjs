@@ -3,11 +3,11 @@
 import { randomBytes } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './helpers.mjs';
+import { ROOT } from '../helpers.mjs';
 import { admittedHarness, loaded } from './e3-runtime-helpers.mjs';
-import { makeHost } from '../examples/harness/host/transports.mjs';
-import { runTask } from '../examples/harness/host/loop.mjs';
-import { hashOf } from '../examples/harness/host/handlers/verify.mjs';
+import { makeHost } from '../../examples/harness/host/transports.mjs';
+import { runTask } from '../../examples/harness/host/loop.mjs';
+import { hashOf } from '../../examples/harness/host/handlers/verify.mjs';
 
 /** The cache write/read price ratio of the main tier's price table: what the pay-gate prices a cache rewrite with (SoL-Pi, 2.4). */
 const MAIN_PRICES = JSON.parse(readFileSync(join(ROOT, 'examples', 'harness', 'prices', 'main.json'), 'utf8')).perMillionTokens;

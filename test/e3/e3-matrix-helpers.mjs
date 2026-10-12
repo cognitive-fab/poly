@@ -1,13 +1,13 @@
 // plan-e3.md E3.5, E3.6: the corpus of recorded trajectories run under every configuration of the four mechanisms, each in a
 // fresh runtime over one shared admission, and what each run left, read from the runtime's own records (the journal, the
 // outbox, the decision events), never from the host's counters alone.
-import { trajectories } from './fixtures/harness/trajectories.mjs';
-import { ALL_OFF, ALL_ON } from '../examples/harness/host/loop.mjs';
+import { trajectories } from '../fixtures/harness/trajectories.mjs';
+import { ALL_OFF, ALL_ON } from '../../examples/harness/host/loop.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { run } from './e3-loop-helpers.mjs';
-import { costReport } from '../examples/harness/host/cost-report.mjs';
-import { ROOT } from './helpers.mjs';
+import { costReport } from '../../examples/harness/host/cost-report.mjs';
+import { ROOT } from '../helpers.mjs';
 
 const PRICES = { main: JSON.parse(readFileSync(join(ROOT, 'examples', 'harness', 'prices', 'main.json'), 'utf8')), cheap: JSON.parse(readFileSync(join(ROOT, 'examples', 'harness', 'prices', 'cheap.json'), 'utf8')) };
 

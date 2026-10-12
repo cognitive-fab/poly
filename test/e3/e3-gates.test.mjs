@@ -9,8 +9,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './helpers.mjs';
-import { checkExample } from './examples-expected.mjs';
+import { ROOT } from '../helpers.mjs';
+import { checkExample as checkOne } from '../examples-expected.mjs';
+import { heavy } from './e3-lock.mjs';
+
+const checkExample = (...args) => heavy(() => checkOne(...args));
 
 const DIR = join(ROOT, 'examples', 'harness');
 const SRC = readFileSync(join(DIR, 'harness.poly'), 'utf8');

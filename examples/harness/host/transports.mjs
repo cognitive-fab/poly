@@ -2,7 +2,7 @@
 //
 // The four switches (Q-E3-2) are the host's alone. A handler reads them through the secrets capability, which has no write,
 // and no effect of the module declares a store table named mechanisms, so no model-driven effect or tool can change them
-// (test/e3-loop.test.mjs holds both). The host sets them once, before the trial begins: a second set is refused. If a trial
+// (test/e3/e3-loop.test.mjs holds both). The host sets them once, before the trial begins: a second set is refused. If a trial
 // could flip its own mechanisms the comparison table of the base and the full harness would mean nothing.
 import { MemoryStore } from './store.mjs';
 

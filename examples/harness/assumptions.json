@@ -38,7 +38,7 @@
         "tool.scan"
       ],
       "status": "discharged",
-      "by": "the AC18 canary over the real runtime store: test/e3-loop.test.mjs, \"AC18, S554, gates 2 and 3: a token in a tool output reaches nothing the runtime, the store, the journal or the effect payloads hold\", with its seeded control (a scan that does not know the secret leaves it in the archive and the same scan finds it); and test/e3-handlers.test.mjs for the shapes, the encodings, the benign corpus and the redaction (owner, 2026-10-11)"
+      "by": "the AC18 canary over the real runtime store: test/e3/e3-loop.test.mjs, \"AC18, S554, gates 2 and 3: a token in a tool output reaches nothing the runtime, the store, the journal or the effect payloads hold\", with its seeded control (a scan that does not know the secret leaves it in the archive and the same scan finds it); and test/e3/e3-handlers.test.mjs for the shapes, the encodings, the benign corpus and the redaction (owner, 2026-10-11)"
     },
     {
       "id": "scan-verdict-unrecognised",
@@ -53,7 +53,7 @@
         "tool.verify"
       ],
       "status": "open",
-      "evidence": "property tests and four seeded mutant verifiers, each caught (E3.3); under poly-runtime a permanent error from the handler completes as the effect's failed outcome (Refused) with no retry, the handler running once (E3.4 gate 1, test/e3-runtime.test.mjs)"
+      "evidence": "property tests and four seeded mutant verifiers, each caught (E3.3); under poly-runtime a permanent error from the handler completes as the effect's failed outcome (Refused) with no retry, the handler running once (E3.4 gate 1, test/e3/e3-runtime.test.mjs)"
     },
     {
       "id": "stage-check-verdict",
@@ -100,7 +100,7 @@
       "id": "staging-rows",
       "assumption": "The raw tool output is staged in the output table until it is scanned, and the staging row is cleared once the clean copy or the redaction is stored. The recording (recorded-tool) holds the world's own raw output and is the one place the canary scan does not look; a live run has no such table.",
       "status": "open",
-      "evidence": "test/e3-loop.test.mjs: the staging row reads cleared after the store step; the canary scan excludes only recorded-tool"
+      "evidence": "test/e3/e3-loop.test.mjs: the staging row reads cleared after the store step; the canary scan excludes only recorded-tool"
     },
     {
       "id": "joint-configuration",

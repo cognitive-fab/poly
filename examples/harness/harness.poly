@@ -16,7 +16,7 @@
 // fact Metered, since a decision's result cannot hold text and a stop reason together. The classifier, the verifier and the
 // credential scan are certified handlers whose verdict is the effect's completion: the machines prove what follows from
 // each verdict, not that the verdict is right. A rule's guard is one tagged line (// @HF3.n) so that
-// test/e3-hac1.test.mjs can seed its violation.
+// test/e3/e3-hac1.test.mjs can seed its violation.
 //
 // Actions the host dispatches after it has seen the facts they need: Metered, Grew, Go, StoreLog, Measured, Overflowed,
 // CapReached, Close, Show. None is trusted: every rule is on the machine's own state, and a require rejects the action

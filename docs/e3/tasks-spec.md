@@ -2,7 +2,7 @@
 
 *Cognitive Fab, October 2026. Written as the light work of E3.7, before any task is built. Nothing here has been run.*
 
-Status: a specification for the owner's rulings on the open questions at the end. It follows the ruling on Q-E3-3 (the tasks come from the owner's small personal repositories, with a check per stage, read-only on the originals, each copied into a scratch folder, a negative result at that size reported as inconclusive).
+Status: a specification, with the owner's rulings of 2026-10-12 on its three questions applied (section 6). It follows the ruling on Q-E3-3 (the tasks come from the owner's small personal repositories, with a check per stage, read-only on the originals, each copied into a scratch folder, a negative result at that size reported as inconclusive).
 
 ## 1. What a task is
 
@@ -22,7 +22,7 @@ The agent sees the prompt and the plan, and the repository in its starting state
 ## 2. The rules
 
 1. **Read-only on the originals.** `todo-app`, `md2pdf` and `snip` under `C:\Users\jjdub\code` are never written, built in or run in. A task's run starts from a copy in a scratch folder (`.poly/e3-tasks/<run>/<id>/`, ignored by git), made by `git archive` of the pinned commit, so no working-tree change of the owner's is copied.
-2. **Offline.** No network at any stage: the dependencies a check needs are the ones the copy already has. For `todo-app` that is its `node_modules`, which the copy reaches by a link to the original's folder (read-only use); for `snip`, the Go module cache; for `md2pdf`, only the pure functions of `pdf2md.py`, since `md2pdf.py` needs the installed packages weasyprint and PyMuPDF and a PDF renderer.
+2. **Offline.** No network at any stage: the dependencies a check needs are the ones the copy already has. For `todo-app` that is its `node_modules`, which the copy reaches by a link to the original's folder (read-only use); for `snip`, the Go module cache. `md2pdf` is not used: PyMuPDF is not installed on this machine (`import fitz` fails with ModuleNotFoundError, checked 2026-10-12 with `py`, with nothing installed), `pdf2md.py` imports it at the top, and `md2pdf.py` needs weasyprint and a PDF renderer as well.
 3. **A check is deterministic and fast.** A command with a fixed result for a fixed copy, under 30 seconds, with no clock, no random seed and no network. A test that reads the date is given a fixed date.
 4. **A check fails before its stage and passes after it.** For every stage k, the check of stage k fails on the copy with `break.patch` and stages 0 to k-1 applied, and passes with stage k's reference applied. The oracle run proves this for all twelve tasks before any model is asked, and a task whose oracle does not pass is not used.
 5. **A stage's check is the conjunction of its commands**, and a stage scores 1 or 0 (the scorer's rule). The finer score of the proposal (the share of a stage's checks that pass) would need several check effects per stage, which `Trial` does not have; it is noted as a limit.
@@ -44,10 +44,10 @@ Each is a break of a function of the repository that its existing tests, or the 
 | `snip-group` | snip | `groupBy` and `aggregate` | 3 |
 | `snip-config` | snip | the configuration loader's precedence (internal/config) | 2 |
 | `snip-gain` | snip | the formatting of the gain display (internal/display/gain.go) | 4 |
-| `pdf2md-headings` | md2pdf | `classify_heading_level` and `detect_body_font_size` (pdf2md.py), pure functions on numbers | 2 |
-| `pdf2md-merge` | md2pdf | `convert_to_markdown` over a list of spans: the merge of spans of one line, lists, the heading marks | 3 |
+| `todo-nlparse` | todo-app | `parseQuickCapture` (src/parsers/nl-parser.js): the priority token, the due-date phrase, the tags, with the reference date fixed | 3 |
+| `snip-pipeline` | snip | the pipeline of filters (internal/engine/pipeline.go): the order the actions run in, and what an action's error does to the rest | 2 |
 
-Five tasks are in JavaScript, five in Go and two in Python, and the plans are 2, 3, 2, 3, 2, 2, 3, 3, 2, 4, 2, 3 stages, 31 stages in all. The logs the Reducer reads come from `go test` and `vitest run`, 4 KiB and over only when a run is verbose or fails in several places; the tasks are chosen so that some stages fail loudly (a failing test file prints its diff) and some are quiet, because the Reducer and ObservationPack have opportunities only on the loud ones.
+Six tasks are in JavaScript and six in Go, and the plans are 2, 3, 2, 3, 2, 3, 2, 3, 3, 2, 4, 2 stages, 31 stages in all. The logs the Reducer reads come from `go test` and `vitest run`, 4 KiB and over only when a run is verbose or fails in several places; the tasks are chosen so that some stages fail loudly (a failing test file prints its diff) and some are quiet, because the Reducer and ObservationPack have opportunities only on the loud ones.
 
 ## 4. What the live run needs from the tasks
 
@@ -60,12 +60,13 @@ Five tasks are in JavaScript, five in Go and two in Python, and the plans are 2,
 
 The twelve tasks are small and the paired comparison on them detects only a large gap: at 12 pairs, an exact one-sided McNemar test on the discordant pairs reaches 0.05 only when all of 5 discordant pairs go one way, or 7 of 8, or 8 of 9 (6 of 7 gives 0.0625), so a harness that is better on 3 or 4 tasks out of 12 is reported `INCONCLUSIVE`, not as no difference (Q-E3-3, ruled). Every figure from these runs carries the labels of `assumptions.json` (`recordings-evidence` for recordings) and, for the live run, its own: the number of tasks, the number of reruns, the noise floor and the smallest gap the set can detect.
 
-## 6. For the owner
+## 6. The owner's rulings (2026-10-12)
 
-- **Q-E3-7. May the task definitions be committed?** `break.patch` and `stage-<k>.patch` hold lines of the repositories. `todo-app` and `md2pdf` are the owner's; `snip` carries a licence of its own (its LICENSE file) and is by another author. Proposed: commit the patches for the owner's two repositories, and for `snip` commit no code, only a script that makes the breaks from a pinned commit by named, small text replacements and states the licence; or exclude `snip`'s tasks. The owner decides.
-- **Q-E3-8. `md2pdf` is only partly runnable offline.** Its two tasks use the pure functions of `pdf2md.py`. If the installed Python lacks PyMuPDF, `pdf2md.py` does not import, and the two tasks are replaced by two `snip` or `todo-app` tasks.
-- **Q-E3-9. Where the E3 tests run.** The E3 test files are in `test/` and the repository's `npm test` runs `test/*.test.mjs` in parallel with the rest; the E3 batch takes about 18 minutes sequentially, with admissions of up to 1 GB. Proposed: they run in the serial group (`test/after/`) or are named in `test:e3` only, as the owner prefers.
+- **The patches are committed.** `todo-app` is the owner's, so its patches are committed as they are. `snip` is MIT licensed ("Copyright (c) 2026 snip contributors", by Edouard Claude and contributors, https://github.com/edouard-claude/snip), a permissive licence, so its patches are committed too, each task directory carrying `NOTICE` with snip's licence text and the line "Portions of snip, by Edouard Claude and contributors, MIT licensed". `md2pdf` has no task, so nothing of it is committed.
+- **`md2pdf` is replaced.** PyMuPDF is missing (section 2), nothing was installed, and the two `md2pdf` tasks are replaced by `todo-nlparse` and `snip-pipeline`: twelve tasks, six from each repository.
+- **The E3 tests run by `npm run test:e3` only, not in `npm test`.** They live in `test/e3/`, which the repository's `test/*.test.mjs` glob does not reach, and `test:e3` runs them one file at a time. The M7.7 gate and the release gate list `npm run test:e3` as their own named item.
+- **The detectable gap is stated in the live run's report as computed here:** with 12 pairs, an exact one-sided McNemar test is significant at 0.05 only for a lopsided result: all of 5 discordant pairs one way, 7 of 8, or 8 of 9 (6 of 7 gives 0.0625). Anything less is reported `INCONCLUSIVE`, not as no difference.
 
 ## Conclusion
 
-The twelve tasks are small, offline and checked stage by stage, and each stage's check has an oracle that proves it can pass and fails before. The scorer and its tests are written and need nothing from the checker; the runtime half of HAC7 and the task builds wait for the go. Three questions are the owner's: whether the task patches may be committed, what to do if `md2pdf` cannot run offline, and where the E3 tests run.
+The twelve tasks are small, offline and checked stage by stage, and each stage's check has an oracle that proves it can pass and fails before. The scorer and its tests are written and need nothing from the checker; the runtime half of HAC7 and the task builds wait for the go. The owner's three questions are ruled (section 6): the patches are committed with snip's notice, `md2pdf` is replaced because PyMuPDF is missing, and the E3 tests run by `test:e3` only.

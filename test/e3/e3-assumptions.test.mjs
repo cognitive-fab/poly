@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './helpers.mjs';
+import { ROOT } from '../helpers.mjs';
 
 const DIR = join(ROOT, 'examples', 'harness');
 const SRC = readFileSync(join(DIR, 'harness.poly'), 'utf8');
@@ -62,12 +62,12 @@ test('the scan verdict is two entries: known secrets and the seven shapes are di
   const unknown = A.find((a) => a.id === 'scan-verdict-unrecognised');
   assert.ok(known && unknown);
   assert.equal(known.status, 'discharged');
-  assert.match(known.by, /test\/e3-loop\.test\.mjs/);
+  assert.match(known.by, /test.e3.e3-loop.test.mjs/);
   assert.match(known.by, /seeded control/);
   assert.equal(unknown.status, 'open');
   assert.ok(!A.some((a) => a.id === 'scan-verdict'), 'the single entry is gone');
   // the test it cites exists, by its title
-  const loop = readFileSync(join(ROOT, 'test', 'e3-loop.test.mjs'), 'utf8');
+  const loop = readFileSync(join(ROOT, 'test', 'e3', 'e3-loop.test.mjs'), 'utf8');
   assert.ok(loop.includes('AC18, S554, gates 2 and 3: a token in a tool output reaches nothing'));
 });
 

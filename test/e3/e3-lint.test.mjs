@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './helpers.mjs';
+import { ROOT } from '../helpers.mjs';
 
 const DIR = join(ROOT, 'examples', 'harness');
 const SRC = readFileSync(join(DIR, 'harness.poly'), 'utf8');

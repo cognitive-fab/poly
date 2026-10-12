@@ -9,14 +9,16 @@ import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { capabilitiesFor } from '@poly/runtime';
-import { ROOT } from './helpers.mjs';
-import { checkExample } from './examples-expected.mjs';
+import { ROOT } from '../helpers.mjs';
+import { checkExample as checkOne } from '../examples-expected.mjs';
+import { heavy } from './e3-lock.mjs';
 import { sharedBuild } from './e3-loop-helpers.mjs';
-import { makeHost } from '../examples/harness/host/transports.mjs';
-import { scanText } from '../examples/harness/host/handlers/scan.mjs';
+import { makeHost } from '../../examples/harness/host/transports.mjs';
+import { scanText } from '../../examples/harness/host/handlers/scan.mjs';
 
 const DIR = join(ROOT, 'examples', 'harness');
 const OUT = join(ROOT, '.poly', 'test-build', 'e3-switches');
+const checkExample = (...args) => heavy(() => checkOne(...args));
 const CLASSIFY = '    labels { read:private, write:store }\n    targets { secrets: ["mechanisms"], store: ["calls"] }';
 
 test('PL7001: the harness is admitted CLEAN and no region witness is reported, with the classifier reading the switches', { timeout: 900_000 }, async () => {

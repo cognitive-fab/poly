@@ -8,12 +8,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './helpers.mjs';
+import { ROOT } from '../helpers.mjs';
 import { CONFIGS, matrix, reportOf } from './e3-matrix-helpers.mjs';
 import { run } from './e3-loop-helpers.mjs';
-import { movedTerms } from '../examples/harness/host/cost-report.mjs';
-import { PREAMBLE, tokensOf, ALL_OFF, ALL_ON } from '../examples/harness/host/loop.mjs';
-import { step, trajectories } from './fixtures/harness/trajectories.mjs';
+import { movedTerms } from '../../examples/harness/host/cost-report.mjs';
+import { PREAMBLE, tokensOf, ALL_OFF, ALL_ON } from '../../examples/harness/host/loop.mjs';
+import { step, trajectories } from '../fixtures/harness/trajectories.mjs';
 
 const TABLE = join(ROOT, 'docs', 'e3', 'cost-report.json');
 const corpus = () => trajectories();

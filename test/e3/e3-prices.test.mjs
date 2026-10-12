@@ -6,8 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './helpers.mjs';
-import { checkPrices, refusalsOf } from '../examples/harness/host/price-gate.mjs';
+import { ROOT } from '../helpers.mjs';
+import { checkPrices, refusalsOf } from '../../examples/harness/host/price-gate.mjs';
 
 const TODAY = new Date('2026-10-11T12:00:00Z');
 const GOOD = {

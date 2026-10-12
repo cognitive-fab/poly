@@ -6,8 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { replayRuntime } from '@poly/check';
 import { buildLog, canary, found, outputs, recording, run, FUSED } from './e3-loop-helpers.mjs';
-import { ALL_OFF } from '../examples/harness/host/loop.mjs';
-import { step, trajectories } from './fixtures/harness/trajectories.mjs';
+import { ALL_OFF } from '../../examples/harness/host/loop.mjs';
+import { step, trajectories } from '../fixtures/harness/trajectories.mjs';
 
 const decisions = async (rt, id) => (await rt.chain(id)).filter((e) => e.kind === 'decision').map((e) => e.body);
 
@@ -193,7 +193,7 @@ test('E3.4: a late Begun, after the plan is done or the trial ended on overflow,
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { capabilitiesFor } from '@poly/runtime';
-import { makeHost } from '../examples/harness/host/transports.mjs';
+import { makeHost } from '../../examples/harness/host/transports.mjs';
 import { sharedBuild } from './e3-loop-helpers.mjs';
 
 test('the mechanisms are the host\'s alone: no effect of the module can write them, and none declares the table', { timeout: 600_000 }, async () => {
