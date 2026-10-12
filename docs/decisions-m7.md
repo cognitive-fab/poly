@@ -223,3 +223,15 @@ One `poly check` of a scratch copy (the original `inbox.poly` and policy with `p
 - `std/channels`: `email.send`, `slack.send`, `sms.send`, `whatsapp.send` (default retry, each has `exhausted`), `webhook.send` (`attempts 10`, has `exhausted`); `std/credentials/grant.revoke` (default).
 - `conformance/`: 16 fixtures (`post`, `refund`, `charge`, `pay`, `fee`, `alarm`, `run`) with the default retry, and `m5/shop.charge` (`attempts 3`) and `m6/customer-brief.post_brief` (`attempts 5`) with their own.
 - Whether each has an idempotency key at its target is a question about its handler, not its declaration; the scan does not answer it. The explicit `retry` of `oms` (6), `orders` (3), `webhook` (10) and `customer-brief` (5) are choices that retry an irreversible effect more than the default does. None is changed here.
+
+### S526 · the payment handlers, read (light work; for a ruling case by case, nothing changed)
+
+The runtime gives every handler `ctx.idempotencyKey`, the intent id, which is the same on every attempt of one intent (`worker.ts`, the handler call). Whether a provider honours a key is the handler's to use.
+- **`concierge.refund`** (`examples/concierge/host/refund.mjs`): sends `ctx.idempotencyKey` as Stripe's `Idempotency-Key` on the refunds POST, so a retry is the same refund; a 4xx other than 429 is a permanent refusal and any other answer is retried, which the key makes safe. It reads the charge first and refuses an amount over what is left, so the one place a duplicate could differ from the first (the amount) is checked. Not the inbox's defect. (I did not check Stripe's present key-retention window; a retry after the key has expired is outside what is tested.)
+- **`oms.chargeCard`** (`attempts 6`) and **`orders.charge`** (`attempts 3`): declarations only. The repository ships no handler for either; the tests that run them register stand-ins that record the payload and send no key (`test/effects.test.mjs`, `test/policy-gate.test.mjs`, `test/session-replay.test.mjs`). So the examples' retries are as safe as the handler an application writes, and nothing in the example says to send the key. This is the same defect as the inbox's if an application's handler does not.
+- **`std/credentials/grant.revoke`**: idempotent by its RFC (the reviewer's ruling); no change.
+- **`std/channels` sends** (`email`, `slack`, `sms`, `whatsapp` on the default retry, `webhook` at 10): a retry after an ambiguous failure can send a message twice. Recorded for the release notes, with no change now (ruling).
+
+### S527 · path properties over completions (a later release)
+
+PS5.4 counts only emitted intents (`count(k)`, `before(k1, k2)`). A property of the completions ("`Created` is reached at most once") cannot be written as one, so the inbox states it as an invariant over a `made` flag (IT4.4). Recorded for a later release: path properties over completions. The inbox's invariant rests on a host fact, listed as an assumption: **a person who answers `DraftMissing` when the draft does exist can cause a second draft**; the runtime cannot know.
