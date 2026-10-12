@@ -359,7 +359,12 @@ async function issue(c: Checked, key: { id: string; privateKeyPem: string }, out
     for (const w of ast?.decls.filter((d): d is A.Workflow => d.kind === 'Workflow') ?? []) {
       const m = r.machines.find((x) => x.machine === w.machine);
       if (!m?.buildDir) throw new AdmitError(`${r.module}: workflow ${w.name} runs ${w.machine}, which was checked without a build`);
-      workflows.push({ name: w.name, machine: `${r.module}.${w.machine}`, runtime: 'poly-runtime', gated: true, descriptor: rel(dir, join(m.buildDir, '..', 'workflows', w.name, 'polyflow.workflow.json')) });
+      const descriptorFile = join(m.buildDir, '..', 'workflows', w.name, 'polyflow.workflow.json');
+      // PS18.7, K16 (M7.5): a workflow that names a budget certifies it, with what its usage is and what bounds the spend.
+      const wb = w.budget ? (JSON.parse(readFileSync(descriptorFile, 'utf8')) as { budget?: { budget: string; prices: { path: string; digest: string; currency: string }; orderCap: number } }).budget : undefined;
+      if (w.budget && !wb) throw new AdmitError(`${r.module}: workflow ${w.name} names a budget and its descriptor holds none (PS18.7)`);
+      if (wb) kernel.add('K16');
+      workflows.push({ name: w.name, machine: `${r.module}.${w.machine}`, runtime: 'poly-runtime', gated: true, descriptor: rel(dir, descriptorFile), ...(wb ? { budget: { budget: wb.budget, prices: { path: wb.prices.path, digest: wb.prices.digest, currency: wb.prices.currency }, orderCap: wb.orderCap, usage: 'self-reported' as const, bound: 'reservation' as const } } : {}) });
     }
     // PS15: each channel's descriptor, written with its application's build, certified like a workflow's.
     for (const ch of ast?.decls.filter((d): d is A.Channel => d.kind === 'Channel') ?? []) {

@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'envelope-dropped' | 'one-dropped' | 'source-credential-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
+export type Fault = 'workflow-budget-dropped' | 'workflow-order-cap-raised' | 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'envelope-dropped' | 'one-dropped' | 'source-credential-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
 
 export interface Lowered {
   machine: string;
@@ -272,7 +272,6 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
   // PT10, S165: each workflow that runs this machine gets its descriptor; the machine has effect-invariants.mjs, since
   // PL6804 refuses a workflow whose machine declares no path property (S172).
   const workflows = module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === m.name);
-  for (const w of workflows) files[`../workflows/${w.name}/polyflow.workflow.json`] = JSON.stringify(workflowDescriptor(module.name, m.name, w, opts.fault), null, 2) + '\n';
   // PS15, PT21.2: each channel's descriptor, written with its application, which the runtime reads to route an inbound
   // message: to the conversation's Inbound (the fault channel-inbound-to-app routes it to the application instead).
   for (const p of opts.channels ?? []) {
@@ -295,6 +294,11 @@ export function lowerMachine(module: A.Module, check: CheckResult, machineName: 
       onExhausted: b.onExhausted,
     }, null, 2) + '\n';
   };
+  // PS18.7 (M7.5): a workflow's descriptor carries its budget and the participant's price table, and the budget's own file is written for it.
+  for (const w of workflows) {
+    files[`../workflows/${w.name}/polyflow.workflow.json`] = JSON.stringify(workflowDescriptor(module.name, m.name, w, opts.fault, opts.routing), null, 2) + '\n';
+    if (w.budget) writeBudget(w.budget.name);
+  }
   for (const d of facts.decisions.values()) {
     // PS18.4a, S454: an unrouted decision's budget is written as a route's is.
     const own = d.items.find((i) => i.kind === 'DecBudget') as { budget: string | null } | undefined;
@@ -685,17 +689,26 @@ function constValue(e: A.Expr, cx: Cx): unknown {
  * polyflow.workflow.json (PT10, S165), written to .poly/build/workflows/<name>/: polyflow names a workflow by its
  * directory, and the descriptor names the machine's lowered files beside it, so nothing is copied.
  */
-export function workflowDescriptor(module: string, machine: string, w: A.Workflow, fault?: Fault): Record<string, unknown> {
+export function workflowDescriptor(module: string, machine: string, w: A.Workflow, fault?: Fault, routing?: Readonly<RoutingFiles>): Record<string, unknown> {
   const rel = (f: string) => `../../${module}.${machine}/${f}`;
   const tools = w.tools.map((t) => [t.effect, { tool: t.tool, ...(t.target === null ? {} : { target: t.target }), why: t.why }] as [string, Record<string, string>]);
   // The broken variants the read-back must catch (standing rule on artefacts).
   if (fault === 'workflow-tool' && tools.length > 1) { const first = tools[0][1].tool; tools[0][1].tool = tools[1][1].tool; tools[1][1].tool = first; }
   const fields = (w.key?.fields ?? []).map((f) => [f.name, { pattern: f.pattern }] as [string, { pattern: string }]);
   if (fault === 'workflow-key' && fields.length) fields.shift();
+  // PS18.7: the budget of the workflow's orders, the participant's price table as a tier's record, and the order cap in micro-units.
+  let budget: Record<string, unknown> | null = null;
+  if (w.budget && fault !== 'workflow-budget-dropped') {
+    const p = routing?.prices[w.budget.prices];
+    if (!p) throw new Error(`poly-lower: no price table ${w.budget.prices} for the budget of workflow ${w.name}`);
+    const table = p.table as PriceTable;
+    budget = { budget: w.budget.name, prices: { path: w.budget.prices, digest: p.digest, currency: table.currency, perMillionTokens: table.perMillionTokens }, orderCap: fault === 'workflow-order-cap-raised' ? w.budget.orderCap.amount * 2 : w.budget.orderCap.amount };
+  }
   return {
     name: w.name,
     inputAction: w.input,
     tools: Object.fromEntries(tools),
+    ...(budget ? { budget } : {}),
     ...(w.key ? { key: { template: w.key.template, fields: Object.fromEntries(fields) } } : {}),
     contract: rel('contract.json'),
     machine: rel('next.cjs'),

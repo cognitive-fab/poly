@@ -96,7 +96,7 @@ export interface Certificate {
      * PT10, S164, S175: each workflow, run on poly-runtime with every work order through the gate (S173). Its
      * descriptor's digest is under `artefacts`. Absent in a certificate with no workflow.
      */
-    workflows?: { name: string; machine: string; runtime: 'poly-runtime'; gated: true; descriptor: string }[];
+    workflows?: { name: string; machine: string; runtime: 'poly-runtime'; gated: true; descriptor: string; /** PS18.7, K16: the budget of the workflow's orders; its usage is the participant's word and the reservation is the bound. */ budget?: { budget: string; prices: { path: string; digest: string; currency: string }; orderCap: number; usage: 'self-reported'; bound: 'reservation' } }[];
     /** PS15: each channel, its application's machine id and its descriptor, whose digest is under `artefacts`. */
     channels?: { name: string; application: string; descriptor: string }[];
     /**

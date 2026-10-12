@@ -353,6 +353,8 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     });
     if (r.budget !== null) budgetBack(r.budget, `route ${r.name}`);
   }
+  // PS18.7 (M7.5): and a workflow's budget file.
+  for (const w of module.decls.filter((d): d is A.Workflow => d.kind === 'Workflow' && d.machine === decl.name)) if (w.budget) budgetBack(w.budget.name, `workflow ${w.name}`);
   // PS18.4a, PT10r (S454): an unrouted decision's budget is written as a route's, and read back the same way.
   for (const d of decisions) {
     const own = d.items.find((x) => x.kind === 'DecBudget') as { budget: string | null } | undefined;
@@ -375,10 +377,18 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
     let got: Record<string, unknown>;
     try { got = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { out.push(`the descriptor of workflow ${w.name} is not JSON`); continue; }
     const rel = (f: string) => `../../${module.name}.${decl.name}/${f}`;
+    // PS18.7 (M7.5): the workflow's budget, its price table read here from beside the source, and the order cap.
+    let wbudget: unknown;
+    if (w.budget) {
+      const p = sourceDir ? sourceFile(sourceDir, w.budget.prices) : null;
+      if (!p) { out.push(`the descriptor of workflow ${w.name}: the price table ${w.budget.prices} cannot be read beside the source to read the budget back against`); continue; }
+      wbudget = { budget: w.budget.name, prices: { path: w.budget.prices, digest: sha256(p.bytes), currency: p.json.currency, perMillionTokens: p.json.perMillionTokens }, orderCap: w.budget.orderCap.amount };
+    }
     differ(`polyflow.workflow.json of ${w.name}`, got, {
       name: w.name,
       inputAction: w.input,
       tools: Object.fromEntries(w.tools.map((t) => [t.effect, { tool: t.tool, ...(t.target === null ? {} : { target: t.target }), why: t.why }])),
+      ...(w.budget ? { budget: wbudget } : {}),
       ...(w.key ? { key: { template: w.key.template, fields: Object.fromEntries(w.key.fields.map((f) => [f.name, { pattern: f.pattern }])) } } : {}),
       contract: rel('contract.json'), machine: rel('next.cjs'), effects: rel('effects.cjs'), manifest: rel('effects.manifest.json'), effectInvariants: rel('effect-invariants.mjs'), invariants: rel('invariants.mjs'),
     });

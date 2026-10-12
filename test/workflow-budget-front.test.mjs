@@ -229,7 +229,7 @@ test('PS18.7, K16: the certificate lists the workflow budget with self-reported 
   assert.equal(wf.budget.prices.currency, 'usd');
   assert.ok(wf.budget.prices.path);
 
-  assert.ok(a.certificate.kernelAssumptions.includes('K16'), 'K16 not in kernel assumptions: ' + JSON.stringify(a.certificate.kernelAssumptions));
+  assert.ok(a.certificate.poly.kernelAssumptions.includes('K16'), 'K16 not in kernel assumptions: ' + JSON.stringify(a.certificate.poly.kernelAssumptions));
 });
 
 test('PS18.7, K16: a workflow without a budget does not list K16 in kernel assumptions', { timeout: 300_000 }, async () => {
@@ -241,7 +241,7 @@ test('PS18.7, K16: a workflow without a budget does not list K16 in kernel assum
 
   const wf = a.certificate.poly.workflows.find((w) => w.name === 'desk');
   assert.ok(!wf.budget, 'workflow without budget should not have budget entry');
-  assert.ok(!a.certificate.kernelAssumptions.includes('K16'), 'K16 should not be listed without a budget workflow');
+  assert.ok(!a.certificate.poly.kernelAssumptions.includes('K16'), 'K16 should not be listed without a budget workflow');
 });
 
 // Note on assumptions made where spec is silent:
