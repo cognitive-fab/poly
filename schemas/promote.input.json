@@ -19,6 +19,14 @@
     "scope": {
       "type": "string",
       "description": "the policy scope that receives a policy rule"
+    },
+    "refine": {
+      "type": "string",
+      "description": "a file with the person's own text, promoted in place of the candidate's (PS20.4)"
+    },
+    "reason": {
+      "type": "string",
+      "description": "why the refined text differs from the candidate; required with refine"
     }
   },
   "required": [

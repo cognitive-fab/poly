@@ -15,7 +15,7 @@ import { checkProject } from './pipeline.js';
 /** A usage error: the command lacks something it needs (exit 64), as against a refusal of a promotion (exit 2). */
 export class PromoteUsageError extends Error {}
 
-export interface PromoteOptions { project: string; candidates: string; adjudications: string[]; scope?: string; /** Where the project's anchor came from; the command line reads it, a test names it (PS20.5). */ anchorSource?: 'user' | 'test' }
+export interface PromoteOptions { project: string; candidates: string; adjudications: string[]; scope?: string; /** PS20.4: the person's own text, in place of the candidate's, and why. */ refine?: string; reason?: string; /** Where the project's anchor came from; the command line reads it, a test names it (PS20.5). */ anchorSource?: 'user' | 'test' }
 export interface PromoteResult { exit: number; promoted: { id: string; file: string; entry: string }[]; lines: string[] }
 
 const sha = (s: string) => `sha256:${createHash('sha256').update(s, 'utf8').digest('hex')}`;
@@ -97,6 +97,15 @@ const key = (d: { code: string; message: string }) => `${d.code} ${d.message}`;
 
 export async function promote(o: PromoteOptions): Promise<PromoteResult> {
   const project = o.project;
+  // PS20.4, PT30.5: a refinement is one promotion, with a reason.
+  let refined: string | null = null;
+  if (o.refine !== undefined) {
+    if (!o.reason || !o.reason.trim()) throw new PromoteUsageError('promote --refine needs --reason <text>: the refined text is the person\'s, and the entry says why it differs from the candidate (PS20.4)');
+    if (o.adjudications.length !== 1) throw new PromoteUsageError('promote --refine takes exactly one --adjudication (PT30.5)');
+    if (!existsSync(o.refine)) throw new AdmitError(`${o.refine}: no such refinement file`);
+    refined = readFileSync(o.refine, 'utf8').replace(/\r\n/g, '\n').replace(/\s+$/, '');
+    if (!refined) throw new AdmitError(`${o.refine} is empty`);
+  }
   const { manifest } = loadProject(project);
   const rings = keyringsOf(project, manifest);
   const anchorId = projectAnchorId(project);
@@ -121,6 +130,7 @@ export async function promote(o: PromoteOptions): Promise<PromoteResult> {
     if (!v.ok) throw new AdmitError(`the adjudication of ${String(adj.id)} does not verify: ${v.problem}`);
     if (adj.verdict !== 'real') throw new AdmitError(`the adjudication of ${String(adj.id)} is ${String(adj.verdict)}: only a real verdict reaches a program (PS20.3)`);
     if (c.promotable !== true) throw new AdmitError(`the candidate ${String(adj.id)} is not promotable: ${String(c.reason ?? 'no reason given')}`);
+    if (refined !== null && refined === String(c.source)) throw new AdmitError(`the refinement of ${String(adj.id)} is the candidate's own text: it is not a refinement (PS20.4)`);
     const corpus = doc.corpus as { digest: string; kind: string };
     if (corpus.kind === 'synthetic' && (o.anchorSource ?? anchor?.source) !== 'test') throw new AdmitError(`the candidate ${String(adj.id)} was mined from a synthetic corpus, which only a test certificate may cite (PS20.5)`);
     for (const f of existing()) if ((JSON.parse(readFileSync(join(dir, f), 'utf8')) as { id?: string }).id === adj.id) throw new AdmitError(`the candidate ${String(adj.id)} is already promoted (${f})`);
@@ -129,7 +139,7 @@ export async function promote(o: PromoteOptions): Promise<PromoteResult> {
     const where = place(project, c, o.scope);
     const original = readFileSync(where.file, 'utf8');
     const record = recordDigest(adj.record as never);
-    const inserted = [`// promoted: ${String(adj.id)} ${record}`, ...String(c.source).split('\n')];
+    const inserted = [`// promoted: ${String(adj.id)} ${record}`, ...(refined ?? String(c.source)).split('\n')];
     const baseline = new Set(diagnosticsOf(await checkProject(project)).filter((d) => d.severity === 'error' || d.code === 'PL6501').map(key));
     const next = existing().length + 1;
     const entry = join(dir, `${String(next).padStart(4, '0')}-${String(adj.id)}.json`);
@@ -139,7 +149,7 @@ export async function promote(o: PromoteOptions): Promise<PromoteResult> {
       writeFileSync(where.file, edited.text);
       mkdirSync(dir, { recursive: true });
       const text = edited.block.join('\n');
-      writeFileSync(entry, JSON.stringify({ candidate: c.digest, id: adj.id, adjudication: adj, tool: doc.tool, corpus, inserted: { file: relative(project, where.file).split(sep).join('/'), text, digest: sha(text) } }, null, 2) + '\n');
+      writeFileSync(entry, JSON.stringify({ candidate: c.digest, id: adj.id, adjudication: adj, tool: doc.tool, corpus, ...(refined !== null ? { refinement: { reason: o.reason!.trim(), candidateSource: String(c.source) } } : {}), inserted: { file: relative(project, where.file).split(sep).join('/'), text, digest: sha(text) } }, null, 2) + '\n');
       const after = diagnosticsOf(await checkProject(project));
       const fresh = after.filter((d) => (d.severity === 'error' || d.code === 'PL6501') && !baseline.has(key(d)));
       if (fresh.length) {

@@ -34,6 +34,13 @@ export function readPromotions(project: string, rings: Keyrings, anchorId: strin
     if (!inside) bad('PL6510', `${rel} (promotion ${id}) names ${ins.file}, which is outside the project`);
     else if (!existsSync(abs)) bad('PL6510', `${rel} (promotion ${id}) names ${ins.file}, which does not exist`);
     else if (!readFileSync(abs, 'utf8').replace(/\r\n/g, '\n').includes(ins.text)) bad('PL6510', `${rel} (promotion ${id}) is not in ${ins.file}: the promoted text is gone from the sources or changed`);
+    // PS20.4: a refinement says why, and its candidate's source is not the text that was inserted.
+    const refinement = (e as { refinement?: { reason?: unknown; candidateSource?: unknown } }).refinement;
+    if (refinement !== undefined) {
+      const body = ins.text.split('\n').slice(1).map((l) => l.trim()).join('\n').trim();
+      if (typeof refinement.reason !== 'string' || !refinement.reason.trim()) bad('PL6510', `${rel} (promotion ${id}) has a refinement with no reason (PS20.4)`);
+      else if (typeof refinement.candidateSource !== 'string' || !refinement.candidateSource.trim() || refinement.candidateSource.split('\n').map((l) => l.trim()).join('\n').trim() === body) bad('PL6510', `${rel} (promotion ${id}) has a refinement whose candidate source is missing or is the inserted text itself, so it refines nothing (PS20.4)`);
+    }
     if (sha(ins.text) !== ins.digest) bad('PL6510', `${rel} (promotion ${id}) has the text digest ${ins.digest}, and its text digests to ${sha(ins.text)}`);
 
     // PL6511: the adjudication is a person's real verdict on this candidate, for this project.

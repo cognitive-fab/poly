@@ -502,13 +502,13 @@ export const COMMANDS: Command[] = [
   {
     name: 'promote', mcp: null, lsp: false,
     summary: 'Adds the rules a person adjudicated real to the project\'s sources, checks the project, and refuses a promotion that makes a mandate undischargeable (PF4.4, PF4.5, PS20.4, PT30.5). Never over MCP.',
-    input: obj({ project: str('the project directory'), candidates: str('the candidates file'), adjudications: { type: 'array', items: { type: 'string' }, description: 'the adjudication files, in the order to promote' }, scope: str('the policy scope that receives a policy rule') }, ['project', 'candidates', 'adjudications']),
+    input: obj({ project: str('the project directory'), candidates: str('the candidates file'), adjudications: { type: 'array', items: { type: 'string' }, description: 'the adjudication files, in the order to promote' }, scope: str('the policy scope that receives a policy rule'), refine: str('a file with the person\'s own text, promoted in place of the candidate\'s (PS20.4)'), reason: str('why the refined text differs from the candidate; required with refine') }, ['project', 'candidates', 'adjudications']),
     output: obj({ promoted: { type: 'array', items: { type: 'object' } } }, ['promoted']),
     async run(input) {
       const adjudications = Array.isArray(input.adjudications) ? (input.adjudications as unknown[]).map(String) : [];
       if (!adjudications.length) throw new CommandUsageError('promote needs at least one --adjudication <file>');
       let r;
-      try { r = await promote({ project: need(input, 'project'), candidates: need(input, 'candidates'), adjudications, scope: opt(input, 'scope') }); } catch (e) { if (e instanceof PromoteUsageError) throw new CommandUsageError(e.message); throw e; }
+      try { r = await promote({ project: need(input, 'project'), candidates: need(input, 'candidates'), adjudications, scope: opt(input, 'scope'), refine: opt(input, 'refine'), reason: opt(input, 'reason') }); } catch (e) { if (e instanceof PromoteUsageError) throw new CommandUsageError(e.message); throw e; }
       return { exit: r.exit, result: { promoted: r.promoted as unknown as Record<string, unknown>[] }, text: r.lines.join('\n') + '\n' };
     },
   },

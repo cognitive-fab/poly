@@ -12,7 +12,7 @@ import { join, basename } from 'node:path';
 import { canonicalize, signRecord } from '@poly/core';
 import { admit, AdmitError } from '@poly/check';
 import { ACCEPT_TEST_ANCHORS, ROOT } from './helpers.mjs';
-import { ANCHORS, PERSON, makeKey, project } from './runtime-helpers.mjs';
+import { ANCHORS, PERSON, makeKey, project, signPolicies } from './runtime-helpers.mjs';
 import { CANDIDATES, candidatesFile, ID } from './fixtures/m7/candidates.mjs';
 
 const CLI = join(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
@@ -63,6 +63,7 @@ test('PS20.4: a refinement inserts the person\'s text under the candidate\'s mar
   assert.deepEqual(entry.refinement, { reason: REASON, candidateSource: CANDIDATES.atMostCharge.source });
   assert.ok(entry.inserted.text.includes(REFINED));
   assert.equal(entry.inserted.digest, `sha256:${createHash('sha256').update(entry.inserted.text, 'utf8').digest('hex')}`);
+  await signPolicies(s.projDir);
   const a = await admit(s.projDir);
   assert.equal(a.verdict, 'CLEAN');
   assert.equal(a.certificate.poly.promotions[0].id, ID.atMostCharge, 'the certificate cites the mined id');
@@ -103,6 +104,7 @@ test('PT30.6: an entry with a refinement must give a reason and the candidate\'s
   const dir = join(s.projDir, 'promotions');
   const [file] = readdirSync(dir);
   const good = readFileSync(join(dir, file), 'utf8');
+  await signPolicies(s.projDir);
   assert.equal((await admit(s.projDir)).verdict, 'CLEAN', 'the control');
   for (const change of [(e) => { e.refinement.reason = ''; }, (e) => { delete e.refinement.reason; }, (e) => { e.refinement.candidateSource = e.inserted.text.split(NL).slice(1).join(NL).trim(); }]) {
     const e = JSON.parse(good);
