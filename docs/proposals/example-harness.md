@@ -20,6 +20,7 @@ A harness tuned for cost can lose correctness without anyone seeing it: a compac
 - **HF2.6 Budget.** Each task has a cost budget; the harness stops at it with the reason shown.
 - **HF2.7 Stage scores.** Each plan step is a stage with its own checks. A run reports a score per stage, and the failing stage is the state where the journal shows the first failed check, read from the journal, not guessed by a model.
 - **HF2.8 One change at a time.** A change to the harness (a skill, a prompt, a threshold) is measured with the model frozen, on the same tasks, with and without the change. It is accepted only if its target stage improves and no stage regresses. A run of the model is measured with the harness frozen.
+- **HF2.9 A stage is up to N turns (amendment A1, owner, 2026-10-12).** A plan step is a stage, and the agent works on a stage in turns: one model call, the tool calls it asks for, and their results added to the context of the next turn. N is declared in the module (8). A stage ends at the first of: an explicit `done` from the agent, the N-th turn, or the end of the budget. The stage's check runs once, at that end, and never before. A failed check is recorded as that stage's failure and the trial goes on to the next stage (HF2.7: the stages after the first failure are still scored). When the budget ends a stage, the check still runs once, and the trial then ends with the reason Budget; the stages after it are not reached. The results of a turn's tools reach the next turn through the context, which the Context machine measures before each request. The first version of the module had one turn per stage, which a live agent cannot work in (it cannot read a file and then edit it); this amendment is the repair, and it is made inside the checked machine and not around it.
 
 ## HF3. What the harness must never do
 
@@ -34,6 +35,8 @@ A harness tuned for cost can lose correctness without anyone seeing it: a compac
 - **HF3.9** End a trial at the step cap or the wall clock without saving the work on disk and reporting the cap as the reason.
 - **HF3.10** Depend on a tool that needs the network when the run is offline: every tool the harness offers declares whether it needs the network, and an offline run offers none that do.
 - **HF3.11** Let a harness change touch the rules of HF3 or the gate policy. Skills and prompts can evolve; the rules and the signed policy (S194) cannot be changed by the loop they govern.
+- **HF3.12** Run a stage's check before the stage has ended (before `done`, the N-th turn or the end of the budget), or run it more than once in a stage (amendment A1).
+- **HF3.13** Run more than N turns in a stage (amendment A1).
 
 ## HF4. Acceptance criteria
 
@@ -45,6 +48,7 @@ A harness tuned for cost can lose correctness without anyone seeing it: a compac
 | HAC6 | The cost of each call is reported as the preamble (system prompt and tool schemas), the transcript and the output, and the step count per trial, so a cost change can be traced to the term that moved it. |
 | HAC7 | Each run reports a score per stage and names the failing stage from the journal; a seeded fault in stage k is reported as a failure of stage k. |
 | HAC8 | A harness change is accepted only by the paired rule of HF2.8, with the test of HAC3; a seeded change that improves one stage and regresses another is refused. |
+| HAC9 | Each rule of HF3.12 and HF3.13 has a seeded variant that breaks it, with a witness. The scorer reports, for each stage, the number of turns it took and what ended it (`done`, the bound or the budget), read from the journal; a stage that ran N turns with no `done` is reported as ended by the bound. |
 | HAC4 | A receipt whose quote is not in the original log is rejected and the original is shown, journaled. |
 | HAC5 | The journal replays every compaction decision, every handle, every receipt check and every tier choice. |
 
@@ -73,6 +77,7 @@ Model calls are decisions under `route` (M11): the main tier for the agent, the 
 | Full output exactly twice | an `Observation` moves to `handled` on its third send, and only then |
 | Fusion only for commands that need no inspection | the fusable commands are a declared set; fusion outside it is refused |
 | Budget | reservations before each model call (PT24.3) |
+| A stage is up to N turns, checked once at its end | `Trial` counts the turns of the stage; the check is emitted only in the step that ends it, with the reason recorded (`step property` over the pre and post state); the bound is an invariant (amendment A1) |
 | Output cutoff recovers | `never emit endStep while lastCall.stop == length and reprompts < 1` |
 | Overflow compacts first | `never emit endTrial(overflow) while compactions == 0` |
 | Caps are reported | every trial ending at a cap carries the cap as its reason, and the working tree is kept |
