@@ -1,4 +1,4 @@
-# E3.9: the live run, prepared and not run
+# E3.9: the live run, prepared (run on 2026-10-13; the result is in live-run-report.md)
 
 *Cognitive Fab, October 2026. Written 2026-10-12 for the owner's check. Nothing in this document has been run against a model, a container or the network. Everything computed here is computed from the committed price tables and tested without a model.*
 
