@@ -578,3 +578,11 @@ The new certificate tests (`test/rejected-completion.test.mjs` and the fixtures 
 **One thing for the owner.** `~/.poly/anchors.json` was still there, dated 04:18, when I checked at 07:54, after the message that it was deleted; nothing of mine wrote to it (the guard would have failed the process).
 
 **Tag.** `v1.0.1`, annotated, local, on the commit this record is in; not pushed.
+
+## S570: `migrate.cjs` is a certified artefact that nothing produces (found in the architecture analysis, 2026-10-13), for a later release
+
+**Found.** `CERTIFIED_ARTEFACTS` in `packages/poly-core/src/certificate.ts:12` names `migrate.cjs`, and `docs/02-architecture.md` (section 4, before this revision) had the construct `version N from M { migrate … }` lower to it. The machine header parses `version N` (`packages/poly-lang/src/parser.ts:923`), but no `from M` clause or migrate block is parsed, and `packages/poly-lower` writes no `migrate.cjs`. The file name is reserved in the certified list and in the artefact read-back, and no build ever has one.
+
+**Not changed in this release.** The architecture document now lists migration under "Planned, not in v1.1" (section 13a). The version gate that would read the migration (polyvers) is not built either.
+
+**For a later release.** Either build the clause, the lowering and the version gate together, or remove `migrate.cjs` from the certified list so that the list names only what the lowering writes. Until then a certificate cannot carry a migration, and the name in the list is a promise with nothing behind it.
