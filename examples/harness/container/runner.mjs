@@ -6,13 +6,14 @@
 //   { op: 'calls', copy, calls }             a turn's tool calls, run in that copy -> { text, exitStatus }
 //   { op: 'check', copy, task, stage }       the stage's check in that copy -> { passed, text, exitStatus }
 //   { op: 'prove', task, run }               the oracle for one task -> { problems, stages }
+//   { op: 'links' }                          every link in a scratch copy that points outside it -> { outside }
 //
 // It is the same code as on the host (tasks.mjs and world.mjs), so the three rules hold the same way: scratch copies only, a
 // built environment with no key and offline toolchains, and the list of declared runners. What the container adds is what the
 // host cannot give: no network at all, a read-only root and no mount of the host. A copy must be under the scratch folder.
 import { cpSync, existsSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { SCRATCH, prepare, prove, runCheck, taskOf } from '../host/tasks.mjs';
+import { SCRATCH, prepare, prove, runCheck, scratchLinksOutside, taskOf } from '../host/tasks.mjs';
 import { runCalls } from '../host/world.mjs';
 
 const SEED = '/opt/seed';
@@ -24,9 +25,8 @@ const req = JSON.parse(input);
 
 // the Go module cache is read with -mod=readonly and GOPROXY=off from the volume copy (tasks.mjs passes GOPATH on)
 process.env.GOPATH = GOPATH;
-// vitest writes a cache into node_modules/.vite, and the image is read-only: the copies link to a writable copy of the packages
-const NODE_MODULES = join(SCRATCH, '.nm', 'node_modules'); // the real path must end in node_modules, or Node finds no package above it
-process.env.E3_NODE_MODULES = NODE_MODULES;
+// a JS task's copy gets its own copy of the image's locked packages (never a link, never the image's folder itself)
+const PACKAGES = '/opt/todo-app/node_modules';
 
 const underScratch = (p) => {
   const r = resolve(String(p));
@@ -38,12 +38,11 @@ async function handle(r) {
   switch (r.op) {
     case 'seed': {
       if (!existsSync(GOPATH)) cpSync(join(SEED, 'gopath'), GOPATH, { recursive: true });
-      if (!existsSync(NODE_MODULES)) cpSync('/opt/todo-app/node_modules', NODE_MODULES, { recursive: true, verbatimSymlinks: true });
       if (!existsSync(join(SCRATCH, '.gocache'))) cpSync(join(SEED, 'gocache'), join(SCRATCH, '.gocache'), { recursive: true });
       return { seeded: true };
     }
     case 'prepare': {
-      const { copy } = prepare(String(r.task), String(r.run));
+      const { copy } = prepare(String(r.task), String(r.run), { packages: PACKAGES });
       return { copy };
     }
     case 'calls':
@@ -55,9 +54,11 @@ async function handle(r) {
       return { passed: c.passed, text: `${c.stdout}${c.stderr}`, exitStatus: c.status ?? 1 };
     }
     case 'prove': {
-      const p = await prove(String(r.task), { run: String(r.run) });
+      const p = await prove(String(r.task), { run: String(r.run), packages: PACKAGES });
       return { problems: p.problems, stages: p.stages };
     }
+    case 'links':
+      return { outside: scratchLinksOutside() };
     default:
       throw new Error(`unknown op ${JSON.stringify(r.op)}`);
   }

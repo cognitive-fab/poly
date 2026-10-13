@@ -7,11 +7,11 @@
 // network: the commands are the repositories' own tests (vitest, go test), run in copies.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ROOT } from '../helpers.mjs';
 import {
-  SCRATCH, TASKS_DIR, commandEnv, digestOf, failedAsATest, originalOf, originalsUnchanged, prepare, prove, refusal, replaceIn, repos, runIn, snapshot, taskIds, taskOf,
+  SCRATCH, TASKS_DIR, commandEnv, digestOf, failedAsATest, linksOutside, originalOf, originalsUnchanged, prepare, prove, refusal, replaceIn, repos, runIn, scratchLinksOutside, snapshot, taskIds, taskOf,
 } from '../../examples/harness/host/tasks.mjs';
 
 const ids = taskIds();
@@ -100,14 +100,23 @@ test('rule 2: a command that names a network tool, a fetching subcommand or a UR
 });
 
 test('rule 1: a copy is made in the scratch folder, from an original whose digest is pinned, and a changed original refuses the task', () => {
-  const r = prepare('todo-urgency', `copy-${process.pid}`);
+  // a JS task is refused on the host: its packages are the container's, never a link to the owner's folder
+  assert.throws(() => prepare('todo-urgency', `copy-${process.pid}`), /runs only in the container/);
+  // with a folder of packages it gets its own COPY: a real folder, not a link
+  const pk = join(ROOT, '.poly', 'tmp', `packages-${process.pid}`);
+  mkdirSync(join(pk, 'vitest'), { recursive: true });
+  writeFileSync(join(pk, 'vitest', 'package.json'), '{}');
+  const r = prepare('todo-urgency', `copy-${process.pid}`, { packages: pk });
   assert.ok(r.copy.startsWith(SCRATCH), r.copy);
   assert.ok(r.copy.startsWith(resolve(ROOT, '.poly', 'e3-tasks')));
-  // the originals' installed packages are linked, read, never copied or written
   const nm = join(r.copy, 'node_modules');
-  assert.ok(lstatSync(nm).isSymbolicLink());
-  assert.equal(realpathSync(nm), realpathSync(join(originalOf('todo-app'), 'node_modules')));
-  assert.throws(() => prepare('todo-urgency', `stale-${process.pid}`, { expectDigest: '0'.repeat(64) }), /has changed since the tasks were written/);
+  assert.ok(lstatSync(nm).isDirectory() && !lstatSync(nm).isSymbolicLink(), 'node_modules is a folder of its own');
+  assert.ok(existsSync(join(nm, 'vitest', 'package.json')));
+  writeFileSync(join(nm, 'vitest', 'package.json'), '{"changed":true}');
+  assert.equal(readFileSync(join(pk, 'vitest', 'package.json'), 'utf8'), '{}', 'writing in the copy does not reach the source');
+  assert.deepEqual(linksOutside(r.copy), []);
+  rmSync(pk, { recursive: true, force: true });
+  assert.throws(() => prepare('snip-config', `stale-${process.pid}`, { expectDigest: '0'.repeat(64) }), /has changed since the tasks were written/);
   // an edit cannot leave the copy
   assert.throws(() => replaceIn(r.copy, '../escape.txt', 'a', 'b'), /outside the copy/);
   assert.throws(() => replaceIn(r.copy, resolve(ROOT, 'package.json'), 'a', 'b'), /outside the copy/);
@@ -116,6 +125,46 @@ test('rule 1: a copy is made in the scratch folder, from an original whose diges
   assert.ok(!readFileSync(join(originalOf('todo-app'), 'src/core/urgency.js'), 'utf8').includes('return 59;'));
 });
 
+test('no scratch copy holds a link that points outside it: the detector finds a junction or symbolic link out, and none inside, and none is on this machine', () => {
+  const base = join(ROOT, '.poly', 'tmp', `links-${process.pid}`);
+  rmSync(base, { recursive: true, force: true });
+  mkdirSync(join(base, 'copy', 'sub'), { recursive: true });
+  mkdirSync(join(base, 'elsewhere'), { recursive: true });
+  writeFileSync(join(base, 'copy', 'sub', 'real.txt'), 'x');
+  assert.deepEqual(linksOutside(join(base, 'copy')), [], 'a copy of plain files has none');
+  // a link to a folder inside the copy is allowed (the .bin links of a package folder are of this kind)
+  symlinkSync(join(base, 'copy', 'sub'), join(base, 'copy', 'inner'), 'junction');
+  assert.deepEqual(linksOutside(join(base, 'copy')), []);
+  // a junction to a folder outside it is found, by its path and its target
+  symlinkSync(join(base, 'elsewhere'), join(base, 'copy', 'node_modules'), 'junction');
+  const found = linksOutside(join(base, 'copy'));
+  assert.equal(found.length, 1);
+  assert.equal(found[0][0], join(base, 'copy', 'node_modules'));
+  assert.equal(found[0][1].toLowerCase(), join(base, 'elsewhere').toLowerCase());
+  // a link to a file outside, and a link into a folder that holds another link out, are found too
+  writeFileSync(join(base, 'elsewhere', 'f.txt'), 'x');
+  let fileLink = true;
+  try {
+    symlinkSync(join(base, 'elsewhere', 'f.txt'), join(base, 'copy', 'sub', 'file-link'), 'file');
+  } catch (e) {
+    if (e.code !== 'EPERM') throw e; // a file link needs a privilege on Windows; the junction cases above hold without it
+    fileLink = false;
+  }
+  assert.equal(linksOutside(join(base, 'copy')).length, fileLink ? 2 : 1);
+  // removing the links (not their targets) clears it, and the targets are intact
+  for (const [p] of linksOutside(join(base, 'copy'))) {
+    try {
+      unlinkSync(p);
+    } catch {
+      rmdirSync(p); // a junction is removed as a folder, without entering it
+    }
+  }
+  assert.deepEqual(linksOutside(join(base, 'copy')), []);
+  assert.ok(existsSync(join(base, 'elsewhere', 'f.txt')));
+  rmSync(base, { recursive: true, force: true });
+  // and on this machine, in every scratch copy that exists (a leftover from an earlier version of the tasks fails this)
+  assert.deepEqual(scratchLinksOutside(), []);
+});
 test('a failure counts as a failed test only when a test failed, not when the copy would not build', () => {
   assert.equal(failedAsATest({ stdout: '--- FAIL: TestX (0.00s)\nFAIL', stderr: '' }), true);
   assert.equal(failedAsATest({ stdout: ' FAIL  tests/a.test.js > x\nAssertionError: expected 1 to be 2', stderr: '' }), true);
@@ -129,7 +178,7 @@ test('the originals are unchanged at the start (their digests are the pinned one
   for (const name of Object.keys(repos())) assert.equal(digestOf(snapshot(originalOf(name))), repos()[name].digest);
 });
 
-for (const id of ids) {
+for (const id of ids.filter((x) => taskOf(x).language !== 'js')) {
   test(`the oracle, ${id}: every stage's check fails as a test before its fix, passes after it, and passes with every stage fixed`, { timeout: 900_000 }, async () => {
     const r = await prove(id, { run: `proof-${process.pid}` });
     assert.deepEqual(r.problems, [], id);
@@ -137,12 +186,16 @@ for (const id of ids) {
   });
 }
 
+test('the six JS tasks are refused on the host (their oracle is run in the container, ctl.mjs oracle) and prove nothing here', async () => {
+  const js = ids.filter((x) => taskOf(x).language === 'js');
+  assert.equal(js.length, 6);
+  for (const id of js) await assert.rejects(prove(id, { run: `proof-${process.pid}` }), /runs only in the container/, id);
+});
+
 test('the originals are unchanged after the proofs, and nothing was written outside the scratch folder', () => {
   assert.deepEqual(originalsUnchanged(), { 'todo-app': true, snip: true });
-  // the junction still points at the original's packages and the original has no scratch file
-  const nm = join(SCRATCH, `proof-${process.pid}`, 'todo-urgency', 'node_modules');
-  assert.ok(lstatSync(nm).isSymbolicLink());
-  assert.ok(readlinkSync(nm).length > 0);
+  // and the proofs left no link out of any copy
+  assert.deepEqual(scratchLinksOutside(), []);
   for (const name of Object.keys(repos())) {
     assert.ok(!existsSync(join(originalOf(name), '.gocache')), `${name}: no build cache in the original`);
     assert.ok(!existsSync(join(originalOf(name), 'internal', 'filter', 'task_dedup_test.go')), `${name}: no added test in the original`);

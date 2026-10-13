@@ -100,7 +100,9 @@ export function oracle() {
     console.log(`${r.error || r.problems?.length ? 'FAILED' : 'ok    '} ${id} (${r.stages ?? '?'} stages)${r.error ? ` ${r.error}` : ''}${r.problems?.length ? ` ${JSON.stringify(r.problems)}` : ''}`);
   }
   const stages = out.reduce((a, r) => a + (r.stages ?? 0), 0);
-  const ok = out.every((r) => !r.error && r.problems?.length === 0);
+  const links = send({ op: 'links' });
+  console.log(`${links.outside?.length === 0 ? 'ok    ' : 'FAILED'} no scratch copy holds a link that points outside it${links.outside?.length ? ` ${JSON.stringify(links.outside)}` : ''}`);
+  const ok = out.every((r) => !r.error && r.problems?.length === 0) && links.outside?.length === 0;
   console.log(`${ok ? 'oracle passed' : 'oracle FAILED'}: ${out.filter((r) => !r.error && r.problems?.length === 0).length} of ${out.length} tasks, ${stages} stages`);
   return ok;
 }

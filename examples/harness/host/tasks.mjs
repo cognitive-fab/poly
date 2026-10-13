@@ -13,7 +13,7 @@
 //   3. no key in any environment a task sees. A command gets a built environment, not the process's: only the names of an
 //      allow-list pass, and a name that looks like a credential is removed even if it is on the list.
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,7 +117,7 @@ export function replaceIn(copy, file, from, to) {
  * A copy of the task's original in the scratch folder, in the task's starting state: the originals' digest checked, the files
  * copied, the task's own test files added, and every injected break applied. `run` names the folder.
  */
-export function prepare(id, run = 'proof', { expectDigest } = {}) {
+export function prepare(id, run = 'proof', { expectDigest, packages } = {}) {
   const task = taskOf(id);
   const orig = originalOf(task.repo);
   const files = snapshot(orig);
@@ -132,10 +132,14 @@ export function prepare(id, run = 'proof', { expectDigest } = {}) {
     mkdirSync(dirname(to), { recursive: true });
     cpSync(join(orig, rel), to);
   }
-  // the toolchain's installed packages are used, not copied: a link to the original's folder, read by the checks and never written
-  // E3_NODE_MODULES names a writable copy of the packages (the container's, since vitest writes a cache into node_modules/.vite)
-  const nm = process.env.E3_NODE_MODULES ?? join(orig, 'node_modules');
-  if (task.language === 'js' && existsSync(nm)) symlinkSync(nm, join(copy, 'node_modules'), 'junction');
+  // No scratch copy links to an original, or to anything else outside itself (owner, 2026-10-12, after the emptied node_modules of
+  // todo-app). A JS task needs packages, and a copy has its own: `packages` names a folder of packages installed from the lockfile
+  // (the container's image has one) and they are COPIED into the copy. Without it the task is refused: the host holds no copy of
+  // the packages that is not the owner's, and vitest writes a cache into node_modules, so the owner's folder is never used.
+  if (task.language === 'js') {
+    if (!packages) throw new Error(`${id} is a JS task and runs only in the container: a scratch copy has its own packages (installed from the lockfile) and never a link to an original's`);
+    cpSync(packages, join(copy, 'node_modules'), { recursive: true, verbatimSymlinks: true });
+  }
   for (const add of task.addFiles ?? []) {
     const to = inside(copy, add.path);
     mkdirSync(dirname(to), { recursive: true });
@@ -143,6 +147,47 @@ export function prepare(id, run = 'proof', { expectDigest } = {}) {
   }
   for (const stage of task.stages) for (const e of stage.edits) if (e.origin !== 'pristine') replaceIn(copy, e.file, e.fixed, e.broken);
   return { task, copy };
+}
+
+/**
+ * The links inside `dir` that point outside it, as [path, target]: a symbolic link or junction whose target, read from the link
+ * itself and never followed, is not inside `dir`. A link that cannot be read counts. Links are not entered, so nothing here can
+ * reach through one. A copy must have none (see prepare).
+ */
+export function linksOutside(dir) {
+  const root = resolve(dir);
+  const bad = [];
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (lstatSync(p).isSymbolicLink()) {
+        let target = null;
+        try {
+          // a junction reads back as an absolute path, often with the \\?\ prefix
+          target = resolve(d, readlinkSync(p).replace(/^[\\][\\][?][\\]/, ''));
+        } catch {
+          // unreadable: reported
+        }
+        const inside = target !== null && (target === root || target.startsWith(root + sep));
+        if (!inside) bad.push([p, target]);
+      } else if (e.isDirectory()) walk(p);
+    }
+  };
+  walk(root);
+  return bad;
+}
+
+/** Every outward link in every scratch copy (.poly/e3-tasks/<run>/<task>) on this machine. */
+export function scratchLinksOutside() {
+  const bad = [];
+  if (!existsSync(SCRATCH)) return bad;
+  for (const run of readdirSync(SCRATCH, { withFileTypes: true })) {
+    if (!run.isDirectory() || run.name.startsWith('.')) continue;
+    for (const task of readdirSync(join(SCRATCH, run.name), { withFileTypes: true })) {
+      if (task.isDirectory()) bad.push(...linksOutside(join(SCRATCH, run.name, task.name)));
+    }
+  }
+  return bad;
 }
 
 /** Applies the reference fix of one stage to a copy. */
@@ -210,8 +255,8 @@ export async function runCheck(copy, stage, opts = {}) {
  * The oracle (docs/e3/tasks-spec.md, rule 4): for every stage k, with the break applied and stages 0 to k-1 fixed, the check of
  * stage k fails; with stage k fixed, it passes; and with every stage fixed, every check passes. Returns the findings.
  */
-export async function prove(id, { run = 'proof', onStep = () => {} } = {}) {
-  const { task, copy } = prepare(id, run);
+export async function prove(id, { run = 'proof', onStep = () => {}, packages } = {}) {
+  const { task, copy } = prepare(id, run, { packages });
   const problems = [];
   for (let k = 0; k < task.stages.length; k++) {
     const stage = task.stages[k];

@@ -34,8 +34,8 @@ test('the module declares exec on act and stageCheck with exactly the commands t
 
 test('act, live: the calls run in the copy the host set, the output is stored, a refused call is a failed call and not a throw', async () => {
   const host = makeHost();
-  const { copy } = prepare('todo-urgency', run);
-  host.setWorld({ copy, task: taskOf('todo-urgency') });
+  const { copy } = prepare('snip-headtail', run);
+  host.setWorld({ copy, task: taskOf('snip-headtail') });
   const caps = capsFor(host, ['harness-tool']);
   const calls = JSON.stringify([{ tool: 'write', path: 'notes/a.txt', content: 'hi' }, { tool: 'bash', command: 'ls' }]);
   await host.store.write('calls', 'i1', calls);
@@ -48,7 +48,7 @@ test('act, live: the calls run in the copy the host set, the output is stored, a
   // no calls row: a permanent error
   await assert.rejects(act({ fused: false }, caps, { instanceId: 'none' }), /no calls/);
   // the world is set once
-  assert.throws(() => host.setWorld({ copy, task: taskOf('todo-urgency') }), /set once/);
+  assert.throws(() => host.setWorld({ copy, task: taskOf('snip-headtail') }), /set once/);
   // a command the effect does not declare cannot be run through its capability
   await assert.rejects(caps.exec.run('harness-check', ['0']), /not among the declared/);
 });
@@ -61,8 +61,8 @@ test('act, live, with no copy set by the host: nothing runs', async () => {
 
 test('stageCheck, live: the broken copy fails the stage as a permanent error, the fixed copy passes it', async () => {
   const host = makeHost();
-  const task = taskOf('todo-urgency');
-  const { copy } = prepare('todo-urgency', run);
+  const task = taskOf('snip-headtail');
+  const { copy } = prepare('snip-headtail', run);
   host.setWorld({ copy, task });
   const caps = capsFor(host, ['harness-check']);
   await assert.rejects(stageCheck({ stage: 0 }, caps, { instanceId: 'i1' }), (e) => e.permanent === true && /stage check failed/.test(e.message));
