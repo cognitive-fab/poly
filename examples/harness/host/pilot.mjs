@@ -93,7 +93,7 @@ export async function runPilot({ taskId, models, tables, world, baseUrl, getKey,
       const score = scoreRun(await rt.getJournal(result.ids.trial));
       // poly's own charge for the same calls: the decision events of every instance the trial used
       let poly = 0;
-      for (const id of [...result.turns.map((t) => `turn:${task.id}:${t.stage}:${t.turn - 1}`), ...result.receipts, result.ids.context]) {
+      for (const id of [...result.turns.map((t) => `turn:${result.runId}:${t.stage}:${t.turn - 1}`), ...result.receipts, result.ids.context]) {
         for (const e of (await rt.chain(id)).filter((x) => x.kind === 'decision')) poly += e.body.cost?.units ?? 0;
       }
       const lines = readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));

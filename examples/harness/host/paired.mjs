@@ -134,13 +134,15 @@ function outcome(reruns, id, side) {
 
 /**
  * The noise floor of one set of runs: { [taskId]: [run, run, ...] } for one configuration with the model frozen.
- * `source` is 'recording' (a replay) or 'live'. A replay must repeat exactly, and then its floor is zero by construction and
+ * `source` is 'recording' (a replay) or 'live'. With `partial`, a live set may hold tasks with one run; the floor is then over the others. A replay must repeat exactly, and then its floor is zero by construction and
  * `measured` is false; a replay that does not repeat is a defect and throws. A live set needs at least two reruns of a task,
  * and the floor is the share of tasks whose completion differs between reruns (and of stages whose score does).
  */
-export function noiseFloor(runs, { source }) {
+export function noiseFloor(runs, { source, partial = false }) {
   if (source !== 'recording' && source !== 'live') throw new Error("source must be 'recording' or 'live'");
-  const ids = Object.keys(runs).sort();
+  // partial (live only): the floor is measured on the tasks that were rerun, and says how many, when not every task was
+  const ids = Object.keys(runs).filter((id) => !(partial && source === 'live' && runs[id].length < 2)).sort();
+  if (partial && source === 'live' && ids.length === 0) throw new Error('no task was rerun, so there is no floor to measure');
   let disagreeTasks = 0;
   let stageCells = 0;
   let disagreeStages = 0;
@@ -198,7 +200,7 @@ function underCap(ids, base, candidate, tasks) {
  * @returns {{ verdict: 'ACCEPT'|'REFUSE'|'INCONCLUSIVE', reasons: string[], instance: object }} the instance is the checked one
  *   (PT12.3a): the tasks, pairs, discordant counts, p-values, regressions, noise floor and detectable gap behind the verdict.
  */
-export function decide({ base, candidate, source, changed, alpha = ALPHA, costs }) {
+export function decide({ base, candidate, source, changed, alpha = ALPHA, costs, partialReruns = false }) {
   const reasons = [];
   const verdict = (v) => {
     if (instance.underCap?.line) reasons.push(instance.underCap.line);
@@ -235,8 +237,8 @@ export function decide({ base, candidate, source, changed, alpha = ALPHA, costs 
   }
 
   const noise = {
-    base: noiseFloor(Object.fromEntries(ids.map((id) => [id, base[id]])), { source }),
-    candidate: noiseFloor(Object.fromEntries(ids.map((id) => [id, candidate[id]])), { source }),
+    base: noiseFloor(Object.fromEntries(ids.map((id) => [id, base[id]])), { source, partial: partialReruns }),
+    candidate: noiseFloor(Object.fromEntries(ids.map((id) => [id, candidate[id]])), { source, partial: partialReruns }),
   };
   instance.noise = noise;
   const floor = Math.max(noise.base.rate, noise.candidate.rate);

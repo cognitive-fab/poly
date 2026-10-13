@@ -53,6 +53,10 @@ One bounded live run is planned (E3.9), reported as a result and not as a test, 
 - the cost terms on a live model: the preamble, the cache read and write, the tokens a step adds;
 - the McNemar gap: with 12 pairs an exact one-sided test reaches 0.05 only for all of 5 discordant pairs one way, 7 of 8, or 8 of 9 (6 of 7 gives 0.0625).
 
+### Expected before the results come in (written 2026-10-13, after a pilot and before the plan)
+
+On tasks this size the four mechanisms have little to save. The pilot (task 1, one trial of each configuration, not counted in the plan) never reached a tenth of the window, produced no output over 10 KiB, and ran 8 to 10 agent calls costing about 0.11 to 0.12 USD; no mechanism fired. The live run is therefore **expected to show small or no differences between the base and the full harness**, and a verdict of INCONCLUSIVE. It goes ahead as planned because of what it measures whatever the differences are: the noise floor over the eight tasks that are rerun, the cost of each term on a live model (the preamble, the cache write and read, the output, the tool results), and whether the mechanisms fire at all (fusion, compaction, ObservationPack, the Reducer), with the commands the agent ran logged beside each call. The pilot also found that the classifier's table of declared runners did not hold the command the bash tool's description named (a vitest command), so that command was neither fused nor read by the Reducer; the description now names the runners of the table (`npm test`, `go test` and the others), and the table was not widened, because it is what fusion is trusted on.
+
 ## 6. Deviations from the paper, and limits
 
 Where this example differs from SoL-Pi, by its own choice (`assumptions.json`, statement `paper-differences`):

@@ -107,10 +107,10 @@ export function oracle() {
   return ok;
 }
 
-export function isolation() {
+export function isolation(quiet = false) {
   // the container has no route at all; the host's names are added to the always-unreachable list of the check
   const r = docker(['exec', NAME, 'node', '/opt/poly/examples/harness/host/isolation-check.mjs', '--unreachable', 'host.docker.internal:443', '--unreachable', 'host.docker.internal:2375']);
-  process.stdout.write(`${r.stdout ?? ''}${r.stderr ?? ''}`);
+  if (!quiet || r.status !== 0) process.stdout.write(`${r.stdout ?? ''}${r.stderr ?? ''}`);
   return r.status === 0;
 }
 

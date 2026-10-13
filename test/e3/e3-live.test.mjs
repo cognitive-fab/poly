@@ -105,6 +105,13 @@ test('A1 and E3.9: two stages of several turns each, ended by done, scored from 
     assert.match(textOf(agentRequests(api)[3]), /Stage 2 of 2: tail keeps the last lines/);
     // the fused call was fused (an edit then a declared runner), and its result came back
     assert.equal(result.metrics.fusion.fired, 2);
+    // the commands of every bash call are logged (a fused call\'s too), with what the classifier and the Reducer\'s condition said
+    const fusedTurn = result.turns.find((x) => x.stage === 0 && x.turn === 2);
+    assert.deepEqual(fusedTurn.commands, [HEAD_TEST]);
+    assert.deepEqual([fusedTurn.plan, fusedTurn.fusable, fusedTurn.fusedTool, fusedTurn.runnerCall], ['Fusable', true, true, true]);
+    const readTurn = result.turns.find((x) => x.stage === 0 && x.turn === 1);
+    assert.deepEqual([readTurn.commands, readTurn.calls, readTurn.plan, readTurn.fusable, readTurn.runnerCall], [[], ['read'], 'Separate', false, false]);
+    assert.ok(result.turns.every((x) => x.runId === 'snip-headtail' && Array.isArray(x.commands)));
     assert.equal((await rt.getState('turn:snip-headtail:0:1')).state.plan, 'Fusable');
     assert.equal((await rt.getState('turn:snip-headtail:0:0')).state.plan, 'Separate');
     // the copy holds the fixes and the originals are untouched

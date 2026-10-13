@@ -22,6 +22,13 @@ export function containerExec({ send, task, run }) {
       return copy;
     },
     copy: () => copy,
+    /** Deletes the copy inside the container when the trial is over. */
+    async remove() {
+      if (copy === null) return;
+      const r = await send({ op: 'remove', copy });
+      if (r.error) throw new Error(`the container could not remove the copy: ${r.error}`);
+      copy = null;
+    },
     async exec(command, args) {
       if (copy === null) throw Object.assign(new Error('no task copy was made in the container, so nothing can run'), { permanent: true });
       if (command === 'harness-tool') {

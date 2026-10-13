@@ -8,8 +8,12 @@
 // mechanism is on. It reaches the machines as the two calls it is, an edit then a command, so the classifier decides whether
 // they may run as one (HF3.4) exactly as for a model that wrote the two itself. The base configuration is not offered it.
 
-/** The command the bash tool accepts, in words: what host/world.mjs allows. Part of the tool's description, and so of every request. */
-const BASH_NOTE = 'Runs one program from this list and nothing else: npm or pnpm or yarn (test, build, lint), node --test, go (test, build, vet), or node node_modules/vitest/vitest.mjs run. Words are letters, digits and . / : = @ + - _ only: no quotes, pipes, redirection, variables or globs. Use read and search to look at files, not bash.';
+/**
+ * The command the bash tool accepts, in words. Part of the tool's description, and so of every request. It names the runners of the classifier's
+ * table (S559) and not the vitest command that host/world.mjs also allows: the pilot (2026-10-13) showed an agent that is told of that
+ * command uses it, and a command outside the table is neither fused nor read by the Reducer. The table is not widened to match (owner, 2026-10-13).
+ */
+const BASH_NOTE = 'Runs one program from this list and nothing else: npm test (arguments for the test runner go after --, for example npm test -- tests/unit/core/urgency.test.js), npm run build, npm run lint, node --test, go test (for example go test ./internal/filter -run TestHead -count 1), go build, go vet. Words are letters, digits and . / : = @ + - _ only: no quotes, pipes, redirection, variables or globs. Use read and search to look at files, not bash.';
 
 const TOOLS = {
   read: { name: 'read', description: 'Reads a file of the repository and returns its text.', input_schema: { type: 'object', properties: { path: { type: 'string', description: 'Path relative to the repository root.' } }, required: ['path'] } },

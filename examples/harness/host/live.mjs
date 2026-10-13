@@ -45,7 +45,7 @@ export function makeProviders({ anthropic, models, session }) {
     session.guard('agent');
     const r = await anthropic.call({ kind: 'agent', model: models.main, system: session.system, tools: session.tools, messages: session.messages(), maxTokens: q.limits?.maxTokens ?? 4000 });
     const calls = callsFromBlocks(r.blocks);
-    session.last = { calls, stop: stopOf(r.stopReason), text: r.text, usage: r.usage };
+    session.last = { calls, stop: stopOf(r.stopReason), text: r.text, usage: r.usage, fusedTool: (r.blocks ?? []).some((b) => b?.type === 'tool_use' && b.name === 'edit_and_run') };
     session.lastUsage = r.usage;
     return reply(calls, r, models.main);
   };
@@ -72,7 +72,8 @@ export function makeProviders({ anthropic, models, session }) {
  * @param {{ rt: object, host: ReturnType<typeof import('./transports.mjs').makeHost>, task: object, models: { main: string, cheap: string },
  *   anthropic: ReturnType<typeof import('./anthropic.mjs').createAnthropic>, editableDir: string, mechanisms?: object, thresholds?: object,
  *   windowTokens?: number, cacheRatio?: number, wallClockMs?: number, now?: () => number, onCap?: () => Promise<void> | void,
- *   trialCapMicro: number, reservations: { agent: number, summarise: number, read: number } }} input
+ *   trialCapMicro: number, reservations: { agent: number, summarise: number, read: number }, runId?: string }} input
+ *   runId names the run's instances (default: the task's id), so that several trials of one task share one runtime and one store
  *
  * The trial's cap (finding of 2026-10-13, decisions-e3.md). The module's "cap usd 0.60 per run" is per decision instance, so per Turn (PS18.4:
  * budget:b:run:<instance>), and one Turn's calls cannot reach it; only the month's cap of the scope spans trials. The cap of a trial is
@@ -81,14 +82,14 @@ export function makeProviders({ anthropic, models, session }) {
  * the machines take as the end of the budget (Turn.StepFailed sends BudgetStop to the Trial: the open stage is checked once and the
  * trial ends with the reason Budget). The sum is the driver's figure, which e3-live.test.mjs shows equals poly's charge. Infinity turns the guard off.
  */
-export async function runLive({ rt, host, task, models, anthropic, editableDir, mechanisms = ALL_ON, thresholds = THRESHOLDS, windowTokens = LIVE_WINDOW_TOKENS, cacheRatio = 25, wallClockMs = 20 * 60_000, now = Date.now, onCap = async () => {}, trialCapMicro, reservations }) {
+export async function runLive({ rt, host, task, models, anthropic, editableDir, mechanisms = ALL_ON, thresholds = THRESHOLDS, windowTokens = LIVE_WINDOW_TOKENS, cacheRatio = 25, wallClockMs = 20 * 60_000, now = Date.now, onCap = async () => {}, trialCapMicro, reservations, runId = task.id }) {
   if (typeof trialCapMicro !== 'number') throw new Error('runLive needs the trial cap in micro-units (Infinity for none)');
   if (!reservations || !(reservations.agent > 0 && reservations.summarise > 0 && reservations.read > 0)) throw new Error('runLive needs the reservation of each kind of call');
   const store = host.store;
   const n = task.stages.length;
   const bucketTokens = windowTokens / 6;
   const bucketOf = (tokens) => Math.max(0, Math.min(6, Math.floor(tokens / bucketTokens)));
-  const ids = { trial: `trial:${task.id}`, context: `context:${task.id}`, ledger: `ledger:${task.id}` };
+  const ids = { trial: `trial:${runId}`, context: `context:${runId}`, ledger: `ledger:${runId}` };
   const state = async (id) => (await rt.getState(id)).state;
   const pump = async (until, what, limit = 80) => {
     for (let i = 0; i < limit; i++) {
@@ -224,7 +225,7 @@ export async function runLive({ rt, host, task, models, anthropic, editableDir, 
   };
   /** One turn: a model call, its tools, its log. Returns 'failed' if the model call could not be made (the machines have taken it as the budget). */
   const turnOf = async (k, i) => {
-    const turn = `turn:${task.id}:${k}:${i}`;
+    const turn = `turn:${runId}:${k}:${i}`;
     await rt.create('harness.Turn', { id: turn });
     const first = await compose();
     await level(first.tokens);
@@ -264,7 +265,7 @@ export async function runLive({ rt, host, task, models, anthropic, editableDir, 
     if (isRunnerCall(calls) && logBytes >= thresholds.logBytes) {
       metrics.reducer.opportunities += 1;
       if (mechanisms.reducer) {
-        const receipt = `receipt:${task.id}:${k}:${i}`;
+        const receipt = `receipt:${runId}:${k}:${i}`;
         receipts.push(receipt);
         metrics.reducer.receipts += 1;
         const flagged = archived.redacted === true;
@@ -289,8 +290,8 @@ export async function runLive({ rt, host, task, models, anthropic, editableDir, 
     if (!shownIsReceipt && Buffer.byteLength(shown, 'utf8') > thresholds.handleBytes) {
       metrics.pack.opportunities += 1;
       if (mechanisms.pack) {
-        const obs = `obs:${task.id}:${k}:${i}`;
-        const arch = `archive:${task.id}:${k}:${i}`;
+        const obs = `obs:${runId}:${k}:${i}`;
+        const arch = `archive:${runId}:${k}:${i}`;
         const handleId = archive.put(Buffer.from(shown, 'utf8'));
         await rt.create('harness.Archive', { id: arch });
         await rt.create('harness.Observation', { id: obs });
@@ -304,7 +305,14 @@ export async function runLive({ rt, host, task, models, anthropic, editableDir, 
       }
     }
     push(message);
-    turnsLog.push({ stage: k, turn: i + 1, calls: JSON.parse(calls).map((c) => c.tool), done: doneOf(calls), stop: session.last.stop, usage: session.last.usage, exitStatus: archived.exitStatus, logBytes, receipt: shownIsReceipt });
+    // the commands of every bash call (a fused call's command is its bash call), and what the classifier and the Reducer's condition said of the turn,
+    // so that the trigger rates of the mechanisms rest on what the agent ran and not on a guess
+    const parsed = JSON.parse(calls);
+    turnsLog.push({
+      stage: k, turn: i + 1, runId, calls: parsed.map((c) => c.tool), commands: parsed.filter((c) => c.tool === 'bash').map((c) => c.command),
+      plan: (await state(turn)).plan, fusable: (await state(turn)).plan === 'Fusable', runnerCall: isRunnerCall(calls), fusedTool: session.last.fusedTool === true,
+      done: doneOf(calls), stop: session.last.stop, usage: session.last.usage, exitStatus: archived.exitStatus, logBytes, receipt: shownIsReceipt,
+    });
     return 'ok';
   };
 
@@ -363,7 +371,7 @@ export async function runLive({ rt, host, task, models, anthropic, editableDir, 
   for (const o of live) metrics.pack.fullSends.push(o.fullSends);
   for (const o of live) if ((await state(o.id)).st === 'Handled') metrics.pack.handled += 1;
   return {
-    ids, trial: await state(ids.trial), context: await state(ids.context), turns: turnsLog, receipts,
+    ids, runId, trial: await state(ids.trial), context: await state(ids.context), turns: turnsLog, receipts,
     compactions: compactions.map(({ before, after, released }) => ({ before, after, released })),
     metrics, requests, gateLog, live: live.map((o) => ({ id: o.id, handle: o.message.handleId, fullSends: o.fullSends })), archive, transcript: messages,
     llm: { ...anthropic.totals, spentThisTrial: anthropic.totals.microUsd - spentAtStart }, wallClockMs: now() - t0,

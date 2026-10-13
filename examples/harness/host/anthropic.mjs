@@ -46,10 +46,10 @@ export function toApiMessages(messages, { cacheLast = true } = {}) {
 
 /**
  * @param {{ fetchImpl?: typeof fetch, baseUrl?: string, getKey?: () => string | undefined, tables: Record<string, object>,
- *   logPath?: string | null, retries?: number, backoffMs?: number, sleep?: (ms: number) => Promise<void>, now?: () => number }} options
+ *   logPath?: string | null, retries?: number, backoffMs?: number, timeoutMs?: number, sleep?: (ms: number) => Promise<void>, now?: () => number }} options
  *   tables maps a model id to its price table (prices-live/*.json)
  */
-export function createAnthropic({ fetchImpl = globalThis.fetch, baseUrl = 'https://api.anthropic.com', getKey = () => process.env.ANTHROPIC_API_KEY, tables, logPath = null, retries = 2, backoffMs = 1000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now } = {}) {
+export function createAnthropic({ fetchImpl = globalThis.fetch, baseUrl = 'https://api.anthropic.com', getKey = () => process.env.ANTHROPIC_API_KEY, tables, logPath = null, retries = 2, backoffMs = 1000, timeoutMs = 180_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now } = {}) {
   let n = 0;
   const totals = { calls: 0, microUsd: 0, byKind: {} };
   // every string that leaves this file passes through here
@@ -85,7 +85,7 @@ export function createAnthropic({ fetchImpl = globalThis.fetch, baseUrl = 'https
       const t0 = now();
       let res;
       try {
-        res = await fetchImpl(`${baseUrl}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': API_VERSION }, body });
+        res = await fetchImpl(`${baseUrl}/v1/messages`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': API_VERSION }, body, signal: AbortSignal.timeout(timeoutMs) });
       } catch (e) {
         if (attempt < retries) {
           await sleep(backoffMs * 2 ** attempt);

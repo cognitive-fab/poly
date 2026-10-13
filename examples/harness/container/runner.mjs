@@ -6,12 +6,13 @@
 //   { op: 'calls', copy, calls }             a turn's tool calls, run in that copy -> { text, exitStatus }
 //   { op: 'check', copy, task, stage }       the stage's check in that copy -> { passed, text, exitStatus }
 //   { op: 'prove', task, run }               the oracle for one task -> { problems, stages }
+//   { op: 'remove', copy }                   delete a scratch copy when its trial is over (it holds no link out of itself)
 //   { op: 'links' }                          every link in a scratch copy that points outside it -> { outside }
 //
 // It is the same code as on the host (tasks.mjs and world.mjs), so the three rules hold the same way: scratch copies only, a
 // built environment with no key and offline toolchains, and the list of declared runners. What the container adds is what the
 // host cannot give: no network at all, a read-only root and no mount of the host. A copy must be under the scratch folder.
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { SCRATCH, prepare, prove, runCheck, scratchLinksOutside, taskOf } from '../host/tasks.mjs';
 import { runCalls } from '../host/world.mjs';
@@ -57,6 +58,9 @@ async function handle(r) {
       const p = await prove(String(r.task), { run: String(r.run), packages: PACKAGES });
       return { problems: p.problems, stages: p.stages };
     }
+    case 'remove':
+      rmSync(underScratch(r.copy), { recursive: true, force: true });
+      return { removed: true };
     case 'links':
       return { outside: scratchLinksOutside() };
     default:

@@ -38,6 +38,29 @@ test('the tools: read, search, edit, write, bash and done always; the fused acti
   assert.deepEqual(toolSchema({ fusion: true }), toolSchema({ fusion: true }));
 });
 
+test('the bash tool\'s description names the runners of the classifier\'s table and not the vitest command (owner, 2026-10-13): an agent told of it uses it, and it is neither fused nor read by the Reducer', async () => {
+  const { FUSABLE_COMMANDS } = await import('../../examples/harness/host/handlers/classify.mjs');
+  const bash = toolSchema({ fusion: true }).find((t) => t.name === 'bash').description;
+  assert.doesNotMatch(bash, /vitest/i);
+  assert.match(bash, /npm test/);
+  assert.match(bash, /go test/);
+  // and the examples the description gives are in the table: they would be fused
+  for (const example of ['npm test -- tests/unit/core/urgency.test.js', 'go test ./internal/filter -run TestHead -count 1', 'npm run build', 'npm run lint', 'node --test']) {
+    assert.ok(FUSABLE_COMMANDS.some((re) => re.test(example)), example);
+  }
+  // while the vitest command, which the world still allows, is not in the table
+  assert.ok(!FUSABLE_COMMANDS.some((re) => re.test('node node_modules/vitest/vitest.mjs run tests/unit/core/urgency.test.js')));
+});
+
+test('a request that never answers is abandoned at the timeout, as a failed request, with the key out of the message', async () => {
+  const api = await fakeApi(() => new Promise(() => {}));
+  const c = createAnthropic({ baseUrl: api.url, getKey: () => CANARY_KEY, tables: TABLES, sleep: async () => {}, retries: 0, timeoutMs: 150 });
+  const t0 = Date.now();
+  await assert.rejects(c.call(req()), (e) => /the request failed/.test(e.message) && !e.message.includes(CANARY_KEY));
+  assert.ok(Date.now() - t0 < 5000);
+  await api.close();
+});
+
 test('the calls of an answer: the machines read one JSON list; edit_and_run is an edit then a command; text blocks are not calls', () => {
   const blocks = [
     { type: 'text', text: 'I will look first.' },
