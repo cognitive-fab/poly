@@ -1,0 +1,100 @@
+{
+  "id": "snip-group",
+  "repo": "snip",
+  "language": "go",
+  "prompt": "This Go repository filters command output. Its tests for the group_by and aggregate actions fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "group_by puts the largest group first",
+    "group_by counts and formats by default",
+    "aggregate counts each pattern and lists them in name order"
+  ],
+  "addFiles": [
+    {
+      "path": "internal/filter/task_group_test.go",
+      "from": "tests/task_group_test.go"
+    }
+  ],
+  "stages": [
+    {
+      "title": "group order",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "return groups[order[i]] > groups[order[j]]",
+          "broken": "return groups[order[i]] < groups[order[j]]",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^TestGroupBy$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "group counts and format",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "groups[key]++",
+          "broken": "groups[key] += 2",
+          "origin": "injected"
+        },
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "fmtStr = \"{{.Key}}: {{.Count}}\"",
+          "broken": "fmtStr = \"{{.Key}} {{.Count}}\"",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^TestGroupByCounts$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "aggregate",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "return patterns[i].name < patterns[j].name",
+          "broken": "return patterns[i].name > patterns[j].name",
+          "origin": "injected"
+        },
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "patterns[i].count++",
+          "broken": "patterns[i].count += 2",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^TestAggregateOutput$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    }
+  ]
+}

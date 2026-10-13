@@ -1,0 +1,30 @@
+// The checked harness's policy (plan-e3.md E3.2, HF3.10, S558). An offline run offers no tool that needs the network:
+// every tool effect declares whether it does (the label egress:external), and the offline scope denies the ones that do.
+// The model's own calls are decisions (kind decision.*), not tools, and are not affected. The never statement is what
+// the checker proves over the gate's decision table: no proposal of a network tool is allowed (PL6503 otherwise). The
+// scope is the module's name, as the policy admission reads it (S160). The policy is signed by a person key before a
+// run (S194); a change to it is outside the editable surface (HF3.11, host/change-gate.mjs).
+module harness_policy
+
+policy offline {
+  scope "harness"
+  obligation no-network "An offline run denies every tool that needs the network." rule {
+    when proposal.kind == "effect" && effect.labels has "egress:external" && effect.kind == "tool.fetch"  // @HF3.10
+    require false else deny
+    on unknown deny
+  }
+  // A model call carries private code to a provider, so the credential-egress region (PL7001) needs a gate that names
+  // it. The gate here is the budget check, which runs before any rule (PS18.4); the rule names the calls so that the
+  // region is crossed, and allows them.
+  obligation model-calls "A model call is gated: it names the decisions that carry the task to a provider." rule {
+    when proposal.kind == "effect" && effect.kind in { "decision.agent", "decision.summarise", "decision.read" }
+    require proposal.kind == "effect" else deny
+    on unknown deny
+  }
+  obligation allow-the-rest "Every other effect is allowed." rule {
+    when proposal.kind == "effect"
+    require proposal.kind == "effect" else deny
+    on unknown deny
+  }
+  never offline-no-network "An offline run allows no tool that needs the network.": allow when proposal.kind == "effect" && effect.labels has "egress:external" && effect.kind == "tool.fetch"
+}

@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "provider": "cheap",
+  "model": "claude-haiku-4-5-20251001",
+  "currency": "usd",
+  "perMillionTokens": {
+    "input": 1000000,
+    "output": 5000000,
+    "cache_write": 1250000,
+    "cache_read": 100000
+  },
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "readOn": "2026-10-12"
+}

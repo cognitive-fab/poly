@@ -29,6 +29,7 @@
     "build": "tsc -b",
     "clean": "tsc -b --clean",
     "check:boundaries": "node scripts/check-boundaries.mjs",
+    "test:e3": "node --import ./test/fixtures/home-guard.mjs --test --test-concurrency=1 \"test/e3/*.test.mjs\"",
     "test": "npm run build && npm run check:boundaries && node --import ./test/fixtures/home-guard.mjs --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test/reporters/file-times.mjs --test-reporter-destination=.poly/file-times.json \"packages/*/dist/test/*.test.js\" \"test/*.test.mjs\" && node --import ./test/fixtures/home-guard.mjs --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test/reporters/file-times.mjs --test-reporter-destination=.poly/file-times-after.json --test-concurrency=1 \"test/after/*.test.mjs\""
   },
   "devDependencies": {

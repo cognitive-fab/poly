@@ -1,0 +1,80 @@
+{
+  "id": "todo-urgency",
+  "repo": "todo-app",
+  "language": "js",
+  "prompt": "This repository is a small local-first task manager. Its unit tests for the urgency score fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "The deadline bands give the right score",
+    "Blocked tasks, energy and the level labels are right"
+  ],
+  "stages": [
+    {
+      "title": "the deadline bands",
+      "edits": [
+        {
+          "file": "src/core/urgency.js",
+          "fixed": "if (msUntil <= 2  * HOUR) return 95;",
+          "broken": "if (msUntil <= 2  * HOUR) return 59;",
+          "origin": "injected"
+        },
+        {
+          "file": "src/core/urgency.js",
+          "fixed": "if (msUntil <= 0)         return 100;  // overdue",
+          "broken": "if (msUntil <= -2 * DAY)  return 100;  // overdue",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/core/urgency.test.js",
+          "-t",
+          "overdue|within 2 hours"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "blocked tasks, energy, level labels",
+      "edits": [
+        {
+          "file": "src/core/urgency.js",
+          "fixed": "return Math.min(30, _deadlineScore(task.deadline, now));",
+          "broken": "return _deadlineScore(task.deadline, now);",
+          "origin": "injected"
+        },
+        {
+          "file": "src/core/urgency.js",
+          "fixed": "case 'high':   return 1.2;",
+          "broken": "case 'high':   return 0.85;",
+          "origin": "injected"
+        },
+        {
+          "file": "src/core/urgency.js",
+          "fixed": "if (score >= level.min && score <= level.max) return level.label;",
+          "broken": "if (score > level.min && score <= level.max) return level.label;",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/core/urgency.test.js",
+          "-t",
+          "blocked|energy multiplier|maps"
+        ],
+        "timeoutMs": 180000
+      }
+    }
+  ]
+}

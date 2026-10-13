@@ -9,3 +9,6 @@ dist/
 # The scorer's working builds (runner/score.mjs, buildImpl): regenerated from the deliveries on every scoring, with this
 # checkout's path to polyrun, so they are not part of a run's record.
 experiments/m3/runs/*/scoring/
+
+# Third-party papers kept for reading are never committed (owner, 2026-10-11).
+docs/research/*.pdf

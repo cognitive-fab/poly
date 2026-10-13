@@ -1,0 +1,94 @@
+{
+  "id": "todo-nlparse",
+  "repo": "todo-app",
+  "language": "js",
+  "prompt": "This repository is a small local-first task manager. Its unit tests for quick-capture parsing fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "Title, project and energy are extracted",
+    "A recurrence rule is kept whole",
+    "The date text leaves the title"
+  ],
+  "stages": [
+    {
+      "title": "title, project, energy",
+      "edits": [
+        {
+          "file": "src/parsers/nl-parser.js",
+          "fixed": "out.energy = 'medium';",
+          "broken": "out.energy = 'low';",
+          "origin": "injected"
+        },
+        {
+          "file": "src/parsers/nl-parser.js",
+          "fixed": "out.projectSlug = match[1];",
+          "broken": "out.projectSlug = match[0];",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/parsers/nl-parser.test.js",
+          "-t",
+          "plain title|project slug|energy|empty string"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "recurrence",
+      "edits": [
+        {
+          "file": "src/parsers/nl-parser.js",
+          "fixed": "out.recurrence = rule;",
+          "broken": "out.recurrence = { ...rule, daysOfWeek: [] };",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/parsers/nl-parser.test.js",
+          "-t",
+          "recurrence"
+        ],
+        "timeoutMs": 180000
+      }
+    },
+    {
+      "title": "the date leaves the title",
+      "edits": [
+        {
+          "file": "src/parsers/nl-parser.js",
+          "fixed": "const after  = text.slice(result.index + result.text.length);",
+          "broken": "const after  = text.slice(result.index);",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "node",
+        "args": [
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--pool=threads",
+          "--reporter=dot",
+          "tests/unit/parsers/nl-parser.test.js",
+          "-t",
+          "combined attributes"
+        ],
+        "timeoutMs": 180000
+      }
+    }
+  ]
+}

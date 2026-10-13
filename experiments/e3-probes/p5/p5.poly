@@ -1,0 +1,46 @@
+module p5
+
+enum Mode { Working, Finished, Compacting, Over }
+
+machine Session {
+  state { mode : Mode = Working  ctx : 0..16 = 0  step : 0..3 = 0  compactions : 0..3 = 0 }
+  terminal mode is Over
+  action Grew(by: 0..8)
+  action StepDone()
+  action Measured(saving: 0..16, rewrite: 0..16)
+  action Compacted(size: 0..16)
+  action Stop()
+  on Grew(by) {
+    require mode is Working && ctx + by <= 16 else reject "full"
+    ctx' = ctx + by
+  }
+  on StepDone {
+    require mode is Working && step < 3 else reject "not-working"
+    mode' = Finished
+    step' = step + 1
+  }
+  // the gate: a typed decision over measured numbers (HT2), never a model's opinion
+  on Measured(saving, rewrite) {
+    require mode is Finished || (mode is Working && ctx >= 14) else reject "mid-step"
+    require saving > rewrite || ctx >= 14 else reject "does-not-pay"
+    mode' = Compacting
+    emit compact()
+  }
+  on Compacted(size) {
+    require mode is Compacting && size < ctx && compactions < 3 else reject "not-compacting"
+    ctx' = size
+    compactions' = compactions + 1
+    mode' = Working
+  }
+  on Stop {
+    require mode is Working && step == 3 else reject "not-done"
+    mode' = Over
+  }
+  effect compact() {
+    kind "harness.compact"
+    labels { read:private }
+    ok -> Compacted(size: 4)
+    failed -> Stop()
+  }
+  never compact-at-step-end-or-limit: emit compact() while mode is Working && ctx < 14
+}

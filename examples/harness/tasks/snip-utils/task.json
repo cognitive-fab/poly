@@ -1,0 +1,118 @@
+{
+  "id": "snip-utils",
+  "repo": "snip",
+  "language": "go",
+  "prompt": "This Go repository filters command output. Its tests for the string utilities fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "Truncate ends with an ellipsis",
+    "Token estimates round up and large counts are abbreviated",
+    "CountLines counts a last line without a newline",
+    "CompactPath strips the known prefixes and OkConfirmation is exact"
+  ],
+  "stages": [
+    {
+      "title": "Truncate",
+      "edits": [
+        {
+          "file": "internal/utils/utils.go",
+          "fixed": "return string(runes[:max-3]) + \"...\"",
+          "broken": "return string(runes[:max-3]) + \"..\"",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/utils",
+          "-run",
+          "^TestTruncate$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "tokens",
+      "edits": [
+        {
+          "file": "internal/utils/utils.go",
+          "fixed": "return int(math.Ceil(float64(n) / 4.0))",
+          "broken": "return int(math.Floor(float64(n) / 4.0))",
+          "origin": "injected"
+        },
+        {
+          "file": "internal/utils/utils.go",
+          "fixed": "case n >= 1_000:",
+          "broken": "case n > 1_000:",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/utils",
+          "-run",
+          "^(TestEstimateTokens|TestFormatTokens)$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "CountLines",
+      "edits": [
+        {
+          "file": "internal/utils/utils.go",
+          "fixed": "if !strings.HasSuffix(s, \"\\n\") {",
+          "broken": "if strings.HasSuffix(s, \"\\n\") {",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/utils",
+          "-run",
+          "^TestCountLines$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "paths and confirmations",
+      "edits": [
+        {
+          "file": "internal/utils/utils.go",
+          "fixed": "prefixes := []string{\"src/\", \"lib/\", \"internal/\", \"pkg/\", \"vendor/\"}",
+          "broken": "prefixes := []string{\"src/\", \"internal/\", \"pkg/\", \"vendor/\"}",
+          "origin": "injected"
+        },
+        {
+          "file": "internal/utils/utils.go",
+          "fixed": "return \"ok \" + action",
+          "broken": "return \"ok  \" + action",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/utils",
+          "-run",
+          "^(TestCompactPath|TestOkConfirmation)$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    }
+  ]
+}

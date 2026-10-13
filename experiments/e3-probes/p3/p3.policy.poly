@@ -1,0 +1,16 @@
+module p3_policy
+
+policy offline {
+  scope "harness"
+  obligation no-network "An offline run denies every effect that needs the network." rule {
+    when proposal.kind == "effect" && effect.labels has "egress:external"
+    require false else deny
+    on unknown deny
+  }
+  obligation allow-tools "Tool effects are allowed." rule {
+    when proposal.kind == "effect"
+    require proposal.kind == "effect" else deny
+    on unknown deny
+  }
+  never offline-no-network "An offline run allows no effect that needs the network.": allow when proposal.kind == "effect" && effect.labels has "egress:external"
+}

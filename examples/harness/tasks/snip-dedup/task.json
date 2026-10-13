@@ -1,0 +1,88 @@
+{
+  "id": "snip-dedup",
+  "repo": "snip",
+  "language": "go",
+  "prompt": "This Go repository filters command output. Its tests for the dedup action fail. Fix the source so that the tests pass; do not change the tests. Work through the plan in order and say when a step is done.",
+  "plan": [
+    "A repeated line shows its count",
+    "Lines come most repeated first",
+    "Normalising patterns merge lines that differ only by them"
+  ],
+  "addFiles": [
+    {
+      "path": "internal/filter/task_dedup_test.go",
+      "from": "tests/task_dedup_test.go"
+    }
+  ],
+  "stages": [
+    {
+      "title": "count suffix",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "out = append(out, fmt.Sprintf(\"%s (x%d)\", e.normalized, e.count))",
+          "broken": "out = append(out, fmt.Sprintf(\"%s (x%d)\", e.normalized, e.count-1))",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^TestDedupCountSuffix$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "order",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "return seen[order[i]].count > seen[order[j]].count",
+          "broken": "return seen[order[i]].count < seen[order[j]].count",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^TestDedupOrder$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    },
+    {
+      "title": "normalising",
+      "edits": [
+        {
+          "file": "internal/filter/actions.go",
+          "fixed": "norm = re.ReplaceAllString(norm, \"\")",
+          "broken": "norm = re.ReplaceAllString(norm, \"$0\")",
+          "origin": "injected"
+        }
+      ],
+      "check": {
+        "cwd": ".",
+        "cmd": "go",
+        "args": [
+          "test",
+          "./internal/filter",
+          "-run",
+          "^TestDedupNormalize$",
+          "-count=1"
+        ],
+        "timeoutMs": 300000
+      }
+    }
+  ]
+}

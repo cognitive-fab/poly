@@ -1,0 +1,802 @@
+{
+  "task": "todo-urgency",
+  "models": {
+    "main": "claude-opus-5-5",
+    "cheap": "claude-haiku-4-5-20251001"
+  },
+  "capMicro": 600000,
+  "reservations": {
+    "agent": 280000,
+    "summarise": 120000,
+    "read": 110000
+  },
+  "trials": [
+    {
+      "config": "base",
+      "mechanisms": {
+        "fusion": false,
+        "compaction": false,
+        "pack": false,
+        "reducer": false
+      },
+      "trial": {
+        "mode": "Done",
+        "why": "PlanDone"
+      },
+      "stages": [
+        {
+          "stage": 0,
+          "state": "passed",
+          "score": 1,
+          "seq": 8,
+          "turns": 6,
+          "endedBy": "Done"
+        },
+        {
+          "stage": 1,
+          "state": "passed",
+          "score": 1,
+          "seq": 12,
+          "turns": 2,
+          "endedBy": "Done"
+        }
+      ],
+      "failingStage": null,
+      "turns": [
+        {
+          "stage": 0,
+          "turn": 1,
+          "calls": [
+            "search"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 49,
+            "cache_write": 1281,
+            "cache_read": 0
+          },
+          "exitStatus": 1,
+          "logBytes": 22,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 2,
+          "calls": [
+            "read",
+            "search"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 150,
+            "cache_write": 43,
+            "cache_read": 1281
+          },
+          "exitStatus": 0,
+          "logBytes": 3678,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 3,
+          "calls": [
+            "read",
+            "search"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 121,
+            "cache_write": 1785,
+            "cache_read": 1324
+          },
+          "exitStatus": 0,
+          "logBytes": 3850,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 4,
+          "calls": [
+            "read",
+            "read"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 108,
+            "cache_write": 1758,
+            "cache_read": 3109
+          },
+          "exitStatus": 0,
+          "logBytes": 4483,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 5,
+          "calls": [
+            "edit",
+            "bash"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 419,
+            "cache_write": 2155,
+            "cache_read": 4867
+          },
+          "exitStatus": 1,
+          "logBytes": 4287,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 6,
+          "calls": [
+            "done"
+          ],
+          "done": true,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 445,
+            "cache_write": 2332,
+            "cache_read": 7022
+          },
+          "exitStatus": 0,
+          "logBytes": 25,
+          "receipt": false
+        },
+        {
+          "stage": 1,
+          "turn": 1,
+          "calls": [
+            "edit",
+            "edit",
+            "edit",
+            "bash"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 660,
+            "cache_write": 148,
+            "cache_read": 9354
+          },
+          "exitStatus": 1,
+          "logBytes": 1650,
+          "receipt": false
+        },
+        {
+          "stage": 1,
+          "turn": 2,
+          "calls": [
+            "done"
+          ],
+          "done": true,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 382,
+            "cache_write": 1196,
+            "cache_read": 9502
+          },
+          "exitStatus": 0,
+          "logBytes": 25,
+          "receipt": false
+        }
+      ],
+      "metrics": {
+        "fusion": {
+          "opportunities": 1,
+          "fired": 0
+        },
+        "compaction": {
+          "opportunities": 0,
+          "chosen": 0,
+          "forced": 0
+        },
+        "pack": {
+          "opportunities": 0,
+          "observations": 0,
+          "handled": 0,
+          "fullSends": []
+        },
+        "reducer": {
+          "opportunities": 0,
+          "receipts": 0,
+          "verified": 0,
+          "rejected": 0,
+          "flagged": 0
+        }
+      },
+      "compactions": 0,
+      "wallClockMs": 48495,
+      "measured": {
+        "agentCalls": 8,
+        "calls": 8,
+        "preambleTokens": 1285,
+        "outputPerStep": 292,
+        "toolPerStep": 1054,
+        "tokensByClass": {
+          "input": 32,
+          "output": 2334,
+          "cache_write": 10698,
+          "cache_read": 36459
+        },
+        "microUsd": 107593,
+        "byKind": {
+          "agent": 107593
+        },
+        "perCall": [
+          {
+            "n": 1,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 49,
+              "cache_write": 1281,
+              "cache_read": 0
+            },
+            "microUsd": 7401,
+            "latencyMs": 1551
+          },
+          {
+            "n": 2,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 150,
+              "cache_write": 43,
+              "cache_read": 1281
+            },
+            "microUsd": 3488,
+            "latencyMs": 3387
+          },
+          {
+            "n": 3,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 121,
+              "cache_write": 1785,
+              "cache_read": 1324
+            },
+            "microUsd": 11626,
+            "latencyMs": 1849
+          },
+          {
+            "n": 4,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 108,
+              "cache_write": 1758,
+              "cache_read": 3109
+            },
+            "microUsd": 11588,
+            "latencyMs": 1603
+          },
+          {
+            "n": 5,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 419,
+              "cache_write": 2155,
+              "cache_read": 4867
+            },
+            "microUsd": 20145,
+            "latencyMs": 4282
+          },
+          {
+            "n": 6,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 445,
+              "cache_write": 2332,
+              "cache_read": 7022
+            },
+            "microUsd": 21981,
+            "latencyMs": 4563
+          },
+          {
+            "n": 7,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 660,
+              "cache_write": 148,
+              "cache_read": 9354
+            },
+            "microUsd": 15827,
+            "latencyMs": 6306
+          },
+          {
+            "n": 8,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 382,
+              "cache_write": 1196,
+              "cache_read": 9502
+            },
+            "microUsd": 15537,
+            "latencyMs": 4841
+          }
+        ]
+      },
+      "driverMicroUsd": 107593,
+      "polyMicroUsd": 107593
+    },
+    {
+      "config": "full",
+      "mechanisms": {
+        "fusion": true,
+        "compaction": true,
+        "pack": true,
+        "reducer": true
+      },
+      "trial": {
+        "mode": "Done",
+        "why": "PlanDone"
+      },
+      "stages": [
+        {
+          "stage": 0,
+          "state": "passed",
+          "score": 1,
+          "seq": 8,
+          "turns": 6,
+          "endedBy": "Done"
+        },
+        {
+          "stage": 1,
+          "state": "passed",
+          "score": 1,
+          "seq": 14,
+          "turns": 4,
+          "endedBy": "Done"
+        }
+      ],
+      "failingStage": null,
+      "turns": [
+        {
+          "stage": 0,
+          "turn": 1,
+          "calls": [
+            "search"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 49,
+            "cache_write": 1453,
+            "cache_read": 0
+          },
+          "exitStatus": 1,
+          "logBytes": 22,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 2,
+          "calls": [
+            "search",
+            "search"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 186,
+            "cache_write": 43,
+            "cache_read": 1453
+          },
+          "exitStatus": 1,
+          "logBytes": 2849,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 3,
+          "calls": [
+            "read",
+            "search"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 132,
+            "cache_write": 1369,
+            "cache_read": 1496
+          },
+          "exitStatus": 0,
+          "logBytes": 4672,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 4,
+          "calls": [
+            "read",
+            "read"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 108,
+            "cache_write": 2145,
+            "cache_read": 2865
+          },
+          "exitStatus": 0,
+          "logBytes": 4483,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 5,
+          "calls": [
+            "edit",
+            "bash"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 431,
+            "cache_write": 2155,
+            "cache_read": 5010
+          },
+          "exitStatus": 1,
+          "logBytes": 4287,
+          "receipt": false
+        },
+        {
+          "stage": 0,
+          "turn": 6,
+          "calls": [
+            "done"
+          ],
+          "done": true,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 491,
+            "cache_write": 2332,
+            "cache_read": 7165
+          },
+          "exitStatus": 0,
+          "logBytes": 25,
+          "receipt": false
+        },
+        {
+          "stage": 1,
+          "turn": 1,
+          "calls": [
+            "edit",
+            "edit",
+            "edit",
+            "bash"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 600,
+            "cache_write": 160,
+            "cache_read": 9497
+          },
+          "exitStatus": 0,
+          "logBytes": 383,
+          "receipt": false
+        },
+        {
+          "stage": 1,
+          "turn": 2,
+          "calls": [
+            "bash"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 225,
+            "cache_write": 495,
+            "cache_read": 9657
+          },
+          "exitStatus": 1,
+          "logBytes": 1570,
+          "receipt": false
+        },
+        {
+          "stage": 1,
+          "turn": 3,
+          "calls": [
+            "search"
+          ],
+          "done": false,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 179,
+            "cache_write": 931,
+            "cache_read": 10152
+          },
+          "exitStatus": 1,
+          "logBytes": 114,
+          "receipt": false
+        },
+        {
+          "stage": 1,
+          "turn": 4,
+          "calls": [
+            "done"
+          ],
+          "done": true,
+          "stop": "Tool",
+          "usage": {
+            "input": 4,
+            "output": 386,
+            "cache_write": 113,
+            "cache_read": 11083
+          },
+          "exitStatus": 0,
+          "logBytes": 25,
+          "receipt": false
+        }
+      ],
+      "metrics": {
+        "fusion": {
+          "opportunities": 1,
+          "fired": 0
+        },
+        "compaction": {
+          "opportunities": 0,
+          "chosen": 0,
+          "forced": 0
+        },
+        "pack": {
+          "opportunities": 0,
+          "observations": 0,
+          "handled": 0,
+          "fullSends": []
+        },
+        "reducer": {
+          "opportunities": 0,
+          "receipts": 0,
+          "verified": 0,
+          "rejected": 0,
+          "flagged": 0
+        }
+      },
+      "compactions": 0,
+      "wallClockMs": 57001,
+      "measured": {
+        "agentCalls": 10,
+        "calls": 10,
+        "preambleTokens": 1457,
+        "outputPerStep": 279,
+        "toolPerStep": 804,
+        "tokensByClass": {
+          "input": 40,
+          "output": 2787,
+          "cache_write": 11196,
+          "cache_read": 58378
+        },
+        "microUsd": 123559,
+        "byKind": {
+          "agent": 123559
+        },
+        "perCall": [
+          {
+            "n": 1,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 49,
+              "cache_write": 1453,
+              "cache_read": 0
+            },
+            "microUsd": 8261,
+            "latencyMs": 1726
+          },
+          {
+            "n": 2,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 186,
+              "cache_write": 43,
+              "cache_read": 1453
+            },
+            "microUsd": 4242,
+            "latencyMs": 2590
+          },
+          {
+            "n": 3,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 132,
+              "cache_write": 1369,
+              "cache_read": 1496
+            },
+            "microUsd": 9801,
+            "latencyMs": 2162
+          },
+          {
+            "n": 4,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 108,
+              "cache_write": 2145,
+              "cache_read": 2865
+            },
+            "microUsd": 13474,
+            "latencyMs": 1842
+          },
+          {
+            "n": 5,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 431,
+              "cache_write": 2155,
+              "cache_read": 5010
+            },
+            "microUsd": 20413,
+            "latencyMs": 4244
+          },
+          {
+            "n": 6,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 491,
+              "cache_write": 2332,
+              "cache_read": 7165
+            },
+            "microUsd": 22929,
+            "latencyMs": 5123
+          },
+          {
+            "n": 7,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 600,
+              "cache_write": 160,
+              "cache_read": 9497
+            },
+            "microUsd": 14716,
+            "latencyMs": 4745
+          },
+          {
+            "n": 8,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 225,
+              "cache_write": 495,
+              "cache_read": 9657
+            },
+            "microUsd": 8923,
+            "latencyMs": 3481
+          },
+          {
+            "n": 9,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 179,
+              "cache_write": 931,
+              "cache_read": 10152
+            },
+            "microUsd": 10282,
+            "latencyMs": 3209
+          },
+          {
+            "n": 10,
+            "kind": "agent",
+            "stop": "tool_use",
+            "usage": {
+              "input": 4,
+              "output": 386,
+              "cache_write": 113,
+              "cache_read": 11083
+            },
+            "microUsd": 10518,
+            "latencyMs": 4444
+          }
+        ]
+      },
+      "driverMicroUsd": 123559,
+      "polyMicroUsd": 123559
+    }
+  ],
+  "recomputed": {
+    "assumptions": {
+      "preamble": 1371,
+      "output": 286,
+      "tool": 929,
+      "steps": [
+        8,
+        10
+      ]
+    },
+    "assumedBefore": {
+      "preamble": 5000,
+      "output": 300,
+      "tool": 1200,
+      "steps": [
+        10,
+        16,
+        30,
+        60
+      ]
+    },
+    "staged": {
+      "name": "staged",
+      "tasks": 12,
+      "trials": 40,
+      "pilotTrials": 0,
+      "capUsd": 0.6,
+      "reservationUsd": 0.28,
+      "spendableUsd": 0.32,
+      "worstUsd": 24,
+      "fits": true,
+      "monthUsd": 25,
+      "stepsBeforeCap": 22,
+      "stepsBeforeInputLimit": 41,
+      "maxInput": 50000,
+      "maxOutput": 4000,
+      "expected": {
+        "8": {
+          "trialUsd": 0.102163,
+          "runUsd": 0.102163,
+          "capped": false
+        },
+        "10": {
+          "trialUsd": 0.129946,
+          "runUsd": 0.129946,
+          "capped": false
+        }
+      },
+      "pairs": 12,
+      "detectableGap": 0.5,
+      "discordantNeeded": 5
+    }
+  }
+}

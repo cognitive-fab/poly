@@ -1,0 +1,162 @@
+{
+  "v": 1,
+  "about": "The harness module proves its rules relative to facts the host supplies and verdicts that certified handlers give (examples/harness/harness.poly, header). Each is a named assumption with a status, as S463 states the assumption of liveness: discharged (a check the build runs closes it) or open (nothing the build runs closes it; the evidence column says what tests it). The poly certificate lists only the assumptions poly's own checks name (poly.assumptions), so these are listed here and by the harness certificate (E3.10), which hashes this file.",
+  "assumptions": [
+    {
+      "id": "stop-reason",
+      "assumption": "The stop reason in Metered(s) is the provider's, for the call whose answer is Stepped (S550).",
+      "actions": [
+        "Metered"
+      ],
+      "status": "open",
+      "evidence": "host test on recorded provider metadata (E3.4)"
+    },
+    {
+      "id": "token-buckets",
+      "assumption": "Level(to), Grew(by), Overflowed and Measured(gain) are the host's token counts. The window is read in sixths (Level, Overflowed, limit 5). The pay-gate's measure is one number, gain, 0 to 8: the ratio, in halves and rounded down, of the saving to the rewrite. The saving is the input not sent again over the requests still to come, estimated from the observed rate and capped by the requests that would fill the window; the rewrite is the context rewritten times the cache write/read price ratio of the main tier's price table, less one (S551, SoL-Pi 2.4). The machine decides on it: a gain above twice (compactions + 1).",
+      "actions": [
+        "Grew",
+        "Measured",
+        "Overflowed"
+      ],
+      "status": "open",
+      "evidence": "bucketing function tested at its boundaries (E3.4); the count itself is the provider's usage figure"
+    },
+    {
+      "id": "classifier-verdict",
+      "assumption": "tool.classify completes ok only for a call whose edit and follow-up may run as one, and failed otherwise (S559). The machine proves fusion follows the verdict, not that the verdict is right.",
+      "effects": [
+        "tool.classify"
+      ],
+      "status": "open",
+      "evidence": "table-driven tests of the classifier over the declared set of fusable commands (E3.3)"
+    },
+    {
+      "id": "scan-verdict-known",
+      "assumption": "tool.scan completes ok only for a log with none of the host's known secrets (in four encodings) and none of the seven credential shapes, and failed for any log that has one (S554).",
+      "effects": [
+        "tool.scan"
+      ],
+      "status": "discharged",
+      "by": "the AC18 canary over the real runtime store: test/e3/e3-loop.test.mjs, \"AC18, S554, gates 2 and 3: a token in a tool output reaches nothing the runtime, the store, the journal or the effect payloads hold\", with its seeded control (a scan that does not know the secret leaves it in the archive and the same scan finds it); and test/e3/e3-handlers.test.mjs for the shapes, the encodings, the benign corpus and the redaction (owner, 2026-10-11)"
+    },
+    {
+      "id": "scan-verdict-unrecognised",
+      "assumption": "A credential of no common shape that the vault does not know is not recognised by the scan, and so reaches the model, the archive and the journal. The canary cannot show that such a credential is caught.",
+      "status": "open",
+      "evidence": "none can exist: the canary knows only the tokens it was given. The limit is stated here and in the README"
+    },
+    {
+      "id": "verifier-verdict",
+      "assumption": "tool.verify completes ok only for a receipt whose source hash matches the archived log, whose every quote occurs in the log byte for byte, whose exit status matches the command's, and which is smaller than the log (HT3, S553).",
+      "effects": [
+        "tool.verify"
+      ],
+      "status": "open",
+      "evidence": "property tests and four seeded mutant verifiers, each caught (E3.3); under poly-runtime a permanent error from the handler completes as the effect's failed outcome (Refused) with no retry, the handler running once (E3.4 gate 1, test/e3/e3-runtime.test.mjs)"
+    },
+    {
+      "id": "stage-check-verdict",
+      "assumption": "tool.stage-check completes ok only when the task's check for that stage passes (HF2.7).",
+      "effects": [
+        "tool.stage-check"
+      ],
+      "status": "open",
+      "evidence": "the tasks' own stage checks, run on the scratch copies (E3.7)"
+    },
+    {
+      "id": "compaction-size",
+      "assumption": "A compaction that completes ok leaves the window at the summary's size, two buckets (S561). The machine sets the window to two buckets on Compacted; the host's real size is read at the next Grew.",
+      "effects": [
+        "tool.compact"
+      ],
+      "status": "open",
+      "evidence": "host test that a compacted transcript is smaller than the original (E3.4)"
+    },
+    {
+      "id": "dispatch-order",
+      "assumption": "The host dispatches Begin before any Start, and Go, StoreLog, Measured, Overflowed, CapReached, Close and Show after it has seen the facts each needs. A require rejects an action out of turn; a host that never dispatches one leaves the run stuck, which is a stuck run and not a broken rule. A failure that reaches a trial not yet begun is kept (the joint check of Turn and Trial found it lost). The host also tells each live observation Sent once per request, and reads nothing back (PS13.8a conditions 2 and 3); in E3.4 no observation is wired yet (E3.5).",
+      "actions": [
+        "Go",
+        "StoreLog",
+        "CapReached",
+        "Close",
+        "Show"
+      ],
+      "status": "open",
+      "evidence": "the loop's tests on recorded tasks (E3.4); liveness of the loop is not claimed"
+    },
+    {
+      "id": "recorded-world",
+      "assumption": "In E3.4 the tool outputs and the stage results come from the task's recording (tables recorded-tool and recorded-stage), and the provider answers from it. Nothing a real tool or a real model does is checked by a recorded run; E3.7 replaces act and stageCheck with real execution in a scratch copy, and the live run (E3.9) uses a real model.",
+      "effects": [
+        "tool.act",
+        "tool.fetch"
+      ],
+      "status": "open",
+      "evidence": "recorded runs only (E3.4); real execution in E3.7"
+    },
+    {
+      "id": "staging-rows",
+      "assumption": "The raw tool output is staged in the output table until it is scanned, and the staging row is cleared once the clean copy or the redaction is stored. The recording (recorded-tool) holds the world's own raw output and is the one place the canary scan does not look; a live run has no such table.",
+      "status": "open",
+      "evidence": "test/e3/e3-loop.test.mjs: the staging row reads cleared after the store step; the canary scan excludes only recorded-tool"
+    },
+    {
+      "id": "joint-configuration",
+      "assumption": "The rules hold for each of Turn, Context, Trial and Receipt alone. The machines coordinate by messages (Turn to Trial, Trial to Context, Context to Trial), and the three are not yet checked as one configuration (owner, 2026-10-11).",
+      "status": "open",
+      "evidence": "E3.4 gate item, attempted (decisions-e3.md). Trial with Context, transit 2: INCONCLUSIVE (PL5301 transit bound hit; 90,024 global states, 4.5M steps), and transit 3 ran the checker out of memory at 3.5 GB; Turn with Trial, transit 2 and 3: PL5301, and a STUCK that is the undriven Context of the probe; the first run of each found two real faults, both fixed (a Ref passed as none, a failure lost before Begin). The entry stays open: no pair has a CLEAN verdict at a bound that is not hit"
+    },
+    {
+      "id": "one-slot-projection",
+      "assumption": "The observation slot is checked as one slot of K (PS13.8a): the properties are per slot, the ledger sends every slot the same message, and nothing the ledger does depends on the number of slots.",
+      "status": "discharged",
+      "by": "PS13.8a conditions 1 to 3, read off the module (Ledger sends Sent to its one reference and reads nothing back), and the K = 1, 2, 3 evidence of decisions-e3.md"
+    },
+    {
+      "id": "live-run-isolation",
+      "assumption": "The live run (E3.9) executes every command a model causes in a disposable container with no network, no key and a read-only root, so that the three rules (scratch copies, offline, no key) hold against code the agent wrote, which npm or go may run. The driver (the poly runtime, the harness loop, the calls to the model API and the key) runs on the host and runs no model-written code; only the driver reaches the model API. The owner approved this form on 2026-10-12, because a container with no network at all is stricter than \"network to the model API only\".",
+      "status": "discharged",
+      "by": "The container poly-e3-runner:611a58b2975d (started with --network none, a read-only root, user 10001, all capabilities dropped, no host mount, no key, removed at the end of the plan), and the isolation check run inside it before every one of the 40 trials of the live run, all 40 passing: host/isolation-check.mjs, whose control connects while the public hosts, the package registries, the metadata address and the host's names do not, which finds no credential-looking variable and no mount of the Windows host (docs/e3/live-staged-2026-10-13.json: isolationChecksMade 40, stopped because the plan was complete; a failed check stops the plan). The barrier is the container runtime's, as for any container; an escape from the runtime is outside it."
+    },
+    {
+      "id": "done-signal",
+      "assumption": "The done of Go(net, done) is the host's reading of the agent's calls: true if and only if the turn's calls hold the explicit done tool (HF2.9, amendment A1). The machine proves what follows from it: a stage ends at a done, at its eighth turn or at the budget, its check runs once at that end, and no stage runs a ninth turn. It does not prove that the host read the calls right: a done missed makes the stage run on to the bound, and a done invented ends a stage early. Either changes the score and never a rule.",
+      "status": "open",
+      "evidence": "the live driver's tests (E3.9): the done tool is read from the calls by one function, tested on the shapes of calls a model writes (done alone, done after an edit, done in a malformed list, no done)"
+    },
+    {
+      "id": "trial-cap",
+      "assumption": "The cap of a trial is the host's, not the machines'. The module's \"cap usd 0.60 per run\" is per decision instance (PS18.4: budget:b:run:<instance>), and every Turn is its own instance, so it bounds one Turn, whose at most two agent calls cannot reach it. Only the month's cap of the scope (25 USD, poly's own) spans trials, and no budget scope can be keyed to a trial: a scope is the instance's module (PS8.7; packages/poly-runtime/src/runtime.ts, scope(instance) is the machine id without its last component), the same for every trial. Poly's own budget therefore bounds each Turn and the month, and the checker cannot prove a cap on a trial. Before each model call the host adds the call's reservation to what the trial has spent and refuses a call that would pass the trial's cap; the machines take the refusal as the end of the budget (the open stage is checked once, the trial ends with the reason Budget). The host's sum is the driver's own figure for each call, which the live test shows equals poly's charge for the same usage. If the host's sum were wrong the trial would stop early or late; the month's cap would still hold.",
+      "status": "open",
+      "evidence": "test/e3/e3-live.test.mjs: the finding (16 calls of 0.12 USD all admitted under a 0.60 USD per-run cap), the guard (the fifth call refused, the stage checked once, the reason Budget), and the equality of poly's charge and the driver's; to be settled by the owner (a module change that binds the cap to the trial, or this assumption)"
+    }
+  ],
+  "statements": [
+    {
+      "id": "rules-proved-per-machine",
+      "text": "The rules of HF3 are proved for each machine alone (Turn, Context, Trial, Receipt, and the observation slot as one slot, PS13.8a). They are not proved for the machines together: the joint configuration is open (see joint-configuration). In E3.4 the pairs Trial with Context and Turn with Trial were checked at transit 2 and gave an inconclusive verdict (the transit bound), and transit 3 for Trial with Context ran out of memory at 3.5 GB, so no pair has a verdict at a bound that is not hit; no more attempts above pairs at transit 2 are made (owner, 2026-10-11)."
+    },
+    {
+      "id": "pairs-were-worth-checking",
+      "text": "The first check of each pair found two faults in a machine that checked CLEAN alone: a reference passed as none made a machine send to nothing, and a failure that reached a trial before it began was lost. Both are fixed. They are recorded as evidence that the pairs were worth checking, and as the reason the entry joint-configuration is not treated as a formality."
+    },
+    {
+      "id": "audience-unused",
+      "text": "The audience classes (clean < secret) are declared in harness.poly and unused. The runtime requires an audience declaration before a decision may read Content, and a body the host stores with putContent always carries the bottom class (S566, S567). HF3.5 is held by the scan, the redaction and the step property (never emit storeClean while secret), not by the flow rule."
+    },
+    {
+      "id": "lint-not-proof",
+      "text": "Two properties are held by a source lint and not a proof: every model decision names its budget (S562) and the effect startCompaction and the summary decision are emitted in the same branch of the same handler (S564)."
+    },
+    {
+      "id": "recordings-evidence",
+      "text": "The measured results of the recorded runs (the trigger rates, the token and cost figures) are recordings evidence, and wherever they appear (the README, this certificate, the E3 report) they carry three labels. (1) They come from a synthetic corpus of 12 trajectories, with tokens estimated at four characters each. (2) A run that \"reached the end of the plan\" did not \"solve the task\": the model, the tools and the stage checks are recorded. (3) The figures of 20% fewer input tokens and 36% less cost (all four mechanisms against none, over the corpus) hold for recordings only, and the saving of Action Fusion cannot show on recordings and is measured at the live run. The expectations for each mechanism are the HF2.2 to HF2.5 definitions of the proposal, checked against the SoL-Pi paper (docs/research) on 2026-10-11 with the differences listed in decisions-e3.md."
+    },
+    {
+      "id": "paper-differences",
+      "text": "The pay-gate has the structure of the SoL-Pi paper (the requests to come from the observed rate, the cache rewrite from the write/read price ratio, a larger margin for each later compaction). Where it differs, by this harness's choice: the machine takes one measured number, the saving to rewrite ratio in halves, where the paper compares two (two numbers of 0..12 made the check of Context take six minutes and 2.5 GB, and of 0..6 four minutes; one of 0..8 takes seconds, see decisions-e3.md); the margin is multiplicative (a saving above the rewrite times the number of compactions so far plus one) where the paper accounts the rewrite costs not yet recovered; the summary is estimated at 250 tokens; the cache ratio is the placeholder price table's (12.5), to be read from the vendor's page at E3.9; the Reducer reads the logs of the declared runners, where the paper's own set of commands is not in the text read; the handle excerpt is 512 bytes of complete lines each side where the paper says about 1 KB. At the table's ratio of 12.5 the gate chooses no compaction on this corpus (15 opportunities, a corpus of two to four plan steps with one request each), and that shows nothing about long tasks; at a ratio of 2 it chooses one, on t03."
+    }
+  ]
+}
