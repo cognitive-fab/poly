@@ -14,12 +14,12 @@ export const HANDLER_FILES = ['verify', 'scan', 'classify', 'tools', 'archive', 
  * Admits the harness module and its policy as a project whose handler modules are the example's own files. `edit` may
  * rewrite the program or the policy text (a seeded variant) before admission.
  */
-export async function admittedHarness(name, { edit = (s) => s, editPolicy = (s) => s, handlers = HANDLER_FILES } = {}) {
+export async function admittedHarness(name, { edit = (s) => s, editPolicy = (s) => s, handlers = HANDLER_FILES, pricesDir = join(EX, 'prices') } = {}) {
   const key = makeKey(name);
   const dir = project(name, ['examples/harness/harness.poly', 'examples/harness/harness.policy.poly'], key, 'test-e3');
   writeFileSync(join(dir, 'src', 'harness.poly'), edit(readFileSync(join(EX, 'harness.poly'), 'utf8')));
   writeFileSync(join(dir, 'src', 'harness.policy.poly'), editPolicy(readFileSync(join(EX, 'harness.policy.poly'), 'utf8')));
-  cpSync(join(EX, 'prices'), join(dir, 'src', 'prices'), { recursive: true });
+  cpSync(pricesDir, join(dir, 'src', 'prices'), { recursive: true });
   cpSync(join(EX, 'host', 'handlers'), join(dir, 'src', 'handlers'), { recursive: true });
   const manifest = JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8'));
   manifest.handlers = handlers;
