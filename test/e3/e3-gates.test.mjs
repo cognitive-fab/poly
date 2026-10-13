@@ -34,6 +34,13 @@ const BRANCHES = [
   ['Receipt.Show', 'the original is shown instead', '  never only-verified-reach-the-agent:', 'invariant original-unreached: !(st is Original)'],
   ['Trial.Close', 'a cap ends the trial', '  never cap-saves-first:', 'invariant cap-end-unreached: !(mode is Stopped && capped)'],
   ['Trial.Close', 'another reason ends the trial', '  never cap-saves-first:', 'invariant other-end-unreached: !(mode is Stopped && !capped)'],
+  ['Trial.Stored', 'the agent said done', '  never cap-saves-first:', 'invariant done-unreached: !(ended == Done)'],
+  ['Trial.Stored', 'the eighth turn ends the stage', '  never cap-saves-first:', 'invariant bound-unreached: !(ended == Bound)'],
+  ['Trial.Stored', 'a turn that ends nothing', '  never cap-saves-first:', 'invariant open-turn-unreached: !(mode is Running && turns > 0)'],
+  ['Trial.BudgetStop', 'the budget ends an open stage', '  never cap-saves-first:', 'invariant budget-stage-unreached: !(ended == Budget)'],
+  ['Trial.BudgetStop', 'the budget ends a trial with no turn done', '  never cap-saves-first:', 'invariant budget-end-unreached: !(mode is Failing && why == Budget && ended == Open)'],
+  ['Trial.NextStep', 'the stage the budget ended is the last of the trial', '  never cap-saves-first:', 'invariant budget-next-unreached: !(mode is Failing && why == Budget && ended == Budget)'],
+  ['Trial.NextStep', 'the next stage starts', '  never cap-saves-first:', 'invariant next-stage-unreached: step == 0'],
 ];
 
 function withInvariant(anchor, line) {

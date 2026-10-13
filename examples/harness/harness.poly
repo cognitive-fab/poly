@@ -38,6 +38,9 @@ enum TrialMode { Idle, Running, Checking, Capped, Failing, Done, Stopped }
 
 enum Why { None, PlanDone, Budget, Overflow, Cap, Fault }
 
+// What ended a stage (HF2.9, amendment A1): the agent said done, the stage ran its N turns, or the budget ran out.
+enum EndedBy { Open, Done, Bound, Budget }
+
 enum CtxMode { Working, Compacting, Closed }
 
 enum ObsState { Empty, Pending, Full, Handled, Released }
@@ -57,6 +60,7 @@ machine Turn {
     reprompts : 0..1     = 0
     scanned   : bool     = false
     secret    : bool     = false
+    done      : bool     = false
     trial     : Ref<Trial>  = none
     ledger    : Ref<Ledger> = none
   }
@@ -70,7 +74,7 @@ machine Turn {
   action Fusable()
   action Separate()
   action Reprompt(note: Content)
-  action Go(net: bool)
+  action Go(net: bool, done: bool)
   action Ran()
   action Clean()
   action Flagged()
@@ -130,12 +134,14 @@ machine Turn {
 
   // The step's tool call runs, unless the model was cut off and has not been asked to continue yet: then the step waits
   // for the reprompt (HF3.7). The tool is never run on a truncated call.
-  on Go(net) {
+  // done is the host's reading of the agent's calls: the explicit done tool (HF2.9). It rides with the turn to the Trial.
+  on Go(net, done) {
     require mode is Thinking && stepped && metered && !(plan is Unplanned) else reject "not-ready"
     if stop is Length && reprompts < 1 {  // @HF3.7
       mode' = Continuing
     } else {
       mode' = Acting
+      done' = done
       send ledger <- Tick()
       if net {
         emit fetch()
@@ -181,7 +187,7 @@ machine Turn {
   on Logged {
     require mode is Checking else reject "not-checking"
     mode' = Done
-    send trial <- Stored()
+    send trial <- Stored(done: done)
   }
 
   on Fault {
@@ -444,13 +450,15 @@ machine Trial {
     capped   : bool      = false
     saved    : bool      = false
     why      : Why       = None
+    turns    : 0..8      = 0
+    ended    : EndedBy   = Open
     context  : Ref<Context> = none
   }
 
   terminal mode in { Done, Stopped }
 
   action Begin(cx: Ref<Context>, n: 2..4)
-  action Stored()
+  action Stored(done: bool)
   action StagePassed()
   action StageFailed()
   action NextStep()
@@ -469,11 +477,31 @@ machine Trial {
     last' = n - 1
   }
 
-  on Stored {
+  // HF2.9, amendment A1: a stage is up to N = 8 turns. A turn that is not the agent's done and not the eighth leaves the stage
+  // open, and its tool results reach the next turn through the context. The stage's check runs once, in the step that ends it,
+  // with the reason recorded (HF3.12); no stage runs a ninth turn (HF3.13).
+  on Stored(done) {
     require mode is Running else reject "not-running"
-    mode' = Checking
-    emit stageCheck(stage: step)
+    if done {
+      turns' = turns + 1
+      ended' = Done
+      mode' = Checking
+      emit stageCheck(stage: step)
+    } else {
+      if turns == 7 {  // @HF3.13
+        turns' = 8
+        ended' = Bound
+        mode' = Checking
+        emit stageCheck(stage: step)
+      } else {
+        turns' = turns + 1  // @HF3.12
+      }
+    }
   }
+
+  step property check-only-at-the-end: (pre.mode == Running && post.mode == Checking) implies post.ended != Open
+  invariant a-check-has-a-reason: mode == Checking implies ended != Open
+  invariant the-bound-ends-the-stage: turns == 8 implies !(mode == Running)
 
   // HF2.7: a stage's score comes from the check journaled in its state; the failing stage is the first failed one.
   on StagePassed {
@@ -489,16 +517,24 @@ machine Trial {
     send context <- StepFinished()
   }
 
+  // A stage the budget ended has had its check; the trial then ends with the reason Budget and the later stages are not reached.
   on NextStep {
     require mode is Checking else reject "not-checking"
-    if step == last {
-      mode' = Done
-      why' = PlanDone
-      emit finishTrial()
+    if ended == Budget {
+      mode' = Failing
+      why' = Budget
     } else {
-      step' = step + 1
-      mode' = Running
-      send context <- StepReset()
+      if step == last {
+        mode' = Done
+        why' = PlanDone
+        emit finishTrial()
+      } else {
+        step' = step + 1
+        turns' = 0
+        ended' = Open
+        mode' = Running
+        send context <- StepReset()
+      }
     }
   }
 
@@ -519,10 +555,18 @@ machine Trial {
 
   // A failure that reaches a trial not yet begun is kept (found by the joint check of Turn and Trial, E3.4): taken as a
   // lost message it would leave the trial waiting for a turn that is already over.
+  // The budget ends the stage it finds open, with at least one turn done: the stage's check runs once and the trial then ends
+  // (NextStep). With no turn done in the stage, or before the trial begins, the trial ends at once.
   on BudgetStop {
     require mode is Running || mode is Idle else reject "not-running"
-    mode' = Failing
-    why' = Budget
+    if mode == Running && turns > 0 {
+      ended' = Budget
+      mode' = Checking
+      emit stageCheck(stage: step)
+    } else {
+      mode' = Failing
+      why' = Budget
+    }
   }
 
   on Faulted {

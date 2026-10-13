@@ -88,6 +88,8 @@ const VARIANTS = [
   ['HF3.7', 'a step run on an output cutoff', 'if stop is Tool && reprompts < 1 {', 'PL3002', true, 'program'],
   ['HF3.8', 'a trial ended on overflow with no compaction tried', 'if attempts == 1 {', 'PL3002', true, 'program'],
   ['HF3.9', 'a trial ended at a cap without saving the work', 'emit stopCap()', 'PL3002', true, 'program'],
+  ['HF3.12', 'a stage check in the middle of a stage', "turns' = turns + 1  mode' = Checking  emit stageCheck(stage: step)", ['PL3001', 'PL3002'], true, 'program'],
+  ['HF3.13', 'a ninth turn in a stage', 'if turns == 8 {', ['PL3001', 'PL3102'], true, 'program'],
   ['HF3.10', 'an offline run that allows a network effect', 'when proposal.kind == "effect" && effect.kind == "tool.stage-check"', ['PL6503', 'PL7001'], true, 'policy'],
 ];
 

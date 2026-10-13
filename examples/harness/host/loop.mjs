@@ -88,7 +88,7 @@ function queueProvider(name, texts, materialOf, preamble, calls) {
 }
 
 /** Whether a step's calls are an edit then any command: the opportunity of Action Fusion, read without the classifier. */
-function fusionOpportunity(calls) {
+export function fusionOpportunity(calls) {
   try {
     const c = JSON.parse(calls);
     return Array.isArray(c) && c.length === 2 && (c[0]?.tool === 'edit' || c[0]?.tool === 'write') && c[1]?.tool === 'bash';
@@ -98,7 +98,7 @@ function fusionOpportunity(calls) {
 }
 
 /** What the agent is shown in place of a verified log: the receipt's status and exact quotes, and the log's size. */
-function receiptView(receiptJson, logBytes) {
+export function receiptView(receiptJson, logBytes) {
   const r = JSON.parse(receiptJson);
   return `[verified receipt of a log of ${logBytes} bytes, status ${r.status}]\n${r.quotes.join('\n')}`;
 }
@@ -224,13 +224,13 @@ export async function runTask({ rt, host, recording, models, mechanisms = ALL_ON
       await pump(async () => { const s = await state(turn); return s.stepped && !(s.plan === 'Unplanned'); }, `${turn} planned`);
       messages.push({ role: 'assistant', text: e.calls });
       if (e.stop === 'Length' && m + 1 < step.model.length) {
-        await rt.dispatch(turn, 'Go', { net: false });
+        await rt.dispatch(turn, 'Go', { net: false, done: false });
         const again = await compose();
         await rt.dispatch(turn, 'Reprompt', { note: await rt.putContent(again.text) });
       }
     }
     if (fusionOpportunity(step.model[step.model.length - 1].calls)) metrics.fusion.opportunities += 1;
-    await rt.dispatch(turn, 'Go', { net: step.tool.net === true });
+    await rt.dispatch(turn, 'Go', { net: step.tool.net === true, done: true });
     if ((await state(turn)).plan === 'Fusable') metrics.fusion.fired += 1;
     await pump(async () => (await state(turn)).mode === 'Observing' && (await state(turn)).scanned, `${turn} scanned`);
     await rt.dispatch(turn, 'StoreLog', {});

@@ -94,3 +94,51 @@ test('HF2.8, Q-E3-6: two runs are compared stage by stage, and a regression is a
   // identical runs: nothing moved
   assert.deepEqual(compareStages(before, before).regressions, []);
 });
+
+// ---------------------------------------------------------------- HAC9 (amendment A1): turns per stage and what ended it
+
+/** A Trial whose stages take `turns[k]` turns and are ended by `by[k]`: Stored rows for each turn, then the check. */
+function turnRows(plan, turns, by, outcomes) {
+  const rows = [];
+  let seq = 0;
+  let st = { mode: 'Idle', step: 0, last: 1, failedAt: 4, capped: false, saved: false, why: 'None', turns: 0, ended: 'Open' };
+  const push = (action, post) => {
+    rows.push({ seq: seq++, action, step_kind: 'accepted', reject_reason: null, pre: { ...st }, post: { ...st, ...post } });
+    st = { ...st, ...post };
+  };
+  push('Begin', { mode: 'Running', last: plan - 1 });
+  for (let k = 0; k < plan; k++) {
+    if (turns[k] === undefined) break;
+    for (let i = 1; i < turns[k]; i++) push('Stored', { turns: i });
+    push('Stored', { turns: turns[k], ended: by[k], mode: 'Checking' });
+    push(outcomes[k] === 'pass' ? 'StagePassed' : 'StageFailed', {});
+    if (k < plan - 1) push('NextStep', { mode: 'Running', step: k + 1, turns: 0, ended: 'Open' });
+  }
+  return rows;
+}
+
+test('HAC9: the scorer reports, for each stage, the turns it took and what ended it, read from the row of the check', () => {
+  const r = scoreRun(turnRows(3, [3, 8, 1], ['Done', 'Bound', 'Done'], ['pass', 'fail', 'pass']));
+  assert.deepEqual(r.stages.map((s) => [s.turns, s.endedBy, s.state]), [[3, 'Done', 'passed'], [8, 'Bound', 'failed'], [1, 'Done', 'passed']]);
+  assert.equal(r.failingStage, 1);
+  // a stage that ran N turns with no done is reported as ended by the bound
+  assert.equal(r.stages[1].endedBy, 'Bound');
+});
+
+test('HAC9: a stage the budget ended is reported as ended by the budget, and the stages after it are not reached', () => {
+  const r = scoreRun(turnRows(3, [2, 4], ['Done', 'Budget'], ['pass', 'pass']));
+  assert.deepEqual(r.stages.map((s) => [s.state, s.turns, s.endedBy]), [['passed', 2, 'Done'], ['passed', 4, 'Budget'], ['not-reached', null, null]]);
+});
+
+test('HAC9: the turns of a stage do not make its check count twice, and a stage checked twice is still an error', () => {
+  const rows = turnRows(2, [5, 2], ['Done', 'Done'], ['pass', 'pass']);
+  assert.equal(scoreRun(rows).passed, 2);
+  const again = [...rows, { ...rows.find((x) => x.action === 'StagePassed'), seq: 999 }];
+  assert.throws(() => scoreRun(again), /checked twice/);
+});
+
+test('rows from before amendment A1 (no turns, no ended in the state) score as before, with null turns', () => {
+  const r = scoreRun(trialRows(2, ['pass', 'pass']));
+  assert.deepEqual(r.stages.map((s) => [s.turns, s.endedBy]), [[null, null], [null, null]]);
+  assert.deepEqual([r.passed, r.total], [2, 2]);
+});

@@ -10,6 +10,10 @@
 // the first stage whose check failed (Q-E3-6, owner 2026-10-11); the stages after it are still scored, so a regression is
 // reported per stage when two runs are compared.
 //
+// A stage is up to N turns (HF2.9, amendment A1, HAC9). The check's row holds the Trial's state as the stage ended, so the scorer
+// also reports, from the same row and no other source, how many turns the stage took (`turns`) and what ended it (`endedBy`: Done,
+// Bound or Budget). Both are null for a stage never reached.
+//
 // Input: the journal rows of the Trial instance, oldest first, as `JournalReader.journal(instance)` gives them:
 //   { seq, action, step_kind, reject_reason, pre, post, data }, with pre and post the Trial's state.
 
@@ -26,13 +30,13 @@ export function scoreRun(rows) {
   const begin = accepted.find((r) => r.action === 'Begin');
   if (!begin) throw new Error('the journal holds no Begin of the trial, so the plan\'s length is not known');
   const total = begin.post.last + 1;
-  const stages = Array.from({ length: total }, (_, stage) => ({ stage, state: 'not-reached', score: 0, seq: null }));
+  const stages = Array.from({ length: total }, (_, stage) => ({ stage, state: 'not-reached', score: 0, seq: null, turns: null, endedBy: null }));
   for (const r of accepted) {
     if (!CHECKS.has(r.action)) continue;
     const s = stages[r.pre.step];
     if (!s) throw new Error(`a check at stage ${r.pre.step} of a plan of ${total}`);
     if (s.state !== 'not-reached') throw new Error(`stage ${r.pre.step} was checked twice (seq ${s.seq} and ${r.seq})`);
-    Object.assign(s, { state: r.action === 'StagePassed' ? 'passed' : 'failed', score: r.action === 'StagePassed' ? 1 : 0, seq: r.seq });
+    Object.assign(s, { state: r.action === 'StagePassed' ? 'passed' : 'failed', score: r.action === 'StagePassed' ? 1 : 0, seq: r.seq, turns: r.pre.turns ?? null, endedBy: r.pre.ended ?? null });
   }
   const failing = stages.find((s) => s.state === 'failed');
   const last = accepted[accepted.length - 1];
