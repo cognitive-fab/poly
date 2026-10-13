@@ -83,7 +83,7 @@ export async function compact(payload, caps, ctx) {
   const row = await caps.store.read('transcript', ctx.instanceId);
   const released = [];
   const r = applyCompaction({ transcript: row.messages, summary, keepLast: row.keepLast ?? 2, archive: { release: (id) => released.push(id) } });
-  await caps.store.write('transcript', ctx.instanceId, { messages: r.transcript, keepLast: row.keepLast ?? 2, before: r.before, after: r.after, released });
+  await caps.store.write('transcript', ctx.instanceId, { messages: r.transcript, keepLast: row.keepLast ?? 2, before: r.before, after: r.after, released, n: (row.n ?? 0) + 1 });
   return { ok: true };
 }
 

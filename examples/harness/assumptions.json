@@ -119,6 +119,18 @@
       "assumption": "The live run (E3.9) executes in an isolated, disposable environment whose only network route is to the model API. On the owner's Windows host the three rules (scratch copies, offline, no key) are held by an environment, a command allowlist and a path check, with no sandbox; a model can edit a test or a script that npm or go then runs, so on that host \"offline\" is a setting, not a barrier. The isolation of the live run (a WSL distro made for the run, Windows Sandbox or a container, destroyed afterwards, holding the repositories' copies and no credential but the run's key for the model API) is what makes the rules hold against code the agent wrote.",
       "status": "open",
       "evidence": "E3.9 gate item: the option and its setup are proposed at E3.9 and the run is refused until the isolated environment is named in the record, with a check from inside it that only the model API is reachable"
+    },
+    {
+      "id": "done-signal",
+      "assumption": "The done of Go(net, done) is the host's reading of the agent's calls: true if and only if the turn's calls hold the explicit done tool (HF2.9, amendment A1). The machine proves what follows from it: a stage ends at a done, at its eighth turn or at the budget, its check runs once at that end, and no stage runs a ninth turn. It does not prove that the host read the calls right: a done missed makes the stage run on to the bound, and a done invented ends a stage early. Either changes the score and never a rule.",
+      "status": "open",
+      "evidence": "the live driver's tests (E3.9): the done tool is read from the calls by one function, tested on the shapes of calls a model writes (done alone, done after an edit, done in a malformed list, no done)"
+    },
+    {
+      "id": "trial-cap",
+      "assumption": "The cap of a trial is the host's, not the machines'. The module's \"cap usd 0.60 per run\" is per decision instance (PS18.4: budget:b:run:<instance>), and every Turn is its own instance, so it bounds one Turn, whose at most two agent calls cannot reach it. Only the month's cap of the scope (25 USD, poly's own) spans trials. Before each model call the host adds the call's reservation to what the trial has spent and refuses a call that would pass the trial's cap; the machines take the refusal as the end of the budget (the open stage is checked once, the trial ends with the reason Budget). The host's sum is the driver's own figure for each call, which the live test shows equals poly's charge for the same usage. If the host's sum were wrong the trial would stop early or late; the month's cap would still hold.",
+      "status": "open",
+      "evidence": "test/e3/e3-live.test.mjs: the finding (16 calls of 0.12 USD all admitted under a 0.60 USD per-run cap), the guard (the fifth call refused, the stage checked once, the reason Budget), and the equality of poly's charge and the driver's; to be settled by the owner (a module change that binds the cap to the trial, or this assumption)"
     }
   ],
   "statements": [

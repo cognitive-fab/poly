@@ -101,6 +101,8 @@ export async function runCall(copy, call, { timeoutMs = 120_000 } = {}) {
         }
         return { text: `${hits.join('\n')}\n`, exitStatus: hits.length ? 0 : 1 };
       }
+      case 'done':
+        return { text: ['the stage is marked done', ''].join('\n'), exitStatus: 0 };
       case 'bash': {
         const v = bashArgv(copy, call);
         if (v.refused) return { text: `refused: ${v.refused}\n`, exitStatus: 1 };

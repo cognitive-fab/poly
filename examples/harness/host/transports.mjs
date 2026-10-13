@@ -11,14 +11,15 @@ import { runCalls } from './world.mjs';
 /**
  * @param {{ known?: string[] }} options the secrets the vault knows, which the scan looks for
  */
-export function makeHost({ known = [] } = {}) {
+export function makeHost({ known = [], exec: execOverride = null } = {}) {
   const store = new MemoryStore();
   let mechanisms = null;
   let world = null;
   // The exec transport (E3.7, PT "exec.run"): the runtime lets a handler run only the commands its effect declares, here
   // harness-tool (act) and harness-check (stageCheck). Both are names, not programs. What runs is decided here: the calls
   // go to world.mjs and the check to tasks.mjs, in the one scratch copy the host set, which no payload or handler names.
-  const exec = async (command, args) => {
+  // execOverride is the live run's: the same two commands, served by the no-network container (host/container-exec.mjs)
+  const exec = execOverride ?? (async (command, args) => {
     if (!world) throw Object.assign(new Error('no task copy was set by the host, so nothing can run'), { permanent: true });
     if (command === 'harness-tool') return runCalls(world.copy, String(args[0]), { timeoutMs: world.timeoutMs });
     if (command === 'harness-check') {
@@ -28,7 +29,7 @@ export function makeHost({ known = [] } = {}) {
       return { passed: r.passed, text: `${r.stdout}${r.stderr}`, exitStatus: r.status ?? 1 };
     }
     throw Object.assign(new Error(`${command} is not a command of the host`), { permanent: true });
-  };
+  });
   return {
     store,
     transports: {

@@ -123,3 +123,15 @@ test('the module carries the ruled limits: 50,000 input and 4,000 output on the 
   assert.equal(LIVE_WINDOW_TOKENS, 48000);
   assert.ok((LIVE_WINDOW_TOKENS * 5) / 6 < 50000);
 });
+
+test('FINDING: one Turn\'s agent calls cannot reach the per-run cap, so it does not cap a trial (PS18.4: per decision instance, and a Turn has at most two agent calls)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { ROOT } = await import('../helpers.mjs');
+  const live = JSON.parse(readFileSync(join(ROOT, 'examples', 'harness', 'prices-live', 'main.json'), 'utf8'));
+  const oneCall = reservation(live, 50000, 4000);
+  assert.equal(oneCall, 280000);
+  assert.ok(2 * oneCall < 600000, 'a cut-off answer and its reprompt, both at their reservation, stay under the 0.60 USD cap');
+  const poly = readFileSync(join(ROOT, 'examples', 'harness', 'harness.poly'), 'utf8');
+  assert.equal((poly.match(/decide agent\(/g) ?? []).length, 2, 'the agent is decided in the Turn, twice at most per Turn (the answer and the reprompt)');
+});

@@ -1,10 +1,11 @@
 // plan-e3.md E3.9 preparation, PS18.3, HF3.6: what a live run can cost, from the vendor's prices, and what each way of fitting it
 // under the month's cap costs in what the paired test can detect. Nothing here calls a model or reads a clock.
 //
-// The worst case is not an estimate. A run's budget gate admits a call only when what the run has spent plus that call's
-// reservation stays inside the run's cap, and a call within its limits costs no more than its reservation (PS18.3, K15), so
-// a run spends at most its cap. N runs cost at most N times the cap, and the tool refuses a plan whose worst case is over the
-// month's cap. The reservation is also what limits a run in practice: a run stops when spent + reservation would pass the cap,
+// The worst case is a guarantee, but whose depends on who counts. A trial spends at most its cap if every call is admitted only when
+// what the trial has spent plus that call's reservation stays inside the cap, and a call within its limits costs no more than its
+// reservation (PS18.3, K15). Poly's per-run cap is per decision instance, that is per Turn (PS18.4), so it does not do this for a
+// trial; the host does, in host/live.mjs (assumption trial-cap). N trials then cost at most N times the cap, and the month's cap of the
+// scope, which is poly's, holds whatever the host does. The tool refuses a plan whose worst case is over the month's cap. The reservation is also what limits a run in practice: a run stops when spent + reservation would pass the cap,
 // so the spendable part of a cap is the cap less the largest reservation.
 //
 // The expected cost is an estimate from stated assumptions about a trial (the preamble, the tokens a step adds, the steps),

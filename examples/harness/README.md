@@ -73,6 +73,8 @@ Limits, each also in the certificate:
 - **The audience classes are declared and unused** (S566, S567); HF3.5 is held by the scan, the redaction and a step property.
 - **No sandbox on the owner's Windows host.** The network rule for a task's commands rests on an environment that points the proxies at a closed port, a list of declared runners, a path check and the repositories' own tests. A program that opened a socket on purpose would not be stopped. The live run therefore runs model-caused commands only in the isolated environment (assumption `live-run-isolation`, open until the environment is named and checked from inside).
 - **Stage scores are binary:** one check per stage.
+- **A stage is up to eight turns** (amendment A1, HF2.9): the agent works in turns, and the stage is checked once, at its `done`, at the eighth turn or at the end of the budget. The machine proves the check is once and at the end; that the agent's `done` was read right from its calls is the open assumption `done-signal`.
+- **The cap of a trial is the host's.** The module's per-run cap is per decision instance, that is per Turn, so it does not bound a trial (PS18.4); the month's cap of the scope, which is poly's own, spans trials. The host refuses a model call that would take a trial past its cap, and the machines take the refusal as the end of the budget (open assumption `trial-cap`, tested). A module change that binds the cap to the trial is the alternative.
 
 ## 7. Running it
 
