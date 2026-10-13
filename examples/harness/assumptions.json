@@ -116,9 +116,9 @@
     },
     {
       "id": "live-run-isolation",
-      "assumption": "The live run (E3.9) executes in an isolated, disposable environment whose only network route is to the model API. On the owner's Windows host the three rules (scratch copies, offline, no key) are held by an environment, a command allowlist and a path check, with no sandbox; a model can edit a test or a script that npm or go then runs, so on that host \"offline\" is a setting, not a barrier. The isolation of the live run (a WSL distro made for the run, Windows Sandbox or a container, destroyed afterwards, holding the repositories' copies and no credential but the run's key for the model API) is what makes the rules hold against code the agent wrote.",
-      "status": "open",
-      "evidence": "E3.9 gate item: the option and its setup are proposed at E3.9 and the run is refused until the isolated environment is named in the record, with a check from inside it that only the model API is reachable"
+      "assumption": "The live run (E3.9) executes every command a model causes in a disposable container with no network, no key and a read-only root, so that the three rules (scratch copies, offline, no key) hold against code the agent wrote, which npm or go may run. The driver (the poly runtime, the harness loop, the calls to the model API and the key) runs on the host and runs no model-written code; only the driver reaches the model API. The owner approved this form on 2026-10-12, because a container with no network at all is stricter than \"network to the model API only\".",
+      "status": "discharged",
+      "by": "The container poly-e3-runner:611a58b2975d (started with --network none, a read-only root, user 10001, all capabilities dropped, no host mount, no key, removed at the end of the plan), and the isolation check run inside it before every one of the 40 trials of the live run, all 40 passing: host/isolation-check.mjs, whose control connects while the public hosts, the package registries, the metadata address and the host's names do not, which finds no credential-looking variable and no mount of the Windows host (docs/e3/live-staged-2026-10-13.json: isolationChecksMade 40, stopped because the plan was complete; a failed check stops the plan). The barrier is the container runtime's, as for any container; an escape from the runtime is outside it."
     },
     {
       "id": "done-signal",

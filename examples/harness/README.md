@@ -1,6 +1,6 @@
 # examples/harness: a checked agent harness
 
-> **Status (2026-10-13):** the live run (E3.9) is in and reported in `docs/e3/live-run-report.md`; section 5 summarises it. Figures from the recorded runs are recordings evidence and carry the three labels of section 4; figures from the live run carry the labels of section 5. The owner reviews this file before it is final.
+> **Status (2026-10-13):** the live run (E3.9) is in and reported in `docs/e3/live-run-report.md`; section 5 summarises it. Figures from the recorded runs are recordings evidence and carry the three labels of section 4; figures from the live run carry the labels of section 5.
 
 An agent harness is the loop around a model: it sends the context, runs the tools, handles their output and decides when to compact. This example writes the control part of one in poly, so that the rules which make the four mechanisms of SoL-Pi (NVIDIA and MIT, arXiv 2609.20519) safe to switch on are properties the checker proves, not conventions. The proposal is `docs/proposals/example-harness.md` (ids `HF`, `HT`, `HAC`); the plan and every ruling are `docs/plan-e3.md` and `docs/decisions-e3.md`.
 
@@ -44,7 +44,7 @@ On the corpus, with the placeholder price table (a write over read ratio of 12.5
 
 ## 5. The live run (E3.9)
 
-One bounded live run, reported as a result and not as a test, on 2026-10-13: 40 trials of the 12 tasks (each under the base and the full harness, then eight tasks again), with Opus 5.5 as the agent and Haiku 4.5 as the cheaper tier, every command in a disposable container with no network, the isolation check made before each trial, each trial capped at 0.60 USD by the host and the month at 25 USD by poly's own budget. The preparation is in `docs/e3/e3-9-plan.md` and the full report in `docs/e3/live-run-report.md` (data: `docs/e3/live-staged-2026-10-13.json`). **Labels on every figure of the run:** one model; 12 small tasks from the owner's repositories, 31 stages, binary stage scores; "reached the end of the plan" is not "solved the task"; the base harness is the full one with the four mechanisms off; the comparison is of two harnesses, not of models.
+One bounded live run, reported as a result and not as a test, on 2026-10-13: 40 trials of the 12 tasks (each under the base and the full harness, then eight tasks again), with Opus 5.5 as the agent and Haiku 4.5 as the cheaper tier, every command in a disposable container with no network, the isolation check made before each trial, each trial capped at 0.60 USD by the host and the month at 25 USD by poly's own budget. The preparation is in `docs/e3/e3-9-plan.md` and the full report in `docs/e3/live-run-report.md` (data: `docs/e3/live-staged-2026-10-13.json`). **Labels on every figure of the run:** one model; 12 small tasks from the owner's repositories, 31 stages, binary stage scores; "reached the end of the plan" is not "solved the task"; the base harness is the full one with the four mechanisms off; the comparison is of two harnesses, not of models. A live run now uses the real clock, so that poly's month budget is keyed to the real month (S571, `d7d4b64a`).
 
 ### Expected before the results come in (written 2026-10-13, after a pilot and before the plan)
 
@@ -55,6 +55,7 @@ On tasks this size the four mechanisms have little to save. The pilot (task 1, o
 - **Completion:** all 40 trials reached the end of their plans (20 of 20 under each harness, all 108 stages ended by `done`). There were 0 discordant pairs of 12; the verdict is INCONCLUSIVE, not "no difference". Completion is at its ceiling, so it could not tell the harnesses apart.
 - **The noise floor:** 0 of the 8 rerun tasks differed in completion (a floor of zero because everything completes); reruns of one task under one harness differ by 1.6 steps on average (at most 5) and by 20% in cost on average (at most 58%).
 - **Cost:** the base harness cost 2.2214 USD and the full one 2.0924 USD (5.8% less, 235 against 219 agent calls). That is inside the 20% rerun spread, so the run does not show the full harness to be cheaper. By term, the cache-read tokens fell by 36% in the full harness (the largest relative change), output and cache write by 1.5% and 3.5%, and the cheaper tier's seven readings cost 0.0275 USD. Poly's own charge equals the driver's to the micro-USD in all 40 trials, and poly's month budget accumulated to the same 4.3138 USD across the plan.
+  The 36% cost saving measured on recordings (section 4) did not carry over to the live run, where the total fell 5.8%, inside the noise.
 - **The mechanisms:** Action Fusion fired on 36 of 38 opportunities in the full harness (the fused action was called in 54 of 219 turns); ObservationPack archived all 9 outputs over 10 KiB and 6 reached their handle; the Reducer read all 7 long logs of a declared runner and all 7 receipts were verified, none rejected; **Online Context Compact never fired**, because no window passed a third of its limit. The commands the agent ran were `go test` and `npm test`, which the classifier's table holds.
 - **Against the expectation written before the run:** small or no differences, an INCONCLUSIVE verdict, and the measures it names. All held.
 
@@ -76,7 +77,7 @@ Limits, each also in the certificate:
 - **The machines are proved one at a time.** The joint configuration of `Turn`, `Context` and `Trial` is an open assumption: pairs were checked at transit 2 and gave an inconclusive verdict, and transit 3 ran out of memory.
 - **Two properties are held by a source lint, not a proof:** every model decision names its budget (S562), and the effect that starts a compaction and the summary decision are emitted in the same branch (S564).
 - **The audience classes are declared and unused** (S566, S567); HF3.5 is held by the scan, the redaction and a step property.
-- **No sandbox on the owner's Windows host.** The network rule for a task's commands rests on an environment that points the proxies at a closed port, a list of declared runners, a path check and the repositories' own tests. A program that opened a socket on purpose would not be stopped. The live run therefore runs model-caused commands only in the isolated environment (assumption `live-run-isolation`, open until the environment is named and checked from inside).
+- **No sandbox on the owner's Windows host.** The network rule for a task's commands rests on an environment that points the proxies at a closed port, a list of declared runners, a path check and the repositories' own tests. A program that opened a socket on purpose would not be stopped. The live run therefore runs every model-caused command in a container with no network, no key and a read-only root (`poly-e3-runner:611a58b2975d`), and the isolation check passed inside it before every one of the 40 trials (assumption `live-run-isolation`, discharged). The barrier is the container runtime's.
 - **Stage scores are binary:** one check per stage.
 - **The live run's reach.** One model, 12 small tasks, completion at its ceiling: it shows what each mechanism does when it has something to act on and what each term costs, and it does not show a gain from the mechanisms on long tasks, which is where the paper finds them, nor anything about Online Context Compact, which did not fire.
 - **A stage is up to eight turns** (amendment A1, HF2.9): the agent works in turns, and the stage is checked once, at its `done`, at the eighth turn or at the end of the budget. The machine proves the check is once and at the end; that the agent's `done` was read right from its calls is the open assumption `done-signal`.
@@ -90,7 +91,7 @@ Limits, each also in the certificate:
 
 ## Conclusion
 
-The harness's control loop fits poly: the rules that make the four mechanisms safe are properties the checker proves, with a seeded fault for each, and what the checker cannot see (the verifier's bytes, the scan's coverage, a summary's content) is a named assumption with a test. The recorded results are recordings evidence. What a live model does with them was shown on 12 small tasks: the mechanisms fired where they had something to act on and made no difference the run can tell from noise, and compaction had nothing to act on. Longer tasks are the next experiment, and this example gives it a harness whose rules are checked.
+The harness's control loop fits poly: the rules that make the four mechanisms safe are properties the checker proves, with a seeded fault for each, and what the checker cannot see (the verifier's bytes, the scan's coverage, a summary's content) is a named assumption with a test. The recorded results are recordings evidence. What a live model does with them was shown on 12 small tasks: the mechanisms fired where they had something to act on and made no difference the run can tell from noise, and compaction had nothing to act on. Longer tasks are a candidate for a later release, and this example gives it a harness whose rules are checked.
 
 ## Glossary
 
@@ -100,7 +101,7 @@ The harness's control loop fits poly: the rules that make the four mechanisms sa
 - **Handle:** a stable reference to an archived output, with its size and an excerpt.
 - **Harness:** the control loop around a model that runs its tools and manages its context.
 - **INCONCLUSIVE:** the third verdict, for a comparison too small to decide; it is never "no difference".
-- **Noise floor:** the share of tasks whose outcome differs between reruns of one configuration with the model frozen.
+- **Noise floor:** how much an outcome (completion, steps or cost) differs between reruns of one configuration with the model frozen.
 - **Pay-gate:** the numeric condition under which a compaction is worth its cache rewrite.
 - **Recordings evidence:** results from the recorded runs, carrying the three labels of section 4.
 - **Stage:** one step of a task's plan, with one check.

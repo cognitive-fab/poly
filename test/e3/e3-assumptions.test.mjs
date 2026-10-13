@@ -50,15 +50,19 @@ test('an open assumption says what tests it, a discharged one what discharges it
   }
 });
 
-test('the live run needs an isolated, disposable environment with network to the model API only: an open assumption naming the E3.9 gate', () => {
+test('the live run\'s isolation is discharged by a named container and the check made inside it before every trial of the run, and the report holds the 40 checks', () => {
   const iso = A.find((a) => a.id === 'live-run-isolation');
   assert.ok(iso, 'the entry exists');
-  assert.equal(iso.status, 'open', 'discharged only by naming the environment and a check made from inside it');
-  assert.match(iso.assumption, /disposable/);
-  assert.match(iso.assumption, /model API/);
-  assert.match(iso.evidence, /E3\.9/);
+  assert.equal(iso.status, 'discharged');
+  assert.ok(!('evidence' in iso), 'a discharged entry says by what, and names no evidence still to come');
+  assert.match(iso.assumption, /disposable container with no network/);
+  assert.match(iso.by, /poly-e3-runner:611a58b2975d/);
+  assert.match(iso.by, /before every one of the 40 trials/);
+  // and the evidence it cites is in the repository: the report of the run made 40 isolation checks and stopped because the plan was complete
+  const report = JSON.parse(readFileSync(join(DIR, '..', '..', 'docs', 'e3', 'live-staged-2026-10-13.json'), 'utf8'));
+  assert.equal(report.isolationChecksMade, 40);
+  assert.equal(report.stoppedBecause.reason, 'plan-complete');
 });
-
 test('the joint configuration of Turn, Context and Trial is open until a configuration of the three has been checked', () => {
   const joint = A.find((a) => a.id === 'joint-configuration');
   assert.ok(joint, 'the entry exists');
