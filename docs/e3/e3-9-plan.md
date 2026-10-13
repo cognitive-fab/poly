@@ -140,6 +140,8 @@ Every figure carries its labels: the task set of 12 from the owner's repositorie
 4. The owner has set the key, in the host's driver only, and the pilot's two trials have been read.
 5. The gate-reach file and the HAC1 file have been run again after any module edit, one at a time.
 
+Condition 3 was met and the isolation assumption is discharged, dated 2026-10-13 (`c073ba55`): the image was built, the oracle passed inside the container, and the isolation check passed inside it before every one of the 40 trials of the live run (`docs/e3/live-staged-2026-10-13.json`). The barrier is the container runtime's.
+
 ## Conclusion
 
 The price tables, the isolation and the cost plan are ready for the owner's check, and nothing has been run. The tables pass the gate. The isolation is a container with no network for every command a model causes, with the key kept on the host (the owner's choice). The plan is 40 runs in two stages at a $0.60 cap, a worst case of $24, which keeps all 12 pairs and measures the noise floor on 8 tasks. At Opus 5.5 prices the module's reservation of $0.56 leaves 1 step under that cap; lowering the agent decision's limits to 50,000 input and 4,000 output makes it $0.28 and buys 18 steps, which the owner is asked to rule on. The verdict at 12 pairs will be INCONCLUSIVE, and the run is worth its cost for the noise floor, the saving of fusion and the cost terms.
