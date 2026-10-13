@@ -1,0 +1,4679 @@
+{
+  "commit": null,
+  "files": {
+    "conformance/m0/enum-pattern.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Worker": {
+          "verdict": "CLEAN",
+          "states": 7,
+          "transitions": 21,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 120
+    },
+    "conformance/m0/errors/PL0001-syntax.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL0001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [],
+      "ms": 61
+    },
+    "conformance/m0/errors/PL0901-not-in-milestone.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL0901"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 66
+    },
+    "conformance/m0/errors/PL1001-unknown-name.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 65
+    },
+    "conformance/m0/errors/PL1002-duplicate-declaration.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1002"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 68
+    },
+    "conformance/m0/errors/PL1005-ambiguous-constructor.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1005"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 66
+    },
+    "conformance/m0/errors/PL1101-unbounded-domain.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1101"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 69
+    },
+    "conformance/m0/errors/PL1201-type-mismatch.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1201"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 68
+    },
+    "conformance/m0/errors/PL1202-read-of-primed-field.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1202"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 65
+    },
+    "conformance/m0/errors/PL1204-division-by-zero.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1204"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 66
+    },
+    "conformance/m0/errors/PL1205-confidence-not-compared.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1205"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:",
+            "decisions:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 70
+    },
+    "conformance/m0/errors/PL1206-principal-not-opaque.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1206"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 70
+    },
+    "conformance/m0/errors/PL1207-reserved-reject-reason.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1207",
+        "PL1207",
+        "PL1207",
+        "PL1207",
+        "PL1207"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 66
+    },
+    "conformance/m0/errors/PL1208-reserved-effect-kind.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1208",
+        "PL1208"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 71
+    },
+    "conformance/m0/errors/PL1209-content-literal.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1209"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 64
+    },
+    "conformance/m0/errors/PL1302-strict-on-unhandled-action.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1302"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 65
+    },
+    "conformance/m0/errors/PL1401-terminal-not-on-control-field.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1401"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 63
+    },
+    "conformance/m0/errors/PL1501-non-exhaustive-match.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1501"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 73
+    },
+    "conformance/m0/errors/PL1502-incomplete-map-literal.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1502"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 66
+    },
+    "conformance/m0/errors/PL1503-unreachable-arm.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1503"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 75
+    },
+    "conformance/m0/errors/PL1504-unused-binder.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1504"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 72
+    },
+    "conformance/m0/errors/PL1601-payload-type-conflict.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1601"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 85
+    },
+    "conformance/m0/errors/PL1602-array-map-not-zero-based.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1602"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 87
+    },
+    "conformance/m0/errors/PL1701-not-prefix-closed.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1701"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 97
+    },
+    "conformance/m0/errors/PL2101-write-before-require.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL2101"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 86
+    },
+    "conformance/m0/errors/PL2102-double-write.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL2102"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 81
+    },
+    "conformance/m0/errors/PL2201-silent-noop.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL2201"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 68
+    },
+    "conformance/m0/errors/PL2301-duplicate-timer-key.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL2301"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 75
+    },
+    "conformance/m0/errors/PL5103-child-read-without-spawned.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL5103"
+      ],
+      "machines": {
+        "Job": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        },
+        "Boss": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:",
+            "composition:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 70
+    },
+    "conformance/m0/errors/PL5105-duplicate-signal.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL5105"
+      ],
+      "machines": {
+        "Child": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        },
+        "Parent": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:",
+            "composition:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 69
+    },
+    "conformance/m0/errors/PL5303-configuration-without-bounds.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL5303"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {
+        "c": {
+          "verdict": "INCONCLUSIVE",
+          "states": null,
+          "transitions": null
+        }
+      },
+      "policies": [],
+      "ms": 66
+    },
+    "conformance/m0/errors/PL5403-unquantified-group.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL5403"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {
+        "c": {
+          "verdict": "INCONCLUSIVE",
+          "states": null,
+          "transitions": null
+        }
+      },
+      "policies": [],
+      "ms": 70
+    },
+    "conformance/m0/errors/PL6101-completion-without-handler.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6101"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 77
+    },
+    "conformance/m0/errors/PL6102-shared-completion-action.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6102"
+      ],
+      "machines": {
+        "Job": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        },
+        "Boss": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:",
+            "composition:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 143
+    },
+    "conformance/m0/errors/PL6202-decision-without-failure.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6202"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:",
+            "decisions:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 77
+    },
+    "conformance/m0/errors/PL6204-decision-completion-sent.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6204"
+      ],
+      "machines": {
+        "Ticket": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:",
+            "decisions:not-run:"
+          ]
+        },
+        "Poker": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 77
+    },
+    "conformance/m0/errors/PL6303-target-not-granted.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6303"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 64
+    },
+    "conformance/m0/errors/PL6801-workflow-input.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6801"
+      ],
+      "machines": {
+        "Brief": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 65
+    },
+    "conformance/m0/errors/PL6802-workflow-key.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6802"
+      ],
+      "machines": {
+        "Brief": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 73
+    },
+    "conformance/m0/errors/PL6803-workflow-tools.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6803"
+      ],
+      "machines": {
+        "Brief": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 72
+    },
+    "conformance/m0/errors/PL6804-workflow-unchecked.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6804"
+      ],
+      "machines": {
+        "Brief": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 69
+    },
+    "conformance/m0/errors/PL6830-envelope-not-from-source.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6830"
+      ],
+      "machines": {
+        "Replier": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:",
+            "decisions:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 68
+    },
+    "conformance/m0/errors/PL6837-verified-by-person.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL6837"
+      ],
+      "machines": {
+        "Notes": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:",
+            "effects:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 64
+    },
+    "conformance/m0/guard-terminal.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3201",
+        "PL3201",
+        "PL3201"
+      ],
+      "machines": {
+        "Room": {
+          "verdict": "FINDINGS",
+          "states": 7,
+          "transitions": 35,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 110
+    },
+    "conformance/m0/if-frames.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Split": {
+          "verdict": "CLEAN",
+          "states": 9,
+          "transitions": 27,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 98
+    },
+    "conformance/m0/map-update.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3201"
+      ],
+      "machines": {
+        "Outbox": {
+          "verdict": "FINDINGS",
+          "states": 9,
+          "transitions": 36,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 101
+    },
+    "conformance/m0/match-union.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Worker": {
+          "verdict": "CLEAN",
+          "states": 11,
+          "transitions": 55,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 106
+    },
+    "conformance/m0/require-let.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Counter": {
+          "verdict": "CLEAN",
+          "states": 19,
+          "transitions": 76,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 100
+    },
+    "conformance/m0/shadowing.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Tank": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 15,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 102
+    },
+    "conformance/m0/strict-param.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Pay": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 25,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 98
+    },
+    "conformance/m1/children.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Shipment": {
+          "verdict": "CLEAN",
+          "states": 12,
+          "transitions": 72,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 7,
+          "transitions": 28,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "composition:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 159
+    },
+    "conformance/m1/effects.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Account": {
+          "verdict": "CLEAN",
+          "states": 9,
+          "transitions": 54,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 129
+    },
+    "conformance/m1/families.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Truck": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Dispatch": {
+          "verdict": "CLEAN",
+          "states": 11,
+          "transitions": 121,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "composition:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 177
+    },
+    "conformance/m1/records.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Packer": {
+          "verdict": "CLEAN",
+          "states": 9,
+          "transitions": 63,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 103
+    },
+    "conformance/m1/sends.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Inventory": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 25,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Lock": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 18,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Client": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 131
+    },
+    "conformance/m1/timers.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Hold": {
+          "verdict": "CLEAN",
+          "states": 9,
+          "transitions": 45,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 103
+    },
+    "conformance/m1/unions.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Board": {
+          "verdict": "CLEAN",
+          "states": 36,
+          "transitions": 396,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 194
+    },
+    "conformance/m2/completions.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "M": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 40,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 133
+    },
+    "conformance/m2/decisions/router.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Ticket": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 110,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 163
+    },
+    "conformance/m2/detached.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Worker": {
+          "verdict": "CLEAN",
+          "states": 9,
+          "transitions": 45,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Dispatcher": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 6,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "pool": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 8
+        }
+      },
+      "policies": [],
+      "ms": 128
+    },
+    "conformance/m2/embed/orders.ts": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3102",
+        "PL4001",
+        "PL4002"
+      ],
+      "machines": {
+        "Order": {
+          "verdict": "FINDINGS",
+          "states": 17,
+          "transitions": 187,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN",
+            "effects:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 184
+    },
+    "conformance/m2/embed/workshop.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Drill": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 9,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Job": {
+          "verdict": "CLEAN",
+          "states": 20,
+          "transitions": 140,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "composition:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 194
+    },
+    "conformance/m2/embed/workshop.ts": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Drill": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 9,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Job": {
+          "verdict": "CLEAN",
+          "states": 20,
+          "transitions": 140,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "composition:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 215
+    },
+    "conformance/m2/errors/fixes.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1005",
+        "PL1005",
+        "PL1202",
+        "PL1202",
+        "PL1202",
+        "PL1501",
+        "PL1501",
+        "PL1504",
+        "PL1504",
+        "PL2101",
+        "PL2101",
+        "PL2101",
+        "PL2101"
+      ],
+      "machines": {
+        "Desk": {
+          "verdict": "REFUSED",
+          "states": null,
+          "transitions": null,
+          "stages": [
+            "parse-type:ran:REFUSED",
+            "lower:not-run:",
+            "validate:not-run:",
+            "translation-validation:not-run:",
+            "model-check:not-run:",
+            "deadlock:not-run:"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 78
+    },
+    "conformance/m2/seeded/configuration-invariant/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Inventory": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 25,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "two-buyers": {
+          "verdict": "CLEAN",
+          "states": 44,
+          "transitions": 146
+        }
+      },
+      "policies": [],
+      "ms": 141
+    },
+    "conformance/m2/seeded/configuration-invariant/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL5401"
+      ],
+      "machines": {
+        "Inventory": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 20,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "two-buyers": {
+          "verdict": "FINDINGS",
+          "states": 47,
+          "transitions": 154
+        }
+      },
+      "policies": [],
+      "ms": 135
+    },
+    "conformance/m2/seeded/deadlock/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Gate": {
+          "verdict": "CLEAN",
+          "states": 7,
+          "transitions": 21,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 109
+    },
+    "conformance/m2/seeded/deadlock/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3201"
+      ],
+      "machines": {
+        "Gate": {
+          "verdict": "FINDINGS",
+          "states": 7,
+          "transitions": 14,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 110
+    },
+    "conformance/m2/seeded/domain-escape/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Basket": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 97
+    },
+    "conformance/m2/seeded/domain-escape/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3102"
+      ],
+      "machines": {
+        "Basket": {
+          "verdict": "FINDINGS",
+          "states": 4,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 105
+    },
+    "conformance/m2/seeded/invariant/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Counter": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 3,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 97
+    },
+    "conformance/m2/seeded/invariant/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3001"
+      ],
+      "machines": {
+        "Counter": {
+          "verdict": "FINDINGS",
+          "states": 4,
+          "transitions": 4,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 89
+    },
+    "conformance/m2/seeded/liveness/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "OutboxIntent": {
+          "verdict": "CLEAN",
+          "states": 33,
+          "transitions": 363,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 175
+    },
+    "conformance/m2/seeded/liveness/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3201",
+        "PL3201",
+        "PL3301"
+      ],
+      "machines": {
+        "OutboxIntent": {
+          "verdict": "FINDINGS",
+          "states": 35,
+          "transitions": 385,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:FINDINGS",
+            "liveness:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 209
+    },
+    "conformance/m2/seeded/path-property/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Cart": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 6,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 117
+    },
+    "conformance/m2/seeded/path-property/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL4001",
+        "PL4002"
+      ],
+      "machines": {
+        "Cart": {
+          "verdict": "FINDINGS",
+          "states": 3,
+          "transitions": 6,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 104
+    },
+    "conformance/m2/seeded/reject-property/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Door": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 4,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 94
+    },
+    "conformance/m2/seeded/reject-property/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3003"
+      ],
+      "machines": {
+        "Door": {
+          "verdict": "FINDINGS",
+          "states": 2,
+          "transitions": 4,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 92
+    },
+    "conformance/m2/seeded/step-property/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Wallet": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 6,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 93
+    },
+    "conformance/m2/seeded/step-property/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3002"
+      ],
+      "machines": {
+        "Wallet": {
+          "verdict": "FINDINGS",
+          "states": 4,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 94
+    },
+    "conformance/m2/seeded/stuck/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Inventory": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 25,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "two-buyers": {
+          "verdict": "CLEAN",
+          "states": 44,
+          "transitions": 146
+        }
+      },
+      "policies": [],
+      "ms": 123
+    },
+    "conformance/m2/seeded/stuck/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL5402"
+      ],
+      "machines": {
+        "Inventory": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 25,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "two-buyers": {
+          "verdict": "FINDINGS",
+          "states": 30,
+          "transitions": 94
+        }
+      },
+      "policies": [],
+      "ms": 133
+    },
+    "conformance/m4/delivery-pair.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Receiver": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Sender": {
+          "verdict": "CLEAN",
+          "states": 7,
+          "transitions": 35,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 119
+    },
+    "conformance/m4/outbox.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Job": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 117
+    },
+    "conformance/m4/router.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Ticket": {
+          "verdict": "CLEAN",
+          "states": 8,
+          "transitions": 200,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 185
+    },
+    "conformance/m4/seeded/adjudication/fixed.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Ticket": {
+          "verdict": "CLEAN",
+          "states": 8,
+          "transitions": 208,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 198
+    },
+    "conformance/m4/seeded/adjudication/unfixed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL6203"
+      ],
+      "machines": {
+        "Ticket": {
+          "verdict": "FINDINGS",
+          "states": 8,
+          "transitions": 208,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 221
+    },
+    "conformance/m5/autonomy.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "support",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 98
+    },
+    "conformance/m5/capabilities.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 12,
+          "transitions": 48,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 134
+    },
+    "conformance/m5/consistency.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "orders",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 73
+    },
+    "conformance/m5/crisis.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "support",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 64
+    },
+    "conformance/m5/halt.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "refund",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 62
+    },
+    "conformance/m5/kids-ship.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Shipment": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 16,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "composition:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 151
+    },
+    "conformance/m5/kids.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Shipment": {
+          "verdict": "CLEAN",
+          "states": 6,
+          "transitions": 438,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 365,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "composition:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 213
+    },
+    "conformance/m5/lineage-pay.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "lp",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 69
+    },
+    "conformance/m5/lineage-pay.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 111,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 135
+    },
+    "conformance/m5/lineage-timer.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "lt",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 71
+    },
+    "conformance/m5/lineage-timer.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Hold": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 111,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 154
+    },
+    "conformance/m5/lineage.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Peer": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Job": {
+          "verdict": "CLEAN",
+          "states": 14,
+          "transitions": 1540,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 309
+    },
+    "conformance/m5/match-claims.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "M": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 6,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 102
+    },
+    "conformance/m5/ops.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "OpsMode": {
+          "verdict": "CLEAN",
+          "states": 7,
+          "transitions": 1512,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 218
+    },
+    "conformance/m5/orders-rules.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "orders",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 74
+    },
+    "conformance/m5/orders.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "orders",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 70
+    },
+    "conformance/m5/orders.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 20,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 105
+    },
+    "conformance/m5/policy-faults.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Meter": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 4,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Pump": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "pf",
+          "verdict": "CLEAN"
+        }
+      ],
+      "ms": 256
+    },
+    "conformance/m5/refund-person.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "refund",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 136
+    },
+    "conformance/m5/refund.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Refund": {
+          "verdict": "CLEAN",
+          "states": 13,
+          "transitions": 4225,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 643
+    },
+    "conformance/m5/reps-label.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3001"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "FINDINGS",
+          "states": 8,
+          "transitions": 200,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 185
+    },
+    "conformance/m5/reps-map.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3001"
+      ],
+      "machines": {
+        "M": {
+          "verdict": "FINDINGS",
+          "states": 26,
+          "transitions": 494,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 189
+    },
+    "conformance/m5/scope-a.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Pinger": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 4,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 91
+    },
+    "conformance/m5/scope-b.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Ponger": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 4,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 90
+    },
+    "conformance/m5/scope.policy.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "sa",
+          "verdict": "CLEAN"
+        }
+      ],
+      "ms": 167
+    },
+    "conformance/m5/shop-escalate.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "shop",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 64
+    },
+    "conformance/m5/shop.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "shop",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 65
+    },
+    "conformance/m5/shop.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Till": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 124
+    },
+    "conformance/m5/split-claims.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Receiver": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Sender": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 16,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "split": {
+          "verdict": "CLEAN",
+          "states": 11,
+          "transitions": 36
+        }
+      },
+      "policies": [],
+      "ms": 118
+    },
+    "conformance/m5/split.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL5401"
+      ],
+      "machines": {
+        "Receiver": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Sender": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "split": {
+          "verdict": "FINDINGS",
+          "states": 7,
+          "transitions": 14
+        }
+      },
+      "policies": [],
+      "ms": 158
+    },
+    "conformance/m5/switch.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Switch": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 130
+    },
+    "conformance/m5/trifecta.policy.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "tri",
+          "verdict": "CLEAN"
+        }
+      ],
+      "ms": 405
+    },
+    "conformance/m5/trifecta.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Agent": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 20,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 239
+    },
+    "conformance/m5/trust.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Trust": {
+          "verdict": "CLEAN",
+          "states": 29,
+          "transitions": 3248,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 641
+    },
+    "conformance/m6/brief.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Brief": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 16,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 140
+    },
+    "conformance/m6/customer-brief.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Brief": {
+          "verdict": "CLEAN",
+          "states": 22,
+          "transitions": 264,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 192
+    },
+    "conformance/m6/long.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Counter": {
+          "verdict": "CLEAN",
+          "states": 16,
+          "transitions": 32,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 116
+    },
+    "conformance/m8/brief-deny.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "customer_brief",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 65
+    },
+    "conformance/m8/brief-escalate.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "customer_brief",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 57
+    },
+    "conformance/m8/concierge/concierge.policy.poly": {
+      "verdict": "REFUSED",
+      "error": null,
+      "diagnostics": [
+        "PL1001",
+        "PL1001"
+      ],
+      "machines": {},
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "concierge.support",
+          "verdict": "REFUSED"
+        }
+      ],
+      "ms": 66
+    },
+    "conformance/m8/concierge/concierge.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Desk": {
+          "verdict": "CLEAN",
+          "states": 8,
+          "transitions": 56,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Texts": {
+          "verdict": "CLEAN",
+          "states": 8,
+          "transitions": 56,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Staff": {
+          "verdict": "CLEAN",
+          "states": 8,
+          "transitions": 64,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "support.Conversation": {
+          "verdict": "CLEAN",
+          "states": 342,
+          "transitions": 10602,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "text.Conversation": {
+          "verdict": "CLEAN",
+          "states": 342,
+          "transitions": 32148,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "staff.Conversation": {
+          "verdict": "CLEAN",
+          "states": 666,
+          "transitions": 41958,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "support": {
+          "verdict": "CLEAN",
+          "states": 14482,
+          "transitions": 314709
+        },
+        "text": {
+          "verdict": "CLEAN",
+          "states": 14483,
+          "transitions": 1234280
+        },
+        "staff": {
+          "verdict": "CLEAN",
+          "states": 24452,
+          "transitions": 1310497
+        }
+      },
+      "policies": [],
+      "ms": 73845
+    },
+    "conformance/m8/content/fetch.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Fetcher": {
+          "verdict": "CLEAN",
+          "states": 6,
+          "transitions": 30,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 130
+    },
+    "conformance/m8/content/guarded.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Box": {
+          "verdict": "CLEAN",
+          "states": 6,
+          "transitions": 30,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 105
+    },
+    "conformance/m8/content/notes.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Note": {
+          "verdict": "CLEAN",
+          "states": 7,
+          "transitions": 42,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 122
+    },
+    "conformance/m8/content/unhandled.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Shelf": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 18,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 104
+    },
+    "conformance/m8/enums/chat.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Chat": {
+          "verdict": "CLEAN",
+          "states": 6,
+          "transitions": 18,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 119
+    },
+    "conformance/m8/enums/kinds.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Outbox": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 4,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 107
+    },
+    "conformance/m8/never/chat-confirmed.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3002",
+        "PL3002",
+        "PL5301"
+      ],
+      "machines": {
+        "Chat": {
+          "verdict": "FINDINGS",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "App": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "pair": {
+          "verdict": "FINDINGS",
+          "states": 22,
+          "transitions": 79
+        }
+      },
+      "policies": [],
+      "ms": 124
+    },
+    "conformance/m8/never/chat-ruled-out.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3002",
+        "PL3002",
+        "PL5301"
+      ],
+      "machines": {
+        "Chat": {
+          "verdict": "FINDINGS",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "App": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 2,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "pair": {
+          "verdict": "FINDINGS",
+          "states": 15,
+          "transitions": 36
+        }
+      },
+      "policies": [],
+      "ms": 123
+    },
+    "conformance/m8/never/window.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Chat": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 16,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 113
+    },
+    "conformance/m8/use/dispatch.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Dispatcher": {
+          "verdict": "CLEAN",
+          "states": 3,
+          "transitions": 6,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "pool": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 8
+        }
+      },
+      "policies": [],
+      "ms": 124
+    },
+    "conformance/m8/use/ledger.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Account": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 10,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 107
+    },
+    "conformance/m8/use/teller.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Till": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 20,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 115
+    },
+    "conformance/m8/use/workers.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Worker": {
+          "verdict": "CLEAN",
+          "states": 9,
+          "transitions": 45,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 132
+    },
+    "examples/checkout/checkout-optimistic.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL5401"
+      ],
+      "machines": {
+        "Inventory": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 20,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "two-buyers": {
+          "verdict": "FINDINGS",
+          "states": 47,
+          "transitions": 154
+        }
+      },
+      "policies": [],
+      "ms": 130
+    },
+    "examples/checkout/checkout.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Inventory": {
+          "verdict": "CLEAN",
+          "states": 2,
+          "transitions": 8,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 5,
+          "transitions": 25,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "two-buyers": {
+          "verdict": "CLEAN",
+          "states": 44,
+          "transitions": 146
+        }
+      },
+      "policies": [],
+      "ms": 147
+    },
+    "examples/concierge/concierge.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Desk": {
+          "verdict": "CLEAN",
+          "states": 2114,
+          "transitions": 112042,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "flow:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:CLEAN"
+          ]
+        },
+        "Notice": {
+          "verdict": "CLEAN",
+          "states": 28,
+          "transitions": 420,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "flow:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:CLEAN"
+          ]
+        },
+        "support.Conversation": {
+          "verdict": "CLEAN",
+          "states": 342,
+          "transitions": 16074,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "staff.Conversation": {
+          "verdict": "CLEAN",
+          "states": 666,
+          "transitions": 41958,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "payments.Grant": {
+          "verdict": "CLEAN",
+          "states": 13,
+          "transitions": 104,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "triage.Route": {
+          "verdict": "CLEAN",
+          "states": 6,
+          "transitions": 36,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "spend.Budget": {
+          "verdict": "CLEAN",
+          "states": 96,
+          "transitions": 2976,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {
+        "support": {
+          "verdict": "CLEAN",
+          "states": 29379,
+          "transitions": 755058
+        },
+        "staff": {
+          "verdict": "CLEAN",
+          "states": 3620,
+          "transitions": 194795
+        }
+      },
+      "policies": [
+        {
+          "scope": "concierge",
+          "verdict": "CLEAN"
+        }
+      ],
+      "ms": 123355
+    },
+    "examples/delivery/delivery-cleared.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3001",
+        "PL3301"
+      ],
+      "machines": {
+        "Delivery": {
+          "verdict": "FINDINGS",
+          "states": 2219,
+          "transitions": 33285,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 7397
+    },
+    "examples/delivery/delivery-parallel-fifo.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3001"
+      ],
+      "machines": {
+        "Delivery": {
+          "verdict": "FINDINGS",
+          "states": 2368,
+          "transitions": 35520,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 7746
+    },
+    "examples/delivery/delivery-parallel.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Delivery": {
+          "verdict": "CLEAN",
+          "states": 2368,
+          "transitions": 35520,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 9836
+    },
+    "examples/delivery/delivery.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Delivery": {
+          "verdict": "CLEAN",
+          "states": 1147,
+          "transitions": 17205,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 4415
+    },
+    "examples/evidence/outbox-union-escape.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3102",
+        "PL3901"
+      ],
+      "machines": {
+        "OutboxIntent": {
+          "verdict": "FINDINGS",
+          "states": 17,
+          "transitions": 187,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 224
+    },
+    "examples/evidence/outbox-union.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "OutboxIntent": {
+          "verdict": "CLEAN",
+          "states": 17,
+          "transitions": 187,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 172
+    },
+    "examples/evidence/outbox-v02.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3201",
+        "PL3201",
+        "PL3301"
+      ],
+      "machines": {
+        "OutboxIntent": {
+          "verdict": "FINDINGS",
+          "states": 35,
+          "transitions": 385,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:FINDINGS",
+            "liveness:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 185
+    },
+    "examples/evidence/outbox-v03.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "OutboxIntent": {
+          "verdict": "CLEAN",
+          "states": 33,
+          "transitions": 363,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 165
+    },
+    "examples/field-studies/hatchet/hatchet-broken.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "WorkflowRun": {
+          "verdict": "CLEAN",
+          "states": 210,
+          "transitions": 3780,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 490
+    },
+    "examples/field-studies/hatchet/hatchet.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "WorkflowRun": {
+          "verdict": "CLEAN",
+          "states": 216,
+          "transitions": 3888,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 517
+    },
+    "examples/field-studies/raft/raft-broken.poly": {
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "diagnostics": [
+        "PL3901"
+      ],
+      "machines": {
+        "Node": {
+          "verdict": "INCONCLUSIVE",
+          "states": 38,
+          "transitions": 342,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:INCONCLUSIVE",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 162
+    },
+    "examples/field-studies/raft/raft.poly": {
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "diagnostics": [
+        "PL3901"
+      ],
+      "machines": {
+        "Node": {
+          "verdict": "INCONCLUSIVE",
+          "states": 38,
+          "transitions": 342,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:INCONCLUSIVE",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 160
+    },
+    "examples/field-studies/turnstile/turnstile-broken.poly": {
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "diagnostics": [
+        "PL3901"
+      ],
+      "machines": {
+        "Turnstile": {
+          "verdict": "INCONCLUSIVE",
+          "states": 8,
+          "transitions": 16,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:INCONCLUSIVE",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 112
+    },
+    "examples/field-studies/turnstile/turnstile.poly": {
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "diagnostics": [
+        "PL3901"
+      ],
+      "machines": {
+        "Turnstile": {
+          "verdict": "INCONCLUSIVE",
+          "states": 7,
+          "transitions": 14,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:INCONCLUSIVE",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 106
+    },
+    "examples/hello/hello-empty.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Gate": {
+          "verdict": "CLEAN",
+          "states": 7,
+          "transitions": 21,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 112
+    },
+    "examples/hello/hello.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3201"
+      ],
+      "machines": {
+        "Gate": {
+          "verdict": "FINDINGS",
+          "states": 7,
+          "transitions": 14,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 104
+    },
+    "examples/inbox/inbox.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Message": {
+          "verdict": "CLEAN",
+          "states": 200,
+          "transitions": 6600,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "flow:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:CLEAN"
+          ]
+        },
+        "Todo": {
+          "verdict": "CLEAN",
+          "states": 9130,
+          "transitions": 785180,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "flow:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "decisions:ran:CLEAN"
+          ]
+        },
+        "gmail_draft.Grant": {
+          "verdict": "CLEAN",
+          "states": 13,
+          "transitions": 104,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "gmail_read.Grant": {
+          "verdict": "CLEAN",
+          "states": 13,
+          "transitions": 104,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "triage.Route": {
+          "verdict": "CLEAN",
+          "states": 6,
+          "transitions": 24,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "kinds.Route": {
+          "verdict": "CLEAN",
+          "states": 6,
+          "transitions": 24,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "liveness:ran:CLEAN",
+            "effects:ran:CLEAN"
+          ]
+        },
+        "monthly.Budget": {
+          "verdict": "CLEAN",
+          "states": 96,
+          "transitions": 2976,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [
+        {
+          "scope": "inbox",
+          "verdict": "CLEAN"
+        }
+      ],
+      "ms": 109366
+    },
+    "examples/oms/oms.poly": {
+      "verdict": "CLEAN",
+      "error": null,
+      "diagnostics": [],
+      "machines": {
+        "Shipment": {
+          "verdict": "CLEAN",
+          "states": 4,
+          "transitions": 12,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN"
+          ]
+        },
+        "Order": {
+          "verdict": "CLEAN",
+          "states": 33,
+          "transitions": 627,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:CLEAN",
+            "deadlock:ran:CLEAN",
+            "effects:ran:CLEAN",
+            "composition:ran:CLEAN"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 374
+    },
+    "examples/orders/orders.poly": {
+      "verdict": "FINDINGS",
+      "error": null,
+      "diagnostics": [
+        "PL3102",
+        "PL4001",
+        "PL4002"
+      ],
+      "machines": {
+        "Order": {
+          "verdict": "FINDINGS",
+          "states": 17,
+          "transitions": 187,
+          "stages": [
+            "parse-type:ran:CLEAN",
+            "lower:ran:CLEAN",
+            "validate:ran:CLEAN",
+            "translation-validation:ran:CLEAN",
+            "model-check:ran:FINDINGS",
+            "deadlock:ran:CLEAN",
+            "effects:ran:FINDINGS"
+          ]
+        }
+      },
+      "configurations": {},
+      "policies": [],
+      "ms": 201
+    }
+  }
+}
