@@ -68,7 +68,7 @@ export function up() {
   down();
   must(docker(['volume', 'create', VOLUME]), 'volume create');
   must(docker([
-    'run', '--detach', '--name', NAME, '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,size=512m',
+    'run', '--detach', '--name', NAME, '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,exec,nosuid,size=512m',
     '--mount', `type=volume,source=${VOLUME},target=${SCRATCH_IN}`, '--user', '10001', '--memory', '2g', '--cpus', '2', '--pids-limit', '512',
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', tag(),
   ]), 'run');

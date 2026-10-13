@@ -24,6 +24,9 @@ const req = JSON.parse(input);
 
 // the Go module cache is read with -mod=readonly and GOPROXY=off from the volume copy (tasks.mjs passes GOPATH on)
 process.env.GOPATH = GOPATH;
+// vitest writes a cache into node_modules/.vite, and the image is read-only: the copies link to a writable copy of the packages
+const NODE_MODULES = join(SCRATCH, '.nm', 'node_modules'); // the real path must end in node_modules, or Node finds no package above it
+process.env.E3_NODE_MODULES = NODE_MODULES;
 
 const underScratch = (p) => {
   const r = resolve(String(p));
@@ -35,6 +38,7 @@ async function handle(r) {
   switch (r.op) {
     case 'seed': {
       if (!existsSync(GOPATH)) cpSync(join(SEED, 'gopath'), GOPATH, { recursive: true });
+      if (!existsSync(NODE_MODULES)) cpSync('/opt/todo-app/node_modules', NODE_MODULES, { recursive: true, verbatimSymlinks: true });
       if (!existsSync(join(SCRATCH, '.gocache'))) cpSync(join(SEED, 'gocache'), join(SCRATCH, '.gocache'), { recursive: true });
       return { seeded: true };
     }

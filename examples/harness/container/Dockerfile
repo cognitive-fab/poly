@@ -16,7 +16,6 @@ RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin runner
 # the repositories, where tasks.mjs looks for them: <root>/.. is /opt, so the originals are /opt/todo-app and /opt/snip
 COPY repos/todo-app /opt/todo-app
 COPY repos/snip /opt/snip
-COPY poly /opt/poly
 
 # network is used here and only here. todo-app: the locked packages, no install scripts. snip: the locked modules, and a warm
 # build cache so that a run does not compile the standard library first. The seeds are copied to the writable volume at start.
@@ -24,6 +23,9 @@ RUN cd /opt/todo-app && npm ci --ignore-scripts --no-audit --no-fund
 RUN mkdir -p /opt/seed && cd /opt/snip \
  && GOPATH=/opt/seed/gopath GOCACHE=/opt/seed/gocache GOFLAGS=-mod=readonly go mod download \
  && GOPATH=/opt/seed/gopath GOCACHE=/opt/seed/gocache GOFLAGS=-mod=readonly GOPROXY=off go test -count=1 -run '^$' ./...
+
+# the host code goes in after the installs, so a change to it does not repeat them
+COPY poly /opt/poly
 
 # the writable place is a volume mounted here; the root is read-only at run time
 RUN mkdir -p /opt/poly/.poly && chown -R runner /opt/poly/.poly && chmod -R a+rX /opt/seed /opt/todo-app /opt/snip /opt/poly

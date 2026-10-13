@@ -133,7 +133,8 @@ export function prepare(id, run = 'proof', { expectDigest } = {}) {
     cpSync(join(orig, rel), to);
   }
   // the toolchain's installed packages are used, not copied: a link to the original's folder, read by the checks and never written
-  const nm = join(orig, 'node_modules');
+  // E3_NODE_MODULES names a writable copy of the packages (the container's, since vitest writes a cache into node_modules/.vite)
+  const nm = process.env.E3_NODE_MODULES ?? join(orig, 'node_modules');
   if (task.language === 'js' && existsSync(nm)) symlinkSync(nm, join(copy, 'node_modules'), 'junction');
   for (const add of task.addFiles ?? []) {
     const to = inside(copy, add.path);
