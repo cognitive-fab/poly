@@ -84,7 +84,8 @@ export async function runPilot({ taskId, models, tables, world, baseUrl, getKey,
     const w = world({ task, run: `pilot-${name}` });
     await w.prepare();
     const host = makeHost({ exec: w.exec });
-    const { rt } = await loaded(a, { transports: host.transports });
+    // the real clock (HF2.10, S571), so that the month's budget is keyed to the real month
+    const { rt } = await loaded(a, { transports: host.transports, now: () => Date.now() });
     const logPath = join(outDir, `${taskId}-${name}.calls.jsonl`);
     writeFileSync(logPath, '');
     const anthropic = createAnthropic({ tables, logPath, ...(baseUrl ? { baseUrl } : {}), ...(getKey ? { getKey } : {}), ...(sleep ? { sleep } : {}) });

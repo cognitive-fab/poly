@@ -154,7 +154,8 @@ export async function runStaged({ models, tables, world, isolation, outDir, tria
       try {
         await w.prepare();
         const host = makeHost({ exec: w.exec });
-        ({ rt } = await loaded(a, { transports: host.transports, store }));
+        // the real clock (HF2.10, S571): the month's budget is keyed to the month in which the plan runs; loaded() would give it the test clock
+        ({ rt } = await loaded(a, { transports: host.transports, store, now: () => Date.now() }));
         const logPath = join(outDir, `calls-${String(t.n).padStart(2, '0')}-${t.label}.jsonl`);
         writeFileSync(logPath, '');
         const anthropic = createAnthropic({ tables, logPath, ...(baseUrl ? { baseUrl } : {}), ...(getKey ? { getKey } : {}), ...(sleep ? { sleep } : {}) });
