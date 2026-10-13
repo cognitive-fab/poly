@@ -458,3 +458,29 @@ Prepared at the owner's order, for the owner's check: `docs/e3/e3-9-plan.md` (th
 **The image was rebuilt** (`world.mjs` gained the done tool) and, inside the no-network container: **the oracle passes, 12 of 12 tasks and 31 of 31 stages, with no scratch copy holding a link that points outside it; the isolation check passes** (the control connects; the public hosts, registries, the metadata address and the host's names do not; no credential-looking variable; no mount of the Windows host).
 
 **The pilot launcher** (`host/pilot.mjs`, command `node examples/harness/host/pilot.mjs [--task <id>]`; task 1 is `todo-urgency`, the first of the specification's table). It refuses to start without the key in the environment, on price tables that do not pass the gate, or if the isolation check fails inside a fresh container. It admits the harness once with `prices-live` in the place of `prices` (the committed placeholder tables stay for the recordings, so their evidence is unchanged), runs the base and the full configuration, one trial each, under the trial's cap of 0.60 USD (host-enforced, `trial-cap`) and a 20-minute wall clock, removes the container, writes `docs/e3/pilot-<date>.json` (turns and what ended each stage, tokens by class and cost for each call and trial, poly's charge beside the driver's, the plan recomputed from what was measured) and stops. **Tested against the fake API** (`e3-pilot` 5 of 5): the tables are checked, the module's limits are read from its text, both configurations run and are scored from the journal, poly's charge equals the driver's under the live Opus table, the base harness is not offered the fused action and the full one is, the plan is recomputed from the measured sizes, and the key is in nothing it writes. **Not tested:** a call to the real API and a trial in the container, which only the pilot does. The harness is admitted with the test anchors (certificate source "test"), as in every E3 run; an admission under the owner's own anchors is the owner's step.
+
+## The pilot (2026-10-13): task 1 (todo-urgency), the base and the full harness, one trial each
+
+Run by the owner (`node examples/harness/host/pilot.mjs --task todo-urgency`), in the container, with the live tables (Opus 5.5 and Haiku 4.5), under the host's trial cap of 0.60 USD. The report is `docs/e3/pilot-2026-10-13.json` (no key in it). **Labels:** one task, one trial of each configuration, so nothing here compares the configurations; "reached the end of the plan" is not "solved the task".
+
+| | base | full |
+|---|---|---|
+| Result | Done, PlanDone; both stages passed | Done, PlanDone; both stages passed |
+| Stage 0: turns, ended by | 6, done | 6, done |
+| Stage 1: turns, ended by | 2, done | 4, done |
+| Agent calls (steps) | 8 | 10 |
+| Tokens: input / output / cache write / cache read | 32 / 2,334 / 10,698 / 36,459 | 40 / 2,787 / 11,196 / 58,378 |
+| Cost, driver | 0.1076 USD | 0.1236 USD |
+| Cost, poly's own charge | 0.1076 USD | 0.1236 USD |
+| Wall clock | 48 s | 57 s |
+
+**What was measured, against what the plan assumed:** the first request is 1,285 and 1,457 tokens (5,000 assumed); a step's output is 292 and 279 tokens (300 assumed); the tool results add 1,054 and 804 tokens a step (1,200 assumed); a trial of 8 to 10 steps costs 0.11 to 0.12 USD, 0.0135 USD a step (0.0175 assumed). Poly's charge equals the driver's to the micro-USD for all 18 calls, so the real API's usage, priced under the live table by poly, is what the driver logged. The cache worked as priced (cache read 36,459 tokens against 10,698 written in the base trial). Slowest call 6.3 s.
+
+**The plan recomputed at the measured sizes** (the staged plan, 40 trials at 0.60 USD, worst case 24 USD): the cap buys 22 steps (the input limit allows 41); a 20-step trial would cost 0.28 USD, a 14-step trial 0.19 USD; at 8 to 14 steps a trial the 40 trials cost about 4 to 8 USD in expectation. The other options at these sizes: staged on 4 tasks (0.78 USD) buys 32 steps; the full plan (48 trials at 0.50 USD) buys 16 steps; the plan can stay as it is, and the caps are not near binding at this task size.
+
+**Findings, not acted on:**
+1. **No mechanism fired, in either trial:** fusion 0 of 1 opportunity, compaction 0, ObservationPack 0, Reducer 0 of 0. The windows stayed far under the limit (the largest request is about 12,000 of 48,000 tokens, bucket 1), and no output reached 10 KiB. Nothing could be saved at this task size, and a run of tasks this small will show little of the four mechanisms.
+2. **The fused action was offered to the full harness and never used,** and the one turn that was an edit then a command (`edit` and `bash`, as two calls) was not fused: the classifier said Separate. Probable cause, not proved because the call log holds tool names and not commands: the bash tool's description, which I wrote, names `node node_modules/vitest/vitest.mjs run` as an allowed command, the agent used it, and the classifier's table of declared runners (S559) has `npm test`, `node --test`, `go test` and others but not that command, so it is not fused and its long logs are not read by the Reducer (`isRunnerCall` is false for it). Two other turns (the 4,287 and 4,483-byte logs, over the 4 KiB threshold) show the effect on the Reducer: 0 opportunities. For the owner to rule: add the command to the table (the table is the trust, so a change to it is a change to what is proved fused), or take it out of the tool's description so that the agent runs `npm test` (which is in the table, and which the world allows). The pilot's report will log the commands from now on.
+3. **The first search of both trials was refused or empty** (exit status 1, 22 bytes); harmless.
+
+**Stopped here, as ruled.** Nothing else has run. The key is read only from the environment and is not in any file.
