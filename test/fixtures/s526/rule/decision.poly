@@ -1,0 +1,37 @@
+// Known-good base with a decision that carries an egress label and no class: CLEAN on the tree before the feature.
+// A decision is class none by construction (PD1.7), so PS23.6 must not report it.
+module s526decision
+
+enum Phase { Idle, Asking, Done, Failed }
+enum Answer { Yes, No }
+
+machine Ask {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+
+  action Go()
+  action Answered(a: Answer, conf: Conf, margin: Conf)
+  action Unanswered()
+
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Asking
+    decide ask(q: "ok")
+  }
+  on Answered(a, conf, margin) {
+    require phase == Asking else reject "not-asking"
+    phase' = Done
+  }
+  on Unanswered {
+    require phase == Asking else reject "not-asking"
+    phase' = Failed
+  }
+
+  decision ask(q: string) -> Answer {
+    provider "p"
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Answered(a: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Unanswered()
+  }
+}

@@ -1,0 +1,39 @@
+// PT33.5 variant K: irreversible effect with idempotent header and explicit retry.
+// This is the keyed case with a 1-hour window and 5 attempts.
+module s526base
+
+enum Phase { Idle, Working, Done, Failed }
+
+machine Job {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+
+  action Go()
+  action Worked()
+  action Gave()
+
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit work(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+
+  effect work(n: 0..1) {
+    kind "s526.work"
+    labels { egress:external }
+    class irreversible
+    idempotent header "Idempotency-Key" window 1h
+    retry { attempts 5, base 500ms, timeout 30s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}

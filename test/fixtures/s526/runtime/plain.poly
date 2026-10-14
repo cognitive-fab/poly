@@ -1,0 +1,37 @@
+// CONTROL: an effect with targets and retry but no idempotent clause
+module s526plain
+
+enum Phase { Idle, Working, Done, Failed }
+
+machine Job {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+
+  action Go()
+  action Worked()
+  action Gave()
+
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit work(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+
+  effect work(n: 0..1) {
+    kind "s526.work"
+    labels { egress:external }
+    targets { egress: "https://api.psp.example/v1/" }
+    class irreversible
+    retry { attempts 1, base 200ms, timeout 5s }
+    ok -> Worked()
+    failed -> Gave()
+  }
+}

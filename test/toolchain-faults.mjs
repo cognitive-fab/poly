@@ -98,6 +98,10 @@ export const FAULT_SOURCES = {
   'workflow-order-cap-raised': ['test/fixtures/m7/workflow-budget/desk.poly'],
   // PS4.1h, PT3.3a (S458): a cut parameter explored at one class fewer than its representatives.
   'range-cut-dropped': ['test/fixtures/cut-ranges/refunds.poly'],
+  // PT33.2: the manifest's idempotency field, an artefact the runtime reads.
+  'idempotency-dropped': ['test/fixtures/s526/manifest/keyed.poly'],
+  'idempotency-window-widened': ['test/fixtures/s526/manifest/keyed.poly'],
+  'idempotency-invented': ['test/fixtures/s526/manifest/plain.poly'],
 };
 
 export const DELIBERATELY_BROKEN_LOWERINGS = Object.keys(FAULT_SOURCES);

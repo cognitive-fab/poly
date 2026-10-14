@@ -1,0 +1,38 @@
+// PT33.2: effects manifest gains idempotency field for nature-idempotent effects
+// PL4005 NATURE_OUTSIDE_STD expected here: the nature-idempotent form is used outside std/, and the build succeeds anyway
+module manifest.nature
+
+enum Phase { Idle, Working, Done, Failed }
+
+machine Job {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+
+  action Go()
+  action Worked()
+  action Gave()
+
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit work(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+
+  effect work(n: 0..1) {
+    kind "s526.work"
+    labels { egress:external }
+    class irreversible
+    retry { attempts 3, base 200ms, timeout 5s }
+    idempotent by nature "RFC 7009"
+    ok -> Worked()
+    failed -> Gave()
+  }
+}

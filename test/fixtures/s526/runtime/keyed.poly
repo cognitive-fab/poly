@@ -1,0 +1,38 @@
+// PT33.4 DAC4: an effect with idempotent header and retry safety
+module s526keyed
+
+enum Phase { Idle, Working, Done, Failed }
+
+machine Job {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+
+  action Go()
+  action Worked()
+  action Gave()
+
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit work(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+
+  effect work(n: 0..1) {
+    kind "s526.work"
+    labels { egress:external }
+    targets { egress: "https://api.psp.example/v1/" }
+    class irreversible
+    idempotent header "Idempotency-Key" window 24h
+    retry { attempts 3, base 200ms, timeout 5s }
+    ok -> Worked()
+    failed -> Gave()
+  }
+}
