@@ -65,21 +65,60 @@ test('PS23.5, DAC1(a): base unguarded irreversible is FINDINGS PL4003 with witne
   const pl4003 = m.diagnostics.filter((d) => d.code === 'PL4003');
   assert.equal(pl4003.length, 1, `PS23.5: must have exactly one PL4003, got ${pl4003.length}`);
 
-  // PS23.8: witness has prefix (trace) and delivery parts
-  const finding = pl4003[0];
-  assert.ok(finding.witness, 'PS23.8: witness must exist');
+  // PT33.12: diagnostic fields - exact structure
+  const d = pl4003[0];
+  assert.ok(d.code === 'PL4003', 'PT33.12: code must be PL4003');
+  assert.ok(d.name, 'PT33.12: name must exist');
+  assert.ok(d.at, 'PT33.12: at must exist');
+  assert.ok(typeof d.at.line === 'number', 'PT33.12: at.line must be a number (the line of effect work declaration)');
+  assert.ok(typeof d.at.module === 'string', 'PT33.12: at.module must exist');
+  assert.ok(typeof d.at.machine === 'string', 'PT33.12: at.machine must exist');
+  assert.ok(typeof d.at.col === 'number', 'PT33.12: at.col must be a number');
 
-  // PS23.8: witness structure check - look in the whole finding JSON, not just trace field
-  const witnessJson = JSON.stringify(finding);
+  // PT33.12: reach must be "reached" or "not-reached-in-instance"
+  assert.equal(d.reach, 'reached', 'PT33.12: reach must be "reached" for reachable effect');
 
-  // Check for prefix trace elements: {pre, action, data, post}
-  // Either directly as fields or in the trace array
-  assert.ok(witnessJson.includes('Start') || witnessJson.includes('pre'),
-    'PS23.8: witness must contain trace part (Start or pre state)');
+  // PT33.12: witness structure
+  assert.ok(d.witness, 'PT33.12: witness must exist');
+  assert.ok(typeof d.witness.id === 'string', 'PT33.12: witness.id must be a string');
 
-  // PS23.8: delivery part: "executions of the target: 2", Start shown twice, may include HandlerFailed
-  assert.ok(witnessJson.includes('executions of the target: 2'),
-    'PS23.8: witness must contain "executions of the target: 2" (delivery part annotation)');
+  // PT33.12: trace is non-empty array of { pre, action, data, post }
+  assert.ok(Array.isArray(d.witness.trace), 'PT33.12: witness.trace must be an array');
+  assert.ok(d.witness.trace.length > 0, 'PT33.12: witness.trace must be non-empty for reached effect');
+  d.witness.trace.forEach((win) => {
+    assert.ok(typeof win.pre === 'object', 'PT33.12: trace window pre must exist');
+    assert.ok(typeof win.action === 'string', 'PT33.12: trace window action must be a string');
+    assert.ok(typeof win.data === 'object', 'PT33.12: trace window data must exist');
+    assert.ok(typeof win.post === 'object', 'PT33.12: trace window post must exist');
+  });
+
+  // PT33.12: delivery structure
+  assert.ok(d.witness.delivery, 'PT33.12: witness.delivery must exist');
+  assert.ok(d.witness.delivery.model && d.witness.delivery.model.match(/^runtime\d+\.OutboxIntent$/),
+    `PT33.12: delivery.model must be runtime<m>.OutboxIntent, got ${d.witness.delivery.model}`);
+
+  // PT33.12: steps array with exact action sequence
+  assert.ok(Array.isArray(d.witness.delivery.steps), 'PT33.12: delivery.steps must be an array');
+  const actions = d.witness.delivery.steps.map((s) => s.action);
+  assert.deepEqual(actions, ['Propose', 'GateAllow', 'Start', 'HandlerFailed', 'Start', 'HandlerOk', 'SettleOk'],
+    `PT33.12: steps actions must be exact sequence, got ${JSON.stringify(actions)}`);
+
+  // PT33.12: each Start carries target: "may-execute"
+  const starts = d.witness.delivery.steps.filter((s) => s.action === 'Start');
+  assert.ok(starts.length === 2, `PT33.12: must have exactly 2 Start steps, got ${starts.length}`);
+  starts.forEach((start) => {
+    assert.equal(start.target, 'may-execute', 'PT33.12: each Start must have target: "may-execute"');
+  });
+
+  // PT33.12: exact field values
+  assert.equal(d.witness.delivery.targetExecutions, 2, 'PT33.12: targetExecutions must be 2');
+  assert.equal(d.witness.delivery.key, 'unchanged', 'PT33.12: key must be "unchanged"');
+  assert.equal(d.witness.delivery.deduplication, 'none', 'PT33.12: deduplication must be "none"');
+  assert.ok(Array.isArray(d.witness.delivery.alsoBy), 'PT33.12: alsoBy must be an array');
+  const unsettled = d.witness.delivery.alsoBy.find((x) => x.cause === 'unsettled');
+  assert.ok(unsettled, 'PT33.12: alsoBy lists the unsettled variant');
+  assert.deepEqual(unsettled.steps.map((s) => s.action), ['Propose', 'GateAllow', 'Start', 'HandlerOk', 'SettleFailed', 'Start', 'HandlerOk', 'SettleOk']);
+  assert.deepEqual(unsettled.steps.filter((s) => s.action === 'Start').map((s) => s.target), ['may-execute', 'may-execute']);
 });
 
 // PS23.8, DAC1(b): unreached effect still PL4003 with reach indicator
@@ -94,11 +133,12 @@ test('PS23.8, DAC1(b): unreached effect is PL4003 with reach: not-reached-in-ins
   const pl4003 = m.diagnostics.filter((d) => d.code === 'PL4003');
   assert.equal(pl4003.length, 1, `PS23.8: unreached must have PL4003, got ${pl4003.length}`);
 
-  // Search witness JSON for reach indicator
-  const finding = pl4003[0];
-  const witnessJson = JSON.stringify(finding);
-  assert.ok(witnessJson.includes('not-reached-in-instance'),
-    'PS23.8: witness must contain reach: "not-reached-in-instance" for unreached effect');
+  // PT33.12: unreached case has reach: "not-reached-in-instance" and empty trace
+  const d = pl4003[0];
+  assert.equal(d.reach, 'not-reached-in-instance', 'PT33.12: reach must be "not-reached-in-instance" for unreached effect');
+  assert.ok(Array.isArray(d.witness.trace), 'PT33.12: trace must be an array');
+  assert.equal(d.witness.trace.length, 0, 'PT33.12: trace must be empty when reach is "not-reached-in-instance"');
+  assert.ok(d.witness.delivery, 'PT33.12: delivery must still be present even when unreached');
 });
 
 // PT33.9: export witness test
@@ -119,7 +159,7 @@ test('PT33.9: poly witness <id> --test exports test for PL4003', async () => {
   delete env.NODE_TEST_CONTEXT;
   const run = spawnSync(process.execPath, ['--test', out], { encoding: 'utf8', env });
   assert.notEqual(run.status, 0, 'PT33.9: the exported test fails on the unfixed program');
-  assert.match(run.stdout + run.stderr, /execut/i, 'PT33.9: it fails because the target executed twice');
+  assert.match(run.stdout + run.stderr, /executions/i, 'PT33.9: it fails on the executions-per-intent assertion (PT33.9: executions per intent <= 1)');
 });
 
 // PS23.4, DAC2(a): G1 (retry { attempts 1 }) eliminates PL4003
@@ -164,6 +204,19 @@ test('PS23.4, DAC2(b): G2 idempotent header window is CLEAN, shows retry-safe wi
   assert.ok(text.includes('keyed') || text.includes('Idempotency-Key'), 'PT33.6: G2 must mention keyed or header');
   assert.ok(text.includes('Idempotency-Key'), 'PT33.6: must show header name');
   assert.ok(text.includes('K17'), 'PT33.6: must list K17 assumption');
+});
+
+// PT33.12: model bound matches attempts for G2 (attempt 3)
+test('PT33.12: G2 with attempts 3 is CLEAN with no PL4003', async () => {
+  const path = variant('g2-attempts3.poly', (b) =>
+    b.replace('    class irreversible', '    class irreversible\n    retry { attempts 3, base 200ms, timeout 500ms }\n    idempotent header "Idempotency-Key" window 5s'));
+  const r = await checkFile(path, { root: OUT });
+  assert.notEqual(r.verdict, 'REFUSED', 'PT33.12: must parse');
+  assert.equal(r.verdict, 'CLEAN', `PT33.12: G2 attempts 3 must be CLEAN, got ${r.verdict}`);
+  assert.ok(r.machines && r.machines[0], 'PT33.12: must have checked');
+  const m = r.machines[0];
+  const pl4003 = m.diagnostics.filter((d) => d.code === 'PL4003');
+  assert.equal(pl4003.length, 0, 'PT33.12: G2 must have no PL4003');
 });
 
 // PS23.4, DAC2(c): base (no G1) must have PL4003 (CLEAN baseline without guarding)
@@ -321,4 +374,15 @@ test('PS23.5: base.poly has no property declaration and has PL4003 when feature 
   const pl4003 = m.diagnostics.filter((d) => d.code === 'PL4003');
   // After feature lands: unguarded irreversible must have PL4003
   assert.ok(pl4003.length > 0, 'PS23.5: unguarded irreversible must have PL4003 regardless of property declarations');
+});
+
+// PT33.12: the delivery model is the one of the effect's bound
+test('PT33.12: an unguarded effect of 3 attempts names the model runtime3.OutboxIntent', async () => {
+  const path = variant('unguarded-attempts3.poly', (b) =>
+    b.replace('    class irreversible', '    class irreversible\n    retry { attempts 3, base 200ms, timeout 500ms }'));
+  const r = await checkFile(path, { root: OUT });
+  assert.notEqual(r.verdict, 'REFUSED', 'the source parses today');
+  const d = (r.machines?.[0]?.diagnostics ?? []).find((x) => x.code === 'PL4003');
+  assert.ok(d, 'PS23.5: PL4003 for 3 attempts and no guarantee');
+  assert.equal(d.witness.delivery.model, 'runtime3.OutboxIntent');
 });

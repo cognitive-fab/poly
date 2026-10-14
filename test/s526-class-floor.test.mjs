@@ -96,11 +96,23 @@ test('PS23.6: class none on egress:external has no PL6304 and report prints clas
   assert.equal(r.verdict, 'CLEAN', `PS23.6: verdict should be CLEAN but got ${r.verdict}`);
   assert.equal(countCode(r, 'PL6304'), 0, 'PS23.6: no PL6304 when class is declared');
 
-  // PT33.6: report prints the class of every effect that has an egress label
+  // PT33.12: effectClasses field has exact structure
+  const m = r.machines[0];
+  assert.ok(Array.isArray(m.effectClasses), 'PT33.12: effectClasses must be an array');
+  assert.equal(m.effectClasses.length, 1, 'PT33.12: one entry for work effect (has egress label)');
+  const entry = m.effectClasses[0];
+  assert.equal(entry.kind, 's526.work', 'PT33.12: kind must match effect kind');
+  assert.equal(entry.effect, 'work', 'PT33.12: effect name');
+  assert.equal(entry.class, 'none', 'PT33.12: class must be none (the declared class)');
+  assert.ok(Array.isArray(entry.labels), 'PT33.12: labels must be an array');
+  assert.ok(entry.labels.includes('egress:external'), 'PT33.12: labels must contain egress:external');
+
+  // PT33.12: report prints exact line
   const report = render(r);
-  assert.ok(report, 'sanity: report should exist');
-  assert.ok(report.split('\n').some((l) => /\bwork\b/.test(l) && /\bnone\b/.test(l)),
-    `PT33.6: report should print the class, got: ${report}`);
+  const lines = report.split('\n').map((l) => l.trim());
+  const expected = 'class  s526.work  none';
+  assert.ok(lines.some((l) => l === expected),
+    `PT33.12: must have exact line "${expected}" in\n${report}`);
 });
 
 test('CONTROL: PS23.6: effect with non-egress label and no class has no PL6304', async () => {
@@ -136,6 +148,30 @@ test('CONTROL: PS23.6: decision with egress label never reports PL6304', async (
   assert.ok(/decision|ask|egress/.test(report), `PS23.6: report should mention decision or egress, got: ${report}`);
 });
 
+test('PT33.12: class null for unclassified egress effect shows in effectClasses', async () => {
+  // Effect with egress label but no class (PL6304)
+  const src = readFileSync(BASE, 'utf8').replace('    class irreversible\n', '');
+  assert.ok(src.includes('egress:external'), 'sanity: egress label present');
+  assert.ok(!src.includes('class'), 'sanity: class removed');
+
+  const file = write('class-null.poly', src);
+  const r = await checkFile(file, { root: OUT });
+
+  // PT33.12: effectClasses has entry with class: null
+  const m = r.machines[0];
+  assert.ok(Array.isArray(m.effectClasses), 'PT33.12: effectClasses must exist');
+  const entry = m.effectClasses.find((e) => e.effect === 'work');
+  assert.ok(entry, 'PT33.12: work effect in effectClasses');
+  assert.equal(entry.class, null, 'PT33.12: class must be null when not declared');
+
+  // PT33.12: render output for unclassified
+  const report = render(r);
+  const lines = report.split('\n').map((l) => l.trim());
+  const expected = 'class  s526.work  unclassified';
+  assert.ok(lines.some((l) => l === expected),
+    `PT33.12: must have exact line "${expected}" in\n${report}`);
+});
+
 test('PS23.6: multi-effect with one lacking class reports exactly one PL6304', async () => {
   // Base should be valid from previous test
   let src = readFileSync(BASE, 'utf8');
@@ -164,6 +200,17 @@ test('PS23.6: multi-effect with one lacking class reports exactly one PL6304', a
   // Exactly one PL6304 (for backup which has no class)
   assert.equal(countCode(r, 'PL6304'), 1, 'PS23.6: expect exactly one PL6304 for the second effect');
 
+  // PT33.12: effectClasses has both effects (both have egress label)
+  const m = r.machines[0];
+  assert.ok(Array.isArray(m.effectClasses), 'PT33.12: effectClasses must be array');
+  assert.equal(m.effectClasses.length, 2, 'PT33.12: two entries for two effects with egress labels');
+  const work = m.effectClasses.find((e) => e.effect === 'work');
+  const backup = m.effectClasses.find((e) => e.effect === 'backup');
+  assert.ok(work, 'PT33.12: work in effectClasses');
+  assert.ok(backup, 'PT33.12: backup in effectClasses');
+  assert.equal(work.class, 'irreversible', 'PT33.12: work has class');
+  assert.equal(backup.class, null, 'PT33.12: backup has class null');
+
   // The PL6304 should point to the backup effect area (not work, which has class)
   const diags = getDiagsWithCode(r, 'PL6304');
   if (diags.length > 0) {
@@ -172,4 +219,14 @@ test('PS23.6: multi-effect with one lacking class reports exactly one PL6304', a
     const line = lines[diag.at.line - 1];
     assert.ok(/backup|labels/.test(line), `PS23.6: PL6304 should point to backup effect, got: ${line}`);
   }
+});
+
+test('CONTROL: decision with egress label is not in effectClasses (decisions are class none by construction, PD1.7)', async () => {
+  const r = await checkFile(DECISION, { root: OUT });
+  const m = r.machines[0];
+
+  // effectClasses should not have the decision; it has no entry
+  assert.ok(Array.isArray(m.effectClasses), 'PT33.12: effectClasses array');
+  const hasDec = m.effectClasses.some((e) => e.effect === 'ask' || e.kind && e.kind.includes('ask'));
+  assert.ok(!hasDec, 'PT33.12: decision must not be in effectClasses');
 });

@@ -30,11 +30,14 @@ function memoryWrap() {
  */
 export async function concierge(name, opts = {}) {
   const key = makeKey(name);
-  const dir = project(name, ['test/fixtures/m9/concierge-refund.poly'], key, 'test-concierge-refund');
+  const source = opts.source ?? 'test/fixtures/m9/concierge-refund.poly';
+  const dir = project(name, [source], key, 'test-concierge-refund');
   writeFileSync(join(dir, 'poly.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(dir, 'poly.json'), 'utf8')), credentials: { payments: { store: 'kms' } } }, null, 2));
   const r = await admit(dir, { std: TEST_STD });
   const verifier = (credentials) => (credentials ? withEvidence({ role: credentials.role ?? 'Agent', principal: credentials.principal ?? 'agent-1' }, (opts.evidence ?? (() => ({})))(credentials)) : null);
-  const { rt, clock } = await loaded({ build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey } }, { std: TEST_STD, verifier });
+  const loadOpts = { std: TEST_STD, verifier };
+  if (opts.fault) loadOpts.fault = opts.fault;
+  const { rt, clock } = await loaded({ build: join(dir, '.poly', 'build'), certificate: r.certificatePath, trust: { [key.id]: key.publicKey } }, loadOpts);
   const token = opts.token ?? ((kind) => `${kind}-${randomBytes(24).toString('base64url')}`);
   const issued = [];
   const sent = [];

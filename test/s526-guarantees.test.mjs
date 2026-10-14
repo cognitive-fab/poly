@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, relative } from 'node:path';
-import { mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { checkFile, checkProject, admit, AdmitError, render } from '@poly/check';
 import { signRecord } from '@poly/core';
 import { ROOT, BUILD } from './helpers.mjs';
@@ -101,6 +101,7 @@ test('PS23.4, PT12.5: an unguarded PL4003 is refused at admission, an agent-sign
   const record = (who) => JSON.stringify(signRecord({ kind: 'acceptance', subject, by: who.keyId, at: '2026-10-14T00:00:00.000Z' }, who.privateKeyPem));
   writeFileSync(join(dir, 'accepted', 'a.json'), record(AGENT));
   await assert.rejects(admit(dir), (e) => e instanceof AdmitError && /agent key/.test(e.message), 'an agent-signed acceptance has no effect');
+  assert.ok(!existsSync(join(dir, '.poly', 'certificate.json')), 'the agent-signed record admitted nothing: no certificate was written');
   writeFileSync(join(dir, 'accepted', 'a.json'), record(PERSON));
   const admitted = await admit(dir);
   assert.deepEqual(admitted.certificate.boundAccepted.map((x) => [x.code, x.by]), [['PL4003', PERSON.keyId]]);
@@ -114,24 +115,67 @@ test('PS23.4, PT12.5: an unguarded PL4003 is refused at admission, an agent-sign
 test('PT33.6: at most once: the report has the retry-safe line of `work` saying so, on a CLEAN verdict', async () => {
   const r = await checked('report-g1.poly', ['retry { attempts 1, base 200ms, timeout 5s }']);
   assert.equal(r.verdict, 'CLEAN');
+
+  // PT33.12: retrySafe field has exact structure
+  const m = r.machines[0];
+  assert.ok(Array.isArray(m.retrySafe), 'PT33.12: retrySafe must be an array');
+  assert.equal(m.retrySafe.length, 1, 'PT33.12: one retrySafe entry for one effect');
+  const entry = m.retrySafe[0];
+  assert.equal(entry.kind, 's526.work', 'PT33.12: kind must match effect kind');
+  assert.equal(entry.effect, 'work', 'PT33.12: effect must be effect name');
+  assert.equal(entry.class, 'irreversible', 'PT33.12: class must be irreversible');
+  assert.equal(entry.attempts, 1, 'PT33.12: attempts must match G1');
+  assert.deepEqual(entry.guarantee, { form: 'at-most-once' }, 'PT33.12: guarantee form must be at-most-once');
+
+  // PT33.12: render output has exact line
   const text = render(r);
-  assert.match(text, /retry-safe[^\n]*work[^\n]*at most once/, text.slice(0, 600));
+  const lines = text.split('\n').map((l) => l.trim());
+  const expected = 'retry-safe  s526.work  irreversible, attempts 1, at most once';
+  assert.ok(lines.some((l) => l === expected),
+    `PT33.12: must have exact line "${expected}" in\n${text}`);
 });
 
 test('PT33.6: keyed: the report line names the header, the window and K17, on a CLEAN verdict', async () => {
   const r = await checked('report-g2.poly', ['retry { attempts 3, base 200ms, timeout 5s }', 'idempotent header "Idempotency-Key" window 24h']);
   assert.equal(r.verdict, 'CLEAN');
+
+  // PT33.12: retrySafe with keyed guarantee
+  const m = r.machines[0];
+  assert.ok(Array.isArray(m.retrySafe), 'PT33.12: retrySafe must be an array');
+  assert.equal(m.retrySafe.length, 1, 'PT33.12: one retrySafe entry');
+  const entry = m.retrySafe[0];
+  assert.equal(entry.kind, 's526.work', 'PT33.12: kind');
+  assert.equal(entry.effect, 'work', 'PT33.12: effect');
+  assert.equal(entry.class, 'irreversible', 'PT33.12: class');
+  assert.equal(entry.attempts, 3, 'PT33.12: attempts must be 3');
+  assert.equal(entry.guarantee.form, 'keyed', 'PT33.12: guarantee form must be keyed');
+  assert.equal(entry.guarantee.header, 'Idempotency-Key', 'PT33.12: header name');
+  assert.equal(entry.guarantee.windowMs, 86400000, 'PT33.12: window in milliseconds');
+
+  // PT33.12: render output exact line with window in largest exact divisor
   const text = render(r);
-  const line = text.split('\n').find((l) => /retry-safe/.test(l) && /work/.test(l));
-  assert.ok(line, `a retry-safe line for work: ${text.slice(0, 600)}`);
-  assert.match(line, /Idempotency-Key/);
-  assert.match(line, /24h|86400000/);
-  assert.match(line, /K17/);
+  const lines = text.split('\n').map((l) => l.trim());
+  const expected = 'retry-safe  s526.work  irreversible, attempts 3, keyed Idempotency-Key within 24h (K17)';
+  assert.ok(lines.some((l) => l === expected),
+    `PT33.12: must have exact line "${expected}" in\n${text}`);
 });
 
 test('PT33.6: unguarded (FINDINGS): the report still has a retry-safe line for `work`, and PL4003', async () => {
   const r = await checkFile(write('report-unguarded.poly', BASE), { root: OUT });
   assert.ok(['CLEAN', 'FINDINGS'].includes(r.verdict), `checked: ${r.verdict}`);
   assert.equal(count(r, 'PL4003'), 1, 'PS23.5: one PL4003');
-  assert.match(render(r), /retry-safe[^\n]*work/, 'PT33.6: a line even when the rule fails');
+
+  // PT33.12: unguarded has guarantee form: "none"
+  const m = r.machines[0];
+  assert.ok(Array.isArray(m.retrySafe), 'PT33.12: retrySafe must exist even with PL4003');
+  const entry = m.retrySafe.find((e) => e.effect === 'work');
+  assert.ok(entry, 'PT33.12: work effect in retrySafe');
+  assert.deepEqual(entry.guarantee, { form: 'none' }, 'PT33.12: unguarded has form: "none"');
+
+  // PT33.12: render output for unguarded effect
+  const text = render(r);
+  const lines = text.split('\n').map((l) => l.trim());
+  const expected = 'retry-safe  s526.work  irreversible, attempts 5, none';
+  assert.ok(lines.some((l) => l === expected),
+    `PT33.12: unguarded must have exact line "${expected}" in\n${text}`);
 });

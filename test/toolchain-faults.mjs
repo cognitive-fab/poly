@@ -138,3 +138,13 @@ export const ADAPTER_CERTIFICATE_FAULTS = ['stale-adapter-digest', 'swap-adapter
 export const POLICY_CERTIFICATE_FAULTS = ['stale-policy-digest', 'omit-policy', 'wrong-policy-engine', 'omit-policy-signature', 'stale-policy-signature', 'swap-policy-source'];
 // Review of M5b, D: the faults that need a handler importing an installed package (S154).
 export const PACKAGE_CERTIFICATE_FAULTS = ['omit-package-file'];
+
+// PT33.5 (ruled after Step 3): the seeded RUNTIME faults of the retry-safety rule, one per layer, so that neither
+// layer hides behind the other. They live in RUNTIME_FAULTS of @poly/runtime, not in poly-lower, and each has its own test
+// (test/s526-load-worker.test.mjs, test/s526-capability.test.mjs).
+export const S526_RUNTIME_FAULTS = [
+  'unkeyed-retry-admitted-at-load', // disables the load check (PL6411)
+  'unkeyed-retry-unclamped', // disables the worker's bound-1 creation
+  'idempotency-header-dropped', // disables the attach of PT33.4
+  'window-lapse-ignored', // disables the window-lapse check
+];

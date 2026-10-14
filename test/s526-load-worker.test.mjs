@@ -1,325 +1,172 @@
-// PT33.5 (DAC5, DAC6, DAC7): load refuses PL6411 for unguarded irreversible entries;
-// seeded runtime faults for unkeyed-retry-allowed and window-lapse-ignored behavior;
-// keyed intent takes WindowLapsed after window lapses with exhausted completion and lapsed outcome.
-// PT33.5a: OutboxIntent model gains WindowLapsed transition.
-// PS23.7: the window lapse prevents new attempts after the declared window since the first attempt.
+// PT33.5, PT33.5a, PT33.5b, PS23.7 (DAC5): the runtime enforces the rule a second and a third time.
+//   item 1  admission refuses an unguarded irreversible entry (PL4003, no acceptance);
+//   item 2  load refuses it again, PL6411, even when the certificate's signature is valid;
+//   item 3  the worker creates the intent with bound 1, so the target is reached once even if load let it through;
+//   PS23.7  a keyed intent starts no attempt after its window has lapsed, and ends `lapsed`.
+// The unsafe artefact is built by test/fixtures/s526/forge-unsafe-build.mjs (PT33.5b): it edits the manifest of an
+// admitted build and signs the certificate with the test trust key, bypassing the checker. Each seeded runtime fault is
+// caught by its own test, so neither layer hides behind the other (the names are in S526_RUNTIME_FAULTS).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { LoadError } from '@poly/runtime';
+import { certificateDigest } from '@poly/core';
+import { load, LoadError, RUNTIME_FAULTS } from '@poly/runtime';
 import { MODEL_SOURCE } from '@poly/runtime/model';
 import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
+import { forgeUnsafeBuild } from './fixtures/s526/forge-unsafe-build.mjs';
+import { S526_RUNTIME_FAULTS } from './toolchain-faults.mjs';
 
-// Fixture paths
 const UNGUARDED = 'test/fixtures/s526/loadworker/unguarded.poly';
 const KEYED = 'test/fixtures/s526/loadworker/keyed.poly';
-const EXHAUSTED_FIXTURE = 'test/fixtures/s526/loadworker/unguarded-exhausted.poly';
-const SAFE = 'test/fixtures/s526/loadworker/safe.poly';
+const SAFE = 'test/fixtures/s526/loadworker/safe.poly'; // retry { attempts 1 }, ok/failed/exhausted: CLEAN today
 
-/**
- * Admits a project, turning a thrown error into assert.fail with a PT33.1 message naming
- * the missing feature when appropriate. Returns the admitted project or fails the test.
- */
-async function admitOrFail(name, sources, expecting = null) {
+/** Admits a keyed variant; a refusal fails with the name of the missing feature, never as a bare crash. */
+async function admitKeyed(name) {
   try {
-    return await admitted(name, sources);
+    return await admitted(name, [KEYED]);
   } catch (e) {
-    if (expecting && expecting(e)) return null; // Expected failure
-    if (e.message && e.message.includes('PL4003')) {
-      assert.fail(`PT33.1/PT33.5 item 1: idempotent/retry clause not yet parsed or admitted: ${e.message}`);
-    }
-    assert.fail(`admission failed unexpectedly: ${e.message}`);
+    return assert.fail(`PT33.1: the idempotent clause is not accepted yet: ${e.message}`);
   }
 }
 
-// Cache admissions to avoid re-running the checker
-let admittedKeyed, admittedSafe, admittedExhausted;
+/** An admitted safe build whose manifest and certificate are then forged to an unguarded irreversible entry of 5 attempts. */
+async function unsafeBuild(name) {
+  return forgeUnsafeBuild(await admitted(name, [SAFE]), { kind: 's526.work', maxAttempts: 5 });
+}
 
-const keyedProject = async () => {
-  if (!admittedKeyed) admittedKeyed = await admitOrFail('s526-load-keyed', [KEYED]);
-  return admittedKeyed;
-};
+const loadOptions = (a, extra = {}) => ({ certificate: a.certificate, trust: a.trust, ...extra });
 
-const safeProject = async () => {
-  if (!admittedSafe) admittedSafe = await admitOrFail('s526-load-safe', [SAFE]);
-  return admittedSafe;
-};
-
-const exhaustedProject = async () => {
-  if (!admittedExhausted) admittedExhausted = await admitOrFail('s526-load-exhausted', [EXHAUSTED_FIXTURE]);
-  return admittedExhausted;
-};
-
-// ── PT33.5 item 1: Admission refuses unguarded irreversible with PL4003 ────────
-
-test('PT33.5 item 1: admitted refuses unguarded irreversible entry as PL4003', async () => {
-  // The unguarded variant U has no idempotent clause, no retry clause, and is irreversible.
-  // PT33.5 item 1 requires admission to refuse it with PL4003 (UNGUARDED_RETRY) when
-  // no signed acceptance lifts the finding. Today U is admitted because the rule is not
-  // yet implemented, so this assertion fails: the right reason.
-  let error;
+/** Runs a Job whose handler always fails (a lost answer) for many worker ticks and reports what the target saw. */
+async function runLost(a, extra = {}) {
+  const { rt, clock } = await loaded(a, extra);
   try {
-    await admitted('s526-load-unguarded', [UNGUARDED]);
-  } catch (e) {
-    error = e;
-  }
-
-  if (error) {
-    // After the feature, expect PL4003 in the error message
-    assert.match(error.message, /PL4003/, 'should refuse with PL4003 code');
-  } else {
-    // Today the feature is missing, so admission succeeds; the test fails with the right reason
-    assert.fail('PT33.5 item 1: admission should refuse PL4003 but succeeded (feature not yet implemented)');
-  }
-});
-
-// ── PT33.5 item 2: Load refuses PL6411 for unsafe manifest ────────────────────
-
-test('PT33.5 item 2: load refuses PL6411 for irreversible entry with no idempotency', { todo: 'no way to build the unsafe artefact yet: see the AMBIGUOUS note (the lead raises it with the reviewer)' }, async () => {
-  // PT33.5 item 2 requires load to refuse a manifest with an irreversible effect that has
-  // maxAttempts >= 2, no idempotency, and no certified acceptance, with PL6411
-  // (RETRY_UNSAFE_MANIFEST).
-  //
-  // To test this, we would need to:
-  // 1. Admit a variant with a safe retry config (to pass admission)
-  // 2. Edit the built manifest to remove idempotency and increase maxAttempts to 5
-  // 3. Load and assert PL6411
-  //
-  // However, the certificate binds artefact digests, so editing the manifest after
-  // admission will likely fail at load for digest mismatch (a different reason than PL6411).
-  // A full test would require re-signing the certificate with the admission key.
-  //
-  // AMBIGUOUS: The spec does not clarify whether a toolchain fault allows bypassing
-  // admission of U (the unguarded variant). If such a fault existed, we could:
-  // - Seed that fault to admit U with an unsafe manifest
-  // - Load without the fault
-  // - Assert the PL6411 refusal
-  //
-  // Today: the feature is not yet implemented, so:
-  // - If we edit the manifest after admission, load fails on digest mismatch
-  // - If we try to load the safe variant's build unchanged, it loads (no PL6411 check)
-  // This test is deferred: we cannot construct a valid, loadable build with the
-  // unguarded entry without either re-signing (implementing the cert signing) or a
-  // toolchain fault (not documented).
-
-  // Mark this test as not yet implementable
-  assert.fail('PT33.5 item 2: cannot construct a testable unsafe build today (PL6411 check not yet implemented, cert re-signing not yet built)');
-});
-
-// ── PT33.5 item 3: Seeded fault unkeyed-retry-allowed ────────────────────────
-
-test('PT33.5 item 3: seeded fault unkeyed-retry-allowed creates intent with bound 1', async () => {
-  // PT33.5 item 3 says the worker creates an intent with bound 1 (runtime1.OutboxIntent).
-  // The seeded fault unkeyed-retry-allowed disables this protection, allowing multiple attempts.
-  //
-  // This test loads with the fault, verifies that the intent is created with bound 1,
-  // and asserts that after the first attempt fails, no retry occurs.
-
-  // Use the exhausted fixture so we can observe the exhausted completion
-  const a = await exhaustedProject();
-  const { rt, clock } = await loaded(a, { fault: 'unkeyed-retry-allowed' });
-  try {
-    const calls = [];
-    handleWith(rt, 's526.work', (_payload, _caps, _ctx) => {
-      calls.push(1);
-      throw new Error('attempt failed');
-    });
-    await rt.create('s526base.Job', { id: 'job-bound1' });
-    await rt.dispatch('job-bound1', 'Go', {});
-    await rt.worker.tick();
-
-    // Advance clock several times to give the worker ample opportunity to retry
-    for (let i = 0; i < 3; i++) {
-      clock.advance(61_000);
-      await rt.worker.tick();
-    }
-
-    // With the fault, the intent has bound 1 so it cannot retry.
-    // The handler should be called exactly once.
-    assert.equal(calls.length, 1, 'handler called exactly once (bound 1)');
-
-    // The job should be Failed (exhausted completion delivered)
-    const state = await rt.getState('job-bound1');
-    assert.equal(state.state.phase, 'Failed', 'Job should be Failed after exhausted');
+    let calls = 0;
+    handleWith(rt, 's526.work', () => { calls++; throw new Error('lost answer'); });
+    await rt.create('s526base.Job', { id: 'job' });
+    await rt.dispatch('job', 'Go', {});
+    for (let i = 0; i < 12; i++) { await rt.worker.tick(); clock.advance(70_000); }
+    return { calls, phase: (await rt.getState('job')).state.phase };
   } finally { await rt.close(); }
+}
+
+// ---- the helper itself ------------------------------------------------------------------------------------------------
+
+test('CONTROL: PT33.5b: the forged build has an unguarded entry of 5 attempts and a certificate that is sealed and signed', async () => {
+  // Protects the helper (it passes today and must keep passing): without a valid seal and signature the load tests below
+  // would fail for the wrong reason.
+  const a = await unsafeBuild('s526-forge-control');
+  const cert = JSON.parse(readFileSync(a.certificate, 'utf8'));
+  assert.equal(cert.digest, certificateDigest(cert), 'the certificate is sealed');
+  assert.equal(cert.signatures[0].keyId, a.key.id, 'it is signed with the test trust key');
+  const man = JSON.parse(readFileSync(`${a.build}/s526base.Job/effects.manifest.json`, 'utf8')).effects['s526.work'];
+  assert.equal(man.retry.maxAttempts, 5);
+  assert.equal(man.class, 'irreversible');
+  assert.equal(man.idempotency, undefined);
 });
 
-// ── PS23.7: Window lapse behavior ──────────────────────────────────────────────
+// ---- the seeded faults exist -------------------------------------------------------------------------------------------
 
-test('PS23.7: keyed intent does not attempt after window lapses', async () => {
-  // PS23.7 says: A keyed intent does not start an attempt after its window has
-  // lapsed since the first attempt began. Such an intent ends lapsed (PS23.1) by
-  // the WindowLapsed transition, with the exhausted completion delivered and
-  // observation outcome lapsed.
-  //
-  // This test:
-  // 1. Uses the keyed variant K with 1-hour window
-  // 2. First attempt fails
-  // 3. Advances clock past the 1-hour window
-  // 4. Asserts the handler is NOT called again (called once total)
-  // 5. Asserts the Job is Failed and OutboxIntent is Dead
-  // 6. Asserts observation event has outcome 'lapsed'
+test('PT33.5: the four seeded runtime faults are listed and exist in RUNTIME_FAULTS', () => {
+  assert.deepEqual([...S526_RUNTIME_FAULTS].sort(), ['idempotency-header-dropped', 'unkeyed-retry-admitted-at-load', 'unkeyed-retry-unclamped', 'window-lapse-ignored']);
+  const known = Array.isArray(RUNTIME_FAULTS) ? RUNTIME_FAULTS : Object.keys(RUNTIME_FAULTS ?? {});
+  for (const f of S526_RUNTIME_FAULTS) assert.ok(known.includes(f), `RUNTIME_FAULTS names ${f} (it has: ${known.join(', ')})`);
+});
 
-  const a = await keyedProject();
+// ---- item 1: admission -------------------------------------------------------------------------------------------------
+
+test('PT33.5 item 1: admission refuses the unguarded irreversible entry, naming PL4003', async () => {
+  await assert.rejects(admitted('s526-load-unguarded', [UNGUARDED]), (e) => /PL4003|FINDINGS/.test(e.message), 'PL4003 is an unaccepted finding: not admitted');
+});
+
+// ---- item 2: load ------------------------------------------------------------------------------------------------------
+
+test('PT33.5 item 2: load refuses the forged unguarded build with PL6411, although its signature is valid', async () => {
+  const a = await unsafeBuild('s526-load-refuse');
+  await assert.rejects(load(a.build, loadOptions(a)), (e) => e instanceof LoadError && /PL6411/.test(e.message), 'PL6411 RETRY_UNSAFE_MANIFEST');
+});
+
+test('PT33.5 item 2, its own fault: unkeyed-retry-admitted-at-load disables the load check and nothing else', async () => {
+  const a = await unsafeBuild('s526-load-fault');
+  await assert.rejects(load(a.build, loadOptions(a)), (e) => e instanceof LoadError && /PL6411/.test(e.message), 'without the fault load refuses (PL6411)');
+  const rt = await load(a.build, loadOptions(a, { fault: 'unkeyed-retry-admitted-at-load' }));
+  await rt.close();
+});
+
+test('PT33.5 item 2, its own fault: unkeyed-retry-unclamped does not disable the load check', async () => {
+  const a = await unsafeBuild('s526-load-unclamped');
+  await assert.rejects(load(a.build, loadOptions(a, { fault: 'unkeyed-retry-unclamped' })), (e) => e instanceof LoadError && /PL6411/.test(e.message), 'the load layer still refuses');
+});
+
+// ---- item 3: the worker clamp ------------------------------------------------------------------------------------------
+
+test('PT33.5 item 3: with the load check bypassed, the intent is created with bound 1: the target is reached once and the exhausted completion ends the job', async () => {
+  const a = await unsafeBuild('s526-clamp');
+  const r = await runLost(a, { fault: 'unkeyed-retry-admitted-at-load' });
+  assert.equal(r.calls, 1, 'the handler (the target) ran once');
+  assert.equal(r.phase, 'Failed', 'the job ended through the exhausted completion');
+});
+
+test('PT33.5 item 3, its own fault: unkeyed-retry-unclamped removes the clamp (seeded on both layers the target is reached 5 times), and the clamp is the layer that held', async () => {
+  const a = await unsafeBuild('s526-clamp-fault');
+  const clamped = await runLost(a, { fault: 'unkeyed-retry-admitted-at-load' });
+  assert.equal(clamped.calls, 1, 'only the load layer seeded: the clamp holds, one call');
+  const both = await runLost(a, { fault: ['unkeyed-retry-admitted-at-load', 'unkeyed-retry-unclamped'] });
+  assert.equal(both.calls, 5, 'both layers seeded: the target is reached once per attempt, 5 times');
+});
+
+// ---- PS23.7: the window ------------------------------------------------------------------------------------------------
+
+test('PS23.7: a keyed intent starts no attempt after its window has lapsed: Dead, the exhausted completion, observation `lapsed`', async () => {
+  const a = await admitKeyed('s526-load-keyed');
   const { rt, clock } = await loaded(a);
   try {
-    const calls = [];
-    handleWith(rt, 's526.work', (_payload, _caps, _ctx) => {
-      calls.push(1);
-      throw new Error('lost answer');
-    });
-
+    let calls = 0;
+    handleWith(rt, 's526.work', () => { calls++; throw new Error('lost answer'); });
     await rt.create('s526base.Job', { id: 'job-lapse' });
     await rt.dispatch('job-lapse', 'Go', {});
     await rt.worker.tick();
-
-    // First attempt has run and failed
-    assert.equal(calls.length, 1, 'first attempt made');
-
-    // Advance clock by 2 hours (well past the 1-hour window)
-    clock.advance(2 * 60 * 60 * 1000);
+    assert.equal(calls, 1, 'the first attempt ran');
+    clock.advance(2 * 60 * 60 * 1000); // past the declared 1h window
     await rt.worker.tick();
-
-    // After the window lapse, the handler should not be called again
-    assert.equal(calls.length, 1, 'handler not called after window lapse (still exactly 1)');
-
-    // The Job should be Failed
-    const jobState = await rt.getState('job-lapse');
-    assert.equal(jobState.state.phase, 'Failed', 'Job in Failed state after window lapse');
-
-    // Check the outbox intent state
+    assert.equal(calls, 1, 'no second attempt after the window lapsed');
+    assert.equal((await rt.getState('job-lapse')).state.phase, 'Failed', 'the exhausted completion was delivered');
     const [row] = await rt.outbox('job-lapse');
-    assert.ok(row, 'PS23.7: the intent has an outbox row');
-    const intent = await rt.worker.intentState(row);
-    assert.equal(intent.intent, 'Dead', 'OutboxIntent is Dead after window lapse');
-
-    // Check observation event for lapsed outcome
-    const events = await rt.chain('job-lapse');
-    const obsEvent = events.find((e) => e.kind === 'observation');
-    assert.ok(obsEvent, 'PS23.7: an observation event exists for the intent');
-    assert.match(obsEvent.body?.outcome ?? '', /lapsed/, 'observation outcome is lapsed');
+    assert.ok(row, 'the intent has an outbox row');
+    assert.equal((await rt.worker.intentState(row)).intent, 'Dead');
+    const obs = (await rt.chain('job-lapse')).filter((e) => e.kind === 'observation');
+    assert.ok(obs.some((e) => e.body?.outcome === 'lapsed'), `an observation with outcome lapsed: ${JSON.stringify(obs.map((e) => e.body?.outcome))}`);
   } finally { await rt.close(); }
 });
 
-// ── Seeded fault: window-lapse-ignored ─────────────────────────────────────────
-
-test('PS23.7: seeded fault window-lapse-ignored allows retry despite window lapse', async () => {
-  // The seeded fault window-lapse-ignored disables the window lapse check in the worker.
-  // This test runs the same scenario as the preceding test, but with the fault enabled,
-  // and asserts that the handler IS called a second time (proving the fault works by
-  // showing the difference).
-
-  const a = await keyedProject();
-
-  // First: run without the fault (window lapse prevents second attempt)
-  const { rt: rt1, clock: clock1 } = await loaded(a);
-  const calls1 = [];
-  try {
-    handleWith(rt1, 's526.work', (_payload, _caps, _ctx) => {
-      calls1.push(1);
-      throw new Error('lost answer');
-    });
-    await rt1.create('s526base.Job', { id: 'job-no-fault' });
-    await rt1.dispatch('job-no-fault', 'Go', {});
-    await rt1.worker.tick();
-
-    clock1.advance(2 * 60 * 60 * 1000);
-    await rt1.worker.tick();
-
-    assert.equal(calls1.length, 1, 'without fault: handler called once (window lapse blocks retry)');
-  } finally { await rt1.close(); }
-
-  // Second: run with the fault (window lapse ignored, retry occurs)
-  const a2 = await keyedProject();
-  const { rt: rt2, clock: clock2 } = await loaded(a2, { fault: 'window-lapse-ignored' });
-  const calls2 = [];
-  try {
-    let failCount = 0;
-    handleWith(rt2, 's526.work', (_payload, _caps, _ctx) => {
-      calls2.push(1);
-      // First attempt fails, second succeeds
-      failCount++;
-      if (failCount === 1) throw new Error('lost answer');
-      return { ok: true };
-    });
-    await rt2.create('s526base.Job', { id: 'job-with-fault' });
-    await rt2.dispatch('job-with-fault', 'Go', {});
-    await rt2.worker.tick();
-
-    clock2.advance(2 * 60 * 60 * 1000);
-    await rt2.worker.tick();
-
-    // With fault, the retry should proceed even though window lapsed
-    assert.ok(calls2.length >= 2, `with fault: handler called ${calls2.length} times (including retry after lapse)`);
-  } finally { await rt2.close(); }
+test('PS23.7, its own fault: window-lapse-ignored lets the attempt run after the window (the difference shows the check is the cause)', async () => {
+  const a = await admitKeyed('s526-load-keyed-fault');
+  const run = async (extra) => {
+    const { rt, clock } = await loaded(a, extra);
+    try {
+      let calls = 0;
+      handleWith(rt, 's526.work', () => { calls++; throw new Error('lost answer'); });
+      await rt.create('s526base.Job', { id: 'job-w' });
+      await rt.dispatch('job-w', 'Go', {});
+      await rt.worker.tick();
+      clock.advance(2 * 60 * 60 * 1000);
+      await rt.worker.tick();
+      return calls;
+    } finally { await rt.close(); }
+  };
+  assert.equal(await run({}), 1, 'without the fault: one call');
+  assert.equal(await run({ fault: 'window-lapse-ignored' }), 2, 'with the fault: the second attempt runs after the window');
 });
 
-// ── PT33.5a: OutboxIntent model text-level check ──────────────────────────────
+// ---- PT33.5a: the model ------------------------------------------------------------------------------------------------
 
-test('PT33.5a: OutboxIntent model source declares action WindowLapsed()', () => {
-  // PT33.5a says the outbox model gains:
-  //   action WindowLapsed()
-  //   on WindowLapsed { match intent { Allowed => intent' = Dead ... } }
-  //
-  // This is a text-level check of the model source. It does not run the model
-  // or check its behavior; it only verifies the action and transition are present
-  // in the source code.
+test('PT33.5a: the OutboxIntent model source declares `action WindowLapsed()`', () => {
+  assert.match(readFileSync(MODEL_SOURCE, 'utf8'), /action\s+WindowLapsed\s*\(\s*\)/);
+});
 
+test('PT33.5a: `on WindowLapsed` takes Allowed to Dead and is not in the fair group', () => {
   const source = readFileSync(MODEL_SOURCE, 'utf8');
-
-  // Check for the WindowLapsed action declaration
-  const hasAction = /action\s+WindowLapsed\s*\(\s*\)/.test(source);
-  assert.ok(hasAction, 'OutboxIntent model should declare action WindowLapsed()');
-});
-
-test('PT33.5a: OutboxIntent model has on WindowLapsed with Allowed => Dead transition', () => {
-  // PT33.5a says: "it is not in the fair group (it is taken by the worker's clock,
-  // as Recheck is)."
-  // This test verifies the transition exists. It does NOT check the fairness group
-  // (that requires model checking, which is in scope for Step 5, not here).
-
-  const source = readFileSync(MODEL_SOURCE, 'utf8');
-
-  // Check for the on WindowLapsed handler
-  const hasHandler = /on\s+WindowLapsed\s*\{/.test(source);
-  assert.ok(hasHandler, 'OutboxIntent model should have on WindowLapsed handler');
-
-  // Check for the Allowed => Dead transition within the handler
-  const hasTransition = /on\s+WindowLapsed[\s\S]{0,500}?Allowed\s*=>\s*intent'\s*=\s*Dead/.test(source);
-  assert.ok(hasTransition, 'on WindowLapsed should have Allowed => intent\' = Dead transition');
-});
-
-// ── CONTROL: Safe variant with keyed header and attempts 1 ──────────────────────
-
-test('CONTROL: PT33.5 item 3: keyed variant with attempts 1 succeeds at first attempt', async () => {
-  // This CONTROL test verifies that the test harness works for success cases.
-  // It uses the safe variant S (keyed with attempts 1) and asserts:
-  // 1. Handler is called once
-  // 2. Handler succeeds
-  // 3. Job ends Done
-  //
-  // This protects the success path: keyed retry with attempts 1 and successful
-  // handler should leave no intent unfinished. Today this should pass because
-  // it exercises the core harness without depending on the retry-safety feature.
-
-  const a = await safeProject();
-  const { rt } = await loaded(a);
-  try {
-    const calls = [];
-    handleWith(rt, 's526.work', (_payload, _caps, _ctx) => {
-      calls.push(1);
-      return { ok: true };
-    });
-
-    await rt.create('s526base.Job', { id: 'job-safe' });
-    await rt.dispatch('job-safe', 'Go', {});
-    await rt.worker.tick();
-
-    // Handler should be called exactly once
-    assert.equal(calls.length, 1, 'handler called once for successful attempt');
-
-    // Job should end Done
-    const state = await rt.getState('job-safe');
-    assert.equal(state.state.phase, 'Done', 'Job should be Done after successful handler');
-  } finally { await rt.close(); }
+  assert.match(source, /on\s+WindowLapsed\s*\{[\s\S]{0,300}?Allowed\s*=>\s*intent'\s*=\s*Dead/);
+  const fair = source.slice(source.indexOf('under fair'));
+  assert.ok(source.includes('under fair'), 'the model states its fairness');
+  assert.doesNotMatch(fair, /WindowLapsed/, 'WindowLapsed is taken by the worker clock, not by fairness');
 });

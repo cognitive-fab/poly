@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { CapabilityRefused } from '@poly/runtime';
 import { ROOT } from './helpers.mjs';
 import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
+import { concierge, REFUNDS } from './concierge-refund-helpers.mjs';
 
 const KEYED_FIXTURE = 'test/fixtures/s526/runtime/keyed.poly';
 const PLAIN_FIXTURE = 'test/fixtures/s526/runtime/plain.poly';
@@ -180,7 +181,7 @@ test('PT33.4(2): handler-supplied Idempotency-Key is replaced with intent id, au
     assert.equal(headerValue, seen.ctx.idempotencyKey, `PT33.4(2): header must equal intent id`);
 
     // Assert an audit row for the replacement exists (AMBIGUOUS: field name if audit row format changes)
-    const replacementRow = audit.find((r) => JSON.stringify(r).includes('idempotency-header-replaced'));
+    const replacementRow = audit.find((r) => r.rule === 'idempotency-header-replaced');
     assert.ok(replacementRow, `PT33.4(2): audit must record idempotency-header-replaced, got ${JSON.stringify(audit.slice(0, 3))}`);
   } finally { await rt.close(); }
 });
@@ -366,15 +367,13 @@ test('PT33.4(6): seeded fault idempotency-header-dropped prevents header attachm
       await rt.worker.tick();
 
       // Return the header from the recorded request
-      if (t.calls.egress.length > 0) {
-        const [request] = t.calls.egress;
-        const headerLower = Object.entries(request.headers || {}).reduce((acc, [k, v]) => {
-          acc[k.toLowerCase()] = v;
-          return acc;
-        }, {});
-        return headerLower['idempotency-key'];
-      }
-      return undefined;
+      assert.equal(t.calls.egress.length, 1, 'PT33.4(6): exactly one POST reached the transport in this run (so an absent header is the fault, not a missing request)');
+      const [request] = t.calls.egress;
+      const headerLower = Object.entries(request.headers || {}).reduce((acc, [k, v]) => {
+        acc[k.toLowerCase()] = v;
+        return acc;
+      }, {});
+      return headerLower['idempotency-key'];
     } finally { await rt.close(); }
   }
 
@@ -385,4 +384,328 @@ test('PT33.4(6): seeded fault idempotency-header-dropped prevents header attachm
   // With fault, header should be absent
   const headerFaulted = await runAttach('idempotency-header-dropped');
   assert.ok(!headerFaulted, `PT33.4(6): with fault, Idempotency-Key must be absent, got ${headerFaulted}`);
+});
+
+/** Tests for caps.api path (credential-using effects): parallel to egress tests but via concierge helper. */
+
+/**
+ * CONTROL: an effect without idempotent clause (plain fixture) sends no Idempotency-Key through caps.api.
+ * This tests the api path works and records headers correctly.
+ */
+test('CONTROL: PT33.4(api): effect without idempotent clause sends no Idempotency-Key through caps.api', { timeout: 300_000 }, async () => {
+  const c = await concierge('s526-api-control', { source: 'test/fixtures/s526/runtime/concierge-plain.poly' });
+  try {
+    let seen;
+    handleWith(c.rt, 'payments.refund', async (payload, { api }) => {
+      seen = { out: await api.post(REFUNDS, `amount=${payload.amount}`) };
+      return { status: seen.out.status };
+    });
+    await c.grant('merchant-1');
+    const app = await c.ticket('alice');
+    await c.refund(app, 'merchant-1', 40);
+    await c.rt.advance();
+
+    assert.ok(seen, 'CONTROL: handler must run');
+    const refundsRequests = c.sent.filter((q) => q.url === REFUNDS);
+    assert.equal(refundsRequests.length, 1, `CONTROL: must make exactly one REFUNDS request, got ${refundsRequests.length}`);
+    const [request] = refundsRequests;
+
+    assert.ok(request.method === 'POST', 'CONTROL: request must be a POST');
+    assert.ok(request.headers?.authorization, 'CONTROL: request must have authorization header');
+
+    const headerKeys = Object.keys(request.headers || {}).map((k) => k.toLowerCase());
+    assert.ok(!headerKeys.includes('idempotency-key'), `CONTROL: no Idempotency-Key header in ${JSON.stringify(request.headers)}`);
+  } finally { await c.rt.close(); }
+});
+
+/**
+ * PT33.4(api) Test 1: a handler that calls api.post through a keyed effect
+ * sends a request whose headers include Idempotency-Key equal to the intent id.
+ * Fails today because the idempotent clause is not accepted yet.
+ */
+test('PT33.4(api-1): handler that calls api.post carries intent id as Idempotency-Key', { timeout: 300_000 }, async () => {
+  let c;
+  try {
+    c = await concierge('s526-api-1', { source: 'test/fixtures/s526/runtime/concierge-keyed.poly' });
+  } catch (e) {
+    if (/REFUSED/.test(e.message)) {
+      assert.fail(`PT33.1: the idempotent clause is not accepted yet: ${e.message}`);
+    }
+    throw e;
+  }
+  try {
+    let seen;
+    handleWith(c.rt, 'payments.refund', async (payload, { api }, ctx) => {
+      seen = { ctx, out: await api.post(REFUNDS, `amount=${payload.amount}`) };
+      return { status: seen.out.status };
+    });
+    await c.grant('merchant-1');
+    const app = await c.ticket('alice');
+    await c.refund(app, 'merchant-1', 40);
+    await c.rt.advance();
+
+    assert.ok(seen, 'PT33.4(api-1): handler must run');
+    assert.ok(seen.ctx, 'PT33.4(api-1): handler context must exist');
+    assert.ok(typeof seen.ctx.idempotencyKey === 'string' && seen.ctx.idempotencyKey.length > 0,
+      `PT33.4(api-1): ctx.idempotencyKey must be non-empty string, got ${typeof seen.ctx.idempotencyKey}`);
+
+    const refundsRequests = c.sent.filter((q) => q.url === REFUNDS);
+    assert.equal(refundsRequests.length, 1, `PT33.4(api-1): must make exactly one REFUNDS request, got ${refundsRequests.length}`);
+    const [request] = refundsRequests;
+
+    const headerLower = Object.entries(request.headers || {}).reduce((acc, [k, v]) => {
+      acc[k.toLowerCase()] = v;
+      return acc;
+    }, {});
+    assert.ok('idempotency-key' in headerLower, `PT33.4(api-1): must have Idempotency-Key header, got ${JSON.stringify(request.headers)}`);
+    const headerValue = headerLower['idempotency-key'];
+    assert.equal(headerValue, seen.ctx.idempotencyKey,
+      `PT33.4(api-1): Idempotency-Key (${headerValue}) must equal ctx.idempotencyKey (${seen.ctx.idempotencyKey})`);
+  } finally { await c.rt.close(); }
+});
+
+/**
+ * PT33.4(api) Test 2: a handler that sets its own Idempotency-Key: forged header
+ * is replaced with intent id; an audit row idempotency-header-replaced exists.
+ */
+test('PT33.4(api-2): handler-supplied Idempotency-Key is replaced with intent id, audited through api', { timeout: 300_000 }, async () => {
+  let c;
+  try {
+    c = await concierge('s526-api-2', { source: 'test/fixtures/s526/runtime/concierge-keyed.poly' });
+  } catch (e) {
+    if (/REFUSED/.test(e.message)) {
+      assert.fail(`PT33.1: the idempotent clause is not accepted yet: ${e.message}`);
+    }
+    throw e;
+  }
+  try {
+    let seen;
+    handleWith(c.rt, 'payments.refund', async (payload, { api }, ctx) => {
+      seen = { ctx, out: await api.post(REFUNDS, `amount=${payload.amount}`, { headers: { 'Idempotency-Key': 'forged' } }) };
+      return { status: seen.out.status };
+    });
+    await c.grant('merchant-1');
+    const app = await c.ticket('alice');
+    await c.refund(app, 'merchant-1', 40);
+    await c.rt.advance();
+
+    assert.ok(seen, 'PT33.4(api-2): handler must run');
+    assert.ok(typeof seen.ctx.idempotencyKey === 'string' && seen.ctx.idempotencyKey.length > 0,
+      'PT33.4(api-2): ctx.idempotencyKey must be a non-empty string');
+
+    const refundsRequests = c.sent.filter((q) => q.url === REFUNDS);
+    assert.equal(refundsRequests.length, 1, `PT33.4(api-2): must make exactly one REFUNDS request, got ${refundsRequests.length}`);
+    const [request] = refundsRequests;
+
+    const headerLower = Object.entries(request.headers || {}).reduce((acc, [k, v]) => {
+      acc[k.toLowerCase()] = v;
+      return acc;
+    }, {});
+    assert.ok('idempotency-key' in headerLower, 'PT33.4(api-2): must have Idempotency-Key header');
+    const headerValue = headerLower['idempotency-key'];
+    assert.notEqual(headerValue, 'forged', `PT33.4(api-2): handler-supplied value must be replaced, got ${headerValue}`);
+    assert.equal(headerValue, seen.ctx.idempotencyKey, `PT33.4(api-2): header must equal intent id`);
+
+    const audit = c.rt.store.db.prepare('SELECT action, rule, reason FROM pr_audit').all();
+    const replacementRow = audit.find((r) => r.rule === 'idempotency-header-replaced');
+    assert.ok(replacementRow, `PT33.4(api-2): audit must record idempotency-header-replaced, got ${JSON.stringify(audit.slice(0, 3))}`);
+  } finally { await c.rt.close(); }
+});
+
+/**
+ * PT33.4(api) Test 3: a second api.post in the same attempt is refused with PL6406.
+ */
+test('PT33.4(api-3): second api.post in same attempt is refused PL6406', { timeout: 300_000 }, async () => {
+  let c;
+  try {
+    c = await concierge('s526-api-3', { source: 'test/fixtures/s526/runtime/concierge-keyed.poly' });
+  } catch (e) {
+    if (/REFUSED/.test(e.message)) {
+      assert.fail(`PT33.1: the idempotent clause is not accepted yet: ${e.message}`);
+    }
+    throw e;
+  }
+  try {
+    let seen;
+    handleWith(c.rt, 'payments.refund', async (payload, { api }, ctx) => {
+      const first = await api.post(REFUNDS, `amount=${payload.amount}`);
+      let secondError;
+      try {
+        await api.post(REFUNDS, `amount=${payload.amount * 2}`);
+      } catch (e) {
+        secondError = e;
+      }
+      seen = { out: { first, secondError } };
+      return { status: first.status };
+    });
+    await c.grant('merchant-1');
+    const app = await c.ticket('alice');
+    await c.refund(app, 'merchant-1', 40);
+    await c.rt.advance();
+
+    assert.ok(seen, 'PT33.4(api-3): handler must run');
+    assert.ok(seen.out.secondError instanceof CapabilityRefused,
+      `PT33.4(api-3): second post must throw CapabilityRefused, got ${seen.out.secondError?.constructor?.name}`);
+
+    const isInMessage = /PL6406|CAPABILITY_REFUSED/.test(seen.out.secondError.message);
+    const audit = c.rt.store.db.prepare('SELECT action, rule, reason FROM pr_audit').all();
+    const isInAudit = audit?.some((r) => r.rule === 'PL6406');
+    assert.ok(isInMessage || isInAudit, `PT33.4(api-3): second post refusal must cite PL6406`);
+
+    const refundsRequests = c.sent.filter((q) => q.url === REFUNDS);
+    assert.equal(refundsRequests.length, 1, `PT33.4(api-3): transport must see exactly one REFUNDS POST, got ${refundsRequests.length}`);
+  } finally { await c.rt.close(); }
+});
+
+/**
+ * PT33.4(api) Test 4: api.get carries no Idempotency-Key header.
+ */
+test('PT33.4(api-4): api.get carries no Idempotency-Key header', { timeout: 300_000 }, async () => {
+  let c;
+  try {
+    c = await concierge('s526-api-4', { source: 'test/fixtures/s526/runtime/concierge-keyed.poly' });
+  } catch (e) {
+    if (/REFUSED/.test(e.message)) {
+      assert.fail(`PT33.1: the idempotent clause is not accepted yet: ${e.message}`);
+    }
+    throw e;
+  }
+  try {
+    let seen;
+    handleWith(c.rt, 'payments.refund', async (payload, { api }, ctx) => {
+      const getResult = await api.get(`${REFUNDS}?id=123`);
+      const postResult = await api.post(REFUNDS, `amount=${payload.amount}`);
+      seen = { out: { getResult, postResult } };
+      return { status: postResult.status };
+    });
+    await c.grant('merchant-1');
+    const app = await c.ticket('alice');
+    await c.refund(app, 'merchant-1', 40);
+    await c.rt.advance();
+
+    const refundsRequests = c.sent.filter((q) => q.url.startsWith(REFUNDS.split('?')[0]));
+    assert.equal(refundsRequests.length, 2, `PT33.4(api-4): must make two REFUNDS requests (GET and POST), got ${refundsRequests.length}`);
+
+    const [getRequest, postRequest] = refundsRequests;
+    assert.equal(getRequest.method, 'GET', 'PT33.4(api-4): first request must be GET');
+    assert.equal(postRequest.method, 'POST', 'PT33.4(api-4): second request must be POST');
+
+    const getHeaderLower = Object.entries(getRequest.headers || {}).reduce((acc, [k, v]) => {
+      acc[k.toLowerCase()] = v;
+      return acc;
+    }, {});
+    assert.ok(!('idempotency-key' in getHeaderLower), `PT33.4(api-4): GET must not have Idempotency-Key header, got ${JSON.stringify(getRequest.headers)}`);
+
+    const postHeaderLower = Object.entries(postRequest.headers || {}).reduce((acc, [k, v]) => {
+      acc[k.toLowerCase()] = v;
+      return acc;
+    }, {});
+    assert.ok('idempotency-key' in postHeaderLower, `PT33.4(api-4): POST must have Idempotency-Key header, got ${JSON.stringify(postRequest.headers)}`);
+  } finally { await c.rt.close(); }
+});
+
+/**
+ * PT33.4(api) Test 5: with the first attempt's handler throwing after the api.post
+ * and the retry succeeding, both attempts' requests carry the SAME key.
+ */
+test('PT33.4(api-5): first attempt throws after api.post, retry succeeds, both carry same key', { timeout: 300_000 }, async () => {
+  let c;
+  try {
+    c = await concierge('s526-api-5', { source: 'test/fixtures/s526/runtime/concierge-keyed.poly' });
+  } catch (e) {
+    if (/REFUSED/.test(e.message)) {
+      assert.fail(`PT33.1: the idempotent clause is not accepted yet: ${e.message}`);
+    }
+    throw e;
+  }
+  try {
+    let handlerAttempts = 0;
+    let firstAttemptKey;
+    handleWith(c.rt, 'payments.refund', async (payload, { api }, ctx) => {
+      handlerAttempts++;
+      const result = await api.post(REFUNDS, `attempt=${handlerAttempts}`);
+
+      if (handlerAttempts === 1) {
+        firstAttemptKey = ctx.idempotencyKey;
+        throw new Error('Lost answer');
+      }
+
+      return { status: result.status };
+    });
+    await c.grant('merchant-1');
+    const app = await c.ticket('alice');
+    await c.refund(app, 'merchant-1', 40);
+    await c.rt.advance();
+
+    c.clock.advance(500);
+    await c.rt.advance();
+
+    assert.equal(handlerAttempts, 2, `PT33.4(api-5): handler should run twice, got ${handlerAttempts} times`);
+
+    const refundsRequests = c.sent.filter((q) => q.url === REFUNDS);
+    assert.equal(refundsRequests.length, 2, `PT33.4(api-5): should make two REFUNDS POSTs, got ${refundsRequests.length}`);
+
+    const [firstRequest, secondRequest] = refundsRequests;
+
+    const firstHeaderLower = Object.entries(firstRequest.headers || {}).reduce((acc, [k, v]) => {
+      acc[k.toLowerCase()] = v;
+      return acc;
+    }, {});
+    const secondHeaderLower = Object.entries(secondRequest.headers || {}).reduce((acc, [k, v]) => {
+      acc[k.toLowerCase()] = v;
+      return acc;
+    }, {});
+
+    assert.ok('idempotency-key' in firstHeaderLower, `PT33.4(api-5): first POST must have Idempotency-Key`);
+    assert.ok('idempotency-key' in secondHeaderLower, `PT33.4(api-5): second POST must have Idempotency-Key`);
+
+    const firstKey = firstHeaderLower['idempotency-key'];
+    const secondKey = secondHeaderLower['idempotency-key'];
+    assert.equal(firstKey, secondKey, `PT33.4(api-5): both attempts must use same key: ${firstKey} vs ${secondKey}`);
+    assert.equal(firstKey, firstAttemptKey, `PT33.4(api-5): key must match ctx.idempotencyKey`);
+  } finally { await c.rt.close(); }
+});
+
+/**
+ * PT33.4(api) Test 6: seeded runtime fault idempotency-header-dropped.
+ * With the fault, the header is not attached; without it, the header is present through api.
+ */
+test('PT33.4(api-6): seeded fault idempotency-header-dropped prevents header attachment through api', { timeout: 300_000 }, async () => {
+  async function runAttach(fault) {
+    let c;
+    try {
+      c = await concierge(`s526-api-6-${fault ? 'fault' : 'nofault'}`, { source: 'test/fixtures/s526/runtime/concierge-keyed.poly', fault });
+    } catch (e) {
+      if (/REFUSED/.test(e.message)) {
+        assert.fail(`PT33.1: the idempotent clause is not accepted yet: ${e.message}`);
+      }
+      throw e;
+    }
+    try {
+      let seen;
+      handleWith(c.rt, 'payments.refund', async (payload, { api }, ctx) => {
+        seen = { ctx, out: await api.post(REFUNDS, `amount=${payload.amount}`) };
+        return { status: seen.out.status };
+      });
+      await c.grant('merchant-1');
+      const app = await c.ticket('alice');
+      await c.refund(app, 'merchant-1', 40);
+      await c.rt.advance();
+
+      const refundsRequests = c.sent.filter((q) => q.url === REFUNDS);
+      assert.equal(refundsRequests.length, 1, 'PT33.4(api-6): exactly one refund POST reached the provider in this run (so an absent header is the fault, not a missing request)');
+      const [request] = refundsRequests;
+      const headerLower = Object.entries(request.headers || {}).reduce((acc, [k, v]) => {
+        acc[k.toLowerCase()] = v;
+        return acc;
+      }, {});
+      return headerLower['idempotency-key'];
+    } finally { await c.rt.close(); }
+  }
+
+  const headerNormal = await runAttach(undefined);
+  assert.ok(headerNormal, `PT33.4(api-6): without fault, Idempotency-Key must be present through api`);
+
+  const headerFaulted = await runAttach('idempotency-header-dropped');
+  assert.ok(!headerFaulted, `PT33.4(api-6): with fault, Idempotency-Key must be absent through api, got ${headerFaulted}`);
 });
