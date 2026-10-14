@@ -30,7 +30,7 @@ Reading the code and records for the spec found four things that shape the plan:
 
 | Step | What | Done when | Costs money |
 |---|---|---|---|
-| **0 Rulings** | The reviewer rules Q1 to Q16 (section 7). Nothing below Step 1 starts before Q1, Q2 and Q3, which change what the migration is. | A ruling note in `decisions-demo.md` | no |
+| **0 Rulings (done, `decisions-demo.md`)** | The reviewer rules Q1 to Q16 (section 7). Nothing below Step 1 starts before Q1, Q2 and Q3, which change what the migration is. | A ruling note in `decisions-demo.md` | no |
 | **1 Spec text** | PS23, K17 and K18 into `04-semantics.md`; PT33 and the diagnostics into `03-technical-spec.md` (the code table, PT12.2, and the grammar); the scope table of `02-architecture.md` §2a; the record of S526 corrected (the manifest default is 5); S572 to S583 into `decisions-demo.md`. Committed alone, with no test and no code. | `git diff` shows only `docs/`; each id cited by a later test exists | no |
 | **2 Scan** | A read-only script, `scripts/scan-retry-safe.mjs`, lists for every `.poly` file (and the embedded `.ts` sources and the inline sources of tests) each irreversible effect with its bound, its guarantee, and each effect with an `egress` label and no class, plus which standard modules each project pulls in. The output is `docs/demo/impact-s526.md`. It replaces the counts in the spec's section 2.5. | The list equals the table's families; a count that differs from `decisions-m7.md` (30 and 25) is explained | no |
 | **3 Tests first** | A separate writer, given only the spec text, writes the failing tests for DAC1 to DAC7: the rule on every form (default, `attempts 1`, keyed, accepted), with and without any declared property; the witness (prefix and delivery parts, and its exported test fails on the unfixed program); the class floor; the window and its lapse; the capability (header attached, replaced and audited, second write refused); load refusal `PL6411`; the bound-1 creation; the three broken lowerings and the two seeded runtime faults; the read-back; the import boundary. Each fails for the right reason before any code. | Every test fails on the unmodified tree, and the failure is the missing feature | no |
@@ -39,7 +39,7 @@ Reading the code and records for the spec found four things that shape the plan:
 | **6 Migration** | One commit per family, each with its verdict diff: `std/credentials` and `std/channels` (as ruled in Q1 and Q3), `examples/oms`, `examples/orders`, `examples/concierge` (the `refund` declaration; the handler's conditional header removed), `examples/harness` (`fetch`'s class), `conformance/` by directory, `test/fixtures/` by directory, the inline sources of the four tests, and `conformance/m2/embed/orders.ts`. The new baseline `docs/demo/verdicts-after-s526.json`. The old baselines stay. | `Step 2`'s list is empty of findings except the teaching variants; every changed verdict is in the new baseline with its reason; the serial group and `test/examples-expected.test.mjs` pass, each heavy file alone | no |
 | **7 Teaching variants and example text** | `examples/retry/` (three forms of the refund, and the 40-line `draft-unguarded.poly`, the inbox's pre-fix draft reduced), each with its expected line; the concierge README's check section and glossary; `examples/README.md`. | The variants check in seconds, each to its expected line | no |
 | **8 Stand-in, driver, controls** | `demo/stand-in/stripe` (the documented refund and idempotency behaviour, the request log, the fault script), the container setup (name mapping, a throwaway authority made at run time, no route to the real Stripe), the replay driver and its report of the five numbers. Tests with three doubles of the baseline (refunds twice, keys, cannot start) and a mutant stand-in that ignores the key. | DAC8 and DAC9; the driver reports O1, O2 and O3 correctly on the doubles; the control fails first where it should | no |
-| **9 Front end and live providers** | The room page and server (personas, signing, per-persona replies, limits, kill switch), the verifier adapter, the transport, the staff panel feed; `demo/host/live-providers.mjs` on the inbox seam, with the extension for the `amount` record; the demo copy of the concierge and its printed diff; the launcher with the test-prefix guard; the secret scan. All tested on recorded providers and the stand-in. | DAC10, DAC11 on a recorded run, DAC13; the demo copy is `CLEAN` with its instance printed | no |
+| **9 Front end and live providers** | The room page and server (personas, signing, per-persona replies, limits, kill switch), the verifier adapter, the transport, the staff panel feed; `demo/host/live-providers.mjs` on the inbox seam, with the extension for the `amount` record; the demo copy of the concierge and its printed diff; a development vault holding a synthetic token that only the stand-in accepts; the secret scan. All tested on recorded providers and the stand-in. | DAC10, DAC11 on a recorded run, DAC13; the demo copy is `CLEAN` with its instance printed | no |
 | **10 Baseline production** | The owner's terminal. (a) The pre-registration commit: `demo/baseline/PROMPT.md` and its hash, the pilot count (Q8), the model and agent version. (b) The pilots, if any, in both arms, saved. (c) The kept TypeScript run and the kept poly run, each committed verbatim before anything is run against it. (d) The driver's report on each, with controls. I draft the launch scripts and the commit procedure; I do not run the agents. | DAC8; the outcomes O1 to O4 and P1 to P4 recorded as they fall | **yes** |
 | **11 Act 3 assets** | `demo/act3/`: the inbox figures with the record each comes from; the pre-fix draft; the recorded `PL4001` witness of the count rule. If the witness is not in a committed record, regenerating it is the 22-minute `test/after/ex-inbox-loop.test.mjs`, which is heavy and waits for the owner's slot. | DAC12 | no (the loop test calls polyx on recorded and synthetic data, no model; confirmed from its record before it runs) |
 | **12 Rehearsal** | Dry runs on recorded providers (free), then one live rehearsal of Act 2 with a few volunteers or the owner alone, on the stand-in; timing of every live command, including the check of the agent-built draft, against the limits of the script (a command that exceeds its limit becomes a recorded segment, labelled). The presenter's runbook. | A rehearsal record; the script's times are measured, not assumed | **yes** |
@@ -82,7 +82,6 @@ Everything below is a ceiling that the owner, the host or the CLI enforces. None
 | 10c | poly arm, the kept run | 25 | same |
 | 12 | one live rehearsal of Act 2 | 5 | the demo copy's budget caps (PS18.4) and the host's stop at the owner's figure |
 | Show | Act 2 live | 5 | same |
-| Test-mode Stripe | refunds and charges in the owner's test account | 0 | test mode moves no money; the host refuses a live-prefix key |
 | Act 3 | replay of records | 0 | no model |
 | **Total ceiling** | | **90** | A further run of anything is a new approval and a new line |
 
@@ -93,7 +92,6 @@ The per-message cost of Act 2 is not estimated here. Step 9 computes the demo co
 - The wording of the fixed paragraph in `PROMPT.md` (DB2), and the pre-registration commit; the number of pilots; the model and agent version for both arms.
 - Each paid run: the two kept runs, the pilots, the rehearsal, the show. Each in the owner's terminal, with the ceiling above.
 - Docker Desktop started for the replay (A8).
-- Test mode: the owner's Stripe test-mode key and a Connect test platform (Q10), the charges the setup script creates in the owner's test account, and the first run with the prefix guard on.
 - The demo person key and its anchor in the presenter's per-user configuration (A13).
 - The migration: bulk edits of `std/`, two examples, about 45 fixtures and four tests (Step 6), and the new verdict baseline.
 - A change to a shared standard-library module (Q1, Q3).
@@ -101,6 +99,8 @@ The per-message cost of Act 2 is not estimated here. Step 9 computes the demo co
 - Anything pushed: nothing is.
 
 ## 7. Open questions for the reviewer
+
+All sixteen are ruled (reviewer and owner); the rulings are in `decisions-demo.md`. The text below is the question as asked, kept for the record, except Q10, which carries the owner's ruling.
 
 Each has my recommendation. The spec cites the same numbers.
 
@@ -113,7 +113,7 @@ Each has my recommendation. The spec cites the same numbers.
 - **Q7** **Is a re-emitted effect (L1) in this release?** *Recommendation:* no (S527). The demo says so on screen.
 - **Q8** **Pilots.** *Recommendation:* one pilot per arm, reported with the kept run, so the pipelines are known before the run of record and neither arm has more tries than the other. If the owner wants none, the kept runs are the first runs and any failure of the pipeline costs a new pre-registration.
 - **Q9** **Act 1 recorded or live.** *Recommendation:* recorded sessions, labelled and dated, with the check, the fix check and the replay live. A build is too long and too variable for a six-minute slot.
-- **Q10** **Test mode needs a Connect test platform** (the concierge's credential is a Connect grant). *Recommendation:* rehearse on the stand-in; use test mode only if the owner has the platform ready, and say on screen which one ran.
+- **Q10** **Stripe (owner decision).** Only the local stand-in, at every stage, the show included. There is no real Stripe connection and no test mode, and nothing in the demo reads a Stripe key. On screen it is labelled a mock-up of Stripe.
 - **Q11** **A copy of the concierge or a configurable example** (DF8). *Recommendation:* a generated copy with its printed diff. The example stays as released.
 - **Q12** **Class `compensable`** joins the rule later.
 - **Q13** **The coding agent's model.** *Recommendation:* the model the audience would use today, named in the pre-registration commit; Opus 5.5 is the E3.9 precedent and its prices are on file. The owner chooses.

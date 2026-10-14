@@ -188,7 +188,7 @@ The paragraph does not mention timeouts, retries, duplicates or idempotency, or 
 phone/laptop --> room page (LAN) --> signs a Cloud-API-shaped webhook --> runtime ingress (127.0.0.1)
                                                                               |
                           Desk (the real concierge program) <- poly-io whatsapp adapter verifies signature
-                                |  refund intents --> gate/policy --> api under the grant --> Stripe (test mode or stand-in)
+                                |  refund intents --> gate/policy --> api under the grant --> Stripe mock-up (local stand-in)
                                 +--> replies --> room page (server-sent events, per participant)
 presenter terminal: staff notices (Notice/Slack panel), poly approve, journal verify and replay, poly cost
 ```
@@ -197,9 +197,8 @@ presenter terminal: staff notices (Notice/Slack panel), poly approve, journal ve
 
 **DF4** **Replies.** The adapter's send goes through a transport the host supplies (PT10b: a send reaches the network only through a transport it is given). The demo's transport hands the reply to the room page for that persona. No byte leaves the machine for a channel provider.
 
-**DF5** **Stripe.** Two modes, one switch, shown on screen.
-- **Stand-in** (default, used for all rehearsals): the local server of DB6, with each persona's charges seeded.
-- **Test mode** (the owner's choice, needs the owner's setup): the owner's Stripe test-mode key and a Connect test platform with a connected test account, in the owner's terminal environment. The host starts only if the key's prefix is a test prefix; a live prefix refuses to start before any request is made (the host reads the prefix, never prints the value). Charges for the personas are created beforehand by a setup script using Stripe's test tokens. Q10 asks whether the owner has a Connect test platform; if not, the demo runs on the stand-in and says so.
+**DF5** **Stripe (owner decision, Q10): only the local stand-in, at every stage, the show included.** There is no real Stripe connection and no test mode, and nothing in the demo reads, needs or stores a Stripe key. Every screen that shows it labels it a mock-up of Stripe.
+- The local server of DB6, with each persona's charges seeded. The concierge's credential is a Stripe Connect grant, so the demo runs a development vault holding a synthetic token that only the stand-in accepts; the token is generated at start, held in memory, and written nowhere.
 
 **DF6** **The live model providers.** The room's text has no recorded answer, so Act 2 calls a model. The concierge has only recorded providers (`host/recorded.mjs`); the demo adds `demo/host/live-providers.mjs` on the seam of `examples/inbox/host/providers.mjs` (`anthropicProvider`: the answer is the vote share of n samples, a key read once from the owner's environment and sent as a header, never logged). The concierge's `amount` decision returns a record `{ value: 0..500 }`, which the inbox's seam does not yet return, so the plan has a step for it. Model tiers and price tables follow the E3.9 pattern (the tables are read from the vendor's page on a date and cited; the last reading, 2026-10-12, is a reference, not a source for this run).
 
@@ -237,7 +236,7 @@ Screen: two panes, left TypeScript, right poly. Under both, the same prompt, wit
 
 ### DS2 · Act 2, "the audience attacks" (about 2:00)
 
-Screen: the room page's QR code and URL, the live feed of messages with persona aliases, the staff panel (Notice), the presenter's terminal. The stand-in or test mode is named. The audience sends anything; the presenter has five lines ready if the room is slow. Nothing below depends on what the model says: each claim is an invariant checked on the journal.
+Screen: the room page's QR code and URL, the live feed of messages with persona aliases, the staff panel (Notice), the presenter's terminal. The Stripe mock-up is named as such. The audience sends anything; the presenter has five lines ready if the room is slow. Nothing below depends on what the model says: each claim is an invariant checked on the journal.
 
 | Message (example) | What the program does | Claim shown |
 |---|---|---|
@@ -268,7 +267,7 @@ All from committed records; the only live command is the small variant of Act 1.
 
 ### DS4 · What is on screen about limits
 
-A final card, always shown: one model; synthetic data; one run per arm; Stripe replaced by a stand-in or in test mode; the program's check holds for the instance printed with the verdict; K17 is an assumption; a re-emitted effect is outside PS23.
+A final card, always shown: one model; synthetic data; one run per arm; Stripe replaced by a local mock-up; the program's check holds for the instance printed with the verdict; K17 is an assumption; a re-emitted effect is outside PS23 (L1, S527).
 
 ## 6. Acceptance criteria
 
@@ -284,7 +283,7 @@ A final card, always shown: one model; synthetic data; one run per arm; Stripe r
 - **DAC10** The front end runs the concierge on messages whose senders were verified by the adapter's signature check; a forged or unsigned message is refused and reaches no machine. (DF3)
 - **DAC11** Act 2's claims hold on a recorded run and on a live rehearsal: no refund above 100 runs without a signed approval; no value outside `0..500` reaches the handler; no refund names an order of another persona; the canary is in no reply; `poly journal replay` reports 0 divergences. (DS2)
 - **DAC12** Every number printed in Act 3 reproduces from the records it cites (`decisions-m7.md`, the corpus, the promotion entries). A number that cannot be reproduced is removed from the script. (DS3)
-- **DAC13** The secret scan of DF9 passes, the host refuses a live-prefix payment key before any request, and the import-boundary check passes over `demo/` and over the new code in `packages/`.
+- **DAC13** The secret scan of DF9 passes, no code under `demo/` reads a Stripe key or any environment variable of a payment provider, and the import-boundary check passes over `demo/` and over the new code in `packages/`.
 
 ## 7. Spec issues raised and questions for the reviewer
 
@@ -314,7 +313,7 @@ Questions that change what this document says (the plan repeats them with my rec
 - **Q7** Whether L1 (a re-emitted effect) is in this release.
 - **Q8** The baseline's pilots (DB5) and the paragraph of DB2.
 - **Q9** Act 1 recorded or live (DS1).
-- **Q10** Test mode needs a Connect test platform.
+- **Q10** Stripe: the local stand-in only (ruled by the owner).
 - **Q11** A copy of the concierge, or a configurable example (DF8).
 - **Q12** Whether class `compensable` joins the rule in a later release (L6).
 
@@ -336,7 +335,7 @@ Questions that change what this document says (the plan repeats them with my rec
 
 ## Conclusion
 
-S526 asked for a check for a retried irreversible effect. This document answers with one rule that does not depend on what a program says about itself: an irreversible effect that may be attempted twice must be at most once, keyed by a header the runtime sets and the handler cannot omit, or (in the library only) idempotent by a vetted reason; a person's signature lifts admission and nothing else. The class floor closes the way around it that a coding agent would find first. The rule is computed from the manifest the runtime executes, enforced again at load and in the worker, and its artefact enters the build with its read-back and its broken variants. The witness is the predicted fault, and the same fault is replayed at the network edge against a TypeScript build that nobody edited, with every outcome of that comparison, including "it refunds once", reported as it falls. The front end carries the room's words through the real adapter, with verified senders and a stand-in or test-mode Stripe, and no secret in the repository. The three acts each state what they prove and what they do not. The cost of the rule is a migration of the standard library and of the fixtures that need an irreversible effect, listed in section 2.5 and decided in the plan.
+S526 asked for a check for a retried irreversible effect. This document answers with one rule that does not depend on what a program says about itself: an irreversible effect that may be attempted twice must be at most once, keyed by a header the runtime sets and the handler cannot omit, or (in the library only) idempotent by a vetted reason; a person's signature lifts admission and nothing else. The class floor closes the way around it that a coding agent would find first. The rule is computed from the manifest the runtime executes, enforced again at load and in the worker, and its artefact enters the build with its read-back and its broken variants. The witness is the predicted fault, and the same fault is replayed at the network edge against a TypeScript build that nobody edited, with every outcome of that comparison, including "it refunds once", reported as it falls. The front end carries the room's words through the real adapter, with verified senders and a local Stripe mock-up, and no secret in the repository. The three acts each state what they prove and what they do not. The cost of the rule is a migration of the standard library and of the fixtures that need an irreversible effect, listed in section 2.5 and decided in the plan.
 
 ## Glossary
 
