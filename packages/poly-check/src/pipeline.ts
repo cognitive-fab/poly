@@ -20,6 +20,7 @@ import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { parse, printExpr } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
+import { pinnedStd } from './std-pins.js';
 import { expandChannels, expandCredentials, expandRoutes, type ChannelPlan, canonicalize, digest, sha256Hex, checkModule, effectKind, effectSignature, fold, verdictOf, diag, loadProject, EXIT_CODES, type Diagnostic, type Module, type Verdict, type Witness } from '@poly/core';
 import type * as A from '@poly/core';
 import { lowerMachine } from '@poly/lower';
@@ -27,6 +28,7 @@ import { attachFixes } from './fixes.js';
 import { exportable } from './witness.js';
 import { handlerClosure } from './handlers.js';
 import { policyReports, type PolicyReport } from './policies.js';
+import type { RetrySafeEntry, EffectClassEntry } from '@poly/ref';
 import { translationValidate, confirmWitness, confirmEffectsWitness, checkJoint, conjunction, checkConfiguration, jointStep, stimuliAt, flattenData, evaluate, type Joint, stateDigestOf, loadLoweredModule, keyOf, type MachineReport, type RefFault, type Vacuous } from '@poly/ref';
 import { check as polygraphCheck, type PolygraphViolation } from '@cognitive-fab/polygraph/scripts/check.mjs';
 import { checkEffects } from '@cognitive-fab/polygraph/polyrun/src/check-effects.mjs';
@@ -51,6 +53,9 @@ export interface StageRecord {
 
 export interface MachineCheck {
   machine: string;
+  /** PS23, PT33.12: one entry per irreversible effect (its attempts and guarantee), and one per effect with an egress label (its class). */
+  retrySafe?: RetrySafeEntry[];
+  effectClasses?: EffectClassEntry[];
   stages: StageRecord[];
   /** Properties that were not checked, with the reason and the milestone that checks them (M1-2). */
   notRun: { property: string; reason: string }[];
@@ -165,6 +170,8 @@ export interface CheckOptions {
   program?: Module[];
   /** S176: a project's modules with their files, where `use` finds the modules it names; absent for a lone file. */
   programFiles?: { file: string; module: Module }[];
+  /** PS23.4, G4: the module is one of the standard library (its file is pinned in std/PINS.json), which may declare an effect idempotent by nature; set by checkFile. */
+  isStd?: boolean;
   /** S176: the program this module is checked in (it and the modules it uses), set by checkFile for its stages. */
   uses?: Module[];
   /** PT6.5, S152: generate the OpenShell sandbox policies (poly.json's `isolation`). */
@@ -283,7 +290,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
   // with too few points, is a warning beside the verdict; the map is used as it is.
   const calibrations = original.decls.flatMap((d) => (d.kind !== 'Route' ? [] : d.tiers.flatMap((t) => { const m = t.calibration === null ? undefined : routing.maps[t.calibration]; const why = m ? calibrationWarning(m.map) : null; return why ? [{ kind: 'calibration' as const, route: d.name, tier: t.name, map: t.calibration!, why }] : []; })));
   if (calibrations.length) report.warnings = [...(report.warnings ?? []), ...calibrations];
-  opts = { ...opts, uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans, providers, routing, sourceDir: dirname(resolve(file)) };
+  opts = { ...opts, isStd: pinnedStd(file, opts.std ?? STD), uses: program, refModule: original, refProgram: uses.program, channels: expansion.plans, providers, routing, sourceDir: dirname(resolve(file)) };
   const checked = checkModule(module, { program, providers, routing });
   report.diagnostics.push(...checked.diagnostics);
   // Review B-F1: a used module the checker refuses refuses this check too, with its own errors, each at its own line;
@@ -351,7 +358,7 @@ export async function checkFile(file: string, opts: CheckOptions = {}): Promise<
       mc.stages.push({ stage: 'parse-type', status: 'ran', engine: '@poly/lang, @poly/core', verdict: refused ? 'REFUSED' : 'CLEAN' });
       if (refused) { notRun(mc, ['lower', 'validate', 'translation-validation', 'model-check', 'deadlock', ...laterStages(x, checkedX, machine)], 'the program was refused at stage 0'); continue; }
       try {
-        await checkMachineStages(x, checkedX, machine, mc, { ...opts, refMachine: `${channel}.${machine}` }, engines);
+        await checkMachineStages(x, checkedX, machine, mc, { ...opts, isStd: true, refMachine: `${channel}.${machine}` }, engines);
       } catch (e) {
         notRun(mc, (['lower', 'validate', 'translation-validation', 'model-check', 'deadlock'] as StageName[]).filter((st) => !mc.stages.some((s) => s.stage === st)), `the check stopped with an error in ${mc.machine}`);
         finish(report, original);
@@ -507,9 +514,12 @@ async function checkMachineStages(module: Module, checked: ReturnType<typeof che
   t0 = performance.now();
   // PS15: poly-ref is given the source as written (and c.Conversation for a channel's conversation), never the expansion.
   const refProgram = opts.refProgram ?? opts.uses;
-  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, std: opts.std ?? STD, ...(opts.sourceDir ? { sourceDir: opts.sourceDir } : {}), ...(opts.refFault ? { fault: opts.refFault } : {}) });
+  const tv = await translationValidate(opts.refModule ?? module, opts.refMachine ?? machine, dir, { ...(opts.isolation ? { isolation: opts.isolation } : {}), program: refProgram, std: opts.std ?? STD, ...(opts.isStd ? { isStd: true } : {}), ...(opts.sourceDir ? { sourceDir: opts.sourceDir } : {}), ...(opts.refFault ? { fault: opts.refFault } : {}) });
   const ref: MachineReport = tv.report;
   mc.instance = instanceRecord(ref, engines, refOnlyProperties(module, machine));
+  // PS23, PT33.6, PT33.12: the retry-safe lines of the irreversible effects and the class of the effects that reach outside.
+  mc.retrySafe = ref.retrySafe;
+  mc.effectClasses = ref.effectClasses;
   // PS17.0, PT10j (S461): the Grant of a credential with a holder that a source names is one instance per owner of the
   // source's items, each an instance of this one machine; the instance line says so, as text, with no artefact of its own.
   if (machine === 'Grant' && opts.refModule && module.name.startsWith(`${opts.refModule.name}.`)) {
@@ -638,7 +648,7 @@ async function compositionStage(module: Module, checked: ReturnType<typeof check
   const engine = `polyrun@${engines.polygraph}`;
   const joint = checkJoint(opts.refModule ?? module, opts.refMachine ?? machine);
   // Review B3: K11 stays when the machine's actions take claims (PD5.5).
-  mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9', ...(mc.instance!.kernelAssumptions.includes('K11') ? ['K11'] : [])];
+  mc.instance!.kernelAssumptions = ['K1', 'K2', 'K3', 'K7', 'K9', ...['K11', 'K17', 'K18'].filter((k) => mc.instance!.kernelAssumptions.includes(k))];
   mc.instance!.jointStates = joint.states;
   mc.vacuous.push(...vacuousRecords(joint.vacuous));
   const out: Diagnostic[] = [];
@@ -991,7 +1001,7 @@ function instanceRecord(ref: MachineReport, engines: Record<string, string>, ref
     bounds,
     // M0 checks one machine's relation: K7 (profile fidelity) is the kernel assumption its guarantee uses (PS10); K11
     // when the machine's actions take claims, which only the verifier vouches for (PD5.5, S110).
-    kernelAssumptions: ref.model.actions.some((a) => a.claims) ? ['K7', 'K11'] : ['K7'],
+    kernelAssumptions: [...(ref.model.actions.some((a) => a.claims) ? ['K7', 'K11'] : ['K7']), ...ref.assumptions],
     engines,
     refOnly,
   };

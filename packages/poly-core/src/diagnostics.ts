@@ -88,6 +88,10 @@ export const CODES: Record<string, CodeInfo> = {
   PL4001: { name: 'PATH_PROPERTY', stage: 'effects', severity: 'finding' },
   // S33: an accepted step that emits and leaves the state unchanged.
   PL4002: { name: 'EMIT_WITHOUT_STATE_CHANGE', stage: 'effects', severity: 'finding' },
+  // PS23, PT33: the retry safety of irreversible effects.
+  PL4003: { name: 'UNGUARDED_RETRY', stage: 'effects', severity: 'finding' },
+  PL4004: { name: 'KEY_WINDOW_TOO_SHORT', stage: 'effects', severity: 'finding' },
+  PL4005: { name: 'NATURE_OUTSIDE_STD', stage: 'effects', severity: 'finding' },
   // S40: polyrun refuses a manifest whose completion action is outside the lowered action surface.
   // PS7.3: a compose invariant violated in a reachable joint state.
   PL5001: { name: 'COMPOSE_INVARIANT', stage: 'composition', severity: 'finding' },
@@ -232,6 +236,7 @@ export const CODES: Record<string, CodeInfo> = {
   PL6302: { name: 'UNLABELLED_IN_LABELLED_SCOPE', stage: 'policy', severity: 'error' },
   // PT6.5, S151: a target whose capability the effect's labels do not grant.
   PL6303: { name: 'TARGET_NOT_GRANTED', stage: 'types', severity: 'error' },
+  PL6304: { name: 'EFFECT_WITHOUT_CLASS', stage: 'effects', severity: 'finding' },
   // S129: an accepted adjudication reachable without a preceding accepted ok completion of its decision.
   PL6203: { name: 'ADJUDICATION_WITHOUT_DECISION', stage: 'effects', severity: 'finding' },
   // S125: a fifo pair, which polyrun's parallel message worker cannot serve; refused at load.
@@ -277,6 +282,15 @@ export interface Witness {
    * configuration that includes the machine confirms it or rules it out.
    */
   environment?: 'unconstrained';
+  /** PS23.8, PT33.12: the part of a PL4003 witness that is a path of the outbox model, after the prefix in `trace`. */
+  delivery?: {
+    model: string;
+    steps: { action: string; target?: 'may-execute' }[];
+    targetExecutions: number;
+    key: string;
+    deduplication: string;
+    alsoBy: { cause: string; steps: { action: string; target?: 'may-execute' }[] }[];
+  };
 }
 
 /** A typed edit addressed to an AST node, applied only if the node still has digest `pre` (PT12.1). */
@@ -304,6 +318,8 @@ export interface Diagnostic {
   names?: string[];
   /** `sha256:` of the state the finding names. */
   stateDigest?: string;
+  /** PS23.8, PT33.12: whether a PL4003's effect is emitted by a step of the checked instance. */
+  reach?: 'reached' | 'not-reached-in-instance';
   /** A witness no exported test can judge yet: "no test export until M4" (ruling after the M2 review). */
   testExport?: string;
 }

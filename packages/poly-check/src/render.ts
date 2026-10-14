@@ -56,6 +56,12 @@ export function renderDiagnostic(d: Diagnostic, file: string): string[] {
       lines.push(`    ${r[0].padEnd(w0)}   ${r[1].padEnd(w1)} -> ${r[2]}${r[3] ? `   ${r[3]}` : ''}`);
     });
   }
+  // PS23.8, PT33.12: the delivery part of a PL4003 witness, a path of the outbox model after the prefix.
+  if (d.witness?.delivery) {
+    const w = d.witness.delivery;
+    lines.push(`  delivery on ${w.model}: ${w.steps.map((x) => x.action + (x.target ? ' (target may execute)' : '')).join(', ')}`);
+    lines.push(`    executions of the target: ${w.targetExecutions}, idempotency key: ${w.key}, deduplication declared: ${w.deduplication}${w.alsoBy.length ? `; also by ${w.alsoBy.map((x) => x.cause).join(', ')}` : ''}`);
+  }
   if (d.testExport) lines.push(`  ${d.testExport}`);
   const rejections = (d as Diagnostic & { rejections?: string[] }).rejections;
   if (rejections?.length) lines.push(`  then ${rejections.join(', ')}`);
@@ -65,6 +71,24 @@ export function renderDiagnostic(d: Diagnostic, file: string): string[] {
     lines.push(`  fix ${f.id}: ${e.op}${e.with ? ` with ${e.with.split('\n')[0]}${e.with.includes('\n') ? ' …' : ''}` : e.stmt ? ` ${e.stmt}` : ''}`);
   }
   return lines;
+}
+
+/** A window in the largest of h, m, s, ms that divides it exactly (PT33.12): 86400000 is 24h, 5400000 is 90m. */
+export function windowText(ms: number): string {
+  for (const [unit, size] of [['h', 3_600_000], ['m', 60_000], ['s', 1000]] as const) if (ms % size === 0 && ms >= size) return `${ms / size}${unit}`;
+  return `${ms}ms`;
+}
+
+/** PS23, PT33.6: one line for each irreversible effect, and one for the class of each effect that reaches outside. */
+export function retryLines(m: MachineCheck): string[] {
+  const out: string[] = [];
+  for (const e of m.retrySafe ?? []) {
+    const g = e.guarantee;
+    const how = g.form === 'none' ? 'none' : g.form === 'at-most-once' ? 'at most once' : g.form === 'keyed' ? `keyed ${g.header} within ${windowText(g.windowMs)} (K17)` : `idempotent by nature ${JSON.stringify(g.nature)} (K18)`;
+    out.push(`retry-safe  ${e.kind}  ${e.class}, attempts ${e.attempts}, ${how}`);
+  }
+  for (const c of m.effectClasses ?? []) out.push(`class  ${c.kind}  ${c.class ?? 'unclassified'}`);
+  return out;
 }
 
 function instanceLine(m: MachineCheck, module: string | null): string {
@@ -97,6 +121,7 @@ export function render(r: CheckReport): string {
     const ran = m.stages.filter((s) => s.status === 'ran').map((s) => `${s.stage} ${s.verdict}${s.note ? ` (${s.note})` : ''}`);
     const notRun = m.stages.filter((s) => s.status === 'not-run');
     out.push(`${m.machine}: ${ran.join(' · ')}`);
+    out.push(...retryLines(m).map((l) => `  ${l}`));
     if (notRun.length) out.push(`  not run: ${notRun.map((s) => s.stage).join(', ')} (${notRun[0].reason})`);
     for (const p of m.notRun) out.push(`  not run: ${p.property}, ${p.reason}`);
     for (const p of m.vacuous) out.push(`  vacuous: ${p.property}, its antecedent ${p.antecedent} is never true${p.member !== undefined ? ` for member ${p.member}` : ''} (PT12.3)`);

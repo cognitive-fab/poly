@@ -178,6 +178,7 @@ class Printer {
       case 'EffLabels': return `${this.use('labels')}([${x.labels.map(q).join(', ')}])`;
       case 'EffClass': return `${this.use('cls')}(${q(x.value)})`;
       case 'EffRetry': return `${this.use('retry')}(${x.attempts}, ${q(x.base)}, ${q(x.timeout)})`;
+      case 'EffIdempotent': return x.form === 'header' ? `${this.use('idempotent')}(${q(x.header)}, ${q(x.window)})` : `${this.use('idempotentByNature')}(${q(x.reason)})`;
       // PT6.5, S151: one entry per key, in source order. S455: an exact target is { exact: '<url>' }, as read.
       case 'EffTargets': return `${this.use('targets')}([${x.targets.map((t) => `[${q(t.key)}, [${t.values.map((v) => (typeof v === 'string' ? q(v) : `{ exact: ${q(v.exact)} }`)).join(', ')}]]`).join(', ')}])`;
       // PT10e: uses(credential, [scopes], holder?).

@@ -504,6 +504,8 @@ export type EffectItem =
   | (NodeBase & { kind: 'EffLabels'; labels: string[] })
   | (NodeBase & { kind: 'EffClass'; value: string })
   | (NodeBase & { kind: 'EffRetry'; attempts: number; base: string; timeout: string })
+  /** PS23.4, PT33.1: `idempotent header "H" window 24h` (G2, keyed) or `idempotent by nature "reason"` (G4). */
+  | (NodeBase & ({ kind: 'EffIdempotent'; form: 'header'; header: string; window: string } | { kind: 'EffIdempotent'; form: 'nature'; reason: string }))
   | EffTargets
   | EffUses
   | EffRetrieve

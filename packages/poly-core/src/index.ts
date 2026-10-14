@@ -6,7 +6,7 @@ export { assignIds, idOfPath } from './ids.js';
 export * from './truth.js';
 export * from './types.js';
 export * from './diagnostics.js';
-export { checkModule, usedModuleOf, type CheckOptions as CheckModuleOptions, tyToString, boundPath, effectKind, effectClass, effectLabels, effectSignature, SOURCE_KINDS, SOURCE_ADAPTERS, childSpec, type ChildSpec, durationMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
+export { checkModule, usedModuleOf, type CheckOptions as CheckModuleOptions, tyToString, boundPath, effectKind, effectClass, effectLabels, effectSignature, SOURCE_KINDS, SOURCE_ADAPTERS, childSpec, type ChildSpec, durationMs, windowMs, countBound, beforeKinds, RESERVED_REASONS, type Ty, type Resolution, type MachineFacts, type CheckResult } from './check/check.js';
 export { profileProblem, underBase, expandCredentials, scopeField, type ProviderProfile, type ProviderEntry } from './credentials.js';
 export { expandChannels, type ChannelExpansion, type ChannelPlan } from './channels.js';
 export { expandRoutes, mapProblem, routePathOk, routedDecisions, type CalibrationFile, type MapEntry, type RoutingFiles } from './routing.js';

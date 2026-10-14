@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { importArtefact } from './import-artefact.js';
 import { valuesOf, monitorStart, monitorStep, replyPath, type RMachine, type RPathProperty, type RType } from './model.js';
 import { initialState, durationMs } from './step.js';
+import { millis } from './retrysafe.js';
 import { evaluate, evaluateAt } from './eval.js';
 import { flatten, flatValue } from './alpha.js';
 import { checkJoint } from './joint.js';
@@ -180,6 +181,10 @@ export async function readBack(module: A.Module, M: RMachine, dir: string, state
         const targets = e.items.find((x): x is A.EffTargets => x.kind === 'EffTargets');
         differ(`effects.manifest.json ${kind}.targets`, entry.targets ?? null, targets ? Object.fromEntries(targets.targets.map((t) => [t.key, t.values])) : null);
         differ(`effects.manifest.json ${kind}.class`, entry.class, M.effects.get(e.name)!.cls);
+        // PT33.2: the key the runtime attaches and the reason an effect is idempotent by nature, read from the source here, so a manifest that
+        // drops it, widens its window or invents one differs (idempotency-dropped, idempotency-window-widened, idempotency-invented).
+        const idem = e.items.find((x): x is A.EffectItem & { kind: 'EffIdempotent' } => x.kind === 'EffIdempotent');
+        differ(`effects.manifest.json ${kind}.idempotency`, entry.idempotency ?? null, idem ? (idem.form === 'header' ? { header: idem.header, windowMs: millis(idem.window) } : { nature: idem.reason }) : null);
         // PT10e: the credential the runtime checks the grant of, its scopes, and the parameter naming its holder.
         const uses = e.items.find((x): x is A.EffUses => x.kind === 'EffUses');
         differ(`effects.manifest.json ${kind}.uses`, entry.uses ?? null, uses ? { credential: uses.credential, scopes: uses.scopes, holder: uses.holder } : null);

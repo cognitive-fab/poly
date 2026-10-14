@@ -5,7 +5,7 @@
 //   invariants.mjs  stateInvariants, transitionInvariants, rejectionInvariants
 import type * as A from '@poly/core';
 import type { ChannelPlan, ProviderEntry, ProviderProfile, RoutingFiles, PriceTable, CalibrationFile } from '@poly/core';
-import { boundPath, diag, digest, effectKind, effectClass, effectLabels, durationMs, countBound, beforeKinds, reservationOf, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
+import { boundPath, diag, digest, windowMs, effectKind, effectClass, effectLabels, durationMs, countBound, beforeKinds, reservationOf, type CheckResult, type Diagnostic, type MachineFacts, type Ty, type TypeEnv } from '@poly/core';
 import { layoutOf, prelude, isPayloadUnion, tyOfTypeExpr, checkDomainValues, type Layout } from './layout.js';
 import { emitsCall } from './emit.js';
 import { expr, stmts, mayWrite, resetNames, type Cx, type EmitOptions } from './emit.js';
@@ -26,7 +26,7 @@ export interface LowerOptions {
   routing?: Readonly<RoutingFiles>;
 }
 
-export type Fault = 'workflow-budget-dropped' | 'workflow-order-cap-raised' | 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'envelope-dropped' | 'one-dropped' | 'source-credential-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped';
+export type Fault = 'workflow-budget-dropped' | 'workflow-order-cap-raised' | 'channel-thread' | 'channel-drop-spawn' | 'channel-drop-ack' | 'channel-swap-rename' | 'channel-inbound-to-app' | 'foreign-enum-member' | 'content-row-on-none' | 'skip-content' | 'content-before-unhandled' | 'drop-never' | 'invert-never-while' | 'drop-never-filter' | 'never-post-state' | 'drop-frame' | 'swap-reason' | 'off-by-one' | 'invert-require' | 'skip-guard' | 'skip-terminal' | 'drop-property' | 'drop-auto-invariant' | 'drop-effect' | 'reorder-effects' | 'unnamed-reject' | 'poison-step' | 'manifest-data' | 'drop-terminal-state' | 'contract-domain' | 'contract-init' | 'path-invariant' | 'compose-invariant' | 'liveness-goal' | 'outcome-entry' | 'widen-target' | 'exact-widened' | 'skip-claims' | 'widen-sandbox' | 'drop-timer-target' | 'workflow-tool' | 'workflow-key' | 'credential-scope-added' | 'credential-holder-dropped' | 'credential-base-widened' | 'types-widen-param' | 'source-unowned' | 'source-key-dropped' | 'flow-class-lowered' | 'flow-recipient-dropped' | 'envelope-dropped' | 'one-dropped' | 'source-credential-dropped' | 'route-threshold-changed' | 'route-tier-dropped' | 'route-price-stale' | 'budget-cap-raised' | 'decision-budget-dropped' | 'range-cut-dropped' | 'idempotency-dropped' | 'idempotency-window-widened' | 'idempotency-invented';
 
 export interface Lowered {
   machine: string;
@@ -522,6 +522,8 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
     for (const it of e.items) {
       if (it.kind === 'EffOutcome') entry[hooks[it.outcome]] = outcomeEntry(it, cx);
       if (it.kind === 'EffRetry') entry.retry = { maxAttempts: it.attempts, baseMs: durationMs(it.base), timeoutMs: durationMs(it.timeout) };
+      // PT33.2: the key the target honours, or the reason the effect is idempotent by nature; the runtime reads it (PT33.4, PT33.5).
+      if (it.kind === 'EffIdempotent') entry.idempotency = it.form === 'header' ? { header: it.header, windowMs: windowMs(it.window) } : { nature: it.reason };
       if (it.kind === 'EffLabels') entry.labels = it.labels;
       // PT6.5, S151: the runtime binds the handler's capabilities to these; polyrun ignores the field.
       if (it.kind === 'EffTargets') entry.targets = Object.fromEntries(it.targets.map((t) => [t.key, t.values]));
@@ -550,6 +552,10 @@ function manifestOf(facts: MachineFacts, env: TypeEnv, cx: Cx & { fault?: Fault 
     if (to || au) entry.recipient = { to: to?.param ?? null, audience: cx.fault === 'flow-recipient-dropped' ? null : au?.cls ?? null };
     // S137: an effect with no retry clause declares polyrun's default bound, so every manifest entry has its maxAttempts (S120).
     if (!entry.retry) entry.retry = { ...DEFAULT_RETRY };
+    // PT33.2: the broken lowerings of the idempotency field (the standing rule): dropped, a window twice as long, a field no source declares.
+    if (cx.fault === 'idempotency-dropped') delete entry.idempotency;
+    if (cx.fault === 'idempotency-window-widened' && entry.idempotency && 'windowMs' in (entry.idempotency as object)) entry.idempotency = { ...(entry.idempotency as object), windowMs: ((entry.idempotency as { windowMs: number }).windowMs) * 2 };
+    if (cx.fault === 'idempotency-invented' && !entry.idempotency) entry.idempotency = { header: 'Idempotency-Key', windowMs: 86_400_000 };
     // polyrun ignores fields it does not read, so labels and class stay in the manifest (PT6.1).
     entry.class = effectClass(e);
     out.push([effectKind(e), entry]);

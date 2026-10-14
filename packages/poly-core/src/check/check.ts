@@ -1508,6 +1508,15 @@ class Checker {
           else if (this.tyOf(p.type).k !== 'items') this.err('PL1201', it, `one ${it.param} names ${tyToString(this.tyOf(p.type))}; it is an Items parameter of the effect (PS17.4b)`);
           break;
         }
+        case 'EffIdempotent':
+          // PT33.1: a header name is a token (RFC 9110); a window is 1s to 7d; a nature has a reason.
+          if (it.form === 'header') {
+            if (!HEADER_TOKEN.test(it.header)) this.err('PL1201', it, `idempotent header ${JSON.stringify(it.header)} is not a header name (an RFC 9110 token) (PT33.1)`);
+            const w = windowMs(it.window);
+            if (w === null) this.err('PL1201', it, `idempotent window ${it.window} is not a duration`);
+            else if (w < WINDOW_MIN_MS || w > WINDOW_MAX_MS) this.err('PL1201', it, `idempotent window ${it.window} is outside 1s to 7d (PT33.1)`);
+          } else if (it.reason.trim() === '') this.err('PL1201', it, 'idempotent by nature names its reason (PT33.1)');
+          break;
         case 'EffRetry':
           if (it.attempts < 1) this.err('PL1201', it, 'retry needs at least one attempt');
           for (const d of [it.base, it.timeout]) if (durationMs(d) === null) this.err('PL1201', it, `${d} is not a duration`);
@@ -3485,6 +3494,17 @@ export function durationMs(text: string): number | null {
   const m = /^(\d+)(ms|s|m|h)$/.exec(text);
   if (!m) return null;
   return Number(m[1]) * { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[m[2] as 'ms' | 's' | 'm' | 'h'];
+}
+
+/** PT33.1: an idempotency header is an RFC 9110 token; its window is 1s to 7d. */
+export const HEADER_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+export const WINDOW_MIN_MS = 1000;
+export const WINDOW_MAX_MS = 7 * 24 * 3_600_000;
+/** A window in milliseconds: 500ms, 24h, 7d (the unit d is a window's, PT33.1). */
+export function windowMs(text: string): number | null {
+  const m = /^(\d+)(ms|s|m|h|d)$/.exec(text);
+  if (!m) return null;
+  return Number(m[1]) * { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2] as 'ms' | 's' | 'm' | 'h' | 'd'];
 }
 
 /** S41: what must agree between effects that share a kind: the payload, the completions and the class. */

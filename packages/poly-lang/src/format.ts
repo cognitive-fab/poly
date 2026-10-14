@@ -345,6 +345,7 @@ class Printer {
       case 'EffClass': return `class ${e.value}`;
       case 'EffLabels': return `labels { ${e.labels.join(', ')} }`;
       case 'EffRetry': return `retry { attempts ${e.attempts}, base ${e.base}, timeout ${e.timeout} }`;
+      case 'EffIdempotent': return e.form === 'header' ? `idempotent header ${JSON.stringify(e.header)} window ${e.window}` : `idempotent by nature ${JSON.stringify(e.reason)}`;
       // S455: an exact target prints as written, `exact "<url>"`.
       case 'EffTargets': {
         const tv = (v: A.TargetValue) => (typeof v === 'string' ? JSON.stringify(v) : `exact ${JSON.stringify(v.exact)}`);

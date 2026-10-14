@@ -1186,6 +1186,19 @@ class Parser {
         const timeout = this.duration();
         this.expect('}');
         items.push(this.effItem(is, { kind: 'EffRetry', attempts, base, timeout }));
+      } else if (w === 'idempotent') {
+        // PT33.1: `idempotent header "<Name>" window <duration>` (keyed, G2) or `idempotent by nature "<reason>"` (G4).
+        const at = this.peek();
+        const form = this.ident('header or by');
+        if (form === 'header') {
+          const header = this.str('a header name');
+          this.expect('window');
+          const window = this.duration();
+          items.push(this.effItem(is, { kind: 'EffIdempotent', form: 'header', header, window }));
+        } else if (form === 'by') {
+          this.expect('nature');
+          items.push(this.effItem(is, { kind: 'EffIdempotent', form: 'nature', reason: this.str('the reason') }));
+        } else this.fail('expected header or by nature after idempotent', at);
       } else if (w === 'targets') {
         // PT6.5, S151: each key names a capability; its value is one target or a list of them. S455: a target is a
         // string or `exact "<url>"`; the check allows exact on egress only (PL1201), so it is read here on any kind.
@@ -1266,7 +1279,7 @@ class Parser {
         items.push(this.effItem(is, { kind: 'EffOne', param: this.ident('an Items parameter') }));
       } else if (w === 'ok' || w === 'failed' || w === 'exhausted') {
         items.push(this.outcome(is, w));
-      } else this.fail('expected kind, labels, targets, uses, retrieve, remember, to, audience, envelope, one, class, retry, ok, failed or exhausted', is);
+      } else this.fail('expected kind, labels, targets, uses, retrieve, remember, to, audience, envelope, one, class, retry, idempotent, ok, failed or exhausted', is);
     }
     this.next();
     return this.node<A.EffectDecl>(start, { kind: 'EffectDecl', name, params, items }, true);

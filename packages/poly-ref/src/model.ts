@@ -79,6 +79,13 @@ export interface REffect {
   params: { name: string; type: RType }[];
   /** PS17.4b (S462): `one p`, the Items parameter whose count is narrowed to {1}. */
   one?: string;
+  /** The node of the declaration, and the class as written (null where none is: `cls` then reads none). */
+  id: string;
+  declaredClass: string | null;
+  labels: string[];
+  /** PS23: the retry as written (null where none: the default of S137 holds), and the idempotency declaration. */
+  retry: { attempts: number; base: string; timeout: string } | null;
+  idempotent: { form: 'header'; header: string; window: string } | { form: 'nature'; reason: string } | null;
 }
 
 /** One conjunct of a path property (PS5.4, S37): a bound on a kind's count, or an order of two kinds. */
@@ -337,6 +344,11 @@ export function buildMachine(source: A.Module, sourceMachine: string, opts: Buil
       // PT6.1: the manifest is keyed by kind; S41 makes the name the kind when none is given.
       kind: retrieveOf(it) ? retrieveKind(retrieveOf(it)!) : rememberOf(it) ? `source.${rememberOf(it)!.source}.remember` : kind && kind.kind === 'EffKind' ? kind.value : it.name,
       cls: cls && cls.kind === 'EffClass' ? cls.value : 'none',
+      id: it.id,
+      declaredClass: cls && cls.kind === 'EffClass' ? cls.value : null,
+      labels: ((l) => (l && l.kind === 'EffLabels' ? [...l.labels] : []))(it.items.find((x) => x.kind === 'EffLabels')),
+      retry: ((r) => (r && r.kind === 'EffRetry' ? { attempts: r.attempts, base: r.base, timeout: r.timeout } : null))(it.items.find((x) => x.kind === 'EffRetry')),
+      idempotent: ((x) => (x && x.kind === 'EffIdempotent' ? (x.form === 'header' ? { form: 'header' as const, header: x.header, window: x.window } : { form: 'nature' as const, reason: x.reason }) : null))(it.items.find((x) => x.kind === 'EffIdempotent')),
       params: it.params.map((p) => ({ name: p.name, type: typeOf(p.type) })),
       ...((o) => (o && o.kind === 'EffOne' ? { one: o.param } : {}))(it.items.find((x) => x.kind === 'EffOne')),
     });

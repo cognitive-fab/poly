@@ -110,6 +110,10 @@ export declare function budget(name: string, body: { caps: { currency: string; a
 /** PT6.5, S151: `targets { egress: [...], secrets: [...] }`, one [key, values] pair per kind of target; S455: `{ exact: url }` is `exact "<url>"`. */
 export declare function targets(entries: [kind: 'egress' | 'secrets' | 'exec' | 'store', values: (string | { exact: string })[]][]): EffItem;
 export declare function retry(attempts: number, base: string, timeout: string): EffItem;
+/** PT33.1, G2: the target honours the intent's key, sent as this header, for this window ('24h'). */
+export declare function idempotent(header: string, window: string): EffItem;
+/** PT33.1, G4: repeating the effect leaves the world as doing it once; for the standard library only. */
+export declare function idempotentByNature(reason: string): EffItem;
 export declare function ok(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
 export declare function failed(action: string, args: Args | ((scope: Scope) => Args)): EffItem;
 export declare function exhausted(action: string, args: Args | ((scope: Scope) => Args)): EffItem;

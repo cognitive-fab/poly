@@ -550,7 +550,7 @@ class Reader {
   }
 
   private effItem(node: ts.Expression): A.EffectItem {
-    const c = this.call(node, 'kind', 'labels', 'targets', 'uses', 'retrieve', 'remember', 'to', 'audience', 'envelope', 'one', 'cls', 'retry', 'ok', 'okWith', 'failed', 'exhausted');
+    const c = this.call(node, 'kind', 'labels', 'targets', 'uses', 'retrieve', 'remember', 'to', 'audience', 'envelope', 'one', 'cls', 'retry', 'idempotent', 'idempotentByNature', 'ok', 'okWith', 'failed', 'exhausted');
     const mk = (fields: Record<string, unknown>) => ({ id: '', ...fields, span: this.span(c.node) }) as unknown as A.EffectItem;
     switch (c.name) {
       case 'kind': return mk({ kind: 'EffKind', value: this.str(this.argsOf(c, 1, 1)[0]) });
@@ -592,6 +592,11 @@ class Reader {
       case 'envelope': return mk({ kind: 'EffEnvelope', param: this.str(this.argsOf(c, 1, 1)[0]) });
       // PS17.4b, S462: one(p), the Items parameter that holds exactly one item.
       case 'one': return mk({ kind: 'EffOne', param: this.str(this.argsOf(c, 1, 1)[0]) });
+      case 'idempotent': {
+        const [header, window] = this.argsOf(c, 2, 2);
+        return mk({ kind: 'EffIdempotent', form: 'header', header: this.str(header), window: this.str(window) });
+      }
+      case 'idempotentByNature': return mk({ kind: 'EffIdempotent', form: 'nature', reason: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'retry': {
         const [n, base, timeout] = this.argsOf(c, 3, 3);
         return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });

@@ -17,3 +17,4 @@ export { checkJoint, jointStep, stimuliAt, jointKey, jointPlain, MAX_CASCADE_DEP
 export { checkConfiguration, buildConfiguration, configurationSystem, globalPlain, globalView, inputData, type ConfigReport, type ConfigInstance, type GlobalState, type GlobalLabel, type Message } from './config.js';
 export { policyFacts, evalPolicyExpr, decide, initialSigma, proposalTable, checkNever, validatePolicy, dischargeCheck, type PolicyFacts, type PolicyScope, type Sigma, type TableResult } from './policy.js';
 export { unattributedEffects } from './attribution.js';
+export { retrySafety, horizon, millis, type RetrySafeEntry, type EffectClassEntry, type Guarantee } from './retrysafe.js';

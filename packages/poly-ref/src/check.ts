@@ -17,6 +17,7 @@ import { fairCycles, type FairGroup } from './liveness.js';
 import { taintSystem, firstBreaks, claimsClass, PENDING_BOUND, type TaintState } from './taint.js';
 import { bare, isBottom, taintOf } from './values.js';
 import { antecedents, emittingActions, judge, neverParts, type Members, type RefFault, type Vacuous } from './vacuity.js';
+import { retrySafety, type RetrySafeEntry, type EffectClassEntry } from './retrysafe.js';
 
 // poly-ref names its own codes (PT12.2): it imports no value from the compiler.
 const CODE = {
@@ -29,6 +30,10 @@ const CODE = {
   PL3901: ['BOUND_HIT', 'inconclusive', 'model-check'],
   PL4001: ['PATH_PROPERTY', 'finding', 'effects'],
   PL4002: ['EMIT_WITHOUT_STATE_CHANGE', 'finding', 'effects'],
+  PL4003: ['UNGUARDED_RETRY', 'finding', 'effects'],
+  PL4004: ['KEY_WINDOW_TOO_SHORT', 'finding', 'effects'],
+  PL4005: ['NATURE_OUTSIDE_STD', 'finding', 'effects'],
+  PL6304: ['EFFECT_WITHOUT_CLASS', 'finding', 'effects'],
   PL6201: ['UNGATED_DECISION', 'finding', 'effects'],
   PL6203: ['ADJUDICATION_WITHOUT_DECISION', 'finding', 'effects'],
   PL6831: ['AUDIENCE_LEAK', 'finding', 'model-check'],
@@ -67,6 +72,11 @@ export interface MachineReport {
   model: RMachine;
   /** S33: every accepted edge that emits and leaves the state unchanged, the steps PL4002 is about. */
   identityEmits: Edge<State>[];
+  /** PS23, PT33.12: one entry per irreversible effect, and one per effect with an egress label. */
+  retrySafe: RetrySafeEntry[];
+  effectClasses: EffectClassEntry[];
+  /** PS10: the kernel assumptions the guarantees rest on (K17, K18). */
+  assumptions: string[];
   /** PT12.3, S128: properties whose antecedent is never true where they are judged. */
   vacuous: Vacuous[];
   /** PS17.3: the states the flow rule explored, with their taints; absent when the program declares no source. */
@@ -95,6 +105,8 @@ export interface CheckOptions {
   program?: Module[];
   /** For one test each (ruled on M8 plan step 10): a deliberately broken check. */
   fault?: RefFault;
+  /** PS23.4, G4: the module is one of the standard library, which may declare an effect idempotent by nature. */
+  isStd?: boolean;
 }
 
 /**
@@ -271,6 +283,18 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
     const kinds = [...new Set(e.label.effects.filter((x) => x.type !== 'send').map((x) => x.kind))].join(', ');
     findings.push(finding('PL4002', M.handlers.get(e.label.action)?.id, `${e.label.action} emits ${kinds} and leaves the state unchanged, so it can repeat its effect without limit`, trace([...pathTo(g, e.from), e, e]), { property: e.label.action, state: g.states[e.from] }));
   }
+
+  // PS23, PT33: the retry safety of irreversible effects, and the class of the effects that reach outside. The prefix of a witness is the shortest path to
+  // the first accepted step that emits the effect's kind, as for any path witness.
+  const safety = retrySafety(M, {
+    std: opts.isStd === true,
+    reachedBy: (kind) => {
+      const hit = g.edges.find((x) => x.label.verdict.kind === 'accepted' && x.label.effects.some((y) => y.kind === kind));
+      return hit ? trace([...pathTo(g, hit.from), hit]) : null;
+    },
+    make: (code, node, message, tr, property) => finding(code, node, message, tr, { property }),
+  });
+  findings.push(...safety.findings);
 
   // PD1.4d, S75, S85: a decision is gated when, for each answer whose completion can emit a compensable or
   // irreversible effect, some confidence or margin interval keeps it from doing so. The completion step alone is
@@ -527,6 +551,9 @@ export function checkMachine(source: Module, sourceMachine: string, opts: CheckO
     graph: g,
     model: M,
     identityEmits,
+    retrySafe: safety.entries,
+    effectClasses: safety.classes,
+    assumptions: safety.assumptions,
   };
 }
 
