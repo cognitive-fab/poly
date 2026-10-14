@@ -71,3 +71,13 @@ Four defects in `scripts/scan-retry-safe.mjs` were confirmed by review and fixed
 - Section 7 pointed at a section 8 that the script did not emit, and section 2 at "section 5". The hand-written sections now live in `docs/demo/impact-s526.tail.md` and the script appends them, so a rerun keeps them.
 - The map of standard-library effects kept one effect per file; it now keeps all of them.
 - Comments were stripped without regard to strings; a `//` inside a string no longer cuts a line.
+
+## Rulings on Step 3 (reviewer, 2026-10-14; ac198686, 5a877c34)
+
+- **Building an unsafe artefact.** No production path: no `--witness`, no `allowWitness`. A helper under `test/fixtures/` writes a certificate directly, signed with the test trust key, over a manifest without the guarantee, bypassing the checker (an existing certificate-writing pattern is reused: `certificateDigest` and `signDigest`, as `test/channels-adapter-pin.test.mjs` does). Load must refuse it with `PL6411` although the signature is valid. The bound-1 clamp test uses the same helper. The import-boundary test is extended so that nothing under `packages/` can reach the helper. The `todo` becomes a real failing test. Text: PT33.5b.
+- **The fault name, split in two.** `unkeyed-retry-admitted-at-load` disables the load check and `unkeyed-retry-unclamped` disables the worker clamp; each is caught by its own test. Text: PT33.5 (seeded runtime faults), and `S526_RUNTIME_FAULTS` in `test/toolchain-faults.mjs`. (`unkeyed-retry-allowed` is retired.)
+- **Field names.** Fixed in PT33.12: the witness's delivery part, `reach`, the class and the `retry-safe` lines, in the JSON and in the report text. The tests assert those exact fields.
+- **PT33.3 at unit level.** Covered by the load tests and the `PL2501` read-back. No public entry is added for tests.
+- **`PL4005`.** A check-time finding. Confirmed.
+- **The `caps.api` path.** Required, not optional: the concierge's refund goes through it. The tests use the vault fixture the concierge's own tests use and are added to `s526-capability`.
+- **Process.** A second reader, given only the spec text and the test files, answers for each failing test whether it would pass on a wrong implementation. `tv.test.mjs` and `standing.test.mjs` are run alone, one at a time. Agents commit nothing; only the lead commits.
