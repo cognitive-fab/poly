@@ -65,7 +65,10 @@ async function run(fixture, projectName, kind, script) {
     await rt.worker.tick();
     const audit = await rt.audit('job-1');
     return { seen, calls: t.calls, audit, rt, clock };
-  } finally { await rt.close(); }
+  } catch (e) {
+    await rt.close(); // the caller closes the runtime of a successful run
+    throw e;
+  }
 }
 
 /**
@@ -192,7 +195,7 @@ test('PT33.4(2): handler-supplied Idempotency-Key is replaced with intent id, au
  */
 test('PT33.4(3): second post in same attempt is refused PL6406', async () => {
   const projectName = 's526-cap-3';
-  const { seen, calls, rt } = await run(KEYED_FIXTURE, projectName, 's526.work', async (caps, ctx) => {
+  const { seen, calls, audit, rt } = await run(KEYED_FIXTURE, projectName, 's526.work', async (caps, ctx) => {
     // Make first POST
     const first = await caps.egress.post('https://api.psp.example/v1/work', { data: 'first' });
 
@@ -216,10 +219,9 @@ test('PT33.4(3): second post in same attempt is refused PL6406', async () => {
     assert.ok(seen.out.secondError instanceof CapabilityRefused,
       `PT33.4(3): second post must throw CapabilityRefused, got ${seen.out.secondError?.constructor?.name}`);
 
-    // AMBIGUOUS: check for PL6406 in error message or audit row
-    const isInMessage = /PL6406|CAPABILITY_REFUSED/.test(seen.out.secondError.message);
-    const isInAudit = calls.audit?.some((r) => r.rule === 'PL6406');
-    assert.ok(isInMessage || isInAudit, `PT33.4(3): second post refusal must cite PL6406`);
+    // PT33.4: refused PL6406 CAPABILITY_REFUSED: the error cites it and the refusal is audited (rt.audit rows carry rule PL6406)
+    assert.match(seen.out.secondError.message, /PL6406 CAPABILITY_REFUSED/, 'PT33.4(3): the error names PL6406 CAPABILITY_REFUSED');
+    assert.ok(audit.some((r) => r.rule === 'PL6406'), `PT33.4(3): the refusal is audited, got ${JSON.stringify(audit.slice(0, 3))}`);
 
     // Assert the transport saw exactly one POST (second one was refused before transport)
     assert.equal(calls.egress.length, 1, `PT33.4(3): transport must see exactly one POST, got ${calls.egress.length}`);
