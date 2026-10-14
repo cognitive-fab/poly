@@ -189,17 +189,15 @@ test('PS23.7: keyed intent does not attempt after window lapses', async () => {
 
     // Check the outbox intent state
     const [row] = await rt.outbox('job-lapse');
-    if (row) {
-      const intent = await rt.worker.intentState(row);
-      assert.equal(intent.intent, 'Dead', 'OutboxIntent is Dead after window lapse');
-    }
+    assert.ok(row, 'PS23.7: the intent has an outbox row');
+    const intent = await rt.worker.intentState(row);
+    assert.equal(intent.intent, 'Dead', 'OutboxIntent is Dead after window lapse');
 
     // Check observation event for lapsed outcome
     const events = await rt.chain('job-lapse');
     const obsEvent = events.find((e) => e.kind === 'observation');
-    if (obsEvent) {
-      assert.match(obsEvent.body?.outcome ?? '', /lapsed/, 'observation outcome is lapsed');
-    }
+    assert.ok(obsEvent, 'PS23.7: an observation event exists for the intent');
+    assert.match(obsEvent.body?.outcome ?? '', /lapsed/, 'observation outcome is lapsed');
   } finally { await rt.close(); }
 });
 
@@ -287,7 +285,7 @@ test('PT33.5a: OutboxIntent model has on WindowLapsed with Allowed => Dead trans
   assert.ok(hasHandler, 'OutboxIntent model should have on WindowLapsed handler');
 
   // Check for the Allowed => Dead transition within the handler
-  const hasTransition = /on\s+WindowLapsed[\s\S]{0,500}?Allowed\s*=>\s*intent\s*=\s*Dead/.test(source);
+  const hasTransition = /on\s+WindowLapsed[\s\S]{0,500}?Allowed\s*=>\s*intent'\s*=\s*Dead/.test(source);
   assert.ok(hasTransition, 'on WindowLapsed should have Allowed => intent\' = Dead transition');
 });
 
