@@ -288,3 +288,7 @@ Because `npm test` stops at the first failing group, **the after group did not r
 ### The v1.1 gate (2026-10-12)
 
 Run twice; the second, at 19b06670, is the gate: the suite 2,797 tests with no failure (2 skipped, 4 waiting), the after group 19 of 19, check-memory passed, 162 of 163 measured programs identical and the inbox CLEAN with the state count its fix changed, the four spot checks within 1.5 times their gate2 time, and E3 compatible (171 of 171 on a throwaway merge that was not kept). The record is docs/v1/gate-v11.md. Waiting for the reviewer: the ruling on the gate, then main fast-forwarded to m7 and the local tag v1.1.0. Not pushed.
+
+### A correction to S526, dated 2026-10-14 (v1.3, `decisions-demo.md`)
+
+The S526 entries above say "3 attempts by default (5 in a manifest that declares no `retry`, PT19)". The default of the manifest is 5: `DEFAULT_RETRY = { maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }` in `packages/poly-lower/src/lower.ts`, asserted by `test/retry-default.test.mjs`. The 3 is the bound of the checked `runtime.OutboxIntent` instance (PT9.7). The entries are left as written. S526 is closed by PS23 and PT33 in v1.3.

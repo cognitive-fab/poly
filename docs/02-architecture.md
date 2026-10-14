@@ -42,6 +42,7 @@ poly adds no new checking, simulation or governance engine. It is still a substa
 | | The outbox intent machine (PT9.7), written in poly | runtime model |
 | | `poly-ref`, poly's model checker: a reference interpreter written from 04-semantics; translation validation, deadlock, liveness (with per-value fairness and oldest-copy delivery), configuration exploration (arrival-order nondeterminism, declared bounds), possibility checks for obligation consistency | model checker (PA0.1) |
 | | The `Delivery` machine (PT9.8) and the `OutboxIntent` machine (PT9.7), both written in poly and checked; the runtime conforms to them by trace replay (K8) | runtime models |
+| | The retry-safety rule (PS23, PT33): `idempotent` on effects, its manifest field and read-back, the capability that attaches the key, the load check and the worker's bound-1 creation, and the `WindowLapsed` transition of the outbox model (v1.3) | toolchain, runtime and runtime model |
 | | CLI, MCP server, language server, Claude Code plugin | agent interface |
 | **Changed code in engines** | polyrun: a `sendTo` built-in intent beside `spawnChild` and `signalChild` (M3); tombstones that keep dedupe keys at archive (E1, K4); shard placement by attached-tree root. The gate hook and the ledger store option are not needed: poly-runtime hosts its own effect worker and subclasses polyrun's store (S119, S121) | small, specified in PT7a, PT9 and PT16 |
 | | polyflow kernel and verifier: the ledger kinds `step`, `advice`, `decision` and `outcome` (E2) | small, PT16 |
