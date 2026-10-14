@@ -57,3 +57,17 @@ Numbered from S572 so that they do not meet S570, which is unused.
 ## Conclusion
 
 The rulings fix what Step 1 writes: the rule with four guarantees, the class floor, one new transition in the outbox model, and a Stripe that is a mock-up everywhere. Step 1 puts that text in the specifications and changes nothing that runs. The `OutboxIntent` block waits for the step that changes the model, so that no test is broken before its code exists. Step 2 follows, and nothing after it starts before the owner has reviewed it.
+
+## Rulings on Step 2 (reviewer, 2026-10-14; `docs/demo/impact-s526.md`, ec40fb4b)
+
+- **The class floor, accepted at its full size.** About 60 one-line class edits in Step 6. Each fixture gets the class that matches what its effect does to the world: an effect that moves money or sends a message outside is `irreversible`. Where a fixture gets `reversible` or any class that avoids the rule, its commit says why in one line. The owner's approval of the bulk edit at Step 6 still stands.
+- **`examples/orders/orders.poly`.** Its expected line becomes `FINDING PL3102 PL4001 PL4002 PL4003`. The finding is real (`charge` is unguarded) and the example teaches findings. `charge` is not migrated. The mention in `examples/README.md` names the new code (the example has no README of its own).
+- **Webhook.** `retry { attempts 1 }` is confirmed. The receiver-side `webhook-id` stays recorded as a fact for a later release (section 8 of the impact file).
+
+### Corrections to the scan after review of ec40fb4b
+
+Four defects in `scripts/scan-retry-safe.mjs` were confirmed by review and fixed. No table of the impact file changed except the lines noted.
+- The count sentence said "reproduced" while finding 24, not 25, on the default. It now says that the 30 is reproduced, that 24 is found, and that 24 + 1 = 25 once the inbox's `createDraft` is counted as it was recorded; it checks that the effect is `createDraft`.
+- Section 7 pointed at a section 8 that the script did not emit, and section 2 at "section 5". The hand-written sections now live in `docs/demo/impact-s526.tail.md` and the script appends them, so a rerun keeps them.
+- The map of standard-library effects kept one effect per file; it now keeps all of them.
+- Comments were stripped without regard to strings; a `//` inside a string no longer cuts a line.

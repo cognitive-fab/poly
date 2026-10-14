@@ -25,7 +25,7 @@ Every `.poly` file here begins with its expected verdict (V10 item 4, ruled 2026
 - `delivery/`: PT9.8's delivery worker, in order and in parallel, with the dedupe table kept or cleared on archive.
 - `evidence/`: the outbox intent in its forms, checked against the review's evidence scripts.
 - `field-studies/`: hatchet, raft and the turnstile of the polygraph field studies, each with its negative control.
-- `oms/` and `orders/`: the order management machines.
+- `oms/` and `orders/`: the order management machines. `orders/` is a teaching variant: its expected verdict is `FINDING PL3102 PL4001 PL4002 PL4003`, the last being `charge`, an irreversible effect on 3 attempts with no guarantee (PS23.5), which it keeps on purpose.
 - `concierge/`: a small business's customer assistant on WhatsApp and Slack, with refunds through a Stripe grant that a person approves above 100; checked `CLEAN` with its policy and run end to end on recorded traffic (`concierge/README.md`).
 - `inbox/`: the owner's daily Gmail assistant, which triages mail, keeps one to-do per thread and prepares drafts the owner approves; checked `CLEAN` with its policy, with steps to run it on your own mailboxes (`inbox/README.md`).
 

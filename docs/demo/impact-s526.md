@@ -16,7 +16,7 @@ Status: for the owner's review. Nothing in the tree is changed by this scan. A s
 | `test/fixtures/` | 17 | 16 | 0 | 1 | 44 |
 | `examples/`, `conformance/`, `std/` together | 30 | 24 | | | |
 
-The recorded counts (30 and 25) are reproduced: decisions-m7.md counted the inbox's createDraft on the default retry, before its fix (IT4.4), and it now declares `attempts 1`.
+The recorded count of 30 irreversible effects is reproduced. This scan finds **24** on the default retry, not 25: the recorded 25 counted the inbox's `createDraft` on the default, and it now declares `attempts 1`, so 24 + 1 = 25 once it is counted as it was recorded.
 
 ## 2. Every irreversible effect
 
@@ -38,7 +38,7 @@ The recorded counts (30 and 25) are reproduced: decisions-m7.md counted the inbo
 | std/channels/email.poly:174 | Conversation.send | `channel.send` | default (5) | ok, failed, exhausted | none | `PL4003` | `retry { attempts 1 }` (Q1) |
 | std/channels/slack.poly:203 | Conversation.send | `channel.send` | default (5) | ok, failed, exhausted | none | `PL4003` | `retry { attempts 1 }` (Q1) |
 | std/channels/sms.poly:179 | Conversation.send | `channel.send` | default (5) | ok, failed, exhausted | none | `PL4003` | `retry { attempts 1 }` (Q1) |
-| std/channels/webhook.poly:170 | Conversation.send | `channel.send` | 10 | ok, failed, exhausted | none | `PL4003` | decide from the adapter at the end of this step (Q1, section 5) |
+| std/channels/webhook.poly:170 | Conversation.send | `channel.send` | 10 | ok, failed, exhausted | none | `PL4003` | `retry { attempts 1 }` (Q1, decided in section 8) |
 | std/channels/whatsapp.poly:170 | Conversation.send | `channel.send` | default (5) | ok, failed, exhausted | none | `PL4003` | `retry { attempts 1 }` (Q1) |
 | std/credentials/grant.poly:84 | Grant.revoke | `credential.revoke` | default (5) | none | none | `PL4003` | G4 `idempotent by nature "RFC 7009"` in the library (Q3) |
 
@@ -288,7 +288,7 @@ An inline source that expects an exact code list changes with its reason in the 
 
 ## 7. The webhook channel (Q1: "decide from the adapter in Step 2")
 
-`std/channels/webhook.poly` declares attempts 10 (base and timeout in the file). The decision from the adapter is in section 8 of this file, written after reading `packages/poly-io`.
+`std/channels/webhook.poly` declares attempts 10 (base and timeout in the file). The decision from the adapter is in section 8 (written by hand, from `packages/poly-io`).
 
 ---
 
@@ -311,7 +311,7 @@ The cost is that a webhook delivery that fails ambiguously is no longer tried up
 2. **96 programs change.** Section 4 lists them: `examples/` 5, `conformance/` 30, `test/fixtures/` 61. Most change by a class line or by a library effect they pull in, and the library edit (Step 6 starts there) removes the second kind.
 3. **A teaching variant changes its expected line.** `examples/orders/orders.poly` expects `FINDING PL3102 PL4001 PL4002` and has `charge` on 3 attempts, so it gains `PL4003`. Either its expected line gains the code, or `charge` is migrated so that its teaching purpose is unchanged. The owner chooses.
 4. **The libraries pulled in.** Every program with a channel of kind `whatsapp`, `slack`, `sms` or `email` pulls in an irreversible send; every program with a credential pulls in `credential.revoke`. After the library is migrated (Q1, Q3), the concierge needs one edit of its own (`refund`) and the inbox none.
-5. **The counts agree with the record.** 30 irreversible effects in `examples/`, `conformance/` and `std/`, 25 on the default once the inbox is counted as `decisions-m7.md` counted it, before its fix.
+5. **The counts agree with the record, with one note.** 30 irreversible effects in `examples/`, `conformance/` and `std/`. On the default retry the scan finds 24, not 25: the recorded 25 included the inbox's `createDraft`, which was on the default before its fix (IT4.4) and is now `attempts 1`.
 6. **The generated `test/fixtures/std/**` files are copies of the library.** They follow the library, and a change to the library must reach them or the tests that pin them will diverge; Step 6 lists them with the library family.
 7. **Limits of the scan.** It reads text, not the parser. A construct it cannot read would be missing from the tables, not wrong in them. Step 3's tests are the check on the list: a program the rule changes that is not here is a failing test, not a silent pass. The tests of section 5 (inline sources) are listed by the line that names the class; the scan does not know which of them parse as programs.
 

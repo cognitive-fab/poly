@@ -6,6 +6,7 @@
 //   - for each program, the standard-library modules it pulls in (uses.ts: a channel of kind k uses std.channels.k, a
 //     credential uses std.credentials, a route or budget uses std.routing) and the irreversible effects among them.
 // It writes the markdown to standard output and nothing to disk. It runs no check and calls no model.
+// The hand-written sections (8 onwards) live in docs/demo/impact-s526.tail.md and are appended when the file exists.
 // usage: node scripts/scan-retry-safe.mjs > docs/demo/impact-s526.md
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -45,6 +46,20 @@ function block(text, from) {
   return null;
 }
 
+/** Line comments removed, leaving a `//` inside a string alone. */
+function stripComments(t) {
+  let o = '';
+  let inStr = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) { o += c; if (c === '\\') o += t[++i] ?? ''; else if (c === '"') inStr = false; continue; }
+    if (c === '"') { inStr = true; o += c; continue; }
+    if (c === '/' && t[i + 1] === '/') { while (i < t.length && t[i] !== '\n') i++; o += '\n'; continue; }
+    o += c;
+  }
+  return o;
+}
+
 /** The effects of one poly source: machine, name, kind, class, labels, retry, completions, uses. */
 function effectsOf(text) {
   const out = [];
@@ -53,7 +68,7 @@ function effectsOf(text) {
   while ((m = re.exec(text))) {
     const b = block(text, m.index + m[0].length);
     if (!b) continue;
-    const body = b.body.replace(/\/\/.*$/gm, '');
+    const body = stripComments(b.body);
     const before = text.slice(0, m.index);
     const machines = [...before.matchAll(/^[ \t]*(?:service[ \t]+)?machine[ \t]+(\w+)/gm)];
     const attempts = body.match(/retry[ \t]*\{[^}]*attempts[ \t]+(\d+)/);
@@ -112,7 +127,7 @@ for (const x of files) for (const e of x.effects) {
 }
 
 const stdIrreversible = new Map();
-for (const x of irreversible.filter((y) => y.fam === 'std')) stdIrreversible.set(x.r, x.e);
+for (const x of irreversible.filter((y) => y.fam === 'std')) stdIrreversible.set(x.r, [...(stdIrreversible.get(x.r) ?? []), x.e]);
 
 const lines = [];
 const out = (s = '') => lines.push(s);
@@ -142,11 +157,12 @@ for (const [fam] of FAMILIES) {
 }
 out(`| \`examples/\`, \`conformance/\`, \`std/\` together | ${tot} | ${totDef} | | | |`);
 out();
-const inboxFixed = irreversible.some((x) => x.r === 'examples/inbox/inbox.poly' && x.e.attempts === 1);
-const reproduced = tot === 30 && (totDef === 25 || (totDef === 24 && inboxFixed));
-out(reproduced
-  ? 'The recorded counts (30 and 25) are reproduced' + (totDef === 24 ? ': decisions-m7.md counted the inbox\'s createDraft on the default retry, before its fix (IT4.4), and it now declares `attempts 1`.' : '.')
-  : '**The recorded counts (30 and 25) are not reproduced: this scan finds ' + tot + ' and ' + totDef + '.**');
+const draft = irreversible.find((x) => x.r === 'examples/inbox/inbox.poly' && x.e.name === 'createDraft');
+const draftFixed = !!draft && draft.e.attempts === 1;
+const withDraft = totDef + (draftFixed ? 1 : 0);
+if (tot === 30 && totDef === 25) out('The recorded counts (30 irreversible, 25 on the default retry) are reproduced.');
+else if (tot === 30 && withDraft === 25) out('The recorded count of 30 irreversible effects is reproduced. This scan finds **' + totDef + '** on the default retry, not 25: the recorded 25 counted the inbox\'s `createDraft` on the default, and it now declares `attempts 1`, so 24 + 1 = 25 once it is counted as it was recorded.');
+else out('**The recorded counts (30 and 25) are not reproduced: this scan finds ' + tot + ' and ' + totDef + '.**');
 out();
 
 // 2. the effects
@@ -167,7 +183,7 @@ for (const [fam, dir] of FAMILIES) {
     let change = '';
     if (bound(e) >= 2) {
       if (x.r === 'std/credentials/grant.poly') change = 'G4 `idempotent by nature "RFC 7009"` in the library (Q3)';
-      else if (x.r === 'std/channels/webhook.poly') change = 'decide from the adapter at the end of this step (Q1, section 5)';
+      else if (x.r === 'std/channels/webhook.poly') change = '`retry { attempts 1 }` (Q1, decided in section 8)';
       else if (x.fam === 'std') change = '`retry { attempts 1 }` (Q1)';
       else if (x.r === 'examples/concierge/concierge.poly') change = '`idempotent header "Idempotency-Key" window …` (the owner reads the window from the provider\'s documentation)';
       else if (x.r.startsWith('examples/')) change = 'owner chooses at Step 6: `idempotent …` or `retry { attempts 1 }`';
@@ -203,7 +219,7 @@ for (const x of files) {
   const own = x.effects.filter((e) => e.cls === 'irreversible' && bound(e) >= 2).length;
   const used = stdUses(x.text);
   const pulled = [];
-  for (const u of used) if (stdIrreversible.has(u) && bound(stdIrreversible.get(u)) >= 2) pulled.push(u);
+  for (const u of used) if ((stdIrreversible.get(u) ?? []).some((e) => bound(e) >= 2)) pulled.push(u);
   const cl = x.effects.filter((e) => e.cls === null && /egress:/.test(e.labels)).length;
   if (x.fam === 'std') continue;
   if (own || pulled.length || cl) { programsChanged++; changed.push(x.r); out(`| ${cell(x.r)} | ${cell(expectedLine(x.text) || '(none)')} | ${own}${cl ? ` (+${cl} classless)` : ''} | ${pulled.length} | ${pulled.map((p) => `\`${p}\``).join(', ') || ''} |`); }
@@ -244,7 +260,9 @@ out();
 const webhook = irreversible.find((x) => x.r === 'std/channels/webhook.poly');
 out('## 7. The webhook channel (Q1: "decide from the adapter in Step 2")');
 out();
-out(webhook ? `\`std/channels/webhook.poly\` declares attempts ${webhook.e.attempts ?? 'default'} (base and timeout in the file). The decision from the adapter is in section 8 of this file, written after reading \`packages/poly-io\`.` : 'Not found.');
+out(webhook ? `\`std/channels/webhook.poly\` declares attempts ${webhook.e.attempts ?? 'default'} (base and timeout in the file). The decision from the adapter is in section 8 (written by hand, from \`packages/poly-io\`).` : 'Not found.');
 out();
 
-process.stdout.write(lines.join('\n') + '\n');
+let tail = '';
+try { tail = readFileSync(join(ROOT, 'docs', 'demo', 'impact-s526.tail.md'), 'utf8'); } catch { /* the generated part alone */ }
+process.stdout.write(lines.join('\n') + '\n' + tail);
