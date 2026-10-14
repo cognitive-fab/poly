@@ -230,3 +230,40 @@ test('CONTROL: decision with egress label is not in effectClasses (decisions are
   const hasDec = m.effectClasses.some((e) => e.effect === 'ask' || e.kind && e.kind.includes('ask'));
   assert.ok(!hasDec, 'PT33.12: decision must not be in effectClasses');
 });
+
+// ---- the class in the manifest and in the report (PT33.12; added after the second reader) --------------------------------
+// The class of an effect lowers to the manifest as declared, and as `none` where none is declared (existing behaviour, effectClass in
+// poly-core). `effectClasses` of the machine's result carries the DECLARED class (null where none), so the two agree where a class is
+// declared and differ exactly where PL6304 is reported.
+
+import { build } from './helpers.mjs';
+
+const manifestClass = (file, name) => {
+  const [b] = build(file, name);
+  return JSON.parse(readFileSync(join(b.dir, 'effects.manifest.json'), 'utf8')).effects['s526.work'].class;
+};
+
+test('PT33.12: for a declared class the effectClasses entry equals the class the manifest carries (irreversible, none)', async () => {
+  for (const [name, cls] of [['irreversible', 'irreversible'], ['none', 'none']]) {
+    const src = readFileSync(BASE, 'utf8').replace('    class irreversible\n', `    class ${cls}\n`);
+    const file = write(`lowering-${name}.poly`, src);
+    const r = await checkFile(file, { root: OUT });
+    assert.ok(['CLEAN', 'FINDINGS'].includes(r.verdict), `checked: ${r.verdict}`);
+    const entries = r.machines[0].effectClasses;
+    assert.ok(Array.isArray(entries) && entries.length === 1, `PT33.12: effectClasses has one entry, got ${JSON.stringify(entries)}`);
+    assert.equal(entries[0].class, cls);
+    assert.equal(manifestClass(file, `s526-lowering-${name}`), cls, 'the manifest carries the declared class');
+  }
+});
+
+test('PT33.12: with no class declared the effectClasses entry has class null (PL6304) while the manifest carries none', async () => {
+  const src = readFileSync(BASE, 'utf8').replace('    class irreversible\n', '');
+  const file = write('lowering-undeclared.poly', src);
+  const r = await checkFile(file, { root: OUT });
+  assert.ok(['CLEAN', 'FINDINGS'].includes(r.verdict), `checked: ${r.verdict}`);
+  const entries = r.machines[0].effectClasses;
+  assert.ok(Array.isArray(entries) && entries.length === 1, `PT33.12: effectClasses has one entry, got ${JSON.stringify(entries)}`);
+  assert.strictEqual(entries[0].class, null);
+  assert.equal(manifestClass(file, 's526-lowering-undeclared'), 'none', 'an undeclared class lowers to none');
+  assert.equal(countCode(r, 'PL6304'), 1);
+});

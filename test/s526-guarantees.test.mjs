@@ -179,3 +179,33 @@ test('PT33.6: unguarded (FINDINGS): the report still has a retry-safe line for `
   assert.ok(lines.some((l) => l === expected),
     `PT33.12: unguarded must have exact line "${expected}" in\n${text}`);
 });
+
+// ---- K17 and K18 in the output (K17, K18; added after the second reader) -------------------------------------------------
+// "K17 is listed in a certificate exactly when an effect declares `idempotent header`; K18 exactly when an included effect declares
+// `idempotent by nature`." The checked instance of a verdict lists the kernel assumptions it holds under (PT12.3a).
+
+test('K17: an effect that declares `idempotent header` lists K17 among the kernel assumptions of its verdict, and an unguarded or at-most-once effect does not', async () => {
+  const keyed = await checked('k17-keyed.poly', ['retry { attempts 3, base 200ms, timeout 5s }', 'idempotent header "Idempotency-Key" window 24h']);
+  assert.ok(keyed.machines[0].instance.kernelAssumptions.includes('K17'), JSON.stringify(keyed.machines[0].instance.kernelAssumptions));
+  assert.ok(!keyed.machines[0].instance.kernelAssumptions.includes('K18'));
+  assert.match(render(keyed), /kernel assumptions[^\n]*K17/);
+  const once = await checked('k17-once.poly', ['retry { attempts 1, base 200ms, timeout 5s }']);
+  assert.ok(!once.machines[0].instance.kernelAssumptions.includes('K17'), 'at most once needs no assumption about the target');
+});
+
+test('K18: an effect that declares `idempotent by nature` lists K18 among the kernel assumptions, and not K17', async () => {
+  const r = await checked('k18-nature.poly', ['idempotent by nature "RFC 7009"']);
+  assert.ok(r.machines[0].instance.kernelAssumptions.includes('K18'), JSON.stringify(r.machines[0].instance.kernelAssumptions));
+  assert.ok(!r.machines[0].instance.kernelAssumptions.includes('K17'));
+  assert.match(render(r), /kernel assumptions[^\n]*K18/);
+});
+
+test('K17: the certificate of an admitted keyed program lists K17 and not K18', async () => {
+  const key = makeKey('s526-k17');
+  const src = write('k17-admit.poly', variant(['retry { attempts 3, base 200ms, timeout 5s }', 'idempotent header "Idempotency-Key" window 24h']));
+  const dir = project('s526-k17', [relative(ROOT, src).split('\\').join('/')], key);
+  let result;
+  try { result = await admit(dir); } catch (e) { assert.fail(`PT33.1: the keyed program is not admitted yet: ${e.message}`); }
+  assert.ok(result.certificate.poly.kernelAssumptions.includes('K17'), JSON.stringify(result.certificate.poly.kernelAssumptions));
+  assert.ok(!result.certificate.poly.kernelAssumptions.includes('K18'));
+});

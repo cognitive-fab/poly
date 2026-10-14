@@ -386,3 +386,24 @@ test('PT33.12: an unguarded effect of 3 attempts names the model runtime3.Outbox
   assert.ok(d, 'PS23.5: PL4003 for 3 attempts and no guarantee');
   assert.equal(d.witness.delivery.model, 'runtime3.OutboxIntent');
 });
+
+// PT33.9, DAC1(b) (added after the second reader): the exported test fails on the unfixed program AND passes on the fixed one.
+// The first half is the existing test above; this one adds the second half, with the fix of PT33.8 (`set-at-most-once`) applied in place.
+// It stays red until the witness export of PT33.9 exists (it needs the PL4003 finding and the exported test that drives the build).
+test('PT33.9: the exported witness test fails on the unfixed program and passes once `retry { attempts 1 }` is applied', async () => {
+  const file = variant('export-fixed.poly', (b) => b, true);
+  const r = await checkFile(file, { root: OUT });
+  const d = (r.machines?.[0]?.diagnostics ?? []).find((x) => x.code === 'PL4003');
+  assert.ok(d?.witness, `PS23.5: the unfixed program has a PL4003 with a witness (verdict ${r.verdict})`);
+  const out = exportWitness(findWitness(JSON.parse(JSON.stringify(r)), d.witness.id), { root: OUT, kind: 'test' });
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const run = () => spawnSync(process.execPath, ['--test', out], { encoding: 'utf8', env });
+  const failing = run();
+  assert.notEqual(failing.status, 0, 'PT33.9: the exported test fails on the unfixed program');
+  writeFileSync(file, base.replace('    class irreversible', '    class irreversible\n    retry { attempts 1, base 200ms, timeout 5s }'));
+  const after = await checkFile(file, { root: OUT });
+  assert.equal(after.verdict, 'CLEAN', `PT33.8: the fixed program is CLEAN, got ${after.verdict}`);
+  const passing = run();
+  assert.equal(passing.status, 0, `PT33.9: the exported test passes on the fixed program: ${passing.stdout.slice(0, 400)}`);
+});
