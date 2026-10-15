@@ -50,6 +50,8 @@ export interface LoadOptions {
   now?: () => number;
   /** S139: load a witness certificate, for an exported witness test only; refused when NODE_ENV is production. */
   allowWitness?: boolean;
+  /** PT33.9: stand-in targets by effect kind, for an exported witness test only; refused unless the certificate's purpose is witness. */
+  standIns?: Record<string, EffectHandler>;
   /**
    * S118: the gate interface; allow-all when omitted, and the policy gate when the build has policies (PT9). `policy`
    * configures the policy gate; a build with policies takes no other gate.
@@ -224,7 +226,7 @@ export class PolyRuntime {
   /** PS17 (M10): the taint of each body, the item sets retrievals return, and the sources' adapters. */
   readonly memory: Memory;
 
-  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: IoPackage | null } = {}) {
+  constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault' | 'standIns'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: IoPackage | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
     this.#ioPackage = opts.ioPackage ?? null;
     this.#faults = faultsOf(opts.fault);
@@ -275,6 +277,8 @@ export class PolyRuntime {
     // PS18.2: a route's call runs its tier's provider, through the runtime's own handler.
     this.#routing = new RoutingHost(kernel, store, verified.routes, verified.budgets, () => this.now(), this.records, (r) => verified.machines.find((x) => x.id === r.decision.machine)?.manifest?.effects?.[`decision.${r.decision.name}`]?.decision?.result ?? null);
     for (const r of verified.routes) builtins[r.effectKind] = this.#routing.handler(r);
+    // PT33.9: a witness test's stand-in target runs in place of a host handler.
+    for (const [kind, h] of Object.entries(opts.standIns ?? {})) builtins[kind] = h;
     // PS18.4a (S454): each unrouted decision's budget, as its certified manifest entry gives it.
     for (const m of verified.machines) for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
       if (e?.decision?.budget && !e.decision.route) this.#routing.decisionBudgets.set(`${m.id}\u0000${kind}`, e.decision.budget);
@@ -2076,6 +2080,7 @@ export class PolyRuntime {
 
 export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRuntime> {
   const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust, { allowWitness: opts.allowWitness, ...(opts.std ? { std: opts.std } : {}) });
+  if (opts.standIns && verified.certificate.purpose !== 'witness') throw new LoadError('refused at load: LoadOptions.standIns is for an exported witness test, and this certificate is not a witness certificate (PT33.9)');
   // S210, as ruled: no test hook is reachable in a project whose anchor says it is production.
   if (opts.fault !== undefined && verified.production) throw new LoadError(`refused at load: LoadOptions.fault (${String(opts.fault)}) is a test hook, and this project's anchor says it is production (S210)`);
   // PT33.5 item 2, PL6411: the second layer. Admission refuses an irreversible entry that may be retried with no guarantee; load
@@ -2181,7 +2186,7 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
     if (other) { await kernel.close(); throw new LoadError(`refused at load: the build was admitted with ${other.package} ${other.version} ${other.digest}; this runtime has ${now.package} ${now.version} ${now.digest} (S182)`); }
     ioPackage = (await import(pathToFileURL(realpathSync(createRequire(import.meta.url).resolve('@poly/io'))).href)) as IoPackage;
   }
-  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault, ioPackage });
+  return new PolyRuntime(kernel, store, verified, opts.ledger, { gate: opts.gate, worker: opts.worker, certified, policyGate, transports: opts.transports, verifier: opts.verifier, fault: opts.fault, standIns: opts.standIns, ioPackage });
 }
 
 /** PS16.1: whether a Grant's state holds a scope, whose field is the scope with each . written _ (flat or nested). */

@@ -61,7 +61,7 @@ export function witnessSpec(found: FoundWitness, root: string): WitnessSpec {
 
 /** The codes an exported test can judge: a machine's through its lowered module, a configuration's through its machines'. */
 const JUDGED = {
-  machine: new Set(['PL3001', 'PL3002', 'PL3003', 'PL3102', 'PL3901', 'PL3201', 'PL3301', 'PL4001', 'PL4002', 'PL6201', 'PL6203']),
+  machine: new Set(['PL3001', 'PL3002', 'PL3003', 'PL3102', 'PL3901', 'PL3201', 'PL3301', 'PL4001', 'PL4002', 'PL6201', 'PL6203', 'PL4003']),
   configuration: new Set(['PL5401', 'PL5402', 'PL5404', 'PL3301', 'PL5101']),
 };
 

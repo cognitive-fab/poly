@@ -33,7 +33,7 @@ import { join } from 'node:path';
 import { importArtefact } from './import-artefact.js';
 import { parse } from '@poly/lang';
 import { readEmbedded } from '@poly/embed';
-import { digest, type Configuration, type Machine, type Module } from '@poly/core';
+import { digest, effectClass, effectKind, type Configuration, type EffectDecl, type Machine, type Module } from '@poly/core';
 import { alpha, buildConfiguration, buildMachine, detachedAlone, evaluate, flatten, flatValue, globalView, inputData, isTerminal, loadLoweredModule, valuesOf, type RMachine, type State } from '@poly/ref';
 
 export interface WitnessStepSpec {
@@ -124,7 +124,7 @@ function offers(l: Lowered): { action: string; data: Flat }[] {
 }
 
 /** S139: the source as it is now, admitted with a witness certificate under a key that lives only for this run. */
-async function witnessRuntime(spec: WitnessSpec): Promise<PolyRuntime> {
+async function witnessRuntime(spec: WitnessSpec, extra: { fault?: readonly string[]; now?: () => number; standIns?: Record<string, never> } = {}): Promise<PolyRuntime> {
   const { admitWitness } = await import('./admit.js');
   const { load: loadRuntime } = await import('@poly/runtime');
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
@@ -133,7 +133,7 @@ async function witnessRuntime(spec: WitnessSpec): Promise<PolyRuntime> {
   await admitWitness(spec.source, { root: spec.buildRoot, key, out });
   // The walk's verifier asserts the claims the witness carries (PD5.1.4): the witness was found over them.
   const verifier = (c: unknown) => (c && typeof c === 'object' && '$witness' in (c as object) ? ((c as { $witness: Record<string, unknown> | null }).$witness ?? null) : null);
-  return loadRuntime(join(spec.buildRoot, '.poly', 'build'), { certificate: out, trust: { [key.id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() }, allowWitness: true, verifier });
+  return loadRuntime(join(spec.buildRoot, '.poly', 'build'), { certificate: out, trust: { [key.id]: publicKey.export({ type: 'spki', format: 'pem' }).toString() }, allowWitness: true, verifier, ...(extra.fault ? { fault: extra.fault as never } : {}), ...(extra.now ? { now: extra.now } : {}), ...(extra.standIns ? { standIns: extra.standIns } : {}) });
 }
 
 /** Whether a machine's handlers spawn children, which a witness drives itself and the runtime would run (S141). */
@@ -158,10 +158,62 @@ export async function runWitness(spec: WitnessSpec): Promise<void> {
   const parsed = spec.source.endsWith('.ts') ? readEmbedded(text, spec.source) : parse(text);
   if (!parsed.module) throw new Error(`${spec.source} does not parse: ${parsed.diagnostics.map((d) => d.message).join('; ')}`);
   const moduleDigest = digest(parsed.module);
+  if (spec.code === 'PL4003') return runRetryWitness(spec, parsed.module);
   const rt = await witnessRuntime(spec);
   try {
     if (spec.configuration) return await walkConfiguration(spec, parsed.module, moduleDigest, rt);
     return await walkMachine(spec, parsed.module, moduleDigest, rt);
+  } finally { await rt.close(); }
+}
+
+/**
+ * PT33.9, PS23.8: the witness of PL4003 is a delivery, not a path through the machine, so the test plays the delivery. It admits the
+ * source as it is now under a witness certificate, drives the witness's prefix through the runtime, and registers a stand-in target
+ * that counts how often it executes the effect per intent: the first answer of each intent is lost (the target executed, the reply
+ * did not arrive), and a build that declares a key or a nature makes the stand-in execute once per key (K17, K18). It asserts
+ * `executions per intent <= 1`. The test runs the declaration as it is written, so the runtime's second and third layer (the load
+ * check PL6411 and the bound-1 clamp, PT33.5) are lifted by their seeded faults: the finding is about the declaration (PS23.5). On
+ * the unfixed program the target executes twice and the test fails; with `retry { attempts 1 }` or a key it passes.
+ */
+async function runRetryWitness(spec: WitnessSpec, module: Module): Promise<void> {
+  const decl = module.decls.find((d): d is Machine => d.kind === 'Machine' && d.name === spec.machine);
+  const irreversible = (decl?.items ?? []).filter((x): x is EffectDecl => x.kind === 'EffectDecl' && effectClass(x) === 'irreversible');
+  if (!irreversible.length) return; // the effect is gone, and its defect with it
+  const executed = new Map<string, number>();
+  const calls = new Map<string, number>();
+  const standIns: Record<string, never> = {};
+  for (const e of irreversible) {
+    const guarded = e.items.some((i) => i.kind === 'EffIdempotent');
+    standIns[effectKind(e)] = ((_payload: unknown, _caps: unknown, ctx: { idempotencyKey: string }) => {
+      const key = ctx.idempotencyKey;
+      const first = (calls.get(key) ?? 0) === 0;
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+      // A target that honours a key (K17) or is idempotent by nature (K18) executes once per key; any other executes every time.
+      if (!(guarded && executed.has(key))) executed.set(key, (executed.get(key) ?? 0) + 1);
+      if (first) throw new Error('the first answer was lost: the target executed and its reply did not arrive');
+      return {};
+    }) as never;
+  }
+  let clock = 1_700_000_000_000;
+  const rt = await witnessRuntime(spec, { fault: ['unkeyed-retry-admitted-at-load', 'unkeyed-retry-unclamped'], now: () => clock, standIns });
+  try {
+    const machineId = `${spec.module}.${spec.machine}`;
+    await rt.create(machineId, { id: 'witness' });
+    for (const [i, s] of spec.steps.entries()) {
+      const r = await runtimeStep(rt, machineId, i, s);
+      if (r.verdict !== s.verdict) return; // the program no longer takes this path
+    }
+    for (let k = 0; k < 24; k++) { clock += 70_000; await rt.worker.tick(); }
+    if (!executed.size) {
+      // The instance of the check never emits the effect (reach: not-reached-in-instance), so there is no delivery to play; the
+      // declaration alone is judged, as the finding judged it.
+      for (const e of irreversible) {
+        const attempts = e.items.find((i): i is Extract<typeof i, { kind: 'EffRetry' }> => i.kind === 'EffRetry')?.attempts ?? 5;
+        assert.ok(e.items.some((i) => i.kind === 'EffIdempotent') || attempts < 2, `executions per intent <= 1 cannot be shown for ${e.name}: it may be attempted ${attempts} times with no key and no nature (PL4003)`);
+      }
+      return;
+    }
+    for (const [key, n] of executed) assert.ok(n <= 1, `executions per intent <= 1 is violated: the target executed intent ${key} ${n} times after its first answer was lost (PL4003, PS23.8)`);
   } finally { await rt.close(); }
 }
 
