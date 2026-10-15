@@ -79,6 +79,8 @@ function effectsOf(text) {
       cls: (body.match(/\bclass[ \t]+(\w+)/) ?? [])[1] ?? null,
       labels: (body.match(/\blabels[ \t]*\{([^}]*)\}/) ?? [])[1]?.trim().replace(/\s+/g, ' ') ?? '',
       attempts: attempts ? Number(attempts[1]) : null,
+      // PS23.4: an `idempotent` item (a header or a nature) is a guarantee, so the effect is not unguarded whatever its bound.
+      guarded: /(^|\s)idempotent\s/.test(body),
       completions: ['ok', 'failed', 'exhausted'].filter((k) => new RegExp(`(^|\\n)[ \\t]*${k}\\b[^\\n]*->`).test(body)),
       uses: /\buses[ \t]+\w+/.test(body),
       line: before.split('\n').length,
@@ -115,7 +117,8 @@ const files = [];
 for (const [fam, dir] of FAMILIES) {
   let root;
   try { root = join(ROOT, dir); statSync(root); } catch { continue; }
-  for (const f of walk(root, ['.poly'])) files.push({ fam, f, r: rel(f), text: readFileSync(f, 'utf8') });
+  // test/fixtures/s526 holds the rule's own inputs, unguarded on purpose (a rule that is tested needs a program it fires on).
+  for (const f of walk(root, ['.poly'])) if (!rel(f).startsWith('test/fixtures/s526/')) files.push({ fam, f, r: rel(f), text: readFileSync(f, 'utf8') });
 }
 for (const x of files) { x.effects = isPolicyFile(x.r) ? [] : effectsOf(x.text); x.policy = isPolicyFile(x.r); }
 
@@ -216,10 +219,10 @@ let programsChanged = 0;
 const changed = [];
 for (const x of files) {
   if (x.policy || !moduleOf(x.text)) continue;
-  const own = x.effects.filter((e) => e.cls === 'irreversible' && bound(e) >= 2).length;
+  const own = x.effects.filter((e) => e.cls === 'irreversible' && bound(e) >= 2 && !e.guarded).length;
   const used = stdUses(x.text);
   const pulled = [];
-  for (const u of used) if ((stdIrreversible.get(u) ?? []).some((e) => bound(e) >= 2)) pulled.push(u);
+  for (const u of used) if ((stdIrreversible.get(u) ?? []).some((e) => bound(e) >= 2 && !e.guarded)) pulled.push(u);
   const cl = x.effects.filter((e) => e.cls === null && /egress:/.test(e.labels)).length;
   if (x.fam === 'std') continue;
   if (own || pulled.length || cl) { programsChanged++; changed.push(x.r); out(`| ${cell(x.r)} | ${cell(expectedLine(x.text) || '(none)')} | ${own}${cl ? ` (+${cl} classless)` : ''} | ${pulled.length} | ${pulled.map((p) => `\`${p}\``).join(', ') || ''} |`); }

@@ -75,6 +75,7 @@ service machine Conversation {
     kind "channel.send"
     retry { attempts 1, base 500ms, timeout 30s }
     labels { egress:external }
+    class irreversible
     ok -> Sent()
     failed -> SendFailed()
     exhausted -> SendFailed()
