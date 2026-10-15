@@ -46,7 +46,7 @@ export interface LoadOptions {
   /** Ruled on step 9, for tests only: the Polyaxion checkout to check against its pin, instead of the sibling one. */
   policyEngine?: string;
   /** For one test only (ruled on step 9): a recipient digest without the store's key, the seeded control. */
-  fault?: (typeof RUNTIME_FAULTS)[number];
+  fault?: (typeof RUNTIME_FAULTS)[number] | readonly (typeof RUNTIME_FAULTS)[number][];
   now?: () => number;
   /** S139: load a witness certificate, for an exported witness test only; refused when NODE_ENV is production. */
   allowWitness?: boolean;
@@ -140,7 +140,10 @@ const GRANT_STEP = Symbol('grant step');
 const GRANT_ONLY = new Set(['Callback', 'Reauthorize', 'Refreshed', 'RefreshFailed', 'Revoke']);
 
 /** Deliberately broken runtimes, for one test each: the recipient digest without the store's key (ruled on step 9). */
-export const RUNTIME_FAULTS = ['unkeyed-recipient', 'address-in-clear'] as const;
+export const RUNTIME_FAULTS = ['unkeyed-recipient', 'address-in-clear', 'unkeyed-retry-admitted-at-load', 'unkeyed-retry-unclamped', 'idempotency-header-dropped', 'window-lapse-ignored'] as const;
+
+/** PT33.5: the faults a LoadOptions.fault names, a name or a list of them. */
+export const faultsOf = (f: LoadOptions['fault'] | string | undefined): readonly string[] => (f === undefined ? [] : Array.isArray(f) ? f : [f as string]);
 
 /**
  * S182: the certified adapter package as the runtime loaded it: whether it made an adapter, and (S460) the credential
@@ -182,7 +185,7 @@ export class PolyRuntime {
    */
   readonly #ioPackage: IoPackage | null;
   /** For one test each: a deliberately broken runtime (RUNTIME_FAULTS). */
-  readonly #fault: LoadOptions['fault'];
+  readonly #faults: readonly string[];
   /** Review D-F4 (M8b): each channel's connected adapter, with which rt.receive verifies the channel's webhooks. */
   readonly #adapters = new Map<string, ChannelAdapter>();
   /**
@@ -224,7 +227,7 @@ export class PolyRuntime {
   constructor(readonly kernel: Runtime, readonly store: LedgerStore, readonly verified: VerifiedBuild, readonly ledger: LoadOptions['ledger'] = undefined, opts: Pick<LoadOptions, 'gate' | 'worker' | 'transports' | 'verifier' | 'fault'> & { certified?: Map<string, Readonly<Record<string, unknown>>>; policyGate?: PolicyGate | null; ioPackage?: IoPackage | null } = {}) {
     this.policyGate = opts.policyGate ?? null;
     this.#ioPackage = opts.ioPackage ?? null;
-    this.#fault = opts.fault;
+    this.#faults = faultsOf(opts.fault);
     this.verifier = opts.verifier ?? personKeyVerifier(verified.certificate.poly.keyrings ?? { people: [], agents: [] });
     this.certified = opts.certified ?? new Map();
     this.certifiedFunctions = new Set([...this.certified.values()].flatMap((ns) => Object.values(ns).filter((v) => typeof v === 'function')));
@@ -281,11 +284,12 @@ export class PolyRuntime {
       if (!w.budget) continue;
       for (const kind of Object.keys(w.tools ?? {})) this.#routing.orderBudgets.set(`${w.machine}\u0000${kind}`, { budget: w.budget.budget, prices: w.budget.prices, orderCap: w.budget.orderCap, workflow: w.name });
     }
-    this.#routing.creditReports = (opts as { fault?: string }).fault === 'workflow-report-credits';
+    this.#routing.creditReports = faultsOf(opts.fault).includes('workflow-report-credits');
     // S402: a tier's call reads its decision's materials, as the decision's own provider would (PS17.2).
     this.#routing.materials = async (payload) => { const m = await this.memory.materials(payload, (d) => this.contentBody(d), (b, t, s) => this.#putTainted(b, t, s)); return { bodies: m.bodies, items: m.items }; };
     this.worker = new EffectWorker(kernel, store, this.#handlers, {
       gate: this.policyGate ?? opts.gate?.gate ?? ALLOW_ALL, escalationTimeoutMs: opts.gate?.escalationTimeoutMs, ...opts.worker, builtins,
+      unclamped: this.#faults.includes('unkeyed-retry-unclamped'), windowLapseIgnored: this.#faults.includes('window-lapse-ignored'),
       outsideType: (instanceId, action, data) => this.outsideType(instanceId, action, data),
       // S180: an effect's completion is marked like a dispatch when its Content names no body.
       markContent: (instanceId, action, data) => {
@@ -298,9 +302,11 @@ export class PolyRuntime {
         const record = decl?.decision || this.#routing.tierOf(row) ? this.records.get(row.intent_id) : undefined;
         if (record) this.store.pending.set(`${row.instance_id}\u0000${row.intent_id}:done`, { before: [{ kind: 'decision', body: record }] });
       },
-      capabilities: (row, decl) => capabilitiesFor(decl ?? {}, opts.transports ?? {}, async (reason) => {
-        await this.store.insertAudit({ at: this.now(), instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule: 'PL6406', reason });
-      }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>), this.#contentFor(row), this.#itemsFor(row)),
+      capabilities: (row, decl) => capabilitiesFor(decl ?? {}, opts.transports ?? {}, async (reason, rule = 'PL6406') => {
+        await this.store.insertAudit({ at: this.now(), instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule, reason });
+      }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>), this.#contentFor(row), this.#itemsFor(row),
+      // PT33.4: the runtime attaches the intent id to every write of a keyed effect, under the manifest's header name.
+      decl?.idempotency?.header && !this.#faults.includes('idempotency-header-dropped') ? { header: decl.idempotency.header as string, value: row.intent_id } : undefined),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
       // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a
@@ -368,7 +374,7 @@ export class PolyRuntime {
         const p = (row.payload ?? {}) as { kind?: unknown };
         // Ruled on step 9: keyed by the store's key, so the journaled proposal cannot be inverted to the address.
         // The seeded control hashes the address itself, which the key is the keyed digest of (S191).
-        const recipient = opts.fault === 'unkeyed-recipient' ? `sha256:${createHash('sha256').update(`${d.kind}:${this.addressOf(key) ?? key}`).digest('hex')}` : store.recipientDigest(`${d.kind}:${key}`);
+        const recipient = faultsOf(opts.fault).includes('unkeyed-recipient') ? `sha256:${createHash('sha256').update(`${d.kind}:${this.addressOf(key) ?? key}`).digest('hex')}` : store.recipientDigest(`${d.kind}:${key}`);
         return { name: m[1], kind: d.kind, recipient, recipientClass: 'external', ...(typeof p.kind === 'string' ? { messageKind: p.kind } : {}) };
       },
       workOrder: (row) => {
@@ -561,7 +567,7 @@ export class PolyRuntime {
     for (const m of v.messages) {
       // S191: the sender the adapter verified is an address, journaled by its keyed digest.
       let sender = m.claims.sender;
-      if (this.#fault !== 'address-in-clear') await this.store.txn(() => { sender = this.store.keepAddress(m.claims.sender); });
+      if (!this.#faults.includes('address-in-clear')) await this.store.txn(() => { sender = this.store.keepAddress(m.claims.sender); });
       // PS15.0a (S450): the host maps a verified sender to its principal; any other sender's claims carry the keyed
       // digest of its address, a principal no source owns, which never fixes a thread.
       const map = m.claims.verified ? this.#senderMaps.get(channel) : undefined;
@@ -617,7 +623,7 @@ export class PolyRuntime {
     const key = d.thread.template.replace(/\{([^}]*)\}/g, (_, f: string) => String(fields[f]));
     // S191, S205 (PS15.4): the key and each field it reads are addresses, kept in the erasable store; the instance is
     // named, and the message delivered, with their keyed digests. The fault address-in-clear is the scan's control.
-    if (this.#fault === 'address-in-clear') application = `${channel}:${key}`;
+    if (this.#faults.includes('address-in-clear')) application = `${channel}:${key}`;
     else {
       application = await this.threadId(channel, key);
       const read = new Set([...d.thread.template.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]));
@@ -2070,6 +2076,15 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   const verified = verifyBuild(buildDir, resolve(opts.certificate), opts.trust, { allowWitness: opts.allowWitness, ...(opts.std ? { std: opts.std } : {}) });
   // S210, as ruled: no test hook is reachable in a project whose anchor says it is production.
   if (opts.fault !== undefined && verified.production) throw new LoadError(`refused at load: LoadOptions.fault (${String(opts.fault)}) is a test hook, and this project's anchor says it is production (S210)`);
+  // PT33.5 item 2, PL6411: the second layer. Admission refuses an irreversible entry that may be retried with no guarantee; load
+  // refuses it again, whatever the certificate says, so a forged or older build cannot reach the worker.
+  if (!faultsOf(opts.fault).includes('unkeyed-retry-admitted-at-load')) {
+    for (const m of verified.machines) {
+      for (const [kind, e] of Object.entries(m.manifest?.effects ?? {})) {
+        if (e.class === 'irreversible' && !e.idempotency && (e.retry?.maxAttempts as number) >= 2) throw new LoadError(`refused at load: PL6411 RETRY_UNSAFE_MANIFEST: effect ${kind} of ${m.id} is irreversible, may be attempted ${e.retry.maxAttempts} times, and its manifest entry declares no idempotency (PS23.5, PT33.5)`);
+      }
+    }
+  }
   const dbPath = opts.store?.sqlite ?? ':memory:';
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true });
   // S143: runtime.* and runtime<m>.* are the runtime's own ids, whatever this build or store needs. The checker refuses
@@ -2080,6 +2095,8 @@ export async function load(buildDir: string, opts: LoadOptions): Promise<PolyRun
   // S119, S120: the OutboxIntent instance for every retry bound the build declares. Review C8: and every bound an
   // intent in the store started under, so it keeps its own machine after a redeploy changes the bound.
   const bounds = new Set<number>(verified.machines.flatMap((m) => Object.values(m.manifest?.effects ?? {}).map((e) => e.retry.maxAttempts as number)));
+  // PT33.5 item 3: an unguarded irreversible intent is created with bound 1, so that instance is loaded as well.
+  if (verified.machines.some((m) => Object.values(m.manifest?.effects ?? {}).some((e) => e.class === 'irreversible' && !e.idempotency))) bounds.add(1);
   for (const r of store.db.prepare("SELECT DISTINCT machine_id FROM pr_instance WHERE machine_id LIKE 'runtime%.OutboxIntent'").all() as { machine_id: string }[]) {
     const m = /^runtime(\d*)\.OutboxIntent$/.exec(r.machine_id);
     if (m) bounds.add(m[1] ? Number(m[1]) : 3);

@@ -89,6 +89,9 @@ export class OwnerMismatch extends Error {
  */
 export const CREDENTIAL_HANDLE = Symbol.for('poly.credential-handle');
 
+/** PT33.4: the header a keyed effect's writes carry, and its value, the intent id. */
+export interface IdempotencyKey { header: string; value: string }
+
 /** Redirects followed before a request is given up; each hop is checked against the prefixes. */
 export const MAX_REDIRECTS = 5;
 
@@ -123,9 +126,22 @@ export function withinPrefix(url: string, prefixes: readonly Target[]): string |
  * The frozen capability object for one effect kind, for one call of its handler. `audit` writes the PL6406 row; it
  * is awaited before the refusal is thrown, so a refusal is in the ledger whatever the handler does with the error.
  */
-export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string) => Promise<void>, api?: ApiTransport, content?: ContentAccess, items?: ItemsAccess): Readonly<Record<string, unknown>> {
+export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string, rule?: string) => Promise<void>, api?: ApiTransport, content?: ContentAccess, items?: ItemsAccess, key?: IdempotencyKey): Readonly<Record<string, unknown>> {
   const targets = decl.targets ?? {};
   const refuse = async (reason: string): Promise<never> => { await audit(reason); throw new CapabilityRefused(`PL6406 CAPABILITY_REFUSED: ${reason}`); };
+  // PT33.4: one write per attempt for a keyed effect (a second is refused, PL6406), and the key header on it, set by the runtime:
+  // a value the handler supplied under that name is replaced and audited.
+  let wrote = false;
+  const keyed = async (method: 'GET' | 'POST', headers: Record<string, string> | undefined): Promise<Record<string, string> | undefined> => {
+    if (!key || method !== 'POST') return headers;
+    if (wrote) return refuse(`a second write in one attempt of a keyed effect (${key.header} is one intent's key, PT33.4)`);
+    wrote = true;
+    const rest: Record<string, string> = {};
+    let replaced = false;
+    for (const [k, v] of Object.entries(headers ?? {})) { if (k.toLowerCase() === key.header.toLowerCase()) replaced = replaced || v !== key.value; else rest[k] = v; }
+    if (replaced) await audit(`the handler supplied ${key.header}; the runtime replaced it with the intent id (PT33.4)`, 'idempotency-header-replaced');
+    return { ...rest, [key.header]: key.value };
+  };
   const need = <K extends keyof Transports>(k: K): NonNullable<Transports[K]> => {
     const t = transports[k];
     if (!t) throw new Error(`no ${k} transport was given at load, so the ${k} capability cannot act (S151)`);
@@ -142,7 +158,7 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
       if (!api) throw new Error(`no vault is connected for credential ${decl.uses!.credential}, so api cannot act (PT22.5)`);
       const text = body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body);
       const h = typeof body === 'object' && body !== null && !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type') ? { ...headers, 'content-type': 'application/json' } : headers;
-      return api.request({ method, url: at, headers: h, body: text });
+      return api.request({ method, url: at, headers: (await keyed(method, h)) ?? h, body: text });
     };
     caps.api = Object.freeze({
       get: (url: string, opts?: { headers?: Record<string, string> }) => call('GET', url, undefined, opts?.headers),
@@ -150,9 +166,10 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
     });
   } else if (has(decl, 'egress:external', 'egress:public')) {
     const prefixes = targets.egress ?? [];
-    const request = async (method: 'GET' | 'POST', url: string, body: unknown, headers: Record<string, string> | undefined): Promise<EgressResponse> => {
+    const request = async (method: 'GET' | 'POST', url: string, body: unknown, supplied: Record<string, string> | undefined): Promise<EgressResponse> => {
       let at = withinPrefix(url, prefixes);
       if (at === null) return refuse(`${method} ${url} is outside the declared egress prefixes ${JSON.stringify(prefixes)}`);
+      const headers = await keyed(method, supplied);
       let req: EgressRequest = { method, url: at, ...(headers ? { headers } : {}), ...(method === 'POST' ? { body } : {}) };
       for (let hop = 0; ; hop++) {
         const res = await need('egress')(req);

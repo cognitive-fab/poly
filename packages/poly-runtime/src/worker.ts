@@ -92,6 +92,10 @@ export interface WorkerOptions {
   beforeCompletion?: (row: OutboxRow, decl: any, result: unknown) => void;
   afterCompletion?: (row: OutboxRow) => void;
   drift?: WorkerDrift;
+  /** PT33.5, for the seeded faults only: the worker does not create an unguarded irreversible intent with bound 1 (unkeyed-retry-unclamped). */
+  unclamped?: boolean;
+  /** PT33.5, PS23.7, for the seeded fault only: the worker does not end a keyed intent whose window has lapsed (window-lapse-ignored). */
+  windowLapseIgnored?: boolean;
   /**
    * S147: whether the allow an intent holds is stale, because a singleton it read has moved on. By default the
    * `reads` of the allow are compared with each instance's current `seq`.
@@ -417,7 +421,10 @@ export class EffectWorker {
     }
     const declared = decl.retry?.maxAttempts;
     if (!Number.isInteger(declared)) throw new RuntimeFault(`effect ${row.kind} declares no retry.maxAttempts (S120)`);
-    if (!(await this.store.getInstance(this.intentId(row)))) await this.kernel.create(machineOfBound(declared), this.intentId(row));
+    // PT33.5 item 3, PS23.2: an irreversible effect with no key and no nature is created with bound 1, so the target is reached
+    // once even if a build got past admission and load. A bound already created keeps its own machine (review C8).
+    const bound = decl.class === 'irreversible' && !decl.idempotency && !this.opts.unclamped ? 1 : declared;
+    if (!(await this.store.getInstance(this.intentId(row)))) await this.kernel.create(machineOfBound(bound), this.intentId(row));
     // Review C8: the intent keeps the bound it was created under, across a redeploy that changes the manifest's.
     const m = await this.boundOf(row);
     let result: unknown;
@@ -526,6 +533,16 @@ export class EffectWorker {
           return;
         }
         case 'Allowed':
+          // PS23.7, PT33.5a: a keyed intent starts no attempt once its window has lapsed since the first allow (the first attempt
+          // starts in the same pass). It is Dead, with the exhausted completion and the observation `lapsed`.
+          if (!this.opts.windowLapseIgnored && decl.idempotency?.windowMs && st.intent_attempts! > 0 && this.lapsed(row, decl.idempotency.windowMs, now)) {
+            const hook = decl.onExhausted || decl.onFailure;
+            await this.finish(row, 'WindowLapsed', { hook, suffix: ':exhausted', data: mapCompletion(hook ?? {}, { error: { message: 'window-lapsed' } }, { reason: 'exhausted' }) }, async () => {
+              this.observed(row, st.intent_attempts!, 'lapsed');
+              await this.store.markEffectDead(row.intent_id, st.intent_attempts!, 'lapsed: the key window has passed');
+            });
+            return;
+          }
           if (this.opts.drift === 'repropose-after-failure' && st.intent_attempts! > 0) { await this.store.txn(() => this.transition(row, 'Propose')); continue; }
           // S147: no allow outlives the state it read. A stale allow is rechecked, at most twice, and then denied.
           if (await this.stale(row)) {
@@ -748,6 +765,12 @@ export class EffectWorker {
     return true;
   }
 
+  /** PS23.7: the window of a key, from the intent's first allow, has passed. */
+  private lapsed(row: OutboxRow, windowMs: number, now: number): boolean {
+    const r = this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict' ORDER BY seq ASC`).all(row.instance_id).map((x) => JSON.parse(x.event)).find((e) => e.body?.intent === row.intent_id && e.body?.outcome === 'allowed');
+    return !!r && now - r.at > windowMs;
+  }
+
   /** S147: the allow this intent holds read a singleton that has moved on since. */
   private async stale(row: OutboxRow): Promise<boolean> {
     const events = this.store.db.prepare(`SELECT event FROM poly_ledger WHERE run = ? AND kind = 'verdict' ORDER BY seq DESC`).all(row.instance_id).map((r) => JSON.parse(r.event));
@@ -780,7 +803,7 @@ export class EffectWorker {
   }
 
   /** S138: each handler outcome, observed on the emitting run in the transaction of the transition it leads to. */
-  private observed(row: OutboxRow, attempt: number, outcome: 'ok' | 'failed' | 'permanent' | 'lost'): void {
+  private observed(row: OutboxRow, attempt: number, outcome: 'ok' | 'failed' | 'permanent' | 'lost' | 'lapsed'): void {
     this.store.appendEvent(row.instance_id, 'observation', { stage: 'handler', intent: row.intent_id, attempt, outcome }, this.now);
   }
 
