@@ -1,0 +1,6 @@
+{
+  "name": "double-refunds-twice",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node test.mjs", "start": "node server.mjs" }
+}
