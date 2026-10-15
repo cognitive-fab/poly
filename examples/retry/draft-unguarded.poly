@@ -1,0 +1,46 @@
+// expected: FINDING PL4003
+// The inbox's draft before it was fixed, reduced to what the rule needs. Creating a Gmail draft cannot be taken back (the owner
+// sees a second draft in the thread), and this declaration lets the worker create it up to five times: a lost answer is retried,
+// and the provider may hold two drafts. The inbox's own createDraft says retry { attempts 1 } and ends an ambiguous attempt with
+// DraftUncertain, which is how a rule mined from the owner's mail found the same defect. The check finds it with no corpus.
+module retrydraft
+
+enum Phase { Idle, Drafting, Drafted, Uncertain, Failed }
+
+machine Todo {
+  state { phase : Phase = Idle }
+  terminal phase in { Drafted, Uncertain, Failed }
+
+  action Prepare(thread: 0..9)
+  action Created()
+  action NotCreated()
+  action DraftUncertain()
+
+  on Prepare {
+    require phase == Idle else reject "prepared"
+    phase' = Drafting
+    emit createDraft(thread)
+  }
+  on Created {
+    require phase == Drafting else reject "not-drafting"
+    phase' = Drafted
+  }
+  on NotCreated {
+    require phase == Drafting else reject "not-drafting"
+    phase' = Failed
+  }
+  on DraftUncertain {
+    require phase == Drafting else reject "not-drafting"
+    phase' = Uncertain
+  }
+
+  effect createDraft(thread: 0..9) {
+    kind "gmail.createDraft"
+    labels { egress:external }
+    targets { egress: exact "https://gmail.googleapis.com/gmail/v1/users/me/drafts" }
+    class irreversible
+    ok -> Created()
+    failed -> NotCreated()
+    exhausted -> DraftUncertain()
+  }
+}

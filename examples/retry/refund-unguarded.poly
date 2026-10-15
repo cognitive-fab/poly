@@ -1,0 +1,40 @@
+// expected: FINDING PL4003
+// The concierge's refund, reduced to the one question the retry-safety rule asks (PS23, PT33). A refund cannot be taken back, and
+// this declaration lets the worker send it up to five times (the default): when the answer is lost the worker sends it again, and
+// the provider may refund twice. The check finds that with no property written, and prints a witness: the way to the refund, then
+// the delivery in which the target runs it twice. Compare refund-at-most-once.poly and refund-keyed.poly, which differ by one line.
+module retryrefund
+
+enum Phase { Idle, Asked, Refunded, Failed }
+
+machine Desk {
+  state { phase : Phase = Idle }
+  terminal phase in { Refunded, Failed }
+
+  action Ask(amount: 0..500)
+  action Refunded()
+  action RefundFailed()
+
+  on Ask {
+    require phase == Idle else reject "asked"
+    phase' = Asked
+    emit refund(amount)
+  }
+  on Refunded {
+    require phase == Asked else reject "not-asked"
+    phase' = Refunded
+  }
+  on RefundFailed {
+    require phase == Asked else reject "not-asked"
+    phase' = Failed
+  }
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    class irreversible
+    ok -> Refunded()
+    failed -> RefundFailed()
+  }
+}

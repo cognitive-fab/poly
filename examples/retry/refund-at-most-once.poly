@@ -1,0 +1,40 @@
+// expected: CLEAN
+// The same refund at most once (G1, PS23.4): retry { attempts 1 } says the worker sends it once. When the answer is lost the exchange
+// ends with the failed completion, a refund the person can look up, and no second refund is possible. The cost is a refund that did not
+// happen on a timeout; the check does not hide it, and the program decides what a failed completion means.
+module retryrefundonce
+
+enum Phase { Idle, Asked, Refunded, Failed }
+
+machine Desk {
+  state { phase : Phase = Idle }
+  terminal phase in { Refunded, Failed }
+
+  action Ask(amount: 0..500)
+  action Refunded()
+  action RefundFailed()
+
+  on Ask {
+    require phase == Idle else reject "asked"
+    phase' = Asked
+    emit refund(amount)
+  }
+  on Refunded {
+    require phase == Asked else reject "not-asked"
+    phase' = Refunded
+  }
+  on RefundFailed {
+    require phase == Asked else reject "not-asked"
+    phase' = Failed
+  }
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    class irreversible
+    retry { attempts 1 }
+    ok -> Refunded()
+    failed -> RefundFailed()
+  }
+}

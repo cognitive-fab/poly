@@ -1,0 +1,40 @@
+// expected: CLEAN
+// The same refund keyed (G2, PS23.4, PS23.7): the runtime sends the intent id as Idempotency-Key on every attempt, and the declared window
+// (24h) is longer than the retry horizon (about 158 s for the default five attempts), so a provider that honours the key (K17, an
+// assumption the check prints and does not prove) refunds once however many times the worker sends it.
+module retryrefundkeyed
+
+enum Phase { Idle, Asked, Refunded, Failed }
+
+machine Desk {
+  state { phase : Phase = Idle }
+  terminal phase in { Refunded, Failed }
+
+  action Ask(amount: 0..500)
+  action Refunded()
+  action RefundFailed()
+
+  on Ask {
+    require phase == Idle else reject "asked"
+    phase' = Asked
+    emit refund(amount)
+  }
+  on Refunded {
+    require phase == Asked else reject "not-asked"
+    phase' = Refunded
+  }
+  on RefundFailed {
+    require phase == Asked else reject "not-asked"
+    phase' = Failed
+  }
+
+  effect refund(amount: 0..500) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: "https://api.stripe.com/v1/refunds" }
+    class irreversible
+    idempotent header "Idempotency-Key" window 24h
+    ok -> Refunded()
+    failed -> RefundFailed()
+  }
+}
