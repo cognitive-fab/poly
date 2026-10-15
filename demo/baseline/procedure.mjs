@@ -11,6 +11,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, createWriteStream } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
+import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { apiKeyProblems, armEnv, configProblems } from '../../experiments/m3/runner/isolation.mjs';
 import { ARMS, ALLOWED_TOOLS, CEILING_USD, MODEL, ROOT, claudeArgs, makeWorkspace, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
@@ -51,17 +52,21 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   const file = join(root, RECORD);
   if (!existsSync(file)) return [`${RECORD} does not exist: the pre-registration commit has not been made, and nothing may run before it`];
   const record = JSON.parse(readFileSync(file, 'utf8'));
+  // The pre-registration commit is the one that introduced the record, and the record and the prompt are as that commit left them: a
+  // later commit that rewrites either does not re-register (a repeat is a new pre-registration, before any run, DB4).
   let commit = '';
-  try { commit = g(['log', '-n1', '--format=%H', '--', RECORD]); } catch { commit = ''; }
+  try { commit = g(['log', '--diff-filter=A', '--format=%H', '--', RECORD]).split('\n').filter(Boolean).at(-1) ?? ''; } catch { commit = ''; }
   if (!commit) out.push(`${RECORD} is not committed: the pre-registration commit has not been made`);
   else {
     try { g(['merge-base', '--is-ancestor', commit, 'HEAD']); } catch { out.push(`the pre-registration commit ${commit.slice(0, 8)} is not an ancestor of HEAD`); }
+    for (const f of [RECORD, 'demo/baseline/PROMPT.md']) if (g(['diff', '--name-only', commit, 'HEAD', '--', f]) !== '') out.push(`${f} has changed since the pre-registration commit ${commit.slice(0, 8)}`);
   }
   if (g(['status', '--porcelain', '--', 'demo/baseline']) !== '') out.push('demo/baseline has uncommitted changes: the prompt, the record and the scaffolds must be as committed');
   const bytes = readFileSync(join(root, 'demo', 'baseline', 'PROMPT.md'));
   if (sha256(bytes) !== record.prompt?.sha256) out.push(`PROMPT.md hashes to ${sha256(bytes)}, not the recorded ${record.prompt?.sha256}`);
   if (record.model !== MODEL) out.push(`the recorded model is ${record.model}, not ${MODEL}`);
   if (record.capsUsd?.[arm] !== ARMS[arm].capUsd) out.push(`the recorded cap of the ${arm} arm is ${record.capsUsd?.[arm]}, not ${ARMS[arm].capUsd}`);
+  if (!isDeepStrictEqual(record.allowedTools?.[arm], ALLOWED_TOOLS[arm])) out.push(`the tools of the ${arm} arm are not the recorded ones`);
   if (record.ceilingUsd !== CEILING_USD) out.push(`the recorded ceiling is ${record.ceilingUsd}, not ${CEILING_USD}`);
   let have;
   try { have = version(); } catch (e) { have = null; out.push(`the agent's version could not be read: ${e.message}`); }
@@ -111,10 +116,36 @@ export async function runArm({ arm, run, bin = 'claude', binArgs = [], root = RO
   let stderr = '';
   child.stderr.on('data', (c) => { stderr = (stderr + c.toString('utf8')).slice(-4000); });
   const exit = await new Promise((resolve) => child.once('close', resolve));
+  // The last event may arrive with no newline after it.
+  try { const e = JSON.parse(buffer); if (e.type === 'result') result = e; } catch { /* nothing left, or not an event */ }
   await new Promise((resolve) => out.end(resolve));
-  const summary = { arm, run, exit, startedWith: { model: MODEL, capUsd: ARMS[arm].capUsd }, stopped: result?.subtype ?? null, costUsd: result?.total_cost_usd ?? null, usage: result?.usage ?? null, stderrTail: stderr };
+  const summary = { arm, run, exit, startedWith: { model: MODEL, capUsd: ARMS[arm].capUsd }, stopped: result?.subtype ?? null, costUsd: result?.total_cost_usd ?? null, usage: result?.usage ?? null, stderrTail: stderr, modelCallFlags: auditSession(join(dir, 'session.jsonl')) };
   writeFileSync(join(dir, 'result.json'), `${JSON.stringify(summary, null, 2)}\n`);
   return { dir, workspace, summary };
+}
+
+/** What would call a model from inside a run: the poly commands that may, and the agent's own command line. */
+const MODEL_CALL = /(?:\bpoly|cli\.js)\s+(?:new|explain)\b|\bclaude\s+-p\b|\bnpx\s+(?:-y\s+)?@anthropic|api\.anthropic\.com/;
+
+/**
+ * The tool list is an allow-list, not a sandbox: an arm that may write a file and run its tests can run any code it wrote. So the session
+ * is read after the run for anything that would call a model (`poly new`, an explanation command, the agent's own command line, the
+ * provider's host), and each hit is recorded in result.json for the owner to read. A hit is not a refusal after the fact; it is a fact
+ * the report states (DB7).
+ */
+export function auditSession(file) {
+  const flags = [];
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    let e;
+    try { e = JSON.parse(line); } catch { continue; }
+    for (const part of e.message?.content ?? []) {
+      if (part?.type !== 'tool_use') continue;
+      for (const [field, value] of Object.entries(part.input ?? {})) {
+        if (typeof value === 'string' && MODEL_CALL.test(value)) flags.push({ tool: part.name, field, excerpt: value.slice(Math.max(0, value.search(MODEL_CALL) - 20), value.search(MODEL_CALL) + 80) });
+      }
+    }
+  }
+  return flags;
 }
 
 /**

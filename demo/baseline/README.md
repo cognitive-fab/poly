@@ -46,6 +46,8 @@ Each step is in the owner's terminal, at the repository root, on the branch `dem
 
 - **Billing.** The M3 arms ran on the subscription and refused any API key in the environment (4210fa6), and the CLI's dollar cap was measured to hold there. Plan section 5 speaks of 90 USD "on the API". This draft follows M3: `run-arm.mjs` refuses to start while an API key variable is set. If the owner wants the API instead, say so and the check changes.
 - **How the poly arm reaches poly.** The draft gives it `npm run poly ...` through Bash, as M3's arms had, and no MCP server or skill. If the plugin's tools (`poly_check` and the rest) should be the interface, the workspace and the tool list change, and the record with them.
+- **The tool list is not a sandbox.** An arm that may write a file and run its tests can run any code it wrote, `poly new` included. So the session is read after each run for anything that would call a model, and each hit is recorded in `result.json` (`modelCallFlags`) for the owner to read. The poly arm has `node --test` and not `node` alone for the same reason, which narrows the way and does not close it.
+- **A repeat is a new pre-registration.** The runner takes the commit that introduced `PREREGISTRATION.json` as the pre-registration and refuses if the record or the prompt has changed since, so a second experiment starts in a folder of its own, with its own record, before any of its runs.
 - **The TypeScript arm's network.** It needs the package registry; the runner cannot limit the network. A container with the registry and the model API alone is the owner's to choose.
 
 ## Conclusion

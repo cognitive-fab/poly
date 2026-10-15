@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ALLOWED_TOOLS, ARMS, CEILING_USD, MODEL, claudeArgs, listFiles, makeWorkspace, promptText, sha256, treeDigest } from '../demo/baseline/arms.mjs';
-import { RECORD, buildRecord, preflight, prepareCommit, runArm } from '../demo/baseline/procedure.mjs';
+import { RECORD, auditSession, buildRecord, preflight, prepareCommit, runArm } from '../demo/baseline/procedure.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -78,7 +78,7 @@ test('DB3: the TypeScript workspace is a Node and TypeScript scaffold with order
 // ---- the record and the checks that refuse (DB2, DB4) ----------------------------------------------------------------------------
 
 /** A repository of its own with a prompt, and, when asked, a committed record: the facts a preflight reads. */
-function repo({ committed = true, record = true, dirty = false } = {}) {
+function repo({ committed = true, record = true, dirty = false, tweak = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'baseline-repo-'));
   const sh = (...a) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   mkdirSync(join(root, 'demo', 'baseline'), { recursive: true });
@@ -89,7 +89,7 @@ function repo({ committed = true, record = true, dirty = false } = {}) {
   sh('config', 'user.email', 'test@example.invalid');
   sh('config', 'commit.gpgsign', 'false');
   const scaffolds = { ts: 'sha256:ts-scaffold', poly: 'sha256:poly-scaffold' };
-  if (record) writeFileSync(join(root, RECORD), `${JSON.stringify(buildRecord({ root, version: '2.1.287', scaffolds }), null, 2)}\n`);
+  if (record) writeFileSync(join(root, RECORD), `${JSON.stringify(tweak ? tweak(buildRecord({ root, version: '2.1.287', scaffolds })) : buildRecord({ root, version: '2.1.287', scaffolds }), null, 2)}\n`);
   if (committed) { sh('add', '-A'); sh('commit', '-q', '-m', 'pre-registration'); }
   if (dirty) writeFileSync(join(root, 'demo', 'baseline', 'PROMPT.md'), 'changed\n');
   return { root, sh, scaffolds, clean: () => rmSync(root, { recursive: true, force: true }) };
@@ -152,6 +152,59 @@ test('DB5: a pilot that has run but is not committed yet still counts: a second 
     assert.match(problems.join(), /allows 1 pilot\(s\).*used/);
     assert.match(preflight({ arm: 'ts', run: 'pilot-1', root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), localRunsDir: runs, deps: deps(r) }).join(), /already has a run named pilot-1/);
   } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
+});
+
+test('DB2: the registration is the commit that introduced the record: a later commit that rewrites the record or the prompt does not re-register', () => {
+  const rewritten = repo();
+  const reworded = repo();
+  try {
+    const record = JSON.parse(readFileSync(join(rewritten.root, RECORD), 'utf8'));
+    record.pilots = { ts: 5, poly: 5 };
+    writeFileSync(join(rewritten.root, RECORD), `${JSON.stringify(record, null, 2)}\n`);
+    rewritten.sh('commit', '-q', '-a', '-m', 'more pilots');
+    assert.match(run(rewritten).join(), /PREREGISTRATION\.json has changed since the pre-registration commit/);
+    writeFileSync(join(reworded.root, 'demo', 'baseline', 'PROMPT.md'), 'build something else\n');
+    reworded.sh('commit', '-q', '-a', '-m', 'new wording');
+    assert.match(run(reworded).join(), /PROMPT\.md has changed since the pre-registration commit/);
+  } finally { rewritten.clean(); reworded.clean(); }
+});
+
+test('DB3: the record pins the tools: an arm whose tool list is not the recorded one is refused', () => {
+  const r = repo({ tweak: (rec) => ({ ...rec, allowedTools: { ...rec.allowedTools, poly: [...rec.allowedTools.poly, 'Bash(npm run poly new*)'] } }) });
+  try {
+    assert.match(run(r, 'poly', 'pilot-1').join(), /tools of the poly arm are not the recorded ones/);
+    assert.deepEqual(run(r, 'ts', 'pilot-1'), [], 'the arm whose list is as recorded may start');
+  } finally { r.clean(); }
+});
+
+test('DB7: the cost of a run is recorded even when its last event has no newline after it', async () => {
+  const r = repo();
+  const runs = mkdtempSync(join(tmpdir(), 'baseline-runs-'));
+  const stub = join(runs, 'stub.cjs');
+  writeFileSync(stub, "process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', total_cost_usd: 2.5, usage: { input_tokens: 1, output_tokens: 1 } }));");
+  try {
+    const { summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub], root: r.root, env: {}, runsDir: runs, configDir: join(runs, 'cfg'), deps: deps(r) });
+    assert.deepEqual([summary.stopped, summary.costUsd], ['success', 2.5]);
+  } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
+});
+
+test('DB3: the tool list is not a sandbox, so the session is read after the run for anything that would call a model, and each hit is recorded', async () => {
+  const runs = mkdtempSync(join(tmpdir(), 'baseline-runs-'));
+  const session = join(runs, 'session.jsonl');
+  const use = (name, input) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+  writeFileSync(session, [
+    use('Bash', { command: 'npm test' }),
+    use('Bash', { command: 'node node_modules/@poly/check/dist/src/cli.js new "a refund agent"' }),
+    use('Write', { file_path: 'test/x.test.mjs', content: "import { execSync } from 'node:child_process'; execSync('claude -p hello');" }),
+    use('Bash', { command: 'npm run poly check src/agent.poly' }),
+    'not json',
+  ].join('\n'));
+  try {
+    const flags = auditSession(session);
+    assert.deepEqual(flags.map((x) => [x.tool, x.field]), [['Bash', 'command'], ['Write', 'content']]);
+    assert.match(flags[0].excerpt, /cli\.js new/);
+    assert.deepEqual(auditSession((() => { writeFileSync(session, use('Bash', { command: 'npm run poly check src/a.poly' })); return session; })()), []);
+  } finally { rmSync(runs, { recursive: true, force: true }); }
 });
 
 // ---- one run, with a stub agent (nothing is called, nothing costs) -----------------------------------------------------------------
