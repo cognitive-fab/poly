@@ -808,7 +808,7 @@ This is the only new engine integration (architecture section 7.2).
     action Propose()   action GateAllow()   action GateDeny()   action GateEscalate()
     action Approve()   action EscalationTimeout()   action Recheck()
     action Start()     action HandlerOk()   action HandlerFailed()   action HandlerFailedPermanent()
-    action SettleOk()  action SettleFailed()
+    action SettleOk()  action SettleFailed()   action WindowLapsed()
 
     on Propose {
       match intent {
@@ -854,6 +854,9 @@ This is the only new engine integration (architecture section 7.2).
                         Settled { attempt: n, rechecks: r } => if n < 3 { intent' = Allowed { attempts: n, rechecks: r } }
                                                                else     { intent' = Dead }
                         _                                   => reject "not-settled" } }
+    on WindowLapsed { match intent {
+                        Allowed => intent' = Dead
+                        _       => reject "not-allowed" } }
 
     step property no-reproposal-after-allow:
       (action != Recheck && (pre.intent is Allowed || pre.intent is Running || pre.intent is Settled))
@@ -878,6 +881,7 @@ This is the only new engine integration (architecture section 7.2).
   2. **Escalation happens once and has a timeout.** An approved re-proposal can be allowed or denied, never escalated again, so an intent takes at most two gate decisions. `escalation.timeoutMs` (the polyflow platform policy field) fires `EscalationTimeout`, which denies the intent.
   3. **Denial is final.** A deny can only happen from `Proposed`: before any attempt ran, or after a `Recheck` found the state the allow read had moved on (S147), when the attempts already made are kept and no further one is.
   4. **A permanent failure is final (S138).** A handler may report a permanent error (a declined card is a result, not an infrastructure failure). `HandlerFailedPermanent` takes `Running` to `Dead` whatever attempt it is, the worker dispatches the effect's `failed` completion, and no further attempt is made. A crash is never permanent: it is `HandlerFailed`.
+  5. **A lapsed key window ends the intent (PT33.5a, S120).** For a keyed effect, once the window has lapsed since the first attempt began, the worker takes `WindowLapsed`, which takes `Allowed` to `Dead` and starts no further attempt. It adds a transition and no state, so the machine still has 17m + 8 states at bound m, and it is not in the fair group (the worker's clock takes it, as it takes `Recheck`). The worker delivers the effect's `exhausted` completion with the observation outcome `lapsed`.
 
   **The worker hosts the machine (S119).** poly-runtime runs its own effect worker, and polyrun's `tickEffects` is never started. Each intent's state is an `OutboxIntent` value in a poly-runtime table, and every worker transition is an action on the lowered `OutboxIntent` module, written in one transaction with the matching `pr_outbox` change. An action the module rejects is a runtime fault: the worker stops on that intent and reports it, and never takes the transition. A terminal transition and the completion it delivers commit in one transaction, behind the claim's fence: K1 extends to the hosted machine, so neither exists without the other, and a worker whose claim was taken over delivers nothing (review C1, C2). `Approve` and `EscalationTimeout` race, and whichever commits first wins; the other is a rejected step of the machine, journaled with its reason, and a late approval's caller gets an error saying the escalation timed out (review C3). Every park has a retry deadline. An outside dispatch to a hosted instance is refused before any step, with an audit row (review C4). A gate that throws holds only the intent it was asked about, `Proposed` with a backoff and never allowed (review C6, PT9.5). An intent keeps the bound it was created under: the runtime registers the machine of every bound the build declares and of every bound an intent in the store was created under, so a redeploy that changes a manifest's `maxAttempts` strands nothing (review C8). The machine for bound m is `runtime<m>.OutboxIntent` (`runtime.OutboxIntent` at 3), and these ids are the runtime's own: a program machine in a module named `runtime` or `runtime<m>` is `PL1208`, and `load` refuses one again, so whether a program loads never depends on the bounds or the store (S143). The only module the checker takes under those names is this model at a bound, identified by its module digest. A crash or lease expiry while `Running` is `HandlerFailed` and counts an attempt; the idempotency key (PT15) keeps a re-run of an effect that did execute from repeating it. A row the worker cannot place (machine or manifest unavailable) takes no transition. `Dead` is terminal: an operator who wants another try creates a new intent through a governed action, never by resurrecting a dead one.
 

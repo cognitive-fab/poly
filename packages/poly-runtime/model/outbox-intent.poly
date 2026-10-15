@@ -20,7 +20,7 @@ machine OutboxIntent {
   action Propose()   action GateAllow()   action GateDeny()   action GateEscalate()
   action Approve()   action EscalationTimeout()   action Recheck()
   action Start()     action HandlerOk()   action HandlerFailed()   action HandlerFailedPermanent()
-  action SettleOk()  action SettleFailed()
+  action SettleOk()  action SettleFailed()   action WindowLapsed()
 
   on Propose {
     match intent {
@@ -66,6 +66,9 @@ machine OutboxIntent {
                       Settled { attempt: n, rechecks: r } => if n < 3 { intent' = Allowed { attempts: n, rechecks: r } }
                                                              else     { intent' = Dead }
                       _                                   => reject "not-settled" } }
+  on WindowLapsed { match intent {
+                      Allowed => intent' = Dead
+                      _       => reject "not-allowed" } }
 
   step property no-reproposal-after-allow:
     (action != Recheck && (pre.intent is Allowed || pre.intent is Running || pre.intent is Settled))

@@ -1,6 +1,6 @@
 {
   "lang": "javascript",
-  "machineVersion": "sha256:96cb9ca63c4530735e53efad9261f8d8ea223f85ddb853d0aeb69444a7dba0f4",
+  "machineVersion": "sha256:ce9343afb65e545a0daf00ea13478d9c073addf190c19fb4d17eee8ecf6ab971",
   "stateKeys": [
     {
       "name": "intent",
@@ -73,6 +73,9 @@
       "dataFields": {}
     },
     "SettleFailed": {
+      "dataFields": {}
+    },
+    "WindowLapsed": {
       "dataFields": {}
     }
   },
