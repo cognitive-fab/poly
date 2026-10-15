@@ -26,6 +26,14 @@ The project, the program with its policy, is `CLEAN`. It was checked in 91 to 17
 
 All seven stages of the policy are `CLEAN`: its types, its lowering, its consistency, its admission by the gate engine, the agreement of the lowered policy with the semantics over 118 proposals, the regions of polycheck (every path from a model call to the outside crosses a gate) and its `never` statements (there are none).
 
+**Retry safety (PS23, PT33).** Every irreversible effect gets a line in the report, even when the verdict is `CLEAN`. The refund is keyed: the worker may send it up to five times, the runtime sends the intent id as `Idempotency-Key` on every attempt, and the 24 h window is longer than the retry horizon (about 158 s). The check prints
+
+```
+retry-safe  payments.refund  irreversible, attempts 5, keyed Idempotency-Key within 24h (K17)
+```
+
+The sends of the WhatsApp and Slack channels are at most once (`retry { attempts 1 }`), and the Stripe grant's revoke is idempotent by nature (RFC 7009, the standard library only). Both are in the report, and the certificate lists K17 and K18 among its kernel assumptions. K17 says the provider honours the key, and K18 that revoking twice does what revoking once does. The check proves that the key is sent and that its window is long enough, not that Stripe honours it: the demo runs against a local stand-in for Stripe, and nothing here reads a Stripe key. Take the key off the refund and the check reports `PL4003` with a witness; `examples/retry/` shows that in four small programs.
+
 **The refund guard.** The program emits the refund only when the answer cites exactly one order, and it guards the emit with an `if`, answering Unsure otherwise. A `require` there checks `CLEAN` as well, yet a rejected completion leaves the `Desk` waiting for ever, because at run time a decision gives one completion and a rejected one consumes it. The machine check cannot see that, since it offers a decision's completions as free inputs; the generated configuration can, and reports a rejected completion of the program's own decision or effect as `PL5409` (S463). The concierge has none, and `test/ex-concierge-liveness.test.mjs` shows both sides: the `require` copy gets `PL5409` with a witness ending in the rejected `Amounted`, and the `if` copy does not. A liveness property of the `Desk` assumes that no such completion is rejected, so the absence of `PL5409` is what would discharge it. The concierge declares no liveness property of its own.
 
 **End to end.** AC27 runs the program on recorded traffic: a status question answered with the customer's own order cited; a refund of 40 that the small model is unsure of and the large one answers, issued through the grant; a refund of 250 that is escalated, noticed to the staff and approved by a person. The program is `CLEAN` with its instance printed, and the journal replays every post-state, gate decision and tier choice: 36 runs and 231 rows, one of them the grant's, and 4 gate sessions with 43 proposals, with no divergence.
@@ -40,7 +48,16 @@ node --max-old-space-size=8192 --test --test-concurrency=1 test/after/serial-sou
 node --max-old-space-size=8192 --test --test-concurrency=1 test/after/ex-concierge-e2e.test.mjs
 ```
 
-The first checks the program alone, with its maps and prices beside it. The second checks the project with its policy beside it, and the program's translation validation. The third is AC27. The light tests, which check nothing heavy, are `test/ex-concierge-host.test.mjs` (the recorded providers), `test/ex-concierge-refund.test.mjs` (the refund path and the handler), `test/ex-concierge-policy.test.mjs` (the policy denies what it says) and `test/ex-concierge-liveness.test.mjs`.
+The retry-safety variants check in well under a second each, with nothing heavy:
+
+```sh
+node packages/poly-check/dist/src/cli.js check examples/retry/refund-unguarded.poly
+node packages/poly-check/dist/src/cli.js check examples/retry/refund-keyed.poly
+```
+
+The first reports `PL4003` and the delivery in which the target executes the refund twice; the second is `CLEAN`. `poly witness <id> --test` writes a test for the finding.
+
+The first of the three heavy commands above checks the program alone, with its maps and prices beside it. The second checks the project with its policy beside it, and the program's translation validation. The third is AC27. The light tests, which check nothing heavy, are `test/ex-concierge-host.test.mjs` (the recorded providers), `test/ex-concierge-refund.test.mjs` (the refund path and the handler), `test/ex-concierge-policy.test.mjs` (the policy denies what it says) and `test/ex-concierge-liveness.test.mjs`.
 
 ## What is recorded and where
 
@@ -53,6 +70,8 @@ The first checks the program alone, with its maps and prices beside it. The seco
 - **The amount refusal reads the charge and refunds nothing.** A refund above what was paid is refused after one read of the charge. No refund is sent, and the one read is expected.
 - **The amount decision's confidence is uncalibrated** until its map is fitted on adjudicated outcomes. The maps here are the tests' own.
 - **Stripe's request shapes** are as its documentation gave them when the handler was written. Confirm them before a live run.
+- **A send is attempted once.** A WhatsApp or Slack message whose answer is lost is not sent again; the exchange ends with its failed completion and the customer's next message starts a new one. The check makes no claim that a provider deduplicates.
+- **The key is an assumption.** K17 is printed with the verdict and is not proved: whether Stripe honours `Idempotency-Key` for 24 h is Stripe's. A refund the program emits again after a failure is a new intent with a new key, and the rule does not see it.
 - **The check's bounds are the program's instance.** `CLEAN` is a statement about the instance printed with it, not about all customers at once.
 
 ## Conclusion
@@ -62,11 +81,14 @@ The concierge shows the four surfaces of v1 in one program: channels with verifi
 ## Glossary
 
 - **Audience:** the class of reader a piece of data may reach; a model call is denied when its input is above the audience of the answer.
+- **At most once:** the worker sends an irreversible effect once; a lost answer ends the exchange.
 - **Charge:** the payment an order was paid with; a refund names one.
 - **Desk:** the machine that works one customer's thread.
 - **Escalation:** the gate's decision that a person must approve an intent before it runs.
 - **Generated configuration:** the checked model of a channel's application with its conversation and its pending intents.
 - **Grant:** the one authorisation of a credential, requested by a person's signed record and revocable.
+- **Idempotency key:** the intent id, sent as a header on every attempt of a keyed effect, so that a provider that honours it executes the request once.
+- **K17, K18:** the kernel assumptions that a provider honours the key, and that a repeated revoke does what one revoke does; printed with the verdict, not proved.
 - **Item set:** the orders a retrieval returned, passed to a decision or an effect and never stored.
 - **Liveness assumption:** that every completion of the program's own intents is accepted, which the check of the configuration discharges.
 - **Recorded traffic:** answers written down in advance, so that a run needs no provider.
