@@ -225,6 +225,7 @@ machine Turn {
   effect fetch() {
     kind "tool.fetch"
     labels { egress:external, write:store }
+    class none
     targets { egress: exact "https://example.com/fetch", store: ["output", "recorded-tool"] }
     ok -> Ran()
     failed -> Ran()

@@ -158,7 +158,7 @@ machine Order {
     kind "chargeCard"
     labels { egress:external }
     class irreversible
-    retry { attempts 6, base 300ms, timeout 10s }
+    retry { attempts 1, base 300ms, timeout 10s }
     ok -> CHARGE_SUCCEEDED()
     failed -> CHARGE_FAILED()
     exhausted -> CHARGE_FAILED(reason: "declined")

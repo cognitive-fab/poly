@@ -331,6 +331,7 @@ service machine Desk {
     uses payments { read_write }
     one order
     class irreversible
+    idempotent header "Idempotency-Key" window 24h
     ok -> Refunded()
     failed -> RefundFailed()
   }
