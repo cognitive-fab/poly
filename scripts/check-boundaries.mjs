@@ -199,7 +199,7 @@ export function demoViolationsOf(file, text) {
   const v = [];
   for (const imp of importsOf(text)) {
     if (MODEL_SDKS.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} imports model SDK '${imp.spec}' (the demo's only model call is the live providers over a given transport)`);
-    if (/^(node:)?child_process$/.test(imp.spec) && !/^demo\/(driver\/|scripts\/|stand-in\/stripe\/tls\.mjs$)/.test(file)) v.push(`${file}:${imp.line} starts a process: only the replay driver, the scripts and the authority do`);
+    if (/^(node:)?child_process$/.test(imp.spec) && !/^demo\/(driver\/|scripts\/|baseline\/|stand-in\/stripe\/tls\.mjs$)/.test(file)) v.push(`${file}:${imp.line} starts a process: only the replay driver, the scripts, the baseline procedure and the authority do`);
     if (/^(node:)?dns(\/promises)?$/.test(imp.spec)) v.push(`${file}:${imp.line} imports node:dns, which resolves names over the network`);
   }
   const line = (re) => text.slice(0, re.exec(text)?.index ?? 0).split('\n').length;

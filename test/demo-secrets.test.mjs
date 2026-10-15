@@ -53,7 +53,7 @@ test('DF9: no file of the demo, its fixtures, its records or the examples it cop
 });
 
 test('DAC13: the only code under demo/ that reads the environment is on the list, and none reads a payment provider\'s variable', () => {
-  const ALLOWED = new Set(['demo/demo.mjs', 'demo/launch.mjs', 'demo/driver/replay.mjs', 'demo/driver/map-hosts.cjs', 'demo/stand-in/stripe/tls.mjs']);
+  const ALLOWED = new Set(['demo/demo.mjs', 'demo/launch.mjs', 'demo/driver/replay.mjs', 'demo/driver/map-hosts.cjs', 'demo/baseline/procedure.mjs', 'demo/stand-in/stripe/tls.mjs']);
   const code = walk(join(ROOT, 'demo')).filter((f) => /\.(mjs|cjs|js|ts)$/.test(f));
   assert.ok(code.length >= 10, 'the scan reads the demo\'s code');
   const PAYMENT = /process\.env(\.|\[\s*['"`])(\w*)(STRIPE|PAYPAL|ADYEN|BRAINTREE|SQUARE|CHECKOUT|PAYMENT|MOLLIE|RAZORPAY)/i;
