@@ -42,7 +42,7 @@ export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = {
 }
 
 /** What stops a run: [] when the run may start. `deps` lets a test give the facts instead of the machine's. */
-export function preflight({ arm, run, root = ROOT, env = process.env, configDir = CONFIG_DIR, runsDir = join(root, 'demo', 'baseline', 'runs'), deps = {} }) {
+export function preflight({ arm, run, root = ROOT, env = process.env, configDir = CONFIG_DIR, runsDir = join(root, 'demo', 'baseline', 'runs'), localRunsDir = RUNS_DIR, deps = {} }) {
   const out = [];
   const g = deps.git ?? ((args) => git(root, args));
   const version = deps.claudeVersion ?? (() => claudeVersion());
@@ -69,7 +69,8 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   out.push(...apiKeyProblems(env));
   out.push(...(deps.configProblems ?? configProblems)(configDir));
   // The runs already committed: a name is used once, the pilots are as many as the record says, and a kept run is one.
-  const taken = existsSync(runsDir) ? readdirSync(runsDir).filter((d) => d.startsWith(`${arm}-`)).map((d) => d.slice(arm.length + 1)) : [];
+  // A run is taken once it has been made, committed or not: the runs in the repository, and the ones still in the folder they ran in.
+  const taken = [...new Set([runsDir, localRunsDir].flatMap((d) => (existsSync(d) ? readdirSync(d).filter((n) => n.startsWith(`${arm}-`)).map((n) => n.slice(arm.length + 1)) : [])))];
   if (taken.includes(run)) out.push(`the ${arm} arm already has a run named ${run}; a repeat is a new pre-registration (DB4)`);
   if (run.startsWith('pilot-') && taken.filter((r) => r.startsWith('pilot-')).length >= (record.pilots?.[arm] ?? 0)) out.push(`the record allows ${record.pilots?.[arm] ?? 0} pilot(s) of the ${arm} arm, and they are used`);
   if (run === 'kept' && taken.includes('kept')) out.push(`the ${arm} arm already has its kept run`);
@@ -85,7 +86,7 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
  * as it arrives; the result event (its usage and cost) is kept. Returns the folder of the run.
  */
 export async function runArm({ arm, run, bin = 'claude', binArgs = [], root = ROOT, env = process.env, configDir = CONFIG_DIR, runsDir = RUNS_DIR, checks = preflight, deps = {} }) {
-  const problems = checks({ arm, run, root, env, configDir, deps });
+  const problems = checks({ arm, run, root, env, configDir, localRunsDir: runsDir, deps });
   if (problems.length) throw new Error(`not started:\n- ${problems.join('\n- ')}`);
   const dir = join(runsDir, `${arm}-${run}`);
   if (existsSync(dir)) throw new Error(`${dir} exists: a run is not repeated in place`);

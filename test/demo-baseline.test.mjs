@@ -54,6 +54,8 @@ test('DB3, plan section 5: the poly arm has the deterministic commands and none 
   const tools = ALLOWED_TOOLS.poly.join(' ');
   for (const c of ['check', 'witness', 'fix', 'fmt', 'edit-check']) assert.ok(tools.includes(`npm run poly ${c}`), c);
   assert.doesNotMatch(tools, /poly new|poly explain|Bash\(npm run poly \*\)/);
+  assert.ok(!ALLOWED_TOOLS.poly.includes('Bash(node *)'), 'node alone would run the poly command line directly, poly new included');
+  assert.ok(ALLOWED_TOOLS.poly.includes('Bash(node --test*)'));
   assert.ok(ALLOWED_TOOLS.ts.includes('Bash(npm *)'), 'the TypeScript arm may install what it uses');
 });
 
@@ -94,7 +96,7 @@ function repo({ committed = true, record = true, dirty = false } = {}) {
 }
 
 const deps = (r, over = {}) => ({ claudeVersion: () => '2.1.287', scaffold: (arm) => r.scaffolds[arm], configProblems: () => [], ...over });
-const run = (r, arm = 'ts', name = 'pilot-1', over = {}) => preflight({ arm, run: name, root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), deps: deps(r, over.deps), ...over.rest });
+const run = (r, arm = 'ts', name = 'pilot-1', over = {}) => preflight({ arm, run: name, root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), localRunsDir: join(r.root, 'nowhere'), deps: deps(r, over.deps), ...over.rest });
 
 test('DB2: the record holds the prompt\'s hash, the model, the agent\'s version, one pilot an arm, the caps and the ceiling', () => {
   const r = buildRecord({ version: '2.1.287', scaffolds: { ts: 'a', poly: 'b' } });
@@ -139,6 +141,17 @@ test('DB4, DB5: a run name is used once, the pilots are as many as the record sa
     mkdirSync(join(r.root, 'demo', 'baseline', 'runs', 'ts-kept'), { recursive: true });
     assert.match(run(r, 'ts', 'kept').join(), /already has a run named kept|already has its kept run/);
   } finally { r.clean(); }
+});
+
+test('DB5: a pilot that has run but is not committed yet still counts: a second pilot is refused before the first is committed', async () => {
+  const r = repo();
+  const runs = mkdtempSync(join(tmpdir(), 'baseline-runs-'));
+  try {
+    mkdirSync(join(runs, 'ts-pilot-1'), { recursive: true });
+    const problems = preflight({ arm: 'ts', run: 'pilot-2', root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), localRunsDir: runs, deps: deps(r) });
+    assert.match(problems.join(), /allows 1 pilot\(s\).*used/);
+    assert.match(preflight({ arm: 'ts', run: 'pilot-1', root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), localRunsDir: runs, deps: deps(r) }).join(), /already has a run named pilot-1/);
+  } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
 });
 
 // ---- one run, with a stub agent (nothing is called, nothing costs) -----------------------------------------------------------------
