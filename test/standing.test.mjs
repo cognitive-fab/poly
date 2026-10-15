@@ -85,6 +85,19 @@ for (const file of ALL.filter((f) => !serial(f))) {
 // Ruled 2026-10-15: a control character in a source is a typo that no reviewer sees. Two backspaces (0x08) once stood where a
 // regex's \b belonged (test/s526-rule.test.mjs), and the regex could never match. No file under test/, conformance/, examples/
 // or std/ holds a character below 0x20 other than tab, newline and carriage return.
+/** The control characters of a file's bytes: [{ line, col, byte }], tab, newline and carriage return being allowed. */
+function controlCharacters(bytes) {
+  const out = [];
+  let line = 1;
+  let col = 1;
+  for (const c of bytes) {
+    if (c === 10) { line++; col = 1; continue; }
+    if (c < 0x20 && c !== 9 && c !== 13) out.push({ line, col, byte: c });
+    col++;
+  }
+  return out;
+}
+
 test('no control character (0x00 to 0x1F but tab, newline, carriage return) in test/, conformance/, examples/ or std/', async () => {
   const { readFileSync } = await import('node:fs');
   const BINARY = /\.(png|jpe?g|gif|ico|woff2?|zip|gz|pdf|sqlite|db|bin|wasm)$/i;
@@ -95,14 +108,7 @@ test('no control character (0x00 to 0x1F but tab, newline, carriage return) in t
       const p = join(dir, name);
       if (statSync(p).isDirectory()) { scan(p); continue; }
       if (BINARY.test(p)) continue;
-      const bytes = readFileSync(p);
-      let line = 1;
-      let col = 1;
-      for (const c of bytes) {
-        if (c === 10) { line++; col = 1; continue; }
-        if (c < 0x20 && c !== 9 && c !== 13) found.push(`${relative(ROOT, p).split(sep).join('/')}:${line}:${col} 0x${c.toString(16).padStart(2, '0')}`);
-        col++;
-      }
+      for (const c of controlCharacters(readFileSync(p))) found.push(`${relative(ROOT, p).split(sep).join('/')}:${c.line}:${c.col} 0x${c.byte.toString(16).padStart(2, '0')}`);
     }
   };
   for (const d of ['test', 'conformance', 'examples', 'std']) scan(join(ROOT, d));
@@ -110,7 +116,10 @@ test('no control character (0x00 to 0x1F but tab, newline, carriage return) in t
 });
 
 test('the control-character check detects one (a check that finds nothing is not shown to look)', () => {
-  const sample = Buffer.from('const re = /\bword\b/;\n');
-  assert.ok([...sample].some((c) => c < 0x20 && c !== 9 && c !== 10 && c !== 13), 'a backspace in a regex is below 0x20');
-  assert.ok(![...Buffer.from('tab\tand\r\nnewline\n')].some((c) => c < 0x20 && c !== 9 && c !== 10 && c !== 13), 'tab, newline and carriage return are allowed');
+  // The function the scan above uses, on a regex with two backspaces where \b was meant: both are found, with their place.
+  const bad = Buffer.from('line one\nconst re = /' + String.fromCharCode(8) + 'word' + String.fromCharCode(8) + '/;\n');
+  assert.deepEqual(controlCharacters(bad), [{ line: 2, col: 13, byte: 8 }, { line: 2, col: 18, byte: 8 }]);
+  assert.deepEqual(controlCharacters(Buffer.from('const re = /\\bword\\b/;\n')), [], 'the escape \\b, written as two characters, is fine');
+  assert.deepEqual(controlCharacters(Buffer.from('tab\tand\r\nnewline\n')), [], 'tab, newline and carriage return are allowed');
+  assert.deepEqual(controlCharacters(Buffer.from([0x00, 0x1b, 0x1f])).map((c) => c.byte), [0, 0x1b, 0x1f], 'the rest of 0x00 to 0x1F are found');
 });
