@@ -169,9 +169,9 @@ service machine Conversation {
 
   effect send(body: Content) {
     kind "channel.send"
+    retry { attempts 1, base 500ms, timeout 30s }
     labels { egress:external }
     class irreversible
-    retry { attempts 10, base 5s, timeout 15s }
     ok -> Sent()
     failed -> Undelivered()
     exhausted -> Undelivered()
