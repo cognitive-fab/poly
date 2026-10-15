@@ -71,8 +71,8 @@ test('an admission key is found only by location, and a key file under version c
   await assert.rejects(admit(dir), /version control/);
 });
 
-test('S137: the cap is 10, so the oms example (attempts 6) is admitted, and a retry above 10 is refused', async () => {
-  const dir = project('retry', ['examples/oms/oms.poly'], key);
+test('S137: the cap is 10, so the oms example with 6 attempts and a key is admitted, and a retry above 10 is refused', async () => {
+  const dir = project('retry', ['test/fixtures/retry-cap/oms.poly'], key);
   assert.equal((await admit(dir)).verdict, 'CLEAN');
   writeFileSync(join(dir, 'src', 'oms.poly'), readFileSync(join(dir, 'src', 'oms.poly'), 'utf8').replace('attempts 6', 'attempts 11'));
   await assert.rejects(admit(dir), /chargeCard.*maxAttempts 11.*at most 10/);
