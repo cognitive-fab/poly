@@ -343,3 +343,27 @@ test('DF7: the presenter routes answer only to the loopback', () => {
   for (const a of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) assert.equal(isLoopback(a), true, a);
   for (const a of ['192.168.1.20', '10.0.0.5', '::ffff:192.168.1.20', undefined, '']) assert.equal(isLoopback(a), false, String(a));
 });
+
+test('DF7: a message the runtime refuses counts for nothing: it uses none of the 12 and starts no gap', async () => {
+  let status = 401;
+  const rt = { async receive() { return { status, contentType: 'text/plain', body: '' }; } };
+  const { c, room } = newRoom({ rt });
+  room.join('s1');
+  assert.deepEqual(await room.say('s1', 'refused'), { ok: false, reason: 'refused' });
+  status = 200;
+  assert.deepEqual(await room.say('s1', 'accepted at once'), { ok: true }, 'no gap was started by the refused one');
+  c.advance(5000);
+  for (let k = 0; k < 11; k++) { assert.deepEqual(await room.say('s1', `m${k}`), { ok: true }, `message ${k + 2}`); c.advance(5000); }
+  assert.deepEqual(await room.say('s1', 'the 13th'), { ok: false, reason: 'too-many' }, '12 accepted messages, the refused one not among them');
+});
+
+test('DF3: the orders table refuses a list query of a shape the adapter does not issue, rather than read it as every customer\'s', async () => {
+  const { ordersDb } = await import('../demo/host/orders-db.mjs');
+  const { createPersonaPool } = await import('../demo/host/personas.mjs');
+  const pool = createPersonaPool({ size: 2 });
+  const db = ordersDb(pool.all());
+  const own = await db.query('SELECT "order_id" AS id FROM "orders"', ['cust-guest-01', 10]);
+  assert.deepEqual(own.rows.map((r) => r.owner), ['cust-guest-01']);
+  await assert.rejects(db.query('SELECT "order_id" AS id FROM "orders"', ['cust-guest-01', '2026-01-01', 10]), /unexpected list query/);
+  await assert.rejects(db.query('SELECT "order_id" AS id FROM "orders"', []), /unexpected list query/);
+});
