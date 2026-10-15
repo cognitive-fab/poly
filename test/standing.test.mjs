@@ -42,7 +42,7 @@ function sources(dir, root = ROOT) {
 }
 
 // Every directory that holds poly sources, and nothing filtered out of them.
-const ALL = ['examples', 'conformance', join('test', 'fixtures'), 'experiments', join('packages', 'poly-runtime', 'model'), 'std'].flatMap((d) => sources(join(ROOT, d)));
+const ALL = ['examples', 'conformance', join('test', 'fixtures'), 'experiments', join('packages', 'poly-runtime', 'model'), 'std', 'demo'].flatMap((d) => sources(join(ROOT, d)));
 const OUT = join(ROOT, '.poly', 'test-build', 'standing');
 
 // S163: the only sources outside the standing rule are named, and nothing else is dropped with them.

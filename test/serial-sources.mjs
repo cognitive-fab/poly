@@ -6,7 +6,8 @@
 import { relative, sep } from 'node:path';
 import { ROOT } from './helpers.mjs';
 
-export const SERIAL = ['examples/concierge/', 'examples/inbox/'];
+// The demo copy of the concierge (Step 9) is the concierge with two cap lines changed, and its check is as long.
+export const SERIAL = ['examples/concierge/', 'examples/inbox/', 'demo/concierge/'];
 
 /** Whether a source is checked in the serial group. */
 export const serial = (file) => SERIAL.some((d) => (relative(ROOT, file).split(sep).join('/') + '/').startsWith(d));
