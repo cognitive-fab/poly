@@ -323,11 +323,16 @@ test('PT33.1, PL1002: second idempotent item is DUPLICATE_DECLARATION', async ()
     b.replace('    class irreversible',
       '    class irreversible\n    retry { attempts 2, base 200ms, timeout 200ms }\n    idempotent header "K1" window 24h\n    idempotent header "K2" window 24h'));
   const r = await checkFile(path, { root: OUT });
-  assert.notEqual(r.verdict, 'REFUSED', 'PT33.1: syntax should parse');
-  assert.ok(r.machines && r.machines[0], 'PT33.1: must have checked');
-  const m = r.machines[0];
-  const pl1002 = m.diagnostics.filter((d) => d.code === 'PL1002');
+  // A duplicate declaration is a front-end error, so the source is REFUSED and the code is in r.diagnostics.
+  assert.equal(r.verdict, 'REFUSED', `PT33.1: a second idempotent item is refused, got ${r.verdict}`);
+  const pl1002 = (r.diagnostics || []).filter((d) => d.code === 'PL1002');
   assert.equal(pl1002.length, 1, `PT33.1: duplicate must be PL1002, got ${pl1002.length}`);
+  // The single-clause form parses and checks.
+  const one = variant('one-idempotent.poly', (b) =>
+    b.replace('    class irreversible',
+      '    class irreversible\n    retry { attempts 2, base 200ms, timeout 200ms }\n    idempotent header "K1" window 24h'));
+  const ok = await checkFile(one, { root: OUT });
+  assert.equal(ok.verdict, 'CLEAN', `PT33.1: the single-clause form is CLEAN, got ${ok.verdict}`);
 });
 
 // PS23.7, PL4004: horizon validation

@@ -35,10 +35,12 @@ const getDiagsWithCode = (result, code) => {
     .filter((d) => d.code === code);
 };
 
-test('CONTROL: base.poly is CLEAN today', async () => {
+test('CONTROL: base.poly is checked, has no PL6304, and its only finding is PL4003 (an unguarded irreversible effect)', async () => {
   const r = await checkFile(BASE, { root: OUT });
-  assert.equal(r.verdict, 'CLEAN', `base.poly should be CLEAN but got ${r.verdict}`);
+  assert.notEqual(r.verdict, 'REFUSED', `base.poly should be checked but got ${r.verdict}`);
   assert.equal(countCode(r, 'PL6304'), 0, 'base.poly should have no PL6304');
+  const codes = [...new Set((r.machines || []).flatMap((m) => m.diagnostics || []).map((d) => d.code))];
+  assert.deepEqual(codes, ['PL4003'], `base.poly's only finding is PL4003, got ${codes}`);
 });
 
 test('CONTROL: decision.poly is CLEAN today', async () => {
