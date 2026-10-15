@@ -28,6 +28,7 @@ machine Meter {
     kind "meter.alarm"
     labels { egress:external }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 }
 
@@ -44,6 +45,7 @@ machine Pump {
     kind "pump.run"
     labels { egress:external }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 }
 

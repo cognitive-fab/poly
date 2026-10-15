@@ -26,7 +26,7 @@ machine Till {
     kind "till.charge"
     labels { egress:external }
     class irreversible
-    retry { attempts 3, base 10ms, timeout 1s }
+    retry { attempts 1, base 10ms, timeout 1s }
     ok -> Charged()
     failed -> Refused()
     exhausted -> Refused()

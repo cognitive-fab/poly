@@ -116,7 +116,7 @@ machine Brief {
     kind "post_brief"
     labels { egress:public }
     class irreversible
-    retry { attempts 5, base 2s, timeout 2m }
+    retry { attempts 1, base 2s, timeout 2m }
     ok -> POST_DONE()
     failed -> POST_FAILED(reason: "channel-unavailable")
     exhausted -> POST_FAILED(reason: "channel-unavailable")

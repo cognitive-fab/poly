@@ -36,6 +36,8 @@ service machine Chat {
   effect send(kind: Kind) {
     kind "chat.send"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 
   never free-when-closed: emit send(kind: FreeForm) while window is Closed

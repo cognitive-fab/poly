@@ -43,7 +43,7 @@ export default module('orders', [
         kind('payment.charge'),
         labels(['egress:external']),
         cls('irreversible'),
-        retry(3, '200ms', '5s'),
+        retry(1, '200ms', '5s'),
         ok('PaymentOk', []),
         failed('PaymentFailed', { code: 'declined' }),
         exhausted('PaymentFailed', { code: 'exhausted' }),

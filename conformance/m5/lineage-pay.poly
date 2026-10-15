@@ -41,5 +41,6 @@ machine Order {
     kind "lp.pay"
     labels { egress:external }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 }

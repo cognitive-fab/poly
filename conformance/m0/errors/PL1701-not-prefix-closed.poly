@@ -9,5 +9,7 @@ machine M {
   effect charge(amount: 0..1) {
     kind "pay.charge"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 }

@@ -15,6 +15,8 @@ machine M {
   action Done(j: Job, b: Box)
   effect Ship() {
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     ok -> Done(j: Busy { n: 1 }, b: { n: 1 })
     failed -> Done(j: Job.Idle, b: { n: 2 - 2 })
   }

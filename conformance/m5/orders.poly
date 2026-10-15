@@ -42,10 +42,12 @@ machine Order {
     kind "payment.charge"
     labels { egress:external }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   effect fee(n: 0..1) {
     kind "payment.fee"
     labels { egress:external }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 }

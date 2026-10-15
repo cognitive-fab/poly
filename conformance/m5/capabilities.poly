@@ -43,6 +43,7 @@ machine Order {
     labels { egress:external, read:private }
     targets { egress: "https://api.psp.example/v1/charges", secrets: ["PSP_KEY"] }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   effect note(n: 0..1) {
     kind "orders.note"
