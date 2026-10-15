@@ -19,5 +19,6 @@ machine Acct {
   effect tick(x: 0..1) {
     kind "cancelTimer"
     labels { egress:external }
+    class none
   }
 }

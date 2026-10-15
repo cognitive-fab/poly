@@ -23,6 +23,7 @@ machine Asker {
   effect fetch() {
     kind "ml.fetch"
     labels { egress:external }
+    class none
     targets { egress: "https://example.org/" }
     ok -> Answered()
     failed -> Failed()

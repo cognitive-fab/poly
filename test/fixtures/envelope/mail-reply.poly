@@ -81,6 +81,8 @@ machine Replier {
   effect draft(account: Principal, e: Content, body: Content) {
     kind "mail.draft"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     to account
     audience public
     envelope e

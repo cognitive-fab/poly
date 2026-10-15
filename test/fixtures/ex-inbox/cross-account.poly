@@ -148,6 +148,7 @@ machine Todo {
     to account
     envelope e
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     ok -> Created()
     failed -> NotCreated()
   }

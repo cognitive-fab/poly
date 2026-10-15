@@ -35,6 +35,7 @@ machine Acct {
   effect ping(x: 0..1) {
     kind "net.ping"
     labels { egress:external }
+    class none
     ok -> Ok(w: Fine, k: 3)
     failed -> Fail(w: Why.Fine)
   }

@@ -19,6 +19,8 @@ machine M {
   effect post(k: Kind) {
     kind "s.post"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   never no-loud: emit post(k: Loud)
 }

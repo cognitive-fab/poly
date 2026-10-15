@@ -14,10 +14,14 @@ machine M {
   effect alert(level: Level) {
     kind "ops.page"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   effect notify(level: Level) {
     kind "ops.page"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   never no-alert: emit alert
   never no-high-alert: emit alert(level: High)

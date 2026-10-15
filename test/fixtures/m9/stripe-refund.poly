@@ -29,5 +29,6 @@ machine Desk {
     targets { egress: "https://api.stripe.com/v1/refunds" }
     uses payments { read_write } for merchant
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 }

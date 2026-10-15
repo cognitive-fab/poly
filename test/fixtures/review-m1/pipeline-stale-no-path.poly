@@ -57,10 +57,14 @@ machine Account {
   effect receipt(copies: 0..1) {
     kind "mail.receipt"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   effect notice(n: 0..2) {
     kind "mail.notice"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   effect reminder(copies: int) {
     kind "mail.reminder"

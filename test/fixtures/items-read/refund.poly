@@ -81,6 +81,7 @@ machine Desk {
     one order
     kind "support.refund"
     labels { egress:external }
+    class none
     to customer
     audience public
   }

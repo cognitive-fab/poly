@@ -144,6 +144,7 @@ service machine Desk {
     uses payments { read_write }
     one order
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     ok -> Refunded()
     failed -> RefundFailed()
   }

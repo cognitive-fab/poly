@@ -28,6 +28,8 @@ service machine Alarm {
   effect bell(loud: bool) {
     kind "alarm.bell"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 
   never no-bell-when-disarmed: emit bell while phase is Disarmed

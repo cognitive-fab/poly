@@ -83,6 +83,7 @@ machine Desk {
   effect reply(customer: Principal, body: Content) {
     kind "support.reply"
     labels { egress:external }
+    class none
     to customer
     audience public
   }

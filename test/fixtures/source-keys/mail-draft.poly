@@ -77,6 +77,7 @@ machine Drafter {
   effect send(recipient: Principal, body: Content) {
     kind "mail.send"
     labels { egress:external }
+    class none
     to recipient
     audience public
   }

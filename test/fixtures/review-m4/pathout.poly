@@ -67,10 +67,12 @@ machine Ticket {
     kind "payments.refund"
     labels { egress:external }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   effect reply(branch: Branch) {
     kind "support.reply"
     labels { egress:external }
+    class none
   }
 
   path property one-routing: count("decision.route") <= 1

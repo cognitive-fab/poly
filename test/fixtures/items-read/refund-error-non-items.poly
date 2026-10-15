@@ -37,6 +37,8 @@ machine Desk {
     one customer
     kind "support.refund"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     to customer
     audience public
   }

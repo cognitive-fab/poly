@@ -139,6 +139,7 @@ service machine Desk {
     targets { egress: "https://api.stripe.com/v1/refunds" }
     uses payments { read_write }
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     ok -> Unclassified()
     failed -> Unclassified()
   }

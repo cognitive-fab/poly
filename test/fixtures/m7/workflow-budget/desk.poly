@@ -74,7 +74,7 @@ machine Desk {
     kind "desk.send"
     labels { egress:external }
     class irreversible
-    retry { attempts 3, base 1s, timeout 30s }
+    retry { attempts 1, base 1s, timeout 30s }
     ok -> Delivered()
     failed -> SendFailed()
   }

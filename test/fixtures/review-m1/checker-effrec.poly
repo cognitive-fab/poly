@@ -11,6 +11,8 @@ machine M {
   action Seal()
   effect Notify(e: Env) {
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
   on Seal {
     require !done else reject "sealed"

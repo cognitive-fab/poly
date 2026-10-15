@@ -12,11 +12,15 @@ service machine Shop {
   effect charge(amount: 0..1) {
     kind "shop.charge"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     ok -> Settle()
   }
   effect receipt(amount: 0..1) {
     kind "shop.receipt"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 
   on Pay {

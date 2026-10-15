@@ -86,5 +86,6 @@ machine Ticket {
     targets { egress: "https://api.test-oauth.example/v1/refunds" }
     uses payments { refunds.write } for merchant
     class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
   }
 }

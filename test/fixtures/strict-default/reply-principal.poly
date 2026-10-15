@@ -16,6 +16,7 @@ machine M {
   effect fetch() {
     kind "x.fetch"
     labels { egress:external }
+    class none
     ok(r) -> Got(w: r.w)
     failed -> Bad()
   }

@@ -84,6 +84,8 @@ machine Desk {
   effect reply(customer: Principal, body: Content) {
     kind "support.reply"
     labels { egress:external }
+    class irreversible
+    retry { attempts 1, base 500ms, timeout 30s }
     to customer
     audience public
   }
