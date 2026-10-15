@@ -598,8 +598,9 @@ class Reader {
       }
       case 'idempotentByNature': return mk({ kind: 'EffIdempotent', form: 'nature', reason: this.str(this.argsOf(c, 1, 1)[0]) });
       case 'retry': {
-        const [n, base, timeout] = this.argsOf(c, 3, 3);
-        return mk({ kind: 'EffRetry', attempts: this.int(n), base: this.str(base), timeout: this.str(timeout) });
+        // PT2.5: retry(n) and retry(n, base) take the S137 defaults for what is left out.
+        const [n, base, timeout] = this.argsOf(c, 1, 3);
+        return mk({ kind: 'EffRetry', attempts: this.int(n), base: base ? this.str(base) : '500ms', timeout: timeout ? this.str(timeout) : '30s' });
       }
       default: {
         // `okWith('r', 'A', args)` is `ok(r) -> A(args)` (PD1.2b, S79).

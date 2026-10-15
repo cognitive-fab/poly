@@ -1178,12 +1178,11 @@ class Parser {
         this.expect('{');
         this.expect('attempts');
         const attempts = this.int();
-        this.expect(',');
-        this.expect('base');
-        const base = this.duration();
-        this.expect(',');
-        this.expect('timeout');
-        const timeout = this.duration();
+        // PT2 (ruled 2026-10-14): base and timeout are optional, in that order, and default to the S137 values (500ms, 30s).
+        let base = '500ms';
+        let timeout = '30s';
+        if (this.atPunct(',') && this.at('base', 1)) { this.expect(','); this.expect('base'); base = this.duration(); }
+        if (this.atPunct(',') && this.at('timeout', 1)) { this.expect(','); this.expect('timeout'); timeout = this.duration(); }
         this.expect('}');
         items.push(this.effItem(is, { kind: 'EffRetry', attempts, base, timeout }));
       } else if (w === 'idempotent') {

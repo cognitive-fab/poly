@@ -140,7 +140,7 @@ const GRANT_STEP = Symbol('grant step');
 const GRANT_ONLY = new Set(['Callback', 'Reauthorize', 'Refreshed', 'RefreshFailed', 'Revoke']);
 
 /** Deliberately broken runtimes, for one test each: the recipient digest without the store's key (ruled on step 9). */
-export const RUNTIME_FAULTS = ['unkeyed-recipient', 'address-in-clear', 'unkeyed-retry-admitted-at-load', 'unkeyed-retry-unclamped', 'idempotency-header-dropped', 'window-lapse-ignored'] as const;
+export const RUNTIME_FAULTS = ['unkeyed-recipient', 'address-in-clear', 'unkeyed-retry-admitted-at-load', 'unkeyed-retry-unclamped', 'idempotency-header-dropped', 'window-lapse-ignored', 'none-class-writes-allowed'] as const;
 
 /** PT33.5: the faults a LoadOptions.fault names, a name or a list of them. */
 export const faultsOf = (f: LoadOptions['fault'] | string | undefined): readonly string[] => (f === undefined ? [] : Array.isArray(f) ? f : [f as string]);
@@ -306,7 +306,9 @@ export class PolyRuntime {
         await this.store.insertAudit({ at: this.now(), instanceId: row.instance_id, action: row.kind, actionId: row.intent_id, rule, reason });
       }, this.apiFor(decl, (row.payload ?? {}) as Record<string, unknown>), this.#contentFor(row), this.#itemsFor(row),
       // PT33.4: the runtime attaches the intent id to every write of a keyed effect, under the manifest's header name.
-      decl?.idempotency?.header && !this.#faults.includes('idempotency-header-dropped') ? { header: decl.idempotency.header as string, value: row.intent_id } : undefined),
+      decl?.idempotency?.header && !this.#faults.includes('idempotency-header-dropped') ? { header: decl.idempotency.header as string, value: row.intent_id } : undefined,
+      // PS23.10: the seeded fault lifts the safe-methods limit of class none, and nothing else.
+      this.#faults.includes('none-class-writes-allowed')),
       onAllowed: (row, proposal) => { for (const f of this.intentSubscribers.get(row.kind) ?? []) f({ intent: row.intent_id, kind: row.kind, instance: row.instance_id, seq: row.seq, payload: row.payload, proposal }); },
       afterCompletion: (row) => { this.store.pending.delete(`${row.instance_id}\u0000${row.intent_id}:done`); this.records.delete(row.intent_id); },
       // PT25.1, S185: a send of channel.<c>.send is proposed with its channel: the name, the kind, the recipient as a

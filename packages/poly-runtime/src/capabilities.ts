@@ -8,7 +8,7 @@ import { canonicalize } from '@poly/core';
 
 /** One HTTP request, made by the host. It follows no redirect: the capability checks each hop itself (S151). */
 /** PT33.4: a write is every method that is not safe. */
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export interface EgressRequest { method: HttpMethod; url: string; headers?: Record<string, string>; body?: unknown }
 export interface EgressResponse { status: number; headers?: Record<string, string>; body?: unknown }
 
@@ -29,7 +29,7 @@ export class CapabilityRefused extends Error {
 export type Target = string | { exact: string };
 
 /** The manifest entry's labels and targets, as the lowering wrote them (PT6.1, S151), and the credential it uses (PT10e). */
-export interface CapabilityDecl { labels?: string[]; targets?: Record<string, Target[]>; uses?: { credential: string; scopes: string[]; holder: string | null } }
+export interface CapabilityDecl { class?: string; labels?: string[]; targets?: Record<string, Target[]>; uses?: { credential: string; scopes: string[]; holder: string | null } }
 
 /** PT22.5, S201: the vault's transport for the intent's grant: the credential is attached inside the vault adapter. */
 export interface ApiTransport { request(r: { method: HttpMethod; url: string; headers: Record<string, string>; body: string }): Promise<{ status: number; headers: Record<string, string>; body: string }> }
@@ -94,6 +94,9 @@ export const CREDENTIAL_HANDLE = Symbol.for('poly.credential-handle');
 /** PT33.4: the header a keyed effect's writes carry, and its value, the intent id. */
 export interface IdempotencyKey { header: string; value: string }
 
+/** PS23.10, PT33.13: the methods that change nothing; an effect of class none sends no other. */
+const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD']);
+
 /** Redirects followed before a request is given up; each hop is checked against the prefixes. */
 export const MAX_REDIRECTS = 5;
 
@@ -128,14 +131,21 @@ export function withinPrefix(url: string, prefixes: readonly Target[]): string |
  * The frozen capability object for one effect kind, for one call of its handler. `audit` writes the PL6406 row; it
  * is awaited before the refusal is thrown, so a refusal is in the ledger whatever the handler does with the error.
  */
-export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string, rule?: string) => Promise<void>, api?: ApiTransport, content?: ContentAccess, items?: ItemsAccess, key?: IdempotencyKey): Readonly<Record<string, unknown>> {
+export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, audit: (reason: string, rule?: string) => Promise<void>, api?: ApiTransport, content?: ContentAccess, items?: ItemsAccess, key?: IdempotencyKey, noneWrites = false): Readonly<Record<string, unknown>> {
   const targets = decl.targets ?? {};
   const refuse = async (reason: string): Promise<never> => { await audit(reason); throw new CapabilityRefused(`PL6406 CAPABILITY_REFUSED: ${reason}`); };
   // PT33.4: one write per attempt for a keyed effect (a second is refused, PL6406), and the key header on it, set by the runtime:
   // a value the handler supplied under that name is replaced and audited.
   let wrote = false;
+  // PS23.10: a class none effect is held to safe methods. A write is refused before the transport, with its own code, and audited.
+  const none = decl.class === 'none' && !noneWrites;
   const keyed = async (method: HttpMethod, headers: Record<string, string> | undefined): Promise<Record<string, string> | undefined> => {
-    if (!key || method === 'GET') return headers;
+    if (none && !SAFE_METHODS.has(method)) {
+      const reason = `${method} by an effect of class none, which may only read (GET, HEAD) (PS23.10)`;
+      await audit(reason, 'PL6412');
+      throw new CapabilityRefused(`PL6412 NONE_CLASS_WRITE: ${reason}`);
+    }
+    if (!key || SAFE_METHODS.has(method)) return headers;
     if (wrote) return refuse(`a second write in one attempt of a keyed effect (${key.header} is one intent's key, PT33.4)`);
     wrote = true;
     const rest: Record<string, string> = {};
@@ -168,6 +178,7 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
       put: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => call('PUT', url, body, opts?.headers),
       patch: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => call('PATCH', url, body, opts?.headers),
       delete: (url: string, opts?: { headers?: Record<string, string> }) => call('DELETE', url, undefined, opts?.headers),
+      head: (url: string, opts?: { headers?: Record<string, string> }) => call('HEAD', url, undefined, opts?.headers),
     });
   } else if (has(decl, 'egress:external', 'egress:public')) {
     const prefixes = targets.egress ?? [];
@@ -199,6 +210,7 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
       put: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => request('PUT', url, body, opts?.headers),
       patch: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => request('PATCH', url, body, opts?.headers),
       delete: (url: string, opts?: { headers?: Record<string, string> }) => request('DELETE', url, undefined, opts?.headers),
+      head: (url: string, opts?: { headers?: Record<string, string> }) => request('HEAD', url, undefined, opts?.headers),
     });
   }
   if (has(decl, 'read:private')) {
