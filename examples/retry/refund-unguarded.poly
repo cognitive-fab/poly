@@ -38,3 +38,4 @@ machine Desk {
     failed -> RefundFailed()
   }
 }
+// scan: rule-input
