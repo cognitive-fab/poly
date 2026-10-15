@@ -188,6 +188,27 @@ function sources(dir) {
   return out;
 }
 
+/**
+ * Rule 7 (DAC13): the demo's code (demo/). No model SDK is imported anywhere in it. The model provider's host is named in one file,
+ * the live transport, and a global fetch is used nowhere else (the room page's own script, a string in page.mjs that the browser
+ * runs, is the one other); a process is started only by the replay driver, the scripts and the stand-in's authority (openssl); and
+ * node:dns, which resolves names over the network, is not used. The live providers (DF6) are the demo's only model call, and they
+ * are given a transport by the launcher, so nothing in demo/ calls a model by itself.
+ */
+export function demoViolationsOf(file, text) {
+  const v = [];
+  for (const imp of importsOf(text)) {
+    if (MODEL_SDKS.some((re) => re.test(imp.spec))) v.push(`${file}:${imp.line} imports model SDK '${imp.spec}' (the demo's only model call is the live providers over a given transport)`);
+    if (/^(node:)?child_process$/.test(imp.spec) && !/^demo\/(driver\/|scripts\/|stand-in\/stripe\/tls\.mjs$)/.test(file)) v.push(`${file}:${imp.line} starts a process: only the replay driver, the scripts and the authority do`);
+    if (/^(node:)?dns(\/promises)?$/.test(imp.spec)) v.push(`${file}:${imp.line} imports node:dns, which resolves names over the network`);
+  }
+  const line = (re) => text.slice(0, re.exec(text)?.index ?? 0).split('\n').length;
+  if (file !== 'demo/host/live-transport.mjs' && /anthropic\.com/i.test(text)) v.push(`${file}:${line(/anthropic\.com/i)} names the model provider's host: only demo/host/live-transport.mjs does`);
+  const FETCH = /(^|[^.\w])fetch\s*\(/;
+  if (file !== 'demo/host/live-transport.mjs' && file !== 'demo/host/page.mjs' && FETCH.test(text)) v.push(`${file}:${line(FETCH)} calls the global fetch: only demo/host/live-transport.mjs may reach an outside host`);
+  return v;
+}
+
 export function checkRepository(root) {
   const violations = [];
   const packagesDir = join(root, 'packages');
@@ -195,6 +216,11 @@ export function checkRepository(root) {
     for (const file of sources(join(packagesDir, pkg, 'src'))) {
       violations.push(...violationsOf(pkg, relative(root, file).split(sep).join('/'), readFileSync(file, 'utf8')));
     }
+  }
+  // Rule 7: the demo's code.
+  for (const file of everyFile(join(root, 'demo'))) {
+    if (!/\.(mjs|cjs|js|ts)$/.test(file) || /(^|[\\/])node_modules[\\/]/.test(file)) continue;
+    violations.push(...demoViolationsOf(relative(root, file).split(sep).join('/'), readFileSync(file, 'utf8')));
   }
   // Rule 3: an adapter is configuration only.
   const adapters = join(root, 'adapters');

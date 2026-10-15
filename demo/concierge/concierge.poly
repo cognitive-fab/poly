@@ -1,0 +1,435 @@
+// expected: CLEAN
+// The concierge, poly v1's release example (plan-ex.md E1; AC15, AC18, AC22, AC27, AC30). A small business answers its
+// customers on WhatsApp. A routed decision classifies each message from its body (S402): the small tier first, the
+// large one when the calibrated answer is unsure. A refund's amount is extracted by a typed decision with a strict
+// domain (AC30, PT28.3a), and the refund is issued through the merchant's delegated credential (PS16); the policy
+// escalates a refund above 100 to a person, and the host tells staff on Slack, where no message approves anything
+// (PF11.8). Every reply is written by a decision from the customer's message and the outcome, and goes back on the
+// thread's conversation, which keeps WhatsApp's window (AC15).
+//
+// A status question retrieves the asking customer's orders, and only theirs, and the answer cites them; the thread's
+// principal comes from the verifier's claims (S450), so the reply reaches the customer the orders belong to (AC22).
+// The refund names no holder: the merchant is the Stripe Connect grant's subject, not program state (Q-EX6, S457).
+// It acts on one order: the customer's own orders are retrieved, the amount decision cites the one the message is about,
+// and the refund carries that item set (`one order`, S462), so the host never picks which charge to refund. The handler
+// reads the order (`items.read`), refuses unless it is the requesting customer's, and refunds no more than was paid.
+module concierge
+
+audience { public < customer < staff }
+
+enum Branch { Refund, Status, Other }
+
+// What a reply tells the customer; the decision that writes it reads this and the customer's message.
+enum Outcome { Refunded, Declined, Unsure, Status, Other }
+
+// AC30, PT28.3a: the extracted amount, a record of one field with a strict domain.
+type Amount = { value: 0..500 }
+
+enum Phase { Idle, Classifying, Looking, Finding, Citing, Extracting, Refunding, Answering }
+
+// S450: the bound action's claims, a field of the WhatsApp kind's Sender claims.
+claims Customer {
+  principal: Principal
+}
+
+// The order's charge is the source's key (S451): the handler refunds that charge and no other (S462).
+source orders: records {
+  adapter "postgres"
+  audience customer owned
+  freshness 1h
+  keys { charge }
+}
+
+channel support: whatsapp {
+  adapter "whatsapp"
+  thread "{from}"
+  audience customer
+  principal from principal
+  starts Desk.Start on inbound
+  Message -> Desk.Got
+  Delivered -> Desk.Delivered
+  Rejected -> Desk.SendRejected
+  Failed -> Desk.SendFailed
+}
+
+channel staff: slack {
+  adapter "slack"
+  thread "{channel}"
+  starts Notice.Start on inbound
+  Message -> Notice.Got
+  Delivered -> Notice.Delivered
+  Rejected -> Notice.SendRejected
+  Failed -> Notice.SendFailed
+}
+
+// S208: Stripe Connect, the platform's key in the vault and the merchant's account as the grant's subject. Q-EX6: the
+// merchant is the grant's, so the credential names no holder the program could set.
+credential payments: oauth2 {
+  provider "stripe-connect"
+  grant authorization_code
+  scopes { read_write }
+}
+
+// Desk: one per customer's WhatsApp thread. One message is worked on at a time. A message that arrives meanwhile is
+// acknowledged with a short reply, so every message is answered (Q-EX7), and a third waits in the conversation, which
+// keeps at most two (std.channels.whatsapp). A reply refused outside the window ends its exchange: the customer's next
+// message opens the window again (the template retry is left out of v1, decisions-ex.md).
+service machine Desk {
+  state {
+    phase    : Phase     = Idle
+    customer : Principal = none
+    started  : bool      = false
+    question : Content   = none
+    large    : bool      = false
+    acking   : bool      = false
+    inflight : 0..3      = 0
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Found(items: Items)
+  action LookupFailed()
+  action Cited(text: Content, cites: Items)
+  action Classified(branch: Branch, conf: Conf, margin: Conf)
+  action Unclassified()
+  action Amounted(value: 0..500, conf: Conf, cites: Items)
+  action Unextracted()
+  action Refunded()
+  action RefundFailed()
+  action Answered(text: Content)
+  action AnswerFailed()
+  action Acked(text: Content)
+  action AckFailed()
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+
+  on Got(body) by c: Customer {
+    if phase == Idle {
+      customer' = c.principal
+      phase' = Classifying
+      question' = body
+      decide classify(body: body)
+    } else {
+      require !acking else reject "busy"
+      customer' = c.principal
+      acking' = true
+      decide ack(question: body)
+    }
+  }
+
+  on Classified(branch, conf, margin) {
+    require phase == Classifying else reject "not-classifying"
+    if branch == Refund {
+      phase' = Finding
+      emit lookup(customer: customer)
+    } else {
+      if branch == Status {
+        phase' = Looking
+        emit lookup(customer: customer)
+      } else {
+        phase' = Answering
+        decide reply(question: question, outcome: Other)
+      }
+    }
+  }
+
+  // The one lookup serves both paths: a status question cites the orders it used, a refund names the one it is for.
+  on Found(items) {
+    require phase == Looking || phase == Finding else reject "not-looking"
+    if phase == Finding {
+      phase' = Extracting
+      decide amount(text: question, context: items)
+    } else {
+      phase' = Citing
+      decide answer(question: question, context: items)
+    }
+  }
+
+  on LookupFailed {
+    require phase == Looking || phase == Finding else reject "not-looking"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  // The answer cites the orders it used, a subset of those it was given (PS17.6), and goes to the customer who asked.
+  // The Desk is idle again as it sends: the conversation holds the reply until the provider takes it.
+  on Cited(text, cites) {
+    require phase == Citing else reject "not-citing"
+    phase' = Idle
+    question' = none
+    if inflight < 3 {
+      inflight' = inflight + 1
+    }
+    emit support.reply(body: text)
+  }
+
+  on Unclassified {
+    require phase == Classifying else reject "not-classifying"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  // AC30: the amount reaches the program only as a value of 0..500; an answer outside it never reaches this handler.
+  // It is compared with 100 and passed on unchanged, so it is explored at its cuts (S458). S462: the refund acts on
+  // exactly one order, so the emit is guarded by the citation's count. A guard with `if`, not `require`: a rejected
+  // completion would leave the Desk in Extracting with no reply (ex-concierge-refund shows it), and an answer that
+  // cites two orders, or an amount the decision is unsure of, is answered Unsure.
+  on Amounted(value, conf, cites) {
+    require phase == Extracting else reject "not-extracting"
+    if conf >= 0.8 {
+      if cites.count == 1 {
+        phase' = Refunding
+        large' = value > 100
+        emit refund(amount: value, customer: customer, order: cites)
+      } else {
+        phase' = Answering
+        decide reply(question: question, outcome: Unsure)
+      }
+    } else {
+      phase' = Answering
+      decide reply(question: question, outcome: Unsure)
+    }
+  }
+
+  on Unextracted {
+    require phase == Extracting else reject "not-extracting"
+    phase' = Answering
+    decide reply(question: question, outcome: Unsure)
+  }
+
+  on Refunded {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Answering
+    decide reply(question: question, outcome: Refunded)
+  }
+
+  on RefundFailed {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Answering
+    decide reply(question: question, outcome: Declined)
+  }
+
+  on Answered(text) {
+    require phase == Answering else reject "not-answering"
+    phase' = Idle
+    question' = none
+    if inflight < 3 {
+      inflight' = inflight + 1
+    }
+    emit support.reply(body: text)
+  }
+
+  on AnswerFailed {
+    require phase == Answering || phase == Citing else reject "not-answering"
+    phase' = Idle
+    question' = none
+  }
+
+  // Q-EX7: the acknowledgement of a message that arrived while the Desk was busy.
+  on Acked(text) {
+    require acking else reject "not-acking"
+    acking' = false
+    if inflight < 3 {
+      inflight' = inflight + 1
+    }
+    emit support.reply(body: text)
+  }
+
+  on AckFailed {
+    require acking else reject "not-acking"
+    acking' = false
+  }
+
+  // A receipt is never rejected (PL5406): each is taken in every phase, and settles one send in flight.
+  on Delivered {
+    if inflight > 0 {
+      inflight' = inflight - 1
+    } else {
+      inflight' = 0
+    }
+  }
+
+  on SendRejected(reason) {
+    if inflight > 0 {
+      inflight' = inflight - 1
+    } else {
+      inflight' = 0
+    }
+  }
+
+  on SendFailed {
+    if inflight > 0 {
+      inflight' = inflight - 1
+    } else {
+      inflight' = 0
+    }
+  }
+
+  decision classify(body: Content) -> Branch {
+    route triage
+    labels { egress:external, read:private }
+    timeout 800ms
+    ok(r) -> Classified(branch: r.answer, conf: r.conf, margin: r.margin)
+    failed -> Unclassified()
+  }
+
+  // Reads the message and the customer's orders, and cites the order the message is about (PS17.6): an answer that
+  // cites none is uncited and takes the failed path.
+  // AC30: the amount is typed by a strict domain, and an answer outside it is refused at dispatch and journaled.
+  decision amount(text: Content, context: Items) -> Amount {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 800ms
+    cites context
+    ok(r) -> Amounted(value: r.answer.value, conf: r.conf.value, cites: r.cites)
+    failed -> Unextracted()
+  }
+
+  effect lookup(customer: Principal) {
+    retrieve orders where owner == customer limit 2
+    ok(r) -> Found(items: r.items)
+    failed -> LookupFailed()
+  }
+
+  decision answer(question: Content, context: Items) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    cites context
+    ok(r) -> Cited(text: r.answer, cites: r.cites)
+    failed -> AnswerFailed()
+  }
+
+  decision reply(question: Content, outcome: Outcome) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Answered(text: r.answer)
+    failed -> AnswerFailed()
+  }
+
+  decision ack(question: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Acked(text: r.answer)
+    failed -> AckFailed()
+  }
+
+  // S462: the handler reads `order` with items.read, reads that order's charge (GET under /v1/charges/) and refunds it
+  // (POST /v1/refunds). A prefix with the slash admits a charge by its id and not `POST /v1/charges`, which creates one.
+  effect refund(amount: 0..500, customer: Principal, order: Items) {
+    kind "payments.refund"
+    labels { egress:external }
+    targets { egress: ["https://api.stripe.com/v1/refunds", "https://api.stripe.com/v1/charges/"] }
+    uses payments { read_write }
+    one order
+    class irreversible
+    idempotent header "Idempotency-Key" window 24h
+    ok -> Refunded()
+    failed -> RefundFailed()
+  }
+}
+
+// Notice: the staff's Slack thread. The host dispatches Notify when the gate escalates a refund, and Notice answers
+// each staff message with a short acknowledgement (Q-EX7). A staff message approves nothing (PF11.8, AC17): an
+// approval is a person's signed record (PF9.6). One notice is in flight at a time; an acknowledgement answers a
+// waiting message, which the conversation queues behind a send in flight.
+service machine Notice {
+  state {
+    started   : bool = false
+    acking    : bool = false
+    notifying : bool = false
+    sending   : 0..3 = 0
+  }
+
+  action Start()
+  action Got(body: Content)
+  action Noted(text: Content)
+  action NotNoted()
+  action Notify(text: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "channel-archived", "rate-limited" })
+  action SendFailed()
+
+  on Start {
+    require !started else reject "started"
+    started' = true
+  }
+
+  on Got(body) {
+    require !acking else reject "busy"
+    acking' = true
+    decide noted(text: body)
+  }
+
+  on Noted(text) {
+    require acking else reject "not-acking"
+    acking' = false
+    if sending < 3 {
+      sending' = sending + 1
+    }
+    emit staff.reply(body: text)
+  }
+
+  on NotNoted {
+    require acking else reject "not-acking"
+    acking' = false
+  }
+
+  on Notify(text) {
+    require !notifying && sending == 0 else reject "busy"
+    notifying' = true
+    sending' = 1
+    emit staff.reply(body: text)
+  }
+
+  // A receipt settles one send in flight; the notice is done once nothing is in flight.
+  on Delivered {
+    if sending > 0 {
+      sending' = sending - 1
+    }
+    notifying' = notifying && sending > 1
+  }
+
+  on SendRejected(reason) {
+    if sending > 0 {
+      sending' = sending - 1
+    }
+    notifying' = notifying && sending > 1
+  }
+
+  on SendFailed {
+    if sending > 0 {
+      sending' = sending - 1
+    }
+    notifying' = notifying && sending > 1
+  }
+
+  decision noted(text: Content) -> Content {
+    provider "small"
+    labels { egress:external, read:private }
+    timeout 2s
+    ok(r) -> Noted(text: r.answer)
+    failed -> NotNoted()
+  }
+}
+
+route triage {
+  tier small provider "small" prices "prices/small.json" calibration "maps/small.json" max input tokens 2000 max tokens 4000
+  tier large provider "large" prices "prices/large.json" calibration "maps/large.json" max input tokens 2000 max tokens 8000
+  escalate when conf < 0.8 or margin < 0.1 or failed
+  budget spend
+}
+
+budget spend {
+  cap usd 0.25 per run
+  cap usd 10 per day per scope
+  on exhausted escalate
+}

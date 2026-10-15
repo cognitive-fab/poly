@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "provider": "small",
+  "model": "flash-2026-09",
+  "currency": "usd",
+  "perMillionTokens": {
+    "input": 100000,
+    "output": 400000
+  },
+  "source": "https://example.com/pricing",
+  "readOn": "2026-10-07"
+}
