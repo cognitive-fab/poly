@@ -236,7 +236,7 @@ export const CODES: Record<string, CodeInfo> = {
   PL6302: { name: 'UNLABELLED_IN_LABELLED_SCOPE', stage: 'policy', severity: 'error' },
   // PT6.5, S151: a target whose capability the effect's labels do not grant.
   PL6303: { name: 'TARGET_NOT_GRANTED', stage: 'types', severity: 'error' },
-  PL6304: { name: 'EFFECT_WITHOUT_CLASS', stage: 'effects', severity: 'finding' },
+  PL6304: { name: 'EFFECT_WITHOUT_CLASS', stage: 'effects', severity: 'error' },
   // S129: an accepted adjudication reachable without a preceding accepted ok completion of its decision.
   PL6203: { name: 'ADJUDICATION_WITHOUT_DECISION', stage: 'effects', severity: 'finding' },
   // S125: a fifo pair, which polyrun's parallel message worker cannot serve; refused at load.

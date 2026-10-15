@@ -33,7 +33,7 @@ const CODE = {
   PL4003: ['UNGUARDED_RETRY', 'finding', 'effects'],
   PL4004: ['KEY_WINDOW_TOO_SHORT', 'finding', 'effects'],
   PL4005: ['NATURE_OUTSIDE_STD', 'finding', 'effects'],
-  PL6304: ['EFFECT_WITHOUT_CLASS', 'finding', 'effects'],
+  PL6304: ['EFFECT_WITHOUT_CLASS', 'error', 'effects'],
   PL6201: ['UNGATED_DECISION', 'finding', 'effects'],
   PL6203: ['ADJUDICATION_WITHOUT_DECISION', 'finding', 'effects'],
   PL6831: ['AUDIENCE_LEAK', 'finding', 'model-check'],
