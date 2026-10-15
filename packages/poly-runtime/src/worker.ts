@@ -533,9 +533,9 @@ export class EffectWorker {
           return;
         }
         case 'Allowed':
-          // PS23.7, PT33.5a: a keyed intent starts no attempt once its window has lapsed since the first allow (the first attempt
-          // starts in the same pass). It is Dead, with the exhausted completion and the observation `lapsed`.
-          if (!this.opts.windowLapseIgnored && decl.idempotency?.windowMs && st.intent_attempts! > 0 && this.lapsed(row, decl.idempotency.windowMs, now)) {
+          // PS23.7, PT33.5a: a keyed intent starts no attempt once its window has lapsed since its first allow (the first attempt
+          // normally starts in the same pass, so the window is the attempts' own; an allow that waited past its window ends too). It is Dead, with the exhausted completion and the observation `lapsed`.
+          if (!this.opts.windowLapseIgnored && decl.idempotency?.windowMs && this.lapsed(row, decl.idempotency.windowMs, this.now)) {
             const hook = decl.onExhausted || decl.onFailure;
             await this.finish(row, 'WindowLapsed', { hook, suffix: ':exhausted', data: mapCompletion(hook ?? {}, { error: { message: 'window-lapsed' } }, { reason: 'exhausted' }) }, async () => {
               this.observed(row, st.intent_attempts!, 'lapsed');

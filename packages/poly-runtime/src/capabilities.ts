@@ -7,7 +7,9 @@ import { createHash } from 'node:crypto';
 import { canonicalize } from '@poly/core';
 
 /** One HTTP request, made by the host. It follows no redirect: the capability checks each hop itself (S151). */
-export interface EgressRequest { method: 'GET' | 'POST'; url: string; headers?: Record<string, string>; body?: unknown }
+/** PT33.4: a write is every method that is not safe. */
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export interface EgressRequest { method: HttpMethod; url: string; headers?: Record<string, string>; body?: unknown }
 export interface EgressResponse { status: number; headers?: Record<string, string>; body?: unknown }
 
 /** The host functions capabilities are built over. A capability whose transport is absent throws when called. */
@@ -30,7 +32,7 @@ export type Target = string | { exact: string };
 export interface CapabilityDecl { labels?: string[]; targets?: Record<string, Target[]>; uses?: { credential: string; scopes: string[]; holder: string | null } }
 
 /** PT22.5, S201: the vault's transport for the intent's grant: the credential is attached inside the vault adapter. */
-export interface ApiTransport { request(r: { method: 'GET' | 'POST'; url: string; headers: Record<string, string>; body: string }): Promise<{ status: number; headers: Record<string, string>; body: string }> }
+export interface ApiTransport { request(r: { method: HttpMethod; url: string; headers: Record<string, string>; body: string }): Promise<{ status: number; headers: Record<string, string>; body: string }> }
 
 /**
  * PS17.4a (S459): what content.read is bound to for one intent: the Content values of its own payload, the store's read
@@ -132,8 +134,8 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
   // PT33.4: one write per attempt for a keyed effect (a second is refused, PL6406), and the key header on it, set by the runtime:
   // a value the handler supplied under that name is replaced and audited.
   let wrote = false;
-  const keyed = async (method: 'GET' | 'POST', headers: Record<string, string> | undefined): Promise<Record<string, string> | undefined> => {
-    if (!key || method !== 'POST') return headers;
+  const keyed = async (method: HttpMethod, headers: Record<string, string> | undefined): Promise<Record<string, string> | undefined> => {
+    if (!key || method === 'GET') return headers;
     if (wrote) return refuse(`a second write in one attempt of a keyed effect (${key.header} is one intent's key, PT33.4)`);
     wrote = true;
     const rest: Record<string, string> = {};
@@ -152,7 +154,7 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
   // requests sent through the vault for the intent's grant. It follows no redirect. With no vault it cannot act.
   if (decl.uses) {
     const prefixes = targets.egress ?? [];
-    const call = async (method: 'GET' | 'POST', url: string, body: unknown, headers: Record<string, string> = {}) => {
+    const call = async (method: HttpMethod, url: string, body: unknown, headers: Record<string, string> = {}) => {
       const at = withinPrefix(url, prefixes);
       if (at === null) return refuse(`${method} ${url} is outside the declared egress targets ${JSON.stringify(prefixes)}`);
       if (!api) throw new Error(`no vault is connected for credential ${decl.uses!.credential}, so api cannot act (PT22.5)`);
@@ -163,14 +165,17 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
     caps.api = Object.freeze({
       get: (url: string, opts?: { headers?: Record<string, string> }) => call('GET', url, undefined, opts?.headers),
       post: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => call('POST', url, body, opts?.headers),
+      put: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => call('PUT', url, body, opts?.headers),
+      patch: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => call('PATCH', url, body, opts?.headers),
+      delete: (url: string, opts?: { headers?: Record<string, string> }) => call('DELETE', url, undefined, opts?.headers),
     });
   } else if (has(decl, 'egress:external', 'egress:public')) {
     const prefixes = targets.egress ?? [];
-    const request = async (method: 'GET' | 'POST', url: string, body: unknown, supplied: Record<string, string> | undefined): Promise<EgressResponse> => {
+    const request = async (method: HttpMethod, url: string, body: unknown, supplied: Record<string, string> | undefined): Promise<EgressResponse> => {
       let at = withinPrefix(url, prefixes);
       if (at === null) return refuse(`${method} ${url} is outside the declared egress prefixes ${JSON.stringify(prefixes)}`);
       const headers = await keyed(method, supplied);
-      let req: EgressRequest = { method, url: at, ...(headers ? { headers } : {}), ...(method === 'POST' ? { body } : {}) };
+      let req: EgressRequest = { method, url: at, ...(headers ? { headers } : {}), ...(method === 'POST' || method === 'PUT' || method === 'PATCH' ? { body } : {}) };
       for (let hop = 0; ; hop++) {
         const res = await need('egress')(req);
         const location = res.status >= 300 && res.status < 400 ? Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === 'location')?.[1] : undefined;
@@ -191,6 +196,9 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
     caps.egress = Object.freeze({
       get: (url: string, opts?: { headers?: Record<string, string> }) => request('GET', url, undefined, opts?.headers),
       post: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => request('POST', url, body, opts?.headers),
+      put: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => request('PUT', url, body, opts?.headers),
+      patch: (url: string, body: unknown, opts?: { headers?: Record<string, string> }) => request('PATCH', url, body, opts?.headers),
+      delete: (url: string, opts?: { headers?: Record<string, string> }) => request('DELETE', url, undefined, opts?.headers),
     });
   }
   if (has(decl, 'read:private')) {

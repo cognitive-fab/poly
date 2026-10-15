@@ -77,6 +77,11 @@ export async function workerConformance(rt: PolyRuntime, workerSourcePath: strin
     if (!row) continue;
     const taken = ((await rt.getJournal(inst.id)) as unknown as JournalRowLike[]).filter((r) => r.step_kind === 'accepted' && /^Handler/.test(r.action)).map((r) => r.action);
     const seen = (await rt.chain(row.instance_id)).filter((e) => e.kind === 'observation' && (e.body as { stage?: string; intent?: string }).stage === 'handler' && (e.body as { intent: string }).intent === intentId).map((e) => e.body as { attempt: number; outcome: string });
+    // PS23.7: a lapsed window is observed beside the transition WindowLapsed, once for once, and is no handler outcome.
+    const lapsed = seen.filter((o) => o.outcome === 'lapsed').length;
+    const lapses = ((await rt.getJournal(inst.id)) as unknown as JournalRowLike[]).filter((r) => r.step_kind === 'accepted' && r.action === 'WindowLapsed').length;
+    if (lapsed !== lapses) diagnostics.push(diag('PL2401', AT, `intent ${inst.id} took WindowLapsed ${lapses} times and observed ${lapsed} lapses`));
+    seen.splice(0, seen.length, ...seen.filter((o) => o.outcome !== 'lapsed'));
     if (taken.length !== seen.length) diagnostics.push(diag('PL2401', AT, `intent ${inst.id} took ${taken.length} handler transitions and observed ${seen.length} handler outcomes`));
     seen.forEach((o, k) => {
       if (taken[k] !== undefined && taken[k] !== expected[o.outcome]) diagnostics.push(diag('PL2401', AT, `intent ${inst.id}: handler outcome ${o.outcome} at attempt ${o.attempt}, and the worker took ${taken[k]}`));
