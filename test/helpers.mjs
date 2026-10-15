@@ -30,8 +30,9 @@ export const TEST_STD = join(ROOT, 'test', 'fixtures', 'std');
  * channel) is then checked and built as poly check would check it.
  */
 export function stdFor(file) {
-  const rel = relative(join(ROOT, 'examples'), resolve(file));
-  return rel && !rel.startsWith('..') && !isAbsolute(rel) ? join(ROOT, 'std') : TEST_STD;
+  const inside = (dir) => { const rel = relative(join(ROOT, dir), resolve(file)); return rel && !rel.startsWith('..') && !isAbsolute(rel); };
+  // The demo copy of the concierge (Step 9) is the example with two cap lines changed, so it is built from the same std.
+  return inside('examples') || inside(join('demo', 'concierge')) ? join(ROOT, 'std') : TEST_STD;
 }
 /** S194: the node arguments of a child process that loads certificates admitted with a test keyring anchor. */
 export const ACCEPT_TEST_ANCHORS = ['--import', new URL('./fixtures/accept-test-anchors.mjs', import.meta.url).href];
