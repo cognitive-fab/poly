@@ -12,13 +12,18 @@ export const BASELINE = join(ROOT, 'demo', 'baseline');
 
 /** Q13: Opus 5.5 for both arms, named in the pre-registration commit. */
 export const MODEL = 'claude-opus-5-5';
-/** The total ceiling on the API (plan section 5) and the lines of it the baseline holds: a pilot and the kept run of each arm. */
-export const CEILING_USD = 90;
-/** The per-run caps, as the plan's section 5 gives them: the TypeScript arm 15 USD a run, the poly arm 25. */
+/** The same cap for both arms, so that neither is advantaged by its budget (plan section 5). */
+export const RUN_CAP_USD = 25;
+/** The same turn limit for both arms (`--max-turns`), for the same reason. */
+export const MAX_TURNS = 200;
 export const ARMS = {
-  ts: { label: 'TypeScript', capUsd: 15 },
-  poly: { label: 'poly', capUsd: 25 },
+  ts: { label: 'TypeScript', capUsd: RUN_CAP_USD },
+  poly: { label: 'poly', capUsd: RUN_CAP_USD },
 };
+/** Both arms run on the owner's subscription, never on an API key, so they are not on the API ceiling of plan section 5. */
+export const BILLING = 'subscription';
+/** Neither arm runs in a container: both have ordinary network access, and no key of any kind is in the workspace or the environment. */
+export const NETWORK = 'ordinary network access, no container, no keys';
 
 const FILES = ['Read', 'Write', 'Edit', 'Glob', 'Grep'];
 /**
@@ -33,6 +38,12 @@ export const ALLOWED_TOOLS = {
 
 /** The prompt, byte for byte (DB2): the file's contents, which the pre-registration hashes. */
 export const promptText = (root = ROOT) => readFileSync(join(root, 'demo', 'baseline', 'PROMPT.md'), 'utf8');
+/**
+ * The one text an arm receives beyond the prompt, byte for byte, as an appended system prompt: the language it is told to use and the
+ * tool that language needs. The two files have the same shape. The workspace holds no CLAUDE.md (the arms run with CLAUDE.md files off),
+ * so this is the only other instruction an arm gets. The pre-registration hashes both files.
+ */
+export const armText = (arm, root = ROOT) => readFileSync(join(root, 'demo', 'baseline', `arm-${arm}.md`), 'utf8');
 export const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 /**
@@ -40,17 +51,19 @@ export const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).di
  * environment, a configuration folder of their own), so no `--bare`. `dontAsk` denies a tool outside the list without a prompt, no
  * slash command or MCP server is loaded, and the CLI's own dollar cap stops the run at the arm's cap.
  */
-export function claudeArgs({ arm, prompt, capUsd = ARMS[arm].capUsd }) {
+export function claudeArgs({ arm, prompt, capUsd = ARMS[arm].capUsd, text = armText(arm) }) {
   if (!ARMS[arm]) throw new Error(`no arm ${arm}`);
   return [
     '-p', prompt,
     '--output-format', 'stream-json', '--verbose',
     '--model', MODEL,
+    '--append-system-prompt', text,
     '--allowedTools', ALLOWED_TOOLS[arm].join(','),
     '--permission-mode', 'dontAsk',
     '--disable-slash-commands',
     '--strict-mcp-config',
     '--max-budget-usd', String(capUsd),
+    '--max-turns', String(MAX_TURNS),
   ];
 }
 

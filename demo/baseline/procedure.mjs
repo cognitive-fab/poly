@@ -14,7 +14,7 @@ import { homedir, tmpdir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { apiKeyProblems, armEnv, configProblems } from '../../experiments/m3/runner/isolation.mjs';
-import { ARMS, ALLOWED_TOOLS, CEILING_USD, MODEL, ROOT, claudeArgs, makeWorkspace, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
+import { ARMS, ALLOWED_TOOLS, BILLING, MAX_TURNS, MODEL, NETWORK, ROOT, armText, claudeArgs, makeWorkspace, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
 
 export const RECORD = 'demo/baseline/PREREGISTRATION.json';
 /** The login and settings folder of the baseline's agent, outside the repository, kept clean the way the M3 arms' is. */
@@ -26,6 +26,9 @@ export const RUN_NAME = /^(pilot-[1-9]|kept)$/;
 const git = (root, args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const claudeVersion = (bin = 'claude') => /(\d+\.\d+\.\d+)/.exec(execFileSync(bin, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))?.[1] ?? null;
 
+/** The most the baseline can cost: every pilot and every kept run at its arm's cap. */
+const totalCap = (pilots) => Object.entries(ARMS).reduce((sum, [arm, a]) => sum + (pilots[arm] + 1) * a.capUsd, 0);
+
 /** The pre-registration record, from the facts of the day: written by preregister.mjs, reviewed by the owner, then committed with PROMPT.md. */
 export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = { ts: 1, poly: 1 }, scaffolds } = {}) {
   const scratch = join(tmpdir(), `poly-demo-scaffold-${process.pid}`);
@@ -36,7 +39,12 @@ export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = {
     claudeCode: { version },
     pilots,
     capsUsd: { ts: ARMS.ts.capUsd, poly: ARMS.poly.capUsd },
-    ceilingUsd: CEILING_USD,
+    maxTurns: MAX_TURNS,
+    // The baseline runs are on the subscription, outside the API ceiling of plan section 5; their total is the sum of the caps.
+    billing: BILLING,
+    totalCapUsd: totalCap(pilots),
+    network: NETWORK,
+    armTexts: { ts: sha256(readFileSync(join(root, 'demo', 'baseline', 'arm-ts.md'))), poly: sha256(readFileSync(join(root, 'demo', 'baseline', 'arm-poly.md'))) },
     allowedTools: ALLOWED_TOOLS,
     scaffolds: scaffolds ?? { ts: scaffoldDigest('ts', scratch, root), poly: scaffoldDigest('poly', scratch, root) },
   };
@@ -59,7 +67,7 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   if (!commit) out.push(`${RECORD} is not committed: the pre-registration commit has not been made`);
   else {
     try { g(['merge-base', '--is-ancestor', commit, 'HEAD']); } catch { out.push(`the pre-registration commit ${commit.slice(0, 8)} is not an ancestor of HEAD`); }
-    for (const f of [RECORD, 'demo/baseline/PROMPT.md']) if (g(['diff', '--name-only', commit, 'HEAD', '--', f]) !== '') out.push(`${f} has changed since the pre-registration commit ${commit.slice(0, 8)}`);
+    for (const f of [RECORD, 'demo/baseline/PROMPT.md', 'demo/baseline/arm-ts.md', 'demo/baseline/arm-poly.md']) if (g(['diff', '--name-only', commit, 'HEAD', '--', f]) !== '') out.push(`${f} has changed since the pre-registration commit ${commit.slice(0, 8)}`);
   }
   if (g(['status', '--porcelain', '--', 'demo/baseline']) !== '') out.push('demo/baseline has uncommitted changes: the prompt, the record and the scaffolds must be as committed');
   const bytes = readFileSync(join(root, 'demo', 'baseline', 'PROMPT.md'));
@@ -67,7 +75,12 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   if (record.model !== MODEL) out.push(`the recorded model is ${record.model}, not ${MODEL}`);
   if (record.capsUsd?.[arm] !== ARMS[arm].capUsd) out.push(`the recorded cap of the ${arm} arm is ${record.capsUsd?.[arm]}, not ${ARMS[arm].capUsd}`);
   if (!isDeepStrictEqual(record.allowedTools?.[arm], ALLOWED_TOOLS[arm])) out.push(`the tools of the ${arm} arm are not the recorded ones`);
-  if (record.ceilingUsd !== CEILING_USD) out.push(`the recorded ceiling is ${record.ceilingUsd}, not ${CEILING_USD}`);
+  if (record.maxTurns !== MAX_TURNS) out.push(`the recorded turn limit is ${record.maxTurns}, not ${MAX_TURNS}`);
+  if (record.billing !== BILLING) out.push(`the recorded billing is ${record.billing}, not ${BILLING}`);
+  if (record.network !== NETWORK) out.push(`the recorded network is ${record.network}, not ${NETWORK}`);
+  if (record.totalCapUsd !== totalCap(record.pilots ?? {})) out.push(`the recorded total cap is ${record.totalCapUsd}, not the sum of the caps`);
+  const text = sha256(readFileSync(join(root, 'demo', 'baseline', `arm-${arm}.md`)));
+  if (text !== record.armTexts?.[arm]) out.push(`arm-${arm}.md hashes to ${text}, not the recorded ${record.armTexts?.[arm]}`);
   let have;
   try { have = version(); } catch (e) { have = null; out.push(`the agent's version could not be read: ${e.message}`); }
   if (have !== null && have !== record.claudeCode?.version) out.push(`the agent is version ${have}, the record says ${record.claudeCode?.version}`);
@@ -100,7 +113,7 @@ export async function runArm({ arm, run, bin = 'claude', binArgs = [], root = RO
   makeWorkspace(arm, workspace, root);
   const prompt = promptText(root);
   const out = createWriteStream(join(dir, 'session.jsonl'));
-  const child = spawn(bin, [...binArgs, ...claudeArgs({ arm, prompt })], { cwd: workspace, env: armEnv(env, configDir), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(bin, [...binArgs, ...claudeArgs({ arm, prompt, text: armText(arm, root) })], { cwd: workspace, env: armEnv(env, configDir), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let result = null;
   let buffer = '';
   child.stdout.on('data', (c) => {

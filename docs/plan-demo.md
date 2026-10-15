@@ -76,14 +76,17 @@ Everything below is a ceiling that the owner, the host or the CLI enforces. None
 | Line | What | Ceiling (USD) | How it is held |
 |---|---|---|---|
 | Steps 0 to 9, 11, 13 | recorded providers, fakes, the stand-in; no model, no network, no Stripe | 0 | the tests refuse a live provider |
-| 10b | TypeScript arm, 1 pilot (Q8) | 15 | per-session spend limit (A9) |
-| 10c | TypeScript arm, the kept run | 15 | same |
-| 10b | poly arm, 1 pilot (Q8) | 25 | same; its `poly check` loop is free, the cost is the agent's tokens. `poly_new` and any model-calling explanation command are off the arm's tool list (DB3), so no second model spends outside the cap; if the owner keeps `poly_new`, its provider spend is added to this line and to the kept run's |
+| 10b | TypeScript arm, 1 pilot (Q8) | 25 | the agent's `--max-budget-usd` (A9), on the subscription |
+| 10c | TypeScript arm, the kept run | 25 | same |
+| 10b | poly arm, 1 pilot (Q8) | 25 | same; its `poly check` loop is free, the cost is the agent's tokens. `poly_new` and any model-calling explanation command are off the arm's tool list (DB3), so no second model spends outside the cap |
 | 10c | poly arm, the kept run | 25 | same |
+| **Baseline, 4 runs** | **not on the API ceiling** | **100 in all, by the caps** | both arms are on the owner's subscription with no API key in either environment (the runner refuses if one is set), so the dollar cap is the CLI's own and the runs draw on the subscription's allowance, not on an API account |
 | 12 | one live rehearsal of Act 2 | 5 | the demo copy's budget caps (PS18.4) and the host's stop at the owner's figure |
 | Show | Act 2 live | 5 | same |
 | Act 3 | replay of records | 0 | no model |
-| **Total ceiling** | | **90** | A further run of anything is a new approval and a new line |
+| **API ceiling** | rehearsal and show | **10** | A further run of anything is a new approval and a new line |
+
+The two arms are held to the same terms so that neither is advantaged by its budget: the same cap per run (25 USD), the same turn limit (`--max-turns 200`), one model (Opus 5.5), one agent version, ordinary network access and no keys, and no container. The earlier 90 USD ceiling counted the baseline on the API with caps of 15 and 25. It is withdrawn: the baseline is on the subscription, so it is outside the API ceiling, and its own limit is the four caps.
 
 The per-message cost of Act 2 is not estimated here. Step 9 computes the demo copy's reservations by PS18.3's formula from the day's price tables (`PL6845` refuses a tier whose reservation is above a cap) and reports the figure per message as a computed reservation, not a measurement. The measured figure comes from `poly cost` after the rehearsal.
 

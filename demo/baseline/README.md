@@ -1,10 +1,12 @@
 # The baseline: two arms, one prompt (prepared, not run)
 
-This folder holds what Step 10 needs and nothing that has been run. The owner approves the prompt, makes the pre-registration commit, and runs each arm in the owner's own terminal. Nothing here starts an agent by itself, and the drafts cost nothing.
+This folder holds what Step 10 needs and nothing that has been run. The owner approves the prompt and the two arm texts, makes the pre-registration commit, and runs each arm in the owner's own terminal. Nothing here starts an agent by itself, and the drafts cost nothing.
 
-## The prompt (DB2)
+## Everything an arm receives (DB2, DB3)
 
-`PROMPT.md` is the whole prompt, as the agent receives it, byte for byte: the owner's sentence, a blank line, and the fixed paragraph. Its SHA-256 goes into the pre-registration record. `.gitattributes` leaves its bytes alone (no end-of-line conversion), so the hash is the same on every checkout. If the wording changes, the hash changes and nothing has run.
+An arm gets four things and no more: the prompt, one appended text, a tool list and a workspace. The prompt and the appended text are below, word for word. The pre-registration holds the SHA-256 of each file, so a changed word is a changed hash and the runner refuses.
+
+### The prompt (`PROMPT.md`, both arms)
 
 ```
 build a support agent that issues refunds
@@ -12,50 +14,89 @@ build a support agent that issues refunds
 Customers write to it on WhatsApp (Cloud API webhooks arrive at a local port; replies go out through the Cloud API). Refunds are issued through the Stripe API. The customers' orders are in `orders.json` in the workspace. Include tests, and finish when they pass. Describe in `README.md` how to start it.
 ```
 
-The paragraph names the interface and nothing about failure: no timeout, retry, duplicate or idempotency, no language, and no word of poly. The language is set by the workspace each arm starts in.
+It names the interface and nothing about failure: no timeout, retry, duplicate or idempotency, no language, and no word of poly.
+
+### The appended text of the TypeScript arm (`arm-ts.md`)
+
+```
+Write the program in TypeScript, for Node 24.
+
+Run the tests with `npm test`, which runs `node --test`. You may install packages with `npm`.
+```
+
+### The appended text of the poly arm (`arm-poly.md`)
+
+```
+Write the program in poly, for Node 24. poly is a language for the stateful core of software. Its reference is in `tools/poly/` (start with `tools/poly/README.md`) and examples are in `tools/poly/examples/`. Write in JavaScript, beside the poly modules, what poly does not express (the HTTP server and the calls to the APIs), as the README shows.
+
+Check poly modules with `npm run poly check <file>`. Run the tests with `npm test`, which runs `node --test`.
+```
+
+Each is given to the agent as `--append-system-prompt`. The workspaces hold no `CLAUDE.md`, and the arms run with `CLAUDE.md` files off, so this is the only other instruction. The two texts have the same shape (two paragraphs: the language, then how to run the tests) and differ in the language and in the one tool that language adds (`npm run poly check`). A test checks that the TypeScript text never says poly, that neither says anything about failure, and that every command a text names is on its arm's tool list.
+
+### The tool lists (`arms.mjs`), as passed to `--allowedTools`
+
+TypeScript arm:
+
+```
+Read, Write, Edit, Glob, Grep, Bash(node *), Bash(npm *), Bash(npx *)
+```
+
+poly arm:
+
+```
+Read, Write, Edit, Glob, Grep, Bash(node --test*), Bash(npm test*), Bash(npm run poly check*), Bash(npm run poly witness*), Bash(npm run poly fix*), Bash(npm run poly fmt*), Bash(npm run poly edit-check*)
+```
+
+Both run with `--permission-mode dontAsk` (anything off the list is denied without a prompt), `--disable-slash-commands`, `--strict-mcp-config` (no MCP server), no web tool, no subagent. The poly arm has no `poly new` and no `poly explain`, which can call a model. It has `node --test` and not `node` alone, because `node` alone would run the poly command line directly, `new` included.
+
+### The workspaces
+
+Built fresh outside the repository. TypeScript: `package.json`, `tsconfig.json`, `orders.json`. poly: `package.json`, `poly.json`, `orders.json`, the toolchain in `node_modules`, poly's README and specifications, and three small examples (`hello`, `delivery`, `evidence`). The examples that model this task (the concierge, the retry variants, the inbox, the OMS) are left out. `orders.json` is the same file, byte for byte, in both.
 
 ## What is fixed, and where
 
 | What | Value | Where |
 |---|---|---|
-| Model, both arms | `claude-opus-5-5` (Q13) | `arms.mjs`, recorded in the pre-registration |
+| Model, both arms | `claude-opus-5-5` (Q13) | `arms.mjs`, recorded |
 | Agent | Claude Code, the version installed when the record is written (2.1.287 on the machine this was drafted on) | recorded; a run refuses if `claude --version` differs |
-| Per-run cap | TypeScript arm 15 USD, poly arm 25 USD (plan section 5), by the agent's own `--max-budget-usd` | `arms.mjs`, recorded |
-| Total ceiling | 90 USD on the API; a further run of anything is a new approval | recorded |
+| Cap per run | 25 USD for each arm, by the agent's own `--max-budget-usd` | `arms.mjs`, recorded |
+| Turn limit | 200 for each arm, by `--max-turns` | `arms.mjs`, recorded |
+| Billing | the owner's subscription; no API key in either environment; the runner refuses if `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set | `procedure.mjs`, recorded as `subscription` |
+| Network | neither arm in a container; ordinary network access and no keys | recorded |
 | Pilots | one per arm (Q8), reported with the kept run; the number is in the record | recorded |
-| Tools | the TypeScript arm: file tools, `node`, `npm`, `npx`. The poly arm: file tools, `node`, `npm test`, and `npm run poly` for `check`, `witness`, `fix`, `fmt`, `edit-check`. No web tool, no subagent, no MCP server, no slash command. `poly new` and `poly explain` (which can call a model) are not allowed. | `arms.mjs` |
+| Total | four runs at 25 USD at most, 100 USD in all, on the subscription and not on the API ceiling of plan section 5 | recorded as `totalCapUsd` |
 | Login | the owner's own, in a folder of its own (`~/.poly-demo/claude`) kept to the login and one setting; no `CLAUDE.md`, memory, plugin, skill or connector reaches the agent | `experiments/m3/runner/isolation.mjs`, reused |
-| Workspaces | built fresh outside the repository. TypeScript: `package.json`, `tsconfig.json`, `orders.json`. poly: `package.json`, `poly.json`, `orders.json`, the toolchain in `node_modules`, poly's README and specifications. The examples that model this task (the concierge, the retry variants, the inbox, the OMS) are left out. | `arms.mjs` |
 
 ## What the owner types, step by step
 
 Each step is in the owner's terminal, at the repository root, on the branch `demo`.
 
-1. **Read `PROMPT.md`.** Approve the wording, or change it (the hash then changes).
-2. **Set up the agent's login folder, once.** In PowerShell: `$env:CLAUDE_CONFIG_DIR = "$HOME\.poly-demo\claude"; claude`, then `/login` with the subscription, then exit. Put exactly `{"env":{"DISABLE_AUTOUPDATER":"1"}}` in `settings.json` in that folder. `node demo/baseline/run-arm.mjs --arm ts --run pilot-1 --check` then reports what is still wrong, and starts nothing.
-3. **Check the spend limit.** The cap on a run is the agent's `--max-budget-usd`. If the installed version does not enforce it, set a limit at the account (A9) before any run.
-4. **Write the record.** `node demo/baseline/preregister.mjs` (add `--pilots-ts 0` or `--pilots-poly 0` to change a pilot count). It reads `claude --version`, hashes the prompt and the two scaffolds, writes `demo/baseline/PREREGISTRATION.json`, and prints the commit command. Read the record.
-5. **Make the pre-registration commit.** `git add demo/baseline/PROMPT.md demo/baseline/PREREGISTRATION.json`, then the `git commit` the script printed. This is the commit that fixes the prompt before any run. Nothing may run before it, and the runner refuses to.
-6. **Run the pilots first** (their number is decided in step 4, and a pilot is never discarded for its outcome or swapped for the kept run):
+1. **Read the prompt and the two arm texts** (above, or `PROMPT.md`, `arm-ts.md`, `arm-poly.md`). Approve the wording, or change it (the hashes then change). Confirm the turn limit of 200, or give another (`MAX_TURNS` in `arms.mjs`).
+2. **Make sure no API key is set.** In PowerShell: `Get-ChildItem Env:ANTHROPIC*` must print nothing. If it prints a name, remove it with `Remove-Item Env:<name>` in that window. The runner refuses to start while either variable is set.
+3. **Set up the agent's login folder, once.** In PowerShell: `$env:CLAUDE_CONFIG_DIR = "$HOME\.poly-demo\claude"; claude`, then `/login` with the subscription, then exit. Put exactly `{"env":{"DISABLE_AUTOUPDATER":"1"}}` in `settings.json` in that folder. `node demo/baseline/run-arm.mjs --arm ts --run pilot-1 --check` then reports what is still wrong, and starts nothing.
+4. **Check the cap holds on the subscription.** The cap on a run is the agent's `--max-budget-usd`, measured to hold on the subscription in M3. The turn limit is `--max-turns`; whether this version enforces it is read from the first pilot's `result.json` (the number of turns the session took), and the report says so.
+5. **Write the record.** `node demo/baseline/preregister.mjs` (add `--pilots-ts 0` or `--pilots-poly 0` to change a pilot count). It reads `claude --version`, hashes the prompt, the two arm texts and the two scaffolds, writes `demo/baseline/PREREGISTRATION.json`, and prints the commit command. Read the record: it names the model, the version, the caps, the turn limit, `subscription`, the network and the hashes.
+6. **Make the pre-registration commit.** `git add demo/baseline/PROMPT.md demo/baseline/PREREGISTRATION.json`, then the `git commit` the script printed. This is the commit that fixes the prompt and the arm texts before any run. Nothing may run before it, and the runner refuses to.
+7. **Run the pilots first** (their number is decided in step 5, and a pilot is never discarded for its outcome or swapped for the kept run):
    `node demo/baseline/run-arm.mjs --arm ts --run pilot-1`, then `node demo/baseline/commit-run.mjs --arm ts --run pilot-1`, then type the three commands it prints. Do the same for `--arm poly`. Each run costs at most its cap.
-7. **Run the kept runs.** `node demo/baseline/run-arm.mjs --arm ts --run kept`, then `commit-run.mjs --arm ts --run kept` and its commands; the same for `poly`. The run is committed verbatim before anything is run against it, and no file of it is edited afterwards. The command `git rev-parse HEAD:demo/baseline/runs/ts-kept/tree` gives the tree hash for the demo's record.
-8. **Run each committed tree, on a copy.** Copy `demo/baseline/runs/<arm>-kept/tree` to a scratch folder, install what it needs there (the committed tree stays as it was), then `node demo/demo.mjs replay --build <scratch> --start "<the command its README gives>" --fault lost-answer --test-command "<its test command>"`, or in the container (`demo/README.md`) with Docker Desktop started. The report gives the five numbers, the control, and O1 to O4. For the poly arm, `poly check` on the build gives P1 to P4 and the witness.
-9. **Record the outcomes as they fall,** in `docs/decisions-demo.md`, each as it is (O1 to O4, P1 to P4). None is replaced by another run.
+8. **Run the kept runs.** `node demo/baseline/run-arm.mjs --arm ts --run kept`, then `commit-run.mjs --arm ts --run kept` and its commands; the same for `poly`. The run is committed verbatim before anything is run against it, and no file of it is edited afterwards. The command `git rev-parse HEAD:demo/baseline/runs/ts-kept/tree` gives the tree hash for the demo's record.
+9. **Run each committed tree, on a copy.** Copy `demo/baseline/runs/<arm>-kept/tree` to a scratch folder, install what it needs there (the committed tree stays as it was), then `node demo/demo.mjs replay --build <scratch> --start "<the command its README gives>" --fault lost-answer --test-command "<its test command>"`, or in the container (`demo/README.md`) with Docker Desktop started. The report gives the five numbers, the control, and O1 to O4. For the poly arm, `poly check` on the build gives P1 to P4 and the witness.
+10. **Record the outcomes as they fall,** in `docs/decisions-demo.md`, each as it is (O1 to O4, P1 to P4). None is replaced by another run.
 
-## Open choices for the owner
+## Limits to read before relying on it
 
-- **Billing.** The M3 arms ran on the subscription and refused any API key in the environment (4210fa6), and the CLI's dollar cap was measured to hold there. Plan section 5 speaks of 90 USD "on the API". This draft follows M3: `run-arm.mjs` refuses to start while an API key variable is set. If the owner wants the API instead, say so and the check changes.
-- **How the poly arm reaches poly.** The draft gives it `npm run poly ...` through Bash, as M3's arms had, and no MCP server or skill. If the plugin's tools (`poly_check` and the rest) should be the interface, the workspace and the tool list change, and the record with them.
 - **The tool list is not a sandbox.** An arm that may write a file and run its tests can run any code it wrote, `poly new` included. So the session is read after each run for anything that would call a model, and each hit is recorded in `result.json` (`modelCallFlags`) for the owner to read. The poly arm has `node --test` and not `node` alone for the same reason, which narrows the way and does not close it.
-- **A repeat is a new pre-registration.** The runner takes the commit that introduced `PREREGISTRATION.json` as the pre-registration and refuses if the record or the prompt has changed since, so a second experiment starts in a folder of its own, with its own record, before any of its runs.
-- **The TypeScript arm's network.** It needs the package registry; the runner cannot limit the network. A container with the registry and the model API alone is the owner's to choose.
+- **A repeat is a new pre-registration.** The runner takes the commit that introduced `PREREGISTRATION.json` as the pre-registration and refuses if the record, the prompt or an arm text has changed since, so a second experiment starts in a folder of its own, with its own record, before any of its runs.
+- **The network is open.** Neither arm runs in a container, and the runner cannot limit the network. The record says so.
 
 ## Conclusion
 
-The protocol is fixed in code that refuses: no run before the record is committed, none on a prompt that does not hash as recorded, none on another agent version, none past the pilots the record names, and none that would repeat a run. What the agents do is the result, whatever it is.
+The protocol is fixed in code that refuses: no run before the record is committed, none on a prompt or an arm text that does not hash as recorded, none on another agent version, none with an API key in the environment, none past the pilots the record names, and none that would repeat a run. The two arms get the same cap, the same turn limit and the same kind of text. What the agents do is the result, whatever it is.
 
 ## Glossary
 
+- **Arm text:** the one paragraph pair appended to an arm's system prompt, naming its language and how to run its tests.
 - **Pre-registration commit:** the commit that holds `PROMPT.md` and the record, made before any run.
 - **Pilot:** a run decided in advance, reported with the kept run, never discarded for its outcome.
 - **Kept run:** the one run of an arm that the demo uses, committed verbatim.

@@ -4,5 +4,7 @@
 conformance/field-studies/** -text
 # Vendored engines are pinned by SHA-256 of their exact bytes (vendor/*/PROVENANCE.md): no end-of-line conversion.
 vendor/** -text
-# The baseline prompt is pinned by the SHA-256 of its exact bytes (DB2): no end-of-line conversion.
+# The baseline prompt and the two arms' texts are pinned by the SHA-256 of their exact bytes (DB2): no end-of-line conversion.
 demo/baseline/PROMPT.md -text
+demo/baseline/arm-ts.md -text
+demo/baseline/arm-poly.md -text

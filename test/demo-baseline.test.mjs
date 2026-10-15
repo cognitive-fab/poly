@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ALLOWED_TOOLS, ARMS, CEILING_USD, MODEL, claudeArgs, listFiles, makeWorkspace, promptText, sha256, treeDigest } from '../demo/baseline/arms.mjs';
+import { ALLOWED_TOOLS, ARMS, BILLING, MAX_TURNS, MODEL, NETWORK, armText, claudeArgs, listFiles, makeWorkspace, promptText, sha256, treeDigest } from '../demo/baseline/arms.mjs';
 import { RECORD, auditSession, buildRecord, preflight, prepareCommit, runArm } from '../demo/baseline/procedure.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -37,11 +37,13 @@ test('DB2: git leaves the prompt\'s bytes alone (no end-of-line conversion), so 
 
 test('DB3, Q13: both arms use Opus 5.5, the per-run caps of the plan, no web tool, no MCP server, no slash command', () => {
   assert.equal(MODEL, 'claude-opus-5-5');
-  assert.deepEqual([ARMS.ts.capUsd, ARMS.poly.capUsd, CEILING_USD], [15, 25, 90]);
+  assert.deepEqual([ARMS.ts.capUsd, ARMS.poly.capUsd, MAX_TURNS], [25, 25, 200], 'the same cap and the same turn limit');
   for (const arm of ['ts', 'poly']) {
     const args = claudeArgs({ arm, prompt: 'P' });
     assert.equal(args[args.indexOf('--model') + 1], MODEL);
-    assert.equal(args[args.indexOf('--max-budget-usd') + 1], String(ARMS[arm].capUsd));
+    assert.equal(args[args.indexOf('--max-budget-usd') + 1], '25');
+    assert.equal(args[args.indexOf('--max-turns') + 1], '200');
+    assert.equal(args[args.indexOf('--append-system-prompt') + 1], armText(arm));
     assert.equal(args[args.indexOf('--permission-mode') + 1], 'dontAsk');
     assert.ok(args.includes('--strict-mcp-config') && args.includes('--disable-slash-commands'));
     assert.ok(!args.includes('--bare'), 'the arms run on the owner\'s login');
@@ -57,6 +59,44 @@ test('DB3, plan section 5: the poly arm has the deterministic commands and none 
   assert.ok(!ALLOWED_TOOLS.poly.includes('Bash(node *)'), 'node alone would run the poly command line directly, poly new included');
   assert.ok(ALLOWED_TOOLS.poly.includes('Bash(node --test*)'));
   assert.ok(ALLOWED_TOOLS.ts.includes('Bash(npm *)'), 'the TypeScript arm may install what it uses');
+});
+
+test('DB3: the arms differ only in the language they are told to use and the tools it needs: the two texts have one shape, and neither says anything about failure', () => {
+  const [ts, poly] = ['ts', 'poly'].map((a) => armText(a));
+  assert.match(ts, /TypeScript/);
+  assert.match(poly, /in poly/);
+  assert.doesNotMatch(ts, /poly/i, 'the TypeScript arm hears nothing of poly');
+  assert.doesNotMatch(poly, /TypeScript/i, 'the poly arm is not told to write TypeScript');
+  for (const text of [ts, poly]) {
+    assert.match(text, /^Write the program in /);
+    assert.match(text, /Run the tests with `npm test`, which runs `node --test`\./);
+    assert.doesNotMatch(text, /timeout|retry|retries|duplicate|idempoten|twice|fail|safe|crash|network|stripe|whatsapp/i, 'no hint of the failure the demo is about');
+    assert.ok(text.endsWith('\n') && !text.endsWith('\n\n'));
+    assert.equal(text.trimEnd().split('\n\n').length, 2, 'two paragraphs each');
+  }
+  assert.match(poly, /npm run poly check <file>/);
+  assert.ok(ALLOWED_TOOLS.poly.includes('Bash(npm run poly check*)'), 'every command the text names is on the list');
+  assert.ok(ALLOWED_TOOLS.poly.includes('Bash(npm test*)') && ALLOWED_TOOLS.ts.includes('Bash(npm *)'));
+});
+
+test('DB2: the record is refused on a changed text of an arm, a changed turn limit, another billing or another network; and the subscription is not an API key', () => {
+  for (const [what, tweak, expect] of [
+    ['arm text', (rec) => ({ ...rec, armTexts: { ...rec.armTexts, poly: 'sha256:0' } }), /arm-poly\.md hashes to/],
+    ['turn limit', (rec) => ({ ...rec, maxTurns: 50 }), /turn limit is 50/],
+    ['billing', (rec) => ({ ...rec, billing: 'api' }), /billing is api/],
+    ['network', (rec) => ({ ...rec, network: 'container' }), /network is container/],
+    ['total', (rec) => ({ ...rec, totalCapUsd: 90 }), /total cap is 90/],
+  ]) {
+    const r = repo({ tweak });
+    try { assert.match(run(r, 'poly', 'pilot-1').join(), expect, what); } finally { r.clean(); }
+  }
+  const r = repo();
+  try {
+    writeFileSync(join(r.root, 'demo', 'baseline', 'arm-ts.md'), 'Write the program in Go.\n');
+    r.sh('commit', '-q', '-a', '-m', 'reworded');
+    assert.match(run(r).join(), /arm-ts\.md has changed since the pre-registration commit/);
+    assert.match(run(r, 'ts', 'pilot-1', { rest: { env: { ANTHROPIC_AUTH_TOKEN: 'x' } } }).join(), /ANTHROPIC_AUTH_TOKEN is set/);
+  } finally { r.clean(); }
 });
 
 test('DB3: the TypeScript workspace is a Node and TypeScript scaffold with orders.json; the poly workspace is the poly scaffold with its toolchain and reference; neither holds a CLAUDE.md, a memory or a skill', () => {
@@ -82,7 +122,7 @@ function repo({ committed = true, record = true, dirty = false, tweak = null } =
   const root = mkdtempSync(join(tmpdir(), 'baseline-repo-'));
   const sh = (...a) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   mkdirSync(join(root, 'demo', 'baseline'), { recursive: true });
-  copyFileSync(join(ROOT, 'demo', 'baseline', 'PROMPT.md'), join(root, 'demo', 'baseline', 'PROMPT.md'));
+  for (const f of ['PROMPT.md', 'arm-ts.md', 'arm-poly.md']) copyFileSync(join(ROOT, 'demo', 'baseline', f), join(root, 'demo', 'baseline', f));
   copyFileSync(join(ROOT, 'demo', 'baseline', 'orders.json'), join(root, 'demo', 'baseline', 'orders.json'));
   sh('init', '-q');
   sh('config', 'user.name', 'test');
@@ -98,9 +138,11 @@ function repo({ committed = true, record = true, dirty = false, tweak = null } =
 const deps = (r, over = {}) => ({ claudeVersion: () => '2.1.287', scaffold: (arm) => r.scaffolds[arm], configProblems: () => [], ...over });
 const run = (r, arm = 'ts', name = 'pilot-1', over = {}) => preflight({ arm, run: name, root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), localRunsDir: join(r.root, 'nowhere'), deps: deps(r, over.deps), ...over.rest });
 
-test('DB2: the record holds the prompt\'s hash, the model, the agent\'s version, one pilot an arm, the caps and the ceiling', () => {
+test('DB2: the record holds the prompt\'s hash, the model, the agent\'s version, one pilot an arm, the caps, the turn limit, the subscription, the network and the hash of each arm text', () => {
   const r = buildRecord({ version: '2.1.287', scaffolds: { ts: 'a', poly: 'b' } });
-  assert.deepEqual([r.v, r.prompt.file, r.model, r.claudeCode.version, r.pilots, r.capsUsd, r.ceilingUsd], [1, 'demo/baseline/PROMPT.md', MODEL, '2.1.287', { ts: 1, poly: 1 }, { ts: 15, poly: 25 }, 90]);
+  assert.deepEqual([r.v, r.prompt.file, r.model, r.claudeCode.version, r.pilots, r.capsUsd, r.maxTurns, r.billing, r.totalCapUsd, r.network], [1, 'demo/baseline/PROMPT.md', MODEL, '2.1.287', { ts: 1, poly: 1 }, { ts: 25, poly: 25 }, 200, BILLING, 100, NETWORK]);
+  assert.deepEqual([r.billing, r.network], ['subscription', 'ordinary network access, no container, no keys']);
+  assert.deepEqual(r.armTexts, { ts: sha256(readFileSync(join(ROOT, 'demo', 'baseline', 'arm-ts.md'))), poly: sha256(readFileSync(join(ROOT, 'demo', 'baseline', 'arm-poly.md'))) });
   assert.equal(r.prompt.sha256, sha256(readFileSync(join(ROOT, 'demo', 'baseline', 'PROMPT.md'))));
   assert.match(r.prompt.sha256, /^sha256:[0-9a-f]{64}$/);
 });
@@ -232,7 +274,8 @@ test('DB3, DB4: one run writes the session as it ran, in a workspace outside the
     const events = readFileSync(join(dir, 'session.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const init = events[0];
     assert.equal(init.args[init.args.indexOf('--model') + 1], MODEL);
-    assert.equal(init.args[init.args.indexOf('--max-budget-usd') + 1], '15');
+    assert.equal(init.args[init.args.indexOf('--max-budget-usd') + 1], '25');
+    assert.equal(init.args[init.args.indexOf('--append-system-prompt') + 1], armText('ts', r.root));
     assert.equal(init.args[1], promptText(r.root));
     assert.equal(init.cwd, workspace);
     assert.deepEqual(init.env, { CLAUDE_CONFIG_DIR: join(runs, 'cfg'), CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ANTHROPIC_API_KEY: null });
