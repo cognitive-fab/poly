@@ -34,3 +34,4 @@ machine Job {
     failed -> Gave()
   }
 }
+// scan: rule-input

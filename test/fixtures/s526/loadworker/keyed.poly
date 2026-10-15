@@ -37,3 +37,4 @@ machine Job {
     exhausted -> Gave()
   }
 }
+// scan: rule-input

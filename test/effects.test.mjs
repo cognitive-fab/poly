@@ -43,10 +43,10 @@ test('PT4.5: the orders program has its three findings, with the witnesses the s
   assert.match(render(r), /Pay\(10\)\s+Placed\/1\/false -> Placed\/1\/false\s+emits payment\.charge/);
 });
 
-test('S42: with place-empty narrowed to the draft state, PT4.5 has exactly its three findings', async () => {
+test('S42: with place-empty narrowed to the draft state, PT4.5 has exactly its four findings (PL4003 by S526)', async () => {
   const r = await checkFile(ORDERS, { root: OUT });
   const m = r.machines[0];
-  assert.deepEqual([...new Set(m.diagnostics.map((d) => d.code))].sort(), ['PL3102', 'PL4001', 'PL4002']);
+  assert.deepEqual([...new Set(m.diagnostics.map((d) => d.code))].sort(), ['PL3102', 'PL4001', 'PL4002', 'PL4003']);
   // The escape names a field and points at the machine; the findings of one stage do not share a position.
   const src = readFileSync(ORDERS, 'utf8').split('\n');
   const escape = m.diagnostics.find((x) => x.code === 'PL3102');
@@ -89,7 +89,7 @@ test('S41: two modules of one project that declare one kind differently are PL10
 
 test('S37: before(k1, k2) is decided by poly-ref and by polyrun, and they agree', async () => {
   // Ship must follow Pack: before("w.pack", "w.ship"). Ship without Pack violates it at once.
-  const file = write('before.poly', 'module bf\nenum P { Start, Packed, Shipped }\nmachine M {\n  state { p : P = Start }\n  terminal p == Shipped\n  action Pack()\n  action Ship()\n  on Pack { require p == Start else reject "no"  p\' = Packed  emit pack(1) }\n  on Ship { require p != Shipped else reject "no"  p\' = Shipped  emit ship(1) }\n  path property pack-first: before("w.pack", "w.ship")\n  effect pack(n: 0..1) {\n    kind "w.pack"\n    labels { write:store }\n  }\n  effect ship(n: 0..1) {\n    kind "w.ship"\n    labels { egress:external }\n  }\n}\n');
+  const file = write('before.poly', 'module bf\nenum P { Start, Packed, Shipped }\nmachine M {\n  state { p : P = Start }\n  terminal p == Shipped\n  action Pack()\n  action Ship()\n  on Pack { require p == Start else reject "no"  p\' = Packed  emit pack(1) }\n  on Ship { require p != Shipped else reject "no"  p\' = Shipped  emit ship(1) }\n  path property pack-first: before("w.pack", "w.ship")\n  effect pack(n: 0..1) {\n    kind "w.pack"\n    labels { write:store }\n  }\n  effect ship(n: 0..1) {\n    kind "w.ship"\n    labels { egress:external }\n    class irreversible\n    retry { attempts 1 }\n  }\n}\n');
   const r = await checkFile(file, { root: OUT });
   const m = r.machines[0];
   const f = m.diagnostics.filter((d) => d.code === 'PL4001');

@@ -86,3 +86,4 @@ machine Ticket {
     retry { attempts 1, base 200ms, timeout 5s }
   }
 }
+// scan: rule-input

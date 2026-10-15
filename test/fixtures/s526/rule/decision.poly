@@ -35,3 +35,4 @@ machine Ask {
     failed -> Unanswered()
   }
 }
+// scan: rule-input

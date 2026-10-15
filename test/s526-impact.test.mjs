@@ -12,6 +12,24 @@ import { join } from 'node:path';
 import { ROOT, polyFiles } from './helpers.mjs';
 import { checkFile } from '@poly/check';
 
+/**
+ * The body of the effect `name` as [whole, body], read up to the brace that closes it, so the order of its items carries no meaning
+ * and a `retry { … }` or `labels { … }` inside it does not end it early (ruled 2026-10-14). Null when there is no such effect.
+ */
+function effectMatch(text, name) {
+  const m = new RegExp(`effect\\s+${name}\\s*\\(`).exec(text);
+  if (!m) return null;
+  let i = m.index + m[0].length;
+  for (let depth = 1; i < text.length && depth > 0; i++) depth += text[i] === '(' ? 1 : text[i] === ')' ? -1 : 0;
+  const open = text.indexOf('{', i);
+  let depth = 0, j = open;
+  for (; j < text.length; j++) {
+    if (text[j] === '{') depth++;
+    else if (text[j] === '}' && --depth === 0) break;
+  }
+  return [text.slice(m.index, j + 1), text.slice(open + 1, j)];
+}
+
 // DAC7(a): run scan-retry-safe.mjs and check section 4 table
 test('DAC7(a): scan-retry-safe.mjs section 4: only orders.poly has own unguarded effects', async (t) => {
   const result = spawnSync(process.execPath, ['scripts/scan-retry-safe.mjs'], {
@@ -118,7 +136,7 @@ test('DAC7(b): verdicts-after-s526.json exists with reasons for changed verdicts
   const afterText = readFileSync(verdictFile, 'utf8');
   let afterVerdicts;
   try {
-    afterVerdicts = JSON.parse(afterText);
+    afterVerdicts = JSON.parse(afterText).files;
   } catch (e) {
     assert.fail(`DAC7(b): verdicts-after-s526.json should be valid JSON: ${e.message}`);
   }
@@ -127,13 +145,14 @@ test('DAC7(b): verdicts-after-s526.json exists with reasons for changed verdicts
   assert.ok(existsSync(beforeFile), 'DAC7(b): comparison file docs/v1/verdicts-at-gate-v11.json should exist');
 
   const beforeText = readFileSync(beforeFile, 'utf8');
-  const beforeVerdicts = JSON.parse(beforeText);
+  const beforeVerdicts = JSON.parse(beforeText).files;
+  const codesOf = (r) => [...new Set((r.diagnostics ?? []).map((d) => d.code ?? d))].sort().join(' ');
 
   // Check that every changed verdict has a reason
   let changedCount = 0;
   for (const [key, after] of Object.entries(afterVerdicts)) {
     const before = beforeVerdicts[key];
-    if (before && before.verdict !== after.verdict) {
+    if (before && (before.verdict !== after.verdict || codesOf(before) !== codesOf(after))) {
       assert.ok(after.reason && after.reason.trim().length > 0,
         `DAC7(b): changed verdict for ${key} should have non-empty reason`);
       changedCount++;
@@ -189,7 +208,7 @@ test('DAC7(d): standard library channels declare retry { attempts 1 }', (t) => {
 
     const text = readFileSync(file, 'utf8');
     // Check that send effect declares retry { attempts 1
-    const sendMatch = text.match(/effect\s+send\s*\([^)]*\)\s*{([^}]*)}/);
+    const sendMatch = effectMatch(text, 'send');
     assert.ok(sendMatch, `DAC7(d): ${channel}.poly should have send effect`);
 
     const sendBody = sendMatch[1];
@@ -204,7 +223,7 @@ test('DAC7(d): standard library webhook declares retry { attempts 1 }', (t) => {
   assert.ok(existsSync(webhookFile), 'DAC7(d): std/channels/webhook.poly should exist');
 
   const text = readFileSync(webhookFile, 'utf8');
-  const sendMatch = text.match(/effect\s+send\s*\([^)]*\)\s*{([^}]*)}/);
+  const sendMatch = effectMatch(text, 'send');
   assert.ok(sendMatch, 'DAC7(d): webhook.poly should have send effect');
 
   const sendBody = sendMatch[1];
@@ -218,7 +237,7 @@ test('DAC7(d): standard library grant.revoke declares idempotent by nature', (t)
   assert.ok(existsSync(grantFile), 'DAC7(d): std/credentials/grant.poly should exist');
 
   const text = readFileSync(grantFile, 'utf8');
-  const revokeMatch = text.match(/effect\s+revoke\s*\([^)]*\)\s*{([^}]*)}/);
+  const revokeMatch = effectMatch(text, 'revoke');
   assert.ok(revokeMatch, 'DAC7(d): grant.poly should have revoke effect');
 
   const revokeBody = revokeMatch[1];
@@ -269,7 +288,7 @@ test('DAC7(e): test fixtures under std directories match library declarations', 
 
     if (fileName === 'channels-test.poly') {
       // Check for send effect (PS23, K18: test-only std channels must follow the library)
-      const sendMatch = text.match(/effect\s+send\s*\([^)]*\)\s*{([^}]*)}/);
+      const sendMatch = effectMatch(text, 'send');
       if (!sendMatch) {
         assert.fail(`DAC7(e): fixture ${copyPath} should have a send effect (channels-test.poly copy must follow library)`);
       }
@@ -281,7 +300,7 @@ test('DAC7(e): test fixtures under std directories match library declarations', 
       t.diagnostic(`${copyPath.slice(ROOT.length)} send effect has retry { attempts 1`);
     } else if (fileName === 'grant.poly') {
       // Check for revoke effect
-      const revokeMatch = text.match(/effect\s+revoke\s*\([^)]*\)\s*{([^}]*)}/);
+      const revokeMatch = effectMatch(text, 'revoke');
       if (!revokeMatch) {
         assert.fail(`DAC7(e): fixture ${copyPath} should have a revoke effect (grant.poly copy must follow library)`);
       }
