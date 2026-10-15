@@ -33,7 +33,7 @@ The image is built once, with a network, from a pinned base; a run never needs o
 
 - The stand-in is read from Stripe's documentation, which the owner dates (K17's evidence); it is not Stripe.
 - A build's interface is the one the prompt names: a WhatsApp Cloud API webhook at a local port, replies through the Cloud API, refunds through the Stripe API. A build that needs something the stand-in does not model is O3.
-- The container run has not been started from this repository's tests: it needs an image, and building one needs a network once.
+- The container run is not started by the tests: it needs an image. The image is built once with a network (`docker build -t poly-demo-replay:step8 -f demo/container/Dockerfile demo`, from `node:24-slim` pinned by digest in the Dockerfile) and every run after that has none. It was run end to end on 2026-10-15 against the four doubles with `network_mode: none`, and the outcomes were the host-side ones: refunds-twice and fresh-key O1, keys and no-retry O2.
 
 ## Conclusion
 

@@ -8,9 +8,10 @@
 # for the run (NODE_EXTRA_CA_CERTS is set by the driver). The tree under test is mounted read-only.
 services:
   replay:
+    image: poly-demo-replay:step8
     build:
-      context: ../..
-      dockerfile: demo/container/Dockerfile
+      context: ..
+      dockerfile: container/Dockerfile
     network_mode: none
     extra_hosts:
       - "api.stripe.com:127.0.0.1"

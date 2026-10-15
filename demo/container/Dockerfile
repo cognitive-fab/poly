@@ -5,9 +5,9 @@
 #
 # The image is built once, with a network, from a pinned base; the runs never need one. Pin the base by digest in the pre-registration
 # commit (plan step 10), where the owner records it with the agent's version.
-FROM node:24-slim
+FROM node:24-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
 RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /demo
-COPY demo /demo/demo
+COPY . /demo/demo
 ENV POLY_DEMO_IN_CONTAINER=1
 ENTRYPOINT ["node", "/demo/demo/demo.mjs"]
