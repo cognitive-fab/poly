@@ -117,8 +117,9 @@ const files = [];
 for (const [fam, dir] of FAMILIES) {
   let root;
   try { root = join(ROOT, dir); statSync(root); } catch { continue; }
-  // test/fixtures/s526 holds the rule's own inputs, unguarded on purpose (a rule that is tested needs a program it fires on).
-  for (const f of walk(root, ['.poly'])) if (!rel(f).startsWith('test/fixtures/s526/')) files.push({ fam, f, r: rel(f), text: readFileSync(f, 'utf8') });
+  // The rule's own test inputs are unguarded on purpose (a rule that is tested needs a program it fires on); their modules
+  // are named s526<...>, which is the convention that leaves them out of the impact.
+  for (const f of walk(root, ['.poly'])) { const text = readFileSync(f, 'utf8'); if (!/^module[ 	]+s526/m.test(text)) files.push({ fam, f, r: rel(f), text }); }
 }
 for (const x of files) { x.effects = isPolicyFile(x.r) ? [] : effectsOf(x.text); x.policy = isPolicyFile(x.r); }
 
