@@ -152,7 +152,8 @@ export function capabilitiesFor(decl: CapabilityDecl, transports: Transports, au
     let replaced = false;
     for (const [k, v] of Object.entries(headers ?? {})) { if (k.toLowerCase() === key.header.toLowerCase()) replaced = replaced || v !== key.value; else rest[k] = v; }
     if (replaced) await audit(`the handler supplied ${key.header}; the runtime replaced it with the intent id (PT33.4)`, 'idempotency-header-replaced');
-    return { ...rest, [key.header]: key.value };
+    // Header names are case-insensitive (RFC 9110); the runtime writes the name in lower case, as the transports index them.
+    return { ...rest, [key.header.toLowerCase()]: key.value };
   };
   const need = <K extends keyof Transports>(k: K): NonNullable<Transports[K]> => {
     const t = transports[k];

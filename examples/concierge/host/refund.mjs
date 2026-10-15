@@ -29,7 +29,7 @@ export const refundForm = (charge, amount) => {
  * The handler: one refund through api. The owner is checked before anything is sent; the amount against the charge is
  * checked after one read of it, so that refusal sends a GET and no POST.
  */
-export async function refund(payload, caps, ctx) {
+export async function refund(payload, caps) {
   const items = await caps.items.read(payload.order);
   if (!Array.isArray(items) || items.length !== 1) throw refuse('a refund acts on exactly one order');
   const [order] = items;
@@ -42,8 +42,8 @@ export async function refund(payload, caps, ctx) {
   if (!Number.isInteger(paid.amount) || !Number.isInteger(paid.amount_refunded) || paid.paid !== true) throw refuse('the charge is not a paid charge');
   const form = refundForm(charge, payload.amount);
   if (payload.amount * 100 > paid.amount - paid.amount_refunded) throw refuse('the amount exceeds what was paid on the order\'s charge');
-  // The intent's key makes a retried POST the same refund (Stripe's Idempotency-Key), so a lost answer cannot refund twice.
-  const res = await caps.api.post(REFUNDS_URL, form, { headers: { 'content-type': 'application/x-www-form-urlencoded', ...(ctx?.idempotencyKey ? { 'idempotency-key': ctx.idempotencyKey } : {}) } });
+  // The key is not the handler's to send: the refund is declared `idempotent header "Idempotency-Key"`, so the runtime sends the intent id on this write and on each retry (PT33.4), and a lost answer cannot refund twice.
+  const res = await caps.api.post(REFUNDS_URL, form, { headers: { 'content-type': 'application/x-www-form-urlencoded' } });
   // A 4xx is Stripe refusing this refund and will again; anything else is tried again.
   if (res.status !== 200) throw res.status >= 400 && res.status < 500 && res.status !== 429 ? refuse(`refunds.create answered ${res.status}`) : new Error(`refunds.create answered ${res.status}`);
   return { ok: true };

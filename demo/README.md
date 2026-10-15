@@ -45,3 +45,21 @@ The replay turns the witness of the check into an event on a server that cannot 
 - **Control:** the run without a fault.
 - **Lost answer:** the stand-in applied the request and dropped the connection before the answer arrived.
 - **Five numbers:** requests received, `POST`s with their keys, refund objects created, `amount_refunded`, and the customer's reply.
+
+
+## The room (Step 9)
+
+`launch.mjs` starts the demo: it prints the diff of the demo copy (`concierge/`, produced by `scripts/make-demo-concierge.mjs`) against `examples/concierge`, checks and admits the copy and prints its verdict with its instance, serves the room page (`host/server.mjs`), and gives the presenter a prompt (`status`, `staff`, `approve <intent>`, `kill`, `quit`). `--recorded` (the default) answers every model call from the recorded fixture; `--live` uses `host/live-providers.mjs`, refuses to start while the price tables are placeholders, and reads the model key from the environment once.
+
+- `host/room.mjs` and `host/server.mjs`: a guest gets a persona (`personas.mjs`, numbers from the fiction range), types a message, and the room signs it as the WhatsApp Cloud API signs (`signing.mjs`); the runtime's certified adapter verifies it, and `verifier.mjs` maps the verified number to `cust-guest-NN`. A reply goes back through `transport.mjs` to that guest's page alone (server-sent events). The limits are 280 characters, one message in 5 seconds and 12 messages a guest (`limits.mjs`); the kill switch is the presenter's (`POST /presenter/kill` with the token, loopback only, or `kill` at the prompt) and stops the room for everyone.
+- `host/vault.mjs`, `host/admission.mjs`, `host/assemble.mjs`: the development vault holds a synthetic token that only the local stand-in accepts (made at start, in memory, written nowhere), the keys of the run are made at start, and the assembly is the same for the launcher and the recorded run.
+- `host/live-providers.mjs` and `host/live-transport.mjs`: the model providers of DF6 over a transport the launcher gives. The transport reaches the provider's host alone; the key is a header and nothing else. `host/price-gate.mjs` refuses placeholder price tables.
+
+Tests: `test/demo-room.test.mjs`, `demo-live-providers.test.mjs`, `demo-vault.test.mjs`, `demo-concierge-copy.test.mjs`, `demo-launch.test.mjs`, `demo-secrets.test.mjs` (the scan for credential shapes, the environment reads, the boundary over `demo/`), and the recorded run `test/after/demo-concierge-e2e.test.mjs` (the copy is `CLEAN`, a forged message is refused, a refund over 100 waits for a signed approval, a value outside 0..500 stops at the domain, no guest reaches another's order, the canary leaks nowhere, and the journal replays with no divergence).
+
+### Glossary additions
+
+- **Persona:** the synthetic guest a browser session is given, with a number, an identity and orders that are made up.
+- **Kill switch:** the presenter's control that stops the room for everyone.
+- **Demo copy:** the concierge as released with only its budget caps changed, produced by a script and checked as itself.
+- **Price gate:** the refusal to launch live on price tables that name a placeholder source.
