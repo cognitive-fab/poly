@@ -1533,6 +1533,10 @@ class Checker {
     // PS17.2: a retrieval's and a remember's labels are the runtime's.
     if (!labelled && !retrieve && !remember) this.err('PL6301', e, `effect ${e.name} has no labels (PT6.2)`);
     const labels = new Set(e.items.flatMap((x) => (x.kind === 'EffLabels' ? x.labels : [])));
+    // PS23.6, PT33.3: an effect that reaches outside the program states its class. poly-ref repeats the check (retrysafe.ts).
+    if ((labels.has('egress:external') || labels.has('egress:public')) && !e.items.some((x) => x.kind === 'EffClass')) {
+      this.err('PL6304', e, `effect ${e.name} reaches outside the program (${[...labels].filter((l) => l.startsWith('egress:')).join(', ')}) and declares no class; state its class (PS23.6)`);
+    }
     for (const t of targets) this.targets(e, t, labels);
     for (const u of uses) this.usesCredential(e, u, targets);
     // polyrun reads timer, cancelTimer, spawnChild and signalChild before its manifest, and PT7a adds sendTo (review finding L3).
