@@ -1,0 +1,40 @@
+// The worker's conformance corpus, keyed half (PS23.7, PT33.5a): the same job as outbox.poly with a keyed effect, so the
+// outbox intent behind a job can take WindowLapsed (Allowed to Dead) at each of its Allowed states. The window is
+// 24h, far longer than the corpus's own clock, so a job lapses only where its script moves the clock.
+module outboxk
+
+enum Phase { Idle, Working, Done, Failed }
+
+machine KeyedJob {
+  state { phase : Phase = Idle }
+  terminal phase in { Done, Failed }
+
+  action Go()
+  action Worked()
+  action Gave()
+
+  on Go {
+    require phase == Idle else reject "started"
+    phase' = Working
+    emit work(1)
+  }
+  on Worked {
+    require phase == Working else reject "not-working"
+    phase' = Done
+  }
+  on Gave {
+    require phase == Working else reject "not-working"
+    phase' = Failed
+  }
+
+  effect work(n: 0..1) {
+    kind "w.keyed"
+    labels { exec }
+    class irreversible
+    idempotent header "Idempotency-Key" window 24h
+    retry { attempts 3, base 10ms, timeout 1s }
+    ok -> Worked()
+    failed -> Gave()
+    exhausted -> Gave()
+  }
+}

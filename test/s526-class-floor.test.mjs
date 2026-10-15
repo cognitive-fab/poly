@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { checkFile, render } from '@poly/check';
 import { ROOT, BUILD } from './helpers.mjs';
 
@@ -27,6 +27,9 @@ const countCode = (result, code) => {
     .flatMap((m) => m.diagnostics || [])
     .filter((d) => d.code === code).length;
 };
+
+// PL6304 is a declaration error (ruled 2026-10-14): the front end reports it, the source is REFUSED, and its diagnostics are in r.diagnostics.
+const refusedCodes = (result) => (result.diagnostics || []).filter((d) => d.code === 'PL6304');
 
 // Helper: get all diagnostics with a code
 const getDiagsWithCode = (result, code) => {
@@ -58,9 +61,9 @@ test('PS23.6: effect with egress:external but no class reports PL6304', async ()
   const file = write('no-class-external.poly', src);
   const r = await checkFile(file, { root: OUT });
 
-  assert.equal(r.verdict, 'FINDINGS', `PS23.6: verdict should be FINDINGS but got ${r.verdict}`);
+  assert.equal(r.verdict, 'REFUSED', `PS23.6: a missing class is a declaration error, so REFUSED, got ${r.verdict}`);
 
-  const pl6304s = getDiagsWithCode(r, 'PL6304');
+  const pl6304s = refusedCodes(r);
   assert.equal(pl6304s.length, 1, `PS23.6: expect exactly one PL6304 but found ${pl6304s.length}`);
 
   // PL6304 must be at the effect declaration
@@ -82,8 +85,8 @@ test('PS23.6: effect with egress:public but no class reports PL6304', async () =
   const file = write('no-class-public.poly', src);
   const r = await checkFile(file, { root: OUT });
 
-  assert.equal(r.verdict, 'FINDINGS', `PS23.6: verdict should be FINDINGS but got ${r.verdict}`);
-  assert.equal(countCode(r, 'PL6304'), 1, `PS23.6: expect exactly one PL6304`);
+  assert.equal(r.verdict, 'REFUSED', `PS23.6: a missing class is a declaration error, so REFUSED, got ${r.verdict}`);
+  assert.equal(refusedCodes(r).length, 1, `PS23.6: expect exactly one PL6304`);
 });
 
 test('PS23.6: class none on egress:external has no PL6304 and report prints class', async () => {
@@ -150,7 +153,7 @@ test('CONTROL: PS23.6: decision with egress label never reports PL6304', async (
   assert.ok(/decision|ask|egress/.test(report), `PS23.6: report should mention decision or egress, got: ${report}`);
 });
 
-test('PT33.12: class null for unclassified egress effect shows in effectClasses', async () => {
+test('PT33.12: an unclassified egress effect is REFUSED and has no effectClasses entry', async () => {
   // Effect with egress label but no class (PL6304)
   const src = readFileSync(BASE, 'utf8').replace('    class irreversible\n', '');
   assert.ok(src.includes('egress:external'), 'sanity: egress label present');
@@ -159,19 +162,12 @@ test('PT33.12: class null for unclassified egress effect shows in effectClasses'
   const file = write('class-null.poly', src);
   const r = await checkFile(file, { root: OUT });
 
-  // PT33.12: effectClasses has entry with class: null
-  const m = r.machines[0];
-  assert.ok(Array.isArray(m.effectClasses), 'PT33.12: effectClasses must exist');
-  const entry = m.effectClasses.find((e) => e.effect === 'work');
-  assert.ok(entry, 'PT33.12: work effect in effectClasses');
-  assert.equal(entry.class, null, 'PT33.12: class must be null when not declared');
-
-  // PT33.12: render output for unclassified
-  const report = render(r);
-  const lines = report.split('\n').map((l) => l.trim());
-  const expected = 'class  s526.work  unclassified';
-  assert.ok(lines.some((l) => l === expected),
-    `PT33.12: must have exact line "${expected}" in\n${report}`);
+  // PT33.12 (amended 2026-10-14): a program that cannot build has no class lines. It is REFUSED with PL6304 and no machine
+  // reports effectClasses, so an entry with class null is never seen by an author.
+  assert.equal(r.verdict, 'REFUSED');
+  assert.equal(refusedCodes(r).length, 1);
+  assert.ok(!r.machines?.some((m) => m.effectClasses), 'a refused source reports no effectClasses');
+  assert.ok(!render(r).split('\n').some((l) => /^\s*class\s+s526\.work/.test(l)), 'and prints no class line');
 });
 
 test('PS23.6: multi-effect with one lacking class reports exactly one PL6304', async () => {
@@ -196,31 +192,16 @@ test('PS23.6: multi-effect with one lacking class reports exactly one PL6304', a
   const file = write('multi-effect.poly', src);
   const r = await checkFile(file, { root: OUT });
 
-  // Source must be checked, not REFUSED
-  assert.ok(r.verdict !== 'REFUSED', `PS23.6: multi-effect source should be checked, got ${r.verdict}`);
+  // The source is REFUSED: a missing class is a declaration error (ruled 2026-10-14).
+  assert.equal(r.verdict, 'REFUSED', `PS23.6: got ${r.verdict}`);
 
-  // Exactly one PL6304 (for backup which has no class)
-  assert.equal(countCode(r, 'PL6304'), 1, 'PS23.6: expect exactly one PL6304 for the second effect');
+  // Exactly one PL6304 (for backup which has no class), none for work, which declares one.
+  const diags = refusedCodes(r);
+  assert.equal(diags.length, 1, 'PS23.6: expect exactly one PL6304 for the second effect');
 
-  // PT33.12: effectClasses has both effects (both have egress label)
-  const m = r.machines[0];
-  assert.ok(Array.isArray(m.effectClasses), 'PT33.12: effectClasses must be array');
-  assert.equal(m.effectClasses.length, 2, 'PT33.12: two entries for two effects with egress labels');
-  const work = m.effectClasses.find((e) => e.effect === 'work');
-  const backup = m.effectClasses.find((e) => e.effect === 'backup');
-  assert.ok(work, 'PT33.12: work in effectClasses');
-  assert.ok(backup, 'PT33.12: backup in effectClasses');
-  assert.equal(work.class, 'irreversible', 'PT33.12: work has class');
-  assert.equal(backup.class, null, 'PT33.12: backup has class null');
-
-  // The PL6304 should point to the backup effect area (not work, which has class)
-  const diags = getDiagsWithCode(r, 'PL6304');
-  if (diags.length > 0) {
-    const diag = diags[0];
-    const lines = src.split('\n');
-    const line = lines[diag.at.line - 1];
-    assert.ok(/backup|labels/.test(line), `PS23.6: PL6304 should point to backup effect, got: ${line}`);
-  }
+  // The PL6304 points to the backup effect (not work, which has a class).
+  const line = src.split('\n')[diags[0].at.line - 1];
+  assert.ok(/backup|labels/.test(line), `PS23.6: PL6304 should point to backup effect, got: ${line}`);
 });
 
 test('CONTROL: decision with egress label is not in effectClasses (decisions are class none by construction, PD1.7)', async () => {
@@ -258,14 +239,15 @@ test('PT33.12: for a declared class the effectClasses entry equals the class the
   }
 });
 
-test('PT33.12: with no class declared the effectClasses entry has class null (PL6304) while the manifest carries none', async () => {
+test('PT33.12: with no class declared the build is refused with PL6304 and no manifest is written', async () => {
   const src = readFileSync(BASE, 'utf8').replace('    class irreversible\n', '');
   const file = write('lowering-undeclared.poly', src);
   const r = await checkFile(file, { root: OUT });
-  assert.ok(['CLEAN', 'FINDINGS'].includes(r.verdict), `checked: ${r.verdict}`);
-  const entries = r.machines[0].effectClasses;
-  assert.ok(Array.isArray(entries) && entries.length === 1, `PT33.12: effectClasses has one entry, got ${JSON.stringify(entries)}`);
-  assert.strictEqual(entries[0].class, null);
-  assert.equal(manifestClass(file, 's526-lowering-undeclared'), 'none', 'an undeclared class lowers to none');
-  assert.equal(countCode(r, 'PL6304'), 1);
+  assert.equal(r.verdict, 'REFUSED');
+  assert.equal(refusedCodes(r).length, 1);
+  const dir = join(BUILD, 's526-lowering-undeclared');
+  rmSync(dir, { recursive: true, force: true });
+  assert.throws(() => build(file, 's526-lowering-undeclared'), /PL6304/, 'the build is refused');
+  const manifests = existsSync(dir) ? readdirSync(dir, { recursive: true }).filter((p) => String(p).endsWith('effects.manifest.json')) : [];
+  assert.deepEqual(manifests, [], 'no manifest is written');
 });

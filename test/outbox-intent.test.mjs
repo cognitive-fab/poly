@@ -103,7 +103,9 @@ function corpusPaths() {
 
 /** A path of OutboxIntent actions, read as the script of one job. */
 function scriptOf(actions) {
-  const s = { propose: [], approve: [], stale: [], handler: [], settle: [], end: null };
+  // PS23.7, PT33.5a: a path that takes WindowLapsed runs on the keyed job, and its script moves the clock past the window at the
+  // step just before it (the gate's last allow, the handler's last failure, or the last failed settle).
+  const s = { propose: [], approve: [], stale: [], handler: [], settle: [], end: null, keyed: actions.includes('WindowLapsed'), lapseAfter: actions[actions.indexOf('WindowLapsed') - 1] ?? null };
   for (let k = 0; k < actions.length; k++) {
     const a = actions[k];
     if (a === 'GateAllow') s.propose.push('allow');
@@ -121,7 +123,11 @@ function scriptOf(actions) {
   return s;
 }
 
-const SCRIPT = Object.fromEntries(corpusPaths().map((p, k) => [`job-${String(k).padStart(2, '0')}`, { ...scriptOf(p), path: p }]));
+const ALL = Object.fromEntries(corpusPaths().map((p, k) => [`job-${String(k).padStart(2, '0')}`, { ...scriptOf(p), path: p }]));
+// A job that takes WindowLapsed moves the clock a whole window, which would end the escalation of any other job in flight, so each
+// runs in a runtime of its own (LAPSE); the others share one (SCRIPT).
+const LAPSE = Object.fromEntries(Object.entries(ALL).filter(([, j]) => j.keyed));
+const SCRIPT = Object.fromEntries(Object.entries(ALL).filter(([, j]) => !j.keyed));
 // A crash while Running, found at the next claim (S119): HandlerFailed by the lease, not by the handler.
 SCRIPT['job-crash'] = { propose: ['allow'], approve: [], stale: [false, false], handler: ['hang', 'ok'], settle: ['ok'], end: 'SettleOk', path: [] };
 
@@ -129,7 +135,8 @@ SCRIPT['job-crash'] = { propose: ['allow'], approve: [], stale: [false, false], 
  * A gate scripted per job. A decision is a function of the proposal (K6): its place in the job's path is fixed by
  * the rechecks it has had and whether it is an approved re-proposal, which the proposal carries. Settles go in order.
  */
-function scriptedGate(script) {
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+function scriptedGate(script, clockRef) {
   const settles = new Map();
   const next = (m, job) => { const k = m.get(job) ?? 0; m.set(job, k + 1); return k; };
   const index = (job, p) => {
@@ -148,38 +155,58 @@ function scriptedGate(script) {
       const d = script[p.instance]?.propose?.[k] ?? 'allow';
       return d === 'allow' ? { decision: 'allow' } : d === 'deny' ? { decision: 'deny', reason: 'scripted', witnessDigest: 'sha256:0' } : { decision: 'escalate', reason: 'scripted' };
     },
-    settle(observed, p) { return script[p.instance]?.settle?.[next(settles, p.instance)] ?? 'ok'; },
+    settle(observed, p) {
+      const sc = script[p.instance];
+      const k = next(settles, p.instance);
+      if (sc?.lapseAfter === 'SettleFailed' && k === sc.settle.length - 1) clockRef.clock.advance(WINDOW_MS + 1);
+      return sc?.settle?.[k] ?? 'ok';
+    },
   };
 }
 
-async function corpus(extra = {}) {
-  const a = await admitted('outbox', ['conformance/m4/outbox.poly']);
-  const gate = scriptedGate(SCRIPT);
+async function corpus(extra = {}, S = SCRIPT) {
+  const a = await admitted('outbox', ['conformance/m4/outbox.poly', 'conformance/m4/outbox-keyed.poly']);
+  const clockRef = {};
+  const gate = scriptedGate(S, clockRef);
   const staleCalls = new Map();
-  const isStale = (row) => { const k = staleCalls.get(row.instance_id) ?? 0; staleCalls.set(row.instance_id, k + 1); return SCRIPT[row.instance_id]?.stale?.[k] ?? false; };
+  const isStale = (row) => { const k = staleCalls.get(row.instance_id) ?? 0; staleCalls.set(row.instance_id, k + 1); return S[row.instance_id]?.stale?.[k] ?? false; };
   const { rt, clock } = await loaded(a, { gate: { gate, escalationTimeoutMs: 10 * 60_000 }, worker: { leaseMs: 60_000, isStale }, ...extra });
+  clockRef.clock = clock;
+  // The window of an allow lapses just after it is recorded: the allow's own time is its start, so the clock moves once it is made.
+  const allows = new Map();
+  rt.intents('w.keyed').subscribe(({ instance }) => {
+    const n = (allows.get(instance) ?? 0) + 1;
+    allows.set(instance, n);
+    const sc = S[instance];
+    if (sc?.lapseAfter === 'GateAllow' && n === sc.propose.filter((x) => x === 'allow').length) clock.advance(WINDOW_MS + 1);
+  });
   const calls = new Map();
   const hung = [];
-  handleWith(rt, 'w.work', (_payload, caps, ctx) => {
+  const work = (_payload, caps, ctx) => {
     const job = ctx.instanceId;
     const k = calls.get(job) ?? 0;
     calls.set(job, k + 1);
-    const what = SCRIPT[job]?.handler?.[k] ?? 'ok';
+    const what = S[job]?.handler?.[k] ?? 'ok';
     assert.deepEqual(Object.keys(caps), ['exec'], 'S134: the exec label grants exec, bound to no command since none is declared');
-    if (what === 'fail') throw new Error('scripted failure');
+    if (what === 'fail') {
+      if (S[job]?.lapseAfter === 'HandlerFailed' && k === S[job].handler.length - 1) clock.advance(WINDOW_MS + 1);
+      throw new Error('scripted failure');
+    }
     if (what === 'permanent') throw Object.assign(new Error('card declined'), { permanent: true });
     if (what === 'hang') return new Promise((resolve) => hung.push(() => resolve(`${job}|late`)));
     return `${job}|${k}`;
-  });
-  for (const id of Object.keys(SCRIPT)) { await rt.create('outbox.Job', { id }); await rt.dispatch(id, 'Go'); }
+  };
+  handleWith(rt, 'w.work', work);
+  handleWith(rt, 'w.keyed', work);
+  for (const id of Object.keys(S)) { await rt.create(S[id].keyed ? 'outboxk.KeyedJob' : 'outbox.Job', { id }); await rt.dispatch(id, 'Go'); }
   // Each escalation is approved at once or left to time out, as its job's path says.
   const approvals = async () => {
-    for (const id of Object.keys(SCRIPT)) {
+    for (const id of Object.keys(S)) {
       const [row] = await rt.outbox(id);
       const st = await rt.worker.intentState(row);
       if (st?.intent !== 'Escalated' || st.intent_approved) continue;
       const k = (await rt.chain(id)).filter((e) => e.kind === 'verdict' && e.body.outcome === 'escalated').length - 1;
-      if (SCRIPT[id].approve[k]) await approveAs(rt, row.intent_id);
+      if (S[id].approve[k]) await approveAs(rt, row.intent_id);
     }
   };
   const pass = async (ms) => { clock.advance(ms); await rt.worker.tick(); };
@@ -195,11 +222,22 @@ async function corpus(extra = {}) {
 }
 
 test('the worker conforms: every intent\'s trace replays through OutboxIntent, and covers every state and transition', async () => {
-  const { rt } = await corpus();
+  const main = await corpus();
+  const runs = [{ rt: main.rt, S: SCRIPT }];
+  const rt = main.rt;
   try {
-    const c = await workerConformance(rt, WORKER_SOURCE);
+    for (const id of Object.keys(LAPSE)) runs.push({ rt: (await corpus({}, { [id]: LAPSE[id] })).rt, S: { [id]: LAPSE[id] } });
+    const c = { diagnostics: [], intents: 0, states: new Set(), edges: new Set() };
+    for (const r of runs) {
+      const x = await workerConformance(r.rt, WORKER_SOURCE);
+      c.diagnostics.push(...x.diagnostics);
+      c.intents += x.intents;
+      x.states.forEach((v) => c.states.add(v));
+      x.edges.forEach((v) => c.edges.add(v));
+    }
     assert.deepEqual(c.diagnostics.map((d) => d.message), []);
-    assert.equal(c.intents, Object.keys(SCRIPT).length);
+    assert.equal(c.intents, Object.keys(SCRIPT).length + Object.keys(LAPSE).length);
+    assert.ok(Object.keys(LAPSE).length >= 1, 'PT33.5a: the corpus has a keyed job that takes WindowLapsed');
     // Coverage, measured against poly-ref's graph of the bound-3 instance.
     const { ref, key } = REF;
     const states = new Set(ref.graph.states.map((s) => key(s)));
@@ -209,7 +247,12 @@ test('the worker conforms: every intent\'s trace replays through OutboxIntent, a
     assert.deepEqual([...edges].filter((e) => !c.edges.has(e)), [], 'every accepted transition taken');
     console.log(`# corpus: ${c.intents} intents, ${c.states.size} of ${states.size} states, ${c.edges.size} of ${edges.size} accepted transitions`);
     // The outcome each path asks for, as the program sees it: Worked on a completed intent, Gave otherwise.
-    for (const [id, s] of Object.entries(SCRIPT)) assert.equal((await rt.getState(id)).state.phase, s.end === 'SettleOk' ? 'Done' : 'Failed', `${id}: ${s.path.join(' ')}`);
+    for (const r of runs) for (const [id, s] of Object.entries(r.S)) assert.equal((await r.rt.getState(id)).state.phase, s.end === 'SettleOk' ? 'Done' : 'Failed', `${id}: ${s.path.join(' ')}`);
+    // PT33.5a: a lapsed window ends the intent Dead, with the exhausted completion and the observation `lapsed`.
+    for (const r of runs) for (const [id, s] of Object.entries(r.S)) if (s.end === 'WindowLapsed') {
+      assert.ok((await r.rt.getJournal(id)).some((x) => x.action === 'Gave' && x.action_id.endsWith(':exhausted')), `${id}: the exhausted completion`);
+      assert.ok((await r.rt.chain(id)).some((e) => e.kind === 'observation' && e.body.outcome === 'lapsed'), `${id}: observed lapsed`);
+    }
     // S138: a permanent error is never retried, and its intent ends with the failed completion.
     for (const [id, s] of Object.entries(SCRIPT)) if (s.end === 'HandlerFailedPermanent') assert.ok((await rt.getJournal(id)).some((r) => r.action === 'Gave' && r.action_id.endsWith(':failed')), id);
     // S147: a stale allow is rechecked, at most twice, and a third is denied with stale-allow.
@@ -218,7 +261,7 @@ test('the worker conforms: every intent\'s trace replays through OutboxIntent, a
     for (const [id] of stale) assert.ok((await rt.chain(id)).some((e) => e.kind === 'verdict' && e.body.outcome === 'denied' && e.body.reason === 'stale-allow'), id);
     // A stale worker (the hung handler's pass) took no transition after its claim was taken over.
     assert.deepEqual((await rt.audit()).filter((x) => x.rule === 'PL2401'), []);
-  } finally { await rt.close(); }
+  } finally { for (const r of runs) await r.rt.close(); }
 });
 
 test('every recorded gate decision replays from its proposal and snapshot (S118), and every run folds', async () => {
