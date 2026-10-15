@@ -36,6 +36,15 @@ export const SYNTHETIC_ENV = {
 
 export class StandInInvalid extends Error {}
 
+/**
+ * Seeded faults of the driver, for its tests only (the way the toolchain's faults are named and kept): each breaks one rule of
+ * DB6 and must turn a driver test red.
+ *   count-by-posts   the driver counts refunds by the POSTs it saw, not by the refund objects the stand-in made (DB6 item 6)
+ *   skip-self-check  the driver does not check the stand-in's own key behaviour first (DB6 item 4)
+ *   reuse-process    one process of the build serves the control and the fault run (DB6 item 4: each against a fresh process)
+ */
+export const DRIVER_FAULTS = ['count-by-posts', 'skip-self-check', 'reuse-process'];
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function chargesOf(orders) {
@@ -162,9 +171,12 @@ async function settle(standIn, { quietMs, maxMs }) {
 
 /** One attempt: a fresh process of the build, the request, the stand-in's numbers. */
 async function drive(ctx, label) {
-  const { standIn, build, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv } = ctx;
-  const port = await freePort();
-  const proc = startBuild({ build, start, port, standInPort: standIn.port, authority, mapNames, extraEnv });
+  const { standIn, build, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault } = ctx;
+  // reuse-process (seeded): the process of the control is kept for the fault run.
+  const reused = driverFault === 'reuse-process' && ctx.kept ? ctx.kept : null;
+  const port = reused ? reused.port : await freePort();
+  const proc = reused ? reused.proc : startBuild({ build, start, port, standInPort: standIn.port, authority, mapNames, extraEnv });
+  if (driverFault === 'reuse-process') ctx.kept = { port, proc };
   try {
     if (!(await proc.listening(startMs))) {
       const exit = proc.exited();
@@ -172,8 +184,11 @@ async function drive(ctx, label) {
     }
     const sent = await sendWebhook({ port, path: webhookPath, order, text: REQUEST.text });
     await settle(standIn, { quietMs, maxMs });
-    return { label, driven: true, webhook: sent, numbers: standIn.report(), output: proc.output() };
-  } finally { proc.stop(); }
+    const numbers = standIn.report();
+    // count-by-posts (seeded): a retry that the stand-in replayed counts as a refund.
+    if (driverFault === 'count-by-posts') numbers.refunds = numbers.posts.length;
+    return { label, driven: true, webhook: sent, numbers, output: proc.output() };
+  } finally { if (driverFault !== 'reuse-process') proc.stop(); }
 }
 
 /** O1, O2 or O3 from the control and the fault run (DB7). */
@@ -196,7 +211,7 @@ export function classify(control, run) {
  */
 export async function replay({
   build, start, fault = 'lost-answer', webhookPath = '/webhook', testCommand = null, mapNames = true,
-  stripe, quietMs = 3000, maxMs = 20_000, startMs = 15_000, orders: ordersFile, extraEnv = {}, standInPort = 0, standInHost = '127.0.0.1',
+  stripe, driverFault = null, quietMs = 3000, maxMs = 20_000, startMs = 15_000, orders: ordersFile, extraEnv = {}, standInPort = 0, standInHost = '127.0.0.1',
 }) {
   const buildDir = resolve(build);
   const ordersPath = ordersFile ?? (existsSync(join(buildDir, 'orders.json')) ? join(buildDir, 'orders.json') : ORDERS);
@@ -205,15 +220,16 @@ export async function replay({
   const authority = createAuthority();
   const standIn = await startStandIn({ authority, charges: chargesOf(orders), fault: 'none', port: standInPort, host: standInHost, ...(stripe ? { stripe } : {}) });
   const result = { build: buildDir, fault: typeof fault === 'string' ? fault : fault.name ?? 'custom', start, orders: ordersPath };
+  let ctx = null;
   try {
     try {
-      await selfCheck(standIn, authority, orders);
+      if (driverFault !== 'skip-self-check') await selfCheck(standIn, authority, orders);
       result.standIn = { valid: true };
     } catch (e) {
       if (!(e instanceof StandInInvalid)) throw e;
       return { ...result, standIn: { valid: false, why: e.message }, outcome: 'stand-in-invalid', reason: e.message, control: null, run: null, tests: null };
     }
-    const ctx = { standIn, build: buildDir, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv };
+    ctx = { standIn, build: buildDir, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault };
     standIn.reset({ charges: chargesOf(orders), fault: 'none' });
     result.control = await drive(ctx, 'control');
     const controlOk = result.control.driven && result.control.numbers.posts.length === 1 && result.control.numbers.refunds === 1;
@@ -225,6 +241,8 @@ export async function replay({
     result.tests = testCommand ? runTests(buildDir, testCommand) : { status: 'not given' };
     return result;
   } finally {
+    // reuse-process (seeded) kept one process for both runs; it ends here.
+    if (driverFault === 'reuse-process') { try { ctx?.kept?.proc.stop(); } catch { /* gone */ } }
     await standIn.close();
     authority.remove();
   }

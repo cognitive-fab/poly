@@ -6,14 +6,16 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { replay, StandInInvalid, selfCheck, ORDERS, chargesOf } from '../demo/driver/replay.mjs';
+import { replay, StandInInvalid, selfCheck, ORDERS, chargesOf, DRIVER_FAULTS } from '../demo/driver/replay.mjs';
 import { createAuthority } from '../demo/stand-in/stripe/tls.mjs';
 import { startStandIn } from '../demo/stand-in/stripe/server.mjs';
 import { createStripeIgnoringKeys } from './fixtures/demo/mutants/stripe-ignores-key.mjs';
 import { readFileSync } from 'node:fs';
 
 const DOUBLES = fileURLToPath(new URL('./fixtures/demo/doubles/', import.meta.url));
-const drive = (name, options = {}) => replay({ build: join(DOUBLES, name), start: 'node server.mjs', quietMs: 1200, maxMs: 8000, startMs: 6000, ...options });
+// POLY_DEMO_DRIVER_FAULT seeds one named fault of the driver (DRIVER_FAULTS) under every test here: the tests are then expected to go red.
+const SEEDED = process.env.POLY_DEMO_DRIVER_FAULT || null;
+const drive = (name, options = {}) => replay({ build: join(DOUBLES, name), start: 'node server.mjs', quietMs: 1200, maxMs: 8000, startMs: 6000, driverFault: SEEDED, ...options });
 
 test('DAC8, O1: the double that retries with no key refunds twice, and the five numbers say so', async () => {
   const r = await drive('refunds-twice');
@@ -134,3 +136,33 @@ test('DB6 item 3: the throwaway authority is removed when the run ends, and noth
   authority.remove();
   assert.ok(!existsSync(authority.dir));
 });
+
+// ---- the driver's own seeded faults (ruled after Step 8) ------------------------------------------------------------------
+
+test('DB6 item 4: each control gets a fresh process: a build that remembers the webhook it handled is still driven under the fault', async () => {
+  const r = await drive('dedupes-webhook');
+  assert.equal(r.outcome, 'O1', r.reason);
+  assert.equal(r.run.numbers.refunds, 2);
+});
+
+// The three faults and the test that catches each. Each runs here with the fault seeded in the driver and expects the result the
+// right driver does not give, so a driver that regresses to one of them is red: the named catching test is the one asserted.
+const CAUGHT = {
+  'count-by-posts': { double: 'keys', right: 'O2', wrong: 'O1', note: 'a replayed retry counted as a refund' },
+  'skip-self-check': { double: 'keys', right: 'stand-in-invalid', wrong: 'O1', note: 'the mutant stand-in is not refused', mutant: true },
+  'reuse-process': { double: 'dedupes-webhook', right: 'O1', wrong: 'O3', note: 'the build remembers the webhook of the control' },
+};
+
+test('the seeded faults of the driver are the ones listed, each with a catching test here', () => {
+  assert.deepEqual(Object.keys(CAUGHT).sort(), [...DRIVER_FAULTS].sort());
+});
+
+for (const [fault, c] of Object.entries(CAUGHT)) {
+  test(`seeded driver fault ${fault}: ${c.note}; the result differs from the right driver's (${c.right} to ${c.wrong})`, async () => {
+    const options = c.mutant ? { stripe: createStripeIgnoringKeys } : {};
+    const right = await replay({ build: join(DOUBLES, c.double), start: 'node server.mjs', quietMs: 1200, maxMs: 8000, startMs: 6000, ...options });
+    const wrong = await replay({ build: join(DOUBLES, c.double), start: 'node server.mjs', quietMs: 1200, maxMs: 8000, startMs: 6000, ...options, driverFault: fault });
+    assert.equal(right.outcome, c.right, 'the right driver');
+    assert.equal(wrong.outcome, c.wrong, `the driver with ${fault} seeded`);
+  });
+}

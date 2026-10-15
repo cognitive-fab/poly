@@ -25,8 +25,10 @@ function call(host, path, headers, body) {
 const tell = (to, text) => call('graph.facebook.com', `/v19.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
   { authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, 'content-type': 'application/json' }, JSON.stringify({ messaging_product: 'whatsapp', to, text: { body: text } })).catch(() => {});
 
-export function startDouble({ keys, retries }) {
+export function startDouble({ keys, retries, dedupe = false }) {
+  const handled = new Set(); // a build that remembers the webhooks it has handled keeps that in its process
   async function handle(message) {
+    if (dedupe) { if (handled.has(message.id)) return; handled.add(message.id); }
     const text = message.text.body;
     const order = orders.find((o) => o.order === /ORD-\d+/.exec(text)?.[0] && o.customer === message.from);
     const m = /refund of (\d+)\.(\d\d)/.exec(text);
