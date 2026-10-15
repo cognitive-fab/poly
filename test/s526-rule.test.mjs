@@ -159,7 +159,7 @@ test('PT33.9: poly witness <id> --test exports test for PL4003', async () => {
   delete env.NODE_TEST_CONTEXT;
   const run = spawnSync(process.execPath, ['--test', out], { encoding: 'utf8', env });
   assert.notEqual(run.status, 0, 'PT33.9: the exported test fails on the unfixed program');
-  assert.match(run.stdout + run.stderr, /executions/i, 'PT33.9: it fails on the executions-per-intent assertion (PT33.9: executions per intent <= 1)');
+  assert.match(run.stdout + run.stderr, /\bexecutions\b/i, 'PT33.9: it fails on the executions-per-intent assertion (PT33.9: executions per intent <= 1)');
 });
 
 // PS23.4, DAC2(a): G1 (retry { attempts 1 }) eliminates PL4003
