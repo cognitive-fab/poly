@@ -83,8 +83,9 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   const text = sha256(readFileSync(join(root, 'demo', 'baseline', `arm-${arm}.md`)));
   if (text !== record.armTexts?.[arm]) out.push(`arm-${arm}.md hashes to ${text}, not the recorded ${record.armTexts?.[arm]}`);
   let have;
-  try { have = version(); } catch (e) { have = null; out.push(`the agent's version could not be read: ${e.message}`); }
-  if (have !== null && have !== record.claudeCode?.version) out.push(`the agent is version ${have}, the record says ${record.claudeCode?.version}`);
+  try { have = version(); } catch (e) { have = undefined; out.push(`the agent's version could not be read: ${e.message}`); }
+  if (have === null) out.push('claude --version printed no version, so the agent cannot be shown to be the recorded one');
+  else if (have !== undefined && have !== record.claudeCode?.version) out.push(`the agent is version ${have}, the record says ${record.claudeCode?.version}`);
   out.push(...apiKeyProblems(env));
   out.push(...(deps.configProblems ?? configProblems)(configDir));
   // The runs already committed: a name is used once, the pilots are as many as the record says, and a kept run is one.
@@ -133,11 +134,13 @@ export async function runArm({ arm, run, bin = 'claude', binArgs = [], root = RO
   });
   let stderr = '';
   child.stderr.on('data', (c) => { stderr = (stderr + c.toString('utf8')).slice(-4000); });
-  const exit = await new Promise((resolve) => child.once('close', resolve));
+  // A binary that cannot be started emits 'error' and may never emit 'close': either one ends the wait, and the failure is recorded.
+  let spawnError = null;
+  const exit = await new Promise((resolve) => { child.once('error', (e) => { spawnError = e; resolve(null); }); child.once('close', resolve); });
   // The last event may arrive with no newline after it.
   try { const e = JSON.parse(buffer); if (e.type === 'result') result = e; } catch { /* nothing left, or not an event */ }
   await new Promise((resolve) => out.end(resolve));
-  const summary = { arm, run, exit, startedWith: { model: MODEL, capUsd: ARMS[arm].capUsd }, stopped: result?.subtype ?? null, costUsd: result?.total_cost_usd ?? null, usage: result?.usage ?? null, stderrTail: stderr, modelCallFlags: auditSession(join(dir, 'session.jsonl')) };
+  const summary = { arm, run, exit, startedWith: { model: MODEL, capUsd: ARMS[arm].capUsd }, stopped: result?.subtype ?? null, costUsd: result?.total_cost_usd ?? null, usage: result?.usage ?? null, stderrTail: stderr, error: spawnError ? `${spawnError.code ?? 'ERROR'}: ${spawnError.message}` : null, modelCallFlags: auditSession(join(dir, 'session.jsonl')) };
   writeFileSync(join(dir, 'result.json'), `${JSON.stringify(summary, null, 2)}\n`);
   return { dir, workspace, summary };
 }

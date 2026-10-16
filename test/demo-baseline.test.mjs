@@ -57,8 +57,8 @@ test('DB3, plan section 5: the poly arm has the deterministic commands and none 
   const tools = ALLOWED_TOOLS.poly.join(' ');
   for (const c of ['check', 'witness', 'fix', 'fmt', 'edit-check']) assert.ok(tools.includes(`npm run poly ${c}`), c);
   assert.doesNotMatch(tools, /poly new|poly explain|Bash\(npm run poly \*\)/);
-  assert.ok(!ALLOWED_TOOLS.poly.includes('Bash(node *)'), 'node alone would run the poly command line directly, poly new included');
-  assert.ok(ALLOWED_TOOLS.poly.includes('Bash(node --test*)'));
+  assert.ok(ALLOWED_TOOLS.poly.includes('Bash(node *)') && ALLOWED_TOOLS.ts.includes('Bash(node *)'), 'both arms have node (ruled 2026-10-15)');
+  assert.deepEqual(ALLOWED_TOOLS.poly.filter((x) => x.startsWith('Bash(node')), ALLOWED_TOOLS.ts.filter((x) => x.startsWith('Bash(node')), 'the same node pattern');
   for (const arm of ['ts', 'poly']) assert.ok(ALLOWED_TOOLS[arm].includes('Bash(npm install*)'), `${arm}: both arms may install packages`);
   assert.ok(!ALLOWED_TOOLS.ts.some((x) => /^Bash\((npm|npx) \*\)$/.test(x)), 'the TypeScript arm has no open-ended npm or npx');
 });
@@ -123,10 +123,12 @@ test('DB3: the poly arm\'s tools/poly holds exactly the listed files, no example
     for (const f of files) {
       const text = readFileSync(join(tmp, 'ws', f), 'utf8');
       const isSpec = /^tools\/poly\/docs\/0[34]-/.test(f);
+      const PRICE_LINE = /charged its full reservation/;
       for (const [i, line] of text.split('\n').entries()) {
         if (!isSpec) assert.doesNotMatch(line, WORKED, `${f}:${i + 1}`);
         else {
           assert.doesNotMatch(line, /refund|api\.stripe\.com/i, `${f}:${i + 1}: a refund in the language reference`);
+          if (!PRICE_LINE.test(line)) assert.doesNotMatch(line, /\b(charg(?:e|es|ed|ing)|payments?)\b|Payment|psp\.example/i, `${f}:${i + 1}: a payment or a charge in the language reference`);
           if (/stripe/i.test(line)) assert.ok(STRIPE_FEATURE_LINES.some((re) => re.test(line)), `${f}:${i + 1}: Stripe outside the provider features`);
         }
       }
@@ -169,6 +171,41 @@ test('DB2: the record holds the list of the poly reference\'s files and a digest
     assert.match(run(r, 'poly', 'pilot-1').join(), /language reference .* is not the recorded one/);
     assert.deepEqual(run(r, 'ts', 'pilot-1'), [], 'the TypeScript arm has no such reference');
   } finally { r.clean(); }
+});
+
+test('DB3: the specifications\' running example is a shipping order, renamed consistently, and the host handler still documents the idempotency key', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'baseline-ref-'));
+  try {
+    makeWorkspace('poly', join(tmp, 'ws'));
+    const spec = readFileSync(join(tmp, 'ws', 'tools', 'poly', 'docs', '03-technical-spec.md'), 'utf8');
+    for (const s of ['action Ship(amount: int check { 10, 20 })', 'action ShipmentOk()', 'action ShipmentFailed(', 'action Deliver()', 'emit dispatch(amount)', 'effect dispatch(amount: int) {', 'kind "shipping.dispatch"',
+      'path property dispatch-at-most-once: count("shipping.dispatch") <= 1', 'shipping.Shipment', 'status\' = Dispatched', 'status\' = Delivered', 'api.carrier.example/v1/shipments',
+      'rt.handle(\'shipping.dispatch\', rt.handlerExports(\'handlers/shipping.ts\').dispatch)']) assert.ok(spec.includes(s), s);
+    assert.match(spec, /return egress\.post\('https:\/\/api\.carrier\.example\/v1\/shipments',\n\/\/\s+\{ amount: payload\.amount \}, \{ idempotencyKey: ctx\.idempotencyKey \}\)/);
+    assert.match(spec, /ctx\.idempotencyKey is stable across retries/);
+    const price = readFileSync(join(tmp, 'ws', 'tools', 'poly', 'docs', '04-semantics.md'), 'utf8');
+    assert.equal(price.split('charged its full reservation').length - 1, 2, 'the model-price lines keep their wording');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('DB4: an agent version that cannot be read is refused, not passed', () => {
+  const r = repo();
+  try {
+    assert.match(run(r, 'ts', 'pilot-1', { deps: { claudeVersion: () => null } }).join(), /printed no version/);
+    assert.match(run(r, 'ts', 'pilot-1', { deps: { claudeVersion: () => { throw new Error('boom'); } } }).join(), /could not be read: boom/);
+    assert.deepEqual(run(r), [], 'the recorded version passes');
+  } finally { r.clean(); }
+});
+
+test('DB4: an agent that cannot be started is recorded as a failed run, not a crash or a hang', async () => {
+  const r = repo();
+  const runs = mkdtempSync(join(tmpdir(), 'baseline-runs-'));
+  try {
+    const { dir, summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: join(runs, 'no-such-agent'), root: r.root, env: {}, runsDir: runs, configDir: join(runs, 'cfg'), deps: deps(r) });
+    assert.equal(summary.exit, null);
+    assert.match(summary.error, /ENOENT/);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')).error, summary.error);
+  } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
 });
 
 test('DB3: the TypeScript workspace is a Node and TypeScript scaffold with orders.json; the poly workspace is the poly scaffold with its toolchain and reference; neither holds a CLAUDE.md, a memory or a skill', () => {

@@ -22,7 +22,8 @@ const HOST_PARAGRAPH = `**What poly does not express.** A poly program is the st
 `;
 
 /**
- * Edits by file, applied in order. \`replace\` swaps an exact string, \`line\` replaces (or, with null, deletes) the one line that starts with
+ * Edits by file, applied in order. \`word\` swaps every match of a pattern and must match the stated number of times (the running example is
+ * renamed through it), \`replace\` swaps an exact string, \`line\` replaces (or, with null, deletes) the one line that starts with
  * a prefix, \`cut\` deletes from the line that starts with the first prefix up to, not including, the line that starts with the second.
  * Each must match exactly once.
  */
@@ -41,10 +42,36 @@ export const REFERENCE_EDITS = {
     { replace: ['targets { egress: "https://api.stripe.com/v1/refunds" }\n  uses payments { read_write } for merchant', 'targets { egress: "https://api.example.com/v1/sync" }\n  uses calendar { read_write } for merchant'] },
     { replace: ["The example's profile is Stripe Connect's, as its OAuth reference documents it: the scopes", "The example's profile is a provider's, with the scopes"] },
     { replace: ['`class none` on a refund passes.', '`class none` on a write passes.'] },
+    // The running example is a shipping order (the order is dispatched to a carrier, then delivered), not a payment. The order of these
+    // matters: the old Ship and Shipped make room for Pay and Paid, and the names of the old Pay are taken last.
+    { word: ['\\bShip\\b', 'Deliver', 2] },
+    { word: ['\\bShipped\\b', 'Delivered', 6] },
+    { word: ['\\bshipped\\b', 'delivered', 2] },
+    { replace: ['on complete -> Paid on parent terminal', 'on complete -> Shipped on parent terminal'] },
+    { replace: ['- `onComplete: "Paid"`;', '- `onComplete: "Shipped"`;'] },
+    { word: ['\\bPaid\\b', 'Dispatched', 5] },
+    { word: ['\\bpaid\\b', 'dispatched', 13] },
+    { replace: ['    dispatched   : bool   = false', '    dispatched : bool   = false'] },
+    { word: ['\\bPay\\b', 'Ship', 7] },
+    { word: ['\\bpay\\b', 'ship', 4] },
+    { word: ['\\bPaymentOk\\b', 'ShipmentOk', 4] },
+    { word: ['\\bPaymentFailed\\b', 'ShipmentFailed', 6] },
+    { word: ['payments\\.Payment', 'shipping.Shipment', 3] },
+    { word: ['handlers/payments\\.ts', 'handlers/shipping.ts', 2] },
+    { word: ['payment\\.charge', 'shipping.dispatch', 9] },
+    { word: ['api\\.psp\\.example/v1/charges', 'api.carrier.example/v1/shipments', 2] },
+    { word: ['order and payment lifecycles', 'order and shipment lifecycles', 1] },
+    { word: ['\\bcharged\\b', 'dispatched', 1] },
+    { word: ['\\bCharge\\b', 'Dispatch', 1] },
+    { word: ['\\bcharge\\b', 'dispatch', 11] },
   ],
   'docs/04-semantics.md': [
     { replace: ['For an irreversible one (a refund, a charge) it is the defect.', 'For an irreversible one it is the defect.'] },
     { replace: ['an agent could write `class none` on a refund and be `CLEAN`', 'an agent could write `class none` on a write and be `CLEAN`'] },
+    // The running example is a shipping order, not a payment (see the same renames in the technical specification).
+    { word: ['\\bPay\\b', 'Ship', 1] },
+    { word: ['\\bPaymentOk\\b', 'ShipmentOk', 1] },
+    { word: ['\\bcharge\\b', 'dispatch', 1] },
   ],
 };
 
@@ -61,6 +88,11 @@ export function applyEdits(rel, text, edits = REFERENCE_EDITS[rel] ?? []) {
     if (e.replace) {
       const at = once(t, e.replace[0], e.replace[0].slice(0, 60));
       t = t.slice(0, at) + e.replace[1] + t.slice(at + e.replace[0].length);
+    } else if (e.word) {
+      const re = new RegExp(e.word[0], 'g');
+      const n = (t.match(re) ?? []).length;
+      if (n !== e.word[2]) throw new Error(`poly reference edit matches ${n} times, not ${e.word[2]}: ${e.word[0]}`);
+      t = t.replace(re, () => e.word[1]);
     } else if (e.line) {
       const at = once(t, `\n${e.line[0]}`, e.line[0]) + 1;
       const end = t.indexOf('\n', at);

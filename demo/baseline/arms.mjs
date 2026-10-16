@@ -28,13 +28,15 @@ export const NETWORK = 'ordinary network access, no container, no keys';
 
 const FILES = ['Read', 'Write', 'Edit', 'Glob', 'Grep'];
 /**
- * The tools of each arm. Web tools are off in both (DB3). Both arms may install packages (`npm install`) and run their tests (`npm test`). The TypeScript arm may run node on a file and the compiler
+ * The tools of each arm. Web tools are off in both (DB3). Both arms may install packages (`npm install`) and run their tests (`npm test`). Both arms may run node on a file. The TypeScript arm may also run the compiler
  * (`npx tsc`), which is what its language needs. The poly arm gets the deterministic commands of poly and none that calls a model: `poly new` drafts a module with a
- * model provider, and an explanation command may add model-written text, so neither is listed (DB3, plan section 5). It has `node --test` and not `node` alone, which would run the poly command line directly, `new` included.
+ * model provider, and an explanation command may add model-written text, so neither is listed (DB3, plan section 5). Both arms have `node` (ruled 2026-10-15): neither has a model key,
+ * so `poly new` could not reach a model, and the post-run audit flags any attempt (procedure.mjs). The poly arm's `npm run poly` is limited to the
+ * deterministic commands.
  */
 export const ALLOWED_TOOLS = {
   ts: [...FILES, 'Bash(node *)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npx tsc*)'],
-  poly: [...FILES, 'Bash(node --test*)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npm run poly check*)', 'Bash(npm run poly witness*)', 'Bash(npm run poly fix*)', 'Bash(npm run poly fmt*)', 'Bash(npm run poly edit-check*)'],
+  poly: [...FILES, 'Bash(node *)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npm run poly check*)', 'Bash(npm run poly witness*)', 'Bash(npm run poly fix*)', 'Bash(npm run poly fmt*)', 'Bash(npm run poly edit-check*)'],
 };
 
 /** The prompt, byte for byte (DB2): the file's contents, which the pre-registration hashes. */
