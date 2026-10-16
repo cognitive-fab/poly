@@ -102,3 +102,18 @@ Step 3 is accepted on these conditions, all met before Step 4:
 - **The handler's conditional header is removed** (`examples/concierge/host/refund.mjs`): the refund is declared keyed, so the runtime sends the intent id on the write and on each retry. The header name is written in lower case (header names are case-insensitive), as the transports index it. Two fixtures that stand for the concierge in `test/ex-concierge-refund.test.mjs` are keyed the same way.
 - **Order of work.** The unit tests were written before the code (commit 74513724). The recorded run (`test/after/demo-concierge-e2e.test.mjs`) was written after the assembly it drives, because it needs the pieces to exist; it failed for faults of its own (a baseline count, a filter) before it passed.
 - **Not covered by the standing rule.** `demo/concierge/` is a copy of an example, and `test/standing.test.mjs` does not list `demo/`; the copy's check is run by the recorded run (CLEAN, the example's instance counts).
+
+## Step 10: rulings on the baseline (reviewer and owner, 2026-10-15)
+
+- **One text beyond the prompt, per arm.** `demo/baseline/arm-ts.md` and `arm-poly.md` are appended to the system prompt (`--append-system-prompt`). They are the only instruction an arm gets besides `PROMPT.md`: the workspaces hold no CLAUDE.md, and the arms run with CLAUDE.md files off. Both are committed, marked `-text`, and hashed in the pre-registration with the prompt. They differ only in the language and the tools that language needs.
+- **Equal terms.** The same cap for both arms (25 USD a run) and the same turn limit (`--max-turns 200`). The caps of 15 and 25 are withdrawn. The turn limit of 200 is the draft's figure for the owner to confirm before the pre-registration commit.
+- **Subscription.** Both arms run on the owner's subscription. No API key is in either environment, and the runner refuses to start if `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set. The pre-registration records "subscription". The baseline is not on the API ceiling of the plan: the 90 USD ceiling is withdrawn, the API ceiling is 10 USD (rehearsal and show), and the baseline's limit is its four caps (100 USD in all).
+- **Interface.** The poly arm reaches poly through `npm run poly` in Bash, as the M3 arms did. No MCP server, skill or plugin.
+- **Network.** Neither arm runs in a container. The pre-registration records that both had ordinary network access and no keys.
+- **Reference of the poly arm (2026-10-15).** The arm's `tools/poly/` is 13 files built by `poly-reference.mjs`: the README, the two specifications and the `hello`, `delivery` and `evidence` examples. The double-charge walkthrough and every refund example are removed, and the specifications' running example is a shipping order (Pay is Ship, charge is dispatch, payments.Payment is shipping.Shipment). The language's features (retry, class, idempotent) stay. Both arms have `node`, `npm test` and `npm install`; the TypeScript arm also has `npx tsc`, the poly arm the five `npm run poly` commands.
+- **Approval (owner, 2026-10-15, on commit 07416749).** The owner approves `PROMPT.md`, `arm-ts.md` and `arm-poly.md` as they are, the turn limit of 200, and the two tool lists. The hashes approved:
+  - `demo/baseline/PROMPT.md` sha256:949bb0611273f24e9d66e557c868924eea6b380612a213a0af7a5d4ec6bd10ec
+  - `demo/baseline/arm-ts.md` sha256:091890e187fc3699a4563e7721c9b182a97abe2ff7f04b34bdc043b59e8326fc
+  - `demo/baseline/arm-poly.md` sha256:f0f5ebedc8d73d2bf5ccb3fe3278128d178adf1124ef9ed38b8a9df18a2c93e6
+
+  The owner makes the pre-registration commit and runs the pilots. No agent does.
