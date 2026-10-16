@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { applyEdits } from '../demo/baseline/poly-reference.mjs';
 import { ALLOWED_TOOLS, ARMS, BILLING, MAX_TURNS, MODEL, NETWORK, armText, claudeArgs, listFiles, makeWorkspace, promptText, sha256, treeDigest } from '../demo/baseline/arms.mjs';
 import { RECORD, auditSession, buildRecord, preflight, prepareCommit, runArm } from '../demo/baseline/procedure.mjs';
 
@@ -58,7 +59,8 @@ test('DB3, plan section 5: the poly arm has the deterministic commands and none 
   assert.doesNotMatch(tools, /poly new|poly explain|Bash\(npm run poly \*\)/);
   assert.ok(!ALLOWED_TOOLS.poly.includes('Bash(node *)'), 'node alone would run the poly command line directly, poly new included');
   assert.ok(ALLOWED_TOOLS.poly.includes('Bash(node --test*)'));
-  assert.ok(ALLOWED_TOOLS.ts.includes('Bash(npm *)'), 'the TypeScript arm may install what it uses');
+  for (const arm of ['ts', 'poly']) assert.ok(ALLOWED_TOOLS[arm].includes('Bash(npm install*)'), `${arm}: both arms may install packages`);
+  assert.ok(!ALLOWED_TOOLS.ts.some((x) => /^Bash\((npm|npx) \*\)$/.test(x)), 'the TypeScript arm has no open-ended npm or npx');
 });
 
 test('DB3: the arms differ only in the language they are told to use and the tools it needs: the two texts have one shape, and neither says anything about failure', () => {
@@ -76,7 +78,8 @@ test('DB3: the arms differ only in the language they are told to use and the too
   }
   assert.match(poly, /npm run poly check <file>/);
   assert.ok(ALLOWED_TOOLS.poly.includes('Bash(npm run poly check*)'), 'every command the text names is on the list');
-  assert.ok(ALLOWED_TOOLS.poly.includes('Bash(npm test*)') && ALLOWED_TOOLS.ts.includes('Bash(npm *)'));
+  for (const arm of ['ts', 'poly']) assert.ok(ALLOWED_TOOLS[arm].includes('Bash(npm test*)') && ALLOWED_TOOLS[arm].includes('Bash(npm install*)'), `${arm}: the commands its text names are on its list`);
+  for (const text of [ts, poly]) assert.match(text, /You may install packages with `npm install`\.\n$/);
 });
 
 test('DB2: the record is refused on a changed text of an arm, a changed turn limit, another billing or another network; and the subscription is not an API key', () => {
@@ -96,6 +99,75 @@ test('DB2: the record is refused on a changed text of an arm, a changed turn lim
     r.sh('commit', '-q', '-a', '-m', 'reworded');
     assert.match(run(r).join(), /arm-ts\.md has changed since the pre-registration commit/);
     assert.match(run(r, 'ts', 'pilot-1', { rest: { env: { ANTHROPIC_AUTH_TOKEN: 'x' } } }).join(), /ANTHROPIC_AUTH_TOKEN is set/);
+  } finally { r.clean(); }
+});
+
+// ---- the poly arm's language reference (DB3) -----------------------------------------------------------------------------------------
+
+const REFERENCE_FILES = [
+  'README.md', 'docs/03-technical-spec.md', 'docs/04-semantics.md',
+  'examples/delivery/delivery-cleared.poly', 'examples/delivery/delivery-parallel-fifo.poly', 'examples/delivery/delivery-parallel.poly', 'examples/delivery/delivery.poly',
+  'examples/evidence/outbox-union-escape.poly', 'examples/evidence/outbox-union.poly', 'examples/evidence/outbox-v02.poly', 'examples/evidence/outbox-v03.poly',
+  'examples/hello/hello-empty.poly', 'examples/hello/hello.poly',
+].map((f) => `tools/poly/${f}`);
+/** The words that make a worked case of the task. The specifications are the language reference and keep the order-and-charge example they use throughout; nothing else may. */
+const WORKED = /\b(refunds?|stripe|charg(?:e|es|ed|ing)|payments?|double)\b/i;
+/** Lines of the specification that name Stripe as a provider's profile (the attach style, the deauthorization notice, the secret-key shapes of the config scan). Features, not a worked refund. */
+const STRIPE_FEATURE_LINES = [/^- \*\*Provider profiles\.\*\*/, /^- \*\*Revocation \(PS16\.4\)\.\*\*/, /^- \*\*`PL6825 SECRET_IN_CONFIG`\*\*/];
+
+test('DB3: the poly arm\'s tools/poly holds exactly the listed files, no example that models the task, and none of the words of a worked refund outside the language reference', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'baseline-ref-'));
+  try {
+    const files = makeWorkspace('poly', join(tmp, 'ws')).filter((f) => f.startsWith('tools/poly/'));
+    assert.deepEqual(files, REFERENCE_FILES);
+    for (const f of files) {
+      const text = readFileSync(join(tmp, 'ws', f), 'utf8');
+      const isSpec = /^tools\/poly\/docs\/0[34]-/.test(f);
+      for (const [i, line] of text.split('\n').entries()) {
+        if (!isSpec) assert.doesNotMatch(line, WORKED, `${f}:${i + 1}`);
+        else {
+          assert.doesNotMatch(line, /refund|api\.stripe\.com/i, `${f}:${i + 1}: a refund in the language reference`);
+          if (/stripe/i.test(line)) assert.ok(STRIPE_FEATURE_LINES.some((re) => re.test(line)), `${f}:${i + 1}: Stripe outside the provider features`);
+        }
+      }
+      assert.doesNotMatch(text, /idempotency[- ]?key[^]{0,80}refund|double[- ]refund/i, f);
+    }
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('DB3: the reference README says what poly does not express, which is what the poly arm\'s text points to; and the double-charge walkthrough is gone from it', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'baseline-ref-'));
+  try {
+    makeWorkspace('poly', join(tmp, 'ws'));
+    const readme = readFileSync(join(tmp, 'ws', 'tools', 'poly', 'README.md'), 'utf8');
+    assert.match(readme, /What poly does not express/);
+    assert.match(readme, /ordinary JavaScript/);
+    assert.match(readme, /rt\.handle/);
+    assert.match(readme, /rt\.dispatch/);
+    assert.doesNotMatch(readme, /A second look/);
+    assert.match(readme, /## A third look: machines that talk/, 'the rest of the README is as it was');
+    assert.match(armText('poly'), /what poly does not express, as `tools\/poly\/README\.md` describes\./);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('DB3: an edit of the reference that no longer matches exactly once is an error, not a passage left in', () => {
+  assert.throws(() => applyEdits('x', 'one\ntwo\n', [{ replace: ['three', 'x'] }]), /exactly once/);
+  assert.throws(() => applyEdits('x', 'a b a\n', [{ replace: ['a', 'x'] }]), /exactly once/);
+  assert.throws(() => applyEdits('x', 'a\nb\n', [{ line: ['c', null] }]), /exactly once/);
+  assert.equal(applyEdits('x', 'k\nfirst\nsecond\nlast\n', [{ cut: ['first', 'last'] }]), 'k\nlast\n');
+  assert.equal(applyEdits('x', 'k\ndrop me\nkeep\n', [{ line: ['drop', null] }]), 'k\nkeep\n');
+});
+
+test('DB2: the record holds the list of the poly reference\'s files and a digest of it, and a changed reference is refused', () => {
+  const real = buildRecord({ version: '2.1.287', scaffolds: { ts: 'a', poly: 'b' } });
+  assert.deepEqual(real.polyReference.files, REFERENCE_FILES.map((f) => f.slice('tools/poly/'.length)));
+  assert.match(real.polyReference.listSha256, /^sha256:[0-9a-f]{64}$/);
+  assert.match(real.polyReference.treeSha256, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(real.polyReference.listSha256, sha256(real.polyReference.files.join('\n')));
+  const r = repo({ tweak: (rec) => ({ ...rec, polyReference: { ...rec.polyReference, treeSha256: 'sha256:other' } }) });
+  try {
+    assert.match(run(r, 'poly', 'pilot-1').join(), /language reference .* is not the recorded one/);
+    assert.deepEqual(run(r, 'ts', 'pilot-1'), [], 'the TypeScript arm has no such reference');
   } finally { r.clean(); }
 });
 
@@ -129,13 +201,15 @@ function repo({ committed = true, record = true, dirty = false, tweak = null } =
   sh('config', 'user.email', 'test@example.invalid');
   sh('config', 'commit.gpgsign', 'false');
   const scaffolds = { ts: 'sha256:ts-scaffold', poly: 'sha256:poly-scaffold' };
-  if (record) writeFileSync(join(root, RECORD), `${JSON.stringify(tweak ? tweak(buildRecord({ root, version: '2.1.287', scaffolds })) : buildRecord({ root, version: '2.1.287', scaffolds }), null, 2)}\n`);
+  const reference = { files: ['README.md'], listSha256: 'sha256:list', treeSha256: 'sha256:tree' };
+  const base = () => buildRecord({ root, version: '2.1.287', scaffolds, reference });
+  if (record) writeFileSync(join(root, RECORD), `${JSON.stringify(tweak ? tweak(base()) : base(), null, 2)}\n`);
   if (committed) { sh('add', '-A'); sh('commit', '-q', '-m', 'pre-registration'); }
   if (dirty) writeFileSync(join(root, 'demo', 'baseline', 'PROMPT.md'), 'changed\n');
-  return { root, sh, scaffolds, clean: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, sh, scaffolds, reference, clean: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-const deps = (r, over = {}) => ({ claudeVersion: () => '2.1.287', scaffold: (arm) => r.scaffolds[arm], configProblems: () => [], ...over });
+const deps = (r, over = {}) => ({ claudeVersion: () => '2.1.287', scaffold: (arm) => r.scaffolds[arm], reference: () => r.reference, configProblems: () => [], ...over });
 const run = (r, arm = 'ts', name = 'pilot-1', over = {}) => preflight({ arm, run: name, root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), localRunsDir: join(r.root, 'nowhere'), deps: deps(r, over.deps), ...over.rest });
 
 test('DB2: the record holds the prompt\'s hash, the model, the agent\'s version, one pilot an arm, the caps, the turn limit, the subscription, the network and the hash of each arm text', () => {

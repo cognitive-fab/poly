@@ -14,7 +14,7 @@ import { homedir, tmpdir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { apiKeyProblems, armEnv, configProblems } from '../../experiments/m3/runner/isolation.mjs';
-import { ARMS, ALLOWED_TOOLS, BILLING, MAX_TURNS, MODEL, NETWORK, ROOT, armText, claudeArgs, makeWorkspace, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
+import { ARMS, ALLOWED_TOOLS, BILLING, MAX_TURNS, MODEL, NETWORK, ROOT, armText, claudeArgs, makeWorkspace, polyReferenceRecord, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
 
 export const RECORD = 'demo/baseline/PREREGISTRATION.json';
 /** The login and settings folder of the baseline's agent, outside the repository, kept clean the way the M3 arms' is. */
@@ -30,7 +30,7 @@ const claudeVersion = (bin = 'claude') => /(\d+\.\d+\.\d+)/.exec(execFileSync(bi
 const totalCap = (pilots) => Object.entries(ARMS).reduce((sum, [arm, a]) => sum + (pilots[arm] + 1) * a.capUsd, 0);
 
 /** The pre-registration record, from the facts of the day: written by preregister.mjs, reviewed by the owner, then committed with PROMPT.md. */
-export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = { ts: 1, poly: 1 }, scaffolds } = {}) {
+export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = { ts: 1, poly: 1 }, scaffolds, reference } = {}) {
   const scratch = join(tmpdir(), `poly-demo-scaffold-${process.pid}`);
   return {
     v: 1,
@@ -46,6 +46,7 @@ export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = {
     network: NETWORK,
     armTexts: { ts: sha256(readFileSync(join(root, 'demo', 'baseline', 'arm-ts.md'))), poly: sha256(readFileSync(join(root, 'demo', 'baseline', 'arm-poly.md'))) },
     allowedTools: ALLOWED_TOOLS,
+    polyReference: reference ?? polyReferenceRecord(join(tmpdir(), `poly-demo-reference-${process.pid}`), root),
     scaffolds: scaffolds ?? { ts: scaffoldDigest('ts', scratch, root), poly: scaffoldDigest('poly', scratch, root) },
   };
 }
@@ -92,6 +93,10 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   if (taken.includes(run)) out.push(`the ${arm} arm already has a run named ${run}; a repeat is a new pre-registration (DB4)`);
   if (run.startsWith('pilot-') && taken.filter((r) => r.startsWith('pilot-')).length >= (record.pilots?.[arm] ?? 0)) out.push(`the record allows ${record.pilots?.[arm] ?? 0} pilot(s) of the ${arm} arm, and they are used`);
   if (run === 'kept' && taken.includes('kept')) out.push(`the ${arm} arm already has its kept run`);
+  if (arm === 'poly') {
+    const have = (deps.reference ?? (() => polyReferenceRecord(join(tmpdir(), `poly-demo-reference-${process.pid}`), root)))();
+    if (!isDeepStrictEqual(have, record.polyReference)) out.push('the poly arm\'s language reference (the files in tools/poly, or what they hold) is not the recorded one');
+  }
   const scratch = join(tmpdir(), `poly-demo-check-${process.pid}-${arm}`);
   const scaffold = deps.scaffold ?? ((a) => scaffoldDigest(a, scratch, root));
   const digest = scaffold(arm);

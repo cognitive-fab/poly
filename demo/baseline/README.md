@@ -21,38 +21,60 @@ It names the interface and nothing about failure: no timeout, retry, duplicate o
 ```
 Write the program in TypeScript, for Node 24.
 
-Run the tests with `npm test`, which runs `node --test`. You may install packages with `npm`.
+Run the tests with `npm test`, which runs `node --test`. You may install packages with `npm install`.
 ```
 
 ### The appended text of the poly arm (`arm-poly.md`)
 
 ```
-Write the program in poly, for Node 24. poly is a language for the stateful core of software. Its reference is in `tools/poly/` (start with `tools/poly/README.md`) and examples are in `tools/poly/examples/`. Write in JavaScript, beside the poly modules, what poly does not express (the HTTP server and the calls to the APIs), as the README shows.
+Write the program in poly, for Node 24. poly is a language for the stateful core of software. Its reference is in `tools/poly/` (start with `tools/poly/README.md`) and examples are in `tools/poly/examples/`. Write in JavaScript, beside the poly modules, what poly does not express, as `tools/poly/README.md` describes.
 
-Check poly modules with `npm run poly check <file>`. Run the tests with `npm test`, which runs `node --test`.
+Check poly modules with `npm run poly check <file>`. Run the tests with `npm test`, which runs `node --test`. You may install packages with `npm install`.
 ```
 
-Each is given to the agent as `--append-system-prompt`. The workspaces hold no `CLAUDE.md`, and the arms run with `CLAUDE.md` files off, so this is the only other instruction. The two texts have the same shape (two paragraphs: the language, then how to run the tests) and differ in the language and in the one tool that language adds (`npm run poly check`). A test checks that the TypeScript text never says poly, that neither says anything about failure, and that every command a text names is on its arm's tool list.
+Each is given to the agent as `--append-system-prompt`. The workspaces hold no `CLAUDE.md`, and the arms run with `CLAUDE.md` files off, so this is the only other instruction. The two texts have the same shape (two paragraphs: the language, then how to run the tests and install packages) and differ in the language, in the reference the poly text points to, and in the one tool that language adds (`npm run poly check`). A test checks that the TypeScript text never says poly, that neither says anything about failure, and that every command a text names is on its arm's tool list.
 
 ### The tool lists (`arms.mjs`), as passed to `--allowedTools`
 
 TypeScript arm:
 
 ```
-Read, Write, Edit, Glob, Grep, Bash(node *), Bash(npm *), Bash(npx *)
+Read, Write, Edit, Glob, Grep, Bash(node *), Bash(npm test*), Bash(npm install*), Bash(npx tsc*)
 ```
 
 poly arm:
 
 ```
-Read, Write, Edit, Glob, Grep, Bash(node --test*), Bash(npm test*), Bash(npm run poly check*), Bash(npm run poly witness*), Bash(npm run poly fix*), Bash(npm run poly fmt*), Bash(npm run poly edit-check*)
+Read, Write, Edit, Glob, Grep, Bash(node --test*), Bash(npm test*), Bash(npm install*), Bash(npm run poly check*), Bash(npm run poly witness*), Bash(npm run poly fix*), Bash(npm run poly fmt*), Bash(npm run poly edit-check*)
 ```
 
-Both run with `--permission-mode dontAsk` (anything off the list is denied without a prompt), `--disable-slash-commands`, `--strict-mcp-config` (no MCP server), no web tool, no subagent. The poly arm has no `poly new` and no `poly explain`, which can call a model. It has `node --test` and not `node` alone, because `node` alone would run the poly command line directly, `new` included.
+Both run with `--permission-mode dontAsk` (anything off the list is denied without a prompt), `--disable-slash-commands`, `--strict-mcp-config` (no MCP server), no web tool, no subagent. The poly arm has no `poly new` and no `poly explain`, which can call a model. It has `node --test` and not `node` alone, because `node` alone would run the poly command line directly, `new` included. Both arms can run their tests and install packages. The remaining difference: the TypeScript arm can run `node` on any file and the compiler (`npx tsc`), and the poly arm can run `node` only to test and `npm run poly` for the five commands, so it can start its program only through a test.
+
+### The poly arm's language reference (`tools/poly/`, `poly-reference.mjs`)
+
+Thirteen files, and no others:
+
+```
+tools/poly/README.md
+tools/poly/docs/03-technical-spec.md
+tools/poly/docs/04-semantics.md
+tools/poly/examples/delivery/delivery-cleared.poly
+tools/poly/examples/delivery/delivery-parallel-fifo.poly
+tools/poly/examples/delivery/delivery-parallel.poly
+tools/poly/examples/delivery/delivery.poly
+tools/poly/examples/evidence/outbox-union-escape.poly
+tools/poly/examples/evidence/outbox-union.poly
+tools/poly/examples/evidence/outbox-v02.poly
+tools/poly/examples/evidence/outbox-v03.poly
+tools/poly/examples/hello/hello-empty.poly
+tools/poly/examples/hello/hello.poly
+```
+
+They are the project's README, its two specifications and three small examples (a turnstile, a message-delivery machine, the outbox model), with the passages removed that work through a refund, a Stripe call or the double-charge case. The README loses its "double charge" walkthrough and gains a paragraph, "What poly does not express", that says the code around a poly program is ordinary JavaScript beside it. The specifications lose their two findings that name the double charge and every refund example, and keep the language's features (retry, class, idempotent) and the order-and-charge example the specifications use throughout. Three lines that name Stripe as a provider profile stay (the attach style, the deauthorization notice, the secret-key shapes of the config scan). The edits are exact strings in `poly-reference.mjs`, each of which must match once. The record holds the list of the files, its SHA-256, and a digest of what they hold. A test fails if the words refund, Stripe, charge, payment or double appear in the README or an example, or if refund appears anywhere in the specifications, or Stripe outside those three lines.
 
 ### The workspaces
 
-Built fresh outside the repository. TypeScript: `package.json`, `tsconfig.json`, `orders.json`. poly: `package.json`, `poly.json`, `orders.json`, the toolchain in `node_modules`, poly's README and specifications, and three small examples (`hello`, `delivery`, `evidence`). The examples that model this task (the concierge, the retry variants, the inbox, the OMS) are left out. `orders.json` is the same file, byte for byte, in both.
+Built fresh outside the repository. TypeScript: `package.json`, `tsconfig.json`, `orders.json`. poly: `package.json`, `poly.json`, `orders.json`, the toolchain in `node_modules`, and the language reference in `tools/poly/` (below). The examples that model this task (the concierge, the retry variants, the inbox, the OMS) and the `demo/` folder are not in it. `orders.json` is the same file, byte for byte, in both.
 
 ## What is fixed, and where
 
@@ -61,7 +83,7 @@ Built fresh outside the repository. TypeScript: `package.json`, `tsconfig.json`,
 | Model, both arms | `claude-opus-5-5` (Q13) | `arms.mjs`, recorded |
 | Agent | Claude Code, the version installed when the record is written (2.1.287 on the machine this was drafted on) | recorded; a run refuses if `claude --version` differs |
 | Cap per run | 25 USD for each arm, by the agent's own `--max-budget-usd` | `arms.mjs`, recorded |
-| Turn limit | 200 for each arm, by `--max-turns` | `arms.mjs`, recorded |
+| Turn limit | 200 for each arm (confirmed 2026-10-15), by `--max-turns` | `arms.mjs`, recorded |
 | Billing | the owner's subscription; no API key in either environment; the runner refuses if `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set | `procedure.mjs`, recorded as `subscription` |
 | Network | neither arm in a container; ordinary network access and no keys | recorded |
 | Pilots | one per arm (Q8), reported with the kept run; the number is in the record | recorded |
@@ -75,8 +97,8 @@ Each step is in the owner's terminal, at the repository root, on the branch `dem
 1. **Read the prompt and the two arm texts** (above, or `PROMPT.md`, `arm-ts.md`, `arm-poly.md`). Approve the wording, or change it (the hashes then change). Confirm the turn limit of 200, or give another (`MAX_TURNS` in `arms.mjs`).
 2. **Make sure no API key is set.** In PowerShell: `Get-ChildItem Env:ANTHROPIC*` must print nothing. If it prints a name, remove it with `Remove-Item Env:<name>` in that window. The runner refuses to start while either variable is set.
 3. **Set up the agent's login folder, once.** In PowerShell: `$env:CLAUDE_CONFIG_DIR = "$HOME\.poly-demo\claude"; claude`, then `/login` with the subscription, then exit. Put exactly `{"env":{"DISABLE_AUTOUPDATER":"1"}}` in `settings.json` in that folder. `node demo/baseline/run-arm.mjs --arm ts --run pilot-1 --check` then reports what is still wrong, and starts nothing.
-4. **Check the cap holds on the subscription.** The cap on a run is the agent's `--max-budget-usd`, measured to hold on the subscription in M3. The turn limit is `--max-turns`; whether this version enforces it is read from the first pilot's `result.json` (the number of turns the session took), and the report says so.
-5. **Write the record.** `node demo/baseline/preregister.mjs` (add `--pilots-ts 0` or `--pilots-poly 0` to change a pilot count). It reads `claude --version`, hashes the prompt, the two arm texts and the two scaffolds, writes `demo/baseline/PREREGISTRATION.json`, and prints the commit command. Read the record: it names the model, the version, the caps, the turn limit, `subscription`, the network and the hashes.
+4. **Know what the record can and cannot fix.** The cap on a run is the agent's `--max-budget-usd`, measured to hold on the subscription in M3. The turn limit is `--max-turns` (200), an option the installed version accepts but does not list in its help. Whether it is enforced can be known only by a run, so the record fixes the setting, not the enforcement. The first pilot's `result.json` and session show the number of turns taken, and the report says whether the limit held. The owner may first run one throwaway call with `--max-turns 1` on a trivial prompt in the login folder to see it stop; that costs a little and is the owner's choice.
+5. **Write the record.** `node demo/baseline/preregister.mjs` (add `--pilots-ts 0` or `--pilots-poly 0` to change a pilot count). It reads `claude --version`, hashes the prompt, the two arm texts, the poly reference and the two scaffolds, records the two tool lists in full, writes `demo/baseline/PREREGISTRATION.json`, and prints the commit command. Read the record: it names the model, the version, the caps, the turn limit, `subscription`, the network, the tool lists and the hashes. A changed tool list, arm text or reference is refused by the runner.
 6. **Make the pre-registration commit.** `git add demo/baseline/PROMPT.md demo/baseline/PREREGISTRATION.json`, then the `git commit` the script printed. This is the commit that fixes the prompt and the arm texts before any run. Nothing may run before it, and the runner refuses to.
 7. **Run the pilots first** (their number is decided in step 5, and a pilot is never discarded for its outcome or swapped for the kept run):
    `node demo/baseline/run-arm.mjs --arm ts --run pilot-1`, then `node demo/baseline/commit-run.mjs --arm ts --run pilot-1`, then type the three commands it prints. Do the same for `--arm poly`. Each run costs at most its cap.

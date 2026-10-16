@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeReference } from './poly-reference.mjs';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BASELINE = join(ROOT, 'demo', 'baseline');
@@ -27,13 +28,13 @@ export const NETWORK = 'ordinary network access, no container, no keys';
 
 const FILES = ['Read', 'Write', 'Edit', 'Glob', 'Grep'];
 /**
- * The tools of each arm. Web tools are off in both (DB3). The TypeScript arm may use node and npm (it needs the registry to install
- * what it uses). The poly arm gets the deterministic commands of poly and none that calls a model: `poly new` drafts a module with a
+ * The tools of each arm. Web tools are off in both (DB3). Both arms may install packages (`npm install`) and run their tests (`npm test`). The TypeScript arm may run node on a file and the compiler
+ * (`npx tsc`), which is what its language needs. The poly arm gets the deterministic commands of poly and none that calls a model: `poly new` drafts a module with a
  * model provider, and an explanation command may add model-written text, so neither is listed (DB3, plan section 5). It has `node --test` and not `node` alone, which would run the poly command line directly, `new` included.
  */
 export const ALLOWED_TOOLS = {
-  ts: [...FILES, 'Bash(node *)', 'Bash(npm *)', 'Bash(npx *)'],
-  poly: [...FILES, 'Bash(node --test*)', 'Bash(npm test*)', 'Bash(npm run poly check*)', 'Bash(npm run poly witness*)', 'Bash(npm run poly fix*)', 'Bash(npm run poly fmt*)', 'Bash(npm run poly edit-check*)'],
+  ts: [...FILES, 'Bash(node *)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npx tsc*)'],
+  poly: [...FILES, 'Bash(node --test*)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npm run poly check*)', 'Bash(npm run poly witness*)', 'Bash(npm run poly fix*)', 'Bash(npm run poly fmt*)', 'Bash(npm run poly edit-check*)'],
 };
 
 /** The prompt, byte for byte (DB2): the file's contents, which the pre-registration hashes. */
@@ -73,8 +74,6 @@ const notBuildInfo = (p) => !p.endsWith('.tsbuildinfo');
 
 /** The poly packages as node_modules holds them: package.json and dist. */
 const POLY_PACKAGES = [['poly-core', 'core'], ['poly-lang', 'lang'], ['poly-lower', 'lower'], ['poly-ref', 'ref'], ['poly-embed', 'embed'], ['poly-check', 'check']];
-/** Examples a poly user starts from; the ones that model this task (the concierge, the retry variants, the inbox) are left out, so no arm starts from a near-answer. */
-const POLY_EXAMPLES = ['hello', 'delivery', 'evidence'];
 
 /**
  * Builds the workspace of an arm in `dir`: "an empty Node 24 + TypeScript scaffold and orders.json" for the TypeScript arm; for the
@@ -98,10 +97,7 @@ export function makeWorkspace(arm, dir, root = ROOT) {
     }
     copy(dir, 'node_modules/@cognitive-fab/polygraph', join(root, 'vendor', 'polygraph'));
     copy(dir, 'node_modules/@cognitive-fab/sam-pattern', join(root, 'vendor', 'sam-pattern'));
-    copy(dir, 'tools/poly/README.md', join(root, 'README.md'));
-    copy(dir, 'tools/poly/docs/03-technical-spec.md', join(root, 'docs', '03-technical-spec.md'));
-    copy(dir, 'tools/poly/docs/04-semantics.md', join(root, 'docs', '04-semantics.md'));
-    for (const e of POLY_EXAMPLES) copy(dir, `tools/poly/examples/${e}`, join(root, 'examples', e));
+    writeReference(dir, root);
   } else throw new Error(`no arm ${arm}`);
   return listFiles(dir);
 }
@@ -126,6 +122,18 @@ export function treeDigest(dir, { skip = ['node_modules', '.git'] } = {}) {
     h.update('\0');
   }
   return `sha256:${h.digest('hex')}`;
+}
+
+/**
+ * The poly arm's language reference, as the record states it: the list of the files in its tools/poly/ (and a digest of that list), and a
+ * digest of what they hold after the edits of poly-reference.mjs. A file added, dropped or reworded changes one of the two.
+ */
+export function polyReferenceRecord(tmp, root = ROOT) {
+  makeWorkspace('poly', tmp, root);
+  try {
+    const files = listFiles(join(tmp, 'tools', 'poly'));
+    return { files, listSha256: sha256(files.join('\n')), treeSha256: treeDigest(join(tmp, 'tools', 'poly'), { skip: [] }) };
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
 }
 
 /** The digest of a whole workspace as an arm would start in it (what the pre-registration records, so a changed scaffold is seen). */
