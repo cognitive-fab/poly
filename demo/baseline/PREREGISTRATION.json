@@ -1,0 +1,78 @@
+{
+  "v": 1,
+  "prompt": {
+    "file": "demo/baseline/PROMPT.md",
+    "sha256": "sha256:949bb0611273f24e9d66e557c868924eea6b380612a213a0af7a5d4ec6bd10ec"
+  },
+  "model": "claude-opus-5-5",
+  "claudeCode": {
+    "version": "2.1.287"
+  },
+  "pilots": {
+    "ts": 1,
+    "poly": 1
+  },
+  "capsUsd": {
+    "ts": 25,
+    "poly": 25
+  },
+  "maxTurns": 200,
+  "billing": "subscription",
+  "totalCapUsd": 100,
+  "network": "ordinary network access, no container, no keys",
+  "armTexts": {
+    "ts": "sha256:091890e187fc3699a4563e7721c9b182a97abe2ff7f04b34bdc043b59e8326fc",
+    "poly": "sha256:f0f5ebedc8d73d2bf5ccb3fe3278128d178adf1124ef9ed38b8a9df18a2c93e6"
+  },
+  "allowedTools": {
+    "ts": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(node *)",
+      "Bash(npm test*)",
+      "Bash(npm install*)",
+      "Bash(npx tsc*)"
+    ],
+    "poly": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(node *)",
+      "Bash(npm test*)",
+      "Bash(npm install*)",
+      "Bash(npm run poly check*)",
+      "Bash(npm run poly witness*)",
+      "Bash(npm run poly fix*)",
+      "Bash(npm run poly fmt*)",
+      "Bash(npm run poly edit-check*)"
+    ]
+  },
+  "polyReference": {
+    "files": [
+      "README.md",
+      "docs/03-technical-spec.md",
+      "docs/04-semantics.md",
+      "examples/delivery/delivery-cleared.poly",
+      "examples/delivery/delivery-parallel-fifo.poly",
+      "examples/delivery/delivery-parallel.poly",
+      "examples/delivery/delivery.poly",
+      "examples/evidence/outbox-union-escape.poly",
+      "examples/evidence/outbox-union.poly",
+      "examples/evidence/outbox-v02.poly",
+      "examples/evidence/outbox-v03.poly",
+      "examples/hello/hello-empty.poly",
+      "examples/hello/hello.poly"
+    ],
+    "listSha256": "sha256:0b8363d4b842a1bb940fab5d07009d33a3a8b3f7f6c3db719010117a64321b62",
+    "treeSha256": "sha256:b52df93c66aa26cbd19ba56abf9ed5cec7d7b7bf89e849c5f42b7110631aab5c"
+  },
+  "scaffolds": {
+    "ts": "sha256:15eaaa6662d1d60e9d79ac717fb4b1cf15e44cf1a9bec76f97903d79b7074300",
+    "poly": "sha256:f788d44ca75d38afbe386e31072bf8328d76af08f7520b072a44ed57c93c88ad"
+  }
+}
