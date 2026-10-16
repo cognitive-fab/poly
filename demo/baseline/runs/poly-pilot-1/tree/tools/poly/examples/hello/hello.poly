@@ -1,0 +1,27 @@
+// expected: FINDING PL3201
+// The hello-world turnstile of README.md. poly check finds PL3201 DEADLOCK:
+// a full coin box locks the turnstile forever (evidence/turnstile_check.py).
+module hello
+
+type Mode = Locked | Unlocked
+
+machine Gate {
+  state {
+    mode  : Mode = Locked
+    coins : 0..3 = 0
+  }
+  action Coin()
+  action Push()
+
+  on Coin {
+    require coins < 3 else reject "coin-box-full"
+    coins' = coins + 1
+    mode' = Unlocked
+  }
+  on Push {
+    require mode is Unlocked else reject "locked"
+    mode' = Locked
+  }
+
+  invariant locked-when-empty: coins == 0 implies mode is Locked
+}

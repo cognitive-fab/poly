@@ -1,0 +1,12 @@
+{
+  "name": "support-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "poly": "node node_modules/@poly/check/dist/src/cli.js"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}
