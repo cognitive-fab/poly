@@ -749,3 +749,30 @@ test('DB11.14: auditEscapes on the recorded sessions: ts-pilot-1 clean, poly-pil
   assert.equal(audit.calls.length, expected.length);
   assert.equal(audit.calls.filter((call) => call.tool === 'Agent').length, 1);
 });
+
+// ---- Found by review after the first implementation (added by the implementer, not by the separate writer) ----
+
+// Catches a guard whose list of absolute roots is too short: /proc/self/environ inside code is outside the workspace like /etc/hosts.
+test('DB11.5: an absolute path of two segments inside code is outside, whatever its root', () => {
+  const workspace = 'C:\\ws\\run';
+  for (const command of ["node -e \"require('fs').readFileSync('/proc/self/environ')\"", "cat '/Library/Preferences/x'", 'grep x "/private/etc/hosts"']) {
+    const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace });
+    assert.equal(verdict.allow, false, command);
+  }
+  assert.deepEqual(checkToolCall({ tool: 'Bash', input: { command: 'curl -s http://localhost:3000/api/orders' }, workspace }), { allow: true });
+});
+
+// Catches an audit that judges every relative path from the workspace, though the hook judged it from the folder the shell had moved to.
+test('DB11.15: auditEscapes follows the shell\'s folder from one Bash call to the next, as the hook saw it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-cwd-'));
+  try {
+    const file = join(dir, 'session.jsonl');
+    const workspace = 'C:\\ws\\run';
+    writeFileSync(file, [event('Bash', { command: 'cd sub' }), event('Read', { file_path: '../a.txt' }), event('Bash', { command: 'cat ../b.txt' })].join('\n'));
+    assert.deepEqual(auditEscapes(file, workspace), { status: 'clean', calls: [] });
+    writeFileSync(file, [event('Bash', { command: 'cd sub' }), event('Read', { file_path: '../../a.txt' })].join('\n'));
+    const audit = auditEscapes(file, workspace);
+    assert.equal(audit.status, 'escaped');
+    assert.deepEqual(audit.calls.map((call) => call.tool), ['Read']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

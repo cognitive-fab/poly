@@ -92,7 +92,7 @@ test('DB10.2: every devDependencies entry matches /^file:\\.harness\\/[A-Za-z0-9
 
 // ---- DB10.3: dependency closure -------
 
-test('DB10.3: every declared package\'s dependencies are satisfied by workspace devDependencies, versions match ranges (at least 8 edges checked)', () => {
+test('DB10.3: every declared package\'s dependencies are satisfied by workspace devDependencies, versions match ranges (a minimum of edges checked per arm)', () => {
   // Catches implementation that does not include transitive dependencies or versions do not satisfy.
   function satisfies(version, range) {
     if (range.match(/^\d+\.\d+\.\d+$/)) return version === range;
@@ -123,7 +123,9 @@ test('DB10.3: every declared package\'s dependencies are satisfied by workspace 
           assert.ok(satisfies(depVersion, depRange), `${arm}: ${depName} version ${depVersion} satisfies ${depRange}`);
         }
       }
-      assert.ok(edgesChecked >= 8, `${arm}: checked at least 8 dependency edges (checked: ${edgesChecked})`);
+      // The TypeScript arm has one edge (@types/node needs undici-types); the poly arm has many. An empty loop must fail in both.
+      const least = arm === 'poly' ? 8 : 1;
+      assert.ok(edgesChecked >= least, `${arm}: checked at least ${least} dependency edge(s) (checked: ${edgesChecked})`);
     } finally { rmSync(tmp, { recursive: true, force: true }); }
   }
 });

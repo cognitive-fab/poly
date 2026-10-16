@@ -4,9 +4,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,8 @@ function gitRepo({ amendments = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'baseline-amend-'));
   const sh = (...a) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   mkdirSync(join(root, 'demo', 'baseline'), { recursive: true });
+  // The files a preflight reads beside the record: the prompt, the two arm texts, and the orders the workspaces carry.
+  for (const name of ['PROMPT.md', 'arm-ts.md', 'arm-poly.md', 'orders.json']) copyFileSync(join(ROOT_DIR, 'demo', 'baseline', name), join(root, 'demo', 'baseline', name));
   const base = buildRecord({ root: ROOT_DIR, version: '2.1.287', scaffolds: { ts: 'sha256:ts', poly: 'sha256:poly' }, reference: { files: ['README.md'], listSha256: 'sha256:list', treeSha256: 'sha256:tree' } });
   writeFileSync(join(root, RECORD), JSON.stringify(base, null, 2) + '\n');
   sh('init', '-q');
@@ -56,6 +58,7 @@ test('A: runArm builds workspace, writes run files, and returns the correct path
 const fs = require('node:fs');
 const path = require('node:path');
 console.log(JSON.stringify({ type: 'system', subtype: 'init', args: process.argv.slice(2), cwd: process.cwd(), env: { POLY_DEMO_WORKSPACE: process.env.POLY_DEMO_WORKSPACE } }));
+fs.mkdirSync('src', { recursive: true });
 fs.writeFileSync('src/agent.ts', 'export const x = 1;\\n');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 pkg.author = 'stub';
@@ -65,7 +68,7 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'FINAL 
   try {
     const { dir, workspace, summary } = await runArm({
       arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub],
-      root: r.root, env: {}, runsDir, workDir: workDirRoot, configDir: join(runsDir, 'cfg'),
+      root: ROOT_DIR, env: {}, runsDir, workDir: workDirRoot, configDir: join(runsDir, 'cfg'),
       checks: () => [], deps: DEPS
     });
     // (1) workspace equals path.join(workDir, 'ts-pilot-1'), run folder is in runsDir.
@@ -501,4 +504,13 @@ test('F: amendment-1 excluded records the two pilot runs (DB13)', () => {
   assert.ok(/^20f7054c/.test(poly.commit), 'poly commit starts 20f7054c');
   assert.ok(/^d02b8170/.test(poly.tree), 'poly tree starts d02b8170');
   assert.deepEqual(poly.findings, ['H1', 'H2', 'H3'], 'poly findings all three');
+});
+
+// Catches a preregister script that rewrites the committed record (DB13: the record is never edited).
+test('DB13: preregister.mjs without --amend refuses once the record is committed, and leaves it as it is', () => {
+  const before = readFileSync(join(ROOT_DIR, RECORD), 'utf8');
+  const run = spawnSync(process.execPath, [join(ROOT_DIR, 'demo', 'baseline', 'preregister.mjs')], { encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /never rewritten/);
+  assert.equal(readFileSync(join(ROOT_DIR, RECORD), 'utf8'), before);
 });

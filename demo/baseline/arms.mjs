@@ -4,12 +4,21 @@
 // terminal, after the pre-registration commit.
 import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DISALLOWED_TOOLS as DISALLOWED } from './guard.mjs';
 import { writeReference } from './poly-reference.mjs';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BASELINE = join(ROOT, 'demo', 'baseline');
+
+/**
+ * Where a run's workspace is built (DB10 item 1): a folder of its own per run, beside the runs folder and not inside it, so that a
+ * workspace never sits inside the runs folder of another arm. The runs folder (session.jsonl, result.json, initial.json) is in procedure.mjs.
+ */
+export const WORK_DIR = join(homedir(), '.poly-demo', 'work');
+export const workDir = (arm, run) => join(WORK_DIR, `${arm}-${run}`);
 
 /** Q13: Opus 5.5 for both arms, named in the pre-registration commit. */
 export const MODEL = 'claude-opus-5-5';
@@ -27,6 +36,10 @@ export const BILLING = 'subscription';
 export const NETWORK = 'ordinary network access, no container, no keys';
 
 const FILES = ['Read', 'Write', 'Edit', 'Glob', 'Grep'];
+/** The built-in tools that exist at all in a run (DB11 item 8): the file tools and Bash. No agent, task, web or notebook tool. */
+export const TOOLS = [...FILES, 'Bash'].join(',');
+/** Never allowed, in either arm (DB11 item 2). The same list is the guard's. */
+export { DISALLOWED_TOOLS } from './guard.mjs';
 /**
  * The tools of each arm. Web tools are off in both (DB3). Both arms may install packages (`npm install`) and run their tests (`npm test`). Both arms may run node on a file. The TypeScript arm may also run the compiler
  * (`npx tsc`), which is what its language needs. The poly arm gets the deterministic commands of poly and none that calls a model: `poly new` drafts a module with a
@@ -49,6 +62,15 @@ export const promptText = (root = ROOT) => readFileSync(join(root, 'demo', 'base
 export const armText = (arm, root = ROOT) => readFileSync(join(root, 'demo', 'baseline', `arm-${arm}.md`), 'utf8');
 export const sha256 = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
+/** The hook file that Claude Code runs before every tool call (DB11 item 7). */
+export const HOOK_FILE = join(BASELINE, 'hook.mjs');
+export const GUARD_FILE = join(BASELINE, 'guard.mjs');
+
+/** The settings that install the hook (DB11 item 8). The path is written with forward slashes, which both bash and cmd accept inside quotes. */
+export const hookSettings = (hookPath) => ({
+  hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `node "${hookPath.replace(/\\/g, '/')}"` }] }] },
+});
+
 /**
  * The agent's command line for one run. The arms run on the owner's own login (experiments/m3/runner/isolation.mjs: no API key in the
  * environment, a configuration folder of their own), so no `--bare`. `dontAsk` denies a tool outside the list without a prompt, no
@@ -61,6 +83,9 @@ export function claudeArgs({ arm, prompt, capUsd = ARMS[arm].capUsd, text = armT
     '--output-format', 'stream-json', '--verbose',
     '--model', MODEL,
     '--append-system-prompt', text,
+    '--settings', JSON.stringify(hookSettings(HOOK_FILE)),
+    '--tools', TOOLS,
+    '--disallowedTools', DISALLOWED.join(','),
     '--allowedTools', ALLOWED_TOOLS[arm].join(','),
     '--permission-mode', 'dontAsk',
     '--disable-slash-commands',
@@ -74,42 +99,74 @@ const write = (ws, rel, text) => { mkdirSync(dirname(join(ws, rel)), { recursive
 const copy = (ws, rel, from, filter) => { mkdirSync(dirname(join(ws, rel)), { recursive: true }); cpSync(from, join(ws, rel), { recursive: true, filter }); };
 const notBuildInfo = (p) => !p.endsWith('.tsbuildinfo');
 
-/** The poly packages as node_modules holds them: package.json and dist. */
-const POLY_PACKAGES = [['poly-core', 'core'], ['poly-lang', 'lang'], ['poly-lower', 'lower'], ['poly-ref', 'ref'], ['poly-embed', 'embed'], ['poly-check', 'check']];
+/**
+ * The toolchain, as folders under .harness/ and devDependencies of the workspace (DB10 item 2): [package name, folder, source in the repository].
+ * A source that is a poly package is copied as package.json and dist; any other is copied whole.
+ */
+const BOTH = [
+  ['typescript', 'typescript', 'node_modules/typescript'],
+  ['@types/node', 'types-node', 'node_modules/@types/node'],
+  ['undici-types', 'undici-types', 'node_modules/undici-types'],
+];
+const POLY = [
+  ['@poly/core', 'poly-core', 'packages/poly-core'],
+  ['@poly/lang', 'poly-lang', 'packages/poly-lang'],
+  ['@poly/lower', 'poly-lower', 'packages/poly-lower'],
+  ['@poly/ref', 'poly-ref', 'packages/poly-ref'],
+  ['@poly/embed', 'poly-embed', 'packages/poly-embed'],
+  ['@poly/check', 'poly-check', 'packages/poly-check'],
+  ['@poly/runtime', 'poly-runtime', 'packages/poly-runtime'],
+  ['@cognitive-fab/polygraph', 'polygraph', 'vendor/polygraph'],
+  ['@cognitive-fab/sam-pattern', 'sam-pattern', 'vendor/sam-pattern'],
+  ['@cognitive-fab/polyflow-kernel', 'polyflow-kernel', 'vendor/polyflow/platform/packages/kernel'],
+  ['@cognitive-fab/polyflow-verify', 'polyflow-verify', 'vendor/polyflow/platform/packages/verify'],
+];
+
+/** Copies the packages into .harness/ and returns the devDependencies that declare them. */
+function declarePackages(dir, root, packages) {
+  const dependencies = {};
+  for (const [name, folder, source] of packages) {
+    const from = join(root, source);
+    if (source.startsWith('packages/')) {
+      copy(dir, `.harness/${folder}/package.json`, join(from, 'package.json'));
+      copy(dir, `.harness/${folder}/dist`, join(from, 'dist'), notBuildInfo);
+    } else copy(dir, `.harness/${folder}`, from);
+    dependencies[name] = `file:.harness/${folder}`;
+  }
+  return Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => (a < b ? -1 : 1)));
+}
 
 /**
- * Builds the workspace of an arm in `dir`: "an empty Node 24 + TypeScript scaffold and orders.json" for the TypeScript arm; for the
- * poly arm the poly project scaffold, the toolchain, the language reference and orders.json. Neither holds a CLAUDE.md, a memory, a
- * skill or any word of the other arm. Returns the files, relative to `dir`.
+ * Builds the workspace of an arm in `dir` (DB10): the scaffold, orders.json and the toolchain, which is declared in package.json as
+ * `file:.harness/<folder>` and installed by `npm install` with no network. The poly arm also gets the cleaned language reference in
+ * tools/poly. Neither holds a CLAUDE.md, a memory, a skill or any word of the other arm. Returns the files, relative to `dir`.
  */
 export function makeWorkspace(arm, dir, root = ROOT) {
+  if (!ARMS[arm]) throw new Error(`no arm ${arm}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   copy(dir, 'orders.json', join(root, 'demo', 'baseline', 'orders.json'));
+  write(dir, '.npmrc', 'install-links=true\n');
+  const devDependencies = declarePackages(dir, root, arm === 'poly' ? [...BOTH, ...POLY] : BOTH);
   if (arm === 'ts') {
-    write(dir, 'package.json', `${JSON.stringify({ name: 'support-agent', private: true, type: 'module', engines: { node: '>=24' }, scripts: { test: 'node --test' } }, null, 2)}\n`);
+    write(dir, 'package.json', `${JSON.stringify({ name: 'support-agent', private: true, type: 'module', engines: { node: '>=24' }, scripts: { test: 'node --test' }, devDependencies }, null, 2)}\n`);
     write(dir, 'tsconfig.json', `${JSON.stringify({ compilerOptions: { target: 'ES2023', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, noEmit: true, types: ['node'], skipLibCheck: true }, include: ['src/**/*.ts', 'test/**/*.ts'] }, null, 2)}\n`);
-  } else if (arm === 'poly') {
-    write(dir, 'package.json', `${JSON.stringify({ name: 'support-agent', private: true, type: 'module', scripts: { test: 'node --test', poly: 'node node_modules/@poly/check/dist/src/cli.js' } }, null, 2)}\n`);
+  } else {
+    write(dir, 'package.json', `${JSON.stringify({ name: 'support-agent', private: true, type: 'module', scripts: { test: 'node --test', poly: 'node node_modules/@poly/check/dist/src/cli.js' }, devDependencies }, null, 2)}\n`);
     write(dir, 'poly.json', `${JSON.stringify({ poly: '1', name: 'support-agent', modules: ['src/*.poly'] }, null, 2)}\n`);
     mkdirSync(join(dir, 'src'), { recursive: true });
-    for (const [pkg, name] of POLY_PACKAGES) {
-      copy(dir, `node_modules/@poly/${name}/package.json`, join(root, 'packages', pkg, 'package.json'));
-      copy(dir, `node_modules/@poly/${name}/dist`, join(root, 'packages', pkg, 'dist'), notBuildInfo);
-    }
-    copy(dir, 'node_modules/@cognitive-fab/polygraph', join(root, 'vendor', 'polygraph'));
-    copy(dir, 'node_modules/@cognitive-fab/sam-pattern', join(root, 'vendor', 'sam-pattern'));
     writeReference(dir, root);
-  } else throw new Error(`no arm ${arm}`);
+  }
   return listFiles(dir);
 }
 
 /** Every file under a directory, relative to it, in a stable order. */
-export function listFiles(dir, rel = '') {
+export function listFiles(dir, rel = '', skip = []) {
   const out = [];
   for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+    if (skip.includes(e.name)) continue;
     const p = rel ? `${rel}/${e.name}` : e.name;
-    if (e.isDirectory()) out.push(...listFiles(dir, p));
+    if (e.isDirectory()) out.push(...listFiles(dir, p, skip));
     else out.push(p);
   }
   return out.sort();

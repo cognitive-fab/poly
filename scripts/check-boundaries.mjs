@@ -220,6 +220,8 @@ export function checkRepository(root) {
   // Rule 7: the demo's code.
   for (const file of everyFile(join(root, 'demo'))) {
     if (!/\.(mjs|cjs|js|ts)$/.test(file) || /(^|[\\/])node_modules[\\/]/.test(file)) continue;
+    // The committed runs of the baseline are the agent's own work, kept verbatim (DB4): they are not the demo's code, and they are not edited.
+    if (relative(root, file).split(sep).join('/').startsWith('demo/baseline/runs/')) continue;
     violations.push(...demoViolationsOf(relative(root, file).split(sep).join('/'), readFileSync(file, 'utf8')));
   }
   // Rule 3: an adapter is configuration only.

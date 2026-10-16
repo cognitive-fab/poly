@@ -201,7 +201,7 @@ test('DB4: an agent that cannot be started is recorded as a failed run, not a cr
   const r = repo();
   const runs = mkdtempSync(join(tmpdir(), 'baseline-runs-'));
   try {
-    const { dir, summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: join(runs, 'no-such-agent'), root: r.root, env: {}, runsDir: runs, configDir: join(runs, 'cfg'), deps: deps(r) });
+    const { dir, summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: join(runs, 'no-such-agent'), root: r.root, sources: ROOT, env: {}, runsDir: runs, workDir: join(runs, 'work'), configDir: join(runs, 'cfg'), deps: deps(r) });
     assert.equal(summary.exit, null);
     assert.match(summary.error, /ENOENT/);
     assert.equal(JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')).error, summary.error);
@@ -213,11 +213,15 @@ test('DB3: the TypeScript workspace is a Node and TypeScript scaffold with order
   try {
     const orders = readFileSync(join(ROOT, 'demo', 'baseline', 'orders.json'));
     const ts = makeWorkspace('ts', join(tmp, 'ts'));
-    assert.deepEqual(ts, ['orders.json', 'package.json', 'tsconfig.json']);
+    assert.deepEqual(ts.filter((p) => !p.startsWith('.harness/')), ['.npmrc', 'orders.json', 'package.json', 'tsconfig.json']);
     const poly = makeWorkspace('poly', join(tmp, 'poly'));
-    for (const f of ['orders.json', 'package.json', 'poly.json', 'tools/poly/README.md', 'tools/poly/docs/03-technical-spec.md', 'tools/poly/docs/04-semantics.md', 'node_modules/@poly/check/package.json']) assert.ok(poly.includes(f), f);
+    for (const f of ['orders.json', 'package.json', 'poly.json', 'tools/poly/README.md', 'tools/poly/docs/03-technical-spec.md', 'tools/poly/docs/04-semantics.md', '.harness/poly-check/package.json']) assert.ok(poly.includes(f), f);
     assert.deepEqual([readFileSync(join(tmp, 'ts', 'orders.json')), readFileSync(join(tmp, 'poly', 'orders.json'))], [orders, orders], 'the same orders, byte for byte');
-    for (const files of [ts, poly]) assert.ok(!files.some((f) => /(^|\/)(CLAUDE\.md|CLAUDE\.local\.md|\.claude\/|memory|skills?\/|\.mcp\.json)/i.test(f)), 'no instruction file');
+    // The toolchain under .harness is packages, not instructions: only the files outside it are looked at, and no CLAUDE.md is anywhere.
+    for (const files of [ts, poly]) {
+      assert.ok(!files.filter((f) => !f.startsWith('.harness/')).some((f) => /(^|\/)(CLAUDE\.md|CLAUDE\.local\.md|\.claude\/|memory|skills?\/|\.mcp\.json)/i.test(f)), 'no instruction file');
+      assert.ok(!files.some((f) => /(^|\/)CLAUDE(\.local)?\.md$/.test(f)), 'no CLAUDE.md, even in the toolchain');
+    }
     assert.ok(!poly.some((f) => /^tools\/poly\/examples\/(concierge|retry|inbox|oms|orders|harness)\//.test(f)), 'no example that models this task');
     assert.equal(JSON.parse(readFileSync(join(tmp, 'ts', 'package.json'), 'utf8')).scripts.test, 'node --test');
     assert.match(JSON.parse(readFileSync(join(tmp, 'poly', 'package.json'), 'utf8')).scripts.poly, /@poly\/check\/dist\/src\/cli\.js/);
@@ -246,7 +250,7 @@ function repo({ committed = true, record = true, dirty = false, tweak = null } =
   return { root, sh, scaffolds, reference, clean: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-const deps = (r, over = {}) => ({ claudeVersion: () => '2.1.287', scaffold: (arm) => r.scaffolds[arm], reference: () => r.reference, configProblems: () => [], ...over });
+const deps = (r, over = {}) => ({ claudeVersion: () => '2.1.287', scaffold: (arm) => r.scaffolds[arm], reference: () => r.reference, configProblems: () => [], smoke: () => ({ ok: true, steps: [] }), ...over });
 const run = (r, arm = 'ts', name = 'pilot-1', over = {}) => preflight({ arm, run: name, root: r.root, env: {}, runsDir: join(r.root, 'demo', 'baseline', 'runs'), localRunsDir: join(r.root, 'nowhere'), deps: deps(r, over.deps), ...over.rest });
 
 test('DB2: the record holds the prompt\'s hash, the model, the agent\'s version, one pilot an arm, the caps, the turn limit, the subscription, the network and the hash of each arm text', () => {
@@ -336,8 +340,8 @@ test('DB7: the cost of a run is recorded even when its last event has no newline
   const stub = join(runs, 'stub.cjs');
   writeFileSync(stub, "process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', total_cost_usd: 2.5, usage: { input_tokens: 1, output_tokens: 1 } }));");
   try {
-    const { summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub], root: r.root, env: {}, runsDir: runs, configDir: join(runs, 'cfg'), deps: deps(r) });
-    assert.deepEqual([summary.stopped, summary.costUsd], ['success', 2.5]);
+    const { summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub], root: r.root, sources: ROOT, env: {}, runsDir: runs, workDir: join(runs, 'work'), configDir: join(runs, 'cfg'), deps: deps(r) });
+    assert.deepEqual([summary.sdkResult, summary.costUsd], ['success', 2.5]);
   } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
 });
 
@@ -380,7 +384,7 @@ test('DB3, DB4: one run writes the session as it ran, in a workspace outside the
   const stub = join(runs, 'stub.cjs');
   writeFileSync(stub, STUB);
   try {
-    const { dir, workspace, summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub], root: r.root, env: {}, runsDir: runs, configDir: join(runs, 'cfg'), deps: deps(r) });
+    const { dir, workspace, summary } = await runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub], root: r.root, sources: ROOT, env: {}, runsDir: runs, workDir: join(runs, 'work'), configDir: join(runs, 'cfg'), deps: deps(r) });
     assert.ok(!dir.startsWith(r.root), 'outside the repository');
     const events = readFileSync(join(dir, 'session.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const init = events[0];
@@ -390,9 +394,9 @@ test('DB3, DB4: one run writes the session as it ran, in a workspace outside the
     assert.equal(init.args[1], promptText(r.root));
     assert.equal(init.cwd, workspace);
     assert.deepEqual(init.env, { CLAUDE_CONFIG_DIR: join(runs, 'cfg'), CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ANTHROPIC_API_KEY: null });
-    assert.deepEqual([summary.exit, summary.stopped, summary.costUsd], [0, 'success', 1.25]);
+    assert.deepEqual([summary.exit, summary.sdkResult, summary.costUsd], [0, 'success', 1.25]);
     assert.ok(existsSync(join(workspace, 'index.ts')), 'the stub wrote into the workspace');
-    await assert.rejects(runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub], root: r.root, env: {}, runsDir: runs, deps: deps(r), checks: () => [] }), /not repeated in place/);
+    await assert.rejects(runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: [stub], root: r.root, sources: ROOT, env: {}, runsDir: runs, workDir: join(runs, 'work'), deps: deps(r), checks: () => [] }), /not repeated in place/);
   } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
 });
 
@@ -400,7 +404,7 @@ test('DB4: a run that fails a check is not started: nothing is created', async (
   const r = repo({ committed: false });
   const runs = mkdtempSync(join(tmpdir(), 'baseline-runs-'));
   try {
-    await assert.rejects(runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: ['-e', 'process.exit(9)'], root: r.root, env: {}, runsDir: runs, deps: deps(r) }), /not started:\n- .*not committed/s);
+    await assert.rejects(runArm({ arm: 'ts', run: 'pilot-1', bin: process.execPath, binArgs: ['-e', 'process.exit(9)'], root: r.root, sources: ROOT, env: {}, runsDir: runs, workDir: join(runs, 'work'), deps: deps(r) }), /not started:\n- .*not committed/s);
     assert.deepEqual(readdirSync(runs), []);
   } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
 });
@@ -411,9 +415,9 @@ test('DB4: a run is committed verbatim: its tree without node_modules, its sessi
   const stub = join(runs, 'stub.cjs');
   writeFileSync(stub, STUB);
   try {
-    await runArm({ arm: 'ts', run: 'kept', bin: process.execPath, binArgs: [stub], root: r.root, env: {}, runsDir: runs, configDir: join(runs, 'cfg'), deps: deps(r) });
+    await runArm({ arm: 'ts', run: 'kept', bin: process.execPath, binArgs: [stub], root: r.root, sources: ROOT, env: {}, runsDir: runs, workDir: join(runs, 'work'), configDir: join(runs, 'cfg'), deps: deps(r) });
     const before = r.sh('rev-list', '--count', 'HEAD');
-    const commands = prepareCommit({ arm: 'ts', run: 'kept', runsDir: runs, root: r.root });
+    const commands = prepareCommit({ arm: 'ts', run: 'kept', runsDir: runs, workDir: join(runs, 'work'), root: r.root });
     const to = join(r.root, 'demo', 'baseline', 'runs', 'ts-kept');
     assert.ok(existsSync(join(to, 'tree', 'index.ts')) && !existsSync(join(to, 'tree', 'node_modules')));
     assert.ok(existsSync(join(to, 'session.jsonl')));
@@ -424,14 +428,13 @@ test('DB4: a run is committed verbatim: its tree without node_modules, its sessi
     assert.match(commands[1], /^git commit .*verbatim before anything is run against it/);
     assert.match(commands[2], /git rev-parse HEAD:demo\/baseline\/runs\/ts-kept\/tree/);
     assert.equal(r.sh('rev-list', '--count', 'HEAD'), before, 'nothing was committed');
-    assert.throws(() => prepareCommit({ arm: 'ts', run: 'kept', runsDir: runs, root: r.root }), /a run is committed once/);
+    assert.throws(() => prepareCommit({ arm: 'ts', run: 'kept', runsDir: runs, workDir: join(runs, 'work'), root: r.root }), /a run is committed once/);
   } finally { r.clean(); rmSync(runs, { recursive: true, force: true }); }
 });
 
-test('Step 10: the committed drafts name no key, start nothing by themselves, and the repository holds no record yet', () => {
-  assert.ok(!existsSync(join(ROOT, RECORD)), 'the pre-registration is the owner\'s commit: no record is committed with the drafts');
-  assert.ok(!existsSync(join(ROOT, 'demo', 'baseline', 'runs')));
-  for (const f of listFiles(join(ROOT, 'demo', 'baseline')).filter((p) => /\.mjs$/.test(p))) {
+test('Step 10: the baseline\'s code names no key and starts nothing by itself', () => {
+  // The committed runs are the agent\'s verbatim work, not our code: they are not scanned here.
+  for (const f of listFiles(join(ROOT, 'demo', 'baseline'), '', ['runs']).filter((p) => /\.mjs$/.test(p))) {
     assert.doesNotMatch(readFileSync(join(ROOT, 'demo', 'baseline', f), 'utf8'), /sk-ant|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN/, f);
   }
 });
