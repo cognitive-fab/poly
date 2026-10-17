@@ -5,6 +5,7 @@
 // new interface only when the interface changes. The brief an arm reads for version n is the base brief
 // followed by the deltas of changes 1 to n.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -40,11 +41,41 @@ export function versions(id) {
   return out;
 }
 
-/** The poly module of a version's reference or mutant: the one .poly file there. */
+/**
+ * The frozen sources of M3 predate PL6304 (013d23f1): an effect that reaches outside the program (egress:external or egress:public) and states no class is
+ * refused. The frozen files are evidence and are not edited. A source that has such an effect is built from a copy in which each of them says
+ * `class reversible` (the one line the rule asks for; none of these effects is retried more than once, so the retry-safety rule is not engaged). A source
+ * that has none is used where it is.
+ */
+export function migrateClasses(text) {
+  let out = '';
+  let at = 0;
+  for (const m of text.matchAll(/^( *)effect [^\n]*\{\n/gm)) {
+    if (m.index < at) continue;
+    let depth = 1;
+    let end = m.index + m[0].length;
+    while (depth > 0 && end < text.length) { if (text[end] === '{') depth++; else if (text[end] === '}') depth--; end++; }
+    const body = text.slice(m.index, end);
+    const labels = /^( *)labels \{ egress:(?:external|public)[^}]*\}\n/m.exec(body);
+    out += text.slice(at, m.index);
+    out += labels && !/^ *class /m.test(body) ? body.replace(labels[0], () => `${labels[0]}${labels[1]}class reversible\n`) : body;
+    at = end;
+  }
+  return out + text.slice(at);
+}
+
+/** The poly module of a version's reference or mutant: the one .poly file there (or its migrated copy, see migrateClasses). */
 export function moduleOf(dir) {
   const files = readdirSync(dir).filter((f) => f.endsWith('.poly'));
   if (files.length !== 1) throw new Error(`${dir}: expected one .poly file, found ${files.length}`);
-  return join(dir, files[0]);
+  const file = join(dir, files[0]);
+  const text = readFileSync(file, 'utf8');
+  const migrated = migrateClasses(text);
+  if (migrated === text) return file;
+  const copy = join(tmpdir(), 'poly-m3', 'migrated', createHash('sha256').update(file).digest('hex').slice(0, 12), files[0]);
+  mkdirSync(join(copy, '..'), { recursive: true });
+  writeFileSync(copy, migrated);
+  return copy;
 }
 
 /** The map of a reference or mutant: its own host.map.json, or else the reference's. */

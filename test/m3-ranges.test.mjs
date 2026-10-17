@@ -49,3 +49,30 @@ for (const r of RANGES) {
     }
   }
 }
+
+// The frozen sources of M3 are evidence and are not edited (test/m3-freeze-eol.test.mjs). They predate PL6304, so the build takes a migrated copy
+// (experiments/m3/lib/task.mjs). Catches an edit of a frozen file, a migration that adds a second class, and one that touches an effect that needs none.
+import { join } from 'node:path';
+import { moduleOf, migrateClasses } from '../experiments/m3/lib/task.mjs';
+
+test('M3 freeze: the frozen T3 reference stays classless on disk, and the build uses a copy with class reversible on its one effect', () => {
+  const dir = join(import.meta.dirname, '..', 'experiments', 'm3', 'tasks', 'T3', 'reference');
+  const original = readFileSync(join(dir, 'payments.poly'), 'utf8');
+  assert.ok(!/^ *class /m.test(original), 'the frozen file says no class');
+  const used = moduleOf(dir);
+  assert.notEqual(used, join(dir, 'payments.poly'));
+  const copy = readFileSync(used, 'utf8');
+  assert.equal(copy.split('class reversible').length - 1, 1);
+  assert.equal(copy.replace('    class reversible\n', ''), original, 'the copy differs from the frozen file by that one line');
+});
+
+test('M3 freeze: the migration adds a class only to an egress effect that has none', () => {
+  const effect = (body) => `module m\nmachine M {\n  effect e() {\n    kind "k"\n${body}  }\n}\n`;
+  const classless = effect('    labels { egress:external }\n');
+  assert.equal(migrateClasses(classless), effect('    labels { egress:external }\n    class reversible\n'));
+  const classed = effect('    class irreversible\n    labels { egress:external }\n');
+  assert.equal(migrateClasses(classed), classed, 'a class before the labels is kept, and no second one is added');
+  const inside = effect('    labels { write:store }\n');
+  assert.equal(migrateClasses(inside), inside, 'an effect that does not reach outside needs no class');
+  assert.equal(migrateClasses(migrateClasses(classless)), migrateClasses(classless), 'the migration is idempotent');
+});
