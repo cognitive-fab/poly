@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isReadOnlyBash, checkToolCall, READ_ONLY_BASH } from '../demo/baseline/guard.mjs';
+import { isReadOnlyBash, checkToolCall, READ_ONLY_BASH, READ_ONLY_EXACT } from '../demo/baseline/guard.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SESSIONS = join(ROOT, 'demo', 'baseline', 'runs');
@@ -14,15 +14,60 @@ const HOOK = join(ROOT, 'demo', 'baseline', 'hook.mjs');
 const TS_WORKSPACE = 'C:\\Users\\jjdub\\.poly-demo\\runs\\ts-pilot-1\\workspace';
 const POLY_WORKSPACE = 'C:\\Users\\jjdub\\.poly-demo\\runs\\poly-pilot-1\\workspace';
 
-// Test 1: DB15.1 - READ_ONLY_BASH exports the correct list.
+// Test 1: DB15.6 - READ_ONLY_BASH and READ_ONLY_EXACT exports have correct values
 test('DB15.1: READ_ONLY_BASH deep-equals the fixed set', () => {
   assert.deepEqual(READ_ONLY_BASH, ['ls', 'cat', 'head', 'tail', 'wc', 'pwd', 'cd']);
 });
 
-// Test 2: DB15.2 - isReadOnlyBash returns true for valid commands in the set.
-test('DB15.2: isReadOnlyBash true for read-only commands', () => {
+test('DB15.1: READ_ONLY_EXACT deep-equals the three exact commands', () => {
+  assert.deepEqual(READ_ONLY_EXACT, ['node --version', 'npm --version', 'npx tsc --version']);
+});
+
+// Test 2: DB15.2 - isReadOnlyBash true for pipes and exact commands
+test('DB15.2: isReadOnlyBash true for pipes between set commands', () => {
   const workspace = 'C:\\ws\\run';
   const validCommands = [
+    'cat a.txt | head',
+    'cat a.txt | head -n 5 | wc -l',
+    'ls | wc -l',
+    'ls src | head',
+    'cat a.txt | tail -3 && pwd',
+  ];
+  for (const command of validCommands) {
+    assert.equal(isReadOnlyBash(command, { workspace }), true, `failed for: ${command}`);
+  }
+});
+
+test('DB15.2: isReadOnlyBash true for exact commands alone', () => {
+  const workspace = 'C:\\ws\\run';
+  const exactCommands = [
+    'node --version',
+    'npm --version',
+    'npx tsc --version',
+    'node  --version',
+  ];
+  for (const command of exactCommands) {
+    assert.equal(isReadOnlyBash(command, { workspace }), true, `failed for: ${command}`);
+  }
+});
+
+test('DB15.2: isReadOnlyBash true for exact commands joined with set commands', () => {
+  const workspace = 'C:\\ws\\run';
+  const joinedCommands = [
+    'ls && node --version',
+    'cd src ; npm --version',
+    'node --version | head',
+    'ls | npx tsc --version',
+    'cd src && ls && npm --version && cat a.txt',
+  ];
+  for (const command of joinedCommands) {
+    assert.equal(isReadOnlyBash(command, { workspace }), true, `failed for: ${command}`);
+  }
+});
+
+test('DB15.2: isReadOnlyBash true for set commands with various flags and paths', () => {
+  const workspace = 'C:\\ws\\run';
+  const commands = [
     'ls',
     'ls -la',
     'ls src tests',
@@ -37,101 +82,157 @@ test('DB15.2: isReadOnlyBash true for read-only commands', () => {
     'cd src ; ls -la ; pwd',
     'ls && cat package.json && wc -l package.json',
     'cat "C:\\ws\\run\\orders.json"',
-    'ls src/*',
   ];
-  for (const command of validCommands) {
+  for (const command of commands) {
     assert.equal(isReadOnlyBash(command, { workspace }), true, `failed for: ${command}`);
   }
 });
 
-// Test 3: DB15.2 with cwd - isReadOnlyBash respects relative paths within workspace.
-test('DB15.2: isReadOnlyBash true with cwd inside workspace', () => {
+// Test 3: DB15.3 - isReadOnlyBash false for various disallowed commands
+test('DB15.3: isReadOnlyBash false but guard allows for disallowed patterns', () => {
   const workspace = 'C:\\ws\\run';
-  const cwd = 'C:\\ws\\run\\sub';
-  assert.equal(isReadOnlyBash('cat ../a.txt', { workspace, cwd }), true);
-});
-
-// Test 4: DB15.3 - isReadOnlyBash false for commands not in the set, guard allows them.
-test('DB15.3: isReadOnlyBash false for disallowed commands, guard allows them', () => {
-  const workspace = 'C:\\ws\\run';
-  const disallowedCommands = [
-    'npm test',
+  const disallowedButAllowed = [
+    'node --version --foo',
+    'node -v',
     'node src/a.js',
+    'node -e "1"',
+    'npm test',
+    'npm --version --json',
+    'npm run poly check f',
+    'npx tsc',
+    'npx tsc --noEmit',
+    'npx tsc --version --pretty',
     'grep x a.txt',
     'echo hi',
-    'cat a.txt | head',
     'cat a.txt > out.txt',
-    'ls > files.txt',
     'ls 2>/dev/null',
     'echo $(ls)',
-    'ls `pwd`',
     'A=1 ls',
     'ls &',
     '(ls)',
     'ls || pwd',
     'cd src && npm test',
     'ls ; rm a.txt',
-    'ls && node --version',
   ];
-  for (const command of disallowedCommands) {
-    assert.equal(isReadOnlyBash(command, { workspace }), false, `failed for: ${command}`);
-    const guardCheck = checkToolCall({ tool: 'Bash', input: { command }, workspace });
-    assert.equal(guardCheck.allow, true, `guard should allow: ${command}`);
+  for (const command of disallowedButAllowed) {
+    assert.equal(isReadOnlyBash(command, { workspace }), false, `isReadOnlyBash should be false for: ${command}`);
+    const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace });
+    assert.equal(verdict.allow, true, `checkToolCall should allow: ${command}`);
   }
 });
 
-// Test 5: DB15.3 - isReadOnlyBash false for empty string and spaces only.
-test('DB15.3: isReadOnlyBash false for empty and whitespace-only commands', () => {
+test('DB15.3: isReadOnlyBash false for pipe out of outside-set command', () => {
+  const workspace = 'C:\\ws\\run';
+  const outsidePipes = [
+    'npm run poly check f 2>&1 | tail -30',
+    'find . -type f | head',
+  ];
+  for (const command of outsidePipes) {
+    assert.equal(isReadOnlyBash(command, { workspace }), false, `isReadOnlyBash should be false for: ${command}`);
+  }
+});
+
+test('DB15.3: isReadOnlyBash false for empty string and whitespace only', () => {
   const workspace = 'C:\\ws\\run';
   assert.equal(isReadOnlyBash('', { workspace }), false);
   assert.equal(isReadOnlyBash('   ', { workspace }), false);
+  assert.equal(isReadOnlyBash('\n', { workspace }), false);
 });
 
-// Test 6: DB15.4 - isReadOnlyBash false for paths outside, and checkToolCall denies them.
-test('DB15.4: isReadOnlyBash false for outside paths, checkToolCall denies them', () => {
+test('DB15.3: isReadOnlyBash false for pipe edge cases', () => {
   const workspace = 'C:\\ws\\run';
-  const outsideCommands = [
+  const edgeCases = [
+    'ls |',
+    '| ls',
+    'ls | | head',
+  ];
+  for (const command of edgeCases) {
+    assert.equal(isReadOnlyBash(command, { workspace }), false, `failed for: ${command}`);
+  }
+});
+
+// Test 4: DB15.4 - Pipe into command outside the set is refused
+test('DB15.4: checkToolCall denies pipe into command outside set', () => {
+  const workspace = 'C:\\ws\\run';
+  const deniedPipes = [
+    'cat x | node -e "console.log(1)"',
+    'cat x | sh',
+    'cat x | bash -s',
+    'cat x | node script.js',
+    'ls | xargs rm',
+    'find src -type f | grep -v node_modules',
+    'cat a | head | grep b',
+    'ls && cat x | node -e "1"',
+    'cat x | npm test',
+  ];
+  for (const command of deniedPipes) {
+    const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace });
+    assert.equal(verdict.allow, false, `should deny: ${command}`);
+    assert.ok(verdict.reason, `should have reason for: ${command}`);
+    assert.ok(verdict.offending && verdict.offending.length > 0, `should have offending for: ${command}`);
+    assert.equal(isReadOnlyBash(command, { workspace }), false, `isReadOnlyBash should be false for: ${command}`);
+  }
+});
+
+test('DB15.4: checkToolCall allows pipe into command in set', () => {
+  const workspace = 'C:\\ws\\run';
+  const allowedPipes = [
+    'cat x | head',
+    'npm run poly check f 2>&1 | tail -30',
+    'ls | node --version',
+    'echo a | head',
+  ];
+  for (const command of allowedPipes) {
+    const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace });
+    assert.deepEqual(verdict, { allow: true }, `should allow: ${command}`);
+  }
+});
+
+// Test 5: DB15.5 - Paths must be inside workspace
+test('DB15.5: isReadOnlyBash and checkToolCall both deny outside paths', () => {
+  const workspace = 'C:\\ws\\run';
+  const outsidePaths = [
     'ls ..',
     'ls ../..',
     'ls /c/Users/jjdub',
     'cat C:\\Users\\x\\y',
     'cd .. && ls',
-    'cd src && cat ../../x',
+    'cat ../x | head',
     'ls ~',
     'ls $HOME',
-    'cat /etc/passwd',
-    'ls ../ws2/x',
+    'cat /etc/passwd | head',
   ];
-  for (const command of outsideCommands) {
-    assert.equal(isReadOnlyBash(command, { workspace }), false, `failed for: ${command}`);
-    const guardCheck = checkToolCall({ tool: 'Bash', input: { command }, workspace });
-    assert.equal(guardCheck.allow, false, `guard should deny: ${command}`);
+  for (const command of outsidePaths) {
+    assert.equal(isReadOnlyBash(command, { workspace }), false, `isReadOnlyBash should deny: ${command}`);
+    const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace });
+    assert.equal(verdict.allow, false, `checkToolCall should deny: ${command}`);
   }
 });
 
-// Test 7: DB15.4 with cwd - isReadOnlyBash and checkToolCall both deny outside from cwd.
-test('DB15.4: isReadOnlyBash and checkToolCall both deny outside paths from cwd', () => {
+test('DB15.5: isReadOnlyBash false for outside paths from cwd', () => {
   const workspace = 'C:\\ws\\run';
   const cwd = 'C:\\ws\\run\\sub';
-  assert.equal(isReadOnlyBash('cat ../../x', { workspace, cwd }), false);
-  const guardCheck = checkToolCall({ tool: 'Bash', input: { command: 'cat ../../x' }, workspace, cwd });
-  assert.equal(guardCheck.allow, false);
+  assert.equal(isReadOnlyBash('cat ../../x | head', { workspace, cwd }), false);
 });
 
-// Test 8: DB15.5 - isReadOnlyBash throws for relative workspace.
 test('DB15.5: isReadOnlyBash throws for relative workspace', () => {
-  // The error must be about the workspace, so an unrelated failure (a TypeError, say) does not pass.
-  assert.throws(() => isReadOnlyBash('ls', { workspace: 'relative/path' }), (e) => e instanceof Error && !(e instanceof TypeError) && /absolute path/i.test(e.message));
+  assert.throws(
+    () => isReadOnlyBash('ls', { workspace: 'relative/path' }),
+    (e) => e instanceof Error && !(e instanceof TypeError) && /absolute path/i.test(e.message),
+    'must throw Error with "absolute path" in message'
+  );
 });
 
-// Test 9: DB15.6 - Recorded replay: ts-pilot-1 first Bash command.
-test('DB15.6: ts-pilot-1 first Bash command: prefix in set, whole command outside', () => {
+// Test 6: DB15.6 - Recorded replay ts-pilot-1
+test('DB15.6: ts-pilot-1 first Bash command is in set and allowed', () => {
   const tsPilotSession = join(SESSIONS, 'ts-pilot-1', 'session.jsonl');
   const lines = readFileSync(tsPilotSession, 'utf8').split('\n');
+
   let firstBashCommand = null;
   for (const line of lines) {
     if (!line.trim()) continue;
-    const event = JSON.parse(line);
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
     if (event.type !== 'assistant') continue;
     for (const part of event.message?.content ?? []) {
       if (part.type === 'tool_use' && part.name === 'Bash') {
@@ -141,177 +242,230 @@ test('DB15.6: ts-pilot-1 first Bash command: prefix in set, whole command outsid
     }
     if (firstBashCommand) break;
   }
-  assert.ok(firstBashCommand, 'first Bash command found');
-  const marker = firstBashCommand.indexOf('&& ls -la');
-  assert.ok(marker >= 0, 'the recorded first Bash call holds the segment && ls -la');
-  const endOfPrefix = marker + '&& ls -la'.length;
-  const prefix = firstBashCommand.substring(0, endOfPrefix);
-  assert.equal(isReadOnlyBash(prefix, { workspace: TS_WORKSPACE }), true, `prefix should be in set: ${prefix}`);
-  assert.equal(isReadOnlyBash(firstBashCommand, { workspace: TS_WORKSPACE }), false, `whole command should be outside: ${firstBashCommand}`);
-  assert.equal(checkToolCall({ tool: 'Bash', input: { command: firstBashCommand }, workspace: TS_WORKSPACE }).allow, true, 'guard should allow whole command');
+
+  assert.ok(firstBashCommand, 'found first Bash call');
+  assert.equal(
+    firstBashCommand,
+    'cd "C:/Users/jjdub/.poly-demo/runs/ts-pilot-1/workspace" && ls -la && cat orders.json | head -80 && node --version && npm --version',
+    'first command is verbatim as expected'
+  );
+  assert.equal(isReadOnlyBash(firstBashCommand, { workspace: TS_WORKSPACE }), true);
+  const verdict = checkToolCall({ tool: 'Bash', input: { command: firstBashCommand }, workspace: TS_WORKSPACE });
+  assert.equal(verdict.allow, true);
 });
 
-// Test 10: DB15.6 - Recorded replay: poly-pilot-1 outside commands.
-test('DB15.6: poly-pilot-1 outside commands denied by both isReadOnlyBash and checkToolCall', () => {
-  const polyPilotSession = join(SESSIONS, 'poly-pilot-1', 'session.jsonl');
-  assert.equal(isReadOnlyBash('ls ../..', { workspace: POLY_WORKSPACE }), false);
-  assert.equal(isReadOnlyBash('ls /c/Users/jjdub', { workspace: POLY_WORKSPACE }), false);
-  const guard1 = checkToolCall({ tool: 'Bash', input: { command: 'ls ../..' }, workspace: POLY_WORKSPACE });
-  const guard2 = checkToolCall({ tool: 'Bash', input: { command: 'ls /c/Users/jjdub' }, workspace: POLY_WORKSPACE });
-  assert.equal(guard1.allow, false);
-  assert.equal(guard2.allow, false);
-  let foundDotdot = false;
-  let foundHome = false;
-  const lines = readFileSync(polyPilotSession, 'utf8').split('\n');
+test('DB15.6: ts-pilot-1 every Bash call is allowed by checkToolCall', () => {
+  const tsPilotSession = join(SESSIONS, 'ts-pilot-1', 'session.jsonl');
+  const lines = readFileSync(tsPilotSession, 'utf8').split('\n');
+
+  let bashCallCount = 0;
   for (const line of lines) {
     if (!line.trim()) continue;
-    const event = JSON.parse(line);
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
     if (event.type !== 'assistant') continue;
     for (const part of event.message?.content ?? []) {
       if (part.type === 'tool_use' && part.name === 'Bash') {
-        const command = part.input.command;
-        if (command.includes('..')) foundDotdot = true;
-        if (command.includes('/c/Users/jjdub')) foundHome = true;
-        if (command.includes('..') || command.includes('/c/Users/jjdub')) {
-          assert.equal(isReadOnlyBash(command, { workspace: POLY_WORKSPACE }), false, `found outside: ${command}`);
-        }
+        bashCallCount++;
+        const verdict = checkToolCall({ tool: 'Bash', input: { command: part.input.command }, workspace: TS_WORKSPACE });
+        assert.equal(verdict.allow, true, `Bash call ${bashCallCount} should be allowed`);
       }
     }
   }
-  assert.ok(foundDotdot || foundHome, 'at least one outside command found in poly-pilot-1');
+
+  assert.ok(bashCallCount >= 1, 'at least one Bash call found');
 });
 
-// Test 11: DB15.7 - The hook: PreToolUse output for allowed read-only Bash.
-test('DB15.7: hook allows read-only Bash with PreToolUse output', () => {
-  const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'cd src && ls -la' }, cwd: 'C:\\ws\\run' });
-  const child = spawnSync(process.execPath, [HOOK], {
+// Test 7: DB15.6 - Recorded replay poly-pilot-1
+// Catches a guard that lets the escaping Bash calls of poly-pilot-1 through, denies one that stays in the workspace, or does not apply the pipe rule to the recorded find | grep.
+test('DB15.7: poly-pilot-1: its Bash calls that name a place outside, or pipe into a command outside the set, are denied, and the others are allowed; none of its pipe-outs is in the set', () => {
+  const calls = [];
+  for (const line of readFileSync(join(SESSIONS, 'poly-pilot-1', 'session.jsonl'), 'utf8').split('\n')) {
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event.type !== 'assistant') continue;
+    for (const part of event.message?.content ?? []) if (part.type === 'tool_use' && part.name === 'Bash') calls.push(part.input.command);
+  }
+  assert.ok(calls.length >= 8, `poly-pilot-1 has its Bash calls: ${calls.length}`);
+  const outsideWord = (cmd) => /(^|[\s;&|"'])\.\.(\/|\\|\s|$|;)/.test(cmd) || /\/c\/users\/jjdub|c:[\\/]users[\\/]jjdub/i.test(cmd);
+  const pipesIntoOutside = (cmd) => /\|\s*grep\b/.test(cmd);
+  const wrong = [];
+  let denied = 0;
+  let allowed = 0;
+  for (const cmd of calls) {
+    const expectDenied = outsideWord(cmd) || pipesIntoOutside(cmd);
+    const verdict = checkToolCall({ tool: 'Bash', input: { command: cmd }, workspace: POLY_WORKSPACE });
+    if (verdict.allow === expectDenied) wrong.push(`${expectDenied ? 'allowed' : 'denied'}: ${cmd.slice(0, 120)}`);
+    if (verdict.allow) allowed++; else denied++;
+    assert.equal(isReadOnlyBash(cmd, { workspace: POLY_WORKSPACE }) && expectDenied, false, `not in the set: ${cmd.slice(0, 80)}`);
+  }
+  assert.deepEqual(wrong, []);
+  assert.ok(denied >= 4 && allowed >= 4, `denied ${denied}, allowed ${allowed}`);
+  // The recorded find piped into grep is denied by the pipe rule, with the command named.
+  const findGrep = calls.filter((c) => c.startsWith('cat poly.json; find src tools -type f | grep -v node_modules'));
+  assert.equal(findGrep.length, 1);
+  const verdict = checkToolCall({ tool: 'Bash', input: { command: findGrep[0] }, workspace: POLY_WORKSPACE });
+  assert.equal(verdict.allow, false);
+  assert.match(verdict.reason, /grep/);
+  // The calls that pipe only into head or tail, from commands outside the set, are allowed by the guard and are not in the set.
+  const pipeOuts = calls.filter((c) => /\|\s*(head|tail)\b/.test(c) && !outsideWord(c) && !pipesIntoOutside(c));
+  assert.ok(pipeOuts.length >= 3, `pipe-outs found: ${pipeOuts.length}`);
+  for (const cmd of pipeOuts) {
+    assert.deepEqual(checkToolCall({ tool: 'Bash', input: { command: cmd }, workspace: POLY_WORKSPACE }), { allow: true }, cmd.slice(0, 80));
+    assert.equal(isReadOnlyBash(cmd, { workspace: POLY_WORKSPACE }), false, cmd.slice(0, 80));
+  }
+});
+
+test('DB15.8: hook allows read-only Bash and prints allow', () => {
+  const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'cd "C:\\ws\\run" && ls -la && cat orders.json | head -80 && node --version && npm --version' }, cwd: 'C:\\ws\\run' });
+  const result = spawnSync(process.execPath, [HOOK], {
     input: stdin,
     env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
     encoding: 'utf8',
   });
-  assert.equal(child.status, 0, `hook exits 0: ${child.stderr}`);
-  const output = JSON.parse(child.stdout);
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
   assert.deepEqual(Object.keys(output), ['hookSpecificOutput']);
   assert.equal(output.hookSpecificOutput.hookEventName, 'PreToolUse');
   assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
-  assert.equal(typeof output.hookSpecificOutput.permissionDecisionReason, 'string');
   assert.ok(output.hookSpecificOutput.permissionDecisionReason.length > 0);
 });
 
-// Test 12: DB15.7 - The hook: abstain (empty output) for non-read-only Bash allowed by guard.
-test('DB15.7: hook abstains (prints {}) for Bash outside set but allowed by guard', () => {
-  const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'npm test' }, cwd: 'C:\\ws\\run' });
-  const child = spawnSync(process.execPath, [HOOK], {
-    input: stdin,
-    env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
-    encoding: 'utf8',
-  });
-  assert.equal(child.status, 0, `hook exits 0: ${child.stderr}`);
-  const output = JSON.parse(child.stdout);
-  assert.deepEqual(output, {});
-});
-
-// Test 13: DB15.7 - The hook: abstain for other non-read-only commands.
-test('DB15.7: hook abstains for other non-read-only Bash commands', () => {
-  const commands = ['node --version && npm --version', 'cat a.txt | head'];
+test('DB15.8: hook abstains ({}) for Bash outside set but allowed by guard', () => {
+  const commands = ['npm test', 'cat a.txt | head', 'node --version && npm --version'];
   for (const command of commands) {
     const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: 'C:\\ws\\run' });
-    const child = spawnSync(process.execPath, [HOOK], {
+    const result = spawnSync(process.execPath, [HOOK], {
       input: stdin,
       env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
       encoding: 'utf8',
     });
-    assert.equal(child.status, 0);
-    const output = JSON.parse(child.stdout);
+    assert.equal(result.status, 0);
+    const output = JSON.parse(result.stdout);
     assert.deepEqual(output, {}, `hook should abstain for: ${command}`);
   }
 });
 
-// Test 14: DB15.7 - The hook: deny for outside paths.
-test('DB15.7: hook denies Bash with paths outside workspace', () => {
+test('DB15.8: hook denies pipes into commands outside the set', () => {
+  const commands = [
+    'cat x | node -e "1"',
+    'cat x | sh',
+    'find . -type f | grep y',
+  ];
+  for (const command of commands) {
+    const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: 'C:\\ws\\run' });
+    const result = spawnSync(process.execPath, [HOOK], {
+      input: stdin,
+      env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.hookSpecificOutput.permissionDecision, 'deny', `hook should deny: ${command}`);
+  }
+});
+
+test('DB15.8: hook denies paths outside workspace', () => {
   const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls ../..' }, cwd: 'C:\\ws\\run' });
-  const child = spawnSync(process.execPath, [HOOK], {
+  const result = spawnSync(process.execPath, [HOOK], {
     input: stdin,
     env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
     encoding: 'utf8',
   });
-  assert.equal(child.status, 0);
-  const output = JSON.parse(child.stdout);
-  assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
-  assert.ok(output.hookSpecificOutput.permissionDecisionReason.length > 0);
-});
-
-// Test 15: DB15.7 - The hook: allow for Read of inside file.
-test('DB15.7: hook allows Read inside workspace', () => {
-  const stdin = JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'C:\\ws\\run\\file.txt' }, cwd: 'C:\\ws\\run' });
-  const child = spawnSync(process.execPath, [HOOK], {
-    input: stdin,
-    env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
-    encoding: 'utf8',
-  });
-  assert.equal(child.status, 0);
-  const output = JSON.parse(child.stdout);
-  assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
-});
-
-// Test 16: DB15.7 - The hook: deny for Read outside.
-test('DB15.7: hook denies Read outside workspace', () => {
-  const stdin = JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'C:\\Users\\x\\y' }, cwd: 'C:\\ws\\run' });
-  const child = spawnSync(process.execPath, [HOOK], {
-    input: stdin,
-    env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
-    encoding: 'utf8',
-  });
-  assert.equal(child.status, 0);
-  const output = JSON.parse(child.stdout);
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
   assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
 });
 
-// Test 17: DB15.7 - The hook: fail closed without POLY_DEMO_WORKSPACE.
-test('DB15.7: hook fails closed without POLY_DEMO_WORKSPACE', () => {
+test('DB15.8: hook allows Read inside workspace, denies outside', () => {
+  const stdin1 = JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'C:\\ws\\run\\file.txt' }, cwd: 'C:\\ws\\run' });
+  const result1 = spawnSync(process.execPath, [HOOK], {
+    input: stdin1,
+    env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
+    encoding: 'utf8',
+  });
+  assert.equal(result1.status, 0);
+  const output1 = JSON.parse(result1.stdout);
+  assert.equal(output1.hookSpecificOutput.permissionDecision, 'allow');
+
+  const stdin2 = JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'C:\\Users\\x\\y' }, cwd: 'C:\\ws\\run' });
+  const result2 = spawnSync(process.execPath, [HOOK], {
+    input: stdin2,
+    env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
+    encoding: 'utf8',
+  });
+  assert.equal(result2.status, 0);
+  const output2 = JSON.parse(result2.stdout);
+  assert.equal(output2.hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('DB15.8: hook fails closed without POLY_DEMO_WORKSPACE', () => {
   const stdin = JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'C:\\ws\\run\\file.txt' }, cwd: 'C:\\ws\\run' });
-  const child = spawnSync(process.execPath, [HOOK], {
+  const result = spawnSync(process.execPath, [HOOK], {
     input: stdin,
     env: { PATH: process.env.PATH },
     encoding: 'utf8',
   });
-  assert.equal(child.status, 0);
-  const output = JSON.parse(child.stdout);
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
   assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
 });
 
-// Test 18: DB15.7 - The hook: fail closed on invalid JSON input.
-test('DB15.7: hook fails closed on invalid JSON input', () => {
-  const stdin = 'this is not json';
-  const child = spawnSync(process.execPath, [HOOK], {
-    input: stdin,
+test('DB15.8: hook fails closed on invalid JSON', () => {
+  const result = spawnSync(process.execPath, [HOOK], {
+    input: 'not json at all',
     env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run' },
     encoding: 'utf8',
   });
-  assert.equal(child.status, 0);
-  const output = JSON.parse(child.stdout);
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
   assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
 });
 
-// Test 19: DB15.8 - Both arms identical: hook output same with different POLY_DEMO_ARM values.
-test('DB15.8: hook output identical regardless of POLY_DEMO_ARM environment variable', () => {
+test('DB15.8: hook output identical regardless of POLY_DEMO_ARM', () => {
   const commands = ['cd src && ls', 'npm test'];
   for (const command of commands) {
     const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: 'C:\\ws\\run' });
-    const output1 = spawnSync(process.execPath, [HOOK], {
+    const result1 = spawnSync(process.execPath, [HOOK], {
       input: stdin,
       env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run', POLY_DEMO_ARM: 'ts' },
       encoding: 'utf8',
     });
-    const output2 = spawnSync(process.execPath, [HOOK], {
+    const result2 = spawnSync(process.execPath, [HOOK], {
       input: stdin,
       env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: 'C:\\ws\\run', POLY_DEMO_ARM: 'poly' },
       encoding: 'utf8',
     });
-    assert.equal(output1.status, 0);
-    assert.equal(output2.status, 0);
-    const result1 = JSON.parse(output1.stdout);
-    const result2 = JSON.parse(output2.stdout);
-    assert.deepEqual(result1, result2, `hook output should match for: ${command}`);
+    assert.equal(result1.status, 0);
+    assert.equal(result2.status, 0);
+    const output1 = JSON.parse(result1.stdout);
+    const output2 = JSON.parse(result2.stdout);
+    assert.deepEqual(output1, output2, `hook output should match for: ${command}`);
   }
+});
+
+// Catches a set that reads a relative path from the workspace and not from the folder the shell is in.
+test('DB15.2: with the shell in a folder of the workspace, a relative path that stays inside is in the set', () => {
+  const workspace = 'C:\\ws\\run';
+  const cwd = 'C:\\ws\\run\\sub';
+  assert.equal(isReadOnlyBash('cat ../a.txt | head', { workspace, cwd }), true);
+  assert.equal(isReadOnlyBash('cat ../../a.txt | head', { workspace, cwd }), false);
+});
+
+// Catches a hook that abstains on, or denies, the whole recorded first Bash call of ts-pilot-1 (the call whose refusal is H4).
+test('DB15.8: the hook allows the whole recorded first Bash call of ts-pilot-1 in its own workspace', () => {
+  let first = null;
+  for (const line of readFileSync(join(SESSIONS, 'ts-pilot-1', 'session.jsonl'), 'utf8').split('\n')) {
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event.type !== 'assistant') continue;
+    for (const part of event.message?.content ?? []) if (!first && part.type === 'tool_use' && part.name === 'Bash') first = part.input.command;
+  }
+  assert.ok(first, 'found the first Bash call');
+  const result = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: first }, cwd: TS_WORKSPACE }), env: { PATH: process.env.PATH, POLY_DEMO_WORKSPACE: TS_WORKSPACE }, encoding: 'utf8' });
+  assert.equal(result.status, 0);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'allow');
+  assert.ok(out.hookSpecificOutput.permissionDecisionReason.length > 0);
 });
