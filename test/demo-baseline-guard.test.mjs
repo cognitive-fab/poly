@@ -776,3 +776,13 @@ test('DB11.15: auditEscapes follows the shell\'s folder from one Bash call to th
     assert.deepEqual(audit.calls.map((call) => call.tool), ['Read']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Catches a guard that takes file:// for a network address: it names a place on this machine (found by review after the first implementation).
+test('DB11.5: a file:// word is a path, not a network address', () => {
+  const workspace = 'C:\\ws\\run';
+  for (const command of ['cat file:///etc/passwd', 'cat file:///C:/Users/x/y', 'curl file://localhost/c/Users/x/y']) {
+    assert.equal(checkToolCall({ tool: 'Bash', input: { command }, workspace }).allow, false, command);
+  }
+  assert.deepEqual(checkToolCall({ tool: 'Bash', input: { command: 'cat file:///C:/ws/run/a.txt' }, workspace }), { allow: true });
+  assert.deepEqual(checkToolCall({ tool: 'Bash', input: { command: 'curl https://api.example.com/v1/x' }, workspace }), { allow: true });
+});

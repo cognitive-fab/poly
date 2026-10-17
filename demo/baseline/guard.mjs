@@ -37,7 +37,20 @@ function realPrefix(abs) {
   }
 }
 
-const resolveFrom = (base, p) => realPrefix(P.resolve(base, toNative(p)));
+/**
+ * Where a path leads from `base`. On Windows the system folds '..' by text before it looks at any link, so the text is resolved first. Elsewhere
+ * the kernel follows a link before it applies a '..' that comes after it, so each '..' is applied to the real path of what precedes it.
+ */
+function resolveFrom(base, p) {
+  const native = toNative(p);
+  if (WIN) return realPrefix(P.resolve(base, native));
+  let cur = P.isAbsolute(native) ? P.parse(native).root : base;
+  for (const segment of native.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    cur = segment === '..' ? P.dirname(realPrefix(cur)) : P.join(cur, segment);
+  }
+  return realPrefix(cur);
+}
 
 function inside(workspaceReal, abs) {
   const rel = P.relative(workspaceReal, abs);
@@ -54,7 +67,9 @@ function pathProblem(ctx, text, base = ctx.cwd) {
 }
 
 const HOME_WORD = /(?:^|[^\w])(?:~(?:[\\/]|$)|\$\{?HOME\}?|\$\{?USERPROFILE\}?|%USERPROFILE%)/i;
-const URL_WORD = /^[a-z][a-z0-9+.-]*:\/\//i;
+/** A network address. file:// is not one: it names a place on this machine and is read as a path. */
+const URL_WORD = /^(?!file:)[a-z][a-z0-9+.-]*:\/\//i;
+const FILE_URL = /^file:\/\/(?:localhost)?(\/.*)$/i;
 const PATH_LIKE = /[\\/]|^\.\.?$|^~|^[A-Za-z]:(?:[\\/]|$)/;
 /** An absolute path of two segments or more (/c/Users, /proc/self/environ, /etc/hosts), found inside quoted code or arguments: outside the workspace by definition. */
 const ROOT_IN_TEXT = /(?:^|[\s'"=(,])(\/(?:[a-zA-Z]|[\w.-]+)\/[^\s'"`)]*)/g;
@@ -111,6 +126,8 @@ function checkBash(ctx, command) {
       let value = text;
       const flag = /^(?:-{1,2}[\w-]+|[A-Za-z_]\w*)=(.*)$/s.exec(text);
       if (flag) value = flag[1];
+      const fileUrl = FILE_URL.exec(value);
+      if (fileUrl) value = fileUrl[1].replace(/^\/([A-Za-z]:)/, '$1');
       // One path per word: the word itself, after a flag= or a NAME= prefix.
       if (value && !URL_WORD.test(value) && PATH_LIKE.test(value) && !/\s/.test(value)) note(pathProblem({ ...ctx, cwd }, value, cwd));
       // Code and prose can hold paths too (node -e "...", a quoted argument): the places named inside any word.
@@ -176,6 +193,50 @@ function evaluate({ tool, input = {}, workspace, cwd }) {
 
   if (offending.length) return { verdict: deny(`${tool} names a place outside the workspace ${workspace}: ${offending.join(', ')}`, offending), cwd: ctx.cwd };
   return { verdict: { allow: true }, cwd: after };
+}
+
+/** The read-only commands of DB15, the same for both arms. `cd` is in the set because it only moves within the workspace. */
+export const READ_ONLY_BASH = ['ls', 'cat', 'head', 'tail', 'wc', 'pwd', 'cd'];
+
+/**
+ * Splits a command into its commands at `&&`, `;` and a newline, outside quotes. Returns null if the command holds anything else that a shell
+ * would act on: a pipe, a redirect, a substitution, a variable, a subshell, a background `&`, or `||`.
+ */
+function readOnlyParts(command) {
+  const parts = [''];
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      const stop = end < 0 ? command.length : end;
+      parts[parts.length - 1] += command.slice(i, stop + 1);
+      i = stop;
+    } else if (c === '"') {
+      let j = i + 1;
+      while (j < command.length && command[j] !== '"') {
+        if (command[j] === '$' || command[j] === '`') return null;
+        j++;
+      }
+      parts[parts.length - 1] += command.slice(i, j + 1);
+      i = j;
+    } else if (c === '&' && command[i + 1] === '&') { parts.push(''); i++; }
+    else if (c === ';' || c === '\n') parts.push('');
+    else if ('|&<>()$`'.includes(c)) return null;
+    else parts[parts.length - 1] += c;
+  }
+  return parts;
+}
+
+/**
+ * True if the whole command is in the read-only set of DB15: only ls, cat, head, tail, wc, pwd and cd, joined by `&&` or `;`, with every
+ * path inside the workspace. Whether Claude Code's permission mode would have allowed such a command depended on its shape (H4); this does not.
+ */
+export function isReadOnlyBash(command, { workspace, cwd } = {}) {
+  const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace, cwd });
+  if (!verdict.allow) return false;
+  const parts = readOnlyParts(command)?.map((p) => p.trim()).filter(Boolean);
+  if (!parts?.length) return false;
+  return parts.every((part) => READ_ONLY_BASH.includes(part.split(/\s+/)[0]));
 }
 
 /**

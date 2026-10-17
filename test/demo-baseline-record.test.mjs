@@ -514,3 +514,13 @@ test('DB13: preregister.mjs without --amend refuses once the record is committed
   assert.match(run.stderr, /never rewritten/);
   assert.equal(readFileSync(join(ROOT_DIR, RECORD), 'utf8'), before);
 });
+
+// Catches a preflight that does not compare the read-only Bash set with the one in the code (DB15 item 6).
+test('DB15: a record whose read-only Bash set differs from the code is refused, and the code\'s own set is accepted', () => {
+  const same = gitRepo({ amendments: [{ v: 1, amendment: 1, reason: 'test', findings: [], set: { pilots: { ts: 2, poly: 2 } }, excluded: [] }] });
+  const other = gitRepo({ amendments: [{ v: 1, amendment: 1, reason: 'test', findings: [], set: { readOnlyBash: ['ls', 'rm'] }, excluded: [] }] });
+  try {
+    assert.deepEqual(pre(same), []);
+    assert.match(pre(other).join('\n'), /read-only Bash set is not the recorded one/);
+  } finally { same.clean(); other.clean(); }
+});

@@ -17,7 +17,7 @@ import { homedir, tmpdir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { apiKeyProblems, armEnv, configProblems } from '../../experiments/m3/runner/isolation.mjs';
-import { ARMS, ALLOWED_TOOLS, BILLING, DISALLOWED_TOOLS, GUARD_FILE, HOOK_FILE, MAX_TURNS, MODEL, NETWORK, ROOT, TOOLS, WORK_DIR, armText, claudeArgs, hookSettings, listFiles, makeWorkspace, polyReferenceRecord, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
+import { ARMS, ALLOWED_TOOLS, BILLING, DISALLOWED_TOOLS, GUARD_FILE, HOOK_FILE, MAX_TURNS, READ_ONLY_BASH, MODEL, NETWORK, ROOT, TOOLS, WORK_DIR, armText, claudeArgs, hookSettings, listFiles, makeWorkspace, polyReferenceRecord, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
 import { auditEscapes } from './guard.mjs';
 import { smokeTest } from './smoke.mjs';
 
@@ -60,6 +60,7 @@ export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = {
     allowedTools: ALLOWED_TOOLS,
     disallowedTools: DISALLOWED_TOOLS,
     tools: TOOLS,
+    readOnlyBash: READ_ONLY_BASH,
     settings: { sha256: settingsDigest() },
     hook: hookDigest(),
     polyReference: reference ?? polyReferenceRecord(join(tmpdir(), `poly-demo-reference-${process.pid}`), root),
@@ -136,6 +137,7 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   if (record.capsUsd?.[arm] !== ARMS[arm].capUsd) out.push(`the recorded cap of the ${arm} arm is ${record.capsUsd?.[arm]}, not ${ARMS[arm].capUsd}`);
   if (!isDeepStrictEqual(record.allowedTools?.[arm], ALLOWED_TOOLS[arm])) out.push(`the tools of the ${arm} arm are not the recorded ones`);
   if (!isDeepStrictEqual(record.disallowedTools, DISALLOWED_TOOLS)) out.push('the disallowed tools are not the recorded ones');
+  if (!isDeepStrictEqual(record.readOnlyBash, READ_ONLY_BASH)) out.push('the read-only Bash set is not the recorded one');
   if (record.tools !== TOOLS) out.push(`the recorded tool set is ${record.tools}, not ${TOOLS}`);
   if (record.settings?.sha256 !== settingsDigest()) out.push('the hook settings are not the recorded ones');
   if (!isDeepStrictEqual(record.hook, hookDigest())) out.push('hook.mjs or guard.mjs is not the recorded one');

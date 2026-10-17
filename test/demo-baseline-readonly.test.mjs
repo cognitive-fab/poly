@@ -120,7 +120,8 @@ test('DB15.4: isReadOnlyBash and checkToolCall both deny outside paths from cwd'
 
 // Test 8: DB15.5 - isReadOnlyBash throws for relative workspace.
 test('DB15.5: isReadOnlyBash throws for relative workspace', () => {
-  assert.throws(() => isReadOnlyBash('ls', { workspace: 'relative/path' }));
+  // The error must be about the workspace, so an unrelated failure (a TypeError, say) does not pass.
+  assert.throws(() => isReadOnlyBash('ls', { workspace: 'relative/path' }), (e) => e instanceof Error && !(e instanceof TypeError) && /absolute path/i.test(e.message));
 });
 
 // Test 9: DB15.6 - Recorded replay: ts-pilot-1 first Bash command.
@@ -141,7 +142,9 @@ test('DB15.6: ts-pilot-1 first Bash command: prefix in set, whole command outsid
     if (firstBashCommand) break;
   }
   assert.ok(firstBashCommand, 'first Bash command found');
-  const endOfPrefix = firstBashCommand.indexOf('&& ls -la') + '&& ls -la'.length;
+  const marker = firstBashCommand.indexOf('&& ls -la');
+  assert.ok(marker >= 0, 'the recorded first Bash call holds the segment && ls -la');
+  const endOfPrefix = marker + '&& ls -la'.length;
   const prefix = firstBashCommand.substring(0, endOfPrefix);
   assert.equal(isReadOnlyBash(prefix, { workspace: TS_WORKSPACE }), true, `prefix should be in set: ${prefix}`);
   assert.equal(isReadOnlyBash(firstBashCommand, { workspace: TS_WORKSPACE }), false, `whole command should be outside: ${firstBashCommand}`);

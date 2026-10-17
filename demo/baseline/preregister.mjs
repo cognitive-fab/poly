@@ -7,7 +7,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DISALLOWED_TOOLS, ROOT, TOOLS } from './arms.mjs';
+import { DISALLOWED_TOOLS, READ_ONLY_BASH, ROOT, TOOLS } from './arms.mjs';
 import { IMMUTABLE_KEYS, RECORD, amendmentFile, buildRecord, effectiveRecord } from './procedure.mjs';
 
 const flag = (name) => { const i = process.argv.indexOf(`--${name}`); return i < 0 ? null : process.argv[i + 1]; };
@@ -19,9 +19,16 @@ const FINDINGS = {
   H1: 'The poly workspace held its packages in node_modules without declaring them in package.json, and typescript was missing, so npm run poly check failed before the agent changed anything and the allowed npm install pruned all eight packages.',
   H2: 'Read, Glob and Grep reached outside the workspace (the owner\'s home, the owner\'s own checkout, the global npm folder and the other arm\'s run), read-only Bash reached outside too, and the Agent tool was used although it is in neither tool list.',
   H3: 'RECORD.json said stopped: success for a run that wrote no file of its own. That field is the agent\'s result subtype, not a task outcome.',
+  H4: 'Bash permission depended on the shape of a command. The first Bash call of ts-pilot-1 (a cd into the workspace, ls, cat piped to head, node --version, npm --version) was denied command by command under dontAsk, and the agent took Bash to be blocked and never ran its tests.',
 };
+/** What the record cannot show (DB14, DB11 item 6, DB15). */
+const LIMITS = [
+  'The guard sees tool inputs, not what an agent\'s own program does at run time.',
+  'The hook and the audit were tested on the recorded inputs of both pilots and by child process, and have not been seen to run inside the live agent until a pilot has run under this amendment.',
+  'The turn limit is recorded as a setting; whether the agent enforces it is shown by the first pilot.',
+];
 const EXCLUDED = [
-  { arm: 'ts', run: 'pilot-1', findings: ['H3'], note: 'Excluded from results as a finding of the harness. RECORD.json called the run a success, and the agent wrote its files but never ran its tests, because its first Bash call was denied and it took Bash to be blocked (observation O1, not changed by this amendment).' },
+  { arm: 'ts', run: 'pilot-1', findings: ['H3', 'H4'], note: 'Excluded from results as a finding of the harness. RECORD.json called the run a success (H3), and the agent wrote its files but never ran its tests, because its first Bash call was denied by the shape of the command and it took Bash to be blocked (H4).' },
   { arm: 'poly', run: 'pilot-1', findings: ['H1', 'H2', 'H3'], note: 'Excluded from results as a finding of the harness. The toolchain was broken by the harness before the agent acted, the agent left the workspace, and the record called the run a success.' },
 ];
 
@@ -40,14 +47,15 @@ function amendment(n) {
   return {
     v: 1,
     amendment: n,
-    reason: 'The two pilots showed three faults of the harness (H1 to H3). This amendment records the rules that remove them (DB10 to DB13): a declared toolchain, a hook that confines every tool call to the workspace, disallowed tools, and a record that says what happened. The prompt, the arm texts, the cleaned reference, the model, the agent, the caps and the turn limit are unchanged. One new pilot per arm is allowed.',
+    reason: 'The two pilots showed four faults of the harness (H1 to H4). This amendment records the rules that remove them (DB10 to DB15): a declared toolchain, a hook that confines every tool call to the workspace, disallowed tools, a record that says what happened, and one read-only set of Bash commands for both arms. The prompt, the arm texts, the cleaned reference, the model, the agent, the caps and the turn limit are unchanged. One new pilot per arm is allowed.',
     findings: FINDINGS,
-    observations: { O1: 'In ts-pilot-1 the first Bash call (cd into the workspace and ls) was denied by the permission mode, and the agent never tried npm test. The tool lists are not changed by this amendment; the reviewer may rule on whether a read-only command should be allowed.' },
+    limits: LIMITS,
     keeps: Object.fromEntries(IMMUTABLE_KEYS.map((k) => [k, eff.record[k]])),
     set: {
       allowedTools: now.allowedTools,
       disallowedTools: DISALLOWED_TOOLS,
       tools: TOOLS,
+      readOnlyBash: READ_ONLY_BASH,
       settings: now.settings,
       hook: now.hook,
       scaffolds: now.scaffolds,
@@ -65,7 +73,7 @@ if (n !== null) {
   console.log(JSON.stringify(record, (k, v) => (k === 'allowedTools' ? '(see arms.mjs)' : v), 2));
   console.log(`\nWritten to ${file}. Read it, then commit it before any run that it governs:\n`);
   console.log(`  git add ${file}`);
-  console.log(`  git commit -m "Baseline pre-registration amendment ${n}: harness findings H1 to H3, the hook and the declared toolchain, one new pilot per arm"`);
+  console.log(`  git commit -m "Baseline pre-registration amendment ${n}: harness findings H1 to H4, the hook, the declared toolchain and the read-only Bash set, one new pilot per arm"`);
 } else {
   // The record is never rewritten once it is committed (DB13): a change is an amendment.
   if (git(['log', '--diff-filter=A', '--format=%H', '--', RECORD]) !== '') {
