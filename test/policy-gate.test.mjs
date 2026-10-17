@@ -59,7 +59,10 @@ test('AC4: an irreversible effect of a cancelled order is denied; after a reserv
     await rt.worker.tick();
     assert.ok((await verdicts(rt, 'r2')).some((b) => b.outcome === 'allowed'), 'the charge is allowed once stock was reserved in the scope');
     // S146: one session for the scope, its sequence strictly increasing over proposals and settles.
-    const seqs = (await Promise.all(['c1', 'r1', 'r2'].map((id) => verdicts(rt, id)))).flat().filter((b) => b.sseq).map((b) => b.sseq).sort((x, y) => x - y);
+    const perMachine = await Promise.all(['c1', 'r1', 'r2'].map(async (id) => (await verdicts(rt, id)).filter((b) => b.sseq).map((b) => b.sseq)));
+    // Within a machine's chain the sequence only rises, and across the scope no number repeats.
+    for (const own of perMachine) assert.deepEqual(own, [...own].sort((x, y) => x - y), 'a chain\'s sequence rises');
+    const seqs = perMachine.flat().sort((x, y) => x - y);
     assert.deepEqual(seqs, [...new Set(seqs)]);
     assert.ok(seqs.length >= 4, 'proposals and settles each take a sequence number');
   } finally { await rt.close(); }
