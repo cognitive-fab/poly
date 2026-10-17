@@ -1,0 +1,15 @@
+// expect: PL6304 (the effect reaches outside the program with egress:external and states no class)
+module errors
+
+machine M {
+  state { n : 0..1 = 0 }
+  action Ping()
+  action Pinged()
+  on Ping { require n == 0 else reject "pinged"  n' = 1  emit ping() }
+  on Pinged { n' = 1 }
+  effect ping() {
+    kind "net.ping"
+    labels { egress:external }
+    ok -> Pinged()
+  }
+}
