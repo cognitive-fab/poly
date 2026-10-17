@@ -75,6 +75,6 @@ test('the real worker refuses to revive a dead intent after polyrun\'s DLQ retry
 });
 
 test('a worker source that names an action the machine does not have is PL2401', async () => {
-  assert.deepEqual(workerActions(readFileSync(WORKER_SOURCE, 'utf8')), ['Approve', 'EscalationTimeout', 'GateAllow', 'GateDeny', 'GateEscalate', 'HandlerFailed', 'HandlerFailedPermanent', 'HandlerOk', 'Propose', 'Recheck', 'SettleFailed', 'SettleOk', 'Start']);
+  assert.deepEqual(workerActions(readFileSync(WORKER_SOURCE, 'utf8')), ['Approve', 'EscalationTimeout', 'GateAllow', 'GateDeny', 'GateEscalate', 'HandlerFailed', 'HandlerFailedPermanent', 'HandlerOk', 'Propose', 'Recheck', 'SettleFailed', 'SettleOk', 'Start', 'WindowLapsed']);
   assert.deepEqual(workerActions("await this.transition(row, 'Retry')"), ['Retry']);
 });

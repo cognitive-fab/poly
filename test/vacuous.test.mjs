@@ -96,6 +96,7 @@ machine M {
   effect ship(n: 0..1) {
     kind "w.ship"
     labels { egress:external }
+    class reversible
   }
 }
 `;

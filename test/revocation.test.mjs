@@ -115,8 +115,11 @@ test('PD5-A8: Restore succeeds with a person\'s signature, and is refused with a
   await restoreNeedsAPerson('restore', 'conformance/m5/trust.poly');
 });
 
+/** The refund example with its refund retried, which the retry-safety rule allows once the refund is keyed (G2): the stale-allow recheck is made on the retry. */
+const retryingRefund = (name) => mutantFile(`${name}-refund`, 'refund.poly', read('conformance/m5/refund.poly').replace('    retry { attempts 1, base 500ms, timeout 30s }', '    retry { attempts 3, base 500ms, timeout 30s }\n    idempotent header "Idempotency-Key" window 24h'));
+
 async function revocationStops(name, trust) {
-  const a = await admitted(name, ['conformance/m5/refund.poly', trust, 'conformance/m5/halt.policy.poly']);
+  const a = await admitted(name, [retryingRefund(name), trust, 'conformance/m5/halt.policy.poly']);
   // The recorded verifier adapter: a credential names the claims it stands for; a person's signature goes to the
   // person-key adapter (S107).
   const recorded = { ann: { kind: 'Person', attest: 'Verified', assurance: 3, principal: 'ann' }, bob: { kind: 'Person', attest: 'Verified', assurance: 3, principal: 'bob' } };

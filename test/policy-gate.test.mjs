@@ -5,7 +5,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { polyaxionPeer, LoadError, load } from '@poly/runtime';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { admitted, loaded, handleWith } from './runtime-helpers.mjs';
+import { ROOT } from './helpers.mjs';
 
 const peer = polyaxionPeer();
 const skip = peer.ok ? false : `not run: ${peer.reason}`;
@@ -76,8 +79,17 @@ test('PT9: a build with policies takes no other gate, and does not load without 
   }
 });
 
+/** The shop with its charge retried, which the retry-safety rule allows once the charge is keyed (G2): the stale-allow recheck is made on the retry. */
+function retryingShop(name) {
+  const dir = join(ROOT, '.poly', 'test-controls', name);
+  mkdirSync(dir, { recursive: true });
+  const text = readFileSync(join(ROOT, 'conformance/m5/shop.poly'), 'utf8').replace('    retry { attempts 1, base 10ms, timeout 1s }', '    retry { attempts 3, base 10ms, timeout 1s }\n    idempotent header "Idempotency-Key" window 1h');
+  writeFileSync(join(dir, 'shop.poly'), text);
+  return `.poly/test-controls/${name}/shop.poly`;
+}
+
 test('S147: an allow that read a singleton is not acted on once the singleton moved; the recheck is a new proposal', { skip }, async () => {
-  const a = await admitted('s147', ['conformance/m5/switch.poly', 'conformance/m5/shop.poly', 'conformance/m5/shop.policy.poly']);
+  const a = await admitted('s147', ['conformance/m5/switch.poly', retryingShop('s147-shop'), 'conformance/m5/shop.policy.poly']);
   const { rt, clock } = await loaded(a);
   try {
     let calls = 0;

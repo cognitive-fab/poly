@@ -10,8 +10,11 @@ import { build, ROOT } from './helpers.mjs';
 test('every effect of the effects conformance source has its maxAttempts, the default where none is written', () => {
   const [{ dir }] = build(join(ROOT, 'conformance', 'm1', 'effects.poly'), 'retry-default');
   const manifest = JSON.parse(readFileSync(join(dir, 'effects.manifest.json'), 'utf8'));
+  // The two irreversible sends write `retry { attempts 1 }` themselves (the retry-safety rule, f8f05588); every other effect writes none and takes the default.
+  const written = { 'mail.receipt': 1, 'mail.notice': 1 };
   for (const [kind, entry] of Object.entries(manifest.effects)) {
     assert.ok(Number.isInteger(entry.retry?.maxAttempts), kind);
-    assert.deepEqual(entry.retry, { maxAttempts: 5, baseMs: 500, timeoutMs: 30000 }, kind);
+    assert.deepEqual(entry.retry, { maxAttempts: written[kind] ?? 5, baseMs: 500, timeoutMs: 30000 }, kind);
   }
+  assert.deepEqual(Object.keys(written).filter((kind) => !(kind in manifest.effects)), [], 'the effects named as written are in the source');
 });

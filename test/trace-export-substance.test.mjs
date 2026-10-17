@@ -149,7 +149,7 @@ test('PS19.5: an erased body leaves its steps out, marks the run gapped, counts 
   assert.ok(!bytes.includes(digest1) && !bytes.includes(digest1.replace('sha256:', '')), 'no digest of the erased body');
 });
 
-test('PS19.2, PT29.6: an effect exports its declared class as its consequence, and unknown when it declares none, counted in the header', async () => {
+test('PS19.2, PT29.6: an effect exports its declared class as its consequence, counted in the header (a classless egress effect is refused since PL6304, so none here is unknown)', async () => {
   const b = await admitted('trace-effects', ['conformance/m1/effects.poly']);
   writeFileSync(join(b.dir, 'admission.pub'), b.key.publicKey);
   const store = join(tmp, 'effects.db');
@@ -167,9 +167,10 @@ test('PS19.2, PT29.6: an effect exports its declared class as its consequence, a
   assert.deepEqual(byKind, {
     'billing.invoice': ['compensable', ['write:store']],
     'billing.perk': ['reversible', ['write:store']],
-    'mail.receipt': ['unknown', ['egress:external']],
-    'mail.notice': ['unknown', ['egress:external']],
+    'mail.receipt': ['irreversible', ['egress:external']],
+    'mail.notice': ['irreversible', ['egress:external']],
   });
-  assert.equal(header.unknown.consequence, 2);
+  // The source gave its two sends a class (f8f05588), so no effect of it exports an unknown consequence any more.
+  assert.equal(header.unknown.consequence, 0);
   assert.ok(ep.steps.every((s) => s.effects.every((e) => e.gate === null)), 'a build with no policy gate has no gate decision');
 });
