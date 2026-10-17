@@ -7,7 +7,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ACCEPT_TEST_ANCHORS, ROOT } from './helpers.mjs';
@@ -149,28 +149,62 @@ test('PS19.5: an erased body leaves its steps out, marks the run gapped, counts 
   assert.ok(!bytes.includes(digest1) && !bytes.includes(digest1.replace('sha256:', '')), 'no digest of the erased body');
 });
 
-test('PS19.2, PT29.6: an effect exports its declared class as its consequence, counted in the header (a classless egress effect is refused since PL6304, so none here is unknown)', async () => {
-  const b = await admitted('trace-effects', ['conformance/m1/effects.poly']);
+/** Runs the effects program (admitted from `files`) through Bill and Notify, exports the traces, and returns the header and the consequence and labels of each effect kind. */
+async function effectsExport(name, files) {
+  const b = await admitted(name, files);
   writeFileSync(join(b.dir, 'admission.pub'), b.key.publicKey);
-  const store = join(tmp, 'effects.db');
+  const store = join(tmp, `${name}.db`);
   const { rt } = await loaded(b, { store: { sqlite: store } });
   try {
     await rt.create('effects.Account', { id: 'acc' });
     await rt.dispatch('acc', 'Bill', { tier: 'Gold' });
     await rt.dispatch('acc', 'Notify', {});
   } finally { await rt.close(); }
-  const out = join(tmp, 'effects.ndjson');
+  const out = join(tmp, `${name}.ndjson`);
   const r = poly('export', 'traces', '--db', store, '--build', b.build, '--certificate', b.certificate, '--trust', `${b.key.id}=${join(b.dir, 'admission.pub')}`, '--out', out);
   assert.equal(r.code, 0, r.out);
   const [header, ep] = readFileSync(out, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  const byKind = Object.fromEntries(ep.steps.flatMap((s) => s.effects).map((e) => [e.kind, [e.consequence, e.labels]]));
+  return { header, ep, byKind: Object.fromEntries(ep.steps.flatMap((s) => s.effects).map((e) => [e.kind, [e.consequence, e.labels]])) };
+}
+
+test('PS19.2, PT29.6: an effect exports its declared class as its consequence, counted in the header', async () => {
+  const { header, ep, byKind } = await effectsExport('trace-effects', ['conformance/m1/effects.poly']);
   assert.deepEqual(byKind, {
     'billing.invoice': ['compensable', ['write:store']],
     'billing.perk': ['reversible', ['write:store']],
     'mail.receipt': ['irreversible', ['egress:external']],
     'mail.notice': ['irreversible', ['egress:external']],
   });
-  // The source gave its two sends a class (f8f05588), so no effect of it exports an unknown consequence any more.
+  // The shared source gave its two sends a class (f8f05588), so none of its effects exports an unknown consequence; the unknown path has its own test below.
   assert.equal(header.unknown.consequence, 0);
   assert.ok(ep.steps.every((s) => s.effects.every((e) => e.gate === null)), 'a build with no policy gate has no gate decision');
+});
+
+/**
+ * The shared effects source with its two sends made classless: a classless effect that reaches outside is refused (PL6304), so they write to the store
+ * instead, are retried three times and are keyed. Neither is irreversible, so the retry-safety rule has nothing to say, and each has no declared class.
+ */
+function classlessEffects(name) {
+  const dir = join(ROOT, '.poly', 'test-controls', name);
+  mkdirSync(dir, { recursive: true });
+  const send = (kind) => new RegExp(`(  effect \\w+\\([^)]*\\) \\{\\n    kind "${kind}"\\n)    labels \\{ egress:external \\}\\n    class irreversible\\n    retry \\{ attempts 1, base 500ms, timeout 30s \\}\\n`);
+  let text = readFileSync(join(ROOT, 'conformance', 'm1', 'effects.poly'), 'utf8');
+  for (const kind of ['mail.receipt', 'mail.notice']) {
+    assert.match(text, send(kind), `the shared source still declares ${kind} as an irreversible send`);
+    text = text.replace(send(kind), (_, head) => `${head}    labels { write:store }\n    retry { attempts 3, base 500ms, timeout 30s }\n    idempotent header "Idempotency-Key" window 24h\n`);
+  }
+  writeFileSync(join(dir, 'effects.poly'), text);
+  return `.poly/test-controls/${name}/effects.poly`;
+}
+
+test('PS19.2, PT29.6: an effect that declares no class exports the unknown consequence, counted in the header', async () => {
+  const { header, byKind } = await effectsExport('trace-effects-unknown', [classlessEffects('trace-unknown')]);
+  // The precondition: the unknown path is reached. Were the fixture to give its effects a class, or the export to drop the field, this fails.
+  assert.deepEqual(byKind, {
+    'billing.invoice': ['compensable', ['write:store']],
+    'billing.perk': ['reversible', ['write:store']],
+    'mail.receipt': ['unknown', ['write:store']],
+    'mail.notice': ['unknown', ['write:store']],
+  });
+  assert.equal(header.unknown.consequence, 2);
 });
