@@ -26,6 +26,7 @@ const LIMITS = [
   'The guard sees tool inputs, not what an agent\'s own program does at run time.',
   'The hook and the audit were tested on the recorded inputs of both pilots and by child process, and have not been seen to run inside the live agent until a pilot has run under this amendment.',
   'The turn limit is recorded as a setting; whether the agent enforces it is shown by the first pilot.',
+  'The guard applies each .. after a link to the real path of what precedes it on systems that follow links first. That ordering is not tested on Windows, which is the run platform, where the system folds .. by text before it looks at a link.',
 ];
 const EXCLUDED = [
   { arm: 'ts', run: 'pilot-1', findings: ['H3', 'H4'], note: 'Excluded from results as a finding of the harness. RECORD.json called the run a success (H3), and the agent wrote its files but never ran its tests, because its first Bash call was denied by the shape of the command and it took Bash to be blocked (H4).' },
