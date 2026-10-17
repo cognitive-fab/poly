@@ -73,6 +73,7 @@ machine Payment {
   effect authorizeCard(amount: 1..2) {
     kind "card.authorize"
     labels { egress:external }
+    class reversible
     retry { attempts 1, base 100ms, timeout 5s }
     ok -> Approved()
     failed -> Declined()
