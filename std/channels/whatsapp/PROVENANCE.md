@@ -16,6 +16,7 @@ The rules of `std/channels/whatsapp.poly` were taken from the WhatsApp Cloud API
 | Constant | Source |
 |---|---|
 | `24h`, the window's length | the first and third rows above |
+| `500ms` and `30s`, the base and the timeout in `retry { attempts 1, base 500ms, timeout 30s }` | poly's own (221b5840, PS23.4 G1): the send is at most once, so no retry follows a lost answer and the base is never waited. Both are the runtime's defaults, written out, so only the bound changed. |
 
 ## poly's own rules
 

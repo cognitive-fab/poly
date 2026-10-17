@@ -9,16 +9,14 @@ The rules of `std/channels/webhook.poly` were taken from the Standard Webhooks s
 | `no-delivery-while-disabled` (never) | https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md | "In some cases, webhook delivery may fail consistently over a long period of time. In that scenario it is important to both: notify the consumers using other channels (e.g. email), and is recommended to disable future delivery to the endpoint." |
 | `disabled-only-after-failures` (step property) | https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md | The same passage: the endpoint is disabled because its deliveries fail consistently, and for no other reason. |
 | `Sent` and `Undelivered`, the send's completions, which reach the conversation at run time (PS15.4) | https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md | "A webhook delivery is considered successful if it was responded to with a `2xx` status code (status codes 200-299), and it is considered a failure in any other scenario." |
-| `retry` on the effect `send` | https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md | "retry delivery following a retry schedule spanning multiple days, with an exponential backoff." Its example schedule has ten attempts, the first retry after 5 seconds. "A recommended request timeout value for webhooks is somewhere between 15 and 30s." |
+| `retry` on the effect `send` | https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md | "retry delivery following a retry schedule spanning multiple days, with an exponential backoff." Its example schedule has ten attempts, the first retry after 5 seconds. "A recommended request timeout value for webhooks is somewhere between 15 and 30s." The module does not follow the schedule since 221b5840 (Q1): a delivery is sent once, because a repeated delivery may reach the receiver twice and the module does not say that the receiver deduplicates on the webhook-id. The schedule stays here as the provider's rule, not checked, for a later release that keys the delivery. |
 
 ## Constants
 
 | Constant | Source |
 |---|---|
-| `attempts 10` | the ten attempts of the example schedule |
-| `5s`, the base of the backoff | the first retry of the example schedule; polyrun's backoff doubles it, which approximates the schedule and does not reproduce it |
-| `15s`, the timeout of an attempt | the low end of the recommended 15 to 30 seconds |
-| three failed deliveries in a row disable the endpoint (`failures: 0..3`) | "fail consistently" is not a number in the source; three is poly's choice, each failure already after its ten attempts |
+| `500ms` and `30s`, the base and the timeout in `retry { attempts 1, base 500ms, timeout 30s }` | poly's own (221b5840, PS23.4 G1): the send is at most once, so no retry follows a lost answer and the base is never waited. Both are the runtime's defaults, written out, so only the bound changed. |
+| three failed deliveries in a row disable the endpoint (`failures: 0..3`) | "fail consistently" is not a number in the source; three is poly's choice, each failure already after its single attempt (221b5840) |
 
 ## poly's own rules
 

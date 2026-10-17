@@ -127,7 +127,7 @@ test('email: two recorded Mailgun bounces, of two different mails to one address
   } finally { await rt.close(); }
 });
 
-test('webhook: three deliveries the endpoint answers 503, each to the end of its retries, disable it; the next reply is refused, endpoint-disabled, and never delivered', { timeout: 300_000 }, async () => {
+test('webhook: three deliveries the endpoint answers 503, each sent once (221b5840: at most once), disable it; the next reply is refused, endpoint-disabled, and never delivered', { timeout: 300_000 }, async () => {
   const { rt, clock, conv, app } = await thread('ev-webhook', 'webhook', 'source', '"endpoint-disabled"', 'hook-1');
   try {
     const sent = [];
@@ -139,11 +139,12 @@ test('webhook: three deliveries the endpoint answers 503, each to the end of its
       assert.equal((await state(rt, conv)).slot, 'Free', `delivery ${d} settled`);
     }
     assert.deepEqual([(await state(rt, conv)).enabled, (await state(rt, conv)).failures], [false, 3]);
-    assert.equal(sent.length, 30, 'three deliveries of ten attempts each');
+    // The webhook is at most once since 221b5840: a delivery is one attempt, so three failed deliveries are three requests.
+    assert.equal(sent.length, 3, 'three deliveries of one attempt each');
     await rt.dispatch(conv, 'Reply', { body: await rt.putContent('{"n":3}') });
     await rt.advance();
     assert.deepEqual(await lastRejection(rt, app), ['endpoint-disabled']);
-    assert.equal(sent.length, 30, 'the refused reply is never delivered');
+    assert.equal(sent.length, 3, 'the refused reply is never delivered');
   } finally { await rt.close(); }
 });
 

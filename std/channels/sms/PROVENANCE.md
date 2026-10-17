@@ -21,7 +21,11 @@ Twilio keeps an opt-out per recipient number and sender. The conversation's `Inb
 
 ## Constants
 
-The module has no duration or numeric constant from the provider. The keyword lists are the adapter's: it classifies a message as `Plain`, `OptOut`, `OptIn` or `Help`, and the conversation reads only the class.
+The module has no duration or numeric constant from the provider, except the retry bound below, which is poly's own. The keyword lists are the adapter's: it classifies a message as `Plain`, `OptOut`, `OptIn` or `Help`, and the conversation reads only the class.
+
+| Constant | Source |
+|---|---|
+| `500ms` and `30s`, the base and the timeout in `retry { attempts 1, base 500ms, timeout 30s }` | poly's own (221b5840, PS23.4 G1): the send is at most once, so no retry follows a lost answer and the base is never waited. Both are the runtime's defaults, written out, so only the bound changed. |
 
 ## poly's own rules
 
