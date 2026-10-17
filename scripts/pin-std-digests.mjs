@@ -5,8 +5,11 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertNotExperimentTree } from './tree-guard.mjs';
 
 const STD = join(fileURLToPath(import.meta.url), '..', '..', 'std');
+// Like every script that writes under the repository, it refuses to run in a tree that is an experiment's (M4).
+assertNotExperimentTree(join(STD, '..'));
 const files = [];
 const walk = (dir) => {
   for (const name of readdirSync(dir).sort()) {
