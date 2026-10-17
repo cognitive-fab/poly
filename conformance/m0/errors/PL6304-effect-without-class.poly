@@ -1,4 +1,5 @@
 // expect: PL6304 (the effect reaches outside the program with egress:external and states no class)
+// scan: rule-input
 module errors
 
 machine M {
