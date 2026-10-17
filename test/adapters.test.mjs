@@ -5,8 +5,8 @@
 // it prints and runs AC5's script through them, with no model. The DeepSeek Harness half waits (S170).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join, delimiter } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join, delimiter, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { admit, commandNamed } from '@poly/check';
@@ -86,6 +86,21 @@ test('S167: the plugin passes the host\'s own validation, where the host is inst
   assert.match(r.output, /Validation passed/);
 });
 
+/**
+ * The `poly` a host would find on its PATH, taken from this repository and not from the machine: the workspace's own bin, node_modules/.bin/poly, which
+ * `npm install` links. If that link is missing (a checkout that was never installed), a folder with a poly command (a shell script and a .cmd) that runs
+ * packages/poly-check/dist/src/cli.js stands in for it, so the test does not depend on a global poly either.
+ */
+function polyOnPath(name) {
+  if (existsSync(join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'poly.cmd' : 'poly'))) return join(ROOT, 'node_modules', '.bin');
+  const bin = join(ROOT, '.poly', 'test-bin', name);
+  mkdirSync(bin, { recursive: true });
+  const cli = resolve(ROOT, 'packages', 'poly-check', 'dist', 'src', 'cli.js');
+  writeFileSync(join(bin, 'poly'), `#!/bin/sh\nexec node "${cli.split('\\').join('/')}" "$@"\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'poly.cmd'), `@node "${cli}" %*\r\n`);
+  return bin;
+}
+
 test('S170: the Claude Code entries poly install prints run the poly tools and AC5\'s workflow, launched exactly as printed', { timeout: 300_000 }, async (t) => {
   const project = join(ROOT, '.poly', `test-install-${process.pid}`);
   rmSync(project, { recursive: true, force: true });
@@ -113,7 +128,7 @@ test('S170: the Claude Code entries poly install prints run the poly tools and A
   assert.ok(file, JSON.stringify(o.result));
   const servers = JSON.parse(file.content).mcpServers;
   // The host resolves `poly` on its PATH; here it is the workspace's own bin.
-  const env = { ...process.env, PATH: `${join(ROOT, 'node_modules', '.bin')}${delimiter}${process.env.PATH}` };
+  const env = { ...process.env, PATH: `${polyOnPath(`install-${process.pid}`)}${delimiter}${join(ROOT, 'node_modules', '.bin')}${delimiter}${process.env.PATH}` };
   const launch = (s) => mcpClient(s.command, s.args, { cwd: project, env: { ...env, ...(s.env ?? {}) }, shell: process.platform === 'win32' });
   const poly = launch(servers.poly);
   try {
