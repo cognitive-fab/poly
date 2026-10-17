@@ -7,8 +7,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DISALLOWED_TOOLS, READ_ONLY_BASH, ROOT, TOOLS } from './arms.mjs';
-import { IMMUTABLE_KEYS, RECORD, amendmentFile, buildRecord, effectiveRecord } from './procedure.mjs';
+import { DISALLOWED_TOOLS, READ_ONLY_BASH, READ_ONLY_EXACT, ROOT, TOOLS } from './arms.mjs';
+import { IMMUTABLE_KEYS, RECORD, amendmentFile, buildRecord, effectiveRecord, totalCap } from './procedure.mjs';
 
 const flag = (name) => { const i = process.argv.indexOf(`--${name}`); return i < 0 ? null : process.argv[i + 1]; };
 const pilot = (name) => { const v = flag(`pilots-${name}`); return v === null ? 1 : Number(v); };
@@ -38,6 +38,7 @@ function amendment(n) {
   if (eff.problems.length) throw new Error(`the amendments so far are not fit:\n- ${eff.problems.join('\n- ')}`);
   if (eff.amendments.length !== n - 1) throw new Error(`amendment ${n} follows ${eff.amendments.length} amendment(s)`);
   if (existsSync(join(ROOT, amendmentFile(n)))) throw new Error(`${amendmentFile(n)} exists: an amendment is written once`);
+  const pilots = { ts: eff.record.pilots.ts + 1, poly: eff.record.pilots.poly + 1 };
   const now = buildRecord({ version: eff.record.claudeCode.version, pilots: eff.record.pilots });
   const excluded = EXCLUDED.map((e) => {
     const runFile = `demo/baseline/runs/${e.arm}-${e.run}/RECORD.json`;
@@ -51,16 +52,18 @@ function amendment(n) {
     reason: 'The two pilots showed four faults of the harness (H1 to H4). This amendment records the rules that remove them (DB10 to DB15): a declared toolchain, a hook that confines every tool call to the workspace, disallowed tools, a record that says what happened, and one read-only set of Bash commands for both arms. The prompt, the arm texts, the cleaned reference, the model, the agent, the caps and the turn limit are unchanged. One new pilot per arm is allowed.',
     findings: FINDINGS,
     limits: LIMITS,
-    keeps: Object.fromEntries(IMMUTABLE_KEYS.map((k) => [k, eff.record[k]])),
+    // The caps of the runs are kept (capsUsd is one of the nine), and so is the approved total they make with the pilots below: 150 USD.
+    keeps: { ...Object.fromEntries(IMMUTABLE_KEYS.map((k) => [k, eff.record[k]])), totalCapUsd: totalCap(pilots) },
     set: {
       allowedTools: now.allowedTools,
       disallowedTools: DISALLOWED_TOOLS,
       tools: TOOLS,
       readOnlyBash: READ_ONLY_BASH,
+      readOnlyExact: READ_ONLY_EXACT,
       settings: now.settings,
       hook: now.hook,
       scaffolds: now.scaffolds,
-      pilots: { ts: eff.record.pilots.ts + 1, poly: eff.record.pilots.poly + 1 },
+      pilots,
     },
     excluded,
   };

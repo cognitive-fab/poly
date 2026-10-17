@@ -17,7 +17,7 @@ import { homedir, tmpdir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { apiKeyProblems, armEnv, configProblems } from '../../experiments/m3/runner/isolation.mjs';
-import { ARMS, ALLOWED_TOOLS, BILLING, DISALLOWED_TOOLS, GUARD_FILE, HOOK_FILE, MAX_TURNS, READ_ONLY_BASH, MODEL, NETWORK, ROOT, TOOLS, WORK_DIR, armText, claudeArgs, hookSettings, listFiles, makeWorkspace, polyReferenceRecord, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
+import { ARMS, ALLOWED_TOOLS, BILLING, DISALLOWED_TOOLS, GUARD_FILE, HOOK_FILE, MAX_TURNS, READ_ONLY_BASH, READ_ONLY_EXACT, MODEL, NETWORK, ROOT, TOOLS, WORK_DIR, armText, claudeArgs, hookSettings, listFiles, makeWorkspace, polyReferenceRecord, promptText, scaffoldDigest, sha256, treeDigest } from './arms.mjs';
 import { auditEscapes } from './guard.mjs';
 import { smokeTest } from './smoke.mjs';
 
@@ -35,7 +35,7 @@ const git = (root, args) => execFileSync('git', ['-C', root, ...args], { encodin
 const claudeVersion = (bin = 'claude') => /(\d+\.\d+\.\d+)/.exec(execFileSync(bin, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))?.[1] ?? null;
 
 /** The most the baseline can cost: every pilot and every kept run at its arm's cap. */
-const totalCap = (pilots) => Object.entries(ARMS).reduce((sum, [arm, a]) => sum + (pilots[arm] + 1) * a.capUsd, 0);
+export const totalCap = (pilots) => Object.entries(ARMS).reduce((sum, [arm, a]) => sum + (pilots[arm] + 1) * a.capUsd, 0);
 
 /** The settings that install the hook, with the path left out: the same on every machine, so the record can hash it. */
 export const settingsDigest = () => sha256(JSON.stringify(hookSettings('<hook>')));
@@ -61,6 +61,7 @@ export function buildRecord({ root = ROOT, version = claudeVersion(), pilots = {
     disallowedTools: DISALLOWED_TOOLS,
     tools: TOOLS,
     readOnlyBash: READ_ONLY_BASH,
+    readOnlyExact: READ_ONLY_EXACT,
     settings: { sha256: settingsDigest() },
     hook: hookDigest(),
     polyReference: reference ?? polyReferenceRecord(join(tmpdir(), `poly-demo-reference-${process.pid}`), root),
@@ -99,14 +100,15 @@ export function effectiveRecord({ root = ROOT, git: g = (args) => git(root, args
     }
     if (am.amendment !== n) problems.push(`${rel} declares amendment ${am.amendment}, not ${n}`);
     for (const key of IMMUTABLE_KEYS) if (am.set && key in am.set) problems.push(`amendment ${n} sets ${key}, which no amendment may change`);
+    record = { ...record, ...(am.set ?? {}) };
+    // The total of the caps follows the pilots the amendment allows, so an amendment that raises the pilots does not leave it behind.
+    if (record.pilots) record = { ...record, totalCapUsd: totalCap(record.pilots) };
+    // What an amendment keeps is read against the record as it leaves it (DB13 item 3): for the keys it cannot set, the record before it.
     for (const [key, value] of Object.entries(am.keeps ?? {})) {
       if (!isDeepStrictEqual(value, record[key])) problems.push(`amendment ${n} keeps ${key} as ${JSON.stringify(value)}, but the record has ${JSON.stringify(record[key])}`);
     }
-    record = { ...record, ...(am.set ?? {}) };
     excluded = [...excluded, ...(am.excluded ?? [])];
   }
-  // The total of the caps follows the pilots the amendments allow, so an amendment that raises the pilots does not leave it behind.
-  if (amendments.length && record.pilots) record = { ...record, totalCapUsd: totalCap(record.pilots) };
   return { record: { ...record, excluded }, base, amendments, problems };
 }
 
@@ -137,7 +139,7 @@ export function preflight({ arm, run, root = ROOT, env = process.env, configDir 
   if (record.capsUsd?.[arm] !== ARMS[arm].capUsd) out.push(`the recorded cap of the ${arm} arm is ${record.capsUsd?.[arm]}, not ${ARMS[arm].capUsd}`);
   if (!isDeepStrictEqual(record.allowedTools?.[arm], ALLOWED_TOOLS[arm])) out.push(`the tools of the ${arm} arm are not the recorded ones`);
   if (!isDeepStrictEqual(record.disallowedTools, DISALLOWED_TOOLS)) out.push('the disallowed tools are not the recorded ones');
-  if (!isDeepStrictEqual(record.readOnlyBash, READ_ONLY_BASH)) out.push('the read-only Bash set is not the recorded one');
+  if (!isDeepStrictEqual(record.readOnlyBash, READ_ONLY_BASH) || !isDeepStrictEqual(record.readOnlyExact, READ_ONLY_EXACT)) out.push('the read-only Bash set is not the recorded one');
   if (record.tools !== TOOLS) out.push(`the recorded tool set is ${record.tools}, not ${TOOLS}`);
   if (record.settings?.sha256 !== settingsDigest()) out.push('the hook settings are not the recorded ones');
   if (!isDeepStrictEqual(record.hook, hookDigest())) out.push('hook.mjs or guard.mjs is not the recorded one');

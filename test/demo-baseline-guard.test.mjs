@@ -674,6 +674,8 @@ function expectedDenied(call, workspace) {
   if (call.tool === 'Agent') return true;
   // A Bash word that is '..' (or starts with '../') names the folder above the workspace.
   if (call.tool === 'Bash' && /(^|[\s"'=;&|(<>])\.\.([\s/\\"';&|)]|$)/.test(call.input.command ?? '')) return true;
+  // A pipe into a command outside the read-only set is refused (DB15 item 1): in the recorded session, the one that pipes find into grep.
+  if (call.tool === 'Bash' && /\|\s*grep\b/.test(call.input.command ?? '')) return true;
   const text = flat(JSON.stringify(call.input));
   const own = flat(workspace);
   const ownShort = own.replace('c:/', '/c/');

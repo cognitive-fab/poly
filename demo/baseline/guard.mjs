@@ -185,58 +185,87 @@ function evaluate({ tool, input = {}, workspace, cwd }) {
     if (prefix) note(pathProblem(ctx, prefix, base));
   }
   let after = ctx.cwd;
+  let sinks = [];
   if (tool === 'Bash' && typeof input.command === 'string') {
     const bash = checkBash(ctx, input.command);
     offending.push(...bash.offending);
     after = bash.cwd;
+    // DB15 item 1: a pipe into a command outside the read-only set is refused, whatever is on its left.
+    sinks = pipeSinksOutsideSet(input.command);
   }
 
-  if (offending.length) return { verdict: deny(`${tool} names a place outside the workspace ${workspace}: ${offending.join(', ')}`, offending), cwd: ctx.cwd };
+  if (offending.length || sinks.length) {
+    const reasons = [];
+    if (offending.length) reasons.push(`${tool} names a place outside the workspace ${workspace}: ${offending.join(', ')}`);
+    if (sinks.length) reasons.push(`${tool} pipes into ${sinks.join(', ')}, which is outside the read-only set`);
+    return { verdict: deny(reasons.join('; '), [...offending, ...sinks]), cwd: ctx.cwd };
+  }
   return { verdict: { allow: true }, cwd: after };
 }
 
 /** The read-only commands of DB15, the same for both arms. `cd` is in the set because it only moves within the workspace. */
 export const READ_ONLY_BASH = ['ls', 'cat', 'head', 'tail', 'wc', 'pwd', 'cd'];
+/** Whole commands that are in the set as they are written, with no other word (spaces between their words do not matter). */
+export const READ_ONLY_EXACT = ['node --version', 'npm --version', 'npx tsc --version'];
+
+/** Whether one command (no `&&`, `;` or `|` in it) is a command of the set. */
+function inSet(command) {
+  const text = command.trim().replace(/\s+/g, ' ');
+  return text !== '' && (READ_ONLY_EXACT.includes(text) || READ_ONLY_BASH.includes(text.split(' ')[0]));
+}
 
 /**
- * Splits a command into its commands at `&&`, `;` and a newline, outside quotes. Returns null if the command holds anything else that a shell
- * would act on: a pipe, a redirect, a substitution, a variable, a subshell, a background `&`, or `||`.
+ * Splits a command into its commands at `&&`, `;`, a newline and a pipe `|`, outside quotes, each with what joined it to the one before. `ok` is
+ * false if the command holds anything else that a shell acts on: `||`, a redirect, a substitution, a variable, a subshell, a background `&`.
  */
-function readOnlyParts(command) {
-  const parts = [''];
+function scanCommands(command) {
+  const parts = [{ text: '', joiner: 'start' }];
+  let ok = true;
+  const next = (joiner) => parts.push({ text: '', joiner });
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
     if (c === "'") {
       const end = command.indexOf("'", i + 1);
       const stop = end < 0 ? command.length : end;
-      parts[parts.length - 1] += command.slice(i, stop + 1);
+      parts.at(-1).text += command.slice(i, stop + 1);
       i = stop;
     } else if (c === '"') {
       let j = i + 1;
       while (j < command.length && command[j] !== '"') {
-        if (command[j] === '$' || command[j] === '`') return null;
+        if (command[j] === '$' || command[j] === '`') ok = false;
         j++;
       }
-      parts[parts.length - 1] += command.slice(i, j + 1);
+      parts.at(-1).text += command.slice(i, j + 1);
       i = j;
-    } else if (c === '&' && command[i + 1] === '&') { parts.push(''); i++; }
-    else if (c === ';' || c === '\n') parts.push('');
-    else if ('|&<>()$`'.includes(c)) return null;
-    else parts[parts.length - 1] += c;
+    } else if (c === '&' && command[i + 1] === '&') { next('&&'); i++; }
+    else if (c === '|' && command[i + 1] === '|') { ok = false; next('||'); i++; }
+    else if (c === '|') next('|');
+    else if (c === ';' || c === '\n') next(';');
+    else if ('&<>()$`'.includes(c)) ok = false;
+    else parts.at(-1).text += c;
   }
-  return parts;
+  return { parts, ok };
+}
+
+/** The commands on the right of a pipe that are not commands of the set (DB15 item 1): what the pipe rule refuses. */
+export function pipeSinksOutsideSet(command) {
+  return scanCommands(command).parts.filter((p) => p.joiner === '|' && p.text.trim() !== '' && !inSet(p.text)).map((p) => p.text.trim().replace(/\s+/g, ' ').slice(0, 60));
 }
 
 /**
- * True if the whole command is in the read-only set of DB15: only ls, cat, head, tail, wc, pwd and cd, joined by `&&` or `;`, with every
- * path inside the workspace. Whether Claude Code's permission mode would have allowed such a command depended on its shape (H4); this does not.
+ * True if the whole command is in the read-only set of DB15: only commands of the set (ls, cat, head, tail, wc, pwd, cd, and the three exact commands),
+ * joined by `&&`, `;` or a pipe, with every path inside the workspace. Whether Claude Code's permission mode would have allowed such a command
+ * depended on its shape (H4); this does not.
  */
 export function isReadOnlyBash(command, { workspace, cwd } = {}) {
   const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace, cwd });
   if (!verdict.allow) return false;
-  const parts = readOnlyParts(command)?.map((p) => p.trim()).filter(Boolean);
-  if (!parts?.length) return false;
-  return parts.every((part) => READ_ONLY_BASH.includes(part.split(/\s+/)[0]));
+  const { parts, ok } = scanCommands(command);
+  if (!ok) return false;
+  // A pipe needs a command on each side.
+  for (const [i, part] of parts.entries()) if (part.text.trim() === '' && (part.joiner === '|' || parts[i + 1]?.joiner === '|')) return false;
+  const commands = parts.map((p) => p.text).filter((text) => text.trim() !== '');
+  return commands.length > 0 && commands.every(inSet);
 }
 
 /**

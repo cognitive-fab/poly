@@ -39,7 +39,7 @@ const FILES = ['Read', 'Write', 'Edit', 'Glob', 'Grep'];
 /** The built-in tools that exist at all in a run (DB11 item 8): the file tools and Bash. No agent, task, web or notebook tool. */
 export const TOOLS = [...FILES, 'Bash'].join(',');
 /** Never allowed, in either arm (DB11 item 2). The same list is the guard's. */
-export { DISALLOWED_TOOLS, READ_ONLY_BASH } from './guard.mjs';
+export { DISALLOWED_TOOLS, READ_ONLY_BASH, READ_ONLY_EXACT } from './guard.mjs';
 /**
  * The tools of each arm. Web tools are off in both (DB3). Both arms may install packages (`npm install`) and run their tests (`npm test`). Both arms may run node on a file. The TypeScript arm may also run the compiler
  * (`npx tsc`), which is what its language needs. The poly arm gets the deterministic commands of poly and none that calls a model: `poly new` drafts a module with a

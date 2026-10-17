@@ -332,7 +332,7 @@ test('DB15.8: hook allows read-only Bash and prints allow', () => {
 });
 
 test('DB15.8: hook abstains ({}) for Bash outside set but allowed by guard', () => {
-  const commands = ['npm test', 'cat a.txt | head', 'node --version && npm --version'];
+  const commands = ['npm test', 'npm run poly check f 2>&1 | tail -30', 'node script.js', 'ls | head && npm test', 'npm --version --json'];
   for (const command of commands) {
     const stdin = JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: 'C:\\ws\\run' });
     const result = spawnSync(process.execPath, [HOOK], {
