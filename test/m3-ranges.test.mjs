@@ -8,7 +8,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { adapterOf, versions } from '../experiments/m3/lib/task.mjs';
+import { versions } from '../experiments/m3/lib/task.mjs';
+import { adapterOfMigrated as adapterOf } from './m3-migrate.mjs';
 import { RANGES } from '../experiments/m3/o1r/ranges.mjs';
 
 const view = async (h, queries) => JSON.stringify(await Promise.all(queries.map((q) => q(h))));
@@ -51,11 +52,11 @@ for (const r of RANGES) {
 }
 
 // The frozen sources of M3 are evidence and are not edited (test/m3-freeze-eol.test.mjs). They predate PL6304, so the build takes a migrated copy
-// (experiments/m3/lib/task.mjs). Catches an edit of a frozen file, a migration that adds a second class, and one that touches an effect that needs none.
+// (test/m3-migrate.mjs). Catches an edit of a frozen file, a migration that adds a second class, and one that touches an effect that needs none.
 import { join } from 'node:path';
-import { moduleOf, migrateClasses } from '../experiments/m3/lib/task.mjs';
+import { migratedModule as moduleOf, migrateClasses } from './m3-migrate.mjs';
 
-test('M3 freeze: the frozen T3 reference stays classless on disk, and the build uses a copy with class reversible on its one effect', () => {
+test('M3 freeze: the frozen T3 reference stays classless on disk, and the migrated module is a copy with class reversible on its one effect', () => {
   const dir = join(import.meta.dirname, '..', 'experiments', 'm3', 'tasks', 'T3', 'reference');
   const original = readFileSync(join(dir, 'payments.poly'), 'utf8');
   assert.ok(!/^ *class /m.test(original), 'the frozen file says no class');

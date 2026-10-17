@@ -8,13 +8,14 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync, cpSync } from 'node:fs'
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { M3, POLYRUN, mapOf, moduleOf, taskIds, versions } from '../experiments/m3/lib/task.mjs';
+import { migratedModule } from './m3-migrate.mjs';
 import { generate } from '../experiments/m3/adapter/generate.mjs';
 import { RANGES, rangesOf } from '../experiments/m3/o1r/ranges.mjs';
 import { runO1R } from '../experiments/m3/runner/score.mjs';
 import { analyse, runMeasures } from '../experiments/m3/analysis/analyse.mjs';
 
 /** The generated adapter of a version's reference or mutant, built from `moduleFile`, as an implementation path. */
-function impl(v, which, moduleFile = moduleOf(join(v.dir, which)), tag = which) {
+function impl(v, which, moduleFile = migratedModule(join(v.dir, which)), tag = which) {
   const out = join(tmpdir(), 'poly-m3-o1r-test', `${v.task}-v${v.n}-${tag}`);
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
