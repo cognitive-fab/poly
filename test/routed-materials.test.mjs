@@ -75,9 +75,9 @@ test('S310, PS18.6: a tier answer outside the decision type is recorded by its d
     const ledger = rt.store.db.prepare('SELECT event FROM poly_ledger').all().map((r) => r.event);
     const decisions = ledger.map((e) => JSON.parse(e)).filter((e) => e.kind === 'decision' || e.body?.tier).map((e) => e.body);
     assert.ok(decisions.some((b) => b.tier === 'small'), 'the small tier call has its decision event: ' + JSON.stringify(decisions));
-    // Nowhere in the store: every table of the ledger, the journal and the route's own.
+    // Nowhere in the store: every table of the ledger, the journal and the route's own. The words are searched, not the bare digits: a hex digest can hold '4242' by chance.
     const tables = rt.store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
-    const clear = tables.filter((t) => JSON.stringify(rt.store.db.prepare(`SELECT * FROM "${t}"`).all()).includes('4242'));
+    const clear = tables.filter((t) => JSON.stringify(rt.store.db.prepare(`SELECT * FROM "${t}"`).all()).includes('card ends 4242'));
     assert.deepEqual(clear, [], 'no table holds the answer in clear');
     const d = digest(secret);
     assert.ok(calls.some((c) => c.includes(d)), 'poly_route_call records the answer by its digest');
