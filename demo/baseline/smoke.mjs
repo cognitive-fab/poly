@@ -33,7 +33,11 @@ export function smokeTest(arm, { root = ROOT } = {}) {
     const steps = [];
     const sh = (command) => spawnSync(command, { cwd: ws, env, shell: true, encoding: 'utf8', timeout: 240000 });
     const tail = (r) => `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().split('\n').filter(Boolean).slice(-6).join(' | ').slice(0, 600);
-    const first = (r) => (`${r.stdout ?? ''}`.trim().split('\n').find(Boolean) ?? 'no output').slice(0, 200);
+    // The line that says what happened: a verdict or a finding if there is one, otherwise the last line of output.
+    const first = (r) => {
+      const lines = `${r.stdout ?? ''}`.trim().split('\n').filter(Boolean);
+      return (lines.find((l) => /verdict:|PL\d{4}/.test(l)) ?? lines.at(-1) ?? 'no output').slice(0, 200);
+    };
     /** One step: `check` gets the finished process and returns an error text or null. */
     const step = (name, command, check = () => null) => {
       const r = sh(command);
