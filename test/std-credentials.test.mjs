@@ -48,11 +48,12 @@ function mutate(src, handler, from, to) {
 }
 const ruleNames = (src) => [...src.matchAll(/^\s*(?:invariant|step property|liveness) ([a-z0-9-]+):/gm)].map((m) => m[1]);
 
-test('AC20: std.credentials is CLEAN, free of deadlock, its refresh bounded, and its liveness holds under its fairness', { timeout: 300_000 }, async () => {
+test('AC20: std.credentials, checked in place, is CLEAN, free of deadlock, its refresh bounded, its liveness holds under its fairness, and its revoke is idempotent by nature (K18)', { timeout: 300_000 }, async () => {
   assert.deepEqual(ruleNames(SRC).sort(), Object.keys(RULES).sort(), 'each rule has its seeded mutant');
   const parsed = parse(SRC);
   assert.equal(format(parsed.module, parsed.trivia), SRC, 'a std module is in canonical form');
-  const r = await check(SRC, {}, 'grant.poly');
+  // In place: the file under std/ whose digest std/PINS.json pins is the library, and only the library may declare an effect idempotent by nature (PS23.4, G4).
+  const r = await checkFile(join(STD, 'grant.poly'), {});
   assert.equal(r.verdict, 'CLEAN', text(r));
   const grant = r.machines.find((m) => m.machine === 'Grant');
   assert.deepEqual([grant.notRun, grant.vacuous], [[], []]);
@@ -60,8 +61,20 @@ test('AC20: std.credentials is CLEAN, free of deadlock, its refresh bounded, and
     const st = grant.stages.find((x) => x.stage === s);
     assert.deepEqual([s, st?.status, st?.verdict], [s, 'ran', 'CLEAN']);
   }
+  // The guarantee of its irreversible revoke is the library's own, and K18 is listed as an assumption of the machine.
+  assert.ok(grant.instance.kernelAssumptions.includes('K18'), JSON.stringify(grant.instance.kernelAssumptions));
+  assert.deepEqual(grant.retrySafe.map((x) => [x.kind, x.guarantee?.nature]), [['credential.revoke', 'RFC 7009']]);
   // The refresh is bounded by the type of attempt, and each bound is reached: three attempts, then Expired.
   assert.match(SRC, /attempt : 0\.\.3 = 0/);
+});
+
+test('AC20: a copy of std.credentials outside std/ is not the library: its idempotent-by-nature revoke is PL4005 NATURE_OUTSIDE_STD, and the verdict is FINDINGS', { timeout: 300_000 }, async () => {
+  // This pins the design (std-pins.ts: a copy elsewhere is not pinned), and does not hide it. The seeded mutants below are copies too, so each also carries this finding.
+  const r = await check(SRC, {}, 'grant.poly');
+  assert.equal(r.verdict, 'FINDINGS');
+  const outside = all(r).filter((d) => d.code === 'PL4005');
+  assert.equal(outside.length, 1, text(r));
+  assert.match(outside[0].message, /effect revoke declares itself idempotent by nature; only a module of the standard library may/);
 });
 
 for (const [rule, [handler, from, to]] of Object.entries(RULES)) {
