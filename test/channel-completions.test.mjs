@@ -58,7 +58,7 @@ const support = (r) => r.configurations.find((c) => c.configuration === 'support
 // failed"); its ok carries the handler's result as fetch.poly's does (conformance/m8/content).
 const DECISION_BLOCK = AGENT.slice(AGENT.indexOf('  decision answer('), AGENT.lastIndexOf('}'));
 const WITH_EFFECT = swap(swap(AGENT, '    decide answer(question: body)\n', '    emit ask(question: body)\n'), DECISION_BLOCK,
-  '  effect ask(question: Content) {\n    kind "cc.ask"\n    labels { egress:external }\n    ok(r) -> Answered(answer: r.body)\n    failed -> AnswerFailed()\n  }\n');
+  '  effect ask(question: Content) {\n    kind "cc.ask"\n    labels { egress:external }\n    class reversible\n    ok(r) -> Answered(answer: r.body)\n    failed -> AnswerFailed()\n  }\n');
 // The seeded control: Got decides nothing, so no intent is ever pending and no completion is offered.
 const SILENT = swap(AGENT, '    decide answer(question: body)\n', '');
 // k intents of one effect kind emitted by one step, beside the decision that leads to the reply. Each completion
@@ -66,7 +66,7 @@ const SILENT = swap(AGENT, '    decide answer(question: body)\n', '');
 const pings = (k) => swap(swap(swap(swap(AGENT, '    decide answer(question: body)\n', `${'    emit ping()\n'.repeat(k)}    decide answer(question: body)\n`),
   '    phase   : Phase = Idle\n', '    phase   : Phase = Idle\n    pinged  : bool  = false\n'),
   '  action Delivered()\n', '  action Pinged()\n  action PingFailed()\n  action Delivered()\n'),
-  '  on Delivered {', '  on Pinged {\n    require started else reject "not-started"\n    pinged\' = true\n  }\n  on PingFailed {\n    require started else reject "not-started"\n    pinged\' = true\n  }\n  effect ping() {\n    kind "cc.ping"\n    labels { egress:external }\n    ok -> Pinged()\n    failed -> PingFailed()\n  }\n  on Delivered {');
+  '  on Delivered {', '  on Pinged {\n    require started else reject "not-started"\n    pinged\' = true\n  }\n  on PingFailed {\n    require started else reject "not-started"\n    pinged\' = true\n  }\n  effect ping() {\n    kind "cc.ping"\n    labels { egress:external }\n    class reversible\n    ok -> Pinged()\n    failed -> PingFailed()\n  }\n  on Delivered {');
 
 // ── 1. the completions make the reply, and the rule is tested ──
 

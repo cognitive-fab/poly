@@ -210,6 +210,7 @@ machine M {
   effect grade(n: 0..1) {
     kind "grader.grade"
     labels { egress:external }
+    class reversible
     ok(r) -> Graded(grade: r.grade)
   }
 }
