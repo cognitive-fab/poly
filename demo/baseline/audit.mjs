@@ -57,7 +57,7 @@ export function auditRun(sessionFile, workspace) {
     if (event.type === 'assistant') tagged.push({ ...event, message: { ...event.message, content: copy } });
   }
 
-  const dir = mkdtempSync(join(tmpdir(), 'poly-demo-audit-'));
+  const dir = mkdtempSync(join(tmpdir(), 'baseline-audit-'));
   const denied = new Map();
   try {
     const copyFile = join(dir, 'session.jsonl');
