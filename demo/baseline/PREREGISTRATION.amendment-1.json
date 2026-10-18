@@ -1,0 +1,149 @@
+{
+  "v": 1,
+  "amendment": 1,
+  "reason": "The two pilots showed four faults of the harness (H1 to H4). This amendment records the rules that remove them (DB10 to DB15): a declared toolchain, a hook that confines every tool call to the workspace, disallowed tools, a record that says what happened, and one read-only set of Bash commands for both arms. The prompt, the arm texts, the cleaned reference, the model, the agent, the caps and the turn limit are unchanged. One new pilot per arm is allowed.",
+  "findings": {
+    "H1": "The poly workspace held its packages in node_modules without declaring them in package.json, and typescript was missing, so npm run poly check failed before the agent changed anything and the allowed npm install pruned all eight packages.",
+    "H2": "Read, Glob and Grep reached outside the workspace (the owner's home, the owner's own checkout, the global npm folder and the other arm's run), read-only Bash reached outside too, and the Agent tool was used although it is in neither tool list.",
+    "H3": "RECORD.json said stopped: success for a run that wrote no file of its own. That field is the agent's result subtype, not a task outcome.",
+    "H4": "Bash permission depended on the shape of a command. The first Bash call of ts-pilot-1 (a cd into the workspace, ls, cat piped to head, node --version, npm --version) was denied command by command under dontAsk, and the agent took Bash to be blocked and never ran its tests."
+  },
+  "limits": [
+    "The guard sees tool inputs, not what an agent's own program does at run time.",
+    "The hook and the audit were tested on the recorded inputs of both pilots and by child process, and have not been seen to run inside the live agent until a pilot has run under this amendment.",
+    "The turn limit is recorded as a setting; whether the agent enforces it is shown by the first pilot.",
+    "The guard applies each .. after a link to the real path of what precedes it on systems that follow links first. That ordering is not tested on Windows, which is the run platform, where the system folds .. by text before it looks at a link."
+  ],
+  "keeps": {
+    "prompt": {
+      "file": "demo/baseline/PROMPT.md",
+      "sha256": "sha256:949bb0611273f24e9d66e557c868924eea6b380612a213a0af7a5d4ec6bd10ec"
+    },
+    "armTexts": {
+      "ts": "sha256:091890e187fc3699a4563e7721c9b182a97abe2ff7f04b34bdc043b59e8326fc",
+      "poly": "sha256:f0f5ebedc8d73d2bf5ccb3fe3278128d178adf1124ef9ed38b8a9df18a2c93e6"
+    },
+    "model": "claude-opus-5-5",
+    "claudeCode": {
+      "version": "2.1.287"
+    },
+    "billing": "subscription",
+    "network": "ordinary network access, no container, no keys",
+    "maxTurns": 200,
+    "capsUsd": {
+      "ts": 25,
+      "poly": 25
+    },
+    "polyReference": {
+      "files": [
+        "README.md",
+        "docs/03-technical-spec.md",
+        "docs/04-semantics.md",
+        "examples/delivery/delivery-cleared.poly",
+        "examples/delivery/delivery-parallel-fifo.poly",
+        "examples/delivery/delivery-parallel.poly",
+        "examples/delivery/delivery.poly",
+        "examples/evidence/outbox-union-escape.poly",
+        "examples/evidence/outbox-union.poly",
+        "examples/evidence/outbox-v02.poly",
+        "examples/evidence/outbox-v03.poly",
+        "examples/hello/hello-empty.poly",
+        "examples/hello/hello.poly"
+      ],
+      "listSha256": "sha256:0b8363d4b842a1bb940fab5d07009d33a3a8b3f7f6c3db719010117a64321b62",
+      "treeSha256": "sha256:b52df93c66aa26cbd19ba56abf9ed5cec7d7b7bf89e849c5f42b7110631aab5c"
+    },
+    "totalCapUsd": 150
+  },
+  "set": {
+    "allowedTools": {
+      "ts": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash(node *)",
+        "Bash(npm test*)",
+        "Bash(npm install*)",
+        "Bash(npx tsc*)"
+      ],
+      "poly": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash(node *)",
+        "Bash(npm test*)",
+        "Bash(npm install*)",
+        "Bash(npm run poly check*)",
+        "Bash(npm run poly witness*)",
+        "Bash(npm run poly fix*)",
+        "Bash(npm run poly fmt*)",
+        "Bash(npm run poly edit-check*)"
+      ]
+    },
+    "disallowedTools": [
+      "Agent",
+      "Task",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "tools": "Read,Write,Edit,Glob,Grep,Bash",
+    "readOnlyBash": [
+      "ls",
+      "cat",
+      "head",
+      "tail",
+      "wc",
+      "pwd",
+      "cd"
+    ],
+    "readOnlyExact": [
+      "node --version",
+      "npm --version",
+      "npx tsc --version"
+    ],
+    "settings": {
+      "sha256": "sha256:6011cdb4079c83eaaaea5bfcb93a1d6f8959875d4ab723182eba805bfb27c2cd"
+    },
+    "hook": {
+      "hookSha256": "sha256:7cfd46d17d31a4394ee33309c7546007783e08151b1867a476c71788069006e8",
+      "guardSha256": "sha256:52d9918685c392141e9208387b282f2117a44566ec3ce5d8e8d418c6764cb4ae"
+    },
+    "scaffolds": {
+      "ts": "sha256:e37c07da00a59e5098b1cd31bef112c07a783fc9d57b094c1684a27d6691bd1f",
+      "poly": "sha256:e61bcc8795157b6ff407acc7f0b25dab794bcb93ac75e3ccf57d250c55ff4b37"
+    },
+    "pilots": {
+      "ts": 2,
+      "poly": 2
+    }
+  },
+  "excluded": [
+    {
+      "arm": "ts",
+      "run": "pilot-1",
+      "commit": "90eee2903c2c8106a051e649ac21f5b68cd5f5d7",
+      "tree": "f3be07cd835dd28e2b9802ba00a6ea022d1a4ed5",
+      "findings": [
+        "H3",
+        "H4"
+      ],
+      "note": "Excluded from results as a finding of the harness. RECORD.json called the run a success (H3), and the agent wrote its files but never ran its tests, because its first Bash call was denied by the shape of the command and it took Bash to be blocked (H4)."
+    },
+    {
+      "arm": "poly",
+      "run": "pilot-1",
+      "commit": "20f7054c9373698f33966e2351e380ca8c442e3a",
+      "tree": "d02b817025fbb1b40cf819c886b23b27a75d5b80",
+      "findings": [
+        "H1",
+        "H2",
+        "H3"
+      ],
+      "note": "Excluded from results as a finding of the harness. The toolchain was broken by the harness before the agent acted, the agent left the workspace, and the record called the run a success."
+    }
+  ]
+}
