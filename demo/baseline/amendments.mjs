@@ -13,8 +13,9 @@ export const FINDINGS_1 = {
 };
 /** The harness findings that amendment 2 answers (DB16, DB17), as they were found in the second pilots. */
 export const FINDINGS_2 = {
-  H5: 'The poly workspace declared @poly/runtime from its package.json and dist only. The runtime reads a model folder of its own at load, so load threw for want of it, and poly-pilot-2 rebuilt the folder into node_modules from the specification text with a script of its own. The smoke test ran poly check and never load.',
+  H5: 'The poly workspace declared @poly/runtime from its package.json and dist only. The runtime reads a model folder of its own at load, so load threw for want of it, and poly-pilot-2 rebuilt the folder into node_modules from the specification text with a script of its own. The smoke test ran poly check and never load. The same review found that the standard library the reference describes (std.channels, std.credentials, std.routing) was not reachable either: the tools read it at node_modules/std, the workspace had none, and a channel of the whatsapp kind was refused PL6811. std is now a declared package, and the smoke test checks a channel of that kind.',
   H6: 'The audit marked poly-pilot-2 escaped for a pipe into grep -v inside its workspace. The label means leaving the workspace or using a tool that is not allowed, so the audit now lists refused calls (guard or tool list) apart from escaped ones.',
+  H7: 'The reference prescribes poly admit (PT14) and poly lint handlers (PT6.5), and the poly tool list refused their npm run form: poly-pilot-2 was refused npm run poly lint handlers. The same commands were allowed through node and the cli file, so the refusal depended on the shape of the command. The poly list gains Bash(npm run poly admit*) and Bash(npm run poly lint*); the TypeScript list is unchanged.',
 };
 /** What the record cannot show (DB14, DB11 item 6, DB15). */
 const LIMITS_1 = [
@@ -25,8 +26,8 @@ const LIMITS_1 = [
 ];
 const LIMITS_2 = [
   ...LIMITS_1,
-  'The smoke test now starts the runtime on the hello example (admit, load, create, one dispatch). It does not exercise handlers, effects, a store or the channel adapters, so another file that the runtime reads at run time could still be missing.',
-  'The poly tool list allows npm run poly check, witness, fix, fmt and edit-check. The reference also names poly admit and poly lint handlers, which the list refuses in the npm run form (DB16 item 6). This amendment does not change the list: poly-pilot-3 runs under the list that poly-pilot-2 had.',
+  'The smoke test starts the runtime on the hello example (admit, load, create, one dispatch) and checks one std channel kind. It does not exercise handlers, effects, a store or the channel adapters, so another file that the runtime reads at run time could still be missing.',
+  'effectiveRecord does not detect a committed amendment that is later deleted or edited, but preflight refuses both. The committed history is the record.',
   'ts-pilot-2 met two refusals of the tool list (a mkdir inside a compound command, and an npm run typecheck script of its own). They are listed in the audit as refused and do not mark the run. It stands as the TypeScript pilot.',
 ];
 const EXCLUDED_1 = [
@@ -38,7 +39,7 @@ const EXCLUDED_2 = [
 ];
 
 /** What the TypeScript arm meets at run time (DB13 item 6): an amendment that would change any of these refuses itself. */
-const KEPT_AT_RUN = ['allowedTools', 'disallowedTools', 'tools', 'settings', 'hook', 'readOnlyBash', 'readOnlyExact'];
+const KEPT_AT_RUN = ['disallowedTools', 'tools', 'settings', 'hook', 'readOnlyBash', 'readOnlyExact'];
 
 /** The commit that added a run's RECORD.json, and the hash of its tree: what an exclusion cites. */
 function excludedEntries(list, git) {
@@ -90,19 +91,23 @@ export function buildAmendment(n, { root = ROOT, git }) {
     if (!isDeepStrictEqual(now[key], eff.record[key])) throw new Error(`${key} is not what the record says: the TypeScript arm would meet something new, so ts-pilot-2 would not stand`);
   }
   if (now.scaffolds.ts !== eff.record.scaffolds.ts) throw new Error('the TypeScript scaffold digest is not what the record says: ts-pilot-2 would not stand');
+  if (!isDeepStrictEqual(now.allowedTools.ts, eff.record.allowedTools.ts)) throw new Error('the TypeScript tool list is not what the record says: ts-pilot-2 would not stand');
   const pilots = { ts: eff.record.pilots.ts, poly: eff.record.pilots.poly + 1 };
   return {
     v: 1,
     amendment: 2,
-    reason: 'The second pilots showed two more faults of the harness. The poly workspace lacked the runtime\'s model folder, so the runtime could not start (H5, DB16), and the audit called a run that never left its workspace escaped (H6, DB17). This amendment records the new poly scaffold, excludes poly-pilot-2, lets ts-pilot-2 stand as the TypeScript pilot, and allows one new poly pilot, pilot-3. Nothing that the TypeScript arm sees at run time changes: its scaffold, tool list, settings, hook and guard are kept. The prompt, the arm texts, the cleaned reference, the model, the agent, the caps and the turn limit are unchanged.',
+    reason: 'The second pilots showed three more faults of the harness. The poly workspace lacked the runtime\'s model folder and the standard library, so the runtime could not start (H5, DB16), the audit called a run that never left its workspace escaped (H6, DB17), and the poly tool list refused two commands that the reference prescribes (H7). This amendment records the new poly scaffold and the poly tool list with poly admit and poly lint, excludes poly-pilot-2, lets ts-pilot-2 stand as the TypeScript pilot, and allows one new poly pilot, pilot-3. Nothing that the TypeScript arm sees at run time changes: its scaffold, tool list, settings, hook and guard are kept, and the keeps say so by path. The prompt, the arm texts, the cleaned reference, the model, the agent, the caps and the turn limit are unchanged.',
     findings: FINDINGS_2,
     limits: LIMITS_2,
     keeps: {
       ...Object.fromEntries(IMMUTABLE_KEYS.map((k) => [k, eff.record[k]])),
       ...Object.fromEntries(KEPT_AT_RUN.map((k) => [k, eff.record[k]])),
+      // The TypeScript part of the two values that are kept per arm; the poly part changes (DB13 item 3, paths in keeps).
+      'allowedTools.ts': eff.record.allowedTools.ts,
+      'scaffolds.ts': eff.record.scaffolds.ts,
       totalCapUsd: totalCap(pilots),
     },
-    set: { scaffolds: now.scaffolds, pilots },
+    set: { scaffolds: now.scaffolds, pilots, allowedTools: now.allowedTools },
     excluded: excludedEntries(EXCLUDED_2, git),
   };
 }

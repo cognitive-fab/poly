@@ -105,8 +105,10 @@ export function effectiveRecord({ root = ROOT, git: g = (args) => git(root, args
     // The total of the caps follows the pilots the amendment allows, so an amendment that raises the pilots does not leave it behind.
     if (record.pilots) record = { ...record, totalCapUsd: totalCap(record.pilots) };
     // What an amendment keeps is read against the record as it leaves it (DB13 item 3): for the keys it cannot set, the record before it.
+    // A key may be a path of field names joined by dots (allowedTools.ts), so that an amendment that changes the poly part of a value kept per arm keeps the TypeScript part.
     for (const [key, value] of Object.entries(am.keeps ?? {})) {
-      if (!isDeepStrictEqual(value, record[key])) problems.push(`amendment ${n} keeps ${key} as ${JSON.stringify(value)}, but the record has ${JSON.stringify(record[key])}`);
+      const actual = key.split('.').reduce((v, field) => v?.[field], record);
+      if (!isDeepStrictEqual(value, actual)) problems.push(`amendment ${n} keeps ${key} as ${JSON.stringify(value)}, but the record has ${JSON.stringify(actual)}`);
     }
     excluded = [...excluded, ...(am.excluded ?? [])];
   }

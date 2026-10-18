@@ -49,7 +49,7 @@ export { DISALLOWED_TOOLS, READ_ONLY_BASH, READ_ONLY_EXACT } from './guard.mjs';
  */
 export const ALLOWED_TOOLS = {
   ts: [...FILES, 'Bash(node *)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npx tsc*)'],
-  poly: [...FILES, 'Bash(node *)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npm run poly check*)', 'Bash(npm run poly witness*)', 'Bash(npm run poly fix*)', 'Bash(npm run poly fmt*)', 'Bash(npm run poly edit-check*)'],
+  poly: [...FILES, 'Bash(node *)', 'Bash(npm test*)', 'Bash(npm install*)', 'Bash(npm run poly check*)', 'Bash(npm run poly witness*)', 'Bash(npm run poly fix*)', 'Bash(npm run poly fmt*)', 'Bash(npm run poly edit-check*)', 'Bash(npm run poly admit*)', 'Bash(npm run poly lint*)'],
 };
 
 /** The prompt, byte for byte (DB2): the file's contents, which the pre-registration hashes. */
@@ -120,7 +120,12 @@ const POLY = [
   ['@cognitive-fab/sam-pattern', 'sam-pattern', 'vendor/sam-pattern'],
   ['@cognitive-fab/polyflow-kernel', 'polyflow-kernel', 'vendor/polyflow/platform/packages/kernel'],
   ['@cognitive-fab/polyflow-verify', 'polyflow-verify', 'vendor/polyflow/platform/packages/verify'],
+  // The standard library the reference describes (std.channels, std.credentials, std.routing). The checker and the runtime read it four folders
+  // above their own package, which is node_modules/std here, so it is a package of the workspace (DB16 item 7, finding H5).
+  ['std', 'std', 'std'],
 ];
+/** The package.json the harness writes into .harness/std: the repository's std folder has none, and npm needs one to install it. */
+const STD_PACKAGE_JSON = `${JSON.stringify({ name: 'std', version: '0.0.0', private: true }, null, 2)}\n`;
 
 /**
  * A folder that a poly package reads from its own root at run time, besides `dist` (DB16 item 2). `@poly/runtime` verifies its OutboxIntent models in
@@ -138,6 +143,7 @@ function declarePackages(dir, root, packages) {
       copy(dir, `.harness/${folder}/dist`, join(from, 'dist'), notBuildInfo);
       for (const extra of RUNTIME_FOLDERS[folder] ?? []) copy(dir, `.harness/${folder}/${extra}`, join(from, extra));
     } else copy(dir, `.harness/${folder}`, from);
+    if (name === 'std') write(dir, '.harness/std/package.json', STD_PACKAGE_JSON);
     dependencies[name] = `file:.harness/${folder}`;
   }
   return Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => (a < b ? -1 : 1)));

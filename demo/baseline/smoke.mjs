@@ -20,6 +20,62 @@ const gate = await rt.create('hello.Gate');
 const answer = await rt.dispatch(gate.id, 'Coin', {}, { actionId: 'coin-1' });
 console.log(JSON.stringify(answer));
 `;
+/**
+ * The module of the std step (DB16 item 7): one machine and one channel of the whatsapp kind, which lives in std/channels. Without std in the
+ * workspace the checker refuses it, PL6811 CHANNEL_KIND_UNKNOWN.
+ */
+const TICKET = `// A support channel of a std kind: the std step of the smoke test.
+module concierge
+
+enum Status { New, Open, Closed }
+
+channel support: whatsapp {
+  adapter "whatsapp"
+  thread "{from}"
+  starts Ticket.Start on inbound
+  Message -> Ticket.Got
+  Delivered -> Ticket.Delivered
+  Rejected -> Ticket.SendRejected
+  Failed -> Ticket.SendFailed
+}
+
+machine Ticket {
+  state {
+    status  : Status = New
+    replies : 0..1 = 0
+  }
+  terminal status is Closed
+
+  action Start()
+  action Got(body: Content)
+  action Delivered()
+  action SendRejected(reason: string check { "window-closed" })
+  action SendFailed()
+
+  on Start {
+    require status is New else reject "started"
+    status' = Open
+  }
+  on Got(body) {
+    require status is Open else reject "closed"
+    require replies == 0 else reject "replied"
+    replies' = 1
+    emit support.reply(body: body)
+  }
+  on Delivered {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+  on SendRejected(reason) {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+  on SendFailed {
+    require status is Open else reject "closed"
+    status' = Closed
+  }
+}
+`;
 /** The test of the TypeScript arm's node-test step (DB16 item 4): one trivial test of node:test. */
 const TRIVIAL_TEST = `import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -57,9 +113,9 @@ export function smokeTest(arm, { root = ROOT } = {}) {
       return (lines.find((l) => /verdict:|PL\d{4}/.test(l)) ?? lines.at(-1) ?? 'no output').slice(0, 200);
     };
     /** One step: `check` gets the finished process and returns an error text or null. `line` picks the line of output that the detail shows. */
-    const step = (name, command, check = () => null, { env: extra, line = first } = {}) => {
+    const step = (name, command, check = () => null, { env: extra, line = first, anyExit = false } = {}) => {
       const r = sh(command, extra);
-      const problem = r.status !== 0 && !/check/.test(name) ? `exit ${r.status}: ${tail(r)}` : check(r);
+      const problem = r.status !== 0 && !anyExit && !/check/.test(name) ? `exit ${r.status}: ${tail(r)}` : check(r);
       steps.push({ name, ok: !problem, detail: problem ?? `${command}: ${line(r)}` });
       return !problem;
     };
@@ -96,6 +152,7 @@ export function smokeTest(arm, { root = ROOT } = {}) {
         && step('check-finding', `npm run poly check ${FINDING}`, verdict(FINDING, 'PL3201'))
         && (keyEnv = hostUp(), step('admit', 'npm run poly admit .', (r) => (/^admitted /m.test(r.stdout ?? '') ? null : `no admitted line: ${tail(r)}`), { env: keyEnv, line: lineWith(/^admitted /) }))
         && step('runtime', 'node smoke-runtime.mjs', (r) => (/"stepKind":"accepted"/.test(r.stdout ?? '') && /"coins":1/.test(r.stdout ?? '') ? null : `the runtime did not accept the action: ${tail(r)}`), { env: keyEnv, line: lineWith(/"stepKind"/) })
+        && (writeFileSync(join(ws, 'src', 'ticket.poly'), TICKET), step('std', 'npm run poly check src/ticket.poly', (r) => (/PL6811/.test(`${r.stdout}${r.stderr}`) || !/configuration support: configuration CLEAN/.test(r.stdout ?? '') ? `the standard library is not reachable: ${tail(r)}` : null), { anyExit: true, line: lineWith(/configuration support: configuration CLEAN/) }))
         && (makeUnrelated(), installLocal())
         && step('check-after', `npm run poly check ${CLEAN}`, (r) => verdict(CLEAN, 'verdict: CLEAN')(r) ?? present());
       return { ok, steps };
