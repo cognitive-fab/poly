@@ -573,3 +573,370 @@ test('DB12/DB17.d: prepareCommit audit.status escaped for Read outside workspace
   }
 });
 
+test('DB17 item 7 A1: replay of first real call of poly-pilot-3 (MSYS path)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/Users/jjdub/.poly-demo/work/poly-pilot-3';
+    const file = join(dir, 'session.jsonl');
+    const command = 'cd /c/Users/jjdub/.poly-demo/work/poly-pilot-3 && grep -n "^#" tools/poly/docs/03-technical-spec.md';
+    writeFileSync(file, assistantEvent('Bash', { command }, 'toolu_01VagCWgzdevDQkaCwNYeYQG'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has one entry');
+    assert.equal(result.refused[0].by, 'guard', 'refused entry is by guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'refused entry has note');
+    assert.equal(result.refused[0].note, 'guard false positive: MSYS path', 'note is guard false positive: MSYS path');
+    assert.ok(result.refused[0].offending.some(o => o.includes('/c/Users/jjdub/.poly-demo/work/poly-pilot-3')), 'offending contains workspace in MSYS form');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 A2: replay of second real call of poly-pilot-3 (non-path word)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/Users/jjdub/.poly-demo/work/poly-pilot-3';
+    const file = join(dir, 'session.jsonl');
+    const command = "python3 - <<'EOF'\nimport re\np='src/support.poly'\ns=open(p,encoding='utf8').read()\ns=s.replace('''    match phase {\n      Quoted { what: Line { i: n } } => {\n        cancel expiry\n        phase' = Issuing { what: Line { i: n } }\n        emit refund(amount: price[n])\n      }\n    }''','''    match phase {\n      Quoted { what: w } => {\n        match w {\n          Line { i: n } => {\n            cancel expiry\n            phase' = Issuing { what: Line { i: n } }\n            emit refund(amount: price[n])\n          }\n        }\n      }\n    }''')\nEOF";
+    writeFileSync(file, assistantEvent('Bash', { command }, 'toolu_01FoggEx3VSmtFdM6c95GzfG'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has one entry');
+    assert.equal(result.refused[0].by, 'guard', 'refused entry is by guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'refused entry has note');
+    assert.equal(result.refused[0].note, 'guard false positive: non-path word', 'note is guard false positive: non-path word');
+    assert.ok(result.refused[0].offending.some(o => o === 'i:'), 'offending contains i:');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 B: whole recorded session of poly-pilot-3', () => {
+  const workspace = 'C:/Users/jjdub/.poly-demo/work/poly-pilot-3';
+  const audit = auditRun(join(SESSIONS, 'poly-pilot-3', 'session.jsonl'), workspace);
+  assert.equal(audit.status, 'clean', 'status is clean');
+  assert.deepEqual(audit.escaped, [], 'escaped is empty');
+  assert.equal(audit.refused.length, 9, 'refused has 9 entries');
+
+  const byGuardWithNote = audit.refused.filter(r => r.by === 'guard' && Object.hasOwn(r, 'note'));
+  const byGuardNoNote = audit.refused.filter(r => r.by === 'guard' && !Object.hasOwn(r, 'note'));
+  const byToolList = audit.refused.filter(r => r.by === 'tool-list');
+
+  assert.equal(byGuardWithNote.length, 2, 'exactly 2 guard entries have note');
+  assert.equal(byGuardNoNote.length, 3, 'exactly 3 guard entries have no note');
+  assert.equal(byToolList.length, 4, 'exactly 4 tool-list entries');
+
+  assert.ok(byGuardWithNote.some(r => r.note === 'guard false positive: MSYS path'), 'one note is MSYS path');
+  assert.ok(byGuardWithNote.some(r => r.note === 'guard false positive: non-path word'), 'one note is non-path word');
+
+  assert.ok(byGuardNoNote.some(r => r.offending.some(o => o.includes('cut -c1-3000'))), 'one guard-no-note offending contains cut -c1-3000');
+  assert.ok(byGuardNoNote.some(r => r.offending.some(o => o.includes('grep -i manifest'))), 'one guard-no-note offending contains grep -i manifest');
+  assert.ok(byGuardNoNote.some(r => r.offending.some(o => o.includes('grep -v Warning'))), 'one guard-no-note offending contains grep -v Warning');
+
+  assert.ok(byToolList.every(r => !Object.hasOwn(r, 'note')), 'all tool-list entries have no note');
+});
+
+test('DB17 item 7 C1: ts-pilot-2 keeps no notes in refused entries', () => {
+  const workspace = 'C:/Users/jjdub/.poly-demo/work/ts-pilot-2';
+  const audit = auditRun(join(SESSIONS, 'ts-pilot-2', 'session.jsonl'), workspace);
+  assert.equal(audit.status, 'clean', 'status is clean');
+  assert.deepEqual(audit.escaped, [], 'escaped is empty');
+  assert.equal(audit.refused.length, 2, 'refused has 2 entries');
+  assert.ok(audit.refused.every(r => !Object.hasOwn(r, 'note')), 'all entries have no note property');
+});
+
+test('DB17 item 7 C2: poly-pilot-2 keeps no notes in any refused entry', () => {
+  const workspace = 'C:/Users/jjdub/.poly-demo/work/poly-pilot-2';
+  const audit = auditRun(join(SESSIONS, 'poly-pilot-2', 'session.jsonl'), workspace);
+  assert.equal(audit.status, 'clean', 'status is clean');
+  assert.deepEqual(audit.escaped, [], 'escaped is empty');
+  assert.equal(audit.refused.length, 4, 'refused has 4 entries');
+  assert.ok(audit.refused.every(r => !Object.hasOwn(r, 'note')), 'all entries have no note property');
+});
+
+test('DB17 item 7 D1: ls /c/ws/run/src is refused with note MSYS path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls /c/ws/run/src' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'has note property');
+    assert.equal(result.refused[0].note, 'guard false positive: MSYS path', 'note is MSYS path');
+    assert.ok(result.refused[0].offending.includes('/c/ws/run/src'), 'offending contains the path');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D2: ls /c/Users/jjdub is escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls /c/Users/jjdub' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D3: ls /c/Users/jjdub/.poly-demo/work/poly-pilot-2 from poly-pilot-3 workspace is escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/Users/jjdub/.poly-demo/work/poly-pilot-3';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls /c/Users/jjdub/.poly-demo/work/poly-pilot-2' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D4: command with MSYS workspace path and ../x is escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/Users/jjdub/.poly-demo/work/poly-pilot-3';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'cd /c/Users/jjdub/.poly-demo/work/poly-pilot-3 && cat ../x' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.ok(result.escaped[0].offending.some(o => o.includes('..')), 'offending includes relative path with ..');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D4a: cd D: is escaped (drive letter names a drive)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'cd D:' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D4b: ls D: is escaped (drive letter names a drive)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls D:' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D4c: ls /c/ws/run/../x is escaped (resolves outside workspace)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls /c/ws/run/../x' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D4d: ls /c/ws/run/src/../../x is escaped (resolves outside workspace)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls /c/ws/run/src/../../x' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D4e: heredoc with i: as word is escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: "cat <<'EOF'\na { i: n }\nEOF\nls i:" }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D5: echo i: is escaped (bare i: as word names a drive)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'echo i:' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D6: echo i:/x is escaped (path-shaped, a drive path outside)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'echo i:/x' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D6a: ls /c/ws/run/./src is refused with note MSYS path (resolves inside)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls /c/ws/run/./src' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'has note property');
+    assert.equal(result.refused[0].note, 'guard false positive: MSYS path', 'note is MSYS path');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D6b: ls /c/ws/run/src/../lib is refused with note MSYS path (resolves inside)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls /c/ws/run/src/../lib' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'has note property');
+    assert.equal(result.refused[0].note, 'guard false positive: MSYS path', 'note is MSYS path');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D7: command with both false-positive kinds is refused with both notes in exact order', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const command = "cd /c/ws/run && python3 - <<'EOF'\na { i: n }\nEOF";
+    writeFileSync(file, assistantEvent('Bash', { command }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'has note property');
+    assert.equal(result.refused[0].note, 'guard false positive: MSYS path; guard false positive: non-path word', 'note is exact string with MSYS path first');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D8: MSYS path inside workspace with pipe rule is refused by guard with MSYS note', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'cat /c/ws/run/file.txt | grep pattern' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'has note property');
+    assert.equal(result.refused[0].note, 'guard false positive: MSYS path', 'note is MSYS path');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D9: disallowed tool (Agent) is still escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Agent', {}));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D10: plain pipe (cat x | grep y) is refused by guard with no note property', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'cat x | grep y' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.equal(Object.hasOwn(result.refused[0], 'note'), false, 'no note property');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 D11: Windows-form workspace path (ls C:/ws/run/src) is allowed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls C:/ws/run/src' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
