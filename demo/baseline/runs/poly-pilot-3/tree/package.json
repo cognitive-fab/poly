@@ -1,0 +1,29 @@
+{
+  "name": "support-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "poly": "node node_modules/@poly/check/dist/src/cli.js",
+    "keygen": "node scripts/keygen.js",
+    "admit": "node --no-warnings=ExperimentalWarning scripts/admit.js",
+    "start": "node --no-warnings=ExperimentalWarning scripts/start.js"
+  },
+  "devDependencies": {
+    "@cognitive-fab/polyflow-kernel": "file:.harness/polyflow-kernel",
+    "@cognitive-fab/polyflow-verify": "file:.harness/polyflow-verify",
+    "@cognitive-fab/polygraph": "file:.harness/polygraph",
+    "@cognitive-fab/sam-pattern": "file:.harness/sam-pattern",
+    "@poly/check": "file:.harness/poly-check",
+    "@poly/core": "file:.harness/poly-core",
+    "@poly/embed": "file:.harness/poly-embed",
+    "@poly/lang": "file:.harness/poly-lang",
+    "@poly/lower": "file:.harness/poly-lower",
+    "@poly/ref": "file:.harness/poly-ref",
+    "@poly/runtime": "file:.harness/poly-runtime",
+    "@types/node": "file:.harness/types-node",
+    "std": "file:.harness/std",
+    "typescript": "file:.harness/typescript",
+    "undici-types": "file:.harness/undici-types"
+  }
+}

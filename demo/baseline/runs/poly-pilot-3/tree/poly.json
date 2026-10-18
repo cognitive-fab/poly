@@ -1,0 +1,14 @@
+{
+  "poly": "1",
+  "name": "support-agent",
+  "modules": [
+    "src/*.poly"
+  ],
+  "handlers": [
+    "handlers/stripe.js",
+    "handlers/whatsapp.js"
+  ],
+  "keys": {
+    "admission": { "id": "support-admission", "location": "env:POLY_ADMISSION_KEY" }
+  }
+}

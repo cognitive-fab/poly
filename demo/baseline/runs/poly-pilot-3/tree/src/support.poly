@@ -1,0 +1,192 @@
+// The stateful core of the refund agent: one Order instance per order in orders.json, keyed by the order id.
+// A customer asks for a refund (of the whole order or of one line), confirms the quote, and the refund is issued
+// through Stripe. The machine decides which lines a refund covers and never sends a line to Stripe twice; the
+// handler prices the lines it is given from orders.json (handlers/stripe.js).
+module support
+
+type Pick = All | Line { i: 0..3 }
+
+type Phase =
+  | New
+  | Ready
+  | Quoted  { what: Pick }      // a quote the customer has to confirm
+  | Issuing { what: Pick }      // the refund was sent to Stripe
+  | Review  { what: Pick }      // Stripe could not be reached: a person decides whether it went through
+  | Closed                      // every line was refunded
+
+enum Notice { Issued, Declined, UnderReview }
+enum Why { Declined, Unreachable }
+
+machine Order {
+  state {
+    phase : Phase           = New
+    done  : map<0..3, bool> = [false, false, false, false]   // refunded, or no such line
+  }
+  terminal phase is Closed
+
+  action Open(lines: 1..4)
+  action RequestAll()
+  action RequestLine(line: 0..3)
+  action Confirm()
+  action Cancel()
+  action Expire()
+  action Refunded()
+  action RefundFailed(why: Why)
+  action ResolveIssued()
+  action ResolveNotIssued()
+
+  on Open(lines) {
+    require phase is New else reject "already-open"
+    phase' = Ready
+    done' = [false, lines < 2, lines < 3, lines < 4]
+  }
+
+  on RequestAll {
+    require phase is Ready || phase is Quoted else reject "busy"
+    require phase != (Quoted { what: All }) else reject "already-quoted"
+    phase' = Quoted { what: All }
+    after 30m -> Expire() as expiry
+  }
+
+  on RequestLine(line) {
+    require phase is Ready || phase is Quoted else reject "busy"
+    require !done[line] else reject "already-refunded"
+    require phase != (Quoted { what: Line { i: line } }) else reject "already-quoted"
+    phase' = Quoted { what: Line { i: line } }
+    after 30m -> Expire() as expiry
+  }
+
+  on Confirm {
+    match phase {
+      Quoted { what: w } => {
+        cancel expiry
+        phase' = Issuing { what: w }
+        match w {
+          All => emit refund(l0: !done[0], l1: !done[1], l2: !done[2], l3: !done[3])
+          Line { i: n } => emit refund(l0: n == 0, l1: n == 1, l2: n == 2, l3: n == 3)
+        }
+      }
+      _ => reject "no-quote"
+    }
+  }
+
+  on Cancel {
+    require phase is Quoted else reject "no-quote"
+    cancel expiry
+    phase' = Ready
+  }
+
+  on Expire {
+    require phase is Quoted else reject "no-quote"
+    phase' = Ready
+  }
+
+  on Refunded {
+    match phase {
+      Issuing { what: w } => {
+        match w {
+          All => {
+            phase' = Closed
+            done' = [true, true, true, true]
+            emit notify(event: Issued, l0: !done[0], l1: !done[1], l2: !done[2], l3: !done[3])
+          }
+          Line { i: n } => {
+            if (n == 0 || done[0]) && (n == 1 || done[1]) && (n == 2 || done[2]) && (n == 3 || done[3]) {
+              phase' = Closed
+            } else {
+              phase' = Ready
+            }
+            done' = done with [n] = true
+            emit notify(event: Issued, l0: n == 0, l1: n == 1, l2: n == 2, l3: n == 3)
+          }
+        }
+      }
+      _ => reject "not-issuing"
+    }
+  }
+
+  on RefundFailed(why) {
+    match phase {
+      Issuing { what: w } => {
+        if why == Why.Unreachable {
+          phase' = Review { what: w }
+          emit notify(event: UnderReview, l0: false, l1: false, l2: false, l3: false)
+        } else {
+          phase' = Ready
+          emit notify(event: Declined, l0: false, l1: false, l2: false, l3: false)
+        }
+      }
+      _ => reject "not-issuing"
+    }
+  }
+
+  // A person looked in the Stripe dashboard: the refund went through.
+  on ResolveIssued {
+    match phase {
+      Review { what: w } => {
+        match w {
+          All => {
+            phase' = Closed
+            done' = [true, true, true, true]
+            emit notify(event: Issued, l0: !done[0], l1: !done[1], l2: !done[2], l3: !done[3])
+          }
+          Line { i: n } => {
+            if (n == 0 || done[0]) && (n == 1 || done[1]) && (n == 2 || done[2]) && (n == 3 || done[3]) {
+              phase' = Closed
+            } else {
+              phase' = Ready
+            }
+            done' = done with [n] = true
+            emit notify(event: Issued, l0: n == 0, l1: n == 1, l2: n == 2, l3: n == 3)
+          }
+        }
+      }
+      _ => reject "not-in-review"
+    }
+  }
+
+  // A person looked in the Stripe dashboard: no refund was made; the customer may ask again.
+  on ResolveNotIssued {
+    require phase is Review else reject "not-in-review"
+    phase' = Ready
+    emit notify(event: Declined, l0: false, l1: false, l2: false, l3: false)
+  }
+
+  effect refund(l0: bool, l1: bool, l2: bool, l3: bool) {
+    kind "stripe.refund"
+    labels { egress:external, read:private, read:store }
+    targets { egress: exact "https://api.stripe.com/v1/refunds", secrets: ["STRIPE_SECRET_KEY"], store: ["orders"] }
+    class irreversible
+    retry { attempts 3, base 1s, timeout 20s }
+    idempotent header "Idempotency-Key" window 24h
+    ok -> Refunded()
+    failed -> RefundFailed(why: Declined)
+    exhausted -> RefundFailed(why: Unreachable)
+  }
+
+  effect notify(event: Notice, l0: bool, l1: bool, l2: bool, l3: bool) {
+    kind "whatsapp.notify"
+    labels { egress:external, read:private, read:store }
+    targets { egress: "https://graph.facebook.com/v21.0", secrets: ["WHATSAPP_TOKEN"], store: ["orders", "whatsapp"] }
+    class irreversible
+    retry { attempts 1 }
+  }
+
+  // No line is ever sent to Stripe once it is refunded.
+  never refund-line-0-once: emit refund(l0: true) while done[0]
+  never refund-line-1-once: emit refund(l1: true) while done[1]
+  never refund-line-2-once: emit refund(l2: true) while done[2]
+  never refund-line-3-once: emit refund(l3: true) while done[3]
+
+  invariant closed-means-all-refunded: phase is Closed implies (done[0] && done[1] && done[2] && done[3])
+  invariant nothing-refunded-before-open: phase is New implies !(done[0] || done[1] || done[2] || done[3])
+  step property refunds-are-kept:
+    (pre.done[0] implies post.done[0]) && (pre.done[1] implies post.done[1])
+      && (pre.done[2] implies post.done[2]) && (pre.done[3] implies post.done[3])
+  step property only-stripe-marks-refunded:
+    (action != Refunded && action != ResolveIssued && action != Open)
+      implies (post.done[0] == pre.done[0] && post.done[1] == pre.done[1]
+               && post.done[2] == pre.done[2] && post.done[3] == pre.done[3])
+  liveness issuing-settles: (phase is Issuing) leads to !(phase is Issuing)
+    under fair { Refunded | RefundFailed(*) }
+}

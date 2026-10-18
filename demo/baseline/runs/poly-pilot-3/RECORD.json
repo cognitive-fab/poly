@@ -1,0 +1,161 @@
+{
+  "arm": "poly",
+  "run": "pilot-3",
+  "treeDigest": "sha256:bc798630f7b5f8000dded848a586b4cda51c307ed3f6ac346e40acfae837dfda",
+  "promptSha256": "sha256:949bb0611273f24e9d66e557c868924eea6b380612a213a0af7a5d4ec6bd10ec",
+  "model": "claude-opus-5-5",
+  "claudeCode": {
+    "version": "2.1.287"
+  },
+  "sdkResult": "success",
+  "sdkResultMeans": "the agent's own label for how the session ended, not a task outcome",
+  "agentFiles": 44,
+  "agentFilePaths": [
+    ".poly/build/support.Order/contract.json",
+    ".poly/build/support.Order/effects.cjs",
+    ".poly/build/support.Order/effects.manifest.json",
+    ".poly/build/support.Order/invariants.mjs",
+    ".poly/build/support.Order/liveness.mjs",
+    ".poly/build/support.Order/next.cjs",
+    ".poly/build/support.Order/types.d.ts",
+    ".poly/certificate.json",
+    ".poly/report.json",
+    ".poly/run/cert-ed78c865ad0f/handlers/handlers/lines.js",
+    ".poly/run/cert-ed78c865ad0f/handlers/handlers/stripe.js",
+    ".poly/run/cert-ed78c865ad0f/handlers/handlers/whatsapp.js",
+    ".poly/run/cert-ed78c865ad0f/support.Order/contract.json",
+    ".poly/run/cert-ed78c865ad0f/support.Order/effects.cjs",
+    ".poly/run/cert-ed78c865ad0f/support.Order/effects.manifest.json",
+    ".poly/run/cert-ed78c865ad0f/support.Order/invariants.mjs",
+    ".poly/run/cert-ed78c865ad0f/support.Order/liveness.mjs",
+    ".poly/run/cert-ed78c865ad0f/support.Order/next.cjs",
+    ".poly/run/cert-ed78c865ad0f/support.Order/types.d.ts",
+    "README.md",
+    "handlers/lines.js",
+    "handlers/stripe.js",
+    "handlers/whatsapp.js",
+    "lib/agent.js",
+    "lib/config.js",
+    "lib/host.js",
+    "lib/orders.js",
+    "lib/parse.js",
+    "lib/server.js",
+    "lib/webhook.js",
+    "lib/whatsapp.js",
+    "package-lock.json",
+    "package.json",
+    "poly.json",
+    "scripts/admit.js",
+    "scripts/keygen.js",
+    "scripts/start.js",
+    "spike.mjs",
+    "spike2.mjs",
+    "src/support.poly",
+    "test/agent.test.js",
+    "test/fixture.js",
+    "test/server.test.js",
+    "test/units.test.js"
+  ],
+  "finalMessage": "I built the refund agent, and all 26 tests pass (`npm test`). The poly module checks CLEAN. One part is unverified: I wasn't allowed to run the real start sequence (`npm run keygen` → `npm run admit` → `npm start`), so `scripts/start.js` and the real WhatsApp and Stripe calls haven't been tried. The pieces it wires together are covered by the tests.\n\n**How a conversation goes.** A customer writes \"refund ORD-1001\" or \"refund CUPS-4 from ORD-1001\". The agent looks up their orders by WhatsApp number and quotes the amount. On \"YES\" it issues the refund through Stripe, and when Stripe answers it messages the customer with the outcome. \"NO\", \"status\", and \"YES ORD-1002\" (when several refunds are waiting) also work. Messages are read by fixed rules, not a language model.\n\n**The poly part (`src/support.poly`).** There is one `Order` machine per order. `poly check` proves, over all 158 reachable states:\n- an item already refunded is never sent to Stripe again;\n- there is no deadlock;\n- a refund in progress always ends.\n\nThe Stripe refund is retried up to 3 times. Every retry carries the same `Idempotency-Key`, so Stripe never refunds twice. A quote expires after 30 minutes.\n\n**The JavaScript beside it:**\n- The webhook server checks Meta's signature on every message and answers the verification handshake.\n- If Meta delivers the same message twice, it only counts once.\n- The Stripe and WhatsApp handlers can only reach their declared URL, one secret each, and the orders.\n\n**One design change.** My first version stored prices inside the poly machine. The checker ran out of memory, because it had to explore every possible amount. Now the machine tracks which items are refunded, and the Stripe handler adds up those items' prices from `orders.json`. The \"never refund an item twice\" guarantee is proven, but the addition itself is only covered by tests.\n\n**Decisions you may want to change:**\n- **Stripe never answers.** If all three attempts get no answer, the refund may or may not have happened, so the order is held for a person instead of retried. The customer is told someone is checking. You record what the Stripe dashboard shows with `POST /admin/orders/<id>/resolve` (needs `ADMIN_TOKEN`). A clear refusal from Stripe (a 4xx error) isn't retried; the customer is told and can ask again.\n- **Item limit.** An order with more than 4 items, or whose prices don't add up to its total, is logged at startup and not served.\n- **Wrong number.** A customer can only reach orders on their own WhatsApp number; asking about anyone else's gets \"not found\".\n\n**Leftovers:**\n- `spike.mjs` and `spike2.mjs` in the project root are throwaway experiments I wasn't allowed to delete; please remove them.\n- The current `.poly/certificate.json` was signed by a throwaway key. Run `npm run keygen` and then `npm run admit` before `npm start`, as the README describes.\n\n`README.md` covers startup, the environment variables, and pointing the WhatsApp webhook at the server through a tunnel.",
+  "audit": {
+    "status": "escaped",
+    "calls": [
+      {
+        "tool": "Bash",
+        "reason": "Bash names a place outside the workspace C:\\Users\\jjdub\\.poly-demo\\work\\poly-pilot-3: /c/Users/jjdub/.poly-demo/work/poly-pilot-3",
+        "offending": [
+          "/c/Users/jjdub/.poly-demo/work/poly-pilot-3"
+        ],
+        "excerpt": "{\"command\":\"cd /c/Users/jjdub/.poly-demo/work/poly-pilot-3 && grep -n \\\"^#\\\" tools/poly/docs/03-technical-spec.md\",\"description\":\"List spec headings\"}"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Bash names a place outside the workspace C:\\Users\\jjdub\\.poly-demo\\work\\poly-pilot-3: i:",
+        "offending": [
+          "i:"
+        ],
+        "excerpt": "{\"command\":\"python3 - <<'EOF'\\nimport re\\np='src/support.poly'\\ns=open(p,encoding='utf8').read()\\ns=s.replace('''    match phase {\\n      Quoted { what: All } => {\\n        cancel expiry\\n        phas"
+      }
+    ],
+    "refused": [
+      {
+        "tool": "Bash",
+        "reason": "Bash pipes into cut -c1-3000, which is outside the read-only set",
+        "offending": [
+          "cut -c1-3000"
+        ],
+        "excerpt": "{\"command\":\"sed -n 100,125p tools/poly/docs/04-semantics.md | cut -c1-3000\",\"description\":\"Read semantics on check domains\"}",
+        "by": "guard"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Bash pipes into grep -i manifest, which is outside the read-only set",
+        "offending": [
+          "grep -i manifest"
+        ],
+        "excerpt": "{\"command\":\"grep -n \\\"EgressRequest\\\\|EgressResponse\\\" -A8 .harness/poly-runtime/dist/src/capabilities.d.ts | head -30; grep -n \\\"export\\\" .harness/poly-check/dist/src/index.d.ts | head; grep -n \\\"han",
+        "by": "guard"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Bash pipes into grep -v Warning, which is outside the read-only set",
+        "offending": [
+          "grep -v Warning"
+        ],
+        "excerpt": "{\"command\":\"cat > spike2.mjs <<'EOF'\\nimport { generateKeyPairSync } from 'node:crypto'\\nimport { admit } from '@poly/check'\\nimport { load } from '@poly/runtime'\\nconst { privateKey, publicKey } = ge",
+        "by": "guard"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+        "offending": [],
+        "excerpt": "{\"command\":\"cd lib && sed -i 's/  async function busyText(order, state) {/  function busyText(order, state) {/; s/(await busyText(order, r.state))/busyText(order, r.state)/g; s/const busy = await busy",
+        "by": "tool-list"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+        "offending": [],
+        "excerpt": "{\"command\":\"rm spike.mjs spike2.mjs; rm -rf .poly; ls -a; ls .harness/*/ | head -60\",\"description\":\"Remove spikes and the spike's certificate\"}",
+        "by": "tool-list"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+        "offending": [],
+        "excerpt": "{\"command\":\"rm spike.mjs spike2.mjs\",\"description\":\"Remove the two spike scripts\"}",
+        "by": "tool-list"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+        "offending": [],
+        "excerpt": "{\"command\":\"T=$(node -p \\\"require('os').tmpdir()\\\") && export SUPPORT_AGENT_KEYS=\\\"$T/sa-keys\\\" STORE_FILE=\\\"$T/sa-store/store.sqlite\\\" WHATSAPP_APP_SECRET=s WHATSAPP_VERIFY_TOKEN=v WHATSAPP_TOKEN=t W",
+        "by": "tool-list"
+      }
+    ]
+  },
+  "costUsd": 4.767197,
+  "usage": {
+    "input_tokens": 116,
+    "cache_creation_input_tokens": 218020,
+    "cache_read_input_tokens": 7753165,
+    "output_tokens": 73597,
+    "output_tokens_details": {
+      "thinking_tokens": 21744
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 218020,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [],
+    "speed": "standard",
+    "fallback_credit": null
+  }
+}
