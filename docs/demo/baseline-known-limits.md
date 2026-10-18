@@ -52,6 +52,21 @@ Calls 4 and 26 would also have been refused by the tool list, because neither `g
 
 `auditRun` (DB17 item 7) now treats an MSYS path inside the workspace as a refused call with the note `guard false positive: MSYS path`, and a bare letter and colon as a refused call with the note `guard false positive: non-path word`. A resolved path outside the workspace, and a disallowed tool, are the only escapes. The committed run folders are not edited: `poly-pilot-3` is recorded as `escaped` with 2 calls in its `RECORD.json`, and the re-audit that corrects this is in the final report.
 
+## The kept runs: the validity rule and two more cases
+
+The rule was ruled before `poly-kept` ran and applies to both arms. A run is invalid only if a call outside the workspace actually ran, or a disallowed tool was used. An outside call that the hook refused is a refused escape attempt: it is listed and does not invalidate the run. The audit has three statuses (DB17 item 8): `clean`, `attempted` (one or more outside calls, every one refused by the hook) and `escaped` (an outside call that ran).
+
+| Run | Commit | Tree | Audit | Valid |
+|---|---|---|---|---|
+| `ts-kept` | `81bb63dd` | `3e8246df94595dcf9fbd588195f2dfcc04afee20` | attempted (1 attempted, 0 escaped, 1 refused by the tool list) | yes |
+| `poly-kept` | `aac2b13e` | `235a38fa6012b2cd9446e013eaa87d8856772f7d` | clean (0 attempted, 0 escaped, 6 refused, 2 noted) | yes |
+
+**`ts-kept`, one attempt.** Call 2 was `cat .harness/typescript/package.json | grep '"version"'; mkdir -p /tmp/tt/test && cd /tmp/tt && …`, a scratch check of how Node strips types. The hook refused it live for `/tmp/tt/test`, `/tmp/tt` and `test/a.test.ts`, and nothing was created. The agent used Grep and went on to write its files. Its later start-up smoke call (call 22) was refused by the tool list, and its final message says `npm start` was never run.
+
+**`poly-kept`, one call refused for option words.** Call 56 was a start-up smoke test: `export … ; for i in 1 2; do (node src/main.js &) ; sleep 8; curl … ; taskkill //F //IM node.exe //FI "WINDOWTITLE eq *" …; npx --yes kill-port 3917 …; done`. The hook refused it live because the guard read `//F`, `//IM` and `//FI`, the MSYS option form of `taskkill`, as paths. They are not paths, so the audit lists the call as a guard refusal with the note `guard false positive: non-path word` (DB17 item 7). Had it run, it would have ended the `node.exe` processes that the filter matched, which could include the agent's own tools; the refusal was a false positive that was also protective, and it is the guard's doing and not the audit's. The agent skipped the smoke test and wrote its README. The session holds no `tasklist` call; the owner's description of two attempts is one call with two options. The same session also met the MSYS spelling of its own workspace (call 14, noted `MSYS path`), two pipe-rule refusals (calls 20 and 51) and two refusals by the tool list (calls 8 and 22). None changed what it built: it used Read, Grep and Edit instead, and its tests (21) pass by its own report.
+
+Both cases are the guard working as designed on the kept runs, and neither run is invalid.
+
 ## Conclusion
 
-The two valid pilots are `ts-pilot-2` and `poly-pilot-3`. The guard has two false-positive shapes, an MSYS spelling of the workspace and a drive-like word in program text. They are the same for both arms, they refused two calls of `poly-pilot-3`, and neither changed what the agent built or tested. The kept runs run under the guard as pre-registered, and the audit tells the two shapes from an escape.
+The valid pilots are `ts-pilot-2` and `poly-pilot-3`, and both kept runs, `ts-kept` and `poly-kept`, are valid under the rule above. The guard has three false-positive shapes: an MSYS spelling of the workspace, a drive-like word in program text, and the MSYS option form of a Windows tool. They are the same for both arms. They refused calls of `poly-pilot-3` and `poly-kept`, and none of them changed what the agent built or tested. `ts-kept` made one refused attempt outside its workspace, and that does not invalidate it. The kept runs ran under the guard as pre-registered, and the audit tells a false positive and a refused attempt from an escape.
