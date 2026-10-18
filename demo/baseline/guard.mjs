@@ -269,6 +269,46 @@ export function isReadOnlyBash(command, { workspace, cwd } = {}) {
 }
 
 /**
+ * Whether one command (no `&&`, `;` or `|` in it) matches a `Bash(...)` pattern of the arm's tool list (DB15 item 6): `Bash(prefix*)` matches a
+ * command that starts with the prefix, `Bash(text)` matches that command exactly. Runs of spaces count as one.
+ */
+export function bashPatternMatches(command, patterns) {
+  const text = command.replace(/\s+/g, ' ');
+  return patterns.some((pattern) => {
+    const m = /^Bash\((.*)\)$/s.exec(pattern);
+    if (!m) return false;
+    const body = m[1].replace(/\s+/g, ' ');
+    return body.endsWith('*') ? text.startsWith(body.slice(0, -1)) : text === body;
+  });
+}
+
+const FLAG_SINKS = ['head', 'tail', 'wc'];
+const INTEGER = /^\d+$/;
+
+/** Whether the right side of a pipe is head, tail or wc with only flag arguments (DB15 item 6): `-n`, `-30`, `-l`, `-c`, or an integer right after `-n` or `-c`. */
+function flagOnlySink(text) {
+  if (/['"]/.test(text)) return false;
+  const [name, ...args] = text.trim().split(/\s+/);
+  if (!FLAG_SINKS.includes(name)) return false;
+  return args.every((word, i) => word.startsWith('-') || (INTEGER.test(word) && (args[i - 1] === '-n' || args[i - 1] === '-c')));
+}
+
+/**
+ * True if the command is one the arm's own tool list allows (or the set allows), trimmed by one or more pipes into head, tail or wc that take only
+ * flags, optionally with `2>&1` or `2>/dev/null` (DB15 item 6). The permission mode judged such a command by shape (H4); this does not. The guard
+ * must allow it first, so a path outside the workspace is still refused.
+ */
+export function isAllowedWithTail(command, { workspace, cwd, allowedBash = [] } = {}) {
+  const verdict = checkToolCall({ tool: 'Bash', input: { command }, workspace, cwd });
+  if (!verdict.allow) return false;
+  const bare = command.replace(/(^|\s)2>(?:&1|\/dev\/null)(?=\s|$|[|;&])/g, '$1');
+  const { parts, ok } = scanCommands(bare);
+  if (!ok || !parts.some((p) => p.joiner === '|')) return false;
+  for (const [i, part] of parts.entries()) if (part.text.trim() === '' && (part.joiner === '|' || parts[i + 1]?.joiner === '|')) return false;
+  return parts.filter((p) => p.text.trim() !== '').every((p) => (p.joiner === '|' ? flagOnlySink(p.text) : inSet(p.text) || bashPatternMatches(p.text.trim(), allowedBash)));
+}
+
+/**
  * Reads a saved session and checks every tool call in it, the way the hook did. `escaped` if any call is denied, including a call the hook
  * refused in the run, because the run tried it (DB11 item 10).
  */

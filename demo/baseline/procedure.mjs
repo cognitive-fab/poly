@@ -219,7 +219,7 @@ export async function runArm({ arm, run, bin = 'claude', binArgs = [], root = RO
   writeFileSync(join(dir, 'initial.json'), `${JSON.stringify(initialManifest(workspace), null, 2)}\n`);
   const prompt = promptText(root);
   const out = createWriteStream(join(dir, 'session.jsonl'));
-  const child = spawn(bin, [...binArgs, ...claudeArgs({ arm, prompt, text: armText(arm, root) })], { cwd: workspace, env: { ...armEnv(env, configDir), POLY_DEMO_WORKSPACE: workspace }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(bin, [...binArgs, ...claudeArgs({ arm, prompt, text: armText(arm, root) })], { cwd: workspace, env: { ...armEnv(env, configDir), POLY_DEMO_WORKSPACE: workspace, POLY_DEMO_ALLOWED_BASH: JSON.stringify(ALLOWED_TOOLS[arm].filter((p) => p.startsWith('Bash('))) }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let result = null;
   let buffer = '';
   child.stdout.on('data', (c) => {
