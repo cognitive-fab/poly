@@ -940,3 +940,51 @@ test('DB17 item 7 D11: Windows-form workspace path (ls C:/ws/run/src) is allowed
   }
 });
 
+test('DB17 item 7 heredoc case 1: python3 - <<EOF ; cd D: is escaped (D: on opener line)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: "python3 - <<'EOF' ; cd D:\na { i: n }\nEOF" }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 heredoc case 2: cat <<EOF | ls D: is escaped (D: on opener line)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: "cat <<'EOF' | ls D:\nbody\nEOF" }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 7 heredoc control: cat <<EOF with i: in body is refused with note non-path word', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: "cat <<'EOF'\na { i: n }\nEOF" }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'has note property');
+    assert.equal(result.refused[0].note, 'guard false positive: non-path word', 'note is non-path word');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
