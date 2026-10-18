@@ -498,7 +498,9 @@ test('DB17 item 8 A: replay of ts-kept mkdir call with hook-refusal result => at
     assert.equal(result.attempted.length, 1, 'attempted has 1 entry');
     assert.deepEqual(result.escaped, [], 'escaped is empty');
     assert.ok(result.attempted[0].offending.some(o => o.includes('/tmp/tt')), 'offending contains /tmp/tt');
-    assert.equal(result.attempted[0].reason, hookRefusal, 'reason is hook refusal message');
+    assert.ok(result.attempted[0].reason.startsWith('Bash names a place outside the workspace '), 'reason starts with guard message');
+    assert.ok(result.attempted[0].reason.includes('/tmp/tt'), 'reason includes /tmp/tt');
+    assert.ok(hookRefusal.includes('/tmp/tt/test, /tmp/tt, test/a.test.ts'), 'hook result includes all three items');
     assert.ok(!Object.hasOwn(result.attempted[0], 'by'), 'attempted entry has no by field');
     assert.ok(!Object.hasOwn(result.attempted[0], 'note'), 'attempted entry has no note field');
     assert.deepEqual(result.calls, [], 'calls is empty (same as escaped)');
@@ -529,7 +531,7 @@ test('DB17 item 8 B: replay of poly-kept taskkill with //F, //IM, //FI => refuse
   }
 });
 
-test('DB17 item 8 C: ts-pilot-1 clean, poly-pilot-1 clean (recorded sessions)', () => {
+test('DB17 item 8 C: ts-pilot-1 clean, poly-pilot-1 escaped (recorded sessions)', () => {
   const tsAudit = auditRun(join(SESSIONS, 'ts-pilot-1', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/runs/ts-pilot-1/workspace');
   assert.equal(tsAudit.status, 'clean', 'ts-pilot-1 status is clean');
   assert.deepEqual(tsAudit.escaped, [], 'ts-pilot-1 escaped is empty');
@@ -537,8 +539,9 @@ test('DB17 item 8 C: ts-pilot-1 clean, poly-pilot-1 clean (recorded sessions)', 
   assert.deepEqual(tsAudit.calls, [], 'ts-pilot-1 calls is empty');
 
   const polyAudit = auditRun(join(SESSIONS, 'poly-pilot-1', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/runs/poly-pilot-1/workspace');
-  assert.equal(polyAudit.status, 'clean', 'poly-pilot-1 status is clean');
+  assert.equal(polyAudit.status, 'escaped', 'poly-pilot-1 status is escaped');
   assert.deepEqual(polyAudit.attempted, [], 'poly-pilot-1 attempted is empty');
+  assert.ok(polyAudit.escaped.length > 0, 'poly-pilot-1 escaped is non-empty');
 });
 
 test('DB17 item 8 C: ts-pilot-2 clean, poly-pilot-2 clean, poly-pilot-3 clean (recorded)', () => {
