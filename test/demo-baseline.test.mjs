@@ -55,7 +55,7 @@ test('DB3, Q13: both arms use Opus 5.5, the per-run caps of the plan, no web too
 
 test('DB3, plan section 5: the poly arm has the deterministic commands and none that calls a model (no poly new, no explain)', () => {
   const tools = ALLOWED_TOOLS.poly.join(' ');
-  for (const c of ['check', 'witness', 'fix', 'fmt', 'edit-check']) assert.ok(tools.includes(`npm run poly ${c}`), c);
+  for (const c of ['check', 'witness', 'fix', 'fmt', 'edit-check', 'admit', 'lint']) assert.ok(tools.includes(`npm run poly ${c}`), c);
   assert.doesNotMatch(tools, /poly new|poly explain|Bash\(npm run poly \*\)/);
   assert.ok(ALLOWED_TOOLS.poly.includes('Bash(node *)') && ALLOWED_TOOLS.ts.includes('Bash(node *)'), 'both arms have node (ruled 2026-10-15)');
   assert.deepEqual(ALLOWED_TOOLS.poly.filter((x) => x.startsWith('Bash(node')), ALLOWED_TOOLS.ts.filter((x) => x.startsWith('Bash(node')), 'the same node pattern');

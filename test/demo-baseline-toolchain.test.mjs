@@ -57,8 +57,8 @@ test('DB10.2: TypeScript arm package.json devDependencies has exactly typescript
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test('DB10.2: poly arm package.json devDependencies has exactly 14 keys: @poly/*, @cognitive-fab/*, typescript, @types/node, undici-types', () => {
-  // Catches implementation that does not declare all packages or declares wrong names.
+test('DB10.2: poly arm package.json devDependencies has exactly 15 keys: @poly/*, @cognitive-fab/*, typescript, @types/node, undici-types, std', () => {
+  // Catches implementation that does not declare all packages or declares wrong names (DB16 item 7).
   const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-deps-'));
   try {
     makeWorkspace('poly', tmp, ROOT);
@@ -67,9 +67,9 @@ test('DB10.2: poly arm package.json devDependencies has exactly 14 keys: @poly/*
     const expected = [
       '@cognitive-fab/polyflow-kernel', '@cognitive-fab/polyflow-verify', '@cognitive-fab/polygraph', '@cognitive-fab/sam-pattern',
       '@poly/check', '@poly/core', '@poly/embed', '@poly/lang', '@poly/lower', '@poly/ref', '@poly/runtime',
-      '@types/node', 'typescript', 'undici-types',
+      '@types/node', 'std', 'typescript', 'undici-types',
     ].sort();
-    assert.deepEqual(keys, expected, 'exactly 14 devDependencies with correct names');
+    assert.deepEqual(keys, expected, 'exactly 15 devDependencies with correct names');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -268,13 +268,13 @@ test('DB10.7: workDir("ts", "pilot-2") and workDir("poly", "pilot-2") are not in
 // ---- DB10.8: smokeTest execution and structure -------
 
 test('DB10.8: smokeTest("poly", { root }) with timeout 300000 returns ok true with correct step names and all ok', () => {
-  // Catches implementation that does not run, returns wrong structure, or steps fail.
+  // Catches implementation that does not run, returns wrong structure, or steps fail (DB16 item 3).
   const result = smokeTest('poly', { root: ROOT, timeout: 300000 });
   assert.ok(result && typeof result === 'object', 'returns an object');
   assert.equal(result.ok, true, 'result.ok === true');
   assert.ok(Array.isArray(result.steps), 'result.steps is an array');
   const stepNames = result.steps.map((s) => s.name);
-  assert.deepEqual(stepNames, ['install', 'check-clean', 'check-finding', 'admit', 'runtime', 'install-local', 'check-after'], 'step names match spec');
+  assert.deepEqual(stepNames, ['install', 'check-clean', 'check-finding', 'admit', 'runtime', 'std', 'install-local', 'check-after'], 'step names match spec');
   for (const step of result.steps) {
     assert.equal(step.ok, true, `step ${step.name} has ok === true`);
     assert.ok(step.detail && typeof step.detail === 'string' && step.detail.length > 0, `step ${step.name} has non-empty detail string`);

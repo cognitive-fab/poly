@@ -140,15 +140,21 @@ test('1: amendment 2 has reason string', async () => {
   assert.ok(amendment2_throwaway.reason.length > 0, 'reason is non-empty');
 });
 
-test('1: amendment 2 has findings with H5 and H6', async () => {
+test('1: amendment 2 has findings with H5, H6, and H7', async () => {
   const amendment2_throwaway = await getAmendment2Throwaway();
   assert.ok(typeof amendment2_throwaway.findings === 'object', 'findings is object');
   assert.ok('H5' in amendment2_throwaway.findings, 'findings has H5 key');
   assert.ok('H6' in amendment2_throwaway.findings, 'findings has H6 key');
+  assert.ok('H7' in amendment2_throwaway.findings, 'findings has H7 key');
   assert.equal(typeof amendment2_throwaway.findings.H5, 'string', 'H5 is string');
   assert.ok(amendment2_throwaway.findings.H5.length > 0, 'H5 is non-empty');
   assert.equal(typeof amendment2_throwaway.findings.H6, 'string', 'H6 is string');
   assert.ok(amendment2_throwaway.findings.H6.length > 0, 'H6 is non-empty');
+  assert.equal(typeof amendment2_throwaway.findings.H7, 'string', 'H7 is string');
+  assert.ok(amendment2_throwaway.findings.H7.length > 0, 'H7 is non-empty');
+  assert.ok(amendment2_throwaway.findings.H5.includes('std'), 'H5 mentions std');
+  assert.ok(amendment2_throwaway.findings.H7.includes('poly lint handlers'), 'H7 mentions poly lint handlers');
+  assert.ok(amendment2_throwaway.findings.H7.includes('poly-pilot-2'), 'H7 mentions poly-pilot-2');
 });
 
 test('1: amendment 2 has keeps, set, excluded, and limits', async () => {
@@ -157,6 +163,19 @@ test('1: amendment 2 has keeps, set, excluded, and limits', async () => {
   assert.ok('set' in amendment2_throwaway, 'has set');
   assert.ok('excluded' in amendment2_throwaway, 'has excluded');
   assert.ok('limits' in amendment2_throwaway, 'has limits');
+});
+
+test('1: amendment 2 has limits with required content', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  assert.ok(Array.isArray(amendment2_throwaway.limits), 'limits is an array');
+  assert.ok(amendment2_throwaway.limits.length > 0, 'limits is non-empty');
+  const limitsText = amendment2_throwaway.limits.join('\n');
+  assert.ok(/std.*channel|channel.*std/.test(limitsText), 'limits contains a sentence mentioning both std and channel');
+  assert.ok(/effectiveRecord.*preflight|preflight.*effectiveRecord/.test(limitsText), 'limits contains a sentence mentioning effectiveRecord and preflight');
+  assert.ok(/committed.*history|history.*committed/.test(limitsText), 'limits contains a sentence mentioning committed history');
+  assert.ok(/ts-pilot-2/.test(limitsText), 'limits contains a sentence mentioning ts-pilot-2');
+  assert.ok(!/poly-pilot-3 runs under/.test(limitsText), 'limits does not contain poly-pilot-3 runs under');
+  assert.ok(!/does not change the list/.test(limitsText), 'limits does not contain does not change the list');
 });
 
 // 2. excluded has exactly one entry: arm poly, run pilot-2, correct commit and tree, findings containing H5.
@@ -213,11 +232,33 @@ test('3: set.pilots is { ts: 2, poly: 3 }', async () => {
   assert.deepEqual(amendment2_throwaway.set.pilots, { ts: 2, poly: 3 }, 'pilots deep-equals { ts: 2, poly: 3 }');
 });
 
-// 4. set.scaffolds.ts equals amendment 1's set.scaffolds.ts; set.scaffolds.poly differs and equals scaffoldDigest.
+// 4. set holds scaffolds, pilots, and allowedTools. set.scaffolds.ts unchanged, set.scaffolds.poly differs.
+// set.allowedTools.ts equals amendment 1's; set.allowedTools.poly is amendment 1's poly list plus two entries.
 test('4: set.scaffolds.ts unchanged from amendment 1', async () => {
   const amendment2_throwaway = await getAmendment2Throwaway();
   const amend1 = getAmend1();
   assert.equal(amendment2_throwaway.set.scaffolds.ts, amend1.set.scaffolds.ts, 'ts scaffold unchanged');
+});
+
+test('4: set.allowedTools.ts equals amendment 1 ts list', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  const amend1 = getAmend1();
+  assert.ok('allowedTools' in amendment2_throwaway.set, 'set has allowedTools');
+  assert.deepEqual(amendment2_throwaway.set.allowedTools.ts, amend1.set.allowedTools.ts, 'ts tools unchanged');
+});
+
+test('4: set.allowedTools.poly is amendment 1 poly list plus two entries', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  const amend1 = getAmend1();
+  assert.ok('allowedTools' in amendment2_throwaway.set, 'set has allowedTools');
+  const expectedPoly = [...amend1.set.allowedTools.poly, 'Bash(npm run poly admit*)', 'Bash(npm run poly lint*)'];
+  assert.deepEqual(amendment2_throwaway.set.allowedTools.poly, expectedPoly, 'poly tools equal amendment 1 plus two new entries in order');
+});
+
+test('4: set has pilots', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  assert.ok('pilots' in amendment2_throwaway.set, 'set has pilots');
+  assert.deepEqual(amendment2_throwaway.set.pilots, { ts: 2, poly: 3 }, 'pilots is { ts: 2, poly: 3 }');
 });
 
 test('4: set.scaffolds.ts equals scaffoldDigest(ts)', async () => {
@@ -249,7 +290,9 @@ test('4: set.scaffolds.poly equals scaffoldDigest(poly)', async () => {
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
-// 5. keeps: contains the nine immutable keys with values from effective record before amendment 2.
+// 5. keeps: contains the nine immutable keys, path keys for allowedTools.ts and scaffolds.ts,
+// tool-related keys (disallowedTools, tools, settings, hook, readOnlyBash, readOnlyExact),
+// totalCapUsd 175, and does NOT have whole allowedTools or scaffolds keys.
 test('5: keeps has all nine immutable keys with correct values', async () => {
   const amendment2_throwaway = await getAmendment2Throwaway();
   const eff_before_amend2 = await getEffBeforeAmend2();
@@ -265,17 +308,38 @@ test('5: keeps.totalCapUsd equals 175', async () => {
   assert.equal(amendment2_throwaway.keeps.totalCapUsd, 175, 'totalCapUsd is 175 (total after amendment; before: 150)');
 });
 
+test('5: keeps path key allowedTools.ts equals amendment 1 ts list', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  const amend1 = getAmend1();
+  assert.ok('allowedTools.ts' in amendment2_throwaway.keeps, 'keeps has path key allowedTools.ts');
+  assert.deepEqual(amendment2_throwaway.keeps['allowedTools.ts'], amend1.set.allowedTools.ts, 'allowedTools.ts value equals amendment 1 ts list');
+});
+
+test('5: keeps path key scaffolds.ts equals amendment 1 ts scaffold', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  const amend1 = getAmend1();
+  assert.ok('scaffolds.ts' in amendment2_throwaway.keeps, 'keeps has path key scaffolds.ts');
+  assert.deepEqual(amendment2_throwaway.keeps['scaffolds.ts'], amend1.set.scaffolds.ts, 'scaffolds.ts value equals amendment 1 ts scaffold');
+});
+
+test('5: keeps does NOT have whole allowedTools or scaffolds keys', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  assert.ok(!('allowedTools' in amendment2_throwaway.keeps), 'keeps does not have whole allowedTools key');
+  assert.ok(!('scaffolds' in amendment2_throwaway.keeps), 'keeps does not have whole scaffolds key');
+});
+
 test('5: keeps tool-related keys match effective record', async () => {
   const amendment2_throwaway = await getAmendment2Throwaway();
   const eff_before_amend2 = await getEffBeforeAmend2();
-  const toolKeys = ['allowedTools', 'disallowedTools', 'tools', 'settings', 'hook', 'readOnlyBash', 'readOnlyExact'];
+  const toolKeys = ['disallowedTools', 'tools', 'settings', 'hook', 'readOnlyBash', 'readOnlyExact'];
   for (const key of toolKeys) {
     assert.ok(key in amendment2_throwaway.keeps, `keeps has ${key}`);
     assert.deepEqual(amendment2_throwaway.keeps[key], eff_before_amend2[key], `${key} value matches effective record`);
   }
 });
 
-// 6. set does not name any immutable key, allowedTools, disallowedTools, tools, settings, hook, readOnlyBash, readOnlyExact.
+// 6. set does not have immutable keys or disallowedTools, tools, settings, hook, readOnlyBash, readOnlyExact,
+// but does have allowedTools.
 test('6: set does not have immutable keys', async () => {
   const amendment2_throwaway = await getAmendment2Throwaway();
   const immutable = ['prompt', 'armTexts', 'model', 'claudeCode', 'billing', 'network', 'maxTurns', 'capsUsd', 'polyReference'];
@@ -285,11 +349,12 @@ test('6: set does not have immutable keys', async () => {
   }
 });
 
-test('6: set does not have tool-related keys', async () => {
+test('6: set has allowedTools but not disallowedTools, tools, settings, hook, readOnlyBash, readOnlyExact', async () => {
   const amendment2_throwaway = await getAmendment2Throwaway();
-  const toolKeys = ['allowedTools', 'disallowedTools', 'tools', 'settings', 'hook', 'readOnlyBash', 'readOnlyExact'];
+  const restrictedKeys = ['disallowedTools', 'tools', 'settings', 'hook', 'readOnlyBash', 'readOnlyExact'];
   const setKeys = Object.keys(amendment2_throwaway.set);
-  for (const key of toolKeys) {
+  assert.ok(setKeys.includes('allowedTools'), 'set has allowedTools');
+  for (const key of restrictedKeys) {
     assert.ok(!setKeys.includes(key), `set does not have ${key}`);
   }
 });
@@ -314,27 +379,54 @@ test('7: amendment 2 is accepted by effectiveRecord', async () => {
     assert.equal(eff.record.totalCapUsd, 175, 'totalCapUsd is 175 after amendment 2');
     assert.deepEqual(eff.record.scaffolds, amendment2_throwaway.set.scaffolds, 'scaffolds match amendment 2 set.scaffolds');
 
-    // Test that changing keeps.allowedTools causes a problem.
+    // Test that the amendment is accepted.
+    assert.equal(eff.record.allowedTools.ts.length, 9, 'record.allowedTools.ts has 9 entries (unchanged)');
+    assert.equal(eff.record.allowedTools.poly.length, 15, 'record.allowedTools.poly has 15 entries (13 + 2)');
+
+    // Test that changing keeps path key allowedTools.ts causes a problem.
     // Control: unmodified amendment 2 should have no problems (already tested above, but verify again).
     assert.deepEqual(eff.problems, [], 'control: unmodified amendment 2 has no problems');
 
-    // Create a new repo with amendment 1 and modified amendment 2 (one tool added to ts list).
+    // Create a new repo with amendment 1 and modified amendment 2 (one tool added to ts list path key).
     const r_bad = gitRepoWithAmendments({ amendments: [amend1] });
     try {
       const badAmendment2 = JSON.parse(JSON.stringify(amendment2_throwaway));
-      // Keep the shape (object keyed by arm) and add one tool to the ts list.
-      badAmendment2.keeps.allowedTools = { ...badAmendment2.keeps.allowedTools, ts: [...(badAmendment2.keeps.allowedTools.ts || []), 'Bash(rm *)'] };
+      // Add one tool to the ts list in the keeps path key.
+      badAmendment2.keeps['allowedTools.ts'] = [...badAmendment2.keeps['allowedTools.ts'], 'Bash(rm *)'];
       writeFileSync(join(r_bad.root, 'demo/baseline/PREREGISTRATION.amendment-2.json'), JSON.stringify(badAmendment2, null, 2) + '\n');
       execFileSync('git', ['-C', r_bad.root, 'add', '-A'], { stdio: ['ignore', 'pipe', 'pipe'] });
       execFileSync('git', ['-C', r_bad.root, 'commit', '-q', '-m', 'amendment 2 with modified keeps'], { stdio: ['ignore', 'pipe', 'pipe'] });
 
       const eff_bad = effectiveRecord({ root: r_bad.root, git: r_bad.git });
-      assert.equal(eff_bad.problems.length, 1, 'exactly one problem reported when keeps.allowedTools changed');
-      assert.ok(eff_bad.problems[0].startsWith('amendment 2 keeps allowedTools as '), 'problem message starts with correct prefix');
+      assert.equal(eff_bad.problems.length, 1, 'exactly one problem reported when keeps.allowedTools.ts changed');
+      assert.ok(eff_bad.problems[0].startsWith('amendment 2 keeps allowedTools.ts as '), 'problem message starts with correct prefix');
       assert.ok(eff_bad.problems[0].includes('Bash(rm *)'), 'problem message includes the tool name');
       assert.ok(eff_bad.problems[0].includes(', but the record has '), 'problem message includes expected/actual comparison');
     } finally { r_bad.clean(); }
   } finally { r.clean(); }
+});
+
+// (f) buildAmendment is refused when the TypeScript part would change: by keeping the TypeScript allowedTools.
+test('amendment 2 refuses if TypeScript allowedTools would change', async () => {
+  const amendment2_throwaway = await getAmendment2Throwaway();
+  const amend1 = getAmend1();
+  const r = gitRepoWithAmendments({ amendments: [amend1] });
+  try {
+    // Create a modified amendment 2 that tries to change the TS allowedTools.
+    const badAmendment2 = JSON.parse(JSON.stringify(amendment2_throwaway));
+    badAmendment2.set.allowedTools.ts = [...amend1.set.allowedTools.ts, 'Bash(extra tool)'];
+    // The keeps still expects the original TS list, so effectiveRecord should refuse it.
+    writeFileSync(join(r.root, 'demo/baseline/PREREGISTRATION.amendment-2.json'), JSON.stringify(badAmendment2, null, 2) + '\n');
+    execFileSync('git', ['-C', r.root, 'add', '-A'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync('git', ['-C', r.root, 'commit', '-q', '-m', 'amendment 2 with changed TS'], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    const eff = effectiveRecord({ root: r.root, git: r.git });
+    assert.ok(eff.problems.length > 0, 'amendment is refused when TS allowedTools would change');
+    const problem = eff.problems.find(p => p.includes('allowedTools.ts'));
+    assert.ok(problem, `expected problem mentioning allowedTools.ts, got: ${eff.problems.join('; ')}`);
+  } finally {
+    r.clean();
+  }
 });
 
 // 9. No em dash (U+2014, —) or en dash (U+2013, –) in the amendment JSON, and no words hon+est, hon+esty, honestly.

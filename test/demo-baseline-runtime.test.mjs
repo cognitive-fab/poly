@@ -1,7 +1,7 @@
 // DB16: poly workspace includes model folder, smoke test runs runtime check
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, copyFileSync, symlinkSync, statSync, mkdirSync, cpSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, copyFileSync, symlinkSync, statSync, mkdirSync, cpSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,21 +122,33 @@ test('DB16.2: only poly-runtime of .harness folders has a model subfolder', () =
 
 // ---- DB16.3: poly workspace differs from no-model only by model files -------
 
-test('DB16.3: deleting .harness/poly-runtime/model gives treeDigest equal to amendment 1 poly scaffold', () => {
+test('DB16.3: deleting .harness/poly-runtime/model and .harness/std, removing std from devDependencies, gives treeDigest equal to amendment 1 poly scaffold', () => {
+  // DB16 item 2: the poly workspace differs from amendment 1 only by those folders and the std entry.
   const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-digest-'));
   try {
     makeWorkspace('poly', tmp, ROOT);
     const allFiles = listFiles(tmp);
     const modelFiles = allFiles.filter(f => f.startsWith('.harness/poly-runtime/model/'));
+    const stdFiles = allFiles.filter(f => f.startsWith('.harness/std/'));
     assert.ok(modelFiles.length > 0, 'has at least some model files');
+    assert.ok(stdFiles.length > 0, 'has at least some std files');
 
-    // Delete the model folder
+    // Verify std folder and devDependency exist before removing
+    const pkg = JSON.parse(readFileSync(join(tmp, 'package.json'), 'utf8'));
+    assert.equal(pkg.devDependencies.std, 'file:.harness/std', 'devDependencies.std equals file:.harness/std');
+
+    // Delete the model folder and std folder
     rmSync(join(tmp, '.harness/poly-runtime/model'), { recursive: true, force: true });
+    rmSync(join(tmp, '.harness/std'), { recursive: true, force: true });
 
-    // Compute treeDigest of workspace without model
+    // Remove std from devDependencies and write package.json back
+    delete pkg.devDependencies.std;
+    writeFileSync(join(tmp, 'package.json'), JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+    // Compute treeDigest of workspace without model and std
     const digester = treeDigest(tmp, { skip: [] });
     const amendment1 = getAmendment1Scaffolds();
-    assert.equal(digester, amendment1.poly, `treeDigest without model equals amendment 1 poly scaffold`);
+    assert.equal(digester, amendment1.poly, `treeDigest without model and std equals amendment 1 poly scaffold`);
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
@@ -150,13 +162,13 @@ function getPolyResult() {
   return cachedPolyResult;
 }
 
-test('DB16.4: smokeTest("poly", { root: ROOT, timeout: 300000 }) returns ok with correct step names including admit and runtime', () => {
+test('DB16.4: smokeTest("poly", { root: ROOT, timeout: 300000 }) returns ok with correct step names including admit, runtime and std', () => {
   const result = getPolyResult();
   assert.ok(result && typeof result === 'object', 'returns an object');
   assert.equal(result.ok, true, 'result.ok === true');
   assert.ok(Array.isArray(result.steps), 'result.steps is an array');
   const stepNames = result.steps.map((s) => s.name);
-  assert.deepEqual(stepNames, ['install', 'check-clean', 'check-finding', 'admit', 'runtime', 'install-local', 'check-after'], 'step names match DB16 spec');
+  assert.deepEqual(stepNames, ['install', 'check-clean', 'check-finding', 'admit', 'runtime', 'std', 'install-local', 'check-after'], 'step names match DB16 spec');
   for (const step of result.steps) {
     assert.equal(step.ok, true, `step ${step.name} has ok === true`);
     assert.ok(step.detail && typeof step.detail === 'string' && step.detail.length > 0, `step ${step.name} has non-empty detail string`);
@@ -197,10 +209,12 @@ test('DB16.5: smokeTest("ts", { root: ROOT, timeout: 300000 }) returns ok with c
 test('DB16.6a: smokeTest("poly") throws when root lacks packages/poly-runtime/model folder', () => {
   const mirrorRoot = mkdtempSync(join(tmpdir(), 'mirror-root-nomodel-'));
   try {
-    // Create junction links to all top-level directories except packages, copy top-level files
+    // Create junction links to top-level directories except packages and std, copy top-level files.
+    // DB16 item 7: std must be a real copy, not a junction. cpSync with a junction as the last path component
+    // on Windows makes a symlink, which fails EPERM. Copying from paths under a junction is fine.
     const topEntries = readdirSync(ROOT);
     for (const entry of topEntries) {
-      if (entry === 'packages') continue;
+      if (entry === 'packages' || entry === 'std') continue;
       const sourcePath = join(ROOT, entry);
       const stat = statSync(sourcePath);
       if (stat.isDirectory()) {
@@ -209,6 +223,8 @@ test('DB16.6a: smokeTest("poly") throws when root lacks packages/poly-runtime/mo
         copyFileSync(sourcePath, join(mirrorRoot, entry));
       }
     }
+    // Copy std as real files
+    cpSync(join(ROOT, 'std'), join(mirrorRoot, 'std'), { recursive: true });
 
     // Create packages with junctions to each package except poly-runtime
     const packagesDir = join(mirrorRoot, 'packages');
@@ -241,10 +257,12 @@ test('DB16.6a: smokeTest("poly") throws when root lacks packages/poly-runtime/mo
 test('DB16.6b: smokeTest("poly") ok false when model lacks build folder, runtime step fails', () => {
   const mirrorRoot = mkdtempSync(join(tmpdir(), 'mirror-root-nomodel-build-'));
   try {
-    // Create junction links to all top-level directories except packages, copy top-level files
+    // Create junction links to top-level directories except packages and std, copy top-level files.
+    // DB16 item 7: std must be a real copy, not a junction. cpSync with a junction as the last path component
+    // on Windows makes a symlink, which fails EPERM. Copying from paths under a junction is fine.
     const topEntries = readdirSync(ROOT);
     for (const entry of topEntries) {
-      if (entry === 'packages') continue;
+      if (entry === 'packages' || entry === 'std') continue;
       const sourcePath = join(ROOT, entry);
       const stat = statSync(sourcePath);
       if (stat.isDirectory()) {
@@ -253,6 +271,8 @@ test('DB16.6b: smokeTest("poly") ok false when model lacks build folder, runtime
         copyFileSync(sourcePath, join(mirrorRoot, entry));
       }
     }
+    // Copy std as real files
+    cpSync(join(ROOT, 'std'), join(mirrorRoot, 'std'), { recursive: true });
 
     // Create packages with junctions to each package except poly-runtime
     const packagesDir = join(mirrorRoot, 'packages');
@@ -298,5 +318,169 @@ test('DB16.6b: smokeTest("poly") ok false when model lacks build folder, runtime
     assert.equal(result.steps.length, runtimeIndex + 1, 'no steps after failed runtime step');
   } finally {
     rmSync(mirrorRoot, { recursive: true, force: true });
+  }
+});
+
+// ---- DB16.7: std folder, std devDependency, std smoke step -------
+
+test('DB16.7: makeWorkspace("poly", tmpdir) holds every file of ROOT/std under .harness/std/ byte for byte', () => {
+  // DB16 item 7: the workspace copies the repository std folder wholly into .harness/std.
+  const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-std-files-'));
+  try {
+    makeWorkspace('poly', tmp, ROOT);
+    const sourceBase = join(ROOT, 'std');
+    const workspaceBase = join(tmp, '.harness/std');
+    const sourceFiles = walkDirectory(sourceBase);
+
+    for (const relPath of sourceFiles) {
+      const sourcePath = join(sourceBase, ...relPath.split('/'));
+      const workspacePath = join(workspaceBase, ...relPath.split('/'));
+      assert.ok(existsSync(workspacePath), `workspace has file: ${relPath}`);
+      const sourceBytes = readFileSync(sourcePath);
+      const workspaceBytes = readFileSync(workspacePath);
+      assert.deepEqual(sourceBytes, workspaceBytes, `${relPath} matches byte for byte`);
+    }
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('DB16.7: .harness/std/package.json has exact content { name: std, version: 0.0.0, private: true } with final newline', () => {
+  // DB16 item 7: the harness writes the std package.json with exact structure and a final newline.
+  const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-std-pkg-'));
+  try {
+    makeWorkspace('poly', tmp, ROOT);
+    const pkgPath = join(tmp, '.harness/std/package.json');
+    assert.ok(existsSync(pkgPath), '.harness/std/package.json exists');
+    const content = readFileSync(pkgPath, 'utf8');
+    assert.ok(content.endsWith('\n'), 'package.json ends with newline');
+    const pkg = JSON.parse(content);
+    assert.equal(pkg.name, 'std', 'name is std');
+    assert.equal(pkg.version, '0.0.0', 'version is 0.0.0');
+    assert.equal(pkg.private, true, 'private is true');
+    const keys = Object.keys(pkg).sort();
+    assert.deepEqual(keys, ['name', 'private', 'version'].sort(), 'exactly three keys');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('DB16.7: poly workspace devDependencies has std: file:.harness/std', () => {
+  // DB16 item 7: the workspace declares std as a devDependency.
+  const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-std-dep-'));
+  try {
+    makeWorkspace('poly', tmp, ROOT);
+    const pkg = JSON.parse(readFileSync(join(tmp, 'package.json'), 'utf8'));
+    assert.equal(pkg.devDependencies.std, 'file:.harness/std', 'devDependencies.std is file:.harness/std');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('DB16.7: TypeScript workspace has no path containing "std" and no std dependency', () => {
+  // DB16 item 7: the TypeScript workspace is unchanged and has no std.
+  const tmp = mkdtempSync(join(tmpdir(), 'ws-ts-nostd-'));
+  try {
+    makeWorkspace('ts', tmp, ROOT);
+    const files = listFiles(tmp);
+    const stdFiles = files.filter(f => f.includes('std'));
+    assert.deepEqual(stdFiles, [], `no files with "std" in path, found: ${stdFiles.join(', ')}`);
+    const pkg = JSON.parse(readFileSync(join(tmp, 'package.json'), 'utf8'));
+    assert.equal(pkg.devDependencies.std, undefined, 'no std devDependency');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('DB16.7: smokeTest("poly") includes std step after runtime and before install-local with correct details', () => {
+  // DB16 item 7: the smoke step std tests that the poly workspace can check a module using a std channel kind.
+  const result = getPolyResult();
+  const steps = result.steps.map(s => s.name);
+  const runtimeIdx = steps.indexOf('runtime');
+  const stdIdx = steps.indexOf('std');
+  const installLocalIdx = steps.indexOf('install-local');
+  assert.ok(runtimeIdx >= 0, 'runtime step exists');
+  assert.ok(stdIdx >= 0, 'std step exists');
+  assert.ok(installLocalIdx >= 0, 'install-local step exists');
+  assert.ok(runtimeIdx < stdIdx && stdIdx < installLocalIdx, 'std step is between runtime and install-local');
+
+  const stdStep = result.steps.find(s => s.name === 'std');
+  assert.equal(stdStep.ok, true, 'std step ok === true');
+  assert.ok(stdStep.detail.includes('configuration support: configuration CLEAN'), 'detail contains configuration support: configuration CLEAN');
+  assert.ok(!stdStep.detail.includes('PL6811'), 'detail does not contain PL6811');
+});
+
+test('DB16.7: smokeTest("poly") root without .harness/std throws', () => {
+  // DB16 item 5: a root whose std folder is missing makes the build throw. The spec is silent on this,
+  // so by analogy with DB10.9, a root without a needed top-level folder throws.
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'mirror-root-nolib-'));
+  try {
+    // Create junction links to all top-level directories except packages and std, copy top-level files
+    const topEntries = readdirSync(ROOT);
+    for (const entry of topEntries) {
+      if (entry === 'packages' || entry === 'std') continue;
+      const sourcePath = join(ROOT, entry);
+      const stat = statSync(sourcePath);
+      if (stat.isDirectory()) {
+        symlinkSync(sourcePath, join(mirrorRoot, entry), 'junction');
+      } else {
+        copyFileSync(sourcePath, join(mirrorRoot, entry));
+      }
+    }
+
+    // Create packages with junctions to each package
+    const packagesDir = join(mirrorRoot, 'packages');
+    mkdirSync(packagesDir, { recursive: true });
+    const packageEntries = readdirSync(join(ROOT, 'packages'));
+    for (const pkgName of packageEntries) {
+      symlinkSync(join(ROOT, 'packages', pkgName), join(packagesDir, pkgName), 'junction');
+    }
+
+    // Note: do not create std folder - it is intentionally missing.
+    // This test shows the builder throws, not the std smoke step's check.
+
+    assert.throws(
+      () => smokeTest('poly', { root: mirrorRoot, timeout: 300000 }),
+      /ENOENT|no such file|does not exist/,
+      'smokeTest throws when std is missing'
+    );
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true });
+  }
+});
+
+test('DB16.7: after smokeTest("poly") succeeds, offline npm install --save-dev keeps node_modules/std intact', () => {
+  // DB16 item 7: a proof that std is installed and persists through a second npm install.
+  // The smoke test runs offline; we replicate that and add a second install.
+  const tmp = mkdtempSync(join(tmpdir(), 'ws-poly-install-proof-'));
+  try {
+    makeWorkspace('poly', tmp, ROOT);
+
+    // Run npm install offline
+    const npmCache = mkdtempSync(join(tmpdir(), 'npm-cache-'));
+    try {
+      const env = {
+        ...process.env,
+        npm_config_offline: 'true',
+        npm_config_cache: npmCache,
+        npm_config_registry: 'http://127.0.0.1:9/',
+      };
+      delete env.NODE_TEST_CONTEXT;
+
+      execSync('npm install', { cwd: tmp, env, timeout: 300000, shell: true });
+      assert.ok(existsSync(join(tmp, 'node_modules/std/package.json')), 'node_modules/std/package.json exists after first install');
+      assert.ok(existsSync(join(tmp, 'node_modules/std/PINS.json')), 'node_modules/std/PINS.json exists after first install');
+
+      // Create a tiny local package and install it
+      const unrelatedDir = join(tmp, 'unrelated');
+      mkdirSync(unrelatedDir, { recursive: true });
+      writeFileSync(join(unrelatedDir, 'package.json'), JSON.stringify({
+        name: 'unrelated-local',
+        version: '1.0.0',
+      }, null, 2) + '\n', 'utf8');
+
+      // Run npm install --save-dev with the local package
+      execSync('npm install --save-dev ./unrelated', { cwd: tmp, env, timeout: 300000, shell: true });
+
+      // Verify std is still there
+      assert.ok(existsSync(join(tmp, 'node_modules/std/package.json')), 'node_modules/std/package.json exists after second install');
+      assert.ok(existsSync(join(tmp, 'node_modules/unrelated-local/package.json')), 'node_modules/unrelated-local/package.json exists');
+    } finally {
+      rmSync(npmCache, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
   }
 });
