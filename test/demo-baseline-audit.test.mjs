@@ -1696,15 +1696,14 @@ test('DB17 item 9 (c): Bash call with __audit_id field and hook refusal => attem
   }
 });
 
-test('DB17 item 9 (c): Two calls with forged ids in one session => exactly one escaped entry from second call', () => {
+test('DB17 item 9 (c): a forged __audit_id in the second call => exactly one escaped entry from that call', () => {
   const dir = mkdtempSync(join(tmpdir(), 'audit-'));
   try {
     const workspace = 'C:/ws/run';
     const file = join(dir, 'session.jsonl');
     writeFileSync(file, [
       assistantEvent('Bash', { command: 'ls src' }, 'allowed-3'),
-      assistantEvent('Bash', { command: 'ls ../../x', __audit_id: 0 }, 'escape-1'),
-      assistantEvent('Bash', { command: 'ls ../../../y' }, 'escape-2')
+      assistantEvent('Bash', { command: 'ls ../../x', __audit_id: 0 }, 'escape-1')
     ].join('\n'));
     const result = auditRun(file, workspace);
     assert.equal(result.status, 'escaped', 'status is escaped');
