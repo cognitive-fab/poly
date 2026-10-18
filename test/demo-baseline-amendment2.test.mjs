@@ -315,15 +315,23 @@ test('7: amendment 2 is accepted by effectiveRecord', async () => {
     assert.deepEqual(eff.record.scaffolds, amendment2_throwaway.set.scaffolds, 'scaffolds match amendment 2 set.scaffolds');
 
     // Test that changing keeps.allowedTools causes a problem.
-    const badAmendment2 = JSON.parse(JSON.stringify(amendment2_throwaway));
-    const toolsList = Array.isArray(badAmendment2.keeps.allowedTools) ? badAmendment2.keeps.allowedTools : [];
-    badAmendment2.keeps.allowedTools = [...toolsList, 'extraTool'];
-    writeFileSync(join(r.root, 'demo/baseline/PREREGISTRATION.amendment-2.json'), JSON.stringify(badAmendment2, null, 2) + '\n');
-    execFileSync('git', ['-C', r.root, 'add', '-A'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    execFileSync('git', ['-C', r.root, 'commit', '-q', '-m', 'amendment 2 with bad keeps'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Control: unmodified amendment 2 should have no problems (already tested above, but verify again).
+    assert.deepEqual(eff.problems, [], 'control: unmodified amendment 2 has no problems');
 
-    const eff_bad = effectiveRecord({ root: r.root, git: r.git });
-    assert.ok(eff_bad.problems.some(p => p.includes('allowedTools')), 'problem reported when keeps.allowedTools changed');
+    // Create a new repo with amendment 1 and modified amendment 2 (one tool added to ts list).
+    const r_bad = gitRepoWithAmendments({ amendments: [amend1] });
+    try {
+      const badAmendment2 = JSON.parse(JSON.stringify(amendment2_throwaway));
+      // Keep the shape (object keyed by arm) and add one tool to the ts list.
+      badAmendment2.keeps.allowedTools = { ...badAmendment2.keeps.allowedTools, ts: [...(badAmendment2.keeps.allowedTools.ts || []), 'Bash(rm *)'] };
+      writeFileSync(join(r_bad.root, 'demo/baseline/PREREGISTRATION.amendment-2.json'), JSON.stringify(badAmendment2, null, 2) + '\n');
+      execFileSync('git', ['-C', r_bad.root, 'add', '-A'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      execFileSync('git', ['-C', r_bad.root, 'commit', '-q', '-m', 'amendment 2 with modified keeps'], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+      const eff_bad = effectiveRecord({ root: r_bad.root, git: r_bad.git });
+      assert.equal(eff_bad.problems.length, 1, 'exactly one problem reported when keeps.allowedTools changed');
+      assert.ok(eff_bad.problems[0].includes('allowedTools') || eff_bad.problems[0].includes('Bash(rm *)') || eff_bad.problems[0].includes('keeps'), 'problem mentions allowedTools, tool, or keeps');
+    } finally { r_bad.clean(); }
   } finally { r.clean(); }
 });
 
