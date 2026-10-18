@@ -1,0 +1,42 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec node src/main.js",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "numbers": {
+      "fault": "none",
+      "requests": 0,
+      "posts": [],
+      "refunds": 0,
+      "amountRefunded": {
+        "ch_demo_1001": 0,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "You asked for a refund of $60.00 for BLENDER-1 from order ORD-1001. Reply YES to confirm or NO to cancel."
+      ]
+    },
+    "output": "support agent listening on http://127.0.0.1:40871/webhook\n{\"at\":\"2026-10-18T22:55:42.110Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.1\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"RequestLine\",\"phase\":\"Confirming\"}}\n"
+  },
+  "run": null,
+  "outcome": "O3",
+  "reason": "could not be driven: the control (no fault) made 0 POST(s) and 0 refund(s), not 1 and 1",
+  "tests": {
+    "status": "passed",
+    "exit": 0,
+    "tail": " another customer's order is unknown, and nothing is refunded (37.781669ms)\n✔ one item, then the rest: each confirmed, each refunded once, with an idempotency key (333.542394ms)\n✔ a webhook delivered twice is answered once (38.016459ms)\n✔ NO cancels a request, and YES then has nothing to confirm (82.987777ms)\n✔ a refusal from Stripe tells the customer, and they may ask again (75.632078ms)\n✔ a Stripe outage is retried with the same key; refunded once (74.966115ms)\n✔ requests outside the refund window are refused before anything is asked (31.349802ms)\n✔ a request survives a restart on the same store, under a new admission key (2754.790323ms)\n✔ an unknown outcome goes to a person; their verdict settles it without a second refund (143.977253ms)\n✔ parse reads refunds, confirmations, cancellations and anything else as help (4.909417ms)\n✔ signatures are checked against the raw body and the app secret (3.103294ms)\n✔ the handshake needs the subscribe mode and the token (1.080894ms)\n✔ messagesOf takes the messages and skips statuses (2.881735ms)\n✔ reply texts name the lines and the amount (37.944967ms)\n✔ support.poly checks CLEAN (1693.672641ms)\n✔ without the already-refunded guard, the checker finds a double refund (2173.413785ms)\n✔ refunding the whole order again after one item is a finding (1200.532652ms)\n✔ a refund that moves money without confirmation is a finding (1035.884088ms)\nℹ tests 21\nℹ suites 0\nℹ pass 21\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 6992.630791\n"
+  }
+}

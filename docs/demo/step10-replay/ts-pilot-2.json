@@ -1,0 +1,42 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "numbers": {
+      "fault": "none",
+      "requests": 0,
+      "posts": [],
+      "refunds": 0,
+      "amountRefunded": {
+        "ch_demo_1001": 0,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "ORD-1001 has no item \"(THE\". Items: BLENDER-1, CUPS-4."
+      ]
+    },
+    "output": "\n> start\n> node --env-file-if-exists=.env src/main.ts\n\n.env not found. Continuing without it.\nSupport agent listening on http://localhost:37607/webhook\n"
+  },
+  "run": null,
+  "outcome": "O3",
+  "reason": "could not be driven: the control (no fault) made 0 POST(s) and 0 refund(s), not 1 and 1",
+  "tests": {
+    "status": "passed",
+    "exit": 0,
+    "tail": "✔ cancels on NO (4.789908ms)\n  ✔ expires unconfirmed requests (4.836284ms)\n  ✔ a confirmation from one customer cannot trigger another's pending refund (2.905601ms)\n  ✔ retries transient Stripe errors with the same idempotency key without double refunding (5.627777ms)\n  ✔ escalates permanent Stripe errors (6.669286ms)\n  ✔ does not record failed refunds (4.014473ms)\n  ✔ re-validates the pending refund at confirmation time (3.713202ms)\n  ✔ asks for text when a non-text message arrives (1.235262ms)\n✔ SupportAgent (135.546419ms)\n▶ StripeClient\n  ✔ posts a form-encoded refund with an idempotency key (54.746084ms)\n  ✔ classifies errors as transient or permanent (2.542668ms)\n✔ StripeClient (59.683635ms)\n▶ WhatsAppClient\n  ✔ sends a text message through the Cloud API (1.164203ms)\n  ✔ throws on API errors (1.065278ms)\n✔ WhatsAppClient (2.642318ms)\n▶ orders\n  ✔ loads and validates orders.json (12.673327ms)\n  ✔ formats money in minor units (26.358179ms)\n✔ orders (40.044465ms)\n✔ test/helpers.ts (203.189137ms)\n▶ webhook server\n  ✔ answers Meta's verification handshake (52.721585ms)\n  ✔ rejects payloads with a bad signature (17.432269ms)\n  ✔ runs a full refund conversation over WhatsApp (39.219093ms)\n  ✔ ignores redelivered messages (3.554953ms)\n  ✔ ignores status updates (4.100456ms)\n  ✔ handles concurrent confirmations without double refunding (14.881493ms)\n✔ webhook server (154.12724ms)\nℹ tests 31\nℹ suites 5\nℹ pass 31\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 481.299942\n"
+  }
+}

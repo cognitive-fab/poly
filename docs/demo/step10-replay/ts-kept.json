@@ -1,0 +1,42 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "numbers": {
+      "fault": "none",
+      "requests": 0,
+      "posts": [],
+      "refunds": 0,
+      "amountRefunded": {
+        "ch_demo_1001": 0,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:46277/webhook (2 orders loaded)\n"
+  },
+  "run": null,
+  "outcome": "O3",
+  "reason": "could not be driven: the control (no fault) made 0 POST(s) and 0 refund(s), not 1 and 1",
+  "tests": {
+    "status": "passed",
+    "exit": 0,
+    "tail": "get no order information (0.930907ms)\n  ✔ full refund requires confirmation, then refunds the original charge (4.461245ms)\n  ✔ cannot refund another customer's order (2.142836ms)\n  ✔ item refund, then the item can't be refunded again, then the rest (2.451092ms)\n  ✔ saying YES twice does not refund twice (1.504499ms)\n  ✔ a second quote for the same items is refused after the first is confirmed (1.437028ms)\n  ✔ NO cancels and an expired quote can't be confirmed (2.954721ms)\n  ✔ unknown item codes are rejected (1.10149ms)\n  ✔ orders outside the refund window are not refunded (1.368223ms)\n  ✔ a Stripe rejection releases the items for a later attempt (1.580277ms)\n  ✔ an uncertain outcome keeps the items reserved and reconcile retries with the same key (1.874759ms)\n  ✔ non-text messages get a polite answer (0.947983ms)\n✔ RefundAgent (59.502033ms)\n▶ webhook server end to end\n  ✔ answers Meta's verification handshake (53.251412ms)\n  ✔ rejects unsigned or badly signed webhooks (20.031856ms)\n  ✔ full conversation issues one Stripe refund and replies on WhatsApp (68.160462ms)\n  ✔ state survives a restart (0.756215ms)\n  ✔ ignores status-only webhooks (4.794209ms)\n✔ webhook server end to end (188.07147ms)\n▶ StripeClient\n  ✔ classifies 4xx as rejected and 5xx as uncertain, retrying with the same key (522.889426ms)\n  ✔ network failure is uncertain (1.559901ms)\n✔ StripeClient (525.007485ms)\nℹ tests 20\nℹ suites 3\nℹ pass 20\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1064.412247\n"
+  }
+}
