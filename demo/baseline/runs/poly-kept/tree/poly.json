@@ -1,0 +1,10 @@
+{
+  "poly": "1",
+  "name": "support-agent",
+  "modules": [
+    "src/*.poly"
+  ],
+  "handlers": [
+    "src/effects.js"
+  ]
+}

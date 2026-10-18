@@ -1,0 +1,68 @@
+// expected: CLEAN
+// PT9.8 with a parallel worker: Send does not wait for M1 to be acknowledged. The dedupe table is kept
+// on archive, so at-most-once holds (delivery_check.py: 2,368 states). In-order delivery is not claimed.
+module delivery
+
+type Msg = M1 | M2
+type Status = Unsent | Pending | InFlight | Acked
+
+service machine Delivery {
+  state {
+    status   : map<Msg, Status> = { M1: Unsent, M2: Unsent }
+    req      : map<Msg, 0..2>   = { M1: 0, M2: 0 }            // request copies in the network
+    ack      : map<Msg, 0..2>   = { M1: 0, M2: 0 }            // acknowledgement copies in the network
+    lost     : map<Msg, 0..1>   = { M1: 0, M2: 0 }            // the network loses at most one copy per message
+    seen     : map<Msg, bool>   = { M1: false, M2: false }    // the receiver's dedupe table (K4)
+    steps    : map<Msg, 0..2>   = { M1: 0, M2: 0 }            // steps taken at the receiver
+    archived : bool = false
+  }
+  action Emit(m: Msg)     action Send(m: Msg)       action Resend(m: Msg)
+  action LoseReq(m: Msg)  action DeliverReq(m: Msg) action LoseAck(m: Msg)
+  action DeliverAck(m: Msg)  action Archive()
+
+  on Emit(m) {
+    require status[m] == Unsent else reject "emitted"
+    require m == M1 || status[M1] != Unsent else reject "emit-order"
+    status' = status with [m] = Pending
+  }
+  on Send(m) {
+    require status[m] == Pending && req[m] < 2 else reject "not-pending"
+    status' = status with [m] = InFlight
+    req' = req with [m] = req[m] + 1
+  }
+  on Resend(m) {
+    require status[m] == InFlight && req[m] < 2 else reject "not-in-flight"
+    req' = req with [m] = req[m] + 1
+  }
+  on LoseReq(m) {
+    require req[m] > 0 && lost[m] < 1 else reject "no-loss"
+    req' = req with [m] = req[m] - 1
+    lost' = lost with [m] = 1
+  }
+  on DeliverReq(m) {
+    require req[m] > 0 else reject "nothing-in-transit"
+    req' = req with [m] = req[m] - 1
+    if ack[m] < 2 { ack' = ack with [m] = ack[m] + 1 }
+    if !seen[m] { seen' = seen with [m] = true
+                  steps' = steps with [m] = steps[m] + 1 }
+  }
+  on LoseAck(m) {
+    require ack[m] > 0 && lost[m] < 1 else reject "no-loss"
+    ack' = ack with [m] = ack[m] - 1
+    lost' = lost with [m] = 1
+  }
+  on DeliverAck(m) {
+    require ack[m] > 0 else reject "no-ack"
+    ack' = ack with [m] = ack[m] - 1
+    if status[m] == InFlight { status' = status with [m] = Acked }
+  }
+  on Archive {
+    require !archived && steps[M1] == 1 && steps[M2] == 1 else reject "not-done"
+    archived' = true                                  // the dedupe table is kept (K4)
+  }
+
+  invariant at-most-once: steps[M1] <= 1 && steps[M2] <= 1
+  liveness exactly-once:
+    eventually (status[M1] == Acked && status[M2] == Acked && steps[M1] == 1 && steps[M2] == 1)
+    under fair { Emit(*), Send(*), Resend(*), DeliverReq(*), DeliverAck(*) }
+}

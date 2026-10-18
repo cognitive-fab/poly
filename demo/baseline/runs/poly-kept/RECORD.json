@@ -1,0 +1,143 @@
+{
+  "arm": "poly",
+  "run": "kept",
+  "treeDigest": "sha256:51c71fd93f67c3a363b84c48398efa9b40df3bd67853bda3d2cf722ce4c5ccf5",
+  "promptSha256": "sha256:949bb0611273f24e9d66e557c868924eea6b380612a213a0af7a5d4ec6bd10ec",
+  "model": "claude-opus-5-5",
+  "claudeCode": {
+    "version": "2.1.287"
+  },
+  "sdkResult": "success",
+  "sdkResultMeans": "the agent's own label for how the session ended, not a task outcome",
+  "agentFiles": 44,
+  "agentFilePaths": [
+    ".poly/build/hello.Gate/contract.json",
+    ".poly/build/hello.Gate/invariants.mjs",
+    ".poly/build/hello.Gate/next.cjs",
+    ".poly/build/hello.Gate/types.d.ts",
+    ".poly/build/support.Notice/contract.json",
+    ".poly/build/support.Notice/effects.cjs",
+    ".poly/build/support.Notice/effects.manifest.json",
+    ".poly/build/support.Notice/invariants.mjs",
+    ".poly/build/support.Notice/next.cjs",
+    ".poly/build/support.Notice/types.d.ts",
+    ".poly/build/support.Ticket/contract.json",
+    ".poly/build/support.Ticket/effects.cjs",
+    ".poly/build/support.Ticket/effects.manifest.json",
+    ".poly/build/support.Ticket/invariants.mjs",
+    ".poly/build/support.Ticket/next.cjs",
+    ".poly/build/support.Ticket/types.d.ts",
+    ".poly/certificate.json",
+    ".poly/report.json",
+    ".poly/run/cert-388c60751561/handlers/src/effects.js",
+    ".poly/run/cert-388c60751561/support.Notice/contract.json",
+    ".poly/run/cert-388c60751561/support.Notice/effects.cjs",
+    ".poly/run/cert-388c60751561/support.Notice/effects.manifest.json",
+    ".poly/run/cert-388c60751561/support.Notice/invariants.mjs",
+    ".poly/run/cert-388c60751561/support.Notice/next.cjs",
+    ".poly/run/cert-388c60751561/support.Notice/types.d.ts",
+    ".poly/run/cert-388c60751561/support.Ticket/contract.json",
+    ".poly/run/cert-388c60751561/support.Ticket/effects.cjs",
+    ".poly/run/cert-388c60751561/support.Ticket/effects.manifest.json",
+    ".poly/run/cert-388c60751561/support.Ticket/invariants.mjs",
+    ".poly/run/cert-388c60751561/support.Ticket/next.cjs",
+    ".poly/run/cert-388c60751561/support.Ticket/types.d.ts",
+    "README.md",
+    "package-lock.json",
+    "poly.json",
+    "src/agent.js",
+    "src/effects.js",
+    "src/main.js",
+    "src/runtime.js",
+    "src/server.js",
+    "src/support.poly",
+    "src/whatsapp.js",
+    "test/agent.test.js",
+    "test/host.test.js",
+    "test/program.test.js"
+  ],
+  "finalMessage": "I built the support agent, and `npm test` passes all 21 tests. `npm run poly check src/support.poly` reports **CLEAN**. Nothing has been run against the real WhatsApp or Stripe APIs; the tests use a fake that records requests and answers in their place. Start instructions, including how to connect the WhatsApp webhook through a tunnel, are in `README.md`.\n\n**How a refund goes.** A customer writes `refund ORD-1001` for the whole order, or `refund ORD-1001 cups` for one item. The agent replies with the amount and asks them to confirm, and only a `YES` issues the Stripe refund. Then it tells them it's done. Orders are matched to the sender's WhatsApp number; asking about someone else's order gets the same reply as an order that doesn't exist.\n\n**The poly part (`src/support.poly`).** A `Ticket` machine per order handles the request, confirmation, Stripe refund and reply, and records which items are refunded. A `Notice` machine sends one-off replies: help, or why a request was refused. The checker proves these over all 226 reachable states:\n- an item is never refunded twice;\n- money moves only after the customer confirms;\n- a refund is never undone;\n- a closed ticket has every item refunded;\n- no state is stuck.\n\nThe Stripe refund is retried up to 3 times, and every attempt carries the same `Idempotency-Key` (set by the runtime), so Stripe refunds at most once. If no attempt gets an answer, the agent can't know whether the refund went through. The ticket then goes to a `Review` state and a person records the outcome via `POST /admin/resolve`. It never retries blindly.\n\n**The JavaScript beside it:**\n- `src/effects.js`: the Stripe and WhatsApp calls. These are limited to the URLs, secrets and tables the program declares, and checked at startup.\n- `src/agent.js`: reads messages and looks up orders.\n- `src/whatsapp.js`: checks webhook signatures and extracts messages.\n- `src/server.js`, `src/runtime.js`, `src/main.js`: the server and startup. At each start the program is checked and signed with a fresh key, so a version that doesn't check CLEAN won't run.\n\n**What the tests cover:**\n- **End to end over HTTP with signed webhooks:** whole and per-item refunds, YES/NO, another customer's order, duplicate webhooks, Stripe refusals and outages, the refund window, review and resolution, and a restart on the same database.\n- **The checker:** three deliberately broken versions of the program, which it must reject.\n- **Unit tests:** message parsing, signatures and reply texts.\n\n**Limits to know about:**\n- Orders can have at most 4 items. Larger orders are told the team will help instead.\n- `orders.json` is read once at startup; restart to pick up new orders.\n- Messages are understood by keywords, not by a language model.\n- The refund window is 30 days from the order date (`REFUND_WINDOW_DAYS`).\n\nThe runtime has no WhatsApp channel package installed, so the webhook handling is plain JavaScript in `src/whatsapp.js` and `src/server.js`. It doesn't go through poly's built-in channels.",
+  "audit": {
+    "status": "escaped",
+    "calls": [
+      {
+        "tool": "Bash",
+        "reason": "Bash names a place outside the workspace C:\\Users\\jjdub\\.poly-demo\\work\\poly-kept: //F, //IM, //FI",
+        "offending": [
+          "//F",
+          "//IM",
+          "//FI"
+        ],
+        "excerpt": "{\"command\":\"export STRIPE_SECRET_KEY=x WHATSAPP_TOKEN=x WHATSAPP_APP_SECRET=x WHATSAPP_VERIFY_TOKEN=v WHATSAPP_PHONE_NUMBER_ID=1 PORT=3917 STORE=.poly/run/smoke.sqlite; for i in 1 2; do (node src/main"
+      }
+    ],
+    "refused": [
+      {
+        "tool": "Bash",
+        "reason": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+        "offending": [],
+        "excerpt": "{\"command\":\"cd tools/poly/examples; for f in */*.poly; do echo \\\"=== $f\\\"; cat $f; done\",\"description\":\"Show all example poly files\"}",
+        "by": "tool-list"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Bash names a place outside the workspace C:\\Users\\jjdub\\.poly-demo\\work\\poly-kept: /c/Users/jjdub/.poly-demo/work/poly-kept",
+        "offending": [
+          "/c/Users/jjdub/.poly-demo/work/poly-kept"
+        ],
+        "excerpt": "{\"command\":\"cd /c/Users/jjdub/.poly-demo/work/poly-kept && npm install 2>&1 | tail -5; ls node_modules/@poly; ls node_modules/@poly/runtime node_modules/@poly/runtime/dist 2>/dev/null | head -50; cat ",
+        "by": "guard",
+        "note": "guard false positive: MSYS path"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Bash pipes into grep -v '^\\s*$', grep -nE '^\\s*(async |readonly )?[a-zA-Z]+\\(|export declare , which is outside the read-only set",
+        "offending": [
+          "grep -v '^\\s*$'",
+          "grep -nE '^\\s*(async |readonly )?[a-zA-Z]+\\(|export declare "
+        ],
+        "excerpt": "{\"command\":\"sed -n 219,675p node_modules/@poly/runtime/dist/src/runtime.d.ts | grep -v '^\\\\s*$' | grep -nE '^\\\\s*(async |readonly )?[a-zA-Z]+\\\\(|export declare function|^\\\\s*/\\\\*\\\\*' | head -120\",\"des",
+        "by": "guard"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed.",
+        "offending": [],
+        "excerpt": "{\"command\":\"npm run poly -- help 2>&1 | head -40; npm run poly -- check tools/poly/examples/hello/hello.poly 2>&1 | tail -30\",\"description\":\"Try poly CLI help and check an example\"}",
+        "by": "tool-list"
+      },
+      {
+        "tool": "Bash",
+        "reason": "Bash pipes into grep -v \"^ℹ\\|ExperimentalWarning\\|trace-warnings\", which is outside the read-only set",
+        "offending": [
+          "grep -v \"^ℹ\\|ExperimentalWarning\\|trace-warnings\""
+        ],
+        "excerpt": "{\"command\":\"npm test 2>&1 | grep -v \\\"^ℹ\\\\|ExperimentalWarning\\\\|trace-warnings\\\" | tail -60\",\"description\":\"Run the full test suite\",\"timeout\":600000}",
+        "by": "guard"
+      }
+    ]
+  },
+  "costUsd": 3.172551,
+  "usage": {
+    "input_tokens": 88,
+    "cache_creation_input_tokens": 161871,
+    "cache_read_input_tokens": 4296855,
+    "output_tokens": 50893,
+    "output_tokens_details": {
+      "thinking_tokens": 17495
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 161871,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [],
+    "speed": "standard",
+    "fallback_credit": null
+  }
+}

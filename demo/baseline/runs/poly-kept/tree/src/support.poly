@@ -1,0 +1,208 @@
+// The stateful core of the WhatsApp refund agent.
+// A Ticket is one order's refunds: a customer asks, confirms, Stripe refunds, the customer is told.
+// A Notice is one reply that changes no order: help, or why a request was refused.
+// The host (src/agent.js) reads messages, finds orders and maps rejections to notices.
+module support
+
+enum Phase { New, Idle, Confirming, Refunding, Review, Closed }
+enum Say { AskConfirm, Refunded, RefundFailed, UnderReview, Cancelled }
+enum Note {
+  Help, UnknownOrder, OutsideWindow, AlreadyRefunded, NoSuchItem, AwaitingConfirmation,
+  RefundInProgress, NothingToConfirm, UnderReviewAlready, TooManyItems, OrderClosed, Ambiguous
+}
+
+machine Ticket {
+  state {
+    phase    : Phase           = New
+    lines    : 0..4            = 0                              // the order's line items (at most 4)
+    refunded : map<0..3, bool> = [false, false, false, false]   // lines refunded at Stripe
+    want     : map<0..3, bool> = [false, false, false, false]   // lines of the request under way
+  }
+  terminal phase == Closed
+
+  action Open(count: 1..4)
+  action RequestAll(inWindow: bool)
+  action RequestLine(line: 0..3, inWindow: bool)
+  action Confirm()
+  action Cancel()
+  action RefundOk()
+  action RefundFailed()
+  action RefundUnknown()
+  action Resolve(done: bool)
+
+  on Open {
+    require phase == New else reject "opened"
+    phase' = Idle
+    lines' = count
+  }
+
+  on RequestAll {
+    require phase != Confirming else reject "awaiting-confirmation"
+    require phase != Refunding  else reject "refund-in-progress"
+    require phase != Review     else reject "under-review"
+    require phase == Idle       else reject "not-open"
+    require inWindow            else reject "outside-window"
+    let w0 = 0 < lines && !refunded[0]
+    let w1 = 1 < lines && !refunded[1]
+    let w2 = 2 < lines && !refunded[2]
+    let w3 = 3 < lines && !refunded[3]
+    phase' = Confirming
+    want' = [w0, w1, w2, w3]
+    emit say(msg: AskConfirm, l0: w0, l1: w1, l2: w2, l3: w3)
+  }
+
+  on RequestLine {
+    require phase != Confirming else reject "awaiting-confirmation"
+    require phase != Refunding  else reject "refund-in-progress"
+    require phase != Review     else reject "under-review"
+    require phase == Idle       else reject "not-open"
+    require inWindow            else reject "outside-window"
+    require line < lines        else reject "no-such-item"
+    require !refunded[line]     else reject "already-refunded"
+    phase' = Confirming
+    want' = [line == 0, line == 1, line == 2, line == 3]
+    emit say(msg: AskConfirm, l0: line == 0, l1: line == 1, l2: line == 2, l3: line == 3)
+  }
+
+  on Confirm {
+    require phase == Confirming else reject "nothing-to-confirm"
+    phase' = Refunding
+    emit refund(l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+  }
+
+  on Cancel {
+    require phase == Confirming else reject "nothing-to-confirm"
+    phase' = Idle
+    want' = [false, false, false, false]
+    emit say(msg: Cancelled, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+  }
+
+  on RefundOk {
+    require phase == Refunding else reject "not-refunding"
+    let r0 = refunded[0] || want[0]
+    let r1 = refunded[1] || want[1]
+    let r2 = refunded[2] || want[2]
+    let r3 = refunded[3] || want[3]
+    refunded' = [r0, r1, r2, r3]
+    want' = [false, false, false, false]
+    if (lines <= 0 || r0) && (lines <= 1 || r1) && (lines <= 2 || r2) && (lines <= 3 || r3) {
+      phase' = Closed
+    } else {
+      phase' = Idle
+    }
+    emit say(msg: Refunded, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+  }
+
+  // Stripe said no, definitely: nothing was refunded, and the customer may ask again.
+  on RefundFailed {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Idle
+    want' = [false, false, false, false]
+    emit say(msg: RefundFailed, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+  }
+
+  // Every attempt ended without an answer: the refund may or may not exist, so a person decides.
+  on RefundUnknown {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Review
+    emit say(msg: UnderReview, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+  }
+
+  // An operator, having looked at the Stripe dashboard, says whether the refund exists.
+  on Resolve {
+    require phase == Review else reject "not-under-review"
+    want' = [false, false, false, false]
+    if done {
+      let r0 = refunded[0] || want[0]
+      let r1 = refunded[1] || want[1]
+      let r2 = refunded[2] || want[2]
+      let r3 = refunded[3] || want[3]
+      refunded' = [r0, r1, r2, r3]
+      if (lines <= 0 || r0) && (lines <= 1 || r1) && (lines <= 2 || r2) && (lines <= 3 || r3) {
+        phase' = Closed
+      } else {
+        phase' = Idle
+      }
+      emit say(msg: Refunded, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+    } else {
+      phase' = Idle
+      emit say(msg: RefundFailed, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+    }
+  }
+
+  // Only lines of the order are ever asked for or refunded.
+  invariant lines-in-order:
+    (lines <= 0 implies !refunded[0] && !want[0]) && (lines <= 1 implies !refunded[1] && !want[1]) &&
+    (lines <= 2 implies !refunded[2] && !want[2]) && (lines <= 3 implies !refunded[3] && !want[3])
+  // A request never covers a line already refunded.
+  invariant want-is-new:
+    !(want[0] && refunded[0]) && !(want[1] && refunded[1]) && !(want[2] && refunded[2]) && !(want[3] && refunded[3])
+  // A refund under way covers at least one line.
+  invariant refunding-has-lines:
+    phase in { Confirming, Refunding, Review } implies (want[0] || want[1] || want[2] || want[3])
+  // Nothing is pending outside a request.
+  invariant idle-wants-nothing:
+    phase in { New, Idle, Closed } implies !(want[0] || want[1] || want[2] || want[3])
+  // A closed ticket has every line refunded.
+  invariant closed-is-whole:
+    phase == Closed implies ((lines <= 0 || refunded[0]) && (lines <= 1 || refunded[1]) &&
+                             (lines <= 2 || refunded[2]) && (lines <= 3 || refunded[3]))
+  // A refund is never taken back.
+  step property refunds-stay:
+    (pre.refunded[0] implies post.refunded[0]) && (pre.refunded[1] implies post.refunded[1]) &&
+    (pre.refunded[2] implies post.refunded[2]) && (pre.refunded[3] implies post.refunded[3])
+  // Money moves only after the customer confirmed.
+  step property refund-after-confirm:
+    (post.phase == Refunding && pre.phase != Refunding) implies (action == Confirm && pre.phase == Confirming)
+
+  // No line is ever refunded twice.
+  never no-double-refund-0: emit refund(l0: true) while refunded[0]
+  never no-double-refund-1: emit refund(l1: true) while refunded[1]
+  never no-double-refund-2: emit refund(l2: true) while refunded[2]
+  never no-double-refund-3: emit refund(l3: true) while refunded[3]
+
+  effect refund(l0: bool, l1: bool, l2: bool, l3: bool) {
+    kind "stripe.refund"
+    labels { egress:external, read:private, read:store }
+    targets { egress: exact "https://api.stripe.com/v1/refunds", secrets: ["STRIPE_SECRET_KEY"], store: ["orders"] }
+    class irreversible
+    idempotent header "Idempotency-Key" window 24h
+    retry { attempts 3, base 1s, timeout 20s }
+    ok -> RefundOk()
+    failed -> RefundFailed()
+    exhausted -> RefundUnknown()
+  }
+
+  effect say(msg: Say, l0: bool, l1: bool, l2: bool, l3: bool) {
+    kind "whatsapp.ticket"
+    labels { egress:external, read:private, read:store }
+    targets { egress: "https://graph.facebook.com/v21.0", secrets: ["WHATSAPP_TOKEN"], store: ["orders", "config"] }
+    class irreversible
+    retry { attempts 1, base 1s, timeout 20s }
+  }
+}
+
+machine Notice {
+  state {
+    status : NoticeStatus = Fresh
+  }
+  terminal status == Sent
+
+  action Send(msg: Note)
+
+  on Send {
+    require status == Fresh else reject "sent"
+    status' = Sent
+    emit tell(msg: msg)
+  }
+
+  effect tell(msg: Note) {
+    kind "whatsapp.notice"
+    labels { egress:external, read:private, read:store }
+    targets { egress: "https://graph.facebook.com/v21.0", secrets: ["WHATSAPP_TOKEN"], store: ["recipients", "customers", "config"] }
+    class irreversible
+    retry { attempts 1, base 1s, timeout 20s }
+  }
+}
+
+enum NoticeStatus { Fresh, Sent }
