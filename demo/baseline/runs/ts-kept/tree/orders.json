@@ -1,0 +1,22 @@
+[
+  {
+    "order": "ORD-1001",
+    "customer": "15550100001",
+    "name": "Ada Demo",
+    "charge": "ch_demo_1001",
+    "total": 10000,
+    "currency": "usd",
+    "items": [{ "sku": "BLENDER-1", "price": 6000 }, { "sku": "CUPS-4", "price": 4000 }],
+    "placed": "2026-09-30"
+  },
+  {
+    "order": "ORD-1002",
+    "customer": "15550100002",
+    "name": "Ben Demo",
+    "charge": "ch_demo_1002",
+    "total": 2500,
+    "currency": "usd",
+    "items": [{ "sku": "MUG-1", "price": 2500 }],
+    "placed": "2026-10-02"
+  }
+]
