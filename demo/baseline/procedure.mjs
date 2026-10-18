@@ -302,11 +302,11 @@ export function prepareCommit({ arm, run, runsDir = RUNS_DIR, workDir: workRoot 
   const treeDir = join(to, 'tree');
   const agentFilePaths = agentFilesIn(treeDir, initial);
   // Two categories (DB17): `calls` are the calls that escaped, `refused` the calls inside the workspace that the guard or the tool list refused.
-  const { status, calls, refused } = auditRun(join(from, 'session.jsonl'), result.workspace ?? workspace);
+  const { status, calls, attempted, refused } = auditRun(join(from, 'session.jsonl'), result.workspace ?? workspace);
   writeFileSync(join(to, 'RECORD.json'), `${JSON.stringify({
     arm, run, treeDigest: treeDigest(treeDir), promptSha256: record.prompt.sha256, model: MODEL, claudeCode: record.claudeCode,
     sdkResult: result.sdkResult, sdkResultMeans: 'the agent\'s own label for how the session ended, not a task outcome',
-    agentFiles: agentFilePaths.length, agentFilePaths, finalMessage: result.finalMessage, audit: { status, calls, refused },
+    agentFiles: agentFilePaths.length, agentFilePaths, finalMessage: result.finalMessage, audit: { status, calls, attempted, refused },
     costUsd: result.costUsd, usage: result.usage,
   }, null, 2)}\n`);
   const rel = `demo/baseline/runs/${arm}-${run}`;

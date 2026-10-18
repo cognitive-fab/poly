@@ -1,5 +1,6 @@
-// The audit of a saved session, in two categories (DB17, finding H6). `escaped` is what the run must not do: name a place outside its workspace or
-// use a tool that is not allowed. `refused` is a call inside the workspace that was refused, by the guard (the pipe rule of DB15 item 1) or by the
+// The audit of a saved session, in three statuses (DB17 items 7 and 8, finding H6 and the kept runs). An escape is a call that names a place outside
+// its workspace, or a tool that is not allowed. It is `escaped` if it ran, and `attempted` if the hook refused it (the result in the session says so): the
+// run is invalid only for the first. `refused` is a call inside the workspace that was refused, by the guard (the pipe rule of DB15 item 1) or by the
 // arm's tool list (the permission mode said no). A refusal is listed and does not mark the run: poly-pilot-2 never left its workspace, and
 // auditEscapes called it escaped for a pipe into grep.
 //
@@ -13,6 +14,8 @@ import { join, posix } from 'node:path';
 import { auditEscapes } from './guard.mjs';
 
 /** What Claude Code's permission mode answers when a tool list does not allow a call (seen in every recorded session). */
+/** What the hook answers when it refuses a call (seen in every session made under the hook). */
+const HOOK_REFUSAL = /^PreToolUse:.*hook error/;
 const TOOL_LIST_REFUSAL = /^Permission to use \S+ has been denied because Claude Code is running in don't ask mode/;
 /** The reasons of the guard that mean leaving: a place outside the workspace, or a tool that is never allowed. */
 const LEAVES = /names a place outside the workspace|is not allowed in a baseline run/;
@@ -71,6 +74,8 @@ function judge(call, workspace, command) {
   let word = false;
   for (const item of items) {
     if (/^\/[A-Za-z]\/./.test(item) && insideWorkspace(item, workspace)) msys = true;
+    // The MSYS option form of a Windows tool (taskkill //F //IM node.exe) is not a path, whether or not it is a word of the command line.
+    else if (/^\/\/[A-Za-z]{1,3}$/.test(item)) word = true;
     else if (/^[A-Za-z]:$/.test(item) && !remainsAsWord(command, item)) word = true;
     else return { escape: true };
   }
@@ -96,6 +101,7 @@ function events(file) {
 export function auditRun(sessionFile, workspace) {
   const uses = [];
   const refusals = new Map();
+  const hookRefused = new Set();
   const tagged = [];
   for (const event of events(sessionFile)) {
     const content = event?.message?.content;
@@ -110,6 +116,7 @@ export function auditRun(sessionFile, workspace) {
         if (event.type === 'user' && part?.type === 'tool_result') {
           const text = textOf(part.content);
           if (TOOL_LIST_REFUSAL.test(text)) refusals.set(part.tool_use_id, text.split('\n')[0]);
+          if (HOOK_REFUSAL.test(text)) hookRefused.add(part.tool_use_id);
         }
       }
     }
@@ -125,14 +132,15 @@ export function auditRun(sessionFile, workspace) {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 
   const escaped = [];
+  const attempted = [];
   const refused = [];
   for (const [index, use] of uses.entries()) {
     const call = denied.get(index);
     const excerpt = excerptOf(use.input);
     const verdict = call ? judge(call, workspace, use.input?.command) : null;
-    if (verdict?.escape) escaped.push({ tool: use.tool, reason: call.reason, offending: call.offending, excerpt });
+    if (verdict?.escape) (hookRefused.has(use.id) ? attempted : escaped).push({ tool: use.tool, reason: call.reason, offending: call.offending, excerpt });
     else if (call) refused.push({ tool: use.tool, reason: call.reason, offending: call.offending, excerpt, by: 'guard', ...(verdict.note ? { note: verdict.note } : {}) });
     else if (refusals.has(use.id)) refused.push({ tool: use.tool, reason: refusals.get(use.id), offending: [], excerpt, by: 'tool-list' });
   }
-  return { status: escaped.length ? 'escaped' : 'clean', escaped, refused, calls: escaped };
+  return { status: escaped.length ? 'escaped' : attempted.length ? 'attempted' : 'clean', escaped, attempted, refused, calls: escaped };
 }
