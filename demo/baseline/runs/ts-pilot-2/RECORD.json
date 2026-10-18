@@ -1,0 +1,60 @@
+{
+  "arm": "ts",
+  "run": "pilot-2",
+  "treeDigest": "sha256:13b6e415143bbe8be26dc431fb5df47500b997fbf7ea90426d6950e29171e7bf",
+  "promptSha256": "sha256:949bb0611273f24e9d66e557c868924eea6b380612a213a0af7a5d4ec6bd10ec",
+  "model": "claude-opus-5-5",
+  "claudeCode": {
+    "version": "2.1.287"
+  },
+  "sdkResult": "success",
+  "sdkResultMeans": "the agent's own label for how the session ended, not a task outcome",
+  "agentFiles": 17,
+  "agentFilePaths": [
+    ".env.example",
+    ".gitignore",
+    "README.md",
+    "package-lock.json",
+    "package.json",
+    "src/agent.ts",
+    "src/main.ts",
+    "src/orders.ts",
+    "src/server.ts",
+    "src/store.ts",
+    "src/stripe.ts",
+    "src/whatsapp.ts",
+    "test/agent.test.ts",
+    "test/clients.test.ts",
+    "test/helpers.ts",
+    "test/server.test.ts",
+    "tsconfig.json"
+  ],
+  "finalMessage": "The support agent is built, and all 31 tests pass with `npm test`. The TypeScript type check also passes. I haven't run it against the real WhatsApp or Stripe APIs; the tests use stand-ins for both, so connecting a real WhatsApp number and Stripe key is still to do. `README.md` explains how to start it.\n\n**How it works**\n- WhatsApp messages arrive at `POST /webhook` (port 3000 by default). The agent answers in the chat through the Cloud API and issues refunds through Stripe.\n- To start it: `npm install`, copy `.env.example` to `.env`, fill in the keys, then `npm start`. WhatsApp needs a public HTTPS address, so for local use the README shows how to put a tunnel in front of the port.\n- Customers can send `orders` to see their orders, `refund ORD-1001` to refund the whole order, or `refund ORD-1001 BLENDER-1` to refund one item. Nothing is refunded until they reply YES to a message stating the exact amount, and that offer expires after 15 minutes.\n\n**Safeguards (all covered by tests)**\n- **Own orders only:** a customer is identified by the number they message from and can only see or refund orders under that number. Asking about someone else's order gets the same \"not found\" reply as an order that doesn't exist.\n- **No refunding more than was paid:** it tracks what has already been refunded on each order and checks everything again when the customer says YES.\n- **No double refunds:**\n  - Each refund is sent to Stripe with a fixed request ID, so a retry can't create a second refund.\n  - Messages are handled one at a time, so two quick YES replies produce one refund.\n  - WhatsApp sometimes delivers the same message twice; the copy is ignored.\n- **Errors:** if Stripe times out, the customer can reply YES again safely. If Stripe rejects the refund, it's logged and the customer is told someone will follow up.\n- **Only real WhatsApp traffic:** incoming messages without a valid WhatsApp signature are refused.\n\n**Choices you may want to change**\n- **No AI model:** the agent replies from fixed, predictable rules and keywords. That keeps every refund decision in code, but it won't follow free-form phrasing as well as a chatbot would.\n- **30-day refund window:** this is my default, not a policy you gave me. Change it with `REFUND_WINDOW_DAYS`.\n- **Where refunds are recorded:** issued refunds are saved to `data/state.json`. That's fine for one server, but running several copies would need a real database.\n- **Setup changes:** I added `start` and `typecheck` scripts to `package.json`, and changed `tsconfig.json` so Node can run the TypeScript files directly.\n\nThe main code is in `src/agent.ts` and `src/server.ts`.",
+  "audit": {
+    "status": "clean",
+    "calls": []
+  },
+  "costUsd": 0.9748911999999998,
+  "usage": {
+    "input_tokens": 34,
+    "cache_creation_input_tokens": 39958,
+    "cache_read_input_tokens": 410256,
+    "output_tokens": 28652,
+    "output_tokens_details": {
+      "thinking_tokens": 4884
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 39958,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [],
+    "speed": "standard",
+    "fallback_credit": null
+  }
+}
