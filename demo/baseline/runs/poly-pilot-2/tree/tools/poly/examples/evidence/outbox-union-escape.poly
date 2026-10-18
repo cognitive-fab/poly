@@ -1,0 +1,67 @@
+// expected: FINDING PL3102 PL3901
+// AC9: the union OutboxIntent with the Dead branch of SettleFailed replaced by Allowed.
+// Allowed { attempts: 3 } leaves 0..2, so poly check reports PL3102 DOMAIN_ESCAPE.
+module intents
+
+type Intent =
+  | Pending
+  | Proposed  { decision: 1..2 }        // 2 only for an approved re-proposal
+  | Escalated { approved: bool }
+  | Allowed   { attempts: 0..2 }        // attempts already made
+  | Running   { attempt: 1..3 }
+  | Settled   { attempt: 1..3 }
+  | Done | Denied | Dead
+
+machine OutboxIntent {
+  state { intent: Intent = Pending }
+  terminal intent is Done | Denied | Dead
+
+  action Propose()   action GateAllow()   action GateDeny()   action GateEscalate()
+  action Approve()   action EscalationTimeout()
+  action Start()     action HandlerOk()   action HandlerFailed()
+  action SettleOk()  action SettleFailed()
+
+  on Propose {
+    match intent {
+      Pending                      => intent' = Proposed { decision: 1 }
+      Escalated { approved: true } => intent' = Proposed { decision: 2 }
+      _                            => reject "not-proposable"
+    }
+  }
+  on GateAllow    { require intent is Proposed else reject "no-proposal"
+                    intent' = Allowed { attempts: 0 } }
+  on GateDeny     { require intent is Proposed else reject "no-proposal"
+                    intent' = Denied }
+  on GateEscalate { match intent {
+                      Proposed { decision: 1 } => intent' = Escalated { approved: false }
+                      _                        => reject "escalate-once" } }
+  on Approve      { match intent {
+                      Escalated { approved: false } => intent' = Escalated { approved: true }
+                      _                             => reject "not-waiting" } }
+  on EscalationTimeout { match intent {
+                      Escalated { approved: false } => intent' = Denied
+                      _                             => reject "not-waiting" } }
+  on Start        { match intent {
+                      Allowed { attempts: n } => intent' = Running { attempt: n + 1 }
+                      _                       => reject "not-allowed" } }
+  on HandlerOk    { match intent {
+                      Running { attempt: n } => intent' = Settled { attempt: n }
+                      _                      => reject "not-running" } }
+  on HandlerFailed { match intent {
+                      Running { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
+                                                else     { intent' = Dead }
+                      _                      => reject "not-running" } }
+  on SettleOk     { require intent is Settled else reject "not-settled"
+                    intent' = Done }
+  on SettleFailed { match intent {
+                      Settled { attempt: n } => if n < 3 { intent' = Allowed { attempts: n } }
+                                                else     { intent' = Allowed { attempts: n } }
+                      _                      => reject "not-settled" } }
+
+  step property no-reproposal-after-allow:
+    (pre.intent is Allowed || pre.intent is Running || pre.intent is Settled)
+      implies !(post.intent is Proposed)
+  liveness settles: eventually intent is Done | Denied | Dead
+    under fair { Propose, GateAllow | GateDeny | GateEscalate, EscalationTimeout, Start,
+                 HandlerOk | HandlerFailed, SettleOk | SettleFailed }
+}

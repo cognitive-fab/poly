@@ -1,0 +1,13 @@
+{
+  "poly": "1",
+  "name": "support-agent",
+  "modules": [
+    "src/*.poly"
+  ],
+  "handlers": [
+    "src/handlers.js"
+  ],
+  "keys": {
+    "admission": { "id": "support-admission", "location": "env:POLY_ADMISSION_KEY" }
+  }
+}

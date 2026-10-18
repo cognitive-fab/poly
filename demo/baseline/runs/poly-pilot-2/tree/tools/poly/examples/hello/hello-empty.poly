@@ -1,0 +1,32 @@
+// expected: CLEAN
+// The README turnstile with the operator action Empty: no deadlock
+// (evidence/turnstile_check.py, second line).
+module hello
+
+type Mode = Locked | Unlocked
+
+machine Gate {
+  state {
+    mode  : Mode = Locked
+    coins : 0..3 = 0
+  }
+  action Coin()
+  action Push()
+  action Empty()
+
+  on Coin {
+    require coins < 3 else reject "coin-box-full"
+    coins' = coins + 1
+    mode' = Unlocked
+  }
+  on Push {
+    require mode is Unlocked else reject "locked"
+    mode' = Locked
+  }
+  on Empty {
+    require mode is Locked else reject "unlocked"
+    coins' = 0
+  }
+
+  invariant locked-when-empty: coins == 0 implies mode is Locked
+}

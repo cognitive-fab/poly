@@ -1,0 +1,104 @@
+// The stateful core of the refund support agent.
+//
+// A Line is one item of one order (instance id `<order>:<index>`). It is refunded through Stripe at most once, only on
+// a request from the customer who placed the order, and the customer is told on WhatsApp how the refund went.
+// An Inquiry is one inbound WhatsApp message (instance id: the message id). It is answered exactly once, so a webhook
+// the provider delivers twice gets one reply.
+module support
+
+enum LineStatus { Open, Refunding, Refunded, Failed }
+enum Notice { RefundIssued, RefundNotIssued }
+
+machine Line {
+  state {
+    status : LineStatus = Open
+  }
+  terminal status in { Refunded, Failed }
+
+  action Request(fromOwner: bool)
+  action RefundOk()
+  action RefundFailed()
+
+  on Request(fromOwner) {
+    require fromOwner else reject "not-owner"
+    require status != Refunding else reject "in-progress"
+    require status == Open else reject "not-open"
+    status' = Refunding
+    emit refund()
+  }
+  on RefundOk {
+    require status == Refunding else reject "not-refunding"
+    status' = Refunded
+    emit notify(outcome: RefundIssued)
+  }
+  // A declined or unconfirmed refund is left to a person: the agent never refunds the line again.
+  on RefundFailed {
+    require status == Refunding else reject "not-refunding"
+    status' = Failed
+    emit notify(outcome: RefundNotIssued)
+  }
+
+  // Stripe honours the Idempotency-Key for 24 hours, so a retried attempt refunds once.
+  effect refund() {
+    kind "stripe.refund"
+    labels { egress:external, read:private, read:store }
+    targets { egress: exact "https://api.stripe.com/v1/refunds", secrets: ["STRIPE_SECRET_KEY"], store: ["lines"] }
+    class irreversible
+    retry { attempts 3, base 1s, timeout 30s }
+    idempotent header "Idempotency-Key" window 24h
+    ok -> RefundOk()
+    failed -> RefundFailed()
+    exhausted -> RefundFailed()
+  }
+  // A WhatsApp message cannot be recalled and the Cloud API takes no idempotency key: it is sent at most once.
+  effect notify(outcome: Notice) {
+    kind "whatsapp.notify"
+    labels { egress:external, read:private, read:store }
+    targets { egress: "https://graph.facebook.com/", secrets: ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"], store: ["lines"] }
+    class irreversible
+    retry { attempts 1 }
+  }
+
+  // A finished line refuses every request as terminal, before its handler runs.
+  reject property only-the-owner:
+    (action == Request && !fromOwner) implies (rejected("not-owner") || rejected("terminal"))
+  step property refunds-start-open: pre.status != Open implies post.status != Refunding
+  step property refunded-was-refunding: post.status == Refunded implies pre.status == Refunding || pre.status == Refunded
+  step property told-when-refunded:
+    (pre.status == Refunding && post.status == Refunded) implies emits(notify, outcome: RefundIssued)
+  step property told-when-not-refunded:
+    (pre.status == Refunding && post.status == Failed) implies emits(notify, outcome: RefundNotIssued)
+  path property refund-at-most-once: count("stripe.refund") <= 1
+  path property one-notice: count("whatsapp.notify") <= 1
+  liveness refund-settles: status == Refunding leads to status in { Refunded, Failed }
+    under fair { RefundOk | RefundFailed }
+}
+
+enum InquiryStatus { New, Answered }
+// What the reply says; its details (the order, the items, the amounts) are read from the host's store.
+enum Outcome { Help, NeedOrder, NotFound, NoItem, Started, NothingToRefund, Status }
+
+machine Inquiry {
+  state {
+    status : InquiryStatus = New
+  }
+  terminal status in { Answered }
+
+  action Answer(outcome: Outcome)
+
+  on Answer(outcome) {
+    require status == New else reject "answered"
+    status' = Answered
+    emit reply(outcome: outcome)
+  }
+
+  effect reply(outcome: Outcome) {
+    kind "whatsapp.reply"
+    labels { egress:external, read:private, read:store }
+    targets { egress: "https://graph.facebook.com/", secrets: ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"], store: ["inquiries"] }
+    class irreversible
+    retry { attempts 1 }
+  }
+
+  path property one-reply: count("whatsapp.reply") <= 1
+}
