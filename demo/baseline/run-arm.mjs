@@ -10,7 +10,7 @@
 // (DB11); the session is saved as it ran. Nothing here runs the build, and nothing is committed: commit-run.mjs prepares the run's commit.
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { auditEscapes } from './guard.mjs';
+import { auditRun } from './audit.mjs';
 import { smokeTest } from './smoke.mjs';
 import { agentFilesIn, preflight, runArm, summaryLine } from './procedure.mjs';
 
@@ -34,9 +34,10 @@ if (process.argv.includes('--check')) {
 try {
   const { dir, workspace, summary } = await runArm({ arm, run });
   const initial = JSON.parse(readFileSync(join(dir, 'initial.json'), 'utf8'));
-  const audit = auditEscapes(join(dir, 'session.jsonl'), workspace);
+  const audit = auditRun(join(dir, 'session.jsonl'), workspace);
   console.log(`run ${arm}-${run} finished (exit ${summary.exit}${summary.error ? `, ${summary.error}` : ''})`);
   console.log(summaryLine({ sdkResult: summary.sdkResult, agentFiles: agentFilesIn(workspace, initial).length, audit: audit.status, costUsd: summary.costUsd }));
+  if (audit.refused.length) console.log(`the audit lists ${audit.refused.length} refused call(s) inside the workspace (not marked)`);
   if (audit.status === 'escaped') console.log(`the audit found ${audit.calls.length} call(s) outside the workspace or of a disallowed tool; see the record after commit-run.mjs`);
   console.log(`final message: ${String(summary.finalMessage ?? '(none)').slice(0, 300)}`);
   console.log(`run folder: ${dir}\nworkspace: ${workspace}`);

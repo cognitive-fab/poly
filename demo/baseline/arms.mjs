@@ -122,6 +122,12 @@ const POLY = [
   ['@cognitive-fab/polyflow-verify', 'polyflow-verify', 'vendor/polyflow/platform/packages/verify'],
 ];
 
+/**
+ * A folder that a poly package reads from its own root at run time, besides `dist` (DB16 item 2). `@poly/runtime` verifies its OutboxIntent models in
+ * `model/` at load; without the folder `load` throws, and poly-pilot-2 rebuilt it from the specification text (finding H5).
+ */
+const RUNTIME_FOLDERS = { 'poly-runtime': ['model'] };
+
 /** Copies the packages into .harness/ and returns the devDependencies that declare them. */
 function declarePackages(dir, root, packages) {
   const dependencies = {};
@@ -130,6 +136,7 @@ function declarePackages(dir, root, packages) {
     if (source.startsWith('packages/')) {
       copy(dir, `.harness/${folder}/package.json`, join(from, 'package.json'));
       copy(dir, `.harness/${folder}/dist`, join(from, 'dist'), notBuildInfo);
+      for (const extra of RUNTIME_FOLDERS[folder] ?? []) copy(dir, `.harness/${folder}/${extra}`, join(from, extra));
     } else copy(dir, `.harness/${folder}`, from);
     dependencies[name] = `file:.harness/${folder}`;
   }

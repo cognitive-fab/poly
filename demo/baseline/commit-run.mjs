@@ -20,6 +20,7 @@ try {
   console.log(`Prepared demo/baseline/runs/${arm}-${run}.`);
   console.log(summaryLine({ sdkResult: record.sdkResult, agentFiles: record.agentFiles, audit: record.audit.status, costUsd: record.costUsd }));
   for (const c of record.audit.calls) console.log(`  escaped: ${c.tool}: ${c.reason}`);
+  for (const c of record.audit.refused ?? []) console.log(`  refused (${c.by}): ${c.tool}: ${c.reason}`);
   console.log(`final message: ${String(record.finalMessage ?? '(none)').slice(0, 300)}`);
   console.log('\nCommit it before anything is run against it:\n');
   for (const c of commands) console.log(`  ${c}`);
