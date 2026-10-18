@@ -482,6 +482,420 @@ test('DB17.6c: poly-pilot-2 escaped + guard-refused == auditEscapes.calls', () =
   assert.equal(auditRunResult.escaped.length + guardRefusedCount, auditEscapesResult.calls.length, 'poly-pilot-2: escaped + guard-refused == auditEscapes.calls');
 });
 
+test('DB17 item 8 A: replay of ts-kept mkdir call with hook-refusal result => attempted', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/Users/jjdub/.poly-demo/work/ts-kept';
+    const file = join(dir, 'session.jsonl');
+    const command = 'cat .harness/typescript/package.json | grep \'"version"\'; mkdir -p /tmp/tt/test && cd /tmp/tt && echo \'{"type":"module"}\' > package.json && echo \'import test from "node:test"; test("x",()=>{const a: number = 1;});\' > test/a.test.ts && node --test 2>&1 | tail -3';
+    const hookRefusal = 'PreToolUse:Bash hook error: Bash names a place outside the workspace C:\\Users\\jjdub\\.poly-demo\\work\\ts-kept: /tmp/tt/test, /tmp/tt, test/a.test.ts; Bash pipes into grep \'"version"\', which is outside the read-only set';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command }, 'mkdir-hook-test'),
+      toolResultEvent('mkdir-hook-test', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'attempted', 'status is attempted');
+    assert.equal(result.attempted.length, 1, 'attempted has 1 entry');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.ok(result.attempted[0].offending.some(o => o.includes('/tmp/tt')), 'offending contains /tmp/tt');
+    assert.equal(result.attempted[0].reason, hookRefusal, 'reason is hook refusal message');
+    assert.ok(!Object.hasOwn(result.attempted[0], 'by'), 'attempted entry has no by field');
+    assert.ok(!Object.hasOwn(result.attempted[0], 'note'), 'attempted entry has no note field');
+    assert.deepEqual(result.calls, [], 'calls is empty (same as escaped)');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 B: replay of poly-kept taskkill with //F, //IM, //FI => refused with note non-path word', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/Users/jjdub/.poly-demo/work/poly-kept';
+    const file = join(dir, 'session.jsonl');
+    const command = 'taskkill //F //IM node.exe //FI "WINDOWTITLE eq *"';
+    writeFileSync(file, assistantEvent('Bash', { command }, 'taskkill-test'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.ok(Object.hasOwn(result.refused[0], 'note'), 'refused entry has note field');
+    assert.equal(result.refused[0].note, 'guard false positive: non-path word', 'note is non-path word');
+    assert.ok(result.refused[0].offending.includes('//F'), 'offending contains //F');
+    assert.ok(result.refused[0].offending.includes('//IM'), 'offending contains //IM');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 C: ts-pilot-1 clean, poly-pilot-1 clean (recorded sessions)', () => {
+  const tsAudit = auditRun(join(SESSIONS, 'ts-pilot-1', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/runs/ts-pilot-1/workspace');
+  assert.equal(tsAudit.status, 'clean', 'ts-pilot-1 status is clean');
+  assert.deepEqual(tsAudit.escaped, [], 'ts-pilot-1 escaped is empty');
+  assert.deepEqual(tsAudit.attempted, [], 'ts-pilot-1 attempted is empty');
+  assert.deepEqual(tsAudit.calls, [], 'ts-pilot-1 calls is empty');
+
+  const polyAudit = auditRun(join(SESSIONS, 'poly-pilot-1', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/runs/poly-pilot-1/workspace');
+  assert.equal(polyAudit.status, 'clean', 'poly-pilot-1 status is clean');
+  assert.deepEqual(polyAudit.attempted, [], 'poly-pilot-1 attempted is empty');
+});
+
+test('DB17 item 8 C: ts-pilot-2 clean, poly-pilot-2 clean, poly-pilot-3 clean (recorded)', () => {
+  const tsAudit = auditRun(join(SESSIONS, 'ts-pilot-2', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/work/ts-pilot-2');
+  assert.equal(tsAudit.status, 'clean', 'ts-pilot-2 status is clean');
+  assert.deepEqual(tsAudit.attempted, [], 'ts-pilot-2 attempted is empty');
+  assert.equal(tsAudit.refused.length, 2, 'ts-pilot-2 refused has 2 entries');
+
+  const polyPilot2 = auditRun(join(SESSIONS, 'poly-pilot-2', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/work/poly-pilot-2');
+  assert.equal(polyPilot2.status, 'clean', 'poly-pilot-2 status is clean');
+  assert.deepEqual(polyPilot2.attempted, [], 'poly-pilot-2 attempted is empty');
+  assert.equal(polyPilot2.refused.length, 4, 'poly-pilot-2 refused has 4 entries');
+
+  const polyPilot3 = auditRun(join(SESSIONS, 'poly-pilot-3', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/work/poly-pilot-3');
+  assert.equal(polyPilot3.status, 'clean', 'poly-pilot-3 status is clean');
+  assert.deepEqual(polyPilot3.attempted, [], 'poly-pilot-3 attempted is empty');
+  assert.equal(polyPilot3.refused.length, 9, 'poly-pilot-3 refused has 9 entries');
+  const withNotes = polyPilot3.refused.filter(r => Object.hasOwn(r, 'note'));
+  assert.equal(withNotes.length, 2, 'poly-pilot-3 has exactly 2 refused with notes');
+});
+
+test('DB17 item 8 C: ts-kept attempted, poly-kept clean (recorded)', () => {
+  const tsKept = auditRun(join(SESSIONS, 'ts-kept', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/work/ts-kept');
+  assert.equal(tsKept.status, 'attempted', 'ts-kept status is attempted');
+  assert.equal(tsKept.attempted.length, 1, 'ts-kept attempted has 1 entry');
+  assert.deepEqual(tsKept.escaped, [], 'ts-kept escaped is empty');
+  assert.equal(tsKept.refused.length, 1, 'ts-kept refused has 1 entry');
+  assert.equal(tsKept.refused[0].by, 'tool-list', 'ts-kept refused entry is by tool-list');
+  assert.ok(tsKept.attempted[0].offending.some(o => o.includes('/tmp/tt')), 'attempted offending contains /tmp/tt');
+  assert.ok(!Object.hasOwn(tsKept.attempted[0], 'by'), 'attempted entry has no by field');
+  assert.ok(!Object.hasOwn(tsKept.attempted[0], 'note'), 'attempted entry has no note field');
+
+  const polyKept = auditRun(join(SESSIONS, 'poly-kept', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/work/poly-kept');
+  assert.equal(polyKept.status, 'clean', 'poly-kept status is clean');
+  assert.deepEqual(polyKept.escaped, [], 'poly-kept escaped is empty');
+  assert.deepEqual(polyKept.attempted, [], 'poly-kept attempted is empty');
+  assert.equal(polyKept.refused.length, 6, 'poly-kept refused has 6 entries');
+  const byGuard = polyKept.refused.filter(r => r.by === 'guard');
+  const byToolList = polyKept.refused.filter(r => r.by === 'tool-list');
+  assert.equal(byGuard.length, 4, 'poly-kept has 4 guard-refused entries');
+  assert.equal(byToolList.length, 2, 'poly-kept has 2 tool-list-refused entries');
+  const withNotes = polyKept.refused.filter(r => Object.hasOwn(r, 'note'));
+  assert.equal(withNotes.length, 2, 'poly-kept has exactly 2 refused with notes');
+});
+
+test('DB17 item 8 D1: ls ../../x with hook-refusal => attempted, status attempted', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: Bash names a place outside the workspace C:\\ws\\run: ../../x';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'escape-hook'),
+      toolResultEvent('escape-hook', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'attempted', 'status is attempted');
+    assert.equal(result.attempted.length, 1, 'attempted has 1 entry');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D2: ls ../../x with NO result => escaped, status escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls ../../x' }, 'escape-no-result'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D3: ls ../../x with tool-list refusal => escaped (tool-list refusal, not attempted)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const toolListRefusal = 'Permission to use Bash has been denied because Claude Code is running in don\'t ask mode.';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'escape-tool-list'),
+      toolResultEvent('escape-tool-list', toolListRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D4: one attempted and one escaped in one session => status escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: Bash names a place outside the workspace C:\\ws\\run: ../../x';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'escape1'),
+      toolResultEvent('escape1', hookRefusal, true),
+      assistantEvent('Bash', { command: 'ls ../../../y' }, 'escape2')
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped (not attempted)');
+    assert.equal(result.attempted.length, 1, 'attempted has 1 entry');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D5: Agent with hook-refusal => attempted (disallowed tool)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Agent hook error: Agent is not allowed';
+    writeFileSync(file, [
+      assistantEvent('Agent', {}, 'agent-hook'),
+      toolResultEvent('agent-hook', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'attempted', 'status is attempted');
+    assert.equal(result.attempted.length, 1, 'attempted has 1 entry');
+    assert.equal(result.attempted[0].tool, 'Agent', 'tool is Agent');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D6: Agent with NO result => escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Agent', {}, 'agent-no-hook'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D7: taskkill //F //IM node.exe => refused by guard with note non-path word, status clean', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'taskkill //F //IM node.exe' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.equal(result.refused[0].note, 'guard false positive: non-path word', 'note is non-path word');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D8: tasklist //FI "IMAGENAME eq node.exe" => refused by guard with note non-path word', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'tasklist //FI "IMAGENAME eq node.exe"' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'guard', 'by is guard');
+    assert.equal(result.refused[0].note, 'guard false positive: non-path word', 'note is non-path word');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D9: ls //F ../../x => has both escape and attempted (if hook refusal) or escaped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const fileWithHook = join(dir, 'session-hook.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: Bash names a place outside the workspace C:\\ws\\run: ../../x';
+    writeFileSync(fileWithHook, [
+      assistantEvent('Bash', { command: 'ls //F ../../x' }, 'mixed1'),
+      toolResultEvent('mixed1', hookRefusal, true)
+    ].join('\n'));
+    const resultHook = auditRun(fileWithHook, workspace);
+    assert.equal(resultHook.status, 'attempted', 'with hook-refusal: status is attempted');
+    assert.equal(resultHook.attempted.length, 1, 'with hook-refusal: attempted has entry');
+
+    const fileNoHook = join(dir, 'session-nohook.jsonl');
+    writeFileSync(fileNoHook, assistantEvent('Bash', { command: 'ls //F ../../x' }, 'mixed2'));
+    const resultNoHook = auditRun(fileNoHook, workspace);
+    assert.equal(resultNoHook.status, 'escaped', 'without hook result: status is escaped');
+    assert.equal(resultNoHook.escaped.length, 1, 'without hook result: escaped has entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D10: ls //server/share (more than three letters) => escaped (not a //X option word)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, assistantEvent('Bash', { command: 'ls //server/share' }));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped (UNC-like path)');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D11: attempted entries have no by or note property', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: something';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'test-attempted'),
+      toolResultEvent('test-attempted', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    const attempted = result.attempted[0];
+    assert.ok(!Object.hasOwn(attempted, 'by'), 'attempted entry has no by property');
+    assert.ok(!Object.hasOwn(attempted, 'note'), 'attempted entry has no note property');
+    assert.ok(Object.hasOwn(attempted, 'tool'), 'attempted entry has tool property');
+    assert.ok(Object.hasOwn(attempted, 'reason'), 'attempted entry has reason property');
+    assert.ok(Object.hasOwn(attempted, 'offending'), 'attempted entry has offending property');
+    assert.ok(Object.hasOwn(attempted, 'excerpt'), 'attempted entry has excerpt property');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 8 D12: calls deep-equals escaped, and is [] for session with only attempted entries', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: something';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'only-attempted'),
+      toolResultEvent('only-attempted', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.deepEqual(result.calls, [], 'calls is [] (does not include attempted)');
+    assert.deepEqual(result.calls, result.escaped, 'calls deep-equals escaped');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB12/DB17 E1: prepareCommit writes audit.attempted, audit.status, audit.calls, audit.refused', async () => {
+  const r = gitRepo();
+  const runsDir = mkdtempSync(join(tmpdir(), 'audit-prep-attempted-'));
+  const workDir = mkdtempSync(join(tmpdir(), 'audit-prep-work-'));
+  const workspace = join(workDir, 'e-attempted-run');
+  const runDir = join(runsDir, 'e-attempted-run');
+
+  mkdirSync(workspace, { recursive: true });
+  mkdirSync(runDir, { recursive: true });
+
+  writeFileSync(join(workspace, 'package.json'), '{}');
+  writeFileSync(join(runDir, 'initial.json'), JSON.stringify({
+    'package.json': sha('{}')
+  }));
+
+  const hookRefusal = 'PreToolUse:Bash hook error: Bash names a place outside the workspace: /tmp/x';
+  const sessionContent = [
+    assistantEvent('Bash', { command: 'ls /tmp/x' }, 'bash-1'),
+    toolResultEvent('bash-1', hookRefusal, true)
+  ].join('\n');
+  writeFileSync(join(runDir, 'session.jsonl'), sessionContent);
+
+  writeFileSync(join(runDir, 'result.json'), JSON.stringify({
+    arm: 'e', run: 'attempted-run', exit: 0, startedWith: {}, sdkResult: 'success',
+    finalMessage: 'test', workspace, costUsd: 1.0, usage: { input_tokens: 10, output_tokens: 5 },
+    stderrTail: '', error: null, modelCallFlags: {}
+  }));
+
+  try {
+    const commands = await prepareCommit({ arm: 'e', run: 'attempted-run', runsDir, workDir, root: r.root });
+    assert.ok(Array.isArray(commands), 'returns array');
+    const recordPath = join(r.root, 'demo', 'baseline', 'runs', 'e-attempted-run', 'RECORD.json');
+    assert.ok(existsSync(recordPath), 'RECORD.json created');
+    const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+
+    assert.ok('audit' in record, 'record has audit field');
+    assert.ok(Object.hasOwn(record.audit, 'status'), 'audit has status');
+    assert.ok(Object.hasOwn(record.audit, 'calls'), 'audit has calls');
+    assert.ok(Object.hasOwn(record.audit, 'attempted'), 'audit has attempted');
+    assert.ok(Object.hasOwn(record.audit, 'refused'), 'audit has refused');
+    assert.equal(record.audit.status, 'attempted', 'status is attempted');
+    assert.equal(record.audit.attempted.length, 1, 'attempted has 1 entry');
+    assert.deepEqual(record.audit.calls, [], 'calls is empty');
+  } finally {
+    r.clean();
+    try { rmSync(runsDir, { recursive: true, force: true }); } catch {}
+    try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+  }
+});
+
+test('DB12/DB17 E2: prepareCommit writes audit.attempted as [] when there is none', async () => {
+  const r = gitRepo();
+  const runsDir = mkdtempSync(join(tmpdir(), 'audit-prep-no-attempted-'));
+  const workDir = mkdtempSync(join(tmpdir(), 'audit-prep-work2-'));
+  const workspace = join(workDir, 'e-clean-run');
+  const runDir = join(runsDir, 'e-clean-run');
+
+  mkdirSync(workspace, { recursive: true });
+  mkdirSync(runDir, { recursive: true });
+
+  writeFileSync(join(workspace, 'package.json'), '{}');
+  writeFileSync(join(runDir, 'initial.json'), JSON.stringify({
+    'package.json': sha('{}')
+  }));
+
+  const sessionContent = [
+    assistantEvent('Bash', { command: 'npm test' }),
+    assistantEvent('Read', { file_path: join(workspace, 'package.json') })
+  ].join('\n');
+  writeFileSync(join(runDir, 'session.jsonl'), sessionContent);
+
+  writeFileSync(join(runDir, 'result.json'), JSON.stringify({
+    arm: 'e', run: 'clean-run', exit: 0, startedWith: {}, sdkResult: 'success',
+    finalMessage: 'test', workspace, costUsd: 1.0, usage: { input_tokens: 10, output_tokens: 5 },
+    stderrTail: '', error: null, modelCallFlags: {}
+  }));
+
+  try {
+    const commands = await prepareCommit({ arm: 'e', run: 'clean-run', runsDir, workDir, root: r.root });
+    const recordPath = join(r.root, 'demo', 'baseline', 'runs', 'e-clean-run', 'RECORD.json');
+    const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+
+    assert.equal(record.audit.status, 'clean', 'status is clean');
+    assert.ok(Object.hasOwn(record.audit, 'attempted'), 'audit has attempted field');
+    assert.deepEqual(record.audit.attempted, [], 'attempted is present and []');
+  } finally {
+    r.clean();
+    try { rmSync(runsDir, { recursive: true, force: true }); } catch {}
+    try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+  }
+});
+
 test('DB12/DB17.d: prepareCommit writes RECORD.json with audit.status, audit.calls, audit.refused (pipe inside, no escapes)', async () => {
   const r = gitRepo();
   const runsDir = mkdtempSync(join(tmpdir(), 'audit-preparecommit-runs-'));
