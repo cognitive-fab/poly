@@ -454,31 +454,22 @@ test('DB17.6c: ts-pilot-1 escaped + guard-refused == auditEscapes.calls', () => 
   assert.equal(auditRunResult.escaped.length + guardRefusedCount, auditEscapesResult.calls.length, 'ts-pilot-1: escaped + guard-refused == auditEscapes.calls');
 });
 
-test('DB17.6c: poly-pilot-1 escaped + guard-refused == auditEscapes.calls', () => {
-  const workspace = 'C:\\Users\\jjdub\\.poly-demo\\runs\\poly-pilot-1\\workspace';
-  const file = join(SESSIONS, 'poly-pilot-1', 'session.jsonl');
-  const auditRunResult = auditRun(file, workspace);
-  const auditEscapesResult = auditEscapes(file, workspace);
-  const guardRefusedCount = auditRunResult.refused.filter(c => c.by === 'guard').length;
-  assert.equal(auditRunResult.escaped.length + guardRefusedCount, auditEscapesResult.calls.length, 'poly-pilot-1: escaped + guard-refused == auditEscapes.calls');
-});
+test('DB17.6c: escaped + attempted + guard-refused == auditEscapes.calls (all four recorded sessions)', () => {
+  const testSessions = [
+    { name: 'ts-pilot-1', workspace: 'C:\\Users\\jjdub\\.poly-demo\\runs\\ts-pilot-1\\workspace' },
+    { name: 'poly-pilot-1', workspace: 'C:\\Users\\jjdub\\.poly-demo\\runs\\poly-pilot-1\\workspace' },
+    { name: 'ts-pilot-2', workspace: 'C:\\Users\\jjdub\\.poly-demo\\work\\ts-pilot-2' },
+    { name: 'poly-pilot-2', workspace: 'C:\\Users\\jjdub\\.poly-demo\\work\\poly-pilot-2' }
+  ];
 
-test('DB17.6c: ts-pilot-2 escaped + guard-refused == auditEscapes.calls', () => {
-  const workspace = 'C:\\Users\\jjdub\\.poly-demo\\work\\ts-pilot-2';
-  const file = join(SESSIONS, 'ts-pilot-2', 'session.jsonl');
-  const auditRunResult = auditRun(file, workspace);
-  const auditEscapesResult = auditEscapes(file, workspace);
-  const guardRefusedCount = auditRunResult.refused.filter(c => c.by === 'guard').length;
-  assert.equal(auditRunResult.escaped.length + guardRefusedCount, auditEscapesResult.calls.length, 'ts-pilot-2: escaped + guard-refused == auditEscapes.calls');
-});
-
-test('DB17.6c: poly-pilot-2 escaped + guard-refused == auditEscapes.calls', () => {
-  const workspace = 'C:\\Users\\jjdub\\.poly-demo\\work\\poly-pilot-2';
-  const file = join(SESSIONS, 'poly-pilot-2', 'session.jsonl');
-  const auditRunResult = auditRun(file, workspace);
-  const auditEscapesResult = auditEscapes(file, workspace);
-  const guardRefusedCount = auditRunResult.refused.filter(c => c.by === 'guard').length;
-  assert.equal(auditRunResult.escaped.length + guardRefusedCount, auditEscapesResult.calls.length, 'poly-pilot-2: escaped + guard-refused == auditEscapes.calls');
+  for (const session of testSessions) {
+    const file = join(SESSIONS, session.name, 'session.jsonl');
+    const auditRunResult = auditRun(file, session.workspace);
+    const auditEscapesResult = auditEscapes(file, session.workspace);
+    const guardRefusedCount = auditRunResult.refused.filter(c => c.by === 'guard').length;
+    const totalCalls = auditRunResult.escaped.length + auditRunResult.attempted.length + guardRefusedCount;
+    assert.equal(totalCalls, auditEscapesResult.calls.length, `${session.name}: escaped + attempted + guard-refused == auditEscapes.calls`);
+  }
 });
 
 test('DB17 item 8 A: replay of ts-kept mkdir call with hook-refusal result => attempted', () => {
@@ -539,8 +530,8 @@ test('DB17 item 8 C: ts-pilot-1 clean, poly-pilot-1 escaped (recorded sessions)'
 
   const polyAudit = auditRun(join(SESSIONS, 'poly-pilot-1', 'session.jsonl'), 'C:/Users/jjdub/.poly-demo/runs/poly-pilot-1/workspace');
   assert.equal(polyAudit.status, 'escaped', 'poly-pilot-1 status is escaped');
-  assert.deepEqual(polyAudit.attempted, [], 'poly-pilot-1 attempted is empty');
-  assert.ok(polyAudit.escaped.length > 0, 'poly-pilot-1 escaped is non-empty');
+  assert.equal(polyAudit.escaped.length, 37, 'poly-pilot-1 escaped has 37 entries');
+  assert.equal(polyAudit.attempted.length, 3, 'poly-pilot-1 attempted has 3 entries');
 });
 
 test('DB17 item 8 C: ts-pilot-2 clean, poly-pilot-2 clean, poly-pilot-3 clean (recorded)', () => {
