@@ -66,6 +66,7 @@ function pathProblem(ctx, text, base = ctx.cwd) {
   return inside(ctx.workspaceReal, resolveFrom(base, text)) ? null : text;
 }
 
+const SPACED_DOTDOT = /(?:^|[\\/])\.\.(?:[\\/]|$)/;
 const HOME_WORD = /(?:^|[^\w])(?:~(?:[\\/]|$)|\$\{?HOME\}?|\$\{?USERPROFILE\}?|%USERPROFILE%)/i;
 /** A network address. file:// is not one: it names a place on this machine and is read as a path. */
 const URL_WORD = /^(?!file:)[a-z][a-z0-9+.-]*:\/\//i;
@@ -130,6 +131,8 @@ function checkBash(ctx, command) {
       if (fileUrl) value = fileUrl[1].replace(/^\/([A-Za-z]:)/, '$1');
       // One path per word: the word itself, after a flag= or a NAME= prefix.
       if (value && !URL_WORD.test(value) && PATH_LIKE.test(value) && !/\s/.test(value)) note(pathProblem({ ...ctx, cwd }, value, cwd));
+      // A word with a space is prose unless it holds a `..` segment: then it is resolved too, so a quoted "sub dir/../../out" cannot leave (DB15 item 8).
+      else if (value && !URL_WORD.test(value) && /\s/.test(value) && SPACED_DOTDOT.test(value)) note(pathProblem({ ...ctx, cwd }, value, cwd));
       // Code and prose can hold paths too (node -e "...", a quoted argument): the places named inside any word.
       for (const m of text.matchAll(DRIVE_IN_TEXT)) note(pathProblem({ ...ctx, cwd }, m[0], cwd));
       for (const m of text.matchAll(DOTDOT_IN_TEXT)) note(pathProblem({ ...ctx, cwd }, m[1], cwd));
