@@ -1555,3 +1555,173 @@ test('DB17 item 7 heredoc control: cat <<EOF with i: in body is refused with not
   }
 });
 
+test('DB17 item 9 (a): Bash call outside workspace with hook-refusal text but is_error false => escaped (it ran)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusalText = 'PreToolUse:Bash hook error: Bash names a place outside the workspace C:\\ws\\run: ../../x';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'outside-1'),
+      toolResultEvent('outside-1', hookRefusalText, false)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 9 (a): Bash call outside workspace with tool-list refusal text but is_error false => escaped (it ran)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const toolListRefusalText = 'Permission to use Bash has been denied because Claude Code is running in don\'t ask mode.';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'outside-2'),
+      toolResultEvent('outside-2', toolListRefusalText, false)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 9 (a): Bash call outside workspace with hook-refusal text and is_error true => attempted (did not run)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusalText = 'PreToolUse:Bash hook error: Bash names a place outside the workspace C:\\ws\\run: ../../x';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls ../../x' }, 'outside-3'),
+      toolResultEvent('outside-3', hookRefusalText, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'attempted', 'status is attempted');
+    assert.equal(result.attempted.length, 1, 'attempted has 1 entry');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 9 (b): Bash call inside workspace allowed by guard but hook refused => refused by hook', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: something the hook said';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls src' }, 'hook-disagree-1'),
+      toolResultEvent('hook-disagree-1', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'clean', 'status is clean (refused does not change status)');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'hook', 'by is hook');
+    assert.equal(result.refused[0].reason, 'PreToolUse:Bash hook error: something the hook said', 'reason is first line');
+    assert.deepEqual(result.refused[0].offending, [], 'offending is empty');
+    assert.ok(result.refused[0].excerpt.includes('ls src'), 'excerpt contains command');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 9 (b): Hook refused with multiline result uses first line only', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: something the hook said\nSecond line of hook error';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls src' }, 'hook-disagree-2'),
+      toolResultEvent('hook-disagree-2', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.refused.length, 1, 'refused has 1 entry');
+    assert.equal(result.refused[0].by, 'hook', 'by is hook');
+    assert.equal(result.refused[0].reason, 'PreToolUse:Bash hook error: something the hook said', 'reason is first line only');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 9 (c): Bash call with __audit_id field placed after allowed call => escaped (no result)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls src' }, 'allowed-1'),
+      assistantEvent('Bash', { command: 'ls ../../x', __audit_id: 0 }, 'forged-1')
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has 1 entry (the forged-id call)');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+    assert.ok(result.escaped[0].excerpt.includes('../../x'), 'escaped entry is the second call');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 9 (c): Bash call with __audit_id field and hook refusal => attempted', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    const hookRefusal = 'PreToolUse:Bash hook error: Bash names a place outside the workspace';
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls src' }, 'allowed-2'),
+      assistantEvent('Bash', { command: 'ls ../../x', __audit_id: 0 }, 'forged-2'),
+      toolResultEvent('forged-2', hookRefusal, true)
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'attempted', 'status is attempted');
+    assert.equal(result.attempted.length, 1, 'attempted has 1 entry (the forged-id call with hook refusal)');
+    assert.deepEqual(result.escaped, [], 'escaped is empty');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DB17 item 9 (c): Two calls with forged ids in one session => exactly one escaped entry from second call', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  try {
+    const workspace = 'C:/ws/run';
+    const file = join(dir, 'session.jsonl');
+    writeFileSync(file, [
+      assistantEvent('Bash', { command: 'ls src' }, 'allowed-3'),
+      assistantEvent('Bash', { command: 'ls ../../x', __audit_id: 0 }, 'escape-1'),
+      assistantEvent('Bash', { command: 'ls ../../../y' }, 'escape-2')
+    ].join('\n'));
+    const result = auditRun(file, workspace);
+    assert.equal(result.status, 'escaped', 'status is escaped');
+    assert.equal(result.escaped.length, 1, 'escaped has exactly 1 entry');
+    assert.deepEqual(result.attempted, [], 'attempted is empty');
+    assert.deepEqual(result.refused, [], 'refused is empty');
+    assert.ok(result.escaped[0].excerpt.includes('../../x'), 'the escaped entry is the second call');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Check which present test helpers omit is_error: DB17 item 8 A fixture sets is_error true', () => {
+  const workspace = 'C:/Users/jjdub/.poly-demo/work/ts-kept';
+  const hookRefusal = 'PreToolUse:Bash hook error: Bash names a place outside the workspace C:\\Users\\jjdub\\.poly-demo\\work\\ts-kept: /tmp/tt/test, /tmp/tt, test/a.test.ts; Bash pipes into grep \'"version"\', which is outside the read-only set';
+  const result = toolResultEvent('test-id', hookRefusal, true);
+  const parsed = JSON.parse(result);
+  assert.equal(parsed.message.content[0].is_error, true, 'DB17 item 8 A fixture sets is_error true correctly');
+});
+
