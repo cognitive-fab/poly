@@ -52,7 +52,8 @@ function excludedEntries(list, git) {
 
 /** Amendment `n` as an object. It writes nothing: `git` is a function from an argument list to the trimmed output of git in `root`. */
 export function buildAmendment(n, { root = ROOT, git }) {
-  const eff = effectiveRecord({ root, git });
+  // The record as it stood before amendment n: the files numbered n and above are not read, so the answer does not depend on whether n's own file exists (DB13 item 6).
+  const eff = effectiveRecord({ root, git, upTo: n - 1 });
   if (eff.problems.length) throw new Error(`the amendments so far are not fit:\n- ${eff.problems.join('\n- ')}`);
   if (eff.amendments.length !== n - 1) throw new Error(`amendment ${n} follows ${eff.amendments.length} amendment(s)`);
   if (n !== 1 && n !== 2) throw new Error(`there is no definition of amendment ${n}`);

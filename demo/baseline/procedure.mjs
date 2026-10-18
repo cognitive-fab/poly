@@ -78,13 +78,14 @@ const introducedBy = (g, file) => {
 /**
  * The record that governs a run (DB13 item 2): the base record with each amendment's `set` laid over it, in order. `base` is the commit that
  * introduced the base record, `amendments` lists `{ n, commit }`, and `problems` lists everything that makes the amendments unfit: one that is
- * not committed, that changed after its commit, that sets a key no amendment may set, or whose keeps differ from the record.
+ * not committed, that changed after its commit, that sets a key no amendment may set, or whose keeps differ from the record. `upTo` limits it to
+ * the amendment files numbered 1 to `upTo` (DB13 item 6): the record as it stood before a later amendment, whatever state that amendment's file is in.
  */
-export function effectiveRecord({ root = ROOT, git: g = (args) => git(root, args) } = {}) {
+export function effectiveRecord({ root = ROOT, git: g = (args) => git(root, args), upTo = Infinity } = {}) {
   const problems = [];
   let record = JSON.parse(readFileSync(join(root, RECORD), 'utf8'));
   const base = introducedBy(g, RECORD);
-  const found = readdirSync(join(root, 'demo', 'baseline')).map((n) => /^PREREGISTRATION\.amendment-(\d+)\.json$/.exec(n)).filter(Boolean).map((m) => Number(m[1])).sort((a, b) => a - b);
+  const found = readdirSync(join(root, 'demo', 'baseline')).map((n) => /^PREREGISTRATION\.amendment-(\d+)\.json$/.exec(n)).filter(Boolean).map((m) => Number(m[1])).filter((n) => n <= upTo).sort((a, b) => a - b);
   const amendments = [];
   let excluded = [...(record.excluded ?? [])];
   for (const [i, n] of found.entries()) {
