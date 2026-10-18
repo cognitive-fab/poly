@@ -1,0 +1,152 @@
+{
+  "v": 1,
+  "amendment": 2,
+  "reason": "The second pilots showed three more faults of the harness. The poly workspace lacked the runtime's model folder and the standard library, so the runtime could not start (H5, DB16), the audit called a run that never left its workspace escaped (H6, DB17), and the poly tool list refused two commands that the reference prescribes (H7). This amendment records the new poly scaffold and the poly tool list with poly admit and poly lint, excludes poly-pilot-2, lets ts-pilot-2 stand as the TypeScript pilot, and allows one new poly pilot, pilot-3. Nothing that the TypeScript arm sees at run time changes: its scaffold, tool list, settings, hook and guard are kept, and the keeps say so by path. The prompt, the arm texts, the cleaned reference, the model, the agent, the caps and the turn limit are unchanged.",
+  "findings": {
+    "H5": "The poly workspace declared @poly/runtime from its package.json and dist only. The runtime reads a model folder of its own at load, so load threw for want of it, and poly-pilot-2 rebuilt the folder into node_modules from the specification text with a script of its own. The smoke test ran poly check and never load. The same review found that the standard library the reference describes (std.channels, std.credentials, std.routing) was not reachable either: the tools read it at node_modules/std, the workspace had none, and a channel of the whatsapp kind was refused PL6811. std is now a declared package, and the smoke test checks a channel of that kind.",
+    "H6": "The audit marked poly-pilot-2 escaped for a pipe into grep -v inside its workspace. The label means leaving the workspace or using a tool that is not allowed, so the audit now lists refused calls (guard or tool list) apart from escaped ones.",
+    "H7": "The reference prescribes poly admit (PT14) and poly lint handlers (PT6.5), and the poly tool list refused their npm run form: poly-pilot-2 was refused npm run poly lint handlers. The same commands were allowed through node and the cli file, so the refusal depended on the shape of the command. The poly list gains Bash(npm run poly admit*) and Bash(npm run poly lint*); the TypeScript list is unchanged."
+  },
+  "limits": [
+    "The guard sees tool inputs, not what an agent's own program does at run time.",
+    "The hook and the audit were tested on the recorded inputs of both pilots and by child process, and have not been seen to run inside the live agent until a pilot has run under this amendment.",
+    "The turn limit is recorded as a setting; whether the agent enforces it is shown by the first pilot.",
+    "The guard applies each .. after a link to the real path of what precedes it on systems that follow links first. That ordering is not tested on Windows, which is the run platform, where the system folds .. by text before it looks at a link.",
+    "The smoke test starts the runtime on the hello example (admit, load, create, one dispatch) and checks one std channel kind. It does not exercise handlers, effects, a store or the channel adapters, so another file that the runtime reads at run time could still be missing.",
+    "effectiveRecord does not detect a committed amendment that is later deleted or edited, but preflight refuses both. The committed history is the record.",
+    "ts-pilot-2 met two refusals of the tool list (a mkdir inside a compound command, and an npm run typecheck script of its own). They are listed in the audit as refused and do not mark the run. It stands as the TypeScript pilot."
+  ],
+  "keeps": {
+    "prompt": {
+      "file": "demo/baseline/PROMPT.md",
+      "sha256": "sha256:949bb0611273f24e9d66e557c868924eea6b380612a213a0af7a5d4ec6bd10ec"
+    },
+    "armTexts": {
+      "ts": "sha256:091890e187fc3699a4563e7721c9b182a97abe2ff7f04b34bdc043b59e8326fc",
+      "poly": "sha256:f0f5ebedc8d73d2bf5ccb3fe3278128d178adf1124ef9ed38b8a9df18a2c93e6"
+    },
+    "model": "claude-opus-5-5",
+    "claudeCode": {
+      "version": "2.1.287"
+    },
+    "billing": "subscription",
+    "network": "ordinary network access, no container, no keys",
+    "maxTurns": 200,
+    "capsUsd": {
+      "ts": 25,
+      "poly": 25
+    },
+    "polyReference": {
+      "files": [
+        "README.md",
+        "docs/03-technical-spec.md",
+        "docs/04-semantics.md",
+        "examples/delivery/delivery-cleared.poly",
+        "examples/delivery/delivery-parallel-fifo.poly",
+        "examples/delivery/delivery-parallel.poly",
+        "examples/delivery/delivery.poly",
+        "examples/evidence/outbox-union-escape.poly",
+        "examples/evidence/outbox-union.poly",
+        "examples/evidence/outbox-v02.poly",
+        "examples/evidence/outbox-v03.poly",
+        "examples/hello/hello-empty.poly",
+        "examples/hello/hello.poly"
+      ],
+      "listSha256": "sha256:0b8363d4b842a1bb940fab5d07009d33a3a8b3f7f6c3db719010117a64321b62",
+      "treeSha256": "sha256:b52df93c66aa26cbd19ba56abf9ed5cec7d7b7bf89e849c5f42b7110631aab5c"
+    },
+    "disallowedTools": [
+      "Agent",
+      "Task",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "tools": "Read,Write,Edit,Glob,Grep,Bash",
+    "settings": {
+      "sha256": "sha256:6011cdb4079c83eaaaea5bfcb93a1d6f8959875d4ab723182eba805bfb27c2cd"
+    },
+    "hook": {
+      "hookSha256": "sha256:7cfd46d17d31a4394ee33309c7546007783e08151b1867a476c71788069006e8",
+      "guardSha256": "sha256:52d9918685c392141e9208387b282f2117a44566ec3ce5d8e8d418c6764cb4ae"
+    },
+    "readOnlyBash": [
+      "ls",
+      "cat",
+      "head",
+      "tail",
+      "wc",
+      "pwd",
+      "cd"
+    ],
+    "readOnlyExact": [
+      "node --version",
+      "npm --version",
+      "npx tsc --version"
+    ],
+    "allowedTools.ts": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(node *)",
+      "Bash(npm test*)",
+      "Bash(npm install*)",
+      "Bash(npx tsc*)"
+    ],
+    "scaffolds.ts": "sha256:e37c07da00a59e5098b1cd31bef112c07a783fc9d57b094c1684a27d6691bd1f",
+    "totalCapUsd": 175
+  },
+  "set": {
+    "scaffolds": {
+      "ts": "sha256:e37c07da00a59e5098b1cd31bef112c07a783fc9d57b094c1684a27d6691bd1f",
+      "poly": "sha256:6ee4130d3bc1ceae80cf35b66fd890e04b50e7d553323b0ca28d2d2dc4872e74"
+    },
+    "pilots": {
+      "ts": 2,
+      "poly": 3
+    },
+    "allowedTools": {
+      "ts": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash(node *)",
+        "Bash(npm test*)",
+        "Bash(npm install*)",
+        "Bash(npx tsc*)"
+      ],
+      "poly": [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash(node *)",
+        "Bash(npm test*)",
+        "Bash(npm install*)",
+        "Bash(npm run poly check*)",
+        "Bash(npm run poly witness*)",
+        "Bash(npm run poly fix*)",
+        "Bash(npm run poly fmt*)",
+        "Bash(npm run poly edit-check*)",
+        "Bash(npm run poly admit*)",
+        "Bash(npm run poly lint*)"
+      ]
+    }
+  },
+  "excluded": [
+    {
+      "arm": "poly",
+      "run": "pilot-2",
+      "commit": "c8aaeb9569122ca2bb917d1c2325a8c0fa50bb6d",
+      "tree": "f7322dff3f5879677a7b2cd87b51dc4be23b3c59",
+      "findings": [
+        "H5"
+      ],
+      "note": "Excluded from results as a finding of the harness. The runtime package was installed without its model folder, so the runtime refused to start, and the agent rebuilt the folder into node_modules from the specification text. The audit called the run escaped for a pipe into grep inside the workspace (H6); the run never left it."
+    }
+  ]
+}
