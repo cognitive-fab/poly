@@ -39,7 +39,8 @@ const insideWorkspace = (item, workspace) => {
 function remainsAsWord(command, item) {
   if (typeof command !== 'string') return true;
   const bare = command
-    .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\2(?=\n|$)/g, '')
+    // The body goes, with the operator and its delimiter; the rest of the opener line stays (it is part of the command line).
+    .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\2(?=\n|$)/g, ' $3')
     .replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '');
   return bare.split(/[\s;&|()<>]+/).includes(item);
 }
