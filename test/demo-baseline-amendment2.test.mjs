@@ -330,7 +330,9 @@ test('7: amendment 2 is accepted by effectiveRecord', async () => {
 
       const eff_bad = effectiveRecord({ root: r_bad.root, git: r_bad.git });
       assert.equal(eff_bad.problems.length, 1, 'exactly one problem reported when keeps.allowedTools changed');
-      assert.ok(eff_bad.problems[0].includes('allowedTools') || eff_bad.problems[0].includes('Bash(rm *)') || eff_bad.problems[0].includes('keeps'), 'problem mentions allowedTools, tool, or keeps');
+      assert.ok(eff_bad.problems[0].startsWith('amendment 2 keeps allowedTools as '), 'problem message starts with correct prefix');
+      assert.ok(eff_bad.problems[0].includes('Bash(rm *)'), 'problem message includes the tool name');
+      assert.ok(eff_bad.problems[0].includes(', but the record has '), 'problem message includes expected/actual comparison');
     } finally { r_bad.clean(); }
   } finally { r.clean(); }
 });
