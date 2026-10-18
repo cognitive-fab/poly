@@ -44,7 +44,8 @@ function remainsAsWord(command, item) {
   const bare = command
     // The body goes, with the operator and its delimiter; the rest of the opener line stays (it is part of the command line).
     .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\2(?=\n|$)/g, ' $3')
-    .replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '');
+    // A quoted string goes, unless it is exactly the item: bash removes the quotes, so cd "D:" names a drive.
+    .replace(/'([^']*)'|"((?:[^"\\]|\\.)*)"/g, (_, single, double) => ((single ?? double) === item ? ` ${item} ` : ' '));
   return bare.split(/[\s;&|()<>]+/).includes(item);
 }
 
@@ -75,7 +76,7 @@ function judge(call, workspace, command) {
   for (const item of items) {
     if (/^\/[A-Za-z]\/./.test(item) && insideWorkspace(item, workspace)) msys = true;
     // The MSYS option form of a Windows tool (taskkill //F //IM node.exe) is not a path, whether or not it is a word of the command line.
-    else if (/^\/\/[A-Za-z]{1,3}$/.test(item)) word = true;
+    else if (/^\/\/[A-Z]{1,3}$/.test(item)) word = true;
     else if (/^[A-Za-z]:$/.test(item) && !remainsAsWord(command, item)) word = true;
     else return { escape: true };
   }
@@ -138,7 +139,7 @@ export function auditRun(sessionFile, workspace) {
     const call = denied.get(index);
     const excerpt = excerptOf(use.input);
     const verdict = call ? judge(call, workspace, use.input?.command) : null;
-    if (verdict?.escape) (hookRefused.has(use.id) ? attempted : escaped).push({ tool: use.tool, reason: call.reason, offending: call.offending, excerpt });
+    if (verdict?.escape) (hookRefused.has(use.id) || refusals.has(use.id) ? attempted : escaped).push({ tool: use.tool, reason: call.reason, offending: call.offending, excerpt });
     else if (call) refused.push({ tool: use.tool, reason: call.reason, offending: call.offending, excerpt, by: 'guard', ...(verdict.note ? { note: verdict.note } : {}) });
     else if (refusals.has(use.id)) refused.push({ tool: use.tool, reason: refusals.get(use.id), offending: [], excerpt, by: 'tool-list' });
   }
