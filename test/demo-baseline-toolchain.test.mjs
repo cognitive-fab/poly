@@ -274,7 +274,7 @@ test('DB10.8: smokeTest("poly", { root }) with timeout 300000 returns ok true wi
   assert.equal(result.ok, true, 'result.ok === true');
   assert.ok(Array.isArray(result.steps), 'result.steps is an array');
   const stepNames = result.steps.map((s) => s.name);
-  assert.deepEqual(stepNames, ['install', 'check-clean', 'check-finding', 'install-local', 'check-after'], 'step names match spec');
+  assert.deepEqual(stepNames, ['install', 'check-clean', 'check-finding', 'admit', 'runtime', 'install-local', 'check-after'], 'step names match spec');
   for (const step of result.steps) {
     assert.equal(step.ok, true, `step ${step.name} has ok === true`);
     assert.ok(step.detail && typeof step.detail === 'string' && step.detail.length > 0, `step ${step.name} has non-empty detail string`);
@@ -288,7 +288,7 @@ test('DB10.8: smokeTest("ts", { root }) with timeout 300000 returns ok true with
   assert.equal(result.ok, true, 'result.ok === true');
   assert.ok(Array.isArray(result.steps), 'result.steps is an array');
   const stepNames = result.steps.map((s) => s.name);
-  assert.deepEqual(stepNames, ['install', 'tsc-version', 'install-local', 'tsc-after'], 'step names match spec');
+  assert.deepEqual(stepNames, ['install', 'tsc-version', 'node-test', 'install-local', 'tsc-after'], 'step names match spec');
   for (const step of result.steps) {
     assert.equal(step.ok, true, `step ${step.name} has ok === true`);
     assert.ok(step.detail && typeof step.detail === 'string' && step.detail.length > 0, `step ${step.name} has non-empty detail string`);
