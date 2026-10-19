@@ -109,7 +109,7 @@ export async function assembleDemo({
   rt.connectChannel('support', whatsapp(wa), supportTransport(room));
   rt.connectChannel('staff', slack(sl), staffTransport(staff));
   rt.mapSenders('support', principalOf(pool));
-  const db = ordersDb(personas);
+  const db = ordersDb(personas, { now });
   rt.connectSource('orders', postgresSource({ query: db.query, table: 'orders', id: 'order_id', owner: 'customer_id', asOf: 'updated_at', body: 'summary', keys: { charge: 'charge_id' } }));
   const { provideRecorded } = await hostModule('recorded.mjs');
   provideRecorded(rt, providers);
