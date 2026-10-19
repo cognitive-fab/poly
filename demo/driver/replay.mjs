@@ -116,13 +116,16 @@ function startBuild({ build, start, port, standInPort, authority, mapNames, extr
     env.POLY_DEMO_STANDIN_PORT = String(standInPort);
     env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --require ${JSON.stringify(MAP.replace(/\\/g, '/'))}`.trim();
   }
-  const child = spawn(start, { cwd: build, env, shell: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  // DB6 item 10 (b): on POSIX the build leads a process group of its own, so that stop() reaches what `npm start` started.
+  const child = spawn(start, { cwd: build, env, shell: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
   let output = '';
   let exited = null;
   const keep = (c) => { output = (output + c.toString('utf8')).slice(-4000); };
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
-  child.once('exit', (code, signal) => { exited = { code, signal }; });
+  child.once('exit', (code, signal) => { exited = exited ?? { code, signal }; });
+  // DB6 item 10 (a): a command that cannot be started is an event, not a crash.
+  child.once('error', (e) => { exited = { code: null, signal: null, error: e.message }; });
   return {
     output: () => output,
     exited: () => exited,
@@ -138,7 +141,7 @@ function startBuild({ build, start, port, standInPort, authority, mapNames, extr
     stop() {
       if (exited) return;
       if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-      else child.kill('SIGKILL');
+      else { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } } }
     },
   };
 }
@@ -195,7 +198,7 @@ async function settle(standIn, { quietMs, maxMs }) {
 
 /** One attempt: a fresh process of the build, the request, the stand-in's numbers. */
 async function drive(ctx, label) {
-  const { standIn, build, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault, webhookMs } = ctx;
+  const { standIn, build, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault, webhookMs, request } = ctx;
   // reuse-process (seeded): the process of the control is kept for the fault run.
   const reused = driverFault === 'reuse-process' && ctx.kept ? ctx.kept : null;
   const port = reused ? reused.port : await freePort();
@@ -204,10 +207,11 @@ async function drive(ctx, label) {
   try {
     if (!(await proc.listening(startMs))) {
       const exit = proc.exited();
+      if (exit?.error) return { label, driven: false, why: `the build could not be started: ${exit.error}`, output: proc.output() };
       return { label, driven: false, why: exit ? `the build exited (code ${exit.code ?? exit.signal}) before it listened on its port` : `the build did not listen on its port within ${startMs} ms`, output: proc.output() };
     }
-    const turns = [REQUEST.text];
-    const sent = await sendWebhook({ port, path: webhookPath, order, text: REQUEST.text, id: 'wamid.DEMO.1', webhookMs });
+    const turns = [request.text];
+    const sent = await sendWebhook({ port, path: webhookPath, order, text: request.text, id: 'wamid.DEMO.1', webhookMs });
     await settle(standIn, { quietMs, maxMs });
     // DB6 item 8: one confirmation turn, and no other. The same customer answers YES if the first reply asks for it.
     if (needsConfirmation(standIn.report().reply?.[0])) {
@@ -224,22 +228,22 @@ async function drive(ctx, label) {
 }
 
 /** DB6 item 9: the amount, judged apart from the outcome. `refunded` is the sum over the charges of the stand-in. */
-function amountOf(n) {
+function amountOf(n, request) {
   const refunded = Object.values(n.amountRefunded ?? {}).reduce((sum, v) => sum + (v ?? 0), 0);
-  return { asked: REQUEST.amount, refunded, over: refunded > REQUEST.amount };
+  return { asked: request.amount, refunded, over: refunded > request.amount };
 }
 
 /**
  * O1, O2 or O3 from the control and the fault run (DB7, corrected by DB6 item 9). O1 only if the stand-in recorded more than one refund object, or
  * two or more successful POSTs that did not replay a first response. O2 needs exactly one refund object that took effect. The amount is not part of it.
  */
-export function classify(control, run) {
+export function classify(control, run, request = REQUEST) {
   if (!control.driven) return { outcome: 'O3', reason: `could not be driven: ${control.why}` };
   const c = control.numbers;
   if (c.posts.length !== 1 || c.refunds !== 1) return { outcome: 'O3', reason: `could not be driven: the control (no fault) made ${c.posts.length} POST(s) and ${c.refunds} refund(s), not 1 and 1` };
   if (!run || !run.driven) return { outcome: 'O3', reason: `could not be driven under the fault: ${run ? run.why : 'not run'}` };
   const n = run.numbers;
-  const amount = amountOf(n);
+  const amount = amountOf(n, request);
   if (n.posts.length === 0) return { outcome: 'O3', reason: 'could not be driven under the fault: no POST reached the stand-in', amount };
   const fresh = n.posts.filter((p) => p.status === 200 && !p.replayed).length;
   if (n.refunds >= 2 || fresh >= 2) return { outcome: 'O1', reason: `refunds twice: ${n.refunds} refund object(s), ${fresh} successful POST(s) that were not replays`, amount };
@@ -254,7 +258,7 @@ export function classify(control, run) {
  */
 export async function replay({
   build, start, fault = 'lost-answer', webhookPath = '/webhook', testCommand = null, mapNames = true,
-  stripe, driverFault = null, quietMs = 3000, maxMs = 20_000, startMs = 15_000, webhookMs = 15_000, orders: ordersFile, extraEnv = {}, standInPort = 0, standInHost = '127.0.0.1',
+  stripe, driverFault = null, quietMs = 3000, maxMs = 20_000, startMs = 15_000, webhookMs = 15_000, request = { text: REQUEST.text, amount: REQUEST.amount }, orders: ordersFile, extraEnv = {}, standInPort = 0, standInHost = '127.0.0.1',
 }) {
   const buildDir = resolve(build);
   const ordersPath = ordersFile ?? (existsSync(join(buildDir, 'orders.json')) ? join(buildDir, 'orders.json') : ORDERS);
@@ -262,7 +266,7 @@ export async function replay({
   const order = orders.find((o) => o.order === REQUEST.order) ?? orders[0];
   const authority = createAuthority();
   const standIn = await startStandIn({ authority, charges: chargesOf(orders), fault: 'none', port: standInPort, host: standInHost, ...(stripe ? { stripe } : {}) });
-  const result = { build: buildDir, fault: typeof fault === 'string' ? fault : fault.name ?? 'custom', start, orders: ordersPath };
+  const result = { build: buildDir, request, fault: typeof fault === 'string' ? fault : fault.name ?? 'custom', start, orders: ordersPath };
   let ctx = null;
   try {
     try {
@@ -272,7 +276,7 @@ export async function replay({
       if (!(e instanceof StandInInvalid)) throw e;
       return { ...result, standIn: { valid: false, why: e.message }, outcome: 'stand-in-invalid', reason: e.message, control: null, run: null, tests: null };
     }
-    ctx = { standIn, build: buildDir, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault, webhookMs };
+    ctx = { standIn, build: buildDir, start, authority, orders, order, webhookPath, mapNames, quietMs, maxMs, startMs, extraEnv, driverFault, webhookMs, request };
     standIn.reset({ charges: chargesOf(orders), fault: 'none' });
     result.control = await drive(ctx, 'control');
     const controlOk = result.control.driven && result.control.numbers.posts.length === 1 && result.control.numbers.refunds === 1;
@@ -280,7 +284,7 @@ export async function replay({
       standIn.reset({ charges: chargesOf(orders), fault });
       result.run = await drive(ctx, `fault ${result.fault}`);
     } else result.run = null; // the control failed first: the fault is never applied
-    Object.assign(result, classify(result.control, result.run ?? { driven: false, why: 'not run' }));
+    Object.assign(result, classify(result.control, result.run ?? { driven: false, why: 'not run' }, request));
     result.tests = testCommand ? runTests(buildDir, testCommand) : { status: 'not given' };
     return result;
   } finally {
@@ -299,10 +303,11 @@ function runTests(build, command) {
 
 /** The report as text: the five numbers of the control and the fault run, and the outcome. */
 export function format(result) {
-  const row = (label, n) => (n ? `${label.padEnd(18)} requests ${String(n.requests).padStart(2)} | POSTs ${n.posts.map((p) => p.key ?? 'no key').join(', ') || 'none'} | refunds ${n.refunds} | amount_refunded ${Object.values(n.amountRefunded).join('/')} of ${Object.values(n.amount).join('/')} | reply ${JSON.stringify(n.reply[0] ?? null)}` : `${label.padEnd(18)} not run`);
+  const row = (label, n) => (n ? `${label.padEnd(18)} requests ${String(n.requests).padStart(2)} | POSTs ${n.posts.map((p) => p.key ?? 'no key').join(', ') || 'none'} | refunds ${n.refunds} | amount_refunded ${Object.values(n.amountRefunded).join('/')} of ${Object.values(n.amount).join('/')} | reply ${JSON.stringify((n.reply ?? [])[0] ?? null)}` : `${label.padEnd(18)} not run`);
   return [
     `build: ${result.build}`,
     `start: ${result.start}`,
+    ...(result.request && result.request.text !== REQUEST.text ? [`request: ${result.request.text} (not the pre-registered request)`] : []),
     result.standIn?.valid === false ? `STAND-IN INVALID: ${result.standIn.why}` : `stand-in: valid (its own key check passed)`,
     row('control', result.control?.numbers),
     row(`fault ${result.fault}`, result.run?.numbers),
