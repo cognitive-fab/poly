@@ -1,0 +1,5 @@
+The first line of the runbook block reads the key at a prompt; here a dummy secure string stands in for it.
+key is set
+variables holding the value:
+> 2.7
+key removed

@@ -73,3 +73,7 @@ Tests: `test/demo-room.test.mjs`, `demo-live-providers.test.mjs`, `demo-vault.te
 - **Cap:** the most a live or stub launch may spend, in dollars, set with `--cap-usd`, at most 10.
 - **Meter:** the code that reserves the worst case of each model request and sums what the responses report.
 - **Stub model:** a local stand-in for the model provider, used to prove the launcher at no cost.
+
+### Step 12 follow-up: the room answers, and the start times
+
+The rehearsal found that a status question got no answer in the stub room and in the recorded room (DF11): the stub cited no order, the program refuses an uncited answer and then sends nothing, the recorded room's first guests owned no order that its recorded answers cite, and the orders table served fixed dates that the program's `freshness 1h` refuses on the real clock. The stub now cites the orders it is given, `host/recorded-orders.mjs` gives guests 1 and 2 the fixture's orders, and `ordersDb(personas, { now })` serves every row as of the query. `demo.mjs replay` takes `--listen-timeout <ms>` (default 15000) and reports `startedMs`; `../docs/demo/rehearsal-start-times.md` measures the starts.

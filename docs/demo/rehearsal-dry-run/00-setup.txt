@@ -1,0 +1,39 @@
+PowerShell 5.1.26100.9711 Desktop
+> 0.1
+demo
+ M docs/demo/rehearsal.md
+?? docs/demo/rehearsal-dry-run/00-setup.txt
+?? docs/demo/rehearsal-dry-run/07-openssl.txt
+?? docs/demo/rehearsal-dry-run/08-warm-up.txt
+?? docs/demo/rehearsal-dry-run/11-checker-poly-kept.txt
+?? docs/demo/rehearsal-dry-run/12-checker-mutation.txt
+?? docs/demo/rehearsal-dry-run/13-replay-ts-kept.txt
+?? docs/demo/rehearsal-dry-run/14-replay-poly-kept.txt
+?? docs/demo/rehearsal-dry-run/15-illustration-ts-kept-nokey-cups.txt
+?? docs/demo/rehearsal-dry-run/16-illustration-poly-kept-nokey-cups.txt
+?? docs/demo/rehearsal-dry-run/17-fallback-recorded.txt
+?? docs/demo/rehearsal-dry-run/23-refusals.txt
+?? docs/demo/rehearsal-dry-run/24-stub-room-cap-0.01.txt
+?? docs/demo/rehearsal-dry-run/24b-stub-room-stops-at-cap-0.0004.txt
+?? docs/demo/rehearsal-dry-run/25-recorded-room.txt
+?? docs/demo/rehearsal-dry-run/26-live-on-placeholder-tables.txt
+?? docs/demo/rehearsal-dry-run/26b-key-form-with-a-dummy.txt
+?? docs/demo/rehearsal-dry-run/31-act3-check.txt
+?? docs/demo/rehearsal-dry-run/32-act3-live-command.txt
+?? docs/demo/rehearsal-dry-run/play-room.mjs
+?? docs/demo/rehearsal-dry-run/start-times.jsonl
+?? docs/demo/rehearsal-start-times.md
+> 0.2
+v24.12.0
+> 0.3
+Docker Desktop is already running
+29.6.1
+> 0.4
+sha256:acf89522ec328c374b4b5d929bcaf0bd905d17f3a9b23092fe19512e1ff35b3f
+> 0.5
+replay\ts-kept               True
+replay\poly-kept             True
+mutation\ts-kept-nokey       True
+mutation\poly-kept-nokey     True
+> 0.6
+no key set (good)

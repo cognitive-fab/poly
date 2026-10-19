@@ -1,0 +1,10 @@
+build: /build
+start: D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start
+request: Please refund CUPS-4 from order ORD-1001. (not the pre-registered request)
+stand-in: valid (its own key check passed)
+control            requests  1 | POSTs no key | refunds 1 | amount_refunded 4000/0 of 10000/2500 | reply "I can refund $40.00 for CUPS-4 from ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel." | started in 6702 ms
+fault lost-answer  requests  2 | POSTs no key, no key | refunds 2 | amount_refunded 8000/0 of 10000/2500 | reply "I can refund $40.00 for CUPS-4 from ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel." | started in 6566 ms
+outcome O1: refunds twice: 2 refund object(s), 2 successful POST(s) that were not replays
+amount: 8000 refunded of 4000 asked (over the amount asked)
+its own tests: not given
+exit 1

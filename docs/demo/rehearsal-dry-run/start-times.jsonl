@@ -1,0 +1,16 @@
+{"kind":"cold","i":1,"tree":"replay\\poly-kept","wall_ms":155390,"outcome":"O2","control_started_ms":75448,"control_cp_ms":63838,"control_node_boot_ms":225,"run_started_ms":53909,"run_cp_ms":46825,"run_node_boot_ms":131}
+{"kind":"cold","i":2,"tree":"replay\\poly-kept","wall_ms":205218,"outcome":"O2","control_started_ms":91557,"control_cp_ms":79901,"control_node_boot_ms":305,"run_started_ms":86726,"run_cp_ms":71455,"run_node_boot_ms":252}
+{"kind":"cold","i":3,"tree":"replay\\poly-kept","wall_ms":162361,"outcome":"O2","control_started_ms":62504,"control_cp_ms":56861,"control_node_boot_ms":173,"run_started_ms":70159,"run_cp_ms":58104,"run_node_boot_ms":181}
+{"kind":"cold","i":4,"tree":"replay\\poly-kept","wall_ms":79024,"outcome":"O2","control_started_ms":27357,"control_cp_ms":24365,"control_node_boot_ms":63,"run_started_ms":30010,"run_cp_ms":28007,"run_node_boot_ms":63}
+{"kind":"cold","i":5,"tree":"replay\\poly-kept","wall_ms":61843,"outcome":"O2","control_started_ms":22518,"control_cp_ms":20560,"control_node_boot_ms":53,"run_started_ms":21884,"run_cp_ms":19925,"run_node_boot_ms":48}
+{"kind":"warm","i":1,"tree":"replay\\poly-kept","wall_ms":63973,"outcome":"O2","control_started_ms":24555,"control_cp_ms":22635,"control_node_boot_ms":44,"run_started_ms":23614,"run_cp_ms":21691,"run_node_boot_ms":50}
+{"kind":"warm","i":2,"tree":"replay\\poly-kept","wall_ms":66692,"outcome":"O2","control_started_ms":28373,"control_cp_ms":26482,"control_node_boot_ms":47,"run_started_ms":22439,"run_cp_ms":20539,"run_node_boot_ms":47}
+{"kind":"warm","i":3,"tree":"replay\\poly-kept","wall_ms":50731,"outcome":"O2","control_started_ms":17982,"control_cp_ms":16133,"control_node_boot_ms":43,"run_started_ms":16953,"run_cp_ms":15041,"run_node_boot_ms":49}
+{"kind":"warm","i":4,"tree":"replay\\poly-kept","wall_ms":50679,"outcome":"O2","control_started_ms":17870,"control_cp_ms":16026,"control_node_boot_ms":49,"run_started_ms":16862,"run_cp_ms":14938,"run_node_boot_ms":47}
+{"kind":"warm","i":5,"tree":"replay\\poly-kept","wall_ms":53562,"outcome":"O2","control_started_ms":18900,"control_cp_ms":17082,"control_node_boot_ms":43,"run_started_ms":18597,"run_cp_ms":16625,"run_node_boot_ms":45}
+{"kind":"warm-ts","i":1,"tree":"replay\\ts-kept","wall_ms":30788,"outcome":"O2","control_started_ms":8622,"control_cp_ms":7339,"control_node_boot_ms":45,"run_started_ms":7791,"run_cp_ms":7291,"run_node_boot_ms":43}
+{"kind":"warm-ts","i":2,"tree":"replay\\ts-kept","wall_ms":29759,"outcome":"O2","control_started_ms":8223,"control_cp_ms":7433,"control_node_boot_ms":45,"run_started_ms":7189,"run_cp_ms":6675,"run_node_boot_ms":46}
+{"kind":"warm-ts","i":3,"tree":"replay\\ts-kept","wall_ms":29065,"outcome":"O2","control_started_ms":7810,"control_cp_ms":6937,"control_node_boot_ms":49,"run_started_ms":6772,"run_cp_ms":6275,"run_node_boot_ms":44}
+{"kind":"docker-run-overhead","i":1,"wall_ms":1480}
+{"kind":"docker-run-overhead","i":2,"wall_ms":1529}
+{"kind":"docker-run-overhead","i":3,"wall_ms":1563}

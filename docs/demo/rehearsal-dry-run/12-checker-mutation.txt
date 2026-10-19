@@ -1,0 +1,26 @@
+
+> poly
+> node node_modules/@poly/check/dist/src/cli.js check src/support.poly
+
+support.poly:164  PL4003 UNGUARDED_RETRY  refund
+  effect refund is irreversible and may be attempted 3 times with no guarantee that the target executes it once: a lost answer is retried and the target may run it twice (PS23.5)
+  witness (3 steps):
+    Open(1)            New/0/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}       -> Idle/1/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}
+    RequestAll(true)   Idle/1/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}      -> Confirming/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}   emits whatsapp.ticket
+    Confirm()          Confirming/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false} -> Refunding/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}   emits stripe.refund
+  delivery on runtime3.OutboxIntent: Propose, GateAllow, Start (target may execute), HandlerFailed, Start (target may execute), HandlerOk, SettleOk
+    executions of the target: 2, idempotency key: unchanged, deduplication declared: none; also by unsettled
+Ticket: parse-type CLEAN ┬╖ lower CLEAN ┬╖ validate CLEAN ┬╖ translation-validation CLEAN (4746 transitions and 29832 property evaluations agree) ┬╖ model-check FINDINGS (226 states explored) ┬╖ deadlock CLEAN (226 states) ┬╖ effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  stripe.refund  irreversible, attempts 3, none
+  retry-safe  whatsapp.ticket  irreversible, attempts 1, at most once
+  class  stripe.refund  irreversible
+  class  whatsapp.ticket  irreversible
+Notice: parse-type CLEAN ┬╖ lower CLEAN ┬╖ validate CLEAN ┬╖ translation-validation CLEAN (24 transitions and 0 property evaluations agree) ┬╖ model-check CLEAN (2 states explored) ┬╖ deadlock CLEAN (2 states) ┬╖ effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  whatsapp.notice  irreversible, attempts 1, at most once
+  class  whatsapp.notice  irreversible
+verdict: FINDINGS (exit 1)  support.Ticket  over lines Γêê 0..4; Open.count Γêê 1..4; RequestAll.inWindow Γêê bool; RequestLine.line Γêê 0..3; RequestLine.inWindow Γêê bool; Resolve.done Γêê bool; 226 states; kernel assumptions K7
+         support.Notice  over Send.msg Γêê Note; 2 states; kernel assumptions K7
+         Ticket: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         Notice: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+engines: sam-pattern 2.3.0, polygraph 8.4.0, polygraph sam-pattern (vendored) 2.3.0, poly-ref 0.0.0
+exit 1
