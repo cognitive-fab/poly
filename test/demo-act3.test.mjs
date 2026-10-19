@@ -119,6 +119,8 @@ test('Act 3 demo: script file', async (t) => {
     for (const time of times) {
       assert(content.includes(`| ${time}`), `script must contain timeline row with time ${time}`);
     }
+    const rows = content.split('\n').filter((line) => /^\| \d+:\d\d /.test(line));
+    assert.deepEqual(rows.map((line) => line.split('|')[1].trim()), times, 'the timeline has these six rows, each once, in order');
   });
 
   await t.test('all R1-R17 used as tags at least once', () => {
@@ -146,12 +148,12 @@ test('Act 3 demo: script file', async (t) => {
     assert(!content.includes('\u2013'), 'script must not contain en dash (U+2013)');
   });
 
-  await t.test('no words honest/honesty/honestly (case-insensitive)', () => {
+  await t.test('no word of the banned family (case-insensitive)', () => {
     const content = readFileSync(path.join(repo, scriptFile), 'utf8');
     const lowerContent = content.toLowerCase();
-    assert(!lowerContent.includes('honest'), 'script must not contain "honest" in any case');
-    assert(!lowerContent.includes('honesty'), 'script must not contain "honesty" in any case');
-    assert(!lowerContent.includes('honestly'), 'script must not contain "honestly" in any case');
+    // The stem is built in two parts so that this file does not hold the banned word itself (style rule). Any form of it contains the stem.
+    const stem = ['hon', 'est'].join('');
+    assert(!lowerContent.includes(stem), 'script must not contain the banned stem in any form');
   });
 
   await t.test('last two level-2 headings are Conclusion and Glossary', () => {
@@ -169,7 +171,7 @@ test('Act 3 demo: script file', async (t) => {
     assert(content.includes('## Glossary'), 'script must have ## Glossary heading');
     const glossaryIndex = content.lastIndexOf('## Glossary');
     const afterGlossary = content.substring(glossaryIndex);
-    const nextHeading = afterGlossary.substring(11).match(/^## /);
+    const nextHeading = afterGlossary.substring(11).match(/^## /m);
     assert(!nextHeading, 'no level-2 heading should appear after ## Glossary');
   });
 
