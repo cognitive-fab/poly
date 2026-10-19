@@ -380,8 +380,7 @@ test('D1: format prints amount line with over true (poly-kept, refunded > asked)
   const lines = formatted.split('\n');
   const amountLine = lines.find((line) => line.startsWith('amount: '));
   assert.ok(amountLine, 'format output should have a line starting with "amount: "');
-  assert.match(amountLine, /6000 refunded of 4000 asked/);
-  assert.match(amountLine, /\(over the amount asked\)/);
+  assert.equal(amountLine, 'amount: 6000 refunded of 4000 asked (over the amount asked)');
 });
 
 test('D2: format prints amount line with over false (refunded equals asked)', () => {
