@@ -60,7 +60,7 @@ test('DF10: stub mode needs no key and no price gate pass', { timeout: 1_800_000
       capUsd: 0.1,
       now: clock.now,
       meter: fakeMeter(),
-      limits: { perPersonaMs: 5000, maxPerPersona: 3, globalMax: 5 },
+      limits: { minGapMs: 1000, maxMessages: 3 },
     });
     assert.ok(demo, 'assembled with stub mode and cap, no key');
     await demo.close();
@@ -85,7 +85,7 @@ test('DF10.5: when meter becomes capReached the room is killed with spend-cap ex
       onKill: (reason) => {
         kills.push(reason);
       },
-      limits: { perPersonaMs: 1000, maxPerPersona: 1, globalMax: 2 },
+      limits: { minGapMs: 1000, maxMessages: 3 },
     });
     const { room } = demo;
     const guest = room.join('s1');
@@ -118,7 +118,7 @@ test('DF10.6: onReply fires after a reply with { session }', { timeout: 1_800_00
       onReply: ({ session }) => {
         replies.push(session);
       },
-      limits: { perPersonaMs: 1000, maxPerPersona: 1, globalMax: 2 },
+      limits: { minGapMs: 1000, maxMessages: 3 },
     });
     const { room } = demo;
     room.join('s1');
@@ -147,7 +147,7 @@ test('DF10.4, DF10.6: demo.meter is returned', { timeout: 1_800_000 }, async () 
       capUsd: 1,
       now: clock.now,
       meter,
-      limits: { perPersonaMs: 1000, maxPerPersona: 1, globalMax: 2 },
+      limits: { minGapMs: 1000, maxMessages: 3 },
     });
     assert.equal(demo.meter, meter, 'demo.meter is the fake meter');
     await demo.close();

@@ -8,8 +8,8 @@ import { readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { parseArgs } from '../demo/launch.mjs';
 import { LaunchRefused } from '../demo/host/assemble.mjs';
-import { ProviderError } from '../examples/inbox/host/providers.mjs';
-import { API_URL } from '../examples/inbox/host/providers.mjs';
+import { ProviderError, API_URL } from '../examples/inbox/host/providers.mjs';
+import { makeProviders, TASKS } from '../demo/host/live-providers.mjs';
 
 // ---- DF10.1: parseArgs and --cap-usd flag --------
 
@@ -142,365 +142,202 @@ test('DF10.2: no poly-demo-run-* folder created in tmpdir during refusal', async
 
 // ---- DF10.3: stubTransport (imports in tests, fails on missing module) --------
 
-test('DF10.3: stubTransport returns Messages-shaped body for API_URL', async () => {
+const MODEL = 'test-model';
+// A request as the live providers send it: the task sentence in the user turn, the customer's text inside message tags.
+const providerRequest = (task, text, extra = '') => ({
+  method: 'POST',
+  url: API_URL,
+  headers: {},
+  body: JSON.stringify({
+    model: MODEL,
+    max_tokens: 100,
+    system: 'You work on a shop\'s customer desk.',
+    messages: [{ role: 'user', content: `Task: ${TASKS[task]}${extra}\n\n<message>\n${text}\n</message>` }],
+  }),
+});
+const answerOf = (resp) => JSON.parse(JSON.parse(resp.body).content.filter((c) => c.type === 'text').map((c) => c.text).join(''));
+const raw = (system, user, max = 100) => ({ method: 'POST', url: API_URL, headers: {}, body: JSON.stringify({ model: MODEL, max_tokens: max, system, messages: [{ role: 'user', content: user }] }) });
+
+test('DF10.3: stubTransport returns a Messages-shaped body for the Messages URL', async () => {
   const { stubTransport } = await import('../demo/host/stub-model.mjs');
-  const t = stubTransport();
-  const resp = await t.request({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ system: 'hi', messages: [{ role: 'user', content: 'refund me' }], model: 'claude-3-5-sonnet-20241022', max_tokens: 100 }),
-  });
+  const resp = await stubTransport().request(providerRequest('classify', 'refund me'));
   assert.equal(resp.status, 200);
   const body = JSON.parse(resp.body);
-  assert.ok(body.content);
-  assert.ok(body.usage);
+  assert.ok(Array.isArray(body.content) && body.content[0].type === 'text');
   assert.equal(typeof body.usage.input_tokens, 'number');
   assert.equal(typeof body.usage.output_tokens, 'number');
 });
 
-test('DF10.3: stubTransport refuses other URLs with no route error', async () => {
+test('DF10.3: stubTransport refuses other URLs with a no route error', async () => {
   const { stubTransport } = await import('../demo/host/stub-model.mjs');
-  const t = stubTransport();
-  await assert.rejects(
-    () => t.request({
-      method: 'POST',
-      url: 'https://api.stripe.com/v1/refunds',
-      headers: {},
-      body: '{}',
-    }),
-    /no route/
-  );
+  await assert.rejects(() => stubTransport().request({ method: 'POST', url: 'https://api.stripe.com/v1/refunds', headers: {}, body: '{}' }), /no route/);
 });
 
-test('DF10.3: stubTransport classifies refund|money back as Refund', async () => {
+test('DF10.3: classify answers Refund, Status or Other by the customer\'s text alone (the task sentence holds the words refund and order)', async () => {
   const { stubTransport } = await import('../demo/host/stub-model.mjs');
   const t = stubTransport();
-  const mkReq = (text) => ({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ system: 'classify', messages: [{ role: 'user', content: text }], model: 'claude-3-5-sonnet-20241022', max_tokens: 100 }),
-  });
-
-  for (const text of ['refund me', 'Money back please', 'REFUND']) {
-    const r = await t.request(mkReq(text));
-    const b = JSON.parse(r.body);
-    assert.ok(b.content.some(c => c.text.includes('Refund')), `${text} -> Refund`);
+  const cases = [['refund me', 'Refund'], ['Money back please', 'Refund'], ['REFUND', 'Refund'], ['order status', 'Status'], ['where is it', 'Status'], ['STATUS', 'Status'], ['hello', 'Other'], ['xyz', 'Other']];
+  for (const [text, want] of cases) {
+    assert.deepEqual(answerOf(await t.request(providerRequest('classify', text))), { answer: want }, text);
   }
 });
 
-test('DF10.3: stubTransport classifies order|where|status as Status', async () => {
+test('DF10.3: amount answers the first whole number of the text, 0 if none, with the first order id given', async () => {
   const { stubTransport } = await import('../demo/host/stub-model.mjs');
   const t = stubTransport();
-  const mkReq = (text) => ({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ system: 'classify', messages: [{ role: 'user', content: text }], model: 'claude-3-5-sonnet-20241022', max_tokens: 100 }),
-  });
+  const orders = '\n\n<order id="o-9011">\nOrder o-9011\n</order>';
+  const withOrder = (text) => ({ ...providerRequest('amount', text), body: JSON.stringify({ ...JSON.parse(providerRequest('amount', text).body), messages: [{ role: 'user', content: `Task: ${TASKS.amount}\n\n<message>\n${text}\n</message>${orders}` }] }) });
+  assert.deepEqual(answerOf(await t.request(withOrder('refund 50 for me'))), { value: 50, cites: ['o-9011'] });
+  assert.deepEqual(answerOf(await t.request(withOrder('please help me'))), { value: 0, cites: ['o-9011'] });
+  assert.deepEqual(answerOf(await t.request(providerRequest('amount', 'refund 450'))), { value: 450, cites: [] });
+});
 
-  for (const text of ['order status', 'where is it', 'STATUS']) {
-    const r = await t.request(mkReq(text));
-    const b = JSON.parse(r.body);
-    assert.ok(b.content.some(c => c.text.includes('Status')), `${text} -> Status`);
+test('DF10.3: answer and reply give one sentence as a JSON object', async () => {
+  const { stubTransport } = await import('../demo/host/stub-model.mjs');
+  const t = stubTransport();
+  for (const task of ['answer', 'reply']) {
+    const a = answerOf(await t.request(providerRequest(task, 'hello')));
+    assert.equal(typeof a.answer, 'string');
+    assert.ok(a.answer.length > 0);
   }
 });
 
-test('DF10.3: stubTransport classifies other text as Other', async () => {
+test('DF10.3: usage is input = ceil(chars of system and user text / 4), output = 20', async () => {
   const { stubTransport } = await import('../demo/host/stub-model.mjs');
-  const t = stubTransport();
-  const mkReq = (text) => ({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ system: 'classify', messages: [{ role: 'user', content: text }], model: 'claude-3-5-sonnet-20241022', max_tokens: 100 }),
-  });
-
-  for (const text of ['hello', 'xyz']) {
-    const r = await t.request(mkReq(text));
-    const b = JSON.parse(r.body);
-    assert.ok(b.content.some(c => c.text.includes('Other')), `${text} -> Other`);
-  }
+  const body = JSON.parse((await stubTransport().request(raw('a'.repeat(8), 'b'.repeat(12)))).body);
+  assert.equal(body.usage.input_tokens, 5);
+  assert.equal(body.usage.output_tokens, 20);
+  const odd = JSON.parse((await stubTransport().request(raw('a'.repeat(8), 'b'.repeat(13)))).body);
+  assert.equal(odd.usage.input_tokens, 6);
 });
 
-test('DF10.3: stubTransport amount extracts first whole number', async () => {
+test('DF10.3: the same request gives the same answer', async () => {
   const { stubTransport } = await import('../demo/host/stub-model.mjs');
   const t = stubTransport();
-  const mkReq = (text) => ({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ system: 'amount', messages: [{ role: 'user', content: text }], model: 'claude-3-5-sonnet-20241022', max_tokens: 100 }),
-  });
-
-  const r1 = await t.request(mkReq('refund 50 for me'));
-  const b1 = JSON.parse(r1.body);
-  const text1 = b1.content[0].text;
-  assert.ok(text1.includes('50'), `50 extracted: ${text1}`);
+  const r1 = await t.request(providerRequest('classify', 'refund 100'));
+  const r2 = await t.request(providerRequest('classify', 'refund 100'));
+  assert.equal(r1.body, r2.body);
 });
 
-test('DF10.3: stubTransport amount is 0 when no number in text', async () => {
+test('DF10.3: the live providers run over the stub and the meter, and the meter counts their calls', async () => {
   const { stubTransport } = await import('../demo/host/stub-model.mjs');
-  const t = stubTransport();
-  const mkReq = (text) => ({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ system: 'amount', messages: [{ role: 'user', content: text }], model: 'claude-3-5-sonnet-20241022', max_tokens: 100 }),
-  });
-
-  const r = await t.request(mkReq('please help me'));
-  const b = JSON.parse(r.body);
-  const text = b.content[0].text;
-  assert.ok(text.includes('0'), `0 when no number: ${text}`);
-});
-
-test('DF10.3: stubTransport usage input = ceil(chars / 4), output = 20', async () => {
-  const { stubTransport } = await import('../demo/host/stub-model.mjs');
-  const t = stubTransport();
-  const system = 'a'.repeat(8);
-  const userMsg = 'b'.repeat(12);
-  const resp = await t.request({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({
-      system,
-      messages: [{ role: 'user', content: userMsg }],
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 100,
-    }),
-  });
-  const body = JSON.parse(resp.body);
-  const totalChars = system.length + userMsg.length;
-  const expectedInput = Math.ceil(totalChars / 4);
-  assert.equal(body.usage.input_tokens, expectedInput, `${totalChars} chars = ${expectedInput} input tokens`);
-  assert.equal(body.usage.output_tokens, 20, 'output is always 20');
-});
-
-test('DF10.3: same request gives same answer (deterministic)', async () => {
-  const { stubTransport } = await import('../demo/host/stub-model.mjs');
-  const t = stubTransport();
-  const req = {
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ system: 'test', messages: [{ role: 'user', content: 'refund 100' }], model: 'claude-3-5-sonnet-20241022', max_tokens: 100 }),
-  };
-  const r1 = await t.request(req);
-  const r2 = await t.request(req);
-  assert.equal(r1.body, r2.body, 'same request gives same response');
+  const { createSpendMeter, meteredTransport } = await import('../demo/host/spend.mjs');
+  const meter = createSpendMeter({ capUsd: 10, tables: { [MODEL]: { perMillionTokens: { input: 3_000_000, output: 15_000_000 } } } });
+  const providers = makeProviders({ transport: meteredTransport(stubTransport(), meter), apiKey: 'stub-model', models: { small: MODEL, large: MODEL } });
+  const out = await providers.tiers.small({ decision: 'classify', limits: { maxInputTokens: 2000, maxTokens: 400 } }, { bodies: { m1: 'I want my money back' }, items: {} });
+  assert.equal(out.answer, 'Refund');
+  assert.equal(meter.calls(), 5, 'five samples, five metered calls');
+  assert.ok(meter.spentUsd() > 0);
 });
 
 // ---- DF10.4: createSpendMeter and meteredTransport (imports in tests, fails on missing module) --------
 
-test('DF10.4: createSpendMeter has required interface', async () => {
+// A body of known size: the worst case of a request is ceil(chars of body / 2) input tokens plus max_tokens output tokens.
+const meterRequest = (model, { max = 100, system = 'hi', user = 'test' } = {}) => ({ method: 'POST', url: API_URL, headers: {}, body: JSON.stringify({ model, max_tokens: max, system, messages: [{ role: 'user', content: user }] }) });
+const reply = (input, output, status = 200) => ({ status, headers: {}, body: JSON.stringify({ content: [{ type: 'text', text: '{}' }], usage: { input_tokens: input, output_tokens: output } }) });
+const worstCase = (req, inPrice, outPrice) => { const b = JSON.parse(req.body); return (Math.ceil(req.body.length / 2) * inPrice + b.max_tokens * outPrice) / 1e6; };
+
+test('DF10.4: createSpendMeter has the interface of DF10 item 4', async () => {
   const { createSpendMeter } = await import('../demo/host/spend.mjs');
   const meter = createSpendMeter({ capUsd: 5, tables: {} });
-  assert.equal(typeof meter.spentUsd, 'function');
-  assert.equal(typeof meter.calls, 'function');
-  assert.equal(typeof meter.capUsd, 'number');
-  assert.equal(typeof meter.capReached, 'function');
-  assert.equal(typeof meter.reserve, 'function');
-  assert.equal(typeof meter.settle, 'function');
+  for (const name of ['spentUsd', 'calls', 'capReached', 'reserve', 'settle']) assert.equal(typeof meter[name], 'function', name);
+  assert.equal(meter.capUsd, 5);
+  assert.equal(meter.spentUsd(), 0);
+  assert.equal(meter.calls(), 0);
+  assert.equal(meter.capReached(), false);
 });
 
-test('DF10.4: cost arithmetic exact: 1000 input at 3 per million, 500 output at 15 per million = $0.0105', async () => {
+test('DF10.4: cost arithmetic is exact: 1000 input tokens at 3 dollars per million and 500 output tokens at 15 dollars per million cost 0.0105 dollars', async () => {
   const { createSpendMeter, meteredTransport } = await import('../demo/host/spend.mjs');
-  const inner = {
-    request: async () => ({
-      status: 200,
-      headers: {},
-      body: JSON.stringify({ content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1000, output_tokens: 500 } }),
-    }),
-  };
-  const meter = createSpendMeter({
-    capUsd: 10,
-    tables: { 'test-model': { perMillionTokens: { input: 3, output: 15 } } },
-  });
-  const wrapped = meteredTransport(inner, meter);
-  await wrapped.request({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ model: 'test-model', max_tokens: 100, system: 'hi', messages: [{ role: 'user', content: 'test' }] }),
-  });
-  const spent = meter.spentUsd();
-  assert.equal(spent, 0.0105, `1000*3/1e6 + 500*15/1e6 = $0.0105, got $${spent}`);
+  const meter = createSpendMeter({ capUsd: 10, tables: { [MODEL]: { perMillionTokens: { input: 3_000_000, output: 15_000_000 } } } });
+  const wrapped = meteredTransport({ request: async () => reply(1000, 500) }, meter);
+  await wrapped.request(meterRequest(MODEL));
+  assert.ok(Math.abs(meter.spentUsd() - 0.0105) < 1e-12, `got ${meter.spentUsd()}`);
+  assert.equal(meter.calls(), 1);
 });
 
-test('DF10.4: reserve before request, settle after with actual usage', async () => {
+test('DF10.4: reserve before a request and settle after it with the usage the response reports', async () => {
   const { createSpendMeter } = await import('../demo/host/spend.mjs');
-  const meter = createSpendMeter({
-    capUsd: 10,
-    tables: { 'test-model': { perMillionTokens: { input: 3, output: 15 } } },
-  });
-  const req = {
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ model: 'test-model', max_tokens: 100, system: 'hi', messages: [{ role: 'user', content: 'test' }] }),
-  };
-  const res = meter.reserve(req);
-  assert.ok(res !== undefined, 'reserve returns a value');
-  meter.settle(res, {
-    status: 200,
-    headers: {},
-    body: JSON.stringify({ content: [], usage: { input_tokens: 10, output_tokens: 20 } }),
-  });
-  assert.ok(meter.spentUsd() > 0, 'settled cost is positive');
+  const meter = createSpendMeter({ capUsd: 10, tables: { [MODEL]: { perMillionTokens: { input: 3_000_000, output: 15_000_000 } } } });
+  const reservation = meter.reserve(meterRequest(MODEL));
+  assert.notEqual(reservation, undefined);
+  meter.settle(reservation, reply(10, 20));
+  assert.ok(Math.abs(meter.spentUsd() - (10 * 3 + 20 * 15) / 1e6) < 1e-12, `got ${meter.spentUsd()}`);
 });
 
-test('DF10.4: response with non-200 status costs nothing', async () => {
+test('DF10.4: a response with a non-200 status costs nothing', async () => {
   const { createSpendMeter } = await import('../demo/host/spend.mjs');
-  const meter = createSpendMeter({
-    capUsd: 10,
-    tables: { 'test-model': { perMillionTokens: { input: 3, output: 15 } } },
-  });
-  const req = {
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ model: 'test-model', max_tokens: 100, system: 'hi', messages: [{ role: 'user', content: 'test' }] }),
-  };
-  const res = meter.reserve(req);
-  meter.settle(res, { status: 500, headers: {}, body: '{}' });
-  assert.equal(meter.spentUsd(), 0, 'status 500 costs nothing');
+  const meter = createSpendMeter({ capUsd: 10, tables: { [MODEL]: { perMillionTokens: { input: 3_000_000, output: 15_000_000 } } } });
+  meter.settle(meter.reserve(meterRequest(MODEL)), { status: 500, headers: {}, body: '{}' });
+  assert.equal(meter.spentUsd(), 0);
+});
+
+test('DF10.4: a request that throws is charged its reserved worst case', async () => {
+  const { createSpendMeter, meteredTransport } = await import('../demo/host/spend.mjs');
+  const meter = createSpendMeter({ capUsd: 10, tables: { [MODEL]: { perMillionTokens: { input: 3_000_000, output: 15_000_000 } } } });
+  const wrapped = meteredTransport({ request: async () => { throw new Error('connection reset'); } }, meter);
+  const req = meterRequest(MODEL);
+  await assert.rejects(() => wrapped.request(req), /connection reset/);
+  assert.ok(Math.abs(meter.spentUsd() - worstCase(req, 3, 15)) < 1e-12, `got ${meter.spentUsd()}, want ${worstCase(req, 3, 15)}`);
 });
 
 test('DF10.4: a model id with no table is refused (fail closed)', async () => {
   const { createSpendMeter } = await import('../demo/host/spend.mjs');
-  const meter = createSpendMeter({
-    capUsd: 10,
-    tables: { 'known-model': { perMillionTokens: { input: 3, output: 15 } } },
-  });
-  assert.throws(
-    () => meter.reserve({
-      method: 'POST',
-      url: API_URL,
-      headers: {},
-      body: JSON.stringify({ model: 'unknown-model', max_tokens: 100, system: 'hi', messages: [] }),
-    }),
-    ProviderError,
-    'unknown model throws ProviderError'
-  );
+  const meter = createSpendMeter({ capUsd: 10, tables: { 'known-model': { perMillionTokens: { input: 3_000_000, output: 15_000_000 } } } });
+  assert.throws(() => meter.reserve(meterRequest('unknown-model')), ProviderError);
 });
 
-test('DF10.4: spent + reserved + worst case exceeds cap -> throws ProviderError, inner not called', async () => {
+test('DF10.4: a request whose worst case would cross the cap is not sent, and the meter says the cap is reached', async () => {
   const { createSpendMeter, meteredTransport } = await import('../demo/host/spend.mjs');
-  let innerCalled = false;
-  const inner = {
-    request: async () => {
-      innerCalled = true;
-      return { status: 200, headers: {}, body: JSON.stringify({ content: [], usage: { input_tokens: 10, output_tokens: 20 } }) };
-    },
-  };
-  const meter = createSpendMeter({
-    capUsd: 0.01,
-    tables: { 'expensive-model': { perMillionTokens: { input: 1000000, output: 1000000 } } },
-  });
-  const wrapped = meteredTransport(inner, meter);
-  await assert.rejects(
-    () => wrapped.request({
-      method: 'POST',
-      url: API_URL,
-      headers: {},
-      body: JSON.stringify({ model: 'expensive-model', max_tokens: 1000, system: 'x'.repeat(1000), messages: [] }),
-    }),
-    /cap|exceed/i
-  );
-  assert.equal(innerCalled, false, 'inner transport not called when cap would be exceeded');
+  let sent = 0;
+  const meter = createSpendMeter({ capUsd: 0.0001, tables: { [MODEL]: { perMillionTokens: { input: 1_000_000, output: 1_000_000 } } } });
+  const wrapped = meteredTransport({ request: async () => { sent++; return reply(10, 10); } }, meter);
+  const req = meterRequest(MODEL, { system: 'x'.repeat(1000) });
+  assert.ok(worstCase(req, 1, 1) > 0.0001, 'the case is built so that the worst case crosses the cap');
+  await assert.rejects(() => wrapped.request(req), (e) => e instanceof ProviderError && /spend cap/i.test(e.message) && /nothing was asked/i.test(e.message));
+  assert.equal(sent, 0, 'the inner transport was not called');
+  assert.equal(meter.capReached(), true);
 });
 
-test('DF10.4: concurrent requests never exceed cap (some fulfilled, some rejected)', async () => {
+test('DF10.4: concurrent requests are reserved together: only those that fit under the cap are sent, and the spend never exceeds it', async () => {
   const { createSpendMeter, meteredTransport } = await import('../demo/host/spend.mjs');
-  let requestCount = 0;
-  const inner = {
-    request: async () => {
-      requestCount++;
-      await new Promise(r => setImmediate(r));
-      return { status: 200, headers: {}, body: JSON.stringify({ content: [], usage: { input_tokens: 100, output_tokens: 100 } }) };
-    },
-  };
-  const meter = createSpendMeter({
-    capUsd: 0.1,
-    tables: { 'test-model': { perMillionTokens: { input: 1000, output: 1000 } } },
-  });
-  const wrapped = meteredTransport(inner, meter);
-  const reqs = Array(10).fill(0).map(() => ({
-    method: 'POST',
-    url: API_URL,
-    headers: {},
-    body: JSON.stringify({ model: 'test-model', max_tokens: 100, system: 'hi', messages: [{ role: 'user', content: 'test' }] }),
-  }));
-  const results = await Promise.allSettled(reqs.map(r => wrapped.request(r)));
-  const fulfilled = results.filter(r => r.status === 'fulfilled').length;
-  const rejected = results.filter(r => r.status === 'rejected').length;
-  assert.ok(fulfilled > 0, 'at least one request fulfilled');
-  assert.ok(rejected > 0, 'at least one request rejected when cap exceeded');
-  assert.ok(results.some(r => r.status === 'rejected' && r.reason instanceof ProviderError && /cap/.test(r.reason.message)), 'cap message in rejection');
-  assert.ok(meter.spentUsd() <= meter.capUsd, `spent ${meter.spentUsd()} <= cap ${meter.capUsd}`);
+  const req = meterRequest(MODEL);
+  const one = worstCase(req, 1, 1);
+  const cap = one * 3.5; // three reservations fit, the fourth does not
+  let sent = 0;
+  const meter = createSpendMeter({ capUsd: cap, tables: { [MODEL]: { perMillionTokens: { input: 1_000_000, output: 1_000_000 } } } });
+  const wrapped = meteredTransport({ request: async () => { sent++; await new Promise((r) => setImmediate(r)); return reply(10, 10); } }, meter);
+  const results = await Promise.allSettled(Array.from({ length: 10 }, () => wrapped.request(req)));
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 3);
+  assert.equal(results.filter((r) => r.status === 'rejected' && r.reason instanceof ProviderError && /spend cap/i.test(r.reason.message)).length, 7);
+  assert.equal(sent, 3);
+  assert.ok(meter.spentUsd() <= cap, `spent ${meter.spentUsd()} must not exceed ${cap}`);
 });
 
-test('DF10.4: capReached() when request refused for cap', async () => {
-  const { createSpendMeter, meteredTransport } = await import('../demo/host/spend.mjs');
-  let innerCalled = false;
-  const inner = {
-    request: async () => {
-      innerCalled = true;
-      return { status: 200, headers: {}, body: JSON.stringify({ content: [], usage: { input_tokens: 100, output_tokens: 100 } }) };
-    },
-  };
-  const meter = createSpendMeter({
-    capUsd: 0.001,
-    tables: { 'test-model': { perMillionTokens: { input: 1000000, output: 1000000 } } },
-  });
-  const wrapped = meteredTransport(inner, meter);
-  await assert.rejects(
-    () => wrapped.request({
-      method: 'POST',
-      url: API_URL,
-      headers: {},
-      body: JSON.stringify({ model: 'test-model', max_tokens: 100, system: 'x'.repeat(1000), messages: [{ role: 'user', content: 'test' }] }),
-    }),
-    ProviderError
-  );
-  assert.equal(innerCalled, false, 'inner transport not called when cap would be exceeded');
-  assert.ok(meter.capReached(), 'capReached after refused request');
-});
-
-test('DF10.4: formatSpend exact format: spend: $X.XXXX of $Y.YY cap, N model calls', async () => {
-  const { createSpendMeter, formatSpend } = await import('../demo/host/spend.mjs');
-  const meter = createSpendMeter({
-    capUsd: 5,
-    tables: { 'test-model': { perMillionTokens: { input: 3, output: 15 } } },
-  });
-  const str = formatSpend(meter);
-  assert.match(str, /^spend: \$\d+\.\d{4} of \$\d+\.\d{2} cap, \d+ model calls$/);
-  assert.match(str, /of \$5\.00 cap/, 'cap is 2 decimals');
+test('DF10.4: formatSpend has the exact form of the spend line', async () => {
+  const { createSpendMeter, meteredTransport, formatSpend } = await import('../demo/host/spend.mjs');
+  const meter = createSpendMeter({ capUsd: 5, tables: { [MODEL]: { perMillionTokens: { input: 3_000_000, output: 15_000_000 } } } });
+  assert.equal(formatSpend(meter), 'spend: $0.0000 of $5.00 cap, 0 model calls');
+  await meteredTransport({ request: async () => reply(1000, 500) }, meter).request(meterRequest(MODEL));
+  assert.equal(formatSpend(meter), 'spend: $0.0105 of $5.00 cap, 1 model calls');
 });
 
 // ---- DF10.6: createRoom onReply --------
 
-test('DF10.6: createRoom onReply called with { session } after each delivered reply', async () => {
+test('DF10.6: createRoom calls onReply with { session } after each reply it delivers to a guest', async () => {
   const { createRoom } = await import('../demo/host/room.mjs');
-  const { supportTransport } = await import('../demo/host/transport.mjs');
-  const replies = [];
-  const onReply = ({ session }) => {
-    replies.push(session);
-  };
-  const transport = supportTransport(() => ({
-    status: 200,
-    headers: {},
-    body: JSON.stringify({ content: [{ type: 'text', text: 'Hello' }] }),
-  }));
-  const room = createRoom({
-    transport,
-    onReply,
-  });
-  room.join('session-1');
-  const result = await room.say('session-1', 'Hi there');
-  assert.ok(result.ok, 'message delivered');
-  assert.ok(replies.includes('session-1'), `onReply called with session-1, got ${JSON.stringify(replies)}`);
+  const { createPersonaPool } = await import('../demo/host/personas.mjs');
+  const { createLimiter } = await import('../demo/host/limits.mjs');
+  const calls = [];
+  const wa = { appSecret: 'a'.repeat(32), accessToken: 'b'.repeat(32), phoneNumberId: '106540352242922', verifyToken: 'c'.repeat(32), apiVersion: 'v23.0' };
+  const pool = createPersonaPool({ size: 2 });
+  const room = createRoom({ rt: { receive: async () => ({ status: 200 }) }, wa, pool, limiter: createLimiter({}), settle: async () => {}, onReply: (e) => calls.push(e) });
+  room.join('s1');
+  room.join('s2');
+  assert.equal(room.deliver(pool.claim('s1').phone, 'Hello'), true);
+  assert.deepEqual(calls, [{ session: 's1' }]);
+  assert.equal(room.deliver('16505551234', 'Nobody'), false);
+  assert.deepEqual(calls, [{ session: 's1' }], 'a reply that is dropped is not a turn');
+  room.deliver(pool.claim('s2').phone, 'Hello');
+  assert.deepEqual(calls, [{ session: 's1' }, { session: 's2' }]);
 });
