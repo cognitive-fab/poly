@@ -136,7 +136,7 @@ test('DF12.1: with example timeouts (800ms), a guest saying "where is my order?"
     // Wait for room to settle
     await new Promise((resolve) => setTimeout(resolve, 100));
     const before = Date.now();
-    const result = await guest.say('where is my order?');
+    const result = await room.say('s1', 'where is my order?');
     assert.deepEqual(result, { ok: true });
     // Wait up to 30 seconds for timeout lines to appear
     const maxWait = 30_000;
@@ -174,7 +174,7 @@ test('DF12.5: with demo copy as produced (no timeout rewrite), a guest saying "w
     // Wait for room to settle
     await new Promise((resolve) => setTimeout(resolve, 100));
     const before = Date.now();
-    const result = await guest.say('where is my order?');
+    const result = await room.say('s1', 'where is my order?');
     assert.deepEqual(result, { ok: true });
     // Wait up to 20 seconds for a reply event with the order id
     const guestOrderId = guest.orders[0].id;
@@ -201,8 +201,8 @@ test('DF12.4: a 401 response from the model is reported exactly once with the ke
     const guest = room.join('s1');
     // Send two messages to ensure the key error is reported only once across both
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const result1 = await guest.say('refund me');
-    const result2 = await guest.say('how much?');
+    const result1 = await room.say('s1', 'refund me');
+    const result2 = await room.say('s1', 'how much?');
     assert.deepEqual(result1, { ok: true });
     assert.deepEqual(result2, { ok: true });
     // Wait a few seconds after the first message for failures to be recorded
