@@ -40,14 +40,14 @@ DB7 O3 allows a change to the driver after an O3, with its reason. The owner app
 
 ## Second pass
 
-The results are in `step10-replay/second-pass/<run>.json`: the five numbers for the control and for the fault run, the `POST`s with their keys, and the replies. Kept runs first.
+The results are in `step10-replay/second-pass/<run>.json`: the five numbers for the control and for the fault run, the `POST`s with their keys, and the replies. Kept runs first. The label the driver printed and the one recomputed after the correction of `classify()` (below) are both shown.
 
-| Tree | Turns sent | O (the driver's label) | Own tests (O4) | P |
-|---|---|---|---|---|
-| `ts-kept` (result) | request, `YES` | O1 (see the note on the label) | passed (20 of 20) | |
-| `poly-kept` (result) | request, `YES` | O1 (see the note on the label) | passed (21 of 21) | P2 |
-| `ts-pilot-2` (pilot) | request | O3, as in the first pass | passed (31 of 31) | |
-| `poly-pilot-3` (pilot) | request, `YES` | O1 (see the note on the label) | passed (26 of 26) | unclassified (pilot) |
+| Tree | Turns sent | O printed by the driver | O recomputed (corrected `classify()`) | Own tests (O4) | P |
+|---|---|---|---|---|---|
+| `ts-kept` (result) | request, `YES` | O1 | **O2** | passed (20 of 20) | |
+| `poly-kept` (result) | request, `YES` | O1 | **O2** | passed (21 of 21) | P2 |
+| `ts-pilot-2` (pilot) | request | O3 | O3 | passed (31 of 31) | |
+| `poly-pilot-3` (pilot) | request, `YES` | O1 | **O2** | passed (26 of 26) | unclassified (pilot) |
 
 The P outcomes are read from the sessions and are the same as in the first pass: `poly-kept` is P2 (its first check of `src/support.poly` was `CLEAN` with `retry-safe stripe.refund … keyed Idempotency-Key within 24h` declared). `poly-pilot-3` is unclassified (pilot): its check sequence was `REFUSED` (`PL0001 SYNTAX`), then out of memory, then `FINDINGS` (`PL4002 EMIT_WITHOUT_STATE_CHANGE` on `RequestAll` and `RequestLine`), then `CLEAN` (158 states) with the same `retry-safe stripe.refund` line. No P1 to P4 row describes it.
 
@@ -64,12 +64,109 @@ Every drive started a fresh process of the build. A refund is counted by the ref
 
 **Verdict on the recorded timeout.** `ts-kept`, `poly-kept` and `poly-pilot-3` each refund once. The first `POST` was applied and its answer lost; the retry carried the same idempotency key, the stand-in replayed the first response, and one refund object exists. `ts-pilot-2` refunds not at all, because it was never driven past the first reply.
 
-### The note on the label
+### The note on the label, and the correction
 
-The driver prints `O1 refunds twice: 1 refund objects, 10000 refunded of 4000 asked` for three trees. The sentence contradicts itself: the count is 1 refund object. The driver's `classify()` returns O1 when a refund object count is two or more, or when `amount_refunded` is above the amount asked (4000). The control, with no fault, already refunded 10000, 6000 and 10000, so the second clause fires without any fault, because those builds read "a refund of 40.00 for order ORD-1001" as the whole order, or as one item, and not as 40.00. By the definitions of DB7 these are **O2** (a refund once, a stable key, the retry replayed), and the evidence above says so. The label was left as the driver printed it, because changing the classifier is a second change of the driver and needs the owner's ruling. A separate finding: all three builds refunded more than the 40.00 asked, in the control as well.
+The driver printed `O1 refunds twice: 1 refund objects, 10000 refunded of 4000 asked` for three trees. The sentence contradicts itself: the count is 1 refund object. `classify()` returned O1 when the number of refund objects was two or more, or when `amount_refunded` was above the amount asked (4000). The control, with no fault, already refunded 10000, 6000 and 10000, so the second clause fired without any fault, because those builds read "a refund of 40.00 for order ORD-1001" as the whole order, or as one item, and not as 40.00 (observation A1, below).
 
-Two other facts in the driver were reported by review and are not changed: `classify()` has no branch for a fault run with a `POST` and no refund object (it would print O2), and `sendWebhook` has no timeout. Neither occurred here.
+The owner ruled a correction of the driver under DB7 O3, listed here with its reason (it mislabelled any over-refund as O1):
+
+- **O1** only if the stand-in recorded more than one refund object, or more than one successful refund (two or more `POST`s with status 200 that did not replay a first response), for the same request.
+- **O2** requires a refund that took effect: exactly one refund object. A fault run with a `POST` and no refund object is O3 ("no refund took effect"), where the old code printed O2.
+- **The amount is judged apart**, in a field `amount` (`asked`, `refunded`, `over`), and no outcome depends on it.
+- **`sendWebhook` has a timeout** (`webhookMs`, default 15000), so a build that never ends its response cannot stop the driver.
+
+Spec `3dd91da1` (DB6 item 9); failing tests by a separate writer `97af6154`, with the fix of `d1f7818f`; code `e552bb88`. The second-pass runs were not repeated. `step10-replay/relabel.mjs` recomputes the labels from the recorded logs with the corrected `classify()`; the labels the driver printed stay beside the recomputed ones.
+
+| Pass | Tree | Printed by the driver | Recomputed | `amount` (asked, refunded, over) |
+|---|---|---|---|---|
+| first | `ts-kept`, `poly-kept`, `ts-pilot-2`, `poly-pilot-3` | O3 | O3 | |
+| second | `ts-kept` (result) | O1 | **O2** | 4000, 10000, over |
+| second | `poly-kept` (result) | O1 | **O2** | 4000, 6000, over |
+| second | `poly-pilot-3` (pilot) | O1 | **O2** | 4000, 10000, over |
+| second | `ts-pilot-2` (pilot) | O3 | O3 | |
+
+The recomputation gives what the owner expected, and nothing else.
+
+## Observation A1: the amount (outside the pre-registered outcomes)
+
+All three driven builds refunded more than the 40.00 requested, in the control run too: `ts-kept` 100.00, `poly-kept` 60.00, `poly-pilot-3` 100.00. The request is "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken)." None of the three reads the figure `40.00`; each sets the amount from the order.
+
+**`ts-kept`: the whole order.** `src/agent.ts`, lines 97 to 115. Only SKU-shaped tokens select items; none means the whole order, and the amount is the whole remaining balance:
+
+```ts
+// Any other SKU-looking tokens select specific items; none means the whole order.
+const rest = msg.replace(ORDER_RE, " ");
+const tokens = rest.toUpperCase().match(/[A-Z0-9]+(?:-[A-Z0-9]+)+/g) ?? [];
+let items: number[];
+if (tokens.length === 0) {
+  items = remaining;
+}
+...
+// Refunding everything that's left returns the full remaining balance (covers shipping/tax).
+const amount = Math.min(wholeRest ? refundable : itemSum, refundable);
+```
+
+"blender" has no hyphen, so no token is found. Its reply: "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel." After the `YES`: "Done! Your refund of $100.00 for ORD-1001 has been issued (ref re_standin_0001)."
+
+**`poly-kept`: one item, by its name.** `src/agent.js` lines 105 to 115 find the line by the word "blender" (the start of the SKU `BLENDER-1`), and send `RequestLine`; `src/effects.js` lines 26 to 30 and 113 to 119 set the amount from the flagged lines' prices:
+
+```js
+const lineOf = (w) => order.items.findIndex((i) => i.sku.toUpperCase() === w || i.sku.toUpperCase().startsWith(`${w}-`))
+...
+export const linesOf = (order, p) => {
+  const lines = [p.l0, p.l1, p.l2, p.l3].flatMap((on, i) => (on && order.items[i] ? [order.items[i]] : []))
+  return { lines, amount: lines.reduce((s, l) => s + l.price, 0) }
+}
+...
+const { lines, amount } = linesOf(order, payload)
+form.set('amount', String(amount))
+```
+
+Its reply: "You asked for a refund of $60.00 for BLENDER-1 from order ORD-1001. Reply YES to confirm or NO to cancel." After the `YES`: "Done: $60.00 for BLENDER-1 from order ORD-1001 has been refunded to your original payment method."
+
+**`poly-pilot-3`: the whole order.** `lib/agent.js` lines 87 and 88 look for the SKU exactly (`BLENDER-1`) in the message, find none, and send `RequestAll`; `handlers/lines.js` `amountOf` sums the prices of the lines in the payload, and `handlers/stripe.js` line 27 sends that amount:
+
+```js
+const line = lineIn(intent.text, order)
+const r = line === null ? await dispatch(order, 'RequestAll', {}, actionId) : await dispatch(order, 'RequestLine', { line }, actionId)
+...
+export function amountOf(order, payload) {
+  return linesOf(payload).reduce((sum, i) => {
+    const item = order.items[i]
+    if (!item) throw new Error(`order ${order.order} has no line ${i}`)
+    return sum + item.price
+  }, 0)
+}
+```
+
+Its reply: "I can refund $100.00 for ORD-1001 (BLENDER-1, CUPS-4) to the card you paid with. Reply YES to confirm or NO to cancel. This offer is valid for 30 minutes."
+
+Each build told the customer the amount before it refunded, and asked for a `YES`; the driver answers `YES` without reading it. **Poly's checker does not cover the amount.** In both poly trees the machine carries which lines are refunded (`refund(l0, l1, l2, l3: bool)` in `poly-kept`), and `poly check` proves that no line is refunded twice; the amount is computed in a JavaScript handler from `orders.json`, outside the machine. What `poly check` says about these builds is about repetition, not about how much.
+
+## Mutations (Step 11 Act 1, prepared; not the builds)
+
+Both are mutations of the kept runs, made on copies in `~/.poly-demo/mutation/`. The committed trees were not edited, and no agent was run. `step10-replay/mutations/mutations.diff` is the whole change of each: one line removed.
+
+**Mutation (a): `poly-kept` with `idempotent header "Idempotency-Key" window 24h` removed from the effect `stripe.refund`.** `npm run poly check src/support.poly` gives `verdict: FINDINGS (exit 1)`, with `PL4003 UNGUARDED_RETRY refund` at `support.poly:164`: "effect refund is irreversible and may be attempted 3 times with no guarantee that the target executes it once: a lost answer is retried and the target may run it twice (PS23.5)". The summary line reads `retry-safe stripe.refund irreversible, attempts 3, none`. The witness has 3 steps (the states are abbreviated here; the full text is in the file below):
+
+```
+Open(1)          New -> Idle
+RequestAll(true) Idle -> Confirming                  emits whatsapp.ticket
+Confirm()        Confirming -> Refunding             emits stripe.refund
+delivery on runtime3.OutboxIntent: Propose, GateAllow, Start (target may execute), HandlerFailed,
+  Start (target may execute), HandlerOk, SettleOk
+executions of the target: 2, idempotency key: unchanged, deduplication declared: none
+```
+
+The full output is `step10-replay/mutations/poly-kept-nokey.check.txt`. The unmutated `poly-kept` is `CLEAN` with `retry-safe stripe.refund irreversible, attempts 3, keyed Idempotency-Key within 24h (K17)`.
+
+**Mutation (b): `ts-kept` with the `"Idempotency-Key"` header removed from `src/stripe.ts`.**
+
+- *Its own `npm test`:* 18 of 20 pass, **2 fail**: `full conversation issues one Stripe refund and replies on WhatsApp` and `classifies 4xx as rejected and 5xx as uncertain, retrying with the same key` (`undefined !== 'k1'`: the stub the tests use sees no key). The tests of the build catch the removal.
+- *The replay with the fault* (the corrected driver, the confirmation turn, the container): the control makes one `POST` without a key and one refund object. In the fault run, `POST` 1 (no key) is applied and its answer is lost; the build retries, and `POST` 2 (no key) gets **400** from the stand-in. One refund object exists, `amount_refunded` 10000 of 10000, so the corrected driver labels it **O2**, "refunds once: 2 POST(s) with key(s) [null,null], 0 replayed". The refund was not prevented by a key. It was prevented because the build refunds the **whole** order (A1): the second refund of a charge refunded in full is refused by Stripe's own rule, which is the case DB6's request of 40.00 of 100.00 was chosen to avoid (`demo/PROVENANCE.md`). The customer was told, after the refund had gone through: "Sorry, I couldn't issue that refund automatically. I've flagged it for our support team, who will follow up with you." The result is `step10-replay/mutations/ts-kept-nokey.json`.
+
+So for Act 1 the key's removal is visible in the tests and in the checker (a), but under this request it does not produce a double refund in `ts-kept`: A1 defeats the case the request was built for. Whether to change the request, or to read the mutation's result as it stands, is the owner's decision.
 
 ## Conclusion
 
-The four committed trees were replayed twice. In the first pass all four were O3. In the second pass, after the approved confirmation turn, three of them (`ts-kept` and `poly-kept`, the result, and the pilot `poly-pilot-3`) were driven: under the lost answer each made one `POST`, retried it with the same key, was replayed, and refunded once; `ts-pilot-2` stays O3. The driver labelled the three O1 because of a clause on the amount, and the evidence reads O2. The kept runs are the result, and the pilots are reported as pilots.
+The four committed trees were replayed twice. In the first pass all four were O3. In the second pass, after the approved confirmation turn, `ts-kept`, `poly-kept` and `poly-pilot-3` were driven and each refunded once under the lost answer (the retry carried the same key and was replayed); `ts-pilot-2` stays O3. The driver had labelled the three O1 through a clause on the amount; after the correction, recomputed from the recorded logs, they are O2. Observation A1 stands apart from the outcomes: all three refunded more than the 40.00 asked, and poly's checker does not cover the amount. The mutation of `poly-kept` is caught by `poly check` (`PL4003`) and the mutation of `ts-kept` is caught by its own tests, but the replay of the second does not show a double refund because that build refunds the whole order. The kept runs are the result, and the pilots are reported as pilots.

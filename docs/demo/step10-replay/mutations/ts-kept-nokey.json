@@ -1,0 +1,104 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 1,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Done! Your refund of $100.00 for ORD-1001 has been issued (ref re_standin_0001). It usually appears on your statement within 5–10 business days."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:42053/webhook (2 orders loaded)\nrefund re_standin_0001 succeeded: ORD-1001 10000\n"
+  },
+  "run": {
+    "label": "fault lost-answer",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "lost-answer",
+      "requests": 2,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 200,
+          "replayed": false,
+          "fault": "reset"
+        },
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 400,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Sorry, I couldn't issue that refund automatically. I've flagged it for our support team, who will follow up with you."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:44479/webhook (2 orders loaded)\nrefund rejected for ORD-1001: Charge ch_demo_1001 has already been refunded. — needs human follow-up\n"
+  },
+  "outcome": "O2",
+  "reason": "refunds once: 2 POST(s) with key(s) [null,null], 0 replayed, 1 refund object",
+  "amount": {
+    "asked": 4000,
+    "refunded": 10000,
+    "over": true
+  },
+  "tests": {
+    "status": "failed",
+    "exit": 1,
+    "tail": "/server.test.ts:128:3\n✖ full conversation issues one Stripe refund and replies on WhatsApp (60.260407ms)\n  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n  \n    assert.ok(call.headers[\"idempotency-key\"])\n  \n      at TestContext.<anonymous> (file:///tmp/tmp.Rniwvy4x6m/test/server.test.ts:145:12)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1409:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:974:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: true,\n    operator: '==',\n    diff: 'simple'\n  }\n\ntest at test/server.test.ts:170:3\n✖ classifies 4xx as rejected and 5xx as uncertain, retrying with the same key (520.793541ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  undefined !== 'k1'\n  \n      at TestContext.<anonymous> (file:///tmp/tmp.Rniwvy4x6m/test/server.test.ts:177:14)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1409:7)\n      at async Promise.all (index 0)\n      at async Suite.run (node:internal/test_runner/test:1905:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: 'k1',\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n"
+  }
+}
