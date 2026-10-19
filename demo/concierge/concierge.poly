@@ -274,7 +274,7 @@ service machine Desk {
   decision classify(body: Content) -> Branch {
     route triage
     labels { egress:external, read:private }
-    timeout 800ms
+    timeout 20s
     ok(r) -> Classified(branch: r.answer, conf: r.conf, margin: r.margin)
     failed -> Unclassified()
   }
@@ -285,7 +285,7 @@ service machine Desk {
   decision amount(text: Content, context: Items) -> Amount {
     provider "small"
     labels { egress:external, read:private }
-    timeout 800ms
+    timeout 10s
     cites context
     ok(r) -> Amounted(value: r.answer.value, conf: r.conf.value, cites: r.cites)
     failed -> Unextracted()
@@ -300,7 +300,7 @@ service machine Desk {
   decision answer(question: Content, context: Items) -> Content {
     provider "small"
     labels { egress:external, read:private }
-    timeout 2s
+    timeout 10s
     cites context
     ok(r) -> Cited(text: r.answer, cites: r.cites)
     failed -> AnswerFailed()
@@ -309,7 +309,7 @@ service machine Desk {
   decision reply(question: Content, outcome: Outcome) -> Content {
     provider "small"
     labels { egress:external, read:private }
-    timeout 2s
+    timeout 10s
     ok(r) -> Answered(text: r.answer)
     failed -> AnswerFailed()
   }

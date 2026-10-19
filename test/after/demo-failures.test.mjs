@@ -74,7 +74,6 @@ const createDemoTimeoutDemo = async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'demo-failures-demo-'));
   const sourceDir = mkdtempSync(join(tmpdir(), 'demo-copy-'));
   // Create a fresh copy without rewriting timeouts - use it exactly as makeDemoConcierge produces it.
-  // The test will fail now because the copy does not yet have the demo's timeouts (makeDemoConcierge doesn't apply them yet).
   makeDemoConcierge({ out: sourceDir });
   const demo = await assembleDemo({
     mode: 'stub-model',

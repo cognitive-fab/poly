@@ -20,10 +20,12 @@ function customerText(user) {
   return m ? m[1] : user;
 }
 
-export function stubTransport() {
+/** `latencyMs` (DF12 item 2) is the time the stub waits before it answers: the live API takes time, and the stub's answer is the same. */
+export function stubTransport({ latencyMs = 0 } = {}) {
   return {
     async request(q) {
       if (q.method !== 'POST' || q.url !== API_URL) throw noRoute(q.url);
+      if (latencyMs > 0) await new Promise((resolve) => setTimeout(resolve, latencyMs));
       let body;
       try { body = JSON.parse(q.body); } catch { return { status: 400, headers: {}, body: JSON.stringify({ error: { type: 'invalid_request_error' } }) }; }
       const system = typeof body.system === 'string' ? body.system : '';

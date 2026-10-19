@@ -23,11 +23,30 @@ export const DEMO_CAPS = {
   demo: { run: '0.25', day: '10' },
 };
 
+/**
+ * DF12 item 5: the timeouts of the demo copy. The example's are `800ms` for classify and amount and `2s` for answer and reply, which
+ * a live provider cannot meet (a vote of 5 asks is two round trips). A route's timeout is one value for its tiers. These are
+ * provisional ceilings until `--measure-latency` reports the provider's own time; ack and noted (fixed texts) keep `2s`.
+ */
+export const EXAMPLE_TIMEOUTS = { classify: '800ms', amount: '800ms', answer: '2s', reply: '2s' };
+export const DEMO_TIMEOUTS = { classify: '20s', amount: '10s', answer: '10s', reply: '10s' };
+
 const walk = (d) => readdirSync(d).flatMap((e) => (statSync(join(d, e)).isDirectory() ? walk(join(d, e)) : [join(d, e)]));
 
 function once(text, from, to) {
   if (text.split(from).length !== 2) throw new Error(`the example no longer holds "${from.trim()}" exactly once`);
   return text.replace(from, () => to);
+}
+
+/** Sets the `timeout` line inside the decision `name`, which must hold `from` once before the next decision. */
+function timeoutOf(text, name, from, to) {
+  const start = text.indexOf(`decision ${name}(`);
+  if (start < 0) throw new Error(`the example no longer holds the decision ${name}`);
+  const next = text.indexOf('\n  decision ', start + 1);
+  const end = next < 0 ? text.length : next;
+  const block = text.slice(start, end);
+  if (block.split(`timeout ${from}`).length !== 2) throw new Error(`the decision ${name} no longer holds "timeout ${from}" exactly once`);
+  return text.slice(0, start) + block.replace(`timeout ${from}`, () => `timeout ${to}`) + text.slice(end);
 }
 
 /** Writes the copy to `out` and returns { changed, diff }: the files that differ from the example, and the diff as text. */
@@ -39,6 +58,7 @@ export function makeDemoConcierge({ out = join(ROOT, 'demo', 'concierge') } = {}
   let text = readFileSync(program, 'utf8');
   text = once(text, `  cap usd ${DEMO_CAPS.example.run} per run`, `  cap usd ${DEMO_CAPS.demo.run} per run`);
   text = once(text, `  cap usd ${DEMO_CAPS.example.day} per day per scope`, `  cap usd ${DEMO_CAPS.demo.day} per day per scope`);
+  for (const name of Object.keys(DEMO_TIMEOUTS)) text = timeoutOf(text, name, EXAMPLE_TIMEOUTS[name], DEMO_TIMEOUTS[name]);
   writeFileSync(program, text);
 
   // The diff against the example's own files, under the names a reader knows them by.

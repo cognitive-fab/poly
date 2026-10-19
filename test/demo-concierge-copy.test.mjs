@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from '@poly/lang';
-import { makeDemoConcierge, DEMO_CAPS } from '../demo/scripts/make-demo-concierge.mjs';
+import { makeDemoConcierge, DEMO_CAPS, DEMO_TIMEOUTS } from '../demo/scripts/make-demo-concierge.mjs';
 import { checkPrices, refusalsOf } from '../demo/host/price-gate.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -29,13 +29,18 @@ test('DF8: the copy holds the program, the policy, the maps and the prices of th
   assert.deepEqual(Object.keys(copy).sort(), ['concierge.policy.poly', 'concierge.poly', 'maps/large.json', 'maps/small.json', 'prices/large.json', 'prices/small.json']);
 });
 
-test('DF8: the diff against examples/concierge is the two cap lines and nothing else, and it is printed', () => {
+test('DF8, DF12: the diff against examples/concierge is the two cap lines and the four timeouts and nothing else, and it is printed', () => {
   const out = mkdtempSync(join(tmpdir(), 'demo-copy-'));
   try {
     const { diff, changed } = makeDemoConcierge({ out });
     assert.deepEqual(changed, ['concierge.poly']);
     const lines = diff.split('\n').filter((l) => /^[-+]/.test(l) && !/^(---|\+\+\+)/.test(l));
-    assert.deepEqual(lines, [`-  cap usd ${DEMO_CAPS.example.run} per run`, `-  cap usd ${DEMO_CAPS.example.day} per day per scope`, `+  cap usd ${DEMO_CAPS.demo.run} per run`, `+  cap usd ${DEMO_CAPS.demo.day} per day per scope`]);
+    // The timeouts (DF12 item 5) come first in the file, in the order of the decisions: classify, amount, answer, reply.
+    const timeouts = [['800ms', DEMO_TIMEOUTS.classify], ['800ms', DEMO_TIMEOUTS.amount], ['2s', DEMO_TIMEOUTS.answer], ['2s', DEMO_TIMEOUTS.reply]];
+    assert.deepEqual(lines, [
+      ...timeouts.flatMap(([from, to]) => [`-    timeout ${from}`, `+    timeout ${to}`]),
+      `-  cap usd ${DEMO_CAPS.example.run} per run`, `-  cap usd ${DEMO_CAPS.example.day} per day per scope`, `+  cap usd ${DEMO_CAPS.demo.run} per run`, `+  cap usd ${DEMO_CAPS.demo.day} per day per scope`,
+    ]);
     assert.match(diff, /diff --git/);
   } finally { rmSync(out, { recursive: true, force: true }); }
 });

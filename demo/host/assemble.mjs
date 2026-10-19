@@ -28,6 +28,7 @@ import { checkPrices } from './price-gate.mjs';
 import { LaunchRefused } from './launch-refused.mjs';
 import { createSpendMeter, meteredTransport, parseCap } from './spend.mjs';
 import { stubTransport } from './stub-model.mjs';
+import { routesOf, watchFailures } from './failures.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const hostModule = (f) => import(pathToFileURL(join(ROOT, 'examples', 'concierge', 'host', f)).href);
@@ -41,11 +42,36 @@ export { LaunchRefused };
 const secret = () => randomBytes(32).toString('hex');
 
 /**
+ * The model side of a live or stub launch (DF10, DF12): the price gate (live only), the cap, the key, the metered transport and the
+ * live providers. The launcher's latency measurement uses it without the rest of the assembly.
+ */
+export function modelSide({ mode, source, now = () => Date.now(), apiKey = null, modelTransport = null, capUsd = null, meter: givenMeter = null, stubLatencyMs = 0, models = null, onCap = () => {}, onAuthFailure = () => {} }) {
+  if (mode === 'live') {
+    const gate = checkPrices(join(source, 'prices'), new Date(now()));
+    if (!gate.ok) throw new LaunchRefused(`a live launch needs price tables read from the vendor's page: ${gate.tables.map((t) => `${t.file}: ${t.refusals.join('; ') || 'ok'}`).join(' | ')}`);
+  }
+  const cap = capUsd === null ? null : parseCap(capUsd);
+  if (cap === null) throw new LaunchRefused('a live or stub launch needs a spend cap: --cap-usd <dollars>, at most 10');
+  if (mode === 'live' && !apiKey) throw new LaunchRefused('a live launch needs the model key (the launcher reads it from the environment, once)');
+  if (mode === 'live' && !modelTransport) throw new LaunchRefused('a live launch needs the model transport');
+  const small = JSON.parse(readFileSync(join(source, 'prices', 'small.json'), 'utf8'));
+  const large = JSON.parse(readFileSync(join(source, 'prices', 'large.json'), 'utf8'));
+  const tables = { [small.model]: small, [large.model]: large };
+  const meter = givenMeter ?? createSpendMeter({ capUsd: cap, tables, onCap });
+  const transport = meteredTransport(mode === 'live' ? modelTransport : stubTransport({ latencyMs: stubLatencyMs }), meter);
+  const names = { small: small.model, large: large.model };
+  const providers = makeProviders({ transport, apiKey: mode === 'live' ? apiKey : 'stub-model', models: names, onAuthFailure, ...(models ?? {}) });
+  return { providers, meter, models: names };
+}
+
+/**
  * Assembles the demo. Options:
  *   mode        'recorded' (the providers answer from a fixture of recorded answers), 'live' (the model providers, with a key) or
  *               'stub-model' (the live providers over the stub model: no key, no network, DF10)
  *   capUsd, meter   the spend cap in dollars (live and stub modes need it, DF10 item 5) and, for a test, a meter that replaces the real one
  *   onReply     called with { session } after each reply delivered to a guest (DF10 item 6)
+ *   onFailure   called with a line for each failed decision and for a refused key (DF12 items 3 and 4); when given, the failures are watched
+ *   stubLatencyMs   the stub model's latency (stub mode, DF12 item 2)
  *   workdir     a folder for the run's keys and project (the launcher gives a temporary one)
  *   now         the clock (default: the real one); a test gives its own
  *   answers     the recorded-answers fixture (recorded mode)
@@ -56,7 +82,7 @@ const secret = () => randomBytes(32).toString('hex');
  */
 export async function assembleDemo({
   mode = 'recorded', workdir, now = () => Date.now(), answers = null, apiKey = null, models = null, modelTransport = null,
-  size = 40, ordersOf = null, startWorkers = false, limits = {}, onKill = () => {}, onReply = () => {}, capUsd = null, meter: givenMeter = null, source = join(ROOT, 'demo', 'concierge'),
+  size = 40, ordersOf = null, startWorkers = false, limits = {}, onKill = () => {}, onReply = () => {}, onFailure = null, stubLatencyMs = 0, capUsd = null, meter: givenMeter = null, source = join(ROOT, 'demo', 'concierge'),
 }) {
   if (!workdir) throw new Error('the demo needs a folder for its run');
   mkdirSync(workdir, { recursive: true });
@@ -64,20 +90,15 @@ export async function assembleDemo({
   let meter = null;
   let room = null;
   if (mode === 'live' || mode === 'stub-model') {
-    if (mode === 'live') {
-      const gate = checkPrices(join(source, 'prices'), new Date(now()));
-      if (!gate.ok) throw new LaunchRefused(`a live launch needs price tables read from the vendor's page: ${gate.tables.map((t) => `${t.file}: ${t.refusals.join('; ') || 'ok'}`).join(' | ')}`);
-    }
-    const cap = capUsd === null ? null : parseCap(capUsd);
-    if (cap === null) throw new LaunchRefused('a live or stub launch needs a spend cap: --cap-usd <dollars>, at most 10');
-    if (mode === 'live' && !apiKey) throw new LaunchRefused('a live launch needs the model key (the launcher reads it from the environment, once)');
-    if (mode === 'live' && !modelTransport) throw new LaunchRefused('a live launch needs the model transport');
-    const small = JSON.parse(readFileSync(join(source, 'prices', 'small.json'), 'utf8'));
-    const large = JSON.parse(readFileSync(join(source, 'prices', 'large.json'), 'utf8'));
-    const tables = { [small.model]: small, [large.model]: large };
-    meter = givenMeter ?? createSpendMeter({ capUsd: cap, tables, onCap: () => room?.kill('spend-cap') });
-    const transport = meteredTransport(mode === 'live' ? modelTransport : stubTransport(), meter);
-    providers = makeProviders({ transport, apiKey: mode === 'live' ? apiKey : 'stub-model', models: { small: small.model, large: large.model }, ...(models ?? {}) });
+    // DF12 item 4: a refused key is a line, once per launch.
+    let reported = false;
+    const side = modelSide({
+      mode, source, now, apiKey, modelTransport, capUsd, meter: givenMeter, stubLatencyMs, models,
+      onCap: () => room?.kill('spend-cap'),
+      onAuthFailure: (e) => { if (!reported) { reported = true; onFailure?.(`model key refused (HTTP ${e?.status ?? '?'}): set a fresh key and restart the launcher`); } },
+    });
+    providers = side.providers;
+    meter = side.meter;
   } else {
     const { loadAnswers, recordedConcierge } = await hostModule('recorded.mjs');
     providers = recordedConcierge(loadAnswers(answers ?? join(ROOT, 'test', 'fixtures', 'concierge', 'answers.json')));
@@ -144,6 +165,8 @@ export async function assembleDemo({
   const { forwardEscalations } = await hostModule('notice.mjs');
   const noticed = new Set();
   if (startWorkers) rt.startWorkers();
+  // DF12 item 3: each failed decision is a line. The watcher reads the runtime's ledger.
+  const watcher = onFailure ? watchFailures({ db: rt.store.db, context: { routes: routesOf(readFileSync(join(source, 'concierge.poly'), 'utf8')), secrets: apiKey ? [apiKey] : [] }, onLine: onFailure }) : null;
 
   return {
     mode, meter, rt, room, pool, staff, standIn, admission, providers, db, settle, wa, limiter, connect,
@@ -161,6 +184,7 @@ export async function assembleDemo({
     async close() {
       if (closed) return;
       closed = true;
+      watcher?.stop();
       await rt.close();
       await standIn.close();
       authority.remove();

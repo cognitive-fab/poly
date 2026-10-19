@@ -20,18 +20,26 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { assembleDemo, LaunchRefused } from './host/assemble.mjs';
+import { assembleDemo, LaunchRefused, modelSide } from './host/assemble.mjs';
+import { formatLatency, measureLatency } from './host/latency.mjs';
 import { recordedOrdersOf } from './host/recorded-orders.mjs';
 import { formatSpend, parseCap } from './host/spend.mjs';
 import { startRoomServer } from './host/server.mjs';
 import { liveTransport } from './host/live-transport.mjs';
-import { makeDemoConcierge } from './scripts/make-demo-concierge.mjs';
+import { DEMO_TIMEOUTS, makeDemoConcierge } from './scripts/make-demo-concierge.mjs';
 
 /** The launcher's arguments, strictly: an unknown flag or a bad port is an error. */
 export function parseArgs(argv) {
   const out = { mode: 'recorded', port: 8080, lan: false, size: 40 };
   let chose = null;
   let cap = null;
+  let stubLatency = null;
+  let runs = null;
+  let measure = false;
+  const whole = (flag, v, lo, hi) => {
+    if (typeof v !== 'string' || !/^\d+$/.test(v) || Number(v) < lo || Number(v) > hi) throw new LaunchRefused(`${flag} is a whole number of ${lo} to ${hi}`);
+    return Number(v);
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--recorded' || a === '--live' || a === '--stub-model') {
@@ -40,6 +48,9 @@ export function parseArgs(argv) {
       out.mode = a.slice(2);
     } else if (a === '--lan') out.lan = true;
     else if (a === '--cap-usd') cap = parseCap(argv[++i]);
+    else if (a === '--stub-latency') stubLatency = whole(a, argv[++i], 0, 60000);
+    else if (a === '--measure-latency') measure = true;
+    else if (a === '--runs') runs = whole(a, argv[++i], 1, 20);
     else if (a === '--port' || a === '--size') {
       const n = Number(argv[++i]);
       if (!Number.isInteger(n) || n < 1 || (a === '--port' && n > 65535) || (a === '--size' && n > 99)) throw new Error(`${a} is a whole number${a === '--port' ? ' of 1 to 65535: the port' : ' of 1 to 99: the personas'}`);
@@ -48,10 +59,16 @@ export function parseArgs(argv) {
   }
   if (out.mode !== 'recorded' && cap === null) throw new LaunchRefused('a live or stub launch needs a spend cap: --cap-usd <dollars>, at most 10');
   if (cap !== null && out.mode === 'recorded') throw new LaunchRefused('--cap-usd applies to a live or stub launch: a recorded run spends nothing');
+  if (stubLatency !== null && out.mode !== 'stub-model') throw new LaunchRefused('--stub-latency applies to --stub-model alone');
+  if (measure && out.mode === 'recorded') throw new LaunchRefused('--measure-latency applies to --live or --stub-model');
+  if (runs !== null && !measure) throw new LaunchRefused('--runs applies to --measure-latency alone');
   if (cap !== null) out.capUsd = cap;
+  if (stubLatency !== null) out.stubLatencyMs = stubLatency;
+  if (measure) { out.measureLatency = true; out.runs = runs ?? 5; }
   return out;
 }
 
+const DEMO_SOURCE = fileURLToPath(new URL('./concierge', import.meta.url));
 const RECORDED_ANSWERS = fileURLToPath(new URL('../test/fixtures/concierge/answers.json', import.meta.url));
 
 const lanAddresses = () => Object.values(networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
@@ -63,9 +80,24 @@ export async function main(argv, io = {}) {
     if (e instanceof LaunchRefused) { io.err(`refused: ${e.message}`); return 2; }
     throw e;
   }
-  const workdir = mkdtempSync(join(tmpdir(), 'poly-demo-run-'));
   let apiKey = null;
   if (args.mode === 'live') apiKey = io.env.ANTHROPIC_API_KEY ?? null;
+
+  // DF12 item 6: the latency of a whole call of each tier, from the owner's own run. No copy is admitted and no room is started.
+  if (args.measureLatency) {
+    try {
+      const side = modelSide({ mode: args.mode, source: DEMO_SOURCE, apiKey, modelTransport: args.mode === 'live' ? liveTransport() : null, capUsd: args.capUsd, stubLatencyMs: args.stubLatencyMs ?? 0 });
+      io.out(`Measuring ${args.runs} whole calls of each tier (a vote of 5 asks, as the room makes it).`);
+      for (const line of formatLatency(await measureLatency({ providers: side.providers, models: side.models, runs: args.runs }), DEMO_TIMEOUTS)) io.out(line);
+      io.out(formatSpend(side.meter));
+      return 0;
+    } catch (e) {
+      if (e instanceof LaunchRefused) { io.err(`refused: ${e.message}`); return 2; }
+      io.err(`measurement stopped: ${e.message}`);
+      return 1;
+    }
+  }
+  const workdir = mkdtempSync(join(tmpdir(), 'poly-demo-run-'));
 
   io.out('Printing what differs from examples/concierge (the demo copy is produced by demo/scripts/make-demo-concierge.mjs):');
   const scratch = mkdtempSync(join(tmpdir(), 'poly-demo-copy-'));
@@ -77,7 +109,8 @@ export async function main(argv, io = {}) {
     demo = await assembleDemo({
       // DF11 item 3: the recorded room's first two guests own the orders its recorded answers cite.
       ordersOf: args.mode === 'recorded' ? recordedOrdersOf(JSON.parse(readFileSync(RECORDED_ANSWERS, 'utf8'))) : null,
-      mode: args.mode, workdir, apiKey, modelTransport: args.mode === 'live' ? liveTransport() : null, size: args.size, startWorkers: true, capUsd: args.capUsd ?? null,
+      mode: args.mode, workdir, apiKey, modelTransport: args.mode === 'live' ? liveTransport() : null, size: args.size, startWorkers: true, capUsd: args.capUsd ?? null, stubLatencyMs: args.stubLatencyMs ?? 0,
+      onFailure: (line) => io.err(line),
       onReply: () => { if (demo?.meter) io.out(formatSpend(demo.meter)); },
       onKill: (by) => { if (by === 'spend-cap' && demo?.meter) io.out(`spend cap reached: ${formatSpend(demo.meter)}. The room has stopped.`); },
     });
@@ -90,7 +123,7 @@ export async function main(argv, io = {}) {
   const machines = report.files.flatMap((f) => f.machines ?? []);
   io.out(`The demo copy is ${report.verdict}. Instance: ${machines.map((m) => `${m.machine} ${m.instance?.states ?? '?'} states`).join(', ')}.`);
   io.out(args.mode === 'live' ? `Model calls: LIVE, over the provider named in the price tables. Spend cap: $${args.capUsd.toFixed(2)}.`
-    : args.mode === 'stub-model' ? `Model calls: STUB. No model is called and no network is used. Spend is priced from the placeholder tables. Spend cap: $${args.capUsd.toFixed(2)}.`
+    : args.mode === 'stub-model' ? `Model calls: STUB. No model is called and no network is used. Spend is priced from the placeholder tables. Spend cap: $${args.capUsd.toFixed(2)}.${args.stubLatencyMs > 0 ? ` Stub latency: ${args.stubLatencyMs} ms.` : ''}`
       : 'Model calls: RECORDED answers only; no model is called.');
   io.out('Payments: a local mock-up of Stripe on this machine; no real money moves and no Stripe key exists anywhere.');
 
