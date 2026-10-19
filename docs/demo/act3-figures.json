@@ -1,0 +1,188 @@
+{
+  "v": 1,
+  "figures": [
+    {
+      "id": "R1",
+      "text": "25 episodes",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "it has 25 episodes and 126 steps"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R2",
+      "text": "one draft instance",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "one consequential effect instance, the draft"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R3",
+      "text": "proposes nothing",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "with `--all` it returns no candidate"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R4",
+      "text": "twelve times",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "copied twelve times under fresh episode tokens"
+        },
+        {
+          "file": "test/after/ex-inbox-loop.test.mjs",
+          "quote": "Array.from({ length: 12 }"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R5",
+      "text": "37 episodes",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "(37 episodes, labelled `synthetic` in the candidates and the certificate)"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R6",
+      "text": "13 of 13 runs",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "(mined, 13 of 13 runs)"
+        },
+        {
+          "file": "test/after/ex-inbox-loop.test.mjs",
+          "quote": "{ holds: 13, of: 13 }"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R7",
+      "text": "reaches 2",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "reaches 2, above 1 on this path"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R8",
+      "text": "ten steps",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "The witness, ten steps on one Todo"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R9",
+      "text": "IT4.4",
+      "sources": [
+        {
+          "file": "docs/decisions-m7.md",
+          "quote": "itself (IT4.4)"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R10",
+      "text": "attempts 1",
+      "sources": [
+        {
+          "file": "examples/inbox/inbox.poly",
+          "quote": "retry { attempts 1, base 200ms, timeout 45s }"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R11",
+      "text": "exhausted -> DraftUncertain()",
+      "sources": [
+        {
+          "file": "examples/inbox/inbox.poly",
+          "quote": "exhausted -> DraftUncertain()"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R12",
+      "text": "draft-created-once",
+      "sources": [
+        {
+          "file": "test/after/ex-inbox-loop.test.mjs",
+          "quote": "invariant draft-created-once: made implies"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R13",
+      "text": "too strong as written",
+      "sources": [
+        {
+          "file": "test/after/ex-inbox-loop.test.mjs",
+          "quote": "real, and too strong as written"
+        }
+      ],
+      "live": false
+    },
+    {
+      "id": "R14",
+      "text": "PL4003",
+      "live": {
+        "command": "node packages/poly-check/dist/src/cli.js check examples/retry/draft-unguarded.poly",
+        "quote": "PL4003 UNGUARDED_RETRY"
+      }
+    },
+    {
+      "id": "R15",
+      "text": "executions of the target: 2",
+      "live": {
+        "command": "node packages/poly-check/dist/src/cli.js check examples/retry/draft-unguarded.poly",
+        "quote": "executions of the target: 2, idempotency key: unchanged, deduplication declared: none"
+      }
+    },
+    {
+      "id": "R16",
+      "text": "attempts 5",
+      "live": {
+        "command": "node packages/poly-check/dist/src/cli.js check examples/retry/draft-unguarded.poly",
+        "quote": "may be attempted 5 times"
+      }
+    },
+    {
+      "id": "R17",
+      "text": "Propose, GateAllow, Start (target may execute), HandlerFailed, Start (target may execute), HandlerOk, SettleOk",
+      "live": {
+        "command": "node packages/poly-check/dist/src/cli.js check examples/retry/draft-unguarded.poly",
+        "quote": "Propose, GateAllow, Start (target may execute), HandlerFailed, Start (target may execute), HandlerOk, SettleOk"
+      }
+    }
+  ]
+}
