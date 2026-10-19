@@ -362,7 +362,7 @@ test('C1: poly-kept reason does not contain "refunds twice"', () => {
 
 // ---- D. format() prints amount line ----
 
-test('D1: format prints line with amount, refunded and asked numbers', () => {
+test('D1: format prints amount line with over true (poly-kept, refunded > asked)', () => {
   const log = JSON.parse(readFileSync(
     fileURLToPath(new URL('../docs/demo/step10-replay/second-pass/poly-kept.json', import.meta.url)), 'utf8'
   ));
@@ -377,9 +377,36 @@ test('D1: format prints line with amount, refunded and asked numbers', () => {
     ...classify(log.control, log.run),
   };
   const formatted = format(result);
-  assert.match(formatted, /amount/i, 'output should contain word "amount"');
-  assert.ok(formatted.includes(String(result.amount.refunded)), 'output should contain refunded amount');
-  assert.ok(formatted.includes(String(REQUEST.amount)), 'output should contain requested amount');
+  const lines = formatted.split('\n');
+  const amountLine = lines.find((line) => line.startsWith('amount: '));
+  assert.ok(amountLine, 'format output should have a line starting with "amount: "');
+  assert.match(amountLine, /6000 refunded of 4000 asked/);
+  assert.match(amountLine, /\(over the amount asked\)/);
+});
+
+test('D2: format prints amount line with over false (refunded equals asked)', () => {
+  const log = JSON.parse(readFileSync(
+    fileURLToPath(new URL('../docs/demo/step10-replay/second-pass/poly-kept.json', import.meta.url)), 'utf8'
+  ));
+  const logCopy = JSON.parse(JSON.stringify(log));
+  logCopy.run.numbers.amountRefunded = { ch_demo_1001: 4000, ch_demo_1002: 0 };
+  logCopy.control.numbers.amountRefunded = { ch_demo_1001: 4000, ch_demo_1002: 0 };
+  const result = {
+    build: logCopy.build,
+    fault: logCopy.fault,
+    start: logCopy.start,
+    standIn: logCopy.standIn,
+    control: logCopy.control,
+    run: logCopy.run,
+    tests: { status: 'not given' },
+    ...classify(logCopy.control, logCopy.run),
+  };
+  const formatted = format(result);
+  const lines = formatted.split('\n');
+  const amountLine = lines.find((line) => line.startsWith('amount: '));
+  assert.ok(amountLine, 'format output should have a line starting with "amount: "');
+  assert.equal(amountLine.trim(), 'amount: 4000 refunded of 4000 asked', 'over false case should have no "(over"');
+  assert.doesNotMatch(amountLine, /\(over/);
 });
 
 // ---- E. Webhook timeout ----

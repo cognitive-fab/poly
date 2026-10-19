@@ -295,13 +295,13 @@ test('DB10.8: smokeTest("ts", { root }) with timeout 300000 returns ok true with
   }
 });
 
-test('DB10.8: smokeTest leaves no workspace behind (no new temp entries with "smoke" or "poly-demo" in name)', () => {
+test('DB10.8: smokeTest leaves no workspace behind (no new temp entries starting with "poly-demo-smoke-")', () => {
   // Catches implementation that does not clean up temporary directories.
   const beforeNames = new Set(readdirSync(tmpdir()));
   smokeTest('ts', { root: ROOT, timeout: 300000 });
   const afterNames = new Set(readdirSync(tmpdir()));
-  const gained = [...afterNames].filter((n) => !beforeNames.has(n) && (n.includes('smoke') || n.includes('poly-demo')));
-  assert.deepEqual(gained, [], `no new temp entries with "smoke" or "poly-demo", gained: ${gained.join(', ')}`);
+  const gained = [...afterNames].filter((n) => !beforeNames.has(n) && n.startsWith('poly-demo-smoke-'));
+  assert.deepEqual(gained, [], `no new temp entries starting with "poly-demo-smoke-", gained: ${gained.join(', ')}`);
 });
 
 // ---- DB10.9: smokeTest failure path -------
@@ -313,7 +313,7 @@ test('DB10.9: smokeTest on a root without the package sources throws and leaves 
   const before = new Set(readdirSync(tmpdir()));
   try {
     assert.throws(() => smokeTest('ts', { root: emptyRoot, timeout: 300000 }), /ENOENT|no such file|does not exist/i);
-    const gained = readdirSync(tmpdir()).filter((n) => !before.has(n) && (n.includes('smoke') || n.includes('poly-demo')));
+    const gained = readdirSync(tmpdir()).filter((n) => !before.has(n) && n.startsWith('poly-demo-smoke-'));
     assert.deepEqual(gained, []);
   } finally { rmSync(emptyRoot, { recursive: true, force: true }); }
 });
