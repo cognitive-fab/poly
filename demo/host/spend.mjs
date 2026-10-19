@@ -54,7 +54,8 @@ export function createSpendMeter({ capUsd, tables, onCap = () => {} }) {
       const p = price(body?.model);
       const maxTokens = Number.isSafeInteger(body.max_tokens) && body.max_tokens >= 0 ? body.max_tokens : null;
       if (maxTokens === null) throw new ProviderError('the request has no max_tokens to price: nothing was asked');
-      const worst = Math.ceil(request.body.length / 2) * p.input + maxTokens * p.output;
+      // A token is at least one byte, so the bytes of the body are an upper bound of the input tokens for any text (DF10 item 4).
+      const worst = Buffer.byteLength(request.body) * p.input + maxTokens * p.output;
       if (settled + reserved + worst > cap) {
         reach();
         throw new ProviderError('the spend cap would be exceeded; nothing was asked');

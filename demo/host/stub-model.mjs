@@ -33,7 +33,8 @@ export function stubTransport() {
       let answer;
       if (task === 'classify') answer = { answer: /refund|money back/i.test(text) ? 'Refund' : /order|where|status/i.test(text) ? 'Status' : 'Other' };
       else if (task === 'amount') {
-        const id = /<order id="([^"]+)">/.exec(user)?.[1];
+        // Only the text after the message tags holds orders: a tag typed inside the message is the customer's text (DF10 item 3).
+        const id = /<order id="([^"]+)">/.exec(user.replace(/<message>\n[\s\S]*\n<\/message>/g, ''))?.[1];
         answer = { value: Number(/\d+/.exec(text)?.[0] ?? 0), cites: id ? [id] : [] };
       } else answer = { answer: SENTENCE, cites: [] };
       const out = { type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: JSON.stringify(answer) }], usage: { input_tokens: Math.ceil((system.length + user.length) / 4), output_tokens: 20 } };
