@@ -1,0 +1,9 @@
+build: /build
+start: D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec node src/main.js
+stand-in: valid (its own key check passed)
+control            requests  1 | POSTs 0b9be09c9ea7d9d45139efb8bf2699e5 | refunds 1 | amount_refunded 6000/0 of 10000/2500 | reply "You asked for a refund of $60.00 for BLENDER-1 from order ORD-1001. Reply YES to confirm or NO to cancel."
+fault lost-answer  requests  2 | POSTs 0b9be09c9ea7d9d45139efb8bf2699e5, 0b9be09c9ea7d9d45139efb8bf2699e5 | refunds 1 | amount_refunded 6000/0 of 10000/2500 | reply "You asked for a refund of $60.00 for BLENDER-1 from order ORD-1001. Reply YES to confirm or NO to cancel."
+outcome O2: refunds once: 2 POST(s) with key(s) ["0b9be09c9ea7d9d45139efb8bf2699e5","0b9be09c9ea7d9d45139efb8bf2699e5"], 1 replayed, 1 refund object
+amount: 6000 refunded of 4000 asked (over the amount asked)
+its own tests: not given
+exit 0

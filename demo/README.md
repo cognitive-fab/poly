@@ -63,3 +63,13 @@ Tests: `test/demo-room.test.mjs`, `demo-live-providers.test.mjs`, `demo-vault.te
 - **Kill switch:** the presenter's control that stops the room for everyone.
 - **Demo copy:** the concierge as released with only its budget caps changed, produced by a script and checked as itself.
 - **Price gate:** the refusal to launch live on price tables that name a placeholder source.
+
+## The spend cap, the stub model and the spend line (Step 12, DF10)
+
+`--live` and `--stub-model` need `--cap-usd <dollars>`, above 0 and at most 10. Without it, or with a value outside that range, the launcher prints `refused: ...` and returns 2 before it reads a key or makes a folder. `host/spend.mjs` holds the meter: before each request it reserves the request's worst case, so the spend never exceeds the cap, and when the cap is reached the room is killed with `spend-cap`. A line `spend: $0.0002 of $0.01 cap, 11 model calls` follows each reply, and `status` adds it. `--stub-model` runs the live path over `host/stub-model.mjs`, which answers locally: no key, no network, and placeholder prices. Tests: `test/demo-spend.test.mjs` and the heavy `test/after/demo-spend-stub.test.mjs` (a fake meter). The runbook of the rehearsal is `docs/demo/rehearsal.md`.
+
+### Glossary additions (Step 12)
+
+- **Cap:** the most a live or stub launch may spend, in dollars, set with `--cap-usd`, at most 10.
+- **Meter:** the code that reserves the worst case of each model request and sums what the responses report.
+- **Stub model:** a local stand-in for the model provider, used to prove the launcher at no cost.

@@ -1,0 +1,16 @@
+poly-kept-nokey.cups-sku.json
+poly-kept.cups-sku.json
+ts-kept-nokey.cups-sku.json
+ts-kept.cups-sku.json
+[
+  {
+    "pass": "first pass",
+    "run": "ts-kept",
+    "printed": "O3",
+    "recomputed": "O3",
+    "reason": "could not be driven: the control (no fault) made 0 POST(s) and 0 refund(s), not 1 and 1",
+    "amount": null
+  },
+  {
+    "pass": "first pass",
+    "run": "poly-kept",

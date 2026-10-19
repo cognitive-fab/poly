@@ -1,0 +1,46 @@
+Printing what differs from examples/concierge (the demo copy is produced by demo/scripts/make-demo-concierge.mjs):
+diff --git a/examples/concierge/concierge.poly b/demo/concierge/concierge.poly
+--- a/examples/concierge/concierge.poly
++++ b/demo/concierge/concierge.poly
+@@ -429,7 +429,7 @@ route triage {
+ }
+ 
+ budget spend {
+-  cap usd 0.5 per run
+-  cap usd 20 per day per scope
++  cap usd 0.25 per run
++  cap usd 10 per day per scope
+   on exhausted escalate
+ }
+
+Checking and admitting the demo copy (this takes a few minutes) ...
+The demo copy is CLEAN. Instance: Desk 2114 states, Notice 28 states, support.Conversation 342 states, staff.Conversation 666 states, payments.Grant 13 states, triage.Route 6 states, spend.Budget 96 states.
+Model calls: STUB. No model is called and no network is used. Spend is priced from the placeholder tables. Spend cap: $0.01.
+Payments: a local mock-up of Stripe on this machine; no real money moves and no Stripe key exists anywhere.
+Room page:    http://127.0.0.1:8098/
+Staff panel:  http://127.0.0.1:8098/presenter/staff?t=<token>   (this machine only; the token is shown here and nowhere else)
+Presenter prompt: status | staff | approve <intent> | kill | quit
+
+>>> guest says: hello there
+>>> room answered HTTP 200 {"ok":true}
+spend: $0.0001 of $0.01 cap, 6 model calls
+
+>>> guest says: where is my order?
+>>> room answered HTTP 200 {"ok":true}
+
+>>> guest says: refund 450 for my order
+>>> room answered HTTP 200 {"ok":true}
+spend: $0.0002 of $0.01 cap, 11 model calls
+
+>>> guest says: refund my friend too
+>>> room answered HTTP 200 {"ok":true}
+spend: $0.0002 of $0.01 cap, 11 model calls
+
+>>> guest says: I want my money back, 30 please
+>>> room answered HTTP 200 {"ok":true}
+spend: $0.0002 of $0.01 cap, 11 model calls
+
+>>> guest says: one more refund please
+>>> room answered HTTP 200 {"ok":true}
+spend: $0.0002 of $0.01 cap, 11 model calls
+{"killed":false,"personas":1,"said":6,"stripe":{"fault":"none","requests":0,"posts":[],"refunds":0,"amountRefunded":{"ch_demo9011":0,"ch_demo9021":0,"ch_demo9022":0,"ch_demo9031":0,"ch_demo9041":0,"ch_demo9042":0,"ch_demo9051":0,"ch_demo9061":0,"ch_demo9062":0,"ch_demo9071":0,"ch_demo9081":0,"ch_demo9082":0,"ch_demo9091":0,"ch_demo9101":0,"ch_demo9102":0,"ch_demo9111":0,"ch_demo9121":0,"ch_demo9122":0,"ch_demo9131":0,"ch_demo9141":0,"ch_demo9142":0,"ch_demo9151":0,"ch_demo9161":0,"ch_demo9162":0,"ch_demo9171":0,"ch_demo9181":0,"ch_demo9182":0,"ch_demo9191":0,"ch_demo9201":0,"ch_demo9202":0,"ch_demo9211":0,"ch_demo9221":0,"ch_demo9222":0,"ch_demo9231":0,"ch_demo9241":0,"ch_demo9242":0,"ch_demo9251":0,"ch_demo9261":0,"ch_demo9262":0,"ch_demo9271":0,"ch_demo9281":0,"ch_demo9282":0,"ch_demo9291":0,"ch_demo9301":0,"ch_demo9302":0,"ch_demo9311":0,"ch_demo9321":0,"ch_demo9322":0,"ch_demo9331":0,"ch_demo9341":0,"ch_demo9342":0,"ch_demo9351":0,"ch_demo9361":0,"ch_demo9362":0,"ch_demo9371":0,"ch_demo9381":0,"ch_demo9382":0,"ch_demo9391":0,"ch_demo9401":0,"ch_demo9402":0},"amount":{"ch_demo9011":12000,"ch_demo9021":12000,"ch_demo9022":30000,"ch_demo9031":12000,"ch_demo9041":12000,"ch_demo9042":30000,"ch_demo9051":12000,"ch_demo9061":12000,"ch_demo9062":30000,"ch_demo9071":12000,"ch_demo9081":12000,"ch_demo9082":30000,"ch_demo9091":12000,"ch_demo9101":12000,"ch_demo9102":30000,"ch_demo9111":12000,"ch_demo9121":12000,"ch_demo9122":30000,"ch_demo9131":12000,"ch_demo9141":12000,"ch_demo9142":30000,"ch_demo9151":12000,"ch_demo9161":12000,"ch_demo9162":30000,"ch_demo9171":12000,"ch_demo9181":12000,"ch_demo9182":30000,"ch_demo9191":12000,"ch_demo9201":12000,"ch_demo9202":30000,"ch_demo9211":12000,"ch_demo9221":12000,"ch_demo9222":30000,"ch_demo9231":12000,"ch_demo9241":12000,"ch_demo9242":30000,"ch_demo9251":12000,"ch_demo9261":12000,"ch_demo9262":30000,"ch_demo9271":12000,"ch_demo9281":12000,"ch_demo9282":30000,"ch_demo9291":12000,"ch_demo9301":12000,"ch_demo9302":30000,"ch_demo9311":12000,"ch_demo9321":12000,"ch_demo9322":30000,"ch_demo9331":12000,"ch_demo9341":12000,"ch_demo9342":30000,"ch_demo9351":12000,"ch_demo9361":12000,"ch_demo9362":30000,"ch_demo9371":12000,"ch_demo9381":12000,"ch_demo9382":30000,"ch_demo9391":12000,"ch_demo9401":12000,"ch_demo9402":30000},"reply":[]},"spend":"spend: $0.0002 of $0.01 cap, 11 model calls"}

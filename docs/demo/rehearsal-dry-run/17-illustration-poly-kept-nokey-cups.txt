@@ -1,0 +1,23 @@
+build: /build
+start: D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec node src/main.js
+request: Please refund CUPS-4 from order ORD-1001. (not the pre-registered request)
+stand-in: valid (its own key check passed)
+control            not run
+fault lost-answer  not run
+outcome O3: could not be driven: the build exited (code 1) before it listened on its port
+its own tests: not given
+exit 3
+> the build's own words (--json, control.output)
+file:///tmp/tmp.lVdjMWbnYH/node_modules/@poly/check/dist/src/admit.js:278
+        throw new AdmitError(`not admitted: the verdict is FINDINGS, and ${[...problems, ...missing].join('; ')} (PT12.5)`);
+              ^
+
+AdmitError: not admitted: the verdict is FINDINGS, and support.Ticket PL4003 refund (witness 2de37158e45d) has no signed acceptance (PT12.5)
+    at acceptedFindings (file:///tmp/tmp.lVdjMWbnYH/node_modules/@poly/check/dist/src/admit.js:278:15)
+    at admit (file:///tmp/tmp.lVdjMWbnYH/node_modules/@poly/check/dist/src/admit.js:213:24)
+    at async boot (file:///tmp/tmp.lVdjMWbnYH/src/runtime.js:23:20)
+    at async start (file:///tmp/tmp.lVdjMWbnYH/src/server.js:35:14)
+    at async file:///tmp/tmp.lVdjMWbnYH/src/main.js:17:20
+
+Node.js v24.22.0
+

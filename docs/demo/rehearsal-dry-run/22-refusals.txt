@@ -1,0 +1,15 @@
+> node demo/launch.mjs --live
+refused: a live or stub launch needs a spend cap: --cap-usd <dollars>, at most 10
+exit 2
+> node demo/launch.mjs --live --cap-usd 11
+refused: the spend cap is at most 10 dollars, not 11
+exit 2
+> node demo/launch.mjs --live --cap-usd 0
+refused: the spend cap must be above 0 dollars, at most 10
+exit 2
+> node demo/launch.mjs --stub-model
+refused: a live or stub launch needs a spend cap: --cap-usd <dollars>, at most 10
+exit 2
+> node demo/launch.mjs --recorded --cap-usd 5
+refused: --cap-usd applies to a live or stub launch: a recorded run spends nothing
+exit 2

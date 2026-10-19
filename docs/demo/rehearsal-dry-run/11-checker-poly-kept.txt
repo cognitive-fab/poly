@@ -1,0 +1,18 @@
+
+> poly
+> node node_modules/@poly/check/dist/src/cli.js check src/support.poly
+
+Ticket: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (4746 transitions and 29832 property evaluations agree) · model-check CLEAN (226 states explored) · deadlock CLEAN (226 states) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  stripe.refund  irreversible, attempts 3, keyed Idempotency-Key within 24h (K17)
+  retry-safe  whatsapp.ticket  irreversible, attempts 1, at most once
+  class  stripe.refund  irreversible
+  class  whatsapp.ticket  irreversible
+Notice: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (24 transitions and 0 property evaluations agree) · model-check CLEAN (2 states explored) · deadlock CLEAN (2 states) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  whatsapp.notice  irreversible, attempts 1, at most once
+  class  whatsapp.notice  irreversible
+verdict: CLEAN (exit 0)  support.Ticket  over lines ∈ 0..4; Open.count ∈ 1..4; RequestAll.inWindow ∈ bool; RequestLine.line ∈ 0..3; RequestLine.inWindow ∈ bool; Resolve.done ∈ bool; 226 states; kernel assumptions K7, K17
+         support.Notice  over Send.msg ∈ Note; 2 states; kernel assumptions K7
+         Ticket: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         Notice: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+engines: sam-pattern 2.3.0, polygraph 8.4.0, polygraph sam-pattern (vendored) 2.3.0, poly-ref 0.0.0
+exit 0
