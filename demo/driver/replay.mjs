@@ -118,6 +118,8 @@ function startBuild({ build, start, port, standInPort, authority, mapNames, extr
   }
   // DB6 item 10 (b): on POSIX the build leads a process group of its own, so that stop() reaches what `npm start` started.
   const child = spawn(start, { cwd: build, env, shell: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
+  const spawnedAt = Date.now();
+  let startedMs = null;
   let output = '';
   let exited = null;
   const keep = (c) => { output = (output + c.toString('utf8')).slice(-4000); };
@@ -129,11 +131,13 @@ function startBuild({ build, start, port, standInPort, authority, mapNames, extr
   return {
     output: () => output,
     exited: () => exited,
+    startedMs: () => startedMs,
     async listening(timeoutMs) {
       const until = Date.now() + timeoutMs;
       while (Date.now() < until) {
         if (exited) return false;
-        if (await tcpOpen(port)) return true;
+        // DB6 item 11 (b): the time from the spawn to the first connection that succeeded.
+        if (await tcpOpen(port)) { startedMs = Math.max(1, Date.now() - spawnedAt); return true; }
         await sleep(100);
       }
       return false;
@@ -223,7 +227,7 @@ async function drive(ctx, label) {
     const numbers = standIn.report();
     // count-by-posts (seeded): a retry that the stand-in replayed counts as a refund.
     if (driverFault === 'count-by-posts') numbers.refunds = numbers.posts.length;
-    return { label, driven: true, webhook: sent, turns, numbers, output: proc.output() };
+    return { label, driven: true, startedMs: proc.startedMs(), webhook: sent, turns, numbers, output: proc.output() };
   } finally { if (driverFault !== 'reuse-process') proc.stop(); }
 }
 
@@ -303,14 +307,14 @@ function runTests(build, command) {
 
 /** The report as text: the five numbers of the control and the fault run, and the outcome. */
 export function format(result) {
-  const row = (label, n) => (n ? `${label.padEnd(18)} requests ${String(n.requests).padStart(2)} | POSTs ${n.posts.map((p) => p.key ?? 'no key').join(', ') || 'none'} | refunds ${n.refunds} | amount_refunded ${Object.values(n.amountRefunded).join('/')} of ${Object.values(n.amount).join('/')} | reply ${JSON.stringify((n.reply ?? [])[0] ?? null)}` : `${label.padEnd(18)} not run`);
+  const row = (label, n, startedMs) => (n ? `${label.padEnd(18)} requests ${String(n.requests).padStart(2)} | POSTs ${n.posts.map((p) => p.key ?? 'no key').join(', ') || 'none'} | refunds ${n.refunds} | amount_refunded ${Object.values(n.amountRefunded).join('/')} of ${Object.values(n.amount).join('/')} | reply ${JSON.stringify((n.reply ?? [])[0] ?? null)}${Number.isInteger(startedMs) ? ` | started in ${startedMs} ms` : ''}` : `${label.padEnd(18)} not run`);
   return [
     `build: ${result.build}`,
     `start: ${result.start}`,
     ...(result.request && result.request.text !== REQUEST.text ? [`request: ${result.request.text} (not the pre-registered request)`] : []),
     result.standIn?.valid === false ? `STAND-IN INVALID: ${result.standIn.why}` : `stand-in: valid (its own key check passed)`,
-    row('control', result.control?.numbers),
-    row(`fault ${result.fault}`, result.run?.numbers),
+    row('control', result.control?.numbers, result.control?.startedMs),
+    row(`fault ${result.fault}`, result.run?.numbers, result.run?.startedMs),
     `outcome ${result.outcome}: ${result.reason}`,
     ...(result.amount ? [`amount: ${result.amount.refunded} refunded of ${result.amount.asked} asked${result.amount.over ? ' (over the amount asked)' : ''}`] : []),
     `its own tests: ${result.tests?.status ?? 'not run'}`,

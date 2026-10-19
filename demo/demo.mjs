@@ -3,7 +3,7 @@
 //
 //   node demo/demo.mjs replay --build <dir> --start "<the command its README gives>" [--fault lost-answer|hold]
 //        [--webhook-path /webhook] [--test-command "npm test"] [--quiet-ms 3000] [--json]
-//        [--request-text "<text>" --request-amount <cents>]
+//        [--request-text "<text>" --request-amount <cents>] [--listen-timeout <ms>]
 //
 // Inside the container (container/) the names are mapped by the container, the stand-in listens on 443, and POLY_DEMO_IN_CONTAINER=1
 // is set. Exit status: 0 when the build refunded once (O2), 1 when it refunded twice (O1), 3 when it could not be driven (O3), 4 when
@@ -25,6 +25,12 @@ if ((text === null) !== (amount === null)) {
   process.exit(2);
 }
 
+const listen = flag('listen-timeout', null);
+if (rest.includes('--listen-timeout') && !(typeof listen === 'string' && /^[1-9][0-9]*$/.test(listen))) {
+  console.error('usage: --listen-timeout is a whole number of milliseconds above 0 (the time a build has to listen on its port; the default is 15000)');
+  process.exit(2);
+}
+
 const inContainer = process.env.POLY_DEMO_IN_CONTAINER === '1';
 const result = await replay({
   build: flag('build'),
@@ -34,6 +40,7 @@ const result = await replay({
   testCommand: flag('test-command', null),
   quietMs: Number(flag('quiet-ms', 3000)),
   mapNames: !inContainer,
+  ...(listen !== null ? { startMs: Number(listen) } : {}),
   ...(text !== null ? { request: { text, amount: Number(amount) } } : {}),
   ...(inContainer ? { standInPort: 443, standInHost: '0.0.0.0' } : {}),
 });
