@@ -202,6 +202,8 @@ test('DF12.4: a 401 response from the model is reported exactly once with the ke
     // Send two messages to ensure the key error is reported only once across both
     await new Promise((resolve) => setTimeout(resolve, 100));
     const result1 = await room.say('s1', 'refund me');
+    // Wait for the rate-limit gap to expire (minGapMs: 1000 in assembly limits)
+    await new Promise((resolve) => setTimeout(resolve, 1100));
     const result2 = await room.say('s1', 'how much?');
     assert.deepEqual(result1, { ok: true });
     assert.deepEqual(result2, { ok: true });
