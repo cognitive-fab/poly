@@ -1,0 +1,99 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 1,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "refund-ORD-1001-b0b658ac-d683-464a-9ff6-fd2eb29a0758",
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Done! Your refund of $100.00 for ORD-1001 has been issued (ref re_standin_0001). It usually appears on your statement within 5–10 business days."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:43285/webhook (2 orders loaded)\nrefund re_standin_0001 succeeded: ORD-1001 10000\n"
+  },
+  "run": {
+    "label": "fault lost-answer",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "lost-answer",
+      "requests": 2,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "refund-ORD-1001-f1d90487-e637-4afc-985c-f2134a334c6d",
+          "status": 200,
+          "replayed": false,
+          "fault": "reset"
+        },
+        {
+          "path": "/v1/refunds",
+          "key": "refund-ORD-1001-f1d90487-e637-4afc-985c-f2134a334c6d",
+          "status": 200,
+          "replayed": true,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Done! Your refund of $100.00 for ORD-1001 has been issued (ref re_standin_0001). It usually appears on your statement within 5–10 business days."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:38769/webhook (2 orders loaded)\nrefund re_standin_0001 succeeded: ORD-1001 10000\n"
+  },
+  "outcome": "O1",
+  "reason": "refunds twice: 1 refund objects, 10000 refunded of 4000 asked",
+  "tests": {
+    "status": "passed",
+    "exit": 0,
+    "tail": "s get no order information (0.868987ms)\n  ✔ full refund requires confirmation, then refunds the original charge (3.900596ms)\n  ✔ cannot refund another customer's order (1.646078ms)\n  ✔ item refund, then the item can't be refunded again, then the rest (2.504025ms)\n  ✔ saying YES twice does not refund twice (1.783294ms)\n  ✔ a second quote for the same items is refused after the first is confirmed (1.45631ms)\n  ✔ NO cancels and an expired quote can't be confirmed (2.020442ms)\n  ✔ unknown item codes are rejected (1.105228ms)\n  ✔ orders outside the refund window are not refunded (1.103129ms)\n  ✔ a Stripe rejection releases the items for a later attempt (1.341649ms)\n  ✔ an uncertain outcome keeps the items reserved and reconcile retries with the same key (1.674595ms)\n  ✔ non-text messages get a polite answer (0.86876ms)\n✔ RefundAgent (60.08365ms)\n▶ webhook server end to end\n  ✔ answers Meta's verification handshake (59.031181ms)\n  ✔ rejects unsigned or badly signed webhooks (19.877429ms)\n  ✔ full conversation issues one Stripe refund and replies on WhatsApp (78.508551ms)\n  ✔ state survives a restart (0.884322ms)\n  ✔ ignores status-only webhooks (5.699427ms)\n✔ webhook server end to end (205.344234ms)\n▶ StripeClient\n  ✔ classifies 4xx as rejected and 5xx as uncertain, retrying with the same key (524.803901ms)\n  ✔ network failure is uncertain (1.39187ms)\n✔ StripeClient (526.677082ms)\nℹ tests 20\nℹ suites 3\nℹ pass 20\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1097.731207\n"
+  }
+}

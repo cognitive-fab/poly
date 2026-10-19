@@ -1,0 +1,99 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec node src/main.js",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 1,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "0b9be09c9ea7d9d45139efb8bf2699e5",
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 6000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "You asked for a refund of $60.00 for BLENDER-1 from order ORD-1001. Reply YES to confirm or NO to cancel.",
+        "Done: $60.00 for BLENDER-1 from order ORD-1001 has been refunded to your original payment method. It can take 5-10 business days to appear."
+      ]
+    },
+    "output": "support agent listening on http://127.0.0.1:38595/webhook\n{\"at\":\"2026-10-19T00:15:52.623Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.1\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"RequestLine\",\"phase\":\"Confirming\"}}\n{\"at\":\"2026-10-19T00:15:55.899Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.2\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"Confirm\",\"phase\":\"Refunding\"}}\n"
+  },
+  "run": {
+    "label": "fault lost-answer",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "lost-answer",
+      "requests": 2,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "0b9be09c9ea7d9d45139efb8bf2699e5",
+          "status": 200,
+          "replayed": false,
+          "fault": "reset"
+        },
+        {
+          "path": "/v1/refunds",
+          "key": "0b9be09c9ea7d9d45139efb8bf2699e5",
+          "status": 200,
+          "replayed": true,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 6000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "You asked for a refund of $60.00 for BLENDER-1 from order ORD-1001. Reply YES to confirm or NO to cancel.",
+        "Done: $60.00 for BLENDER-1 from order ORD-1001 has been refunded to your original payment method. It can take 5-10 business days to appear."
+      ]
+    },
+    "output": "support agent listening on http://127.0.0.1:33525/webhook\n{\"at\":\"2026-10-19T00:16:10.323Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.1\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"RequestLine\",\"phase\":\"Confirming\"}}\n{\"at\":\"2026-10-19T00:16:13.550Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.2\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"Confirm\",\"phase\":\"Refunding\"}}\n"
+  },
+  "outcome": "O1",
+  "reason": "refunds twice: 1 refund objects, 6000 refunded of 4000 asked",
+  "tests": {
+    "status": "passed",
+    "exit": 0,
+    "tail": "\n✔ another customer's order is unknown, and nothing is refunded (31.054137ms)\n✔ one item, then the rest: each confirmed, each refunded once, with an idempotency key (265.948421ms)\n✔ a webhook delivered twice is answered once (29.329669ms)\n✔ NO cancels a request, and YES then has nothing to confirm (47.47058ms)\n✔ a refusal from Stripe tells the customer, and they may ask again (92.748144ms)\n✔ a Stripe outage is retried with the same key; refunded once (65.291867ms)\n✔ requests outside the refund window are refused before anything is asked (28.168203ms)\n✔ a request survives a restart on the same store, under a new admission key (2919.715688ms)\n✔ an unknown outcome goes to a person; their verdict settles it without a second refund (140.862276ms)\n✔ parse reads refunds, confirmations, cancellations and anything else as help (1.920785ms)\n✔ signatures are checked against the raw body and the app secret (1.137039ms)\n✔ the handshake needs the subscribe mode and the token (0.424813ms)\n✔ messagesOf takes the messages and skips statuses (0.995626ms)\n✔ reply texts name the lines and the amount (23.504225ms)\n✔ support.poly checks CLEAN (1170.508934ms)\n✔ without the already-refunded guard, the checker finds a double refund (1802.34205ms)\n✔ refunding the whole order again after one item is a finding (1336.604363ms)\n✔ a refund that moves money without confirmation is a finding (1178.450551ms)\nℹ tests 21\nℹ suites 0\nℹ pass 21\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 6263.257471\n"
+  }
+}

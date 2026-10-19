@@ -1,0 +1,101 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && npm run keygen && npm run admit && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 1,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "85a4ae5c51bb2e0b36d28cd70bbe9242",
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $100.00 for ORD-1001 (BLENDER-1, CUPS-4) to the card you paid with. Reply YES to confirm or NO to cancel. This offer is valid for 30 minutes.",
+        "Thank you. I'm issuing your refund of $100.00 for ORD-1001 now, and I'll message you as soon as it is done.",
+        "Your refund of $100.00 for ORD-1001 (BLENDER-1, CUPS-4) has been issued. It usually reaches your card within 5 to 10 business days."
+      ]
+    },
+    "output": "\n> keygen\n> node scripts/keygen.js\n\nwrote /tmp/.support-agent/admission.pem and /tmp/.support-agent/admission.pub.pem\n\n> admit\n> node --no-warnings=ExperimentalWarning scripts/admit.js\n\nadmitted: CLEAN, certificate at /tmp/tmp.Bb4ON8R8si/.poly/certificate.json\n\n> start\n> node --no-warnings=ExperimentalWarning scripts/start.js\n\nsupport agent listening on http://127.0.0.1:41779/webhook (2 orders)\n"
+  },
+  "run": {
+    "label": "fault lost-answer",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken).",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "lost-answer",
+      "requests": 2,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "85a4ae5c51bb2e0b36d28cd70bbe9242",
+          "status": 200,
+          "replayed": false,
+          "fault": "reset"
+        },
+        {
+          "path": "/v1/refunds",
+          "key": "85a4ae5c51bb2e0b36d28cd70bbe9242",
+          "status": 200,
+          "replayed": true,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $100.00 for ORD-1001 (BLENDER-1, CUPS-4) to the card you paid with. Reply YES to confirm or NO to cancel. This offer is valid for 30 minutes.",
+        "Thank you. I'm issuing your refund of $100.00 for ORD-1001 now, and I'll message you as soon as it is done.",
+        "Your refund of $100.00 for ORD-1001 (BLENDER-1, CUPS-4) has been issued. It usually reaches your card within 5 to 10 business days."
+      ]
+    },
+    "output": "\n> keygen\n> node scripts/keygen.js\n\nan admission key already exists at /tmp/.support-agent/admission.pem; nothing written\n\n> admit\n> node --no-warnings=ExperimentalWarning scripts/admit.js\n\nadmitted: CLEAN, certificate at /tmp/tmp.UQy4d0T20M/.poly/certificate.json\n\n> start\n> node --no-warnings=ExperimentalWarning scripts/start.js\n\nsupport agent listening on http://127.0.0.1:39663/webhook (2 orders)\n"
+  },
+  "outcome": "O1",
+  "reason": "refunds twice: 1 refund objects, 10000 refunded of 4000 asked",
+  "tests": {
+    "status": "passed",
+    "exit": 0,
+    "tail": "08968ms)\n✔ a refusal from Stripe is not retried; the customer is told and may ask again (48.065414ms)\n✔ when Stripe cannot be reached at all, the order goes to review and a person resolves it (92.529939ms)\n✔ while a refund is in flight, nothing else can be started on that order (47.436306ms)\n✔ the agent never dispatches the completions or the resolutions on behalf of a customer (12.338741ms)\n✔ test/fixture.js (731.633885ms)\n✔ the verification handshake (774.929621ms)\n✔ an unsigned or forged notification is refused and does nothing (18.153676ms)\n✔ a conversation over the webhook issues the refund (113.755553ms)\n✔ a notification for another business number is ignored (4.091609ms)\n✔ the operator route needs the admin token (18.29361ms)\n✔ the parser reads intents and order ids (4.831589ms)\n✔ the parser finds the one line a message names (0.956168ms)\n✔ orders.json loads, and an order the machine cannot hold is refused (1.658746ms)\n✔ the webhook signature is checked against the raw body (1.767986ms)\n✔ the verification handshake echoes the challenge only for the right token (0.602821ms)\n✔ a Cloud API notification yields its messages and not its statuses (0.666814ms)\n✔ amounts are priced from the lines a payload names (23.383026ms)\n✔ the Stripe handler posts the refund and classifies the answer (2.534834ms)\n✔ the WhatsApp handler sends the notice to the order's customer (0.822241ms)\nℹ tests 26\nℹ suites 0\nℹ pass 26\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2562.595407\n"
+  }
+}

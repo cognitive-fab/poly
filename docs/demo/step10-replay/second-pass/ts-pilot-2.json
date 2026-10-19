@@ -1,0 +1,45 @@
+{
+  "build": "/build",
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Hello, I'd like a refund of 40.00 for order ORD-1001 (the blender arrived broken)."
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 0,
+      "posts": [],
+      "refunds": 0,
+      "amountRefunded": {
+        "ch_demo_1001": 0,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "ORD-1001 has no item \"(THE\". Items: BLENDER-1, CUPS-4."
+      ]
+    },
+    "output": "\n> start\n> node --env-file-if-exists=.env src/main.ts\n\n.env not found. Continuing without it.\nSupport agent listening on http://localhost:42511/webhook\n"
+  },
+  "run": null,
+  "outcome": "O3",
+  "reason": "could not be driven: the control (no fault) made 0 POST(s) and 0 refund(s), not 1 and 1",
+  "tests": {
+    "status": "passed",
+    "exit": 0,
+    "tail": " cancels on NO (5.986443ms)\n  ✔ expires unconfirmed requests (3.469531ms)\n  ✔ a confirmation from one customer cannot trigger another's pending refund (3.280835ms)\n  ✔ retries transient Stripe errors with the same idempotency key without double refunding (5.214914ms)\n  ✔ escalates permanent Stripe errors (5.231082ms)\n  ✔ does not record failed refunds (3.548656ms)\n  ✔ re-validates the pending refund at confirmation time (5.026821ms)\n  ✔ asks for text when a non-text message arrives (1.571227ms)\n✔ SupportAgent (130.150184ms)\n▶ StripeClient\n  ✔ posts a form-encoded refund with an idempotency key (47.247703ms)\n  ✔ classifies errors as transient or permanent (3.769113ms)\n✔ StripeClient (54.082505ms)\n▶ WhatsAppClient\n  ✔ sends a text message through the Cloud API (1.068889ms)\n  ✔ throws on API errors (0.810553ms)\n✔ WhatsAppClient (2.387641ms)\n▶ orders\n  ✔ loads and validates orders.json (13.347299ms)\n  ✔ formats money in minor units (27.554428ms)\n✔ orders (41.489113ms)\n✔ test/helpers.ts (174.045067ms)\n▶ webhook server\n  ✔ answers Meta's verification handshake (46.570506ms)\n  ✔ rejects payloads with a bad signature (17.649431ms)\n  ✔ runs a full refund conversation over WhatsApp (37.582716ms)\n  ✔ ignores redelivered messages (4.797997ms)\n  ✔ ignores status updates (3.839882ms)\n  ✔ handles concurrent confirmations without double refunding (16.653992ms)\n✔ webhook server (146.759395ms)\nℹ tests 31\nℹ suites 5\nℹ pass 31\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 459.904869\n"
+  }
+}
