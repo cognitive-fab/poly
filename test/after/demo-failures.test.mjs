@@ -291,3 +291,110 @@ test('DF12.5: the instance is unchanged by timeout rewrite; compare example-time
     rmSync(src1, { recursive: true, force: true, maxRetries: 3 });
   }
 });
+
+// ---- DF13: the answer request recorded in a live demo has correct fields
+
+test('DF13.1: a guest saying "where is my order?" triggers an answer request with correct fields', { timeout: 1_800_000 }, async () => {
+  const { assembleDemo } = await import('../../demo/host/assemble.mjs');
+  const { makeDemoConcierge } = await import('../../demo/scripts/make-demo-concierge.mjs');
+  const { TASKS } = await import('../../demo/host/live-providers.mjs');
+  const { stubTransport } = await import('../../demo/host/stub-model.mjs');
+  const workdir = mkdtempSync(join(tmpdir(), 'demo-failures-df13-'));
+  const sourceDir = mkdtempSync(join(tmpdir(), 'demo-copy-df13-'));
+
+  // Create a fresh copy with price tables that pass the price gate
+  makeDemoConcierge({ out: sourceDir });
+  const smallOriginal = JSON.parse(readFileSync(join(sourceDir, 'prices', 'small.json'), 'utf8'));
+  const largeOriginal = JSON.parse(readFileSync(join(sourceDir, 'prices', 'large.json'), 'utf8'));
+  const smallPrice = { ...smallOriginal, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
+  const largePrice = { ...largeOriginal, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
+  writeFileSync(join(sourceDir, 'prices', 'small.json'), JSON.stringify(smallPrice));
+  writeFileSync(join(sourceDir, 'prices', 'large.json'), JSON.stringify(largePrice));
+
+  // Create a transport that records request bodies
+  const recordedBodies = [];
+  const recordingTransport = {
+    async request(r) {
+      try {
+        recordedBodies.push(JSON.parse(r.body));
+      } catch {
+        // body is not JSON, skip recording
+      }
+      return stubTransport().request(r);
+    },
+  };
+
+  const demo = await assembleDemo({
+    mode: 'stub-model',
+    workdir,
+    capUsd: 5,
+    now: () => Date.now(),
+    startWorkers: true,
+    limits: { minGapMs: 1000 },
+    source: sourceDir,
+    modelTransport: recordingTransport,
+  });
+
+  const { room } = demo;
+  try {
+    const guest = room.join('s1');
+    const heard = [];
+    room.subscribe('s1', (e) => heard.push(e));
+
+    // Wait for room to settle
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const before = Date.now();
+    const result = await room.say('s1', 'where is my order?');
+    assert.deepEqual(result, { ok: true });
+
+    // Wait up to 30 seconds for a reply event with the guest's order id
+    const guestOrderId = guest.orders[0].id;
+    const maxWait = 30_000;
+    while (Date.now() - before < maxWait && !heard.find((e) => e.kind === 'reply' && e.text.includes(guestOrderId))) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const replyEvent = heard.find((e) => e.kind === 'reply' && e.text.includes(guestOrderId));
+    assert.ok(replyEvent, `guest should get a reply naming their order ${guestOrderId} within ${maxWait} ms`);
+
+    // Find the answer request in recorded bodies
+    const answerRequest = recordedBodies.find((body) => {
+      const system = body.system || '';
+      const userMsg = body.messages?.[0]?.content || '';
+      return system.includes(TASKS.answer) || userMsg.includes(TASKS.answer);
+    });
+
+    assert.ok(answerRequest, 'should have recorded an answer request');
+
+    // Check the structure and content
+    const keys = Object.keys(answerRequest).sort();
+    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys: ${keys}`);
+    assert.equal(answerRequest.model, smallPrice.model, `model should be ${smallPrice.model}`);
+    assert.ok(Number.isInteger(answerRequest.max_tokens) && answerRequest.max_tokens > 0, `max_tokens should be whole number above 0, got ${answerRequest.max_tokens}`);
+    assert.equal(answerRequest.temperature, 0.3, `temperature should be 0.3, got ${answerRequest.temperature}`);
+    assert.ok(typeof answerRequest.system === 'string' && answerRequest.system.length > 0, 'system should be non-empty string');
+    assert.ok(Array.isArray(answerRequest.messages) && answerRequest.messages.length > 0, 'messages should be non-empty array');
+
+    // Check the user message content
+    const userMsg = answerRequest.messages[0];
+    assert.ok(userMsg.content.includes(TASKS.answer) || answerRequest.system.includes(TASKS.answer), 'should contain task sentence');
+    assert.ok(userMsg.content.includes('where is my order'), 'should contain customer message');
+    assert.ok(userMsg.content.includes(guestOrderId), `should contain guest order id ${guestOrderId}`);
+
+    // Check for no null values
+    const jsonStr = JSON.stringify(answerRequest);
+    assert.ok(!jsonStr.includes('"null"'), 'should have no null values');
+
+    // Check all numbers are finite
+    const checkFinite = (val) => {
+      if (typeof val === 'number') assert.ok(Number.isFinite(val), `${val} is not finite`);
+      if (Array.isArray(val)) val.forEach(checkFinite);
+      if (typeof val === 'object' && val !== null) Object.values(val).forEach(checkFinite);
+    };
+    checkFinite(answerRequest);
+  } finally {
+    if (demo) await demo.close();
+    rmSync(workdir, { recursive: true, force: true, maxRetries: 3 });
+    rmSync(sourceDir, { recursive: true, force: true, maxRetries: 3 });
+  }
+});

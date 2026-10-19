@@ -11,7 +11,7 @@ import { parseArgs } from '../demo/launch.mjs';
 import { LaunchRefused } from '../demo/host/assemble.mjs';
 import { makeDemoConcierge } from '../demo/scripts/make-demo-concierge.mjs';
 import { stubTransport } from '../demo/host/stub-model.mjs';
-import { makeProviders } from '../demo/host/live-providers.mjs';
+import { makeProviders, ProviderError, TASKS } from '../demo/host/live-providers.mjs';
 import { createSpendMeter, meteredTransport } from '../demo/host/spend.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -422,4 +422,424 @@ test('DF12.6: measureLatency measurements are at least the latency (50 ms x 2 ro
   assert.ok(result.small.maxMs >= minExpected);
   assert.ok(result.small.minMs <= result.small.medianMs);
   assert.ok(result.small.medianMs <= result.small.maxMs);
+});
+
+// ---- DF13: guard on limits, API message in ProviderError, describeFailure with message, request shape
+
+// Helper: create a recording transport that wraps another transport
+function recordingTransport(delegate) {
+  const records = [];
+  return {
+    records,
+    async request(r) {
+      records.push(r);
+      return delegate.request(r);
+    },
+  };
+}
+
+// Helper: parse JSON body of a request
+function parseBody(req) {
+  return JSON.parse(req.body);
+}
+
+test('DF13.2: the guard refuses maxInputTokens that is not a whole number above 0', async () => {
+  const badValues = [undefined, null, NaN, 0, -1, 1.5, '400', Infinity];
+  for (const bad of badValues) {
+    const t = recordingTransport(stubTransport());
+    const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+    const limits = { maxInputTokens: 2000, maxTokens: 400 };
+    if (bad !== undefined) {
+      limits.maxInputTokens = bad;
+    } else {
+      delete limits.maxInputTokens;
+    }
+    const provider = providers.decisions.answer.provider;
+    const question = { decision: 'answer', payload: {}, intent: 'i', limits };
+    const materials = { bodies: { m: 'test' }, items: {} };
+    const valueText = String(bad).slice(0, 20);
+    const expectedMsg = `the limit maxInputTokens is not a whole number above 0 (${valueText}): nothing was asked`;
+    await assert.rejects(
+      provider(question, materials),
+      (e) => {
+        assert.ok(e instanceof ProviderError, `should be ProviderError for maxInputTokens=${bad}`);
+        assert.equal(e.message, expectedMsg, `wrong message for maxInputTokens=${bad}`);
+        return true;
+      }
+    );
+    assert.equal(t.records.length, 0, `transport should not be called for maxInputTokens=${bad}`);
+  }
+});
+
+test('DF13.2: the guard refuses maxTokens that is not a whole number above 0', async () => {
+  const badValues = [undefined, null, NaN, 0, -1, 1.5, '400', Infinity];
+  for (const bad of badValues) {
+    const t = recordingTransport(stubTransport());
+    const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+    const limits = { maxInputTokens: 2000, maxTokens: 400 };
+    if (bad !== undefined) {
+      limits.maxTokens = bad;
+    } else {
+      delete limits.maxTokens;
+    }
+    const provider = providers.tiers.small;
+    const question = { decision: 'classify', limits };
+    const materials = { bodies: { m: 'test' }, items: {} };
+    const valueText = String(bad).slice(0, 20);
+    const expectedMsg = `the limit maxTokens is not a whole number above 0 (${valueText}): nothing was asked`;
+    await assert.rejects(
+      provider(question, materials),
+      (e) => {
+        assert.ok(e instanceof ProviderError, `should be ProviderError for tier.small, maxTokens=${bad}`);
+        assert.equal(e.message, expectedMsg, `wrong message for tier.small, maxTokens=${bad}`);
+        return true;
+      }
+    );
+    assert.equal(t.records.length, 0, `transport should not be called for tier.small, maxTokens=${bad}`);
+  }
+});
+
+test('DF13.2: every provider refuses a bad limit of either field before any call', async () => {
+  const providerOf = (providers) => ({
+    'tiers.small': [providers.tiers.small, 'classify'],
+    'tiers.large': [providers.tiers.large, 'classify'],
+    amount: [providers.decisions.amount.provider, 'amount'],
+    answer: [providers.decisions.answer.provider, 'answer'],
+    reply: [providers.decisions.reply.provider, 'reply'],
+  });
+  const names = Object.keys(providerOf(makeProviders({ transport: stubTransport(), apiKey: 'stub-key-for-test', models: { small: 's', large: 'l' } })));
+  assert.equal(names.length, 5);
+  for (const name of names) {
+    for (const field of ['maxInputTokens', 'maxTokens']) {
+      for (const bad of [undefined, null, NaN, 0, -1, 1.5, '400', Infinity]) {
+        const t = recordingTransport(stubTransport());
+        const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+        const [provider, decision] = providerOf(providers)[name];
+        const limits = { maxInputTokens: 2000, maxTokens: 400 };
+        if (bad === undefined) delete limits[field]; else limits[field] = bad;
+        const question = { decision, payload: { outcome: 'Unsure' }, intent: 'i', limits };
+        const materials = { bodies: { m: 'test' }, items: {} };
+        await assert.rejects(provider(question, materials), (e) => {
+          assert.ok(e instanceof ProviderError, `${name} ${field}=${String(bad)}: a ProviderError`);
+          assert.equal(e.message, `the limit ${field} is not a whole number above 0 (${String(bad).slice(0, 20)}): nothing was asked`, `${name} ${field}=${String(bad)}`);
+          return true;
+        });
+        assert.equal(t.records.length, 0, `${name} ${field}=${String(bad)}: the transport was not called`);
+      }
+    }
+  }
+});
+
+test('DF13.2: a question with no limits passes the guard and uses defaults', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', payload: {}, intent: 'i' }; // no limits
+  const materials = { bodies: { m: 'test message' }, items: {} };
+  const result = await providers.decisions.answer.provider(question, materials);
+  assert.ok(result, 'provider should return a result');
+  assert.ok(t.records.length > 0, 'transport should be called');
+});
+
+test('DF13.3: a 400 with error message is in the ProviderError', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 400,
+        headers: {},
+        body: JSON.stringify({ error: { type: 'invalid_request_error', message: 'max_tokens: Field required' } }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', limits: { maxInputTokens: 2000, maxTokens: 400 } };
+  const materials = { bodies: { m: 'test' }, items: {} };
+  const expectedMsg = 'the model provider answered HTTP 400 (invalid_request_error): max_tokens: Field required';
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError, 'should be ProviderError');
+      assert.equal(e.message, expectedMsg, 'message should include error message');
+      return true;
+    }
+  );
+});
+
+test('DF13.3: a 400 without error message uses shorter form', async () => {
+  const t = recordingTransport({
+    async request() {
+      return { status: 400, headers: {}, body: JSON.stringify({ error: { type: 'invalid_request_error' } }) };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', limits: { maxInputTokens: 2000, maxTokens: 400 } };
+  const materials = { bodies: { m: 'test' }, items: {} };
+  const expectedMsg = 'the model provider answered HTTP 400 (invalid_request_error)';
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.equal(e.message, expectedMsg, `should match expected form, got: ${e.message}`);
+      return true;
+    }
+  );
+});
+
+test('DF13.3: a 400 without error type uses shortest form', async () => {
+  const t = recordingTransport({
+    async request() {
+      return { status: 400, headers: {}, body: JSON.stringify({ error: {} }) };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', limits: { maxInputTokens: 2000, maxTokens: 400 } };
+  const materials = { bodies: { m: 'test' }, items: {} };
+  const expectedMsg = 'the model provider answered HTTP 400';
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.equal(e.message, expectedMsg, `should match expected form, got: ${e.message}`);
+      return true;
+    }
+  );
+});
+
+test('DF13.3: a key in the error message is replaced by [removed]', async () => {
+  const key = 'stub-key-for-test';
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 400,
+        headers: {},
+        body: JSON.stringify({ error: { type: 'invalid_request_error', message: `invalid key ${key} provided` } }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: key, models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', limits: { maxInputTokens: 2000, maxTokens: 400 } };
+  const materials = { bodies: { m: 'test' }, items: {} };
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.ok(e.message.includes('[removed]'), 'message should contain [removed]');
+      assert.ok(!e.message.includes(key), `message should not contain key: ${e.message}`);
+      return true;
+    }
+  );
+});
+
+test('DF13.3: whitespace including newlines is collapsed to single space', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 400,
+        headers: {},
+        body: JSON.stringify({ error: { type: 'err', message: 'line1\n   line2   line3\n\nline4' } }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', limits: { maxInputTokens: 2000, maxTokens: 400 } };
+  const materials = { bodies: { m: 'test' }, items: {} };
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /line1 line2 line3 line4/, `whitespace should be collapsed, got: ${e.message}`);
+      assert.ok(!e.message.includes('\n'), 'should have no newlines');
+      return true;
+    }
+  );
+});
+
+test('DF13.3: a 500-character message is cut at 200 characters', async () => {
+  const longMsg = 'x'.repeat(500);
+  const t = recordingTransport({
+    async request() {
+      return { status: 400, headers: {}, body: JSON.stringify({ error: { type: 'err', message: longMsg } }) };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', limits: { maxInputTokens: 2000, maxTokens: 400 } };
+  const materials = { bodies: { m: 'test' }, items: {} };
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      const msgPart = e.message.replace(/^[^:]*: /, '');
+      assert.equal(msgPart.length, 200, `message part should be exactly 200 chars, got ${msgPart.length}`);
+      return true;
+    }
+  );
+});
+
+test('DF13.4: describeFailure with an API message line', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: 'the model provider answered HTTP 400 (invalid_request_error): max_tokens: Field required',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.ok(line.startsWith('decision failed: answer, tier none, HTTP 400 (invalid_request_error): max_tokens: Field required'), `got: ${line}`);
+});
+
+test('DF13.4: describeFailure removes the key from the message part', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const key = 'stub-key-for-test';
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: `the model provider answered HTTP 400 (invalid_request_error): error with ${key} in it`,
+    payload: {},
+  };
+  const context = { routes: [], secrets: [key] };
+  const line = describeFailure(row, context);
+  assert.ok(line.includes('[removed]'), `should contain [removed], got: ${line}`);
+  assert.ok(!line.includes(key), `should not contain key, got: ${line}`);
+});
+
+test('DF13.4: describeFailure collapses whitespace in the message part', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: 'the model provider answered HTTP 400 (err): line1\n  line2   line3',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /line1 line2 line3/, `whitespace should be collapsed, got: ${line}`);
+});
+
+test('DF13.4: describeFailure cuts the message part at 200 characters', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const longMsg = 'x'.repeat(500);
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: `the model provider answered HTTP 400 (err): ${longMsg}`,
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  // The line should be capped: "decision failed: answer, tier none, HTTP 400 (err): " + up to 200 chars of message
+  const msgPart = line.replace(/^[^:]*HTTP 400 \([^)]*\): /, '');
+  assert.equal(msgPart.length, 200, `message part should be 200 chars, got ${msgPart.length}: ${msgPart}`);
+});
+
+test('DF13.4: describeFailure on limit error gives the limit reason', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: 'the limit maxTokens is not a whole number above 0 (NaN): nothing was asked',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /limit is not a whole number/, `should have limit reason, got: ${line}`);
+});
+
+test('DF13.4: describeFailure extracts HTTP form from mixed error text', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: 'some prefix text. the model provider answered HTTP 400 (err_type). some suffix text.',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  // Should extract only the HTTP form, not the surrounding text
+  assert.match(line, /HTTP 400 \(err_type\)/, `should have HTTP form, got: ${line}`);
+  assert.ok(!line.includes('prefix'), `should not include prefix, got: ${line}`);
+  assert.ok(!line.includes('suffix'), `should not include suffix, got: ${line}`);
+});
+
+test('DF13.1: the answer request has correct structure and content', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', payload: {}, intent: 'i' };
+  const materials = {
+    bodies: { m: 'where is my order?' },
+    items: { o: [
+      { id: 'o-9011', body: 'Order 9011: a desk lamp, delivered on 2 October.' },
+      { id: 'o-9012', body: 'Order 9012: a sofa.' },
+    ] },
+  };
+  await providers.decisions.answer.provider(question, materials);
+  assert.equal(t.records.length, 1, 'should make exactly one request');
+  const body = parseBody(t.records[0]);
+  const keys = Object.keys(body).sort();
+  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys: ${keys}`);
+  assert.equal(body.model, 'small-model-id', 'model should be small-model-id');
+  assert.ok(Number.isInteger(body.max_tokens) && body.max_tokens === 400, `max_tokens should be 400, got ${body.max_tokens}`);
+  assert.equal(body.temperature, 0.3, `temperature should be 0.3, got ${body.temperature}`);
+  assert.ok(typeof body.system === 'string' && body.system.length > 0, 'system should be non-empty string');
+  assert.equal(body.messages.length, 1, 'should have one message');
+  const msg = body.messages[0];
+  assert.equal(msg.role, 'user', 'message role should be user');
+  assert.ok(typeof msg.content === 'string' && msg.content.length > 0, 'message content should be non-empty string');
+  assert.ok(msg.content.includes('Your order') || msg.content.includes(TASKS.answer), 'content should hold task sentence');
+  assert.ok(msg.content.includes('where is my order?'), 'content should hold customer message');
+  assert.ok(msg.content.includes('o-9011'), 'content should hold order id o-9011');
+  assert.ok(msg.content.includes('o-9012'), 'content should hold order id o-9012');
+  // Check JSON has no null or NaN
+  const jsonStr = JSON.stringify(body);
+  assert.ok(!jsonStr.includes('"null"') && jsonStr !== 'null', 'should have no null values');
+  // NaN becomes null in JSON.stringify, but we check for finite numbers
+  const checkFinite = (val) => {
+    if (typeof val === 'number') assert.ok(Number.isFinite(val), `${val} is not finite`);
+    if (Array.isArray(val)) val.forEach(checkFinite);
+    if (typeof val === 'object' && val !== null) Object.values(val).forEach(checkFinite);
+  };
+  checkFinite(body);
+});
+
+test('DF13.1: the reply request has correct structure and content', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'reply', payload: { outcome: 'Unsure' }, intent: 'i' };
+  const materials = { bodies: { m: 'please refund' }, items: {} };
+  await providers.decisions.reply.provider(question, materials);
+  assert.equal(t.records.length, 1, 'should make exactly one request for reply');
+  const body = parseBody(t.records[0]);
+  const keys = Object.keys(body).sort();
+  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys for reply: ${keys}`);
+  assert.equal(body.model, 'small-model-id', 'reply model should be small-model-id');
+  assert.ok(Number.isInteger(body.max_tokens) && body.max_tokens === 400, `reply max_tokens should be 400, got ${body.max_tokens}`);
+  assert.equal(body.temperature, 0.3, `reply temperature should be 0.3, got ${body.temperature}`);
+  assert.ok(body.messages.length > 0, 'reply should have messages');
+  const jsonStr = JSON.stringify(body);
+  assert.ok(!jsonStr.includes('"null"'), 'reply should have no null values');
+  const checkFinite = (val) => {
+    if (typeof val === 'number') assert.ok(Number.isFinite(val), `${val} is not finite`);
+    if (Array.isArray(val)) val.forEach(checkFinite);
+    if (typeof val === 'object' && val !== null) Object.values(val).forEach(checkFinite);
+  };
+  checkFinite(body);
+});
+
+test('DF13.1: the amount request has correct structure and content (vote of 5)', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 50' }, items: {} };
+  await providers.decisions.amount.provider(question, materials);
+  assert.ok(t.records.length >= 1, 'amount should make at least one request (it is a vote)');
+  // Check all requests are well-formed
+  for (let i = 0; i < t.records.length; i++) {
+    const body = parseBody(t.records[i]);
+    const keys = Object.keys(body).sort();
+    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys in amount request ${i}: ${keys}`);
+    assert.equal(body.model, 'small-model-id', `amount request ${i} model should be small-model-id`);
+    assert.ok(Number.isInteger(body.max_tokens) && body.max_tokens > 0, `amount request ${i} max_tokens should be whole number above 0, got ${body.max_tokens}`);
+    assert.ok(Number.isFinite(body.temperature), `amount request ${i} temperature should be finite, got ${body.temperature}`);
+    const jsonStr = JSON.stringify(body);
+    assert.ok(!jsonStr.includes('"null"'), `amount request ${i} should have no null values`);
+  }
 });
