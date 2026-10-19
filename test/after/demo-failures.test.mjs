@@ -29,7 +29,7 @@ function rewriteTimeouts(text, targetTimeouts) {
     const blockEnd = nextDeclMatch ? start + nextDeclMatch.index : result.length;
     // Search for timeout within this specific decision block only
     const block = result.substring(start, blockEnd);
-    const timeoutMatch = block.match(/timeout [0-9]+(ms|s)\b/);
+    const timeoutMatch = block.match(/timeout [0-9.]+(ms|s|m)\b/);
     if (!timeoutMatch) throw new Error(`could not find "timeout" in decision ${name}`);
     // Replace this occurrence only
     const pos = start + timeoutMatch.index;
