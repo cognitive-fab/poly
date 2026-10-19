@@ -148,3 +148,112 @@ test('DF11.5: recorded mode, unmapped message gets no reply (the program sends n
   const replyEvents = heard.filter((e) => e.kind === 'reply');
   assert.equal(replyEvents.length, 0, `unmapped message should produce no reply (heard ${replyEvents.length} replies)`);
 });
+
+// Cleanup for heavy real-time tests.
+let stubDemoRealClock = null;
+let recordedDemoRealClock = null;
+
+const getStubDemoRealClock = async () => {
+  if (!stubDemoRealClock) {
+    const { assembleDemo } = await import('../../demo/host/assemble.mjs');
+    const workdir = mkdtempSync(join(tmpdir(), 'demo-room-answers-stub-real-'));
+    stubDemoRealClock = {
+      promise: assembleDemo({
+        mode: 'stub-model',
+        workdir,
+        capUsd: 1,
+        startWorkers: true,
+        limits: { minGapMs: 1000, maxMessages: 100 },
+      }),
+      workdir,
+    };
+  }
+  return stubDemoRealClock.promise;
+};
+
+const getRecordedDemoRealClock = async () => {
+  if (!recordedDemoRealClock) {
+    const { recordedOrdersOf } = await import('../../demo/host/recorded-orders.mjs');
+    const { assembleDemo } = await import('../../demo/host/assemble.mjs');
+    const workdir = mkdtempSync(join(tmpdir(), 'demo-room-answers-recorded-real-'));
+    const ordersOf = recordedOrdersOf(FIXTURE);
+    recordedDemoRealClock = {
+      promise: assembleDemo({
+        mode: 'recorded',
+        workdir,
+        ordersOf,
+        size: 4,
+        startWorkers: true,
+        limits: { minGapMs: 1000, maxMessages: 100 },
+      }),
+      workdir,
+    };
+  }
+  return recordedDemoRealClock.promise;
+};
+
+test.after(async () => {
+  if (stubDemoRealClock) {
+    const demo = await stubDemoRealClock.promise;
+    await demo.close();
+    rmSync(stubDemoRealClock.workdir, { recursive: true, force: true });
+  }
+  if (recordedDemoRealClock) {
+    const demo = await recordedDemoRealClock.promise;
+    await demo.close();
+    rmSync(recordedDemoRealClock.workdir, { recursive: true, force: true });
+  }
+});
+
+// Poll for a reply event with optional filter, up to 20 seconds of real time.
+const pollReply = async (heard, filter = null) => {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const events = filter ? heard.filter(filter) : heard.filter((e) => e.kind === 'reply');
+    if (events.length > 0) return events[events.length - 1];
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return undefined;
+};
+
+// ---- DF11.5a: stub mode with real clock, no settle. --------
+
+test('DF11.5a: stub mode, guest gets reply naming order within 20 seconds real time', { timeout: 1_800_000 }, async () => {
+  const demo = await getStubDemoRealClock();
+  const { room } = demo;
+  const g1 = room.join('s1');
+  const heard = [];
+  room.subscribe('s1', (e) => heard.push(e));
+  const order1 = g1.orders[0];
+  assert.ok(order1 && order1.id, 'guest 1 should have at least one order with an id');
+  const result = await room.say('s1', 'where is my order?');
+  assert.deepEqual(result, { ok: true }, 'message should be accepted');
+  const replyEvent = await pollReply(heard);
+  assert.ok(replyEvent, `no reply naming order arrived within 20 s of real time; heard: ${JSON.stringify(heard.map((e) => ({ kind: e.kind, text: e.text?.slice?.(0, 50) })))}`);
+  assert.ok(replyEvent.text.includes(order1.id), `reply text should name guest's order ${order1.id}, got: ${replyEvent.text}`);
+  const countBefore = heard.filter((e) => e.kind === 'reply').length;
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const sayResult = await room.say('s1', 'hello there');
+  assert.deepEqual(sayResult, { ok: true }, 'second message should be accepted');
+  const secondReply = await pollReply(heard, (e) => e.kind === 'reply' && heard.indexOf(e) > heard.indexOf(replyEvent));
+  assert.ok(secondReply, 'second message should receive a reply within 20 seconds');
+  const ackText = 'Thank you, we have your message and will answer it shortly.';
+  assert.notEqual(secondReply.text, ackText, `second reply should not be the acknowledgement "${ackText}", got: ${secondReply.text}`);
+});
+
+// ---- DF11.5a: recorded mode with real clock, ordersOf, and no settle. --------
+
+test('DF11.5a: recorded mode, guest 1 gets fixture answer within 20 seconds real time', { timeout: 1_800_000 }, async () => {
+  const demo = await getRecordedDemoRealClock();
+  const { room } = demo;
+  const g1 = room.join('s1');
+  const heard = [];
+  room.subscribe('s1', (e) => heard.push(e));
+  const statusText = FIXTURE.messages.find((m) => m.id === 'status').text;
+  const expectedAnswerText = FIXTURE.messages.find((m) => m.id === 'status').answer.text;
+  const result = await room.say('s1', statusText);
+  assert.deepEqual(result, { ok: true }, 'message should be accepted');
+  const replyEvent = await pollReply(heard);
+  assert.ok(replyEvent, `no reply arrived within 20 s of real time for fixture status message; heard: ${JSON.stringify(heard.map((e) => ({ kind: e.kind, text: e.text?.slice?.(0, 50) })))}`);
+  assert.equal(replyEvent.text, expectedAnswerText, `reply should match fixture answer text "${expectedAnswerText}", got: ${replyEvent.text}`);
+});

@@ -176,3 +176,115 @@ test('DF11.5: recorded concierge with synthetic orders cites nothing for unmappe
     'a message not in the fixture should throw'
   );
 });
+
+// ---- DF11.2a: ordersDb serves rows with as_of at query time, not fixed --------
+
+test('DF11.2a: every row has as_of equal to the clock at query time', async () => {
+  const { ordersDb } = await import('../demo/host/orders-db.mjs');
+  const { createPersonaPool } = await import('../demo/host/personas.mjs');
+  let t = Date.parse('2026-10-19T12:00:00.000Z');
+  const now = () => t;
+  const pool = createPersonaPool({ size: 2 });
+  const db = ordersDb(pool.all(), { now });
+  const result = await db.query('SELECT "order_id" AS id FROM "orders"', [10]);
+  assert.ok(result.rows.length > 0, `should have rows, got ${result.rows.length}`);
+  const expectedAsOf = new Date(t).toISOString();
+  result.rows.forEach((r) => {
+    assert.equal(r.as_of, expectedAsOf, `row ${r.id} as_of should be ${expectedAsOf}, got ${r.as_of}`);
+  });
+});
+
+test('DF11.2a: after clock moves by a day, next query as_of moves with it', async () => {
+  const { ordersDb } = await import('../demo/host/orders-db.mjs');
+  const { createPersonaPool } = await import('../demo/host/personas.mjs');
+  let t = Date.parse('2026-10-19T12:00:00.000Z');
+  const now = () => t;
+  const pool = createPersonaPool({ size: 2 });
+  const db = ordersDb(pool.all(), { now });
+  const result1 = await db.query('SELECT "order_id" AS id FROM "orders"', [10]);
+  assert.ok(result1.rows.length > 0, `first query should have rows, got ${result1.rows.length}`);
+  const firstAsOf = result1.rows[0].as_of;
+  t += 86_400_000; // advance by one day
+  const result2 = await db.query('SELECT "order_id" AS id FROM "orders"', [10]);
+  assert.ok(result2.rows.length > 0, `second query should have rows, got ${result2.rows.length}`);
+  const secondAsOf = result2.rows[0].as_of;
+  assert.notEqual(secondAsOf, firstAsOf, `as_of should change when clock advances, first: ${firstAsOf}, second: ${secondAsOf}`);
+  const expectedAsOf = new Date(t).toISOString();
+  assert.equal(secondAsOf, expectedAsOf, `second as_of should match new clock time ${expectedAsOf}, got ${secondAsOf}`);
+});
+
+test('DF11.2a: a persona whose order asOf is a month before the clock is served as fresh as the clock', async () => {
+  const { ordersDb } = await import('../demo/host/orders-db.mjs');
+  let t = Date.parse('2026-10-19T12:00:00.000Z');
+  const now = () => t;
+  const oldDate = new Date(t - 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days before t
+  const personas = [{
+    n: 1,
+    id: 'guest-01',
+    principal: 'cust-guest-01',
+    phone: '1555555010',
+    display: '+1 555 555 0101',
+    orders: [{ id: 'o-old', owner: 'cust-guest-01', charge: 'ch_old', paid: 5000, asOf: oldDate, body: 'Old order' }],
+  }];
+  const db = ordersDb(personas, { now });
+  const result = await db.query('SELECT "order_id" AS id FROM "orders"', [10]);
+  assert.equal(result.rows.length, 1, `should have one row, got ${result.rows.length}`);
+  const expectedAsOf = new Date(t).toISOString();
+  assert.equal(result.rows[0].as_of, expectedAsOf, `old order should be served with fresh as_of ${expectedAsOf}, got ${result.rows[0].as_of}`);
+});
+
+test('DF11.2a: order of customers orders is unchanged, owner filter and limit apply, key_0 is unchanged', async () => {
+  const { ordersDb } = await import('../demo/host/orders-db.mjs');
+  let t = Date.parse('2026-10-19T12:00:00.000Z');
+  const now = () => t;
+  const asOfOld = new Date(t - 10 * 24 * 60 * 60 * 1000).toISOString();
+  const asOfNew = new Date(t - 5 * 24 * 60 * 60 * 1000).toISOString();
+  const personas = [
+    {
+      n: 1,
+      id: 'guest-01',
+      principal: 'cust-guest-01',
+      phone: '1555555010',
+      display: '+1 555 555 0101',
+      orders: [
+        { id: 'o-old', owner: 'cust-guest-01', charge: 'ch_old', paid: 5000, asOf: asOfOld, body: 'Order 1' },
+        { id: 'o-new', owner: 'cust-guest-01', charge: 'ch_new', paid: 10000, asOf: asOfNew, body: 'Order 2' },
+      ],
+    },
+    {
+      n: 2,
+      id: 'guest-02',
+      principal: 'cust-guest-02',
+      phone: '1555555020',
+      display: '+1 555 555 0102',
+      orders: [{ id: 'o-guest2', owner: 'cust-guest-02', charge: 'ch_guest2', paid: 3000, asOf: asOfNew, body: 'Order 3' }],
+    },
+  ];
+  const db = ordersDb(personas, { now });
+  const allResult = await db.query('SELECT "order_id" AS id FROM "orders"', [10]);
+  assert.equal(allResult.rows.length, 3, `all orders: should have 3 rows, got ${allResult.rows.length}`);
+  const ownerResult = await db.query('SELECT "order_id" AS id FROM "orders"', ['cust-guest-01', 10]);
+  assert.equal(ownerResult.rows.length, 2, `guest-01 orders: should have 2 rows, got ${ownerResult.rows.length}`);
+  assert.deepEqual(ownerResult.rows.map((r) => r.owner), ['cust-guest-01', 'cust-guest-01'], 'owner filter should apply');
+  assert.deepEqual(ownerResult.rows.map((r) => r.key_0), ['ch_new', 'ch_old'], 'orders should be newest first by stored asOf, charge unchanged');
+  const limitResult = await db.query('SELECT "order_id" AS id FROM "orders"', ['cust-guest-01', 1]);
+  assert.equal(limitResult.rows.length, 1, `guest-01 with limit 1: should have 1 row, got ${limitResult.rows.length}`);
+  assert.equal(limitResult.rows[0].id, 'o-new', `limit 1 should return newest order o-new, got ${limitResult.rows[0].id}`);
+  const expectedAsOf = new Date(t).toISOString();
+  ownerResult.rows.forEach((r) => {
+    assert.equal(r.as_of, expectedAsOf, `row ${r.id} as_of should be ${expectedAsOf}, got ${r.as_of}`);
+  });
+});
+
+test('DF11.2a: with no now option, rows as_of is within a few seconds of Date.now', async () => {
+  const { ordersDb } = await import('../demo/host/orders-db.mjs');
+  const { createPersonaPool } = await import('../demo/host/personas.mjs');
+  const pool = createPersonaPool({ size: 2 });
+  const db = ordersDb(pool.all());
+  const result = await db.query('SELECT "order_id" AS id FROM "orders"', [10]);
+  assert.ok(result.rows.length > 0, `should have rows, got ${result.rows.length}`);
+  result.rows.forEach((r) => {
+    const diff = Math.abs(Date.parse(r.as_of) - Date.now());
+    assert.ok(diff < 5000, `row ${r.id} as_of ${r.as_of} should be within 5s of now, diff was ${diff}ms`);
+  });
+});
