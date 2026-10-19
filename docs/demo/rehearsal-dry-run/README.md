@@ -9,8 +9,8 @@ This is the second dry run of Step 12, made after the owner's rehearsal findings
 | `08-warm-up.txt` | 0.8 | The warm-up replay of `poly-kept` with `--listen-timeout 180000`: O2. |
 | `11-checker-poly-kept.txt` | 1.1 | `CLEAN`, `keyed Idempotency-Key within 24h (K17)`. |
 | `12-checker-mutation.txt` | 1.2 | `PL4003`, the 3-step witness, `executions of the target: 2`, exit 1. |
-| `13-replay-ts-kept.txt` | 1.3 | O2, 10000 refunded of 4000 asked. |
-| `14-replay-poly-kept.txt` | 1.4 | O2, 6000 refunded of 4000 asked, with `started in <n> ms` on both rows. |
+| `13-replay-ts-kept.txt` | 1.3 | O2, 10000 refunded of 4000 asked (observation A1, the amount). |
+| `14-replay-poly-kept.txt` | 1.4 | O2, 6000 refunded of 4000 asked (observation A1), with `started in <n> ms` on both rows. |
 | `15-illustration-ts-kept-nokey-cups.txt` | 1.5 | O1, 2 refund objects, 8000 refunded of 10000. |
 | `16-illustration-poly-kept-nokey-cups.txt` | 1.6 | O3, not admitted, with the build's own `AdmitError`. |
 | `17-fallback-recorded.txt` | 1.7 | The recorded results. |
