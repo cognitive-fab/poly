@@ -71,7 +71,8 @@ test('DF6, DAC13: the model key is read once, by the launcher, and by name; no o
   const named = walk(join(ROOT, 'demo')).filter((f) => /\.(mjs|cjs|js|ts)$/.test(f)).filter((f) => /ANTHROPIC_API_KEY/.test(readFileSync(f, 'utf8'))).map(rel);
   assert.deepEqual(named, ['demo/launch.mjs']);
   const launch = readFileSync(join(ROOT, 'demo', 'launch.mjs'), 'utf8');
-  assert.equal(launch.split('process.env.ANTHROPIC_API_KEY').length - 1, 1, 'read once');
+  // DF10 item 7: the launcher reads the environment through io.env, which defaults to process.env.
+  assert.equal(launch.match(/(?:process|io).env.ANTHROPIC_API_KEY/g).length, 1, 'read once');
 });
 
 // ---- the boundary over demo/ (DAC13) -----------------------------------------------------------------------------------------

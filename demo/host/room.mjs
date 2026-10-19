@@ -8,15 +8,23 @@ import { signedWebhook } from './signing.mjs';
 /**
  * `rt` is the runtime (only `receive` is used); `wa` is the channel's configuration (the app secret and the phone number id);
  * `pool` and `limiter` are personas.mjs and limits.mjs; `settle` runs the runtime until it is quiet (the launcher gives it, a test
- * gives a no-op); `onKill` is called once, with who stopped the room.
+ * gives a no-op); `onKill` is called once, with who stopped the room. `onReply({ session })` is called after each reply delivered to a guest
+ * (the end of a turn, DF10 item 6); `capReached()` is the spend meter's (DF10 item 5): the room is killed with 'spend-cap' when it says so.
  */
-export function createRoom({ rt, wa, now = () => Date.now(), pool, limiter, settle = async () => {}, onKill = () => {}, channel = 'support', url = 'https://room.invalid/channels/support' }) {
+export function createRoom({ rt, wa, now = () => Date.now(), pool, limiter, settle = async () => {}, onKill = () => {}, onReply = () => {}, capReached = () => false, channel = 'support', url = 'https://room.invalid/channels/support' }) {
   const personaOf = new Map(); // session -> persona
   const listeners = new Map(); // session -> Set(fn)
   const histories = new Map(); // session -> replies
   let killed = false;
   let sequence = 0;
 
+  const kill = (by = 'presenter') => {
+    if (killed) return;
+    killed = true;
+    onKill(by);
+    for (const session of listeners.keys()) emit(session, { kind: 'halted', at: now() });
+  };
+  const stopAtCap = () => { if (!killed && capReached()) kill('spend-cap'); };
   const emit = (session, event) => { for (const fn of listeners.get(session) ?? []) fn(event); };
   const sessionOfPersona = (persona) => [...personaOf].find(([, p]) => p === persona)?.[0] ?? null;
 
@@ -30,6 +38,7 @@ export function createRoom({ rt, wa, now = () => Date.now(), pool, limiter, sett
       return persona;
     },
     async say(session, text) {
+      stopAtCap();
       if (killed) return { ok: false, reason: 'halted' };
       const persona = personaOf.get(session);
       if (!persona) return { ok: false, reason: 'no-session' };
@@ -40,6 +49,7 @@ export function createRoom({ rt, wa, now = () => Date.now(), pool, limiter, sett
       const answer = await rt.receive(channel, w);
       if (answer.status !== 200) { undo(); return { ok: false, reason: 'refused' }; }
       await settle();
+      stopAtCap();
       return { ok: true };
     },
     /** A reply for the number `phone`, from the transport: shown to that persona's page, or dropped. */
@@ -51,6 +61,8 @@ export function createRoom({ rt, wa, now = () => Date.now(), pool, limiter, sett
       const event = { kind: 'reply', text, at: now() };
       histories.set(session, [...(histories.get(session) ?? []), event]);
       emit(session, event);
+      onReply({ session });
+      stopAtCap();
       return true;
     },
     subscribe(session, fn) {
@@ -61,12 +73,7 @@ export function createRoom({ rt, wa, now = () => Date.now(), pool, limiter, sett
     },
     history: (session) => (histories.get(session) ?? []).map((e) => ({ ...e })),
     /** The presenter's kill switch: the room stops, for everyone, and stays stopped until the host is started again. */
-    kill(by = 'presenter') {
-      if (killed) return;
-      killed = true;
-      onKill(by);
-      for (const session of listeners.keys()) emit(session, { kind: 'halted', at: now() });
-    },
+    kill,
     stats: () => ({ killed, personas: pool.claimed().length, said: pool.claimed().reduce((n, p) => n + limiter.sent(p.id), 0) }),
   };
 }
