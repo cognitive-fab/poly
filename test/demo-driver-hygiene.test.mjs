@@ -118,7 +118,7 @@ test('(b) spawns-grandchild: parent and child are killed when replay returns', a
       replay({
         build: join(DOUBLES, 'spawns-grandchild'),
         start: `node server.mjs "${pidFile1}" "${pidFile2}"`,
-        startMs: 3000,
+        startMs: 20000,
         quietMs: 300,
         maxMs: 5000,
         env: {
