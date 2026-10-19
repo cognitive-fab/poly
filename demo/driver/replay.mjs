@@ -52,14 +52,14 @@ export function chargesOf(orders) {
 }
 
 /** The WhatsApp Cloud API webhook for one text message, signed with the synthetic app secret as the Cloud API signs. */
-export function webhook(order, text, secret = SYNTHETIC_ENV.WHATSAPP_APP_SECRET) {
+export function webhook(order, text, secret = SYNTHETIC_ENV.WHATSAPP_APP_SECRET, id = 'wamid.DEMO.1') {
   const body = JSON.stringify({
     object: 'whatsapp_business_account',
     entry: [{ id: 'WABA-DEMO-1', changes: [{ field: 'messages', value: {
       messaging_product: 'whatsapp',
       metadata: { display_phone_number: '15550100000', phone_number_id: SYNTHETIC_ENV.WHATSAPP_PHONE_NUMBER_ID },
       contacts: [{ profile: { name: order.name }, wa_id: order.customer }],
-      messages: [{ from: order.customer, id: 'wamid.DEMO.1', timestamp: '1790000000', type: 'text', text: { body: text } }],
+      messages: [{ from: order.customer, id, timestamp: '1790000000', type: 'text', text: { body: text } }],
     } }] }],
   });
   return { body, headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(body).digest('hex')}` } };
@@ -143,8 +143,8 @@ function startBuild({ build, start, port, standInPort, authority, mapNames, extr
   };
 }
 
-async function sendWebhook({ port, path, order, text }) {
-  const w = webhook(order, text);
+async function sendWebhook({ port, path, order, text, id }) {
+  const w = webhook(order, text, undefined, id);
   return new Promise((resolveSend) => {
     const req = http.request({ host: '127.0.0.1', port, path, method: 'POST', headers: { ...w.headers, 'content-length': Buffer.byteLength(w.body) } }, (res) => {
       res.resume();
@@ -153,6 +153,28 @@ async function sendWebhook({ port, path, order, text }) {
     req.on('error', (e) => resolveSend({ error: e.message }));
     req.end(w.body);
   });
+}
+
+/**
+ * DB6 item 8: whether the build's first reply asks the customer to confirm. The word YES (case-sensitive, a whole word) or confirm (any case).
+ * The driver answers a reply that matches with one further message, YES, and never sends anything else.
+ */
+export function needsConfirmation(reply) {
+  return typeof reply === 'string' && (/\bYES\b/.test(reply) || /confirm/i.test(reply));
+}
+
+/** Waits until the stand-in has logged a request after the first `after` ones, and then none for quietMs, or maxMs in all (the wait after the YES). */
+async function settleAfter(standIn, after, { quietMs, maxMs }) {
+  const started = Date.now();
+  let last = after;
+  let changed = Date.now();
+  for (;;) {
+    const n = standIn.log().length;
+    if (n !== last) { last = n; changed = Date.now(); }
+    if (n > after && Date.now() - changed >= quietMs) return;
+    if (Date.now() - started >= maxMs) return;
+    await sleep(50);
+  }
 }
 
 /** Waits until the stand-in has seen requests and then none for quietMs, or maxMs in all. */
@@ -182,12 +204,20 @@ async function drive(ctx, label) {
       const exit = proc.exited();
       return { label, driven: false, why: exit ? `the build exited (code ${exit.code ?? exit.signal}) before it listened on its port` : `the build did not listen on its port within ${startMs} ms`, output: proc.output() };
     }
-    const sent = await sendWebhook({ port, path: webhookPath, order, text: REQUEST.text });
+    const turns = [REQUEST.text];
+    const sent = await sendWebhook({ port, path: webhookPath, order, text: REQUEST.text, id: 'wamid.DEMO.1' });
     await settle(standIn, { quietMs, maxMs });
+    // DB6 item 8: one confirmation turn, and no other. The same customer answers YES if the first reply asks for it.
+    if (needsConfirmation(standIn.report().reply?.[0])) {
+      const before = standIn.log().length;
+      turns.push('YES');
+      await sendWebhook({ port, path: webhookPath, order, text: 'YES', id: 'wamid.DEMO.2' });
+      await settleAfter(standIn, before, { quietMs, maxMs });
+    }
     const numbers = standIn.report();
     // count-by-posts (seeded): a retry that the stand-in replayed counts as a refund.
     if (driverFault === 'count-by-posts') numbers.refunds = numbers.posts.length;
-    return { label, driven: true, webhook: sent, numbers, output: proc.output() };
+    return { label, driven: true, webhook: sent, turns, numbers, output: proc.output() };
   } finally { if (driverFault !== 'reuse-process') proc.stop(); }
 }
 
