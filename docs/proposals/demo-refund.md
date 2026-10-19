@@ -368,6 +368,38 @@ All from committed records; the only live command is the small variant of Act 1.
 
 *What Act 3 proves.* The loop exists and found a real defect, as recorded in `decisions-m7.md`. *What it does not prove:* that mining works on a recorded run (it proposed nothing), or on anything but this synthetic amplification.
 
+### DS3a · Act 3, the materials (Step 11)
+
+DS3 says what is shown. This says what is committed, so that DAC12 can be tested: every figure of Act 3 is cited, and every citation is checked.
+
+1. **The script.** `docs/demo/act3-script.md` holds the six rows of DS3 as the presenter shows them: the time, what is on screen, what it shows. It is written in short declarative sentences, with no em dash, and it ends with a conclusion and a glossary. Each figure in a row of the timeline table is followed by a tag `[R<n>]`, with `<n>` the number of a figure of the next item.
+2. **The figures.** `docs/demo/act3-figures.json` is `{ "v": 1, "figures": [ … ] }`. A figure is `{ "id": "R<n>", "text": …, "sources": [ { "file": …, "quote": … } ], "live": false }`, or, for the one live figure group, `{ "id": …, "text": …, "live": { "command": …, "quote": … } }`. The ids are `R1` to `R17`, each once. `text` is the figure as it is written in the script, in the line that carries its tag. `file` is a committed file of the repository, and `quote` is a string that occurs in it, byte for byte. For a live figure, `command` is the one command that Act 3 runs live, `poly check examples/retry/draft-unguarded.poly` (run as `node packages/poly-check/dist/src/cli.js check examples/retry/draft-unguarded.poly`), and `quote` is a string that occurs in its output. The figures are these:
+
+| id | text | where it is cited | quote |
+|---|---|---|---|
+| R1 | 25 episodes | `docs/decisions-m7.md` | `it has 25 episodes and 126 steps` |
+| R2 | one draft instance | `docs/decisions-m7.md` | `one consequential effect instance, the draft` |
+| R3 | proposes nothing | `docs/decisions-m7.md` | ``with `--all` it returns no candidate`` |
+| R4 | twelve times | `docs/decisions-m7.md`, and `test/after/ex-inbox-loop.test.mjs` | `copied twelve times under fresh episode tokens`; `Array.from({ length: 12 }` |
+| R5 | 37 episodes | `docs/decisions-m7.md` | ``(37 episodes, labelled `synthetic` in the candidates and the certificate)`` |
+| R6 | 13 of 13 runs | `docs/decisions-m7.md`, and `test/after/ex-inbox-loop.test.mjs` | `(mined, 13 of 13 runs)`; `{ holds: 13, of: 13 }` |
+| R7 | reaches 2 | `docs/decisions-m7.md` | `reaches 2, above 1 on this path` |
+| R8 | ten steps | `docs/decisions-m7.md` | `The witness, ten steps on one Todo` |
+| R9 | IT4.4 | `docs/decisions-m7.md` | `itself (IT4.4)` |
+| R10 | attempts 1 | `examples/inbox/inbox.poly` | `retry { attempts 1, base 200ms, timeout 45s }` |
+| R11 | exhausted -> DraftUncertain() | `examples/inbox/inbox.poly` | `exhausted -> DraftUncertain()` |
+| R12 | draft-created-once | `test/after/ex-inbox-loop.test.mjs` | `invariant draft-created-once: made implies` |
+| R13 | too strong as written | `test/after/ex-inbox-loop.test.mjs` | `real, and too strong as written` |
+| R14 | PL4003 | live | `PL4003 UNGUARDED_RETRY` |
+| R15 | executions of the target: 2 | live | `executions of the target: 2, idempotency key: unchanged, deduplication declared: none` |
+| R16 | attempts 5 | live | `may be attempted 5 times` |
+| R17 | Propose, GateAllow, Start (target may execute), HandlerFailed, Start (target may execute), HandlerOk, SettleOk | live | the same string |
+
+3. **The check.** `scripts/act3-check.mjs` exports `checkFigures({ root, figuresFile, scriptFile, live })`, which returns `[{ id, ok, why }]` in the order of the ids, and is also a command: it prints one line per figure, runs the live command once (not when `--no-live` is given), and exits 0 only if every figure holds. A figure holds if (a) its `text` occurs in a line of the script that carries its tag, (b) every `quote` occurs in its `file`, or, for a live figure, in the output of the command, and (c) the file exists. A figure that fails is named with the reason. The rule of DAC12 is that a number that cannot be reproduced is removed from the script, so a figure whose check fails is a failure, never a warning.
+4. **No uncited figure.** A row of the timeline table (a line that starts with `|`, other than the header and the separator) that holds a digit, outside a time in its first cell, outside a tag, and outside a code of letters and digits (`PL4001`, `IT4.4`), carries at least one tag. `checkFigures` also reports each such row, with the id `uncited`. Each id of the figures file is used by the script at least once.
+5. **What is live.** Only `poly check examples/retry/draft-unguarded.poly` (it takes about a second). The recorded inbox run, the mining, the promotions and the `PL4001` witness are not re-run on stage: they are reproduced by `test/after/ex-inbox-loop.test.mjs`, which the full suite runs, and the script cites it.
+6. **The label.** Row 0:10 and row 0:20 of the script say on screen that the corpus is `synthetic`, and the script says that mining proposed nothing on the recorded run.
+
 ### DS4 · What is on screen about limits
 
 A final card, always shown: one model; synthetic data; one run per arm; Stripe replaced by a local mock-up; the program's check holds for the instance printed with the verdict; K17 is an assumption; a re-emitted effect is outside PS23 (L1, S527).
