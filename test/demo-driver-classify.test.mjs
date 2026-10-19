@@ -378,8 +378,8 @@ test('D1: format prints line with amount, refunded and asked numbers', () => {
   };
   const formatted = format(result);
   assert.match(formatted, /amount/i, 'output should contain word "amount"');
-  assert.match(formatted, String(result.amount.refunded), 'output should contain refunded amount');
-  assert.match(formatted, String(REQUEST.amount), 'output should contain requested amount');
+  assert.ok(formatted.includes(String(result.amount.refunded)), 'output should contain refunded amount');
+  assert.ok(formatted.includes(String(REQUEST.amount)), 'output should contain requested amount');
 });
 
 // ---- E. Webhook timeout ----
