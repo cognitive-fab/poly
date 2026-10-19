@@ -9,28 +9,31 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Rewrite the timeouts in the program text: replace the first N timeout lines.
-// The concierge has exactly 2 "timeout 800ms" (classify and amount) and 4 "timeout 2s".
+// Rewrite the timeouts in the program text: replace whatever timeout is in each decision block with the target.
 function rewriteTimeouts(text, targetTimeouts) {
   // targetTimeouts: { classify: '800ms', amount: '800ms', answer: '2s', reply: '2s' }
-  // Find decision blocks by their declaration and replace the timeout within 5 lines.
+  // Find decision blocks and replace whatever timeout is there with the target value.
   const decisions = [
-    { name: 'classify', match: /decision classify[^{]*\{/, oldTimeout: '800ms', newTimeout: targetTimeouts.classify },
-    { name: 'amount', match: /decision amount[^{]*\{/, oldTimeout: '800ms', newTimeout: targetTimeouts.amount },
-    { name: 'answer', match: /decision answer[^{]*\{/, oldTimeout: '2s', newTimeout: targetTimeouts.answer },
-    { name: 'reply', match: /decision reply[^{]*\{/, oldTimeout: '2s', newTimeout: targetTimeouts.reply },
+    { name: 'classify', match: /decision classify[^{]*\{/ },
+    { name: 'amount', match: /decision amount[^{]*\{/ },
+    { name: 'answer', match: /decision answer[^{]*\{/ },
+    { name: 'reply', match: /decision reply[^{]*\{/ },
   ];
   let result = text;
-  for (const { name, match, oldTimeout, newTimeout } of decisions) {
+  for (const { name, match } of decisions) {
     const decl = result.match(match);
     if (!decl) throw new Error(`could not find decision ${name}`);
     const start = decl.index + decl[0].length;
-    // Find the timeout line within the next 500 characters
-    const section = result.substring(start, start + 500);
-    const timeoutMatch = section.match(new RegExp(`timeout ${oldTimeout.replace(/\./g, '\\.')}`));
-    if (!timeoutMatch) throw new Error(`could not find "timeout ${oldTimeout}" in decision ${name}`);
+    // Find the end of this decision block (next decision or end of text)
+    const nextDeclMatch = result.substring(start).match(/\n\s*decision /);
+    const blockEnd = nextDeclMatch ? start + nextDeclMatch.index : result.length;
+    // Search for timeout within this specific decision block only
+    const block = result.substring(start, blockEnd);
+    const timeoutMatch = block.match(/timeout [0-9]+(ms|s)\b/);
+    if (!timeoutMatch) throw new Error(`could not find "timeout" in decision ${name}`);
     // Replace this occurrence only
     const pos = start + timeoutMatch.index;
+    const newTimeout = targetTimeouts[name];
     result = result.substring(0, pos) + `timeout ${newTimeout}` + result.substring(pos + timeoutMatch[0].length);
   }
   return result;
@@ -93,9 +96,12 @@ const create401Demo = async (onFailure) => {
   const workdir = mkdtempSync(join(tmpdir(), 'demo-failures-401-'));
   const sourceDir = mkdtempSync(join(tmpdir(), 'demo-copy-'));
   makeDemoConcierge({ out: sourceDir });
-  // Rewrite price tables to pass the price gate: https source, non-placeholder host, real date, positive prices
-  const smallPrice = { v: 1, provider: 'small', model: 'claude-haiku-5-5', currency: 'usd', perMillionTokens: { input: 100000, output: 500000 }, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
-  const largePrice = { v: 1, provider: 'large', model: 'claude-opus-4-5', currency: 'usd', perMillionTokens: { input: 3000000, output: 15000000 }, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
+  // Read the copy's price tables to get their models (must match calibration maps' fittedFor)
+  const smallOriginal = JSON.parse(readFileSync(join(sourceDir, 'prices', 'small.json'), 'utf8'));
+  const largeOriginal = JSON.parse(readFileSync(join(sourceDir, 'prices', 'large.json'), 'utf8'));
+  // Rewrite only source and readOn to pass the price gate (keep model as-is to match calibration maps)
+  const smallPrice = { ...smallOriginal, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
+  const largePrice = { ...largeOriginal, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
   writeFileSync(join(sourceDir, 'prices', 'small.json'), JSON.stringify(smallPrice));
   writeFileSync(join(sourceDir, 'prices', 'large.json'), JSON.stringify(largePrice));
   // Transport that always returns 401
@@ -124,12 +130,13 @@ test('DF12.1: with example timeouts (800ms), a guest saying "where is my order?"
   const { demo, workdir, sourceDir } = await createExampleTimeoutDemo((line) => failures.push(line));
   const { room } = demo;
   try {
+    const guest = room.join('s1');
     const heard = [];
     room.subscribe('s1', (e) => heard.push(e));
     // Wait for room to settle
     await new Promise((resolve) => setTimeout(resolve, 100));
     const before = Date.now();
-    const result = await room.say('s1', 'where is my order?');
+    const result = await guest.say('where is my order?');
     assert.deepEqual(result, { ok: true });
     // Wait up to 30 seconds for timeout lines to appear
     const maxWait = 30_000;
@@ -143,9 +150,10 @@ test('DF12.1: with example timeouts (800ms), a guest saying "where is my order?"
     assert.ok(!failures.some((l) => l.includes('sk-test-key')), 'no key in failures');
     assert.ok(!failures.some((l) => l.includes('where is my order')), 'no customer text in failures');
     // Guest should not get a reply naming the order (no answer about the order), though generic reply may arrive
+    const guestOrderId = guest.orders[0].id;
     const replyEvents = heard.filter((e) => e.kind === 'reply');
     for (const reply of replyEvents) {
-      assert.ok(!reply.text.includes('o-91'), 'no reply should name the guest order id');
+      assert.ok(!reply.text.includes(guestOrderId), `no reply should name the guest order id ${guestOrderId}`);
     }
   } finally {
     await demo.close();
@@ -160,20 +168,22 @@ test('DF12.5: with demo copy as produced (no timeout rewrite), a guest saying "w
   const { demo, workdir, sourceDir } = await createDemoTimeoutDemo();
   const { room } = demo;
   try {
+    const guest = room.join('s1');
     const heard = [];
     room.subscribe('s1', (e) => heard.push(e));
     // Wait for room to settle
     await new Promise((resolve) => setTimeout(resolve, 100));
     const before = Date.now();
-    const result = await room.say('s1', 'where is my order?');
+    const result = await guest.say('where is my order?');
     assert.deepEqual(result, { ok: true });
     // Wait up to 20 seconds for a reply event with the order id
+    const guestOrderId = guest.orders[0].id;
     const maxWait = 20_000;
-    while (Date.now() - before < maxWait && !heard.find((e) => e.kind === 'reply' && e.text.includes('o-91'))) {
+    while (Date.now() - before < maxWait && !heard.find((e) => e.kind === 'reply' && e.text.includes(guestOrderId))) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    const replyEvent = heard.find((e) => e.kind === 'reply' && e.text.includes('o-91'));
-    assert.ok(replyEvent, `guest should get a reply naming their order within ${maxWait} ms, got events: ${heard.map((e) => e.kind).join(', ')}`);
+    const replyEvent = heard.find((e) => e.kind === 'reply' && e.text.includes(guestOrderId));
+    assert.ok(replyEvent, `guest should get a reply naming their order ${guestOrderId} within ${maxWait} ms, got events: ${heard.map((e) => e.kind).join(', ')}`);
   } finally {
     await demo.close();
     rmSync(workdir, { recursive: true, force: true, maxRetries: 3 });
@@ -188,11 +198,11 @@ test('DF12.4: a 401 response from the model is reported exactly once with the ke
   const { demo, workdir, sourceDir } = await create401Demo((line) => failures.push(line));
   const { room } = demo;
   try {
+    const guest = room.join('s1');
     // Send two messages to ensure the key error is reported only once across both
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const before = Date.now();
-    const result1 = await room.say('s1', 'refund me');
-    const result2 = await room.say('s1', 'how much?');
+    const result1 = await guest.say('refund me');
+    const result2 = await guest.say('how much?');
     assert.deepEqual(result1, { ok: true });
     assert.deepEqual(result2, { ok: true });
     // Wait a few seconds after the first message for failures to be recorded
@@ -221,61 +231,62 @@ test('DF12.5: the instance is unchanged by timeout rewrite; compare example-time
   // admission instances. Timeouts are not part of the state machine, so both should have identical instances.
   // Create fresh assemblies for this comparison (not reusing from other tests to avoid shared teardown issues)
   const { demo: demoExample, workdir: dir1, sourceDir: src1 } = await createExampleTimeoutDemo();
-  const { demo: demoDemo, workdir: dir2, sourceDir: src2 } = await createDemoTimeoutDemo();
 
   try {
-    // Both demos should assemble successfully
-    assert.ok(demoExample.admission, 'example timeout demo should have admission');
-    assert.ok(demoDemo.admission, 'demo copy demo should have admission');
+    const { demo: demoDemo, workdir: dir2, sourceDir: src2 } = await createDemoTimeoutDemo();
 
-    // Extract the machines and their instance states from both admissions
-    const exampleMachines = demoExample.admission.report.files
-      .flatMap((f) => f.machines ? Object.keys(f.machines) : [])
-      .sort();
-    const demoCopyMachines = demoDemo.admission.report.files
-      .flatMap((f) => f.machines ? Object.keys(f.machines) : [])
-      .sort();
+    try {
+      // Both demos should assemble successfully
+      assert.ok(demoExample.admission, 'example timeout demo should have admission');
+      assert.ok(demoDemo.admission, 'demo copy demo should have admission');
 
-    // Both should have the same machines
-    assert.deepEqual(exampleMachines, demoCopyMachines, 'both assemblies should have the same machines');
-
-    // Create a mapping of machine names to their state counts
-    const instanceSignature = (admission) => {
-      const machines = {};
-      for (const file of admission.report.files) {
-        if (file.machines) {
-          for (const [name, machine] of Object.entries(file.machines)) {
-            machines[name] = machine.instance?.states ?? 0;
+      // Create a mapping of machine names to their state counts
+      // report.files[].machines is an array of { machine, instance: { states } }
+      const instanceSignature = (admission) => {
+        const machines = {};
+        for (const file of admission.report.files) {
+          if (Array.isArray(file.machines)) {
+            for (const m of file.machines) {
+              machines[m.machine] = m.instance?.states ?? 0;
+            }
           }
         }
-      }
-      return machines;
-    };
+        return machines;
+      };
 
-    const exampleSig = instanceSignature(demoExample.admission);
-    const copySig = instanceSignature(demoDemo.admission);
+      // Extract the machines and their instance states from both admissions
+      const exampleMachines = Object.keys(instanceSignature(demoExample.admission)).sort();
+      const demoCopyMachines = Object.keys(instanceSignature(demoDemo.admission)).sort();
 
-    // The instances should be identical: { Desk: 2114, Notice: 28, support.Conversation: 342, staff.Conversation: 666, payments.Grant: 13, triage.Route: 6, spend.Budget: 96 }
-    // This is the instance printed at launch for this demo
-    const expectedStates = {
-      Desk: 2114,
-      Notice: 28,
-      'support.Conversation': 342,
-      'staff.Conversation': 666,
-      'payments.Grant': 13,
-      'triage.Route': 6,
-      'spend.Budget': 96,
-    };
+      // Both should have the same machines
+      assert.deepEqual(exampleMachines, demoCopyMachines, 'both assemblies should have the same machines');
 
-    assert.deepEqual(exampleSig, expectedStates, 'example timeout assembly has expected instance states');
-    assert.deepEqual(copySig, expectedStates, 'demo copy assembly has expected instance states');
-    assert.deepEqual(exampleSig, copySig, 'both assemblies have identical instances despite different timeouts');
+      const exampleSig = instanceSignature(demoExample.admission);
+      const copySig = instanceSignature(demoDemo.admission);
+
+      // The instances should be identical: { Desk: 2114, Notice: 28, support.Conversation: 342, staff.Conversation: 666, payments.Grant: 13, triage.Route: 6, spend.Budget: 96 }
+      // This is the instance printed at launch for this demo
+      const expectedStates = {
+        Desk: 2114,
+        Notice: 28,
+        'support.Conversation': 342,
+        'staff.Conversation': 666,
+        'payments.Grant': 13,
+        'triage.Route': 6,
+        'spend.Budget': 96,
+      };
+
+      assert.deepEqual(exampleSig, expectedStates, 'example timeout assembly has expected instance states');
+      assert.deepEqual(copySig, expectedStates, 'demo copy assembly has expected instance states');
+      assert.deepEqual(exampleSig, copySig, 'both assemblies have identical instances despite different timeouts');
+    } finally {
+      await demoDemo.close();
+      rmSync(dir2, { recursive: true, force: true, maxRetries: 3 });
+      rmSync(src2, { recursive: true, force: true, maxRetries: 3 });
+    }
   } finally {
     await demoExample.close();
-    await demoDemo.close();
     rmSync(dir1, { recursive: true, force: true, maxRetries: 3 });
     rmSync(src1, { recursive: true, force: true, maxRetries: 3 });
-    rmSync(dir2, { recursive: true, force: true, maxRetries: 3 });
-    rmSync(src2, { recursive: true, force: true, maxRetries: 3 });
   }
 });
