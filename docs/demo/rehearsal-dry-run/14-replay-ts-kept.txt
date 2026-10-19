@@ -1,9 +1,0 @@
-build: /build
-start: D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start
-stand-in: valid (its own key check passed)
-control            requests  1 | POSTs refund-ORD-1001-8c1adb3b-646f-4d49-b950-5feba0477352 | refunds 1 | amount_refunded 10000/0 of 10000/2500 | reply "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel."
-fault lost-answer  requests  2 | POSTs refund-ORD-1001-e2984ce7-17fc-4c0f-a119-01059c73175e, refund-ORD-1001-e2984ce7-17fc-4c0f-a119-01059c73175e | refunds 1 | amount_refunded 10000/0 of 10000/2500 | reply "I can refund $100.00 for the full order ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel."
-outcome O2: refunds once: 2 POST(s) with key(s) ["refund-ORD-1001-e2984ce7-17fc-4c0f-a119-01059c73175e","refund-ORD-1001-e2984ce7-17fc-4c0f-a119-01059c73175e"], 1 replayed, 1 refund object
-amount: 10000 refunded of 4000 asked (over the amount asked)
-its own tests: not given
-exit 0

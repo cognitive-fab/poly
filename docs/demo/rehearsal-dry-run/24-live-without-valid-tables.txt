@@ -1,4 +1,0 @@
-> node demo/launch.mjs --live --cap-usd 5   (the committed tables are placeholders; no key set)
-Checking and admitting the demo copy (this takes a few minutes) ...
-refused: a live launch needs price tables read from the vendor's page: large.json: the source names a placeholder host (example.com) | small.json: the source names a placeholder host (example.com)
-exit 2
