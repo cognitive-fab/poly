@@ -14,6 +14,13 @@ import { stubTransport } from '../demo/host/stub-model.mjs';
 import { makeProviders, ProviderError, TASKS } from '../demo/host/live-providers.mjs';
 import { createSpendMeter, meteredTransport } from '../demo/host/spend.mjs';
 
+// A NaN or an undefined limit becomes null (or is left out) when the body is written as JSON, so a null anywhere in the parsed body is a defect.
+function noNulls(value, path = 'body') {
+  if (value === null) assert.fail(`${path} is null`);
+  if (Array.isArray(value)) value.forEach((x, i) => noNulls(x, `${path}[${i}]`));
+  else if (typeof value === 'object') for (const [k, x] of Object.entries(value)) noNulls(x, `${path}.${k}`);
+}
+
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 // ---- DF12.2: stubTransport with latency, parseArgs --stub-latency --------
@@ -727,7 +734,8 @@ test('DF13.4: describeFailure cuts the message part at 200 characters', async ()
   const context = { routes: [], secrets: [] };
   const line = describeFailure(row, context);
   // The line should be capped: "decision failed: answer, tier none, HTTP 400 (err): " + up to 200 chars of message
-  const msgPart = line.replace(/^[^:]*HTTP 400 \([^)]*\): /, '');
+  const head = 'HTTP 400 (err): ';
+  const msgPart = line.slice(line.indexOf(head) + head.length);
   assert.equal(msgPart.length, 200, `message part should be 200 chars, got ${msgPart.length}: ${msgPart}`);
 });
 
@@ -790,7 +798,7 @@ test('DF13.1: the answer request has correct structure and content', async () =>
   assert.ok(msg.content.includes('o-9012'), 'content should hold order id o-9012');
   // Check JSON has no null or NaN
   const jsonStr = JSON.stringify(body);
-  assert.ok(!jsonStr.includes('"null"') && jsonStr !== 'null', 'should have no null values');
+  noNulls(body, 'the answer request');
   // NaN becomes null in JSON.stringify, but we check for finite numbers
   const checkFinite = (val) => {
     if (typeof val === 'number') assert.ok(Number.isFinite(val), `${val} is not finite`);
@@ -815,7 +823,7 @@ test('DF13.1: the reply request has correct structure and content', async () => 
   assert.equal(body.temperature, 0.3, `reply temperature should be 0.3, got ${body.temperature}`);
   assert.ok(body.messages.length > 0, 'reply should have messages');
   const jsonStr = JSON.stringify(body);
-  assert.ok(!jsonStr.includes('"null"'), 'reply should have no null values');
+  noNulls(body, 'the reply request');
   const checkFinite = (val) => {
     if (typeof val === 'number') assert.ok(Number.isFinite(val), `${val} is not finite`);
     if (Array.isArray(val)) val.forEach(checkFinite);
@@ -840,6 +848,6 @@ test('DF13.1: the amount request has correct structure and content (vote of 5)',
     assert.ok(Number.isInteger(body.max_tokens) && body.max_tokens > 0, `amount request ${i} max_tokens should be whole number above 0, got ${body.max_tokens}`);
     assert.ok(Number.isFinite(body.temperature), `amount request ${i} temperature should be finite, got ${body.temperature}`);
     const jsonStr = JSON.stringify(body);
-    assert.ok(!jsonStr.includes('"null"'), `amount request ${i} should have no null values`);
+    noNulls(body, `the amount request ${i}`);
   }
 });

@@ -15,10 +15,18 @@ export function routesOf(programText) {
   return routes;
 }
 
+/** DF13 item 4: the API's message part of an HTTP reason: the secrets removed, one line, at most 200 characters. */
+function cleanMessage(text, secrets) {
+  let out = text;
+  for (const s of secrets) if (typeof s === 'string' && s !== '') out = out.split(s).join('[removed]');
+  return out.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
 const REASONS = [
   [/route-exhausted/, () => 'every tier failed'],
   [/timed out after (\d+)\s*ms/, (m) => `timed out after ${m[1]} ms`],
-  [/HTTP (\d{3})(?: \((\w+)\))?/, (m) => (m[2] ? `HTTP ${m[1]} (${m[2]})` : `HTTP ${m[1]}`)],
+  [/the limit \w+ is not a whole number/, () => 'limit is not a whole number'],
+  [/HTTP (\d{3})(?: \((\w+)\)(?:: ([\s\S]+))?)?/, (m, secrets) => (m[2] ? `HTTP ${m[1]} (${m[2]})${m[3] ? `: ${cleanMessage(m[3], secrets)}` : ''}` : `HTTP ${m[1]}`)],
   [/over its share/, () => 'over its input share'],
   [/no ask gave an allowed answer/, () => 'no allowed answer'],
   [/gave no text/, () => 'no text'],
@@ -37,9 +45,9 @@ export function describeFailure(row, context = {}) {
   let reason = 'not recognised';
   for (const [re, say] of REASONS) {
     const m = re.exec(row.last_error);
-    if (m) { reason = say(m); break; }
+    if (m) { reason = say(m, secrets); break; }
   }
-  if (secrets.some((s) => typeof s === 'string' && s !== '' && row.last_error.includes(s))) reason += ' [removed]';
+  if (!reason.includes('[removed]') && secrets.some((s) => typeof s === 'string' && s !== '' && row.last_error.includes(s))) reason += ' [removed]';
   return `decision failed: ${decision}, tier ${tier}, ${reason}`;
 }
 

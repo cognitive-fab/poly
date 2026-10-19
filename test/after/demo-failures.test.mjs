@@ -40,6 +40,13 @@ function rewriteTimeouts(text, targetTimeouts) {
 }
 
 // Create a demo assembly with the example's timeouts (rewritten) and onFailure callback.
+// A NaN or an undefined limit becomes null (or is left out) when the body is written as JSON, so a null anywhere in the parsed body is a defect.
+function noNulls(value, path = 'body') {
+  if (value === null) assert.fail(`${path} is null`);
+  if (Array.isArray(value)) value.forEach((x, i) => noNulls(x, `${path}[${i}]`));
+  else if (typeof value === 'object') for (const [k, x] of Object.entries(value)) noNulls(x, `${path}.${k}`);
+}
+
 const createExampleTimeoutDemo = async (onFailure) => {
   const { assembleDemo } = await import('../../demo/host/assemble.mjs');
   const { makeDemoConcierge } = await import('../../demo/scripts/make-demo-concierge.mjs');
@@ -325,7 +332,8 @@ test('DF13.1: a guest saying "where is my order?" triggers an answer request wit
   };
 
   const demo = await assembleDemo({
-    mode: 'stub-model',
+    mode: 'live',
+    apiKey: 'stub-key-for-test',
     workdir,
     capUsd: 5,
     now: () => Date.now(),
@@ -383,7 +391,7 @@ test('DF13.1: a guest saying "where is my order?" triggers an answer request wit
 
     // Check for no null values
     const jsonStr = JSON.stringify(answerRequest);
-    assert.ok(!jsonStr.includes('"null"'), 'should have no null values');
+    noNulls(answerRequest, 'the answer request');
 
     // Check all numbers are finite
     const checkFinite = (val) => {

@@ -32,6 +32,17 @@ function objectIn(text) {
   try { const v = JSON.parse(text.slice(from, to + 1)); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
 }
 
+/** DF13 item 3: the API's own message, kept to one line of at most 200 characters, with the key (if it is ever there) removed. */
+const cleanMessage = (message, apiKey) => String(message).split(apiKey).join('[removed]').replace(/\s+/g, ' ').trim().slice(0, 200);
+
+/** DF13 item 2: a limit that is not a whole number above 0 is an error before any ask (an undefined one would drop `max_tokens` from the body, a NaN would make it null). */
+function checkLimits(limits) {
+  for (const name of ['maxInputTokens', 'maxTokens']) {
+    const v = limits?.[name];
+    if (!Number.isSafeInteger(v) || v <= 0) throw new ProviderError(`the limit ${name} is not a whole number above 0 (${String(v).slice(0, 20)}): nothing was asked`);
+  }
+}
+
 const ACK = 'Thank you, we have your message and will answer it shortly.';
 const NOTED = 'Noted.';
 
@@ -56,7 +67,11 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
     if (r.status === 401 || r.status === 403) throw new ProviderAuthError(r.status);
     let body = null;
     try { body = JSON.parse(r.body); } catch { body = null; }
-    if (r.status !== 200 || !body) throw new ProviderError(`the model provider answered HTTP ${r.status}${typeof body?.error?.type === 'string' ? ` (${body.error.type})` : ''}`, r.status);
+    if (r.status !== 200 || !body) {
+      const type = typeof body?.error?.type === 'string' ? ` (${body.error.type})` : '';
+      const said = typeof body?.error?.message === 'string' && body.error.message.trim() !== '' && type ? `: ${cleanMessage(body.error.message, apiKey)}` : '';
+      throw new ProviderError(`the model provider answered HTTP ${r.status}${type}${said}`, r.status);
+    }
     const text = Array.isArray(body.content) ? body.content.filter((c) => c?.type === 'text').map((c) => String(c.text)).join('') : '';
     const input = Number(body.usage?.input_tokens);
     const output = Number(body.usage?.output_tokens);
@@ -85,6 +100,7 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
   /** n asks with the declared limits shared out; the first ask checks the estimate against the tokens the API counts. */
   async function vote(model, q, materials, { shape, allowed, extra, parse }) {
     const limits = q.limits ?? defaults;
+    checkLimits(limits);
     const perInput = Math.floor(limits.maxInputTokens / samples);
     const perOutput = Math.floor(limits.maxTokens / samples);
     if (perOutput < 8) throw new ProviderError(`the declared output limit (${limits.maxTokens}) is too small for ${samples} asks`);
@@ -121,6 +137,7 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
 
   async function text(model, q, materials, extra = '') {
     const limits = q.limits ?? defaults;
+    checkLimits(limits);
     const { system, user } = prompt(q, materials, q.decision === 'reply' ? '{"answer": "<the reply>"}' : '{"answer": "<the answer>", "cites": ["<order id>", ...]}', null, limits.maxInputTokens, extra);
     let one;
     try { one = await ask(model, system, user, limits.maxTokens, 0.3); } catch (e) { if (e instanceof ProviderAuthError) onAuthFailure(e); throw e; }
