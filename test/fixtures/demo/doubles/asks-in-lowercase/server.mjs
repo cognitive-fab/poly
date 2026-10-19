@@ -6,8 +6,13 @@ import https from 'node:https';
 const orders = JSON.parse(readFileSync(new URL('../../../../demo/baseline/orders.json', import.meta.url), 'utf8'));
 const logPath = process.argv[2];
 
-// Initialize log
-writeFileSync(logPath, JSON.stringify({ ev: 'start' }) + '\n');
+if (logPath) {
+  try {
+    appendFileSync(logPath, JSON.stringify({ ev: 'start' }) + '\n');
+  } catch (e) {
+    // ignore
+  }
+}
 
 function call(host, path, headers, body) {
   return new Promise((resolve, reject) => {
@@ -31,8 +36,13 @@ async function handle(message) {
   const from = message.from;
   const id = message.id;
 
-  // Log inbound message
-  appendFileSync(logPath, JSON.stringify({ ev: 'in', id, from, text }) + '\n');
+  if (logPath) {
+    try {
+      appendFileSync(logPath, JSON.stringify({ ev: 'in', id, from, text }) + '\n');
+    } catch (e) {
+      // ignore
+    }
+  }
 
   const order = orders.find((o) => o.order === /ORD-\d+/.exec(text)?.[0] && o.customer === from);
   const m = /refund of (\d+)\.(\d\d)/.exec(text);

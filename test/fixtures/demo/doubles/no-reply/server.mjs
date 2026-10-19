@@ -4,8 +4,14 @@ import http from 'node:http';
 
 const logPath = process.argv[2];
 
-// Initialize log
-writeFileSync(logPath, JSON.stringify({ ev: 'start' }) + '\n');
+// Append start marker to log (do not truncate)
+if (logPath) {
+  try {
+    appendFileSync(logPath, JSON.stringify({ ev: 'start' }) + '\n');
+  } catch (e) {
+    // ignore
+  }
+}
 
 http.createServer((req, res) => {
   const chunks = [];

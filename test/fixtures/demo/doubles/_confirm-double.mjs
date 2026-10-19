@@ -24,8 +24,14 @@ const tell = (to, text) => call('graph.facebook.com', `/v19.0/${process.env.WHAT
   { authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, 'content-type': 'application/json' }, JSON.stringify({ messaging_product: 'whatsapp', to, text: { body: text } })).catch(() => {});
 
 export function startConfirmDouble({ logPath, askText, refundAfterConfirms = 1, keyBehaviour = 'stable' }) {
-  // Initialize log with start marker
-  writeFileSync(logPath, JSON.stringify({ ev: 'start' }) + '\n');
+  // Append start marker to log (do not truncate, as the test creates fresh logs)
+  if (logPath) {
+    try {
+      appendFileSync(logPath, JSON.stringify({ ev: 'start' }) + '\n');
+    } catch (e) {
+      // ignore logging errors
+    }
+  }
 
   // Track pending refund requests: customer -> { order, cents, confirmCount }
   const pending = new Map();
