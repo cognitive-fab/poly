@@ -62,7 +62,8 @@ export function checkFigures({ root = ROOT, figuresFile = join(root, FIGURES), s
         ? { id: figure.id, ok: true, why: 'the live command prints it' }
         : { id: figure.id, ok: false, why: `the live command does not print "${figure.live.quote}"` };
     }
-    for (const source of figure.sources ?? []) {
+    if (!figure.sources?.length) return { id: figure.id, ok: false, why: 'no citation' };
+    for (const source of figure.sources) {
       const file = join(root, source.file);
       if (!existsSync(file)) return { id: figure.id, ok: false, why: `the cited file is missing: ${source.file}` };
       if (!readFileSync(file, 'utf8').includes(source.quote)) return { id: figure.id, ok: false, why: `the quote is not in ${source.file}: "${source.quote}"` };
