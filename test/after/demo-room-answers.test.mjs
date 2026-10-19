@@ -49,6 +49,7 @@ const getRecordedDemo = async () => {
         now: clock.now,
         ordersOf,
         size: 4,
+        limits: { minGapMs: 1000, maxMessages: 100 }, // the test sends more than one message a guest in a few simulated seconds
       }).then((d) => Object.assign(d, { clock })),
       workdir,
     };

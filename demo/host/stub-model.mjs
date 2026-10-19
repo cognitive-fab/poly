@@ -30,12 +30,15 @@ export function stubTransport() {
       const user = (body.messages ?? []).map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
       const task = taskOf(`${system}\n${user}`);
       const text = customerText(user);
+      // Only the text after the message tags holds orders: a tag typed inside the message is the customer's text (DF10 item 3).
+      const ids = [...user.replace(/<message>\n[\s\S]*\n<\/message>/g, '').matchAll(/<order id="([^"]+)">/g)].map((m) => m[1]);
       let answer;
       if (task === 'classify') answer = { answer: /refund|money back/i.test(text) ? 'Refund' : /order|where|status/i.test(text) ? 'Status' : 'Other' };
       else if (task === 'amount') {
-        // Only the text after the message tags holds orders: a tag typed inside the message is the customer's text (DF10 item 3).
-        const id = /<order id="([^"]+)">/.exec(user.replace(/<message>\n[\s\S]*\n<\/message>/g, ''))?.[1];
-        answer = { value: Number(/\d+/.exec(text)?.[0] ?? 0), cites: id ? [id] : [] };
+        answer = { value: Number(/\d+/.exec(text)?.[0] ?? 0), cites: ids.slice(0, 1) };
+      } else if (task === 'answer') {
+        // DF11 item 2: the program refuses an answer that cites no order, so the stub cites every order it was given.
+        answer = { answer: ids.length ? `Your order ${ids.join(', ')} is on file.` : SENTENCE, cites: ids };
       } else answer = { answer: SENTENCE, cites: [] };
       const out = { type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: JSON.stringify(answer) }], usage: { input_tokens: Math.ceil((system.length + user.length) / 4), output_tokens: 20 } };
       return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(out) };

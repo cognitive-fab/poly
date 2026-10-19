@@ -14,13 +14,14 @@
 //
 // DF10: --live and --stub-model need --cap-usd, at most 10 dollars. The spend never exceeds it, the room stops when it is reached, and a
 // spend line follows each reply. --stub-model runs the live path over a local stub: no key, no network.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { assembleDemo, LaunchRefused } from './host/assemble.mjs';
+import { recordedOrdersOf } from './host/recorded-orders.mjs';
 import { formatSpend, parseCap } from './host/spend.mjs';
 import { startRoomServer } from './host/server.mjs';
 import { liveTransport } from './host/live-transport.mjs';
@@ -51,6 +52,8 @@ export function parseArgs(argv) {
   return out;
 }
 
+const RECORDED_ANSWERS = fileURLToPath(new URL('../test/fixtures/concierge/answers.json', import.meta.url));
+
 const lanAddresses = () => Object.values(networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
 
 export async function main(argv, io = {}) {
@@ -72,6 +75,8 @@ export async function main(argv, io = {}) {
   try {
     io.out('Checking and admitting the demo copy (this takes a few minutes) ...');
     demo = await assembleDemo({
+      // DF11 item 3: the recorded room's first two guests own the orders its recorded answers cite.
+      ordersOf: args.mode === 'recorded' ? recordedOrdersOf(JSON.parse(readFileSync(RECORDED_ANSWERS, 'utf8'))) : null,
       mode: args.mode, workdir, apiKey, modelTransport: args.mode === 'live' ? liveTransport() : null, size: args.size, startWorkers: true, capUsd: args.capUsd ?? null,
       onReply: () => { if (demo?.meter) io.out(formatSpend(demo.meter)); },
       onKill: (by) => { if (by === 'spend-cap' && demo?.meter) io.out(`spend cap reached: ${formatSpend(demo.meter)}. The room has stopped.`); },
