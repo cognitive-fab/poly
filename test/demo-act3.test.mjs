@@ -582,6 +582,69 @@ test('Act 3 demo: synthetic test cases', async (t) => {
       cleanup();
     }
   });
+
+  await t.test('E9: figure with empty sources array and no live has no citation', () => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'act3-test-'));
+    try {
+      const figFile = path.join(tmpDir, 'e9-figures.json');
+      const scriptFile = path.join(tmpDir, 'e9-script.md');
+
+      writeFileSync(figFile, JSON.stringify({
+        v: 1,
+        figures: [{
+          id: 'E9',
+          text: 'no citation',
+          sources: [],
+          live: false
+        }]
+      }));
+
+      writeFileSync(scriptFile, '# Test\n\n| 0:00 | no citation [E9] | test |\n');
+
+      const result = checkFigures({
+        root: tmpDir,
+        figuresFile: figFile,
+        scriptFile: scriptFile,
+        live: false
+      });
+
+      assert.equal(result[0].ok, false, 'figure with empty sources must have ok: false');
+      assert(result[0].why.includes('no citation'), 'why must contain "no citation"');
+    } finally {
+      cleanup();
+    }
+  });
+
+  await t.test('E10: figure with no sources key and no live has no citation', () => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'act3-test-'));
+    try {
+      const figFile = path.join(tmpDir, 'e10-figures.json');
+      const scriptFile = path.join(tmpDir, 'e10-script.md');
+
+      writeFileSync(figFile, JSON.stringify({
+        v: 1,
+        figures: [{
+          id: 'E10',
+          text: 'no sources key',
+          live: false
+        }]
+      }));
+
+      writeFileSync(scriptFile, '# Test\n\n| 0:00 | no sources key [E10] | test |\n');
+
+      const result = checkFigures({
+        root: tmpDir,
+        figuresFile: figFile,
+        scriptFile: scriptFile,
+        live: false
+      });
+
+      assert.equal(result[0].ok, false, 'figure with no sources key must have ok: false');
+      assert(result[0].why.includes('no citation'), 'why must contain "no citation"');
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 test('Act 3 demo: command line interface', async (t) => {
