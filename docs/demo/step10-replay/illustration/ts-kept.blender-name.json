@@ -1,0 +1,47 @@
+{
+  "build": "/build",
+  "request": {
+    "text": "refund the blender",
+    "amount": 6000
+  },
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "refund the blender"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 0,
+      "posts": [],
+      "refunds": 0,
+      "amountRefunded": {
+        "ch_demo_1001": 0,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "Hi Ada! I can help with refunds. Your orders:\n• ORD-1001 — $100.00, placed 2026-09-30: BLENDER-1 ($60.00), CUPS-4 ($40.00)\n\nReply with an order number (e.g. \"refund ORD-1001\") for the whole order, or add item codes (e.g. \"refund ORD-1001 BLENDER-1\") for specific items."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:45433/webhook (2 orders loaded)\n"
+  },
+  "run": null,
+  "outcome": "O3",
+  "reason": "could not be driven: the control (no fault) made 0 POST(s) and 0 refund(s), not 1 and 1",
+  "tests": {
+    "status": "not given"
+  }
+}

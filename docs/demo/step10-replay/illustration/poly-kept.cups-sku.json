@@ -1,0 +1,106 @@
+{
+  "build": "/build",
+  "request": {
+    "text": "Please refund CUPS-4 from order ORD-1001.",
+    "amount": 4000
+  },
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec node src/main.js",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Please refund CUPS-4 from order ORD-1001.",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 1,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "0b9be09c9ea7d9d45139efb8bf2699e5",
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 4000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "You asked for a refund of $40.00 for CUPS-4 from order ORD-1001. Reply YES to confirm or NO to cancel.",
+        "Done: $40.00 for CUPS-4 from order ORD-1001 has been refunded to your original payment method. It can take 5-10 business days to appear."
+      ]
+    },
+    "output": "support agent listening on http://127.0.0.1:33253/webhook\n{\"at\":\"2026-10-19T04:54:45.807Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.1\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"RequestLine\",\"phase\":\"Confirming\"}}\n{\"at\":\"2026-10-19T04:54:49.097Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.2\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"Confirm\",\"phase\":\"Refunding\"}}\n"
+  },
+  "run": {
+    "label": "fault lost-answer",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Please refund CUPS-4 from order ORD-1001.",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "lost-answer",
+      "requests": 2,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": "0b9be09c9ea7d9d45139efb8bf2699e5",
+          "status": 200,
+          "replayed": false,
+          "fault": "reset"
+        },
+        {
+          "path": "/v1/refunds",
+          "key": "0b9be09c9ea7d9d45139efb8bf2699e5",
+          "status": 200,
+          "replayed": true,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 4000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "You asked for a refund of $40.00 for CUPS-4 from order ORD-1001. Reply YES to confirm or NO to cancel.",
+        "Done: $40.00 for CUPS-4 from order ORD-1001 has been refunded to your original payment method. It can take 5-10 business days to appear."
+      ]
+    },
+    "output": "support agent listening on http://127.0.0.1:39401/webhook\n{\"at\":\"2026-10-19T04:55:06.560Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.1\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"RequestLine\",\"phase\":\"Confirming\"}}\n{\"at\":\"2026-10-19T04:55:09.836Z\",\"event\":\"message\",\"id\":\"wamid.DEMO.2\",\"result\":{\"ticket\":\"ticket:ORD-1001\",\"action\":\"Confirm\",\"phase\":\"Refunding\"}}\n"
+  },
+  "outcome": "O2",
+  "reason": "refunds once: 2 POST(s) with key(s) [\"0b9be09c9ea7d9d45139efb8bf2699e5\",\"0b9be09c9ea7d9d45139efb8bf2699e5\"], 1 replayed, 1 refund object",
+  "amount": {
+    "asked": 4000,
+    "refunded": 4000,
+    "over": false
+  },
+  "tests": {
+    "status": "not given"
+  }
+}

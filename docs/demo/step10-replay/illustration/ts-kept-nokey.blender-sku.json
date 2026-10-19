@@ -1,0 +1,106 @@
+{
+  "build": "/build",
+  "request": {
+    "text": "Please refund BLENDER-1 from order ORD-1001.",
+    "amount": 6000
+  },
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Please refund BLENDER-1 from order ORD-1001.",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 1,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 6000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $60.00 for BLENDER-1 from ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Done! Your refund of $60.00 for ORD-1001 has been issued (ref re_standin_0001). It usually appears on your statement within 5–10 business days."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:36707/webhook (2 orders loaded)\nrefund re_standin_0001 succeeded: ORD-1001 6000\n"
+  },
+  "run": {
+    "label": "fault lost-answer",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Please refund BLENDER-1 from order ORD-1001.",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "lost-answer",
+      "requests": 2,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 200,
+          "replayed": false,
+          "fault": "reset"
+        },
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 400,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 6000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $60.00 for BLENDER-1 from ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Sorry, I couldn't issue that refund automatically. I've flagged it for our support team, who will follow up with you."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:33027/webhook (2 orders loaded)\nrefund rejected for ORD-1001: Refund amount (60.00) is greater than unrefunded amount on charge (40.00) — needs human follow-up\n"
+  },
+  "outcome": "O2",
+  "reason": "refunds once: 2 POST(s) with key(s) [null,null], 0 replayed, 1 refund object",
+  "amount": {
+    "asked": 6000,
+    "refunded": 6000,
+    "over": false
+  },
+  "tests": {
+    "status": "not given"
+  }
+}

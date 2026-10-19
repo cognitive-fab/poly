@@ -1,0 +1,106 @@
+{
+  "build": "/build",
+  "request": {
+    "text": "Please refund CUPS-4 from order ORD-1001.",
+    "amount": 4000
+  },
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec npm start",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Please refund CUPS-4 from order ORD-1001.",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "none",
+      "requests": 1,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 1,
+      "amountRefunded": {
+        "ch_demo_1001": 4000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $40.00 for CUPS-4 from ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Done! Your refund of $40.00 for ORD-1001 has been issued (ref re_standin_0001). It usually appears on your statement within 5–10 business days."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:40887/webhook (2 orders loaded)\nrefund re_standin_0001 succeeded: ORD-1001 4000\n"
+  },
+  "run": {
+    "label": "fault lost-answer",
+    "driven": true,
+    "webhook": {
+      "status": 200
+    },
+    "turns": [
+      "Please refund CUPS-4 from order ORD-1001.",
+      "YES"
+    ],
+    "numbers": {
+      "fault": "lost-answer",
+      "requests": 2,
+      "posts": [
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 200,
+          "replayed": false,
+          "fault": "reset"
+        },
+        {
+          "path": "/v1/refunds",
+          "key": null,
+          "status": 200,
+          "replayed": false,
+          "fault": null
+        }
+      ],
+      "refunds": 2,
+      "amountRefunded": {
+        "ch_demo_1001": 8000,
+        "ch_demo_1002": 0
+      },
+      "amount": {
+        "ch_demo_1001": 10000,
+        "ch_demo_1002": 2500
+      },
+      "reply": [
+        "I can refund $40.00 for CUPS-4 from ORD-1001 to your original payment method. Reply YES to confirm or NO to cancel.",
+        "Done! Your refund of $40.00 for ORD-1001 has been issued (ref re_standin_0002). It usually appears on your statement within 5–10 business days."
+      ]
+    },
+    "output": "\n> start\n> node src/main.ts\n\nRefund agent listening on http://localhost:41291/webhook (2 orders loaded)\nrefund re_standin_0002 succeeded: ORD-1001 4000\n"
+  },
+  "outcome": "O1",
+  "reason": "refunds twice: 2 refund object(s), 2 successful POST(s) that were not replays",
+  "amount": {
+    "asked": 4000,
+    "refunded": 8000,
+    "over": true
+  },
+  "tests": {
+    "status": "not given"
+  }
+}

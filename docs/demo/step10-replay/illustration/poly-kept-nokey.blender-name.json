@@ -1,0 +1,25 @@
+{
+  "build": "/build",
+  "request": {
+    "text": "refund the blender",
+    "amount": 6000
+  },
+  "fault": "lost-answer",
+  "start": "D=$(mktemp -d) && cp -r /build/. $D && cd $D && export HOME=/tmp npm_config_cache=/tmp/.npm && exec node src/main.js",
+  "orders": "/build/orders.json",
+  "standIn": {
+    "valid": true
+  },
+  "control": {
+    "label": "control",
+    "driven": false,
+    "why": "the build exited (code 1) before it listened on its port",
+    "output": "file:///tmp/tmp.PRo4qFZibZ/node_modules/@poly/check/dist/src/admit.js:278\n        throw new AdmitError(`not admitted: the verdict is FINDINGS, and ${[...problems, ...missing].join('; ')} (PT12.5)`);\n              ^\n\nAdmitError: not admitted: the verdict is FINDINGS, and support.Ticket PL4003 refund (witness 2de37158e45d) has no signed acceptance (PT12.5)\n    at acceptedFindings (file:///tmp/tmp.PRo4qFZibZ/node_modules/@poly/check/dist/src/admit.js:278:15)\n    at admit (file:///tmp/tmp.PRo4qFZibZ/node_modules/@poly/check/dist/src/admit.js:213:24)\n    at async boot (file:///tmp/tmp.PRo4qFZibZ/src/runtime.js:23:20)\n    at async start (file:///tmp/tmp.PRo4qFZibZ/src/server.js:35:14)\n    at async file:///tmp/tmp.PRo4qFZibZ/src/main.js:17:20\n\nNode.js v24.22.0\n"
+  },
+  "run": null,
+  "outcome": "O3",
+  "reason": "could not be driven: the build exited (code 1) before it listened on its port",
+  "tests": {
+    "status": "not given"
+  }
+}
