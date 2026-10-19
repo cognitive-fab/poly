@@ -35,3 +35,7 @@ Every free step of the runbook ran as the runbook says, and the screens match th
 - **Dry run:** the free steps of the runbook, run with no key and no network except the local container.
 - **Stub model:** a local program that answers where the model provider would, at no cost.
 - **Cap:** the most a launch may spend, set with `--cap-usd`, at most 10 dollars.
+
+## Windows PowerShell 5.1
+
+`51-windows-powershell-5.1.txt` is a second run of the steps that changed, in Windows PowerShell 5.1 (the owner's window): the setup checks, the replay helper and the four replays, the JSON read of step 1.7 (`Out-String | ConvertFrom-Json`), the figures of Act 3, and the key form of steps 2.5 and 2.6. The key form was run with a dummy value in place of the secure string that the prompt returns. It left the environment variable set, then no variable named `secure`, and no other variable holding the value, and the removal step cleared it.

@@ -13,7 +13,7 @@ Both kept builds refund once under the lost answer. The retry of each carried th
 | `ts-kept` (TypeScript) | 1 | same key, replayed | O2, refunds once |
 | `poly-kept` (poly) | 1 | same key, replayed | O2, refunds once |
 
-Both refund the wrong amount (observation A1). The customer asked for 40.00 of a 100.00 order. `ts-kept` refunded 100.00, the whole order. `poly-kept` refunded 60.00, the blender, because it read "blender" in the request as an item. The checker does not cover the amount. In the poly build the machine carries which lines are refunded, and `poly check` proves that no line is refunded twice. The amount is computed in a JavaScript handler, outside the machine. What `poly check` says is about repetition, not about how much.
+Both refund the wrong amount (observation A1). The customer asked for 40.00 of a 100.00 order. `ts-kept` refunded 100.00, the whole order. `poly-kept` refunded 60.00, the blender, because it read "blender" in the request as an item. The checker does not cover the amount. In the poly build the machine carries which lines are refunded, and `poly check` checks, over its finite model, that no line is refunded twice. The amount is computed in a JavaScript handler, outside the machine. What `poly check` says is about repetition, not about how much.
 
 The records are `docs/demo/step10-replay.md` and `docs/demo/step10-replay/`.
 

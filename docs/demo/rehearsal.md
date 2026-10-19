@@ -1,6 +1,6 @@
 # Rehearsal runbook
 
-This is the runbook for the owner's rehearsal of the refund demo. It is followed in your own PowerShell 7 window, act by act. Each step has three parts: the command, what the screen should show, and what to do if it does not.
+This is the runbook for the owner's rehearsal of the refund demo. It is followed in your own Windows PowerShell 5.1 window, act by act. Each step has three parts: the command, what the screen should show, and what to do if it does not.
 
 Nothing here costs money until step 2.5, and step 2.5 is capped. Acts 1 and 3 never call a model. Act 2 calls a model only in step 2.5.
 
@@ -8,7 +8,9 @@ The dry run of every free step is recorded in `docs/demo/rehearsal-dry-run/`. Co
 
 ## Conventions
 
-- Commands are for PowerShell 7 (`pwsh`). Run them from the repository root unless a step says otherwise.
+- Commands are for Windows PowerShell 5.1 (the `powershell.exe` that comes with Windows). They use no syntax that only PowerShell 7 has: no `&&`, no `||`, no ternary operator, no `-MaskInput`. Run them from the repository root unless a step says otherwise.
+- A native program (`docker`, `node`, `npm`) that writes to the error stream can show its lines in red in some 5.1 hosts. That is not a failure. The `exit` line or the program's own verdict is the result.
+- If the checker's output shows odd characters in place of symbols, run `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` once in the window.
 - Placeholders are in angle brackets: `<paste your key>`. You replace them. Nothing in this file is a key.
 - A step that shows `exit 1` is not failing when it says so. A checker answers `FINDINGS` with exit 1 by design.
 - Never paste a key into a file, a commit, a chat or this runbook. The key lives in one environment variable, in one window, for one act.
@@ -197,7 +199,7 @@ To show why, ask for the JSON and print the build's own words:
 
 ```powershell
 $vol = '{0}\.poly-demo\mutation\poly-kept-nokey:/build:ro' -f $HOME
-$r = docker run --rm --network none --add-host api.stripe.com:127.0.0.1 --add-host graph.facebook.com:127.0.0.1 --read-only --tmpfs /tmp -v $vol $img replay --build /build --start $node --request-text 'Please refund CUPS-4 from order ORD-1001.' --request-amount 4000 --json | ConvertFrom-Json
+$r = docker run --rm --network none --add-host api.stripe.com:127.0.0.1 --add-host graph.facebook.com:127.0.0.1 --read-only --tmpfs /tmp -v $vol $img replay --build /build --start $node --request-text 'Please refund CUPS-4 from order ORD-1001.' --request-amount 4000 --json | Out-String | ConvertFrom-Json
 $r.control.output
 ```
 
@@ -289,13 +291,17 @@ You should see `Checking and admitting the demo copy` and then either a `refused
 
 ### 2.5 The live launch (this costs money, up to the cap)
 
-Set the key in this window only. Use the masked prompt, so the key is not echoed and is not saved in your history:
+Set the key in this window only. Use the masked prompt, so the key is not echoed and is not saved in your history. The key is read as a secure string and turned into plain text only inside the environment variable. No other variable holds it, and `$secure` is removed at once:
 
 ```powershell
-$env:ANTHROPIC_API_KEY = Read-Host -MaskInput 'Anthropic API key'
+$secure = Read-Host -AsSecureString 'Anthropic API key'
+$env:ANTHROPIC_API_KEY = [System.Net.NetworkCredential]::new('', $secure).Password
+Remove-Variable secure
+if ($env:ANTHROPIC_API_KEY) { 'key set, ' + $env:ANTHROPIC_API_KEY.Length + ' characters' } else { 'KEY NOT SET' }
+Get-Variable secure -ErrorAction SilentlyContinue
 ```
 
-You type or paste the key at the prompt and press Enter. If you cannot use the prompt, the plain form is below. It puts the key in your history, so use it only if you must, and clear the line afterwards (step 2.6):
+You type or paste the key at the prompt and press Enter. The last two lines print the length of the key (never the key) and nothing for `$secure`. If the variable `secure` is listed, run `Remove-Variable secure` again. If you cannot use the prompt, the plain form is below. It puts the key in your history, so use it only if you must, and clear the line afterwards (step 2.6):
 
 ```powershell
 $env:ANTHROPIC_API_KEY = '<paste your key>'
