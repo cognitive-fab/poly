@@ -1,0 +1,50 @@
+support.poly:163  PL3002 STEP_PROPERTY  no-reissue-0
+  never no-reissue-0 is violated by Confirm
+  witness (6 steps):
+    Open(1)            New/{0:false,1:false,2:false,3:false}/0/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}       -> Idle/{0:false,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}
+    RequestAll(true)   Idle/{0:false,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}      -> Confirming/{0:false,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:false,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false} -> Refunding/{0:true,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}   emits stripe.refund
+    RefundUnknown()    Refunding/{0:true,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}   -> Idle/{0:true,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}   emits whatsapp.ticket
+    RequestAll(true)   Idle/{0:true,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}       -> Confirming/{0:true,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:true,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}  -> Refunding/{0:true,1:false,2:false,3:false}/1/{0:false,1:false,2:false,3:false}/{0:true,1:false,2:false,3:false}   emits stripe.refund
+support.poly:164  PL3002 STEP_PROPERTY  no-reissue-1
+  never no-reissue-1 is violated by Confirm
+  witness (6 steps):
+    Open(2)            New/{0:false,1:false,2:false,3:false}/0/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}      -> Idle/{0:false,1:false,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}
+    RequestAll(true)   Idle/{0:false,1:false,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}     -> Confirming/{0:false,1:false,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:false,3:false}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:false,1:false,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:false,3:false} -> Refunding/{0:true,1:true,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:false,3:false}   emits stripe.refund
+    RefundUnknown()    Refunding/{0:true,1:true,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:false,3:false}    -> Idle/{0:true,1:true,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}   emits whatsapp.ticket
+    RequestAll(true)   Idle/{0:true,1:true,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}       -> Confirming/{0:true,1:true,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:false,3:false}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:true,1:true,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:false,3:false}   -> Refunding/{0:true,1:true,2:false,3:false}/2/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:false,3:false}   emits stripe.refund
+support.poly:165  PL3002 STEP_PROPERTY  no-reissue-2
+  never no-reissue-2 is violated by Confirm
+  witness (6 steps):
+    Open(3)            New/{0:false,1:false,2:false,3:false}/0/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}     -> Idle/{0:false,1:false,2:false,3:false}/3/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}
+    RequestAll(true)   Idle/{0:false,1:false,2:false,3:false}/3/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}    -> Confirming/{0:false,1:false,2:false,3:false}/3/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:false}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:false,1:false,2:false,3:false}/3/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:false} -> Refunding/{0:true,1:true,2:true,3:false}/3/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:false}   emits stripe.refund
+    RefundUnknown()    Refunding/{0:true,1:true,2:true,3:false}/3/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:false}     -> Idle/{0:true,1:true,2:true,3:false}/3/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}   emits whatsapp.ticket
+    RequestAll(true)   Idle/{0:true,1:true,2:true,3:false}/3/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}       -> Confirming/{0:true,1:true,2:true,3:false}/3/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:false}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:true,1:true,2:true,3:false}/3/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:false}    -> Refunding/{0:true,1:true,2:true,3:false}/3/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:false}   emits stripe.refund
+support.poly:166  PL3002 STEP_PROPERTY  no-reissue-3
+  never no-reissue-3 is violated by Confirm
+  witness (6 steps):
+    Open(4)            New/{0:false,1:false,2:false,3:false}/0/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}    -> Idle/{0:false,1:false,2:false,3:false}/4/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}
+    RequestAll(true)   Idle/{0:false,1:false,2:false,3:false}/4/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}   -> Confirming/{0:false,1:false,2:false,3:false}/4/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:true}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:false,1:false,2:false,3:false}/4/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:true} -> Refunding/{0:true,1:true,2:true,3:true}/4/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:true}   emits stripe.refund
+    RefundUnknown()    Refunding/{0:true,1:true,2:true,3:true}/4/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:true}      -> Idle/{0:true,1:true,2:true,3:true}/4/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}   emits whatsapp.ticket
+    RequestAll(true)   Idle/{0:true,1:true,2:true,3:true}/4/{0:false,1:false,2:false,3:false}/{0:false,1:false,2:false,3:false}       -> Confirming/{0:true,1:true,2:true,3:true}/4/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:true}   emits whatsapp.ticket
+    Confirm()          Confirming/{0:true,1:true,2:true,3:true}/4/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:true}     -> Refunding/{0:true,1:true,2:true,3:true}/4/{0:false,1:false,2:false,3:false}/{0:true,1:true,2:true,3:true}   emits stripe.refund
+Ticket: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (13839 transitions and 142344 property evaluations agree) · model-check FINDINGS (659 states explored) · deadlock CLEAN (659 states) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  stripe.refund  irreversible, attempts 3, keyed Idempotency-Key within 24h (K17)
+  retry-safe  whatsapp.ticket  irreversible, attempts 1, at most once
+  class  stripe.refund  irreversible
+  class  whatsapp.ticket  irreversible
+Notice: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (24 transitions and 0 property evaluations agree) · model-check CLEAN (2 states explored) · deadlock CLEAN (2 states) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  whatsapp.notice  irreversible, attempts 1, at most once
+  class  whatsapp.notice  irreversible
+verdict: FINDINGS (exit 1)  support.Ticket  over lines ∈ 0..4; Open.count ∈ 1..4; RequestAll.inWindow ∈ bool; RequestLine.line ∈ 0..3; RequestLine.inWindow ∈ bool; Resolve.done ∈ bool; 659 states; kernel assumptions K7, K17
+         support.Notice  over Send.msg ∈ Note; 2 states; kernel assumptions K7
+         Ticket: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         Notice: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+engines: sam-pattern 2.3.0, polygraph 8.4.0, polygraph sam-pattern (vendored) 2.3.0, poly-ref 0.0.0
+exit 1

@@ -24,7 +24,7 @@ function hashCommittedTree() {
   function walk(dir, relative = '') {
     const entries = readdirSync(dir).sort();
     for (const entry of entries) {
-      if (entry === 'node_modules') continue;
+      if (entry === 'node_modules' || entry === '.poly') continue; // .poly is the checker's own build output, rewritten by the checks of the other tests
       const fullPath = join(dir, entry);
       const relPath = relative ? join(relative, entry) : entry;
       const stat = statSync(fullPath);
@@ -97,7 +97,7 @@ export function withNoReissueProperty(text) {
   const neverAnchor = '  // No line is ever refunded twice.';
   if (result.includes(neverAnchor)) {
     subCount++;
-    const neverClauses = '  never no-reissue-0: emit refund(l0: true) while issued[0]\n  never no-reissue-1: emit refund(l1: true) while issued[1]\n  never no-reissue-2: emit refund(l2: true) while issued[2]\n  never no-reissue-3: emit refund(l3: true) while issued[3]\n\n  ';
+    const neverClauses = '  never no-reissue-0: emit refund(l0: true) while issued[0]\n  never no-reissue-1: emit refund(l1: true) while issued[1]\n  never no-reissue-2: emit refund(l2: true) while issued[2]\n  never no-reissue-3: emit refund(l3: true) while issued[3]\n\n';
     result = result.replace(neverAnchor, neverClauses + neverAnchor);
   } else {
     throw new Error('Anchor for never clauses not found exactly once');
@@ -295,7 +295,7 @@ test('DF23 item 4: all other files in mutations are byte-identical to committed'
     function walkAndCompare(dir, relative = '') {
       const entries = readdirSync(dir).sort();
       for (const entry of entries) {
-        if (entry === 'node_modules') continue;
+        if (entry === 'node_modules' || entry === '.poly') continue; // .poly is the checker's own build output, rewritten by the checks of the other tests
         const fullCommitted = join(dir, entry);
         const fullMutation = join(mutationPath, relative, entry);
         const relPath = relative ? join(relative, entry) : entry;
@@ -320,7 +320,7 @@ test('DF23 item 4: all other files in mutations are byte-identical to committed'
     function walkMutation(dir, relative = '') {
       const entries = readdirSync(dir).sort();
       for (const entry of entries) {
-        if (entry === 'node_modules') continue;
+        if (entry === 'node_modules' || entry === '.poly') continue; // .poly is the checker's own build output, rewritten by the checks of the other tests
         const fullMutation = join(dir, entry);
         const fullCommitted = join(COMMITTED_TREE, relative, entry);
         const relPath = relative ? join(relative, entry) : entry;

@@ -1,0 +1,65 @@
+# poly-kept to poly-kept-reissue (the one handler)
+diff --git a/poly-kept/src/support.poly b/poly-kept-reissue/src/support.poly
+index 4f8af4c..b2ccb68 100644
+--- a/poly-kept/src/support.poly
++++ b/poly-kept-reissue/src/support.poly
+@@ -104,7 +104,8 @@ machine Ticket {
+   // Every attempt ended without an answer: the refund may or may not exist, so a person decides.
+   on RefundUnknown {
+     require phase == Refunding else reject "not-refunding"
+-    phase' = Review
++    phase' = Idle
++    want' = [false, false, false, false]
+     emit say(msg: UnderReview, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+   }
+ 
+
+# poly-kept-reissue to poly-kept-reissue-checked (the property: 1 field, 3 updates, 4 never)
+diff --git a/poly-kept-reissue/src/support.poly b/poly-kept-reissue-checked/src/support.poly
+index b2ccb68..65be2b0 100644
+--- a/poly-kept-reissue/src/support.poly
++++ b/poly-kept-reissue-checked/src/support.poly
+@@ -14,6 +14,7 @@ enum Note {
+ machine Ticket {
+   state {
+     phase    : Phase           = New
++    issued   : map<0..3, bool> = [false, false, false, false]
+     lines    : 0..4            = 0                              // the order's line items (at most 4)
+     refunded : map<0..3, bool> = [false, false, false, false]   // lines refunded at Stripe
+     want     : map<0..3, bool> = [false, false, false, false]   // lines of the request under way
+@@ -67,6 +68,7 @@ machine Ticket {
+   on Confirm {
+     require phase == Confirming else reject "nothing-to-confirm"
+     phase' = Refunding
++    issued' = [issued[0] || want[0], issued[1] || want[1], issued[2] || want[2], issued[3] || want[3]]
+     emit refund(l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+   }
+ 
+@@ -97,6 +99,7 @@ machine Ticket {
+   on RefundFailed {
+     require phase == Refunding else reject "not-refunding"
+     phase' = Idle
++    issued' = [issued[0] && !want[0], issued[1] && !want[1], issued[2] && !want[2], issued[3] && !want[3]]
+     want' = [false, false, false, false]
+     emit say(msg: RefundFailed, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+   }
+@@ -127,6 +130,7 @@ machine Ticket {
+       emit say(msg: Refunded, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+     } else {
+       phase' = Idle
++      issued' = [issued[0] && !want[0], issued[1] && !want[1], issued[2] && !want[2], issued[3] && !want[3]]
+       emit say(msg: RefundFailed, l0: want[0], l1: want[1], l2: want[2], l3: want[3])
+     }
+   }
+@@ -156,6 +160,11 @@ machine Ticket {
+   step property refund-after-confirm:
+     (post.phase == Refunding && pre.phase != Refunding) implies (action == Confirm && pre.phase == Confirming)
+ 
++  never no-reissue-0: emit refund(l0: true) while issued[0]
++  never no-reissue-1: emit refund(l1: true) while issued[1]
++  never no-reissue-2: emit refund(l2: true) while issued[2]
++  never no-reissue-3: emit refund(l3: true) while issued[3]
++
+   // No line is ever refunded twice.
+   never no-double-refund-0: emit refund(l0: true) while refunded[0]
+   never no-double-refund-1: emit refund(l1: true) while refunded[1]
