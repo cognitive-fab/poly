@@ -53,7 +53,7 @@ const REASONS = [
   [/timed out after (\d+)\s*ms/, (m) => `timed out after ${m[1]} ms`],
   [/the limit \w+ is not a whole number/, () => 'limit is not a whole number'],
   [/HTTP (\d{3})(?: \((\w+)\)(?:: ([\s\S]+))?)?/, (m, secrets) => (m[2] ? `HTTP ${m[1]} (${m[2]})${m[3] ? `: ${cleanMessage(m[3], secrets)}` : ''}` : `HTTP ${m[1]}`)],
-  [/over its share/, () => 'over its input share'],
+  [/over its share|over the declared input limit/, () => 'over its input share'],
   [/no ask gave an allowed answer/, (m, secrets, text) => `no allowed answer${rejections(text)}`],
   [/gave no text/, (m, secrets, text) => `no text${rejections(text)}`],
 ];

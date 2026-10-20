@@ -86,9 +86,10 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
       throw new ProviderError(`the model provider answered HTTP ${r.status}${type}${said}`, r.status);
     }
     const text = Array.isArray(body.content) ? body.content.filter((c) => c?.type === 'text').map((c) => String(c.text)).join('') : '';
-    const input = Number(body.usage?.input_tokens);
-    const output = Number(body.usage?.output_tokens);
-    if (!Number.isSafeInteger(input) || !Number.isSafeInteger(output)) throw new ProviderError('the model provider reported no token usage');
+    // DF18 item 1: numbers only. Number(null) is 0, and a usage that is not a whole number of tokens is never zero spend.
+    const input = body.usage?.input_tokens;
+    const output = body.usage?.output_tokens;
+    if (!Number.isSafeInteger(input) || input < 0 || !Number.isSafeInteger(output) || output < 0) throw new ProviderError('the model provider reported no token usage');
     return { text, input, output, stopReason: typeof body.stop_reason === 'string' ? body.stop_reason : null };
   }
 
@@ -155,6 +156,8 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
     const { system, user } = prompt(q, materials, q.decision === 'reply' ? '{"answer": "<the reply>"}' : '{"answer": "<the answer>", "cites": ["<order id>", ...]}', null, limits.maxInputTokens, extra);
     let one;
     try { one = await ask(model, system, user, limits.maxTokens); } catch (e) { if (e instanceof ProviderAuthError) onAuthFailure(e); throw e; }
+    // DF18 item 2: the input share of a single ask, as the first ask of a vote has it.
+    if (one.input > limits.maxInputTokens) throw new ProviderError(`the message counts ${one.input} tokens, over the declared input limit of ${limits.maxInputTokens} (one ask); nothing more was asked`);
     const o = objectIn(one.text);
     const why = one.stopReason === 'max_tokens' ? `reply cut off at ${one.output} tokens` : !o ? 'no JSON object' : typeof o.answer !== 'string' || o.answer.trim() === '' ? 'answer missing' : null;
     if (why) throw new ProviderError(`the model gave no text (${asksOf(1)}: ${why})`);
