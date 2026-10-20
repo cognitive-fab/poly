@@ -996,7 +996,7 @@ test('DF15.1: amount decision with null value gives "no ask gave an allowed answ
 });
 
 test('DF15.1: amount decision with string value gives "no ask gave an allowed answer (5 asks: 5 value a string)"', async () => {
-  for (const stringValue of ['$450', '"$450"', '"450"', '"5,000"', '"450.50"', '"450.0"', '"-450"', '"0450"', '" 450"']) {
+  for (const stringValue of ['"$450"', '"5,000"', '"450.50"', '"450.0"', '"-450"', '"0450"', '" 450"']) {
     const t = recordingTransport({
       async request() {
         return {
@@ -1486,7 +1486,7 @@ test('DF15.3: amount accepts JSON number 450', async () => {
   const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 450);
+  assert.equal(result.answer.value, 450);
 });
 
 test('DF15.3: amount accepts string "450"', async () => {
@@ -1508,7 +1508,7 @@ test('DF15.3: amount accepts string "450"', async () => {
   const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 450);
+  assert.equal(result.answer.value, 450);
 });
 
 test('DF15.3: amount accepts string "450.00"', async () => {
@@ -1530,7 +1530,7 @@ test('DF15.3: amount accepts string "450.00"', async () => {
   const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 450);
+  assert.equal(result.answer.value, 450);
 });
 
 test('DF15.3: amount accepts 5000 (domain refuses it later)', async () => {
@@ -1552,7 +1552,7 @@ test('DF15.3: amount accepts 5000 (domain refuses it later)', async () => {
   const materials = { bodies: { m: 'refund 5000 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 5000);
+  assert.equal(result.answer.value, 5000);
 });
 
 test('DF15.3: amount accepts string "5000"', async () => {
@@ -1574,7 +1574,7 @@ test('DF15.3: amount accepts string "5000"', async () => {
   const materials = { bodies: { m: 'refund 5000 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 5000);
+  assert.equal(result.answer.value, 5000);
 });
 
 test('DF15.3: amount accepts 0', async () => {
@@ -1596,7 +1596,7 @@ test('DF15.3: amount accepts 0', async () => {
   const materials = { bodies: { m: 'refund 0 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 0);
+  assert.equal(result.answer.value, 0);
 });
 
 test('DF15.3: amount accepts string "0"', async () => {
@@ -1618,7 +1618,7 @@ test('DF15.3: amount accepts string "0"', async () => {
   const materials = { bodies: { m: 'refund 0 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 0);
+  assert.equal(result.answer.value, 0);
 });
 
 test('DF15.3: amount accepts JSON in prose (first object extracted)', async () => {
@@ -1640,7 +1640,7 @@ test('DF15.3: amount accepts JSON in prose (first object extracted)', async () =
   const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result);
-  assert.equal(result.value, 450);
+  assert.equal(result.answer.value, 450);
 });
 
 // ---- DF15.4: prompt for amount decision --------
@@ -1676,7 +1676,7 @@ test('DF15.4: stub still recognizes amount task', async () => {
   const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
   const result = await providers.decisions.amount.provider(question, materials);
   assert.ok(result, 'stub should recognize amount task and return a result');
-  assert.equal(result.value, 450, 'stub should extract the amount 450 from the message');
+  assert.equal(result.answer.value, 450, 'stub should extract the amount 450 from the message');
 });
 
 // ---- DF15.5: --log flag and openRunLog --------
@@ -1710,8 +1710,8 @@ test('DF15.5: openRunLog exported from run-log.mjs', async () => {
 
 test('DF15.5: openRunLog appends ISO time and text to line', async () => {
   const { openRunLog } = await import('../demo/host/run-log.mjs');
-  const tmpdir = mkdtempSync(join(tmpdir(), 'run-log-'));
-  const logFile = join(tmpdir, 'test.log');
+  const dir = mkdtempSync(join(tmpdir(), 'run-log-'));
+  const logFile = join(dir, 'test.log');
   try {
     let now = 0;
     const fakeNow = () => now;
@@ -1724,14 +1724,14 @@ test('DF15.5: openRunLog appends ISO time and text to line', async () => {
     assert.ok(content.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z test line/), 'should have ISO time then space then text');
     log.close();
   } finally {
-    rmSync(tmpdir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('DF15.5: openRunLog appends status with ISO time and no reply list', async () => {
   const { openRunLog } = await import('../demo/host/run-log.mjs');
-  const tmpdir = mkdtempSync(join(tmpdir(), 'run-log-'));
-  const logFile = join(tmpdir, 'test.log');
+  const dir = mkdtempSync(join(tmpdir(), 'run-log-'));
+  const logFile = join(dir, 'test.log');
   try {
     let now = 0;
     const fakeNow = () => now;
@@ -1760,14 +1760,14 @@ test('DF15.5: openRunLog appends status with ISO time and no reply list', async 
     assert.ok(statusObj.stripe.reply, 'original object should still have reply list');
     log.close();
   } finally {
-    rmSync(tmpdir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('DF15.5: openRunLog appends to file instead of overwriting', async () => {
   const { openRunLog } = await import('../demo/host/run-log.mjs');
-  const tmpdir = mkdtempSync(join(tmpdir(), 'run-log-'));
-  const logFile = join(tmpdir, 'test.log');
+  const dir = mkdtempSync(join(tmpdir(), 'run-log-'));
+  const logFile = join(dir, 'test.log');
   try {
     let now = 0;
     const fakeNow = () => now;
@@ -1785,7 +1785,7 @@ test('DF15.5: openRunLog appends to file instead of overwriting', async () => {
     const lines = content.trim().split('\n');
     assert.equal(lines.length, 2, 'should have two lines');
   } finally {
-    rmSync(tmpdir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

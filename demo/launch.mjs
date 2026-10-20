@@ -14,9 +14,9 @@
 //
 // DF10: --live and --stub-model need --cap-usd, at most 10 dollars. The spend never exceeds it, the room stops when it is reached, and a
 // spend line follows each reply. --stub-model runs the live path over a local stub: no key, no network.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
@@ -24,6 +24,7 @@ import { assembleDemo, LaunchRefused, modelSide } from './host/assemble.mjs';
 import { formatLatency, measureLatency } from './host/latency.mjs';
 import { recordedOrdersOf } from './host/recorded-orders.mjs';
 import { formatSpend, parseCap } from './host/spend.mjs';
+import { openRunLog } from './host/run-log.mjs';
 import { startRoomServer } from './host/server.mjs';
 import { liveTransport } from './host/live-transport.mjs';
 import { DEMO_TIMEOUTS, makeDemoConcierge } from './scripts/make-demo-concierge.mjs';
@@ -36,6 +37,7 @@ export function parseArgs(argv) {
   let stubLatency = null;
   let runs = null;
   let measure = false;
+  let logFile = null;
   const whole = (flag, v, lo, hi) => {
     if (typeof v !== 'string' || !/^\d+$/.test(v) || Number(v) < lo || Number(v) > hi) throw new LaunchRefused(`${flag} is a whole number of ${lo} to ${hi}`);
     return Number(v);
@@ -51,6 +53,11 @@ export function parseArgs(argv) {
     else if (a === '--stub-latency') stubLatency = whole(a, argv[++i], 0, 60000);
     else if (a === '--measure-latency') measure = true;
     else if (a === '--runs') runs = whole(a, argv[++i], 1, 20);
+    else if (a === '--log') {
+      const v = argv[++i];
+      if (typeof v !== 'string' || v === '' || v.startsWith('--')) throw new LaunchRefused('--log needs the path of a file: --log <file>');
+      logFile = v;
+    }
     else if (a === '--port' || a === '--size') {
       const n = Number(argv[++i]);
       if (!Number.isInteger(n) || n < 1 || (a === '--port' && n > 65535) || (a === '--size' && n > 99)) throw new Error(`${a} is a whole number${a === '--port' ? ' of 1 to 65535: the port' : ' of 1 to 99: the personas'}`);
@@ -59,11 +66,14 @@ export function parseArgs(argv) {
   }
   if (out.mode !== 'recorded' && cap === null) throw new LaunchRefused('a live or stub launch needs a spend cap: --cap-usd <dollars>, at most 10');
   if (cap !== null && out.mode === 'recorded') throw new LaunchRefused('--cap-usd applies to a live or stub launch: a recorded run spends nothing');
+  if (logFile !== null && measure) throw new LaunchRefused('--log applies to a room launch, not to --measure-latency');
+  if (logFile !== null && !existsSync(dirname(resolvePath(logFile)))) throw new LaunchRefused(`--log: the folder of ${logFile} does not exist`);
   if (stubLatency !== null && out.mode !== 'stub-model') throw new LaunchRefused('--stub-latency applies to --stub-model alone');
   if (measure && out.mode === 'recorded') throw new LaunchRefused('--measure-latency applies to --live or --stub-model');
   if (runs !== null && !measure) throw new LaunchRefused('--runs applies to --measure-latency alone');
   if (cap !== null) out.capUsd = cap;
   if (stubLatency !== null) out.stubLatencyMs = stubLatency;
+  if (logFile !== null) out.logFile = logFile;
   if (measure) { out.measureLatency = true; out.runs = runs ?? 5; }
   return out;
 }
@@ -103,6 +113,10 @@ export async function main(argv, io = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'poly-demo-copy-'));
   try { io.out(makeDemoConcierge({ out: scratch }).diff); } finally { rmSync(scratch, { recursive: true, force: true }); }
 
+  // DF15 item 5: the run log. Each line the launcher prints for a failure, a spend or a status is also written to the owner's file.
+  const log = args.logFile ? openRunLog(args.logFile) : null;
+  const onFailureLine = (line) => { io.err(line); log?.line(line); };
+  const spendLine = (text) => { io.out(text); log?.line(text); };
   let demo;
   try {
     io.out('Checking and admitting the demo copy (this takes a few minutes) ...');
@@ -110,9 +124,9 @@ export async function main(argv, io = {}) {
       // DF11 item 3: the recorded room's first two guests own the orders its recorded answers cite.
       ordersOf: args.mode === 'recorded' ? recordedOrdersOf(JSON.parse(readFileSync(RECORDED_ANSWERS, 'utf8'))) : null,
       mode: args.mode, workdir, apiKey, modelTransport: args.mode === 'live' ? liveTransport() : null, size: args.size, startWorkers: true, capUsd: args.capUsd ?? null, stubLatencyMs: args.stubLatencyMs ?? 0,
-      onFailure: (line) => io.err(line),
-      onReply: () => { if (demo?.meter) io.out(formatSpend(demo.meter)); },
-      onKill: (by) => { if (by === 'spend-cap' && demo?.meter) io.out(`spend cap reached: ${formatSpend(demo.meter)}. The room has stopped.`); },
+      onFailure: onFailureLine,
+      onReply: () => { if (demo?.meter) spendLine(formatSpend(demo.meter)); },
+      onKill: (by) => { if (by === 'spend-cap' && demo?.meter) spendLine(`spend cap reached: ${formatSpend(demo.meter)}. The room has stopped.`); },
     });
   } catch (e) {
     rmSync(workdir, { recursive: true, force: true });
@@ -136,12 +150,13 @@ export async function main(argv, io = {}) {
   const noticing = setInterval(() => { demo.pumpStaff().catch(() => {}); }, 1000);
   noticing.unref?.();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const statusOf = () => ({ ...demo.room.stats(), stripe: demo.standIn.report(), ...(demo.meter ? { spend: formatSpend(demo.meter) } : {}) });
   const stop = async () => { clearInterval(noticing); rl.close(); await server.close(); await demo.close(); rmSync(workdir, { recursive: true, force: true }); };
   await new Promise((resolve) => {
     rl.on('line', async (line) => {
       const [cmd, arg] = line.trim().split(/\s+/);
       try {
-        if (cmd === 'status') io.out(JSON.stringify({ ...demo.room.stats(), stripe: demo.standIn.report(), ...(demo.meter ? { spend: formatSpend(demo.meter) } : {}) }));
+        if (cmd === 'status') { const st = statusOf(); io.out(JSON.stringify(st)); log?.status(st); }
         else if (cmd === 'staff') for (const e of demo.staff.entries()) io.out(`${new Date(e.at).toLocaleTimeString()}  ${e.text}`);
         else if (cmd === 'approve' && arg) io.out(JSON.stringify(await demo.approve(arg)));
         else if (cmd === 'kill') { demo.room.kill('presenter'); io.out('The room has stopped. Nothing more reaches the concierge.'); }
@@ -151,6 +166,7 @@ export async function main(argv, io = {}) {
     });
     rl.on('close', resolve);
   });
+  log?.status(statusOf()); // the final status
   await stop();
   return 0;
 }

@@ -22,14 +22,26 @@ function cleanMessage(text, secrets) {
   return out.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
+/** DF15 item 2: the parenthesis of a rejected vote, rebuilt from numbers and reasons of a fixed list, or '' if any part is not on it. */
+const REJECTIONS = ['no JSON object', 'value missing', 'value a string', 'value not a whole number', 'value negative', 'answer missing', 'answer not allowed', 'reply cut off'];
+function rejections(text) {
+  const m = new RegExp('\\((\\d+) asks?: ([^)]*)\\)').exec(text);
+  if (!m) return '';
+  // A vote gives a count before each reason; a single ask (answer, reply) gives the reason alone.
+  const parts = m[2].split(', ').map((p) => new RegExp('^(?:(\\d+) )?(.+)$').exec(p));
+  if (parts.some((p) => !p || !REJECTIONS.includes(p[2]))) return '';
+  const n = Number(m[1]);
+  return ` (${n} ${n === 1 ? 'ask' : 'asks'}: ${parts.map((p) => (p[1] === undefined ? p[2] : `${Number(p[1])} ${p[2]}`)).join(', ')})`;
+}
+
 const REASONS = [
   [/route-exhausted/, () => 'every tier failed'],
   [/timed out after (\d+)\s*ms/, (m) => `timed out after ${m[1]} ms`],
   [/the limit \w+ is not a whole number/, () => 'limit is not a whole number'],
   [/HTTP (\d{3})(?: \((\w+)\)(?:: ([\s\S]+))?)?/, (m, secrets) => (m[2] ? `HTTP ${m[1]} (${m[2]})${m[3] ? `: ${cleanMessage(m[3], secrets)}` : ''}` : `HTTP ${m[1]}`)],
   [/over its share/, () => 'over its input share'],
-  [/no ask gave an allowed answer/, () => 'no allowed answer'],
-  [/gave no text/, () => 'no text'],
+  [/no ask gave an allowed answer/, (m, secrets, text) => `no allowed answer${rejections(text)}`],
+  [/gave no text/, (m, secrets, text) => `no text${rejections(text)}`],
 ];
 
 /** One line for a failed row of the outbox, or null for a row that is not a decision's (or has no error). */
@@ -45,7 +57,7 @@ export function describeFailure(row, context = {}) {
   let reason = 'not recognised';
   for (const [re, say] of REASONS) {
     const m = re.exec(row.last_error);
-    if (m) { reason = say(m, secrets); break; }
+    if (m) { reason = say(m, secrets, row.last_error); break; }
   }
   if (!reason.includes('[removed]') && secrets.some((s) => typeof s === 'string' && s !== '' && row.last_error.includes(s))) reason += ' [removed]';
   return `decision failed: ${decision}, tier ${tier}, ${reason}`;

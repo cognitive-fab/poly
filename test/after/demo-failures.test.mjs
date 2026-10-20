@@ -416,98 +416,53 @@ test('DF13.1: a guest saying "where is my order?" triggers an answer request wit
 
 // ---- DF15.1-5: amount decision reasons, parsing, and prompt shape --------
 
-test('DF15: assembled demo records amount request with correct structure', async () => {
+test('DF15: a refund question whose amount comes back as "$450" says why, with the count, and the request holds the message and the order', { timeout: 1_800_000 }, async () => {
   const { assembleDemo } = await import('../../demo/host/assemble.mjs');
   const { makeDemoConcierge } = await import('../../demo/scripts/make-demo-concierge.mjs');
   const { TASKS } = await import('../../demo/host/live-providers.mjs');
   const { stubTransport } = await import('../../demo/host/stub-model.mjs');
-
-  const workdir = mkdtempSync(join(tmpdir(), 'demo-amount-prompt-'));
-  const sourceDir = mkdtempSync(join(tmpdir(), 'demo-copy-amount-'));
-
+  const workdir = mkdtempSync(join(tmpdir(), 'demo-failures-df15-'));
+  const sourceDir = mkdtempSync(join(tmpdir(), 'demo-copy-df15-'));
+  makeDemoConcierge({ out: sourceDir });
+  for (const name of ['small', 'large']) {
+    const table = JSON.parse(readFileSync(join(sourceDir, 'prices', name + '.json'), 'utf8'));
+    writeFileSync(join(sourceDir, 'prices', name + '.json'), JSON.stringify({ ...table, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) }));
+  }
+  // DF15 items 1 and 3: the amount ask is answered with a value written as "$450" (refused by the strict parse); everything else is the stub's.
+  const recorded = [];
+  const inner = stubTransport();
+  const transport = {
+    async request(r) {
+      const body = JSON.parse(r.body);
+      recorded.push(body);
+      const user = body.messages[0].content;
+      if (user.includes(TASKS.amount)) {
+        const id = /<order id="([^"]+)">/.exec(user)?.[1] ?? 'none';
+        return { status: 200, headers: {}, body: JSON.stringify({ content: [{ type: 'text', text: JSON.stringify({ value: '$450', cites: [id] }) }], usage: { input_tokens: 50, output_tokens: 20 }, stop_reason: 'end_turn' }) };
+      }
+      return inner.request(r);
+    },
+  };
+  const lines = [];
+  const demo = await assembleDemo({ mode: 'live', apiKey: 'stub-key-for-test', workdir, capUsd: 5, now: () => Date.now(), startWorkers: true, limits: { minGapMs: 1000 }, source: sourceDir, modelTransport: transport, onFailure: (line) => lines.push(line) });
   try {
-    makeDemoConcierge({ out: sourceDir });
-
-    // Transport that records requests and answers amount with a string value
-    const recordedRequests = [];
-    const transport = {
-      async request(r) {
-        recordedRequests.push(r);
-        const body = JSON.parse(r.body);
-        // Recognize amount request and answer with string value to test parsing
-        if (body.system && body.system.includes('value') && body.messages && body.messages.length > 0) {
-          const msgText = body.messages[body.messages.length - 1].content || '';
-          if (msgText.includes('refund')) {
-            return {
-              status: 200,
-              headers: {},
-              body: JSON.stringify({
-                content: [{ type: 'text', text: '{"value":"450","cites":["o-9011"]}' }],
-                usage: { input_tokens: 50, output_tokens: 20 },
-                stop_reason: 'end_turn',
-              }),
-            };
-          }
-        }
-        // Default response for non-amount requests
-        return {
-          status: 200,
-          headers: {},
-          body: JSON.stringify({
-            content: [{ type: 'text', text: '{"answer":"Refund"}' }],
-            usage: { input_tokens: 50, output_tokens: 20 },
-            stop_reason: 'end_turn',
-          }),
-        };
-      },
-    };
-
-    const demo = await assembleDemo({
-      mode: 'stub-model',
-      workdir,
-      capUsd: 5,
-      now: () => Date.now(),
-      startWorkers: true,
-      limits: { minGapMs: 1000 },
-      source: sourceDir,
-      transport,
-    });
-
-    // Send a message that triggers amount decision
-    const guest = demo.guests[0];
-    if (guest) {
-      await guest.send({ text: 'refund 450 for my order' });
-      // Wait a bit for processing
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-
-    // Find the amount request in the recorded requests
-    const amountRequest = recordedRequests.find((req) => {
-      const body = JSON.parse(req.body);
-      return body.system && body.system.includes('value') && body.system.includes('with no other text');
-    });
-
-    assert.ok(amountRequest, 'should have recorded at least one amount request');
-    const body = JSON.parse(amountRequest.body);
-
-    // Verify the request body has the expected fields
-    const keys = Object.keys(body).sort();
-    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), 'amount request should have only expected fields');
-
-    // Verify system and task sentence
-    assert.ok(body.system.includes('with no other text'), 'system should include "with no other text"');
-    assert.ok(body.system.includes('"value": <a bare JSON number>'), 'system should include bare number shape');
-
-    const msgContent = body.messages[0].content;
-    assert.ok(msgContent.includes(TASKS.amount), 'message should include the amount task sentence');
-    assert.ok(msgContent.includes('refund 450 for my order'), 'message should include customer text');
-    assert.ok(msgContent.includes('o-9011'), 'message should include the order id');
-
-    // Verify no temperature field
-    assert.equal(Object.hasOwn(body, 'temperature'), false, 'amount request should not have temperature field');
-
+    const guest = demo.room.join('s1');
+    const orderId = guest.orders[0].id;
+    assert.deepEqual(await demo.room.say('s1', 'refund 450 for my order'), { ok: true });
+    const until = Date.now() + 40_000;
+    while (Date.now() < until && !lines.some((l) => l.includes('amount'))) await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.ok(lines.includes('decision failed: amount, tier none, no allowed answer (5 asks: 5 value a string)'), 'the failure line, got: ' + JSON.stringify(lines));
+    assert.ok(!lines.some((l) => l.includes('450') || l.includes('$')), 'no word of the reply in a line');
+    const ask = recorded.find((b) => b.messages[0].content.includes(TASKS.amount));
+    assert.ok(ask, 'an amount request was sent');
+    const user = ask.messages[0].content;
+    assert.ok(user.includes('<message>\nrefund 450 for my order\n</message>'), 'the customer\'s message is in message tags');
+    assert.ok(user.includes('<order id="' + orderId + '">'), 'the order is in an order tag');
+    assert.deepEqual(Object.keys(ask).sort(), ['max_tokens', 'messages', 'model', 'system']);
+    assert.ok(ask.system.includes('with no other text') && ask.system.includes('"value": <a bare JSON number>'));
   } finally {
+    await demo.close();
     rmSync(workdir, { recursive: true, force: true, maxRetries: 3 });
     rmSync(sourceDir, { recursive: true, force: true, maxRetries: 3 });
   }
-}, { timeout: 10000 });
+});

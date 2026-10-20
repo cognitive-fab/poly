@@ -420,11 +420,14 @@ spend: $0.0100 of $1.00 cap, 50 model calls
 
 #### The live check: one question, then status
 
-Start the room:
+Start the room, with a log file in a folder you keep (the run's own folder is removed at `quit`):
 
 ```powershell
-node demo/launch.mjs --live --cap-usd 5
+$log = "$HOMEpoly-demo-live.log"
+node demo/launch.mjs --live --cap-usd 5 --log $log
 ```
+
+The log holds one line each for the failed decisions, the `spend:` lines, the cap line and every `status`, with the final `status` when the launcher ends. Each line starts with the time. It holds no key, no customer text and not the `reply` list of the Stripe mock-up. Send it with your report.
 
 You should see `Model calls: LIVE, over the provider named in the price tables. Spend cap: $5.00.`, the room page, and `spend:` lines after each reply. If you see `refused:` and a table name, fix that table. If you see `refused: a live launch needs the model key`, the variable is not set in this window.
 
@@ -436,11 +439,12 @@ Before the attacks, ask one question on the room page: `where is my order?`. The
 ```
 decision failed: classify, tier small, timed out after 20000 ms
 decision failed: classify, tier large, HTTP 429 (rate_limit_error)
-decision failed: answer, tier none, no allowed answer
+decision failed: amount, tier none, no allowed answer (5 asks: 5 value a string)
+decision failed: answer, tier none, no text (1 ask: reply cut off)
 model key refused (HTTP 401): set a fresh key and restart the launcher
 ```
 
-  Each line has the decision, the tier (`none` for a decision with one provider) and the reason. The reasons are: `timed out after <n> ms` (the timeout is too short for the provider: run the latency measurement), `HTTP <status>` with the error type (the provider refused: 401 or 403 is the key, 429 is the rate limit, 5xx is the provider), `over its input share` (the message is too long), `no allowed answer` (the model did not answer in the allowed form), `no text`, `every tier failed`, and `not recognised`. A line never holds the key, a body or the customer's text. A refused key is silent in the page and is a line here. The spend line still counts the abandoned calls, because the provider bills them.
+  Each line has the decision, the tier (`none` for a decision with one provider) and the reason. The reasons are: `timed out after <n> ms` (the timeout is too short for the provider: run the latency measurement), `HTTP <status>` with the error type (the provider refused: 401 or 403 is the key, 429 is the rate limit, 5xx is the provider), `over its input share` (the message is too long), `no allowed answer (5 asks: ...)` (no ask of the vote was accepted: the counts say why, from `no JSON object`, `value missing`, `value a string`, `value not a whole number`, `value negative`, `answer missing`, `answer not allowed` and `reply cut off`; `reply cut off` means the per-ask output limit was too small), `no text (1 ask: ...)` (the same reasons for a single ask), `every tier failed`, and `not recognised`. A line never holds the key, a body or the customer's text. A refused key is silent in the page and is a line here. The spend line still counts the abandoned calls, because the provider bills them.
 
 If the first question fails, do not go on to the attacks. Stop the room (`quit`) and report the lines.
 
