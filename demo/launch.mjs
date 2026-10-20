@@ -195,7 +195,7 @@ export function heapArgsFor(limitMb, env = {}) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const heap = heapArgsFor(Math.floor(getHeapStatistics().heap_size_limit / (1024 * 1024)), process.env);
   if (heap.length > 0) {
-    runAgainWithHeap(process.argv[1], process.argv.slice(2), heap);
+    runAgainWithHeap(process.argv[1], process.argv.slice(2), heap, process.env);
   } else {
     main(process.argv.slice(2)).then((code) => process.exit(code), (e) => { console.error(e.message); process.exit(1); });
   }

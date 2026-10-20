@@ -3,8 +3,8 @@
 // replay driver and the baseline (scripts/check-boundaries.mjs, DAC13), so the launcher calls this file and starts nothing itself.
 import { spawn } from 'node:child_process';
 
-/** Runs `script` with `args` in a new process that has the Node arguments `heapArgs`; POLY_DEMO_HEAP_REEXEC=1 says that it is the second. */
-export function runAgainWithHeap(script, args, heapArgs, env = process.env) {
+/** Runs `script` with `args` and the environment `env` (the caller's, so that this file reads none) in a new process that has the Node arguments `heapArgs`; POLY_DEMO_HEAP_REEXEC=1 says that it is the second. */
+export function runAgainWithHeap(script, args, heapArgs, env) {
   const child = spawn(process.execPath, [...heapArgs, script, ...args], { stdio: 'inherit', env: { ...env, POLY_DEMO_HEAP_REEXEC: '1' } });
   child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
   return child;
