@@ -2109,3 +2109,292 @@ test('DF16.3: reply decision with max_tokens cut-off gives "the model gave no te
     },
   );
 });
+
+// ---- DF17.1: domainsOf --------
+
+test('DF17.1: domainsOf is exported from failures.mjs', async () => {
+  const { domainsOf } = await import('../demo/host/failures.mjs');
+  assert.equal(typeof domainsOf, 'function');
+});
+
+test('DF17.1: domainsOf on demo concierge returns amount with domain 0 to 500', async () => {
+  const { domainsOf } = await import('../demo/host/failures.mjs');
+  const out = mkdtempSync(join(tmpdir(), 'demo-copy-'));
+  try {
+    makeDemoConcierge({ out });
+    const prog = readFileSync(join(out, 'concierge.poly'), 'utf8');
+    const domains = domainsOf(prog);
+    assert.ok(domains.amount);
+    assert.equal(domains.amount.min, 0);
+    assert.equal(domains.amount.max, 500);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('DF17.1: domainsOf finds entries for decisions with value range type', async () => {
+  const { domainsOf } = await import('../demo/host/failures.mjs');
+  const prog = `
+type Amount = { value: 0..500 }
+type Other = { value: 10..20 }
+type Pair = { a: 1..2, b: 3..4 }
+decision amount(text: Content) -> Amount {
+  // body
+}
+decision other(x: Content) -> Other {
+  // body
+}
+decision pair(x: Content) -> Pair {
+  // body
+}
+decision plain(x: Content) -> Content {
+  // body
+}
+`;
+  const domains = domainsOf(prog);
+  assert.ok(domains.amount);
+  assert.equal(domains.amount.min, 0);
+  assert.equal(domains.amount.max, 500);
+  assert.ok(domains.other);
+  assert.equal(domains.other.min, 10);
+  assert.equal(domains.other.max, 20);
+  assert.ok(!domains.pair, 'pair has no value field');
+  assert.ok(!domains.plain, 'plain is not a range type');
+  assert.ok(!domains.classify, 'classify not in program');
+});
+
+test('DF17.1: domainsOf has no entry for decisions that are not in program', async () => {
+  const { domainsOf } = await import('../demo/host/failures.mjs');
+  const prog = `
+type Amount = { value: 0..500 }
+decision amount(text: Content) -> Amount {
+  // body
+}
+`;
+  const domains = domainsOf(prog);
+  assert.ok(!domains.classify);
+  assert.ok(!domains.answer);
+  assert.ok(!domains.reply);
+  assert.ok(!domains.ack);
+  assert.ok(!domains.noted);
+});
+
+// ---- DF17.2: describeFailure with context.domains --------
+
+test('DF17.2: describeFailure with domain gives "outside its domain (0 to 500)" for S140 error', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'the completion is outside its type (S140)',
+    payload: {},
+  };
+  const context = {
+    routes: [],
+    secrets: [],
+    domains: { amount: { min: 0, max: 500 } },
+  };
+  const line = describeFailure(row, context);
+  assert.equal(line, 'decision failed: amount, tier none, outside its domain (0 to 500)');
+});
+
+test('DF17.2: describeFailure without domain gives "outside its type" for S140 error', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'the completion is outside its type (S140)',
+    payload: {},
+  };
+  const context = {
+    routes: [],
+    secrets: [],
+  };
+  const line = describeFailure(row, context);
+  assert.equal(line, 'decision failed: amount, tier none, outside its type');
+});
+
+test('DF17.2: describeFailure with domain lacking amount gives "outside its type"', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'the completion is outside its type (S140)',
+    payload: {},
+  };
+  const context = {
+    routes: [],
+    secrets: [],
+    domains: { other: { min: 10, max: 20 } },
+  };
+  const line = describeFailure(row, context);
+  assert.equal(line, 'decision failed: amount, tier none, outside its type');
+});
+
+test('DF17.2: describeFailure for unknown decision gives "outside its type"', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.unknown',
+    attempts: 1,
+    last_error: 'the completion is outside its type (S140)',
+    payload: {},
+  };
+  const context = {
+    routes: [],
+    secrets: [],
+    domains: { amount: { min: 0, max: 500 } },
+  };
+  const line = describeFailure(row, context);
+  assert.equal(line, 'decision failed: unknown, tier none, outside its type');
+});
+
+test('DF17.2: describeFailure does not include value from last_error', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'the completion is outside its type (S140) Amounted.value is 5000, outside 0..500',
+    payload: {},
+  };
+  const context = {
+    routes: [],
+    secrets: [],
+    domains: { amount: { min: 0, max: 500 } },
+  };
+  const line = describeFailure(row, context);
+  assert.equal(line, 'decision failed: amount, tier none, outside its domain (0 to 500)');
+  assert.ok(!line.includes('5000'));
+});
+
+test('DF17.2: describeFailure redacts keys from domain error message', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const secret = 'stub-key-for-test';
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: `the completion is outside its type (S140) with key ${secret}`,
+    payload: {},
+  };
+  const context = {
+    routes: [],
+    secrets: [secret],
+    domains: { amount: { min: 0, max: 500 } },
+  };
+  const line = describeFailure(row, context);
+  assert.ok(line.includes('[removed]'));
+  assert.ok(!line.includes(secret));
+});
+
+// ---- DF17.3: runApprove --------
+
+test('DF17.3: runApprove is exported from approval.mjs', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  assert.equal(typeof runApprove, 'function');
+});
+
+test('DF17.3: runApprove with undefined id gives usage message and does not call approve', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  let approveCalled = false;
+  const demo = {
+    approve: async (id) => {
+      approveCalled = true;
+      throw new Error('should not be called');
+    },
+  };
+  const result = await runApprove(demo, undefined);
+  assert.equal(result.ok, false);
+  assert.equal(result.line, 'usage: approve <intent id>');
+  assert.equal(approveCalled, false);
+});
+
+test('DF17.3: runApprove with empty string id gives usage message', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  let approveCalled = false;
+  const demo = {
+    approve: async (id) => {
+      approveCalled = true;
+      throw new Error('should not be called');
+    },
+  };
+  const result = await runApprove(demo, '');
+  assert.equal(result.ok, false);
+  assert.equal(result.line, 'usage: approve <intent id>');
+  assert.equal(approveCalled, false);
+});
+
+test('DF17.3: runApprove with valid approval resolves to success line', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  const demo = {
+    approve: async (id) => {
+      assert.equal(id, 'i-1');
+      return { approved: true, intent: 'i-1', by: 'key-demo', subject: 'h', at: 't' };
+    },
+  };
+  const result = await runApprove(demo, 'i-1');
+  assert.equal(result.ok, true);
+  assert.equal(result.line, 'approved: intent i-1, signed by the presenter key key-demo');
+});
+
+test('DF17.3: runApprove with approval refused error gives single prefix', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  const demo = {
+    approve: async (id) => {
+      throw new Error('approval refused: the record was already used');
+    },
+  };
+  const result = await runApprove(demo, 'i-1');
+  assert.equal(result.ok, false);
+  assert.equal(result.line, 'approval refused: the record was already used');
+});
+
+test('DF17.3: runApprove with escalation not found error includes the message', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  const demo = {
+    approve: async (id) => {
+      throw new Error('no escalation was found for intent x: copy the id from the staff panel');
+    },
+  };
+  const result = await runApprove(demo, 'x');
+  assert.equal(result.ok, false);
+  assert.equal(result.line, 'approval refused: no escalation was found for intent x: copy the id from the staff panel');
+});
+
+test('DF17.3: runApprove cuts error message at 200 characters', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  const longMessage = 'x'.repeat(500);
+  const demo = {
+    approve: async (id) => {
+      throw new Error(longMessage);
+    },
+  };
+  const result = await runApprove(demo, 'i-1');
+  assert.equal(result.ok, false);
+  const msgPart = result.line.replace(/^approval refused: /, '');
+  assert.equal(msgPart.length, 200);
+});
+
+test('DF17.3: runApprove collapses newlines to single space', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  const demo = {
+    approve: async (id) => {
+      throw new Error('line1\n  line2   line3');
+    },
+  };
+  const result = await runApprove(demo, 'i-1');
+  assert.equal(result.ok, false);
+  assert.match(result.line, /line1 line2 line3/);
+  assert.ok(!result.line.includes('\n'));
+});
+
+test('DF17.3: runApprove handles non-Error thrown values', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  const demo = {
+    approve: async (id) => {
+      throw 'string error';
+    },
+  };
+  const result = await runApprove(demo, 'i-1');
+  assert.equal(result.ok, false);
+  assert.ok(result.line);
+  assert.ok(result.line.startsWith('approval refused:'));
+});
