@@ -4,9 +4,9 @@ Step 13 runs the full suite. This list holds what is to be done before it or wit
 
 ## From the live rehearsal
 
-1. **Null token usage is metered as zero** (polywatch finding 1, `mvfyi7za`). In `demo/host/live-providers.mjs`, `ask()` reads the usage with `Number(body.usage?.input_tokens)`, and `Number(null)`, `Number('')`, `Number(false)` and `Number([])` are 0, so a 200 response with a null usage is accepted as 0 tokens. The meter is safe (it charges the reserved worst case when the usage is not a whole number), but the provider reports zero to the runtime. A fix reads the usage as numbers only and throws `the model provider reported no token usage` for anything else. It must show the refusal for `null`, an empty string, `false`, an array and a missing field.
-2. **No input-share check on the single asks** (polywatch finding 3). `text()` (the `answer` and `reply` decisions) never compares the input tokens that the API counts with `limits.maxInputTokens`, as `vote()` does for its first ask. A fix adds the check, with the same message form. It must show a refusal when the API reports more input tokens than the limit, and the single ask not retried.
-3. **The room page's "Sending..." state**, and the rest of the page fix proposed in `docs/demo/rehearsal.md` under "The room page, for v1.3": a timeout on `/api/say` with a message, the state of the event stream, one stream for each session, and the release of a hidden page's connection. A fix needs a fast test of the pure parts and a heavy test with six held connections.
+1. **Done (DF18 item 1).** **Null token usage is metered as zero** (polywatch finding 1, `mvfyi7za`). In `demo/host/live-providers.mjs`, `ask()` reads the usage with `Number(body.usage?.input_tokens)`, and `Number(null)`, `Number('')`, `Number(false)` and `Number([])` are 0, so a 200 response with a null usage is accepted as 0 tokens. The meter is safe (it charges the reserved worst case when the usage is not a whole number), but the provider reports zero to the runtime. A fix reads the usage as numbers only and throws `the model provider reported no token usage` for anything else. It must show the refusal for `null`, an empty string, `false`, an array and a missing field.
+2. **Done (DF18 item 2).** **No input-share check on the single asks** (polywatch finding 3). `text()` (the `answer` and `reply` decisions) never compares the input tokens that the API counts with `limits.maxInputTokens`, as `vote()` does for its first ask. A fix adds the check, with the same message form. It must show a refusal when the API reports more input tokens than the limit, and the single ask not retried.
+3. **Done in part (DF18 item 3).** **The room page's "Sending..." state**, and the rest of the page fix proposed in `docs/demo/rehearsal.md` under "The room page, for v1.3": a timeout on `/api/say` with a message, the state of the event stream, one stream for each session, and the release of a hidden page's connection. A fix needs a fast test of the pure parts and a heavy test with six held connections.
 
 ## From the launcher
 
@@ -22,7 +22,7 @@ Step 13 runs the full suite. This list holds what is to be done before it or wit
 
 ## The suite
 
-10. **Run the full suite** (`npm test`) with the owner's tables restored to the committed ones, or after item 4, and report the counts. The full suite has not been run since the first part of Step 12.
+10. **Done.** **Run the full suite** (`npm test`) with the owner's tables restored to the committed ones, or after item 4, and report the counts. The full suite has not been run since the first part of Step 12.
 
 ## Conclusion
 
