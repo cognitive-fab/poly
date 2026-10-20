@@ -250,3 +250,31 @@ test('AC30 at run time: an amount outside 0..500 is refused as the completion\'s
     assert.deepEqual(replies(p), ['Unsure']);
   } finally { await rt.close(); }
 });
+
+// ── DF20: HTTP status codes on the POST /v1/refunds ──
+
+const statusTests = [
+  { status: 409, permanent: false, desc: 'DF20: a 409 on the POST is retried (plain error, permanent not set)' },
+  { status: 429, permanent: false, desc: 'DF20: a 429 on the POST is retried (plain error, permanent not set)' },
+  { status: 400, permanent: true, desc: 'DF20: a 400 on the POST is permanent' },
+  { status: 402, permanent: true, desc: 'DF20: a 402 on the POST is permanent' },
+  { status: 403, permanent: true, desc: 'DF20: a 403 on the POST is permanent' },
+  { status: 404, permanent: true, desc: 'DF20: a 404 on the POST is permanent' },
+  { status: 500, permanent: false, desc: 'DF20: a 500 on the POST is plain error (permanent not set)' },
+  { status: 503, permanent: false, desc: 'DF20: a 503 on the POST is plain error (permanent not set)' },
+];
+
+for (const { status, permanent, desc } of statusTests) {
+  test(desc, async () => {
+    const c = caps({ items: [order()] });
+    const http = {
+      get: async () => ({ status: 200, headers: {}, body: JSON.stringify({ amount: 4500, amount_refunded: 0, paid: true }) }),
+      post: async () => ({ status, headers: {}, body: `{"error":"status_${status}"}` }),
+    };
+    const cWithHttp = { ...c, api: http };
+    await assert.rejects(refund(ask(40), cWithHttp), (e) => {
+      assert.match(e.message, new RegExp(String(status)), `error message includes status ${status}`);
+      return Boolean(e.permanent) === permanent;
+    });
+  });
+}

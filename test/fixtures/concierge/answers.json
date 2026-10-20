@@ -232,6 +232,76 @@
       "replies": {
         "Unsure": "How much should we refund, and for which order?"
       }
+    },
+    {
+      "id": "refund-twice",
+      "from": "wa-1",
+      "text": "Please refund 40 euros for the chairs.",
+      "classify": [
+        {
+          "tier": "small",
+          "answer": "Refund",
+          "p": 0.97,
+          "usage": {
+            "input": 150,
+            "output": 3
+          }
+        }
+      ],
+      "amount": {
+        "answer": {
+          "value": 40
+        },
+        "p": 0.93,
+        "usage": {
+          "input": 150,
+          "output": 6
+        },
+        "cites": [
+          "o-1002"
+        ]
+      },
+      "replies": {
+        "Refunded": "We are processing the refund of 40 euros. It will appear in your account shortly.",
+        "Declined": "We could not issue the refund now. A member of staff will contact you.",
+        "Checking": "Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
+        "Already": "A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else."
+      }
+    },
+    {
+      "id": "refund-synthetic",
+      "from": "wa-3",
+      "text": "Please refund 40 euros for my desk lamp.",
+      "classify": [
+        {
+          "tier": "small",
+          "answer": "Refund",
+          "p": 0.97,
+          "usage": {
+            "input": 150,
+            "output": 3
+          }
+        }
+      ],
+      "amount": {
+        "answer": {
+          "value": 40
+        },
+        "p": 0.93,
+        "usage": {
+          "input": 150,
+          "output": 6
+        },
+        "cites": [
+          "o-9031"
+        ]
+      },
+      "replies": {
+        "Refunded": "Your refund of 40 euros is on its way.",
+        "Declined": "We could not issue the refund now. A member of staff will contact you.",
+        "Checking": "Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
+        "Already": "A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else."
+      }
     }
   ],
   "customers": {
