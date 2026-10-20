@@ -75,7 +75,7 @@ test('DF10.1: --stub-model with --cap-usd parses correctly', () => {
 test('DF10.1: the result for argument lists without --cap-usd has no capUsd key', () => {
   const r = parseArgs([]);
   assert.ok(!('capUsd' in r), 'recorded has no capUsd');
-  assert.deepEqual(Object.keys(r).sort(), ['lan', 'mode', 'port', 'size']);
+  assert.deepEqual(Object.keys(r).sort(), ['lan', 'mode', 'port', 'size', 'standInFault']);
 });
 
 // ---- DF10.2: main catches LaunchRefused and refuses before side effects --------

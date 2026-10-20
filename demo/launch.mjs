@@ -15,7 +15,6 @@
 // DF10: --live and --stub-model need --cap-usd, at most 10 dollars. The spend never exceeds it, the room stops when it is reached, and a
 // spend line follows each reply. --stub-model runs the live path over a local stub: no key, no network.
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { spawn } from 'node:child_process';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { getHeapStatistics } from 'node:v8';
 import { dirname, join, resolve as resolvePath } from 'node:path';
@@ -32,6 +31,7 @@ import { runResolve } from './host/resolve.mjs';
 import { startRoomServer } from './host/server.mjs';
 import { liveTransport } from './host/live-transport.mjs';
 import { DEMO_TIMEOUTS, makeDemoConcierge } from './scripts/make-demo-concierge.mjs';
+import { runAgainWithHeap } from './scripts/heap-reexec.mjs';
 
 /** The launcher's arguments, strictly: an unknown flag or a bad port is an error. */
 export function parseArgs(argv) {
@@ -195,8 +195,7 @@ export function heapArgsFor(limitMb, env = {}) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const heap = heapArgsFor(Math.floor(getHeapStatistics().heap_size_limit / (1024 * 1024)), process.env);
   if (heap.length > 0) {
-    const child = spawn(process.execPath, [...heap, process.argv[1], ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, POLY_DEMO_HEAP_REEXEC: '1' } });
-    child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+    runAgainWithHeap(process.argv[1], process.argv.slice(2), heap);
   } else {
     main(process.argv.slice(2)).then((code) => process.exit(code), (e) => { console.error(e.message); process.exit(1); });
   }
