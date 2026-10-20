@@ -1,6 +1,6 @@
 # Act 1: the same prompt, two builds
 
-This is the script of Act 1. It has three parts: the experiment, the difference, and an illustration. The first two parts are records. The third is a chosen scenario, and the screen says so.
+This is the script of Act 1. It has four parts: the experiment, the difference, an illustration, and what a lint sees and what it does not. The first two parts are records. The third and the fourth are chosen scenarios, and the screen says so.
 
 ## Part 1: The experiment
 
@@ -70,13 +70,41 @@ The unkeyed poly build was never driven. In the control it exits with `AdmitErro
 
 The records are in `docs/demo/step10-replay/illustration/`, one file per tree and request. The driver is `demo/demo.mjs replay` with `--request-text` and `--request-amount` (DB6 item 10).
 
+## Part 4: What a lint sees, and what it does not (v1.3.1)
+
+The question from the room is: could a linter catch this? A careful TypeScript team would write one rule: a POST to /v1/refunds carries an Idempotency-Key. The lint is `demo/lint/refund-key.mjs`. It reads the syntax of the build with the TypeScript compiler API, and it says clean only when it found a call to check. This part is a chosen scenario, not part of the experiment.
+
+**The lint catches the key that is missing.** On `ts-kept` it reports the one call of `src/stripe.ts` keyed (exit 0). On `ts-kept-nokey`, the tree with the line `"Idempotency-Key": idempotencyKey,` removed (mutation (b)), it reports the call unkeyed, with its line (exit 1):
+
+```
+src/stripe.ts:46  unkeyed  POST /v1/refunds
+refund-key: 1 call(s) checked, 1 unkeyed, 0 undecided
+```
+
+The key is a local fact. It is in the call, and a lint can see it. The records are `docs/demo/part4/lint-ts-kept.txt` and `docs/demo/part4/lint-ts-kept-nokey.txt`.
+
+**The lint does not catch a second intent for the same order.** The fixture `test/fixtures/lint/reissue` keys every call with a fresh `randomUUID()` and keeps no memory of earlier refunds. The lint reports it keyed (exit 0), and the build refunds a customer twice when the customer asks twice. No line of it is wrong. The second request is a new intent with a new key, and that is a fact about the paths of the machine, not about a line (`docs/demo/part4/lint-reissue-fixture.txt`). The concierge of v1.3.0 had exactly this defect, and the review of the pages found it (DF19): the key was in every call, and the Desk formed a second refund intent after the first.
+
+**The check sees it once the property is written.** Mutation (c) is the kept poly build with one handler changed: after an uncertain end, `RefundUnknown` goes to `Idle` where the kept build goes to `Review` (a person decides). The records are in `docs/demo/part4/`:
+
+| Program | Check | What it says |
+|---|---|---|
+| `poly-kept` (the kept build) | `poly-kept.check.txt` | `CLEAN`, 226 states |
+| mutation (c), shipped properties | `poly-kept-reissue.check.txt` | `CLEAN`, 161 states. The shipped properties speak of lines confirmed at Stripe, and an uncertain refund is not confirmed. |
+| mutation (c) with the property `no-reissue` | `poly-kept-reissue-checked.check.txt` | `FINDINGS`, four `PL3002`, each with a witness of 6 steps: Open, RequestAll, Confirm, RefundUnknown, RequestAll, Confirm |
+| `poly-kept` with the same property | `poly-kept-plus-property.check.txt` | `CLEAN`, 226 states: the kept build keeps its ambiguity in `Review`, and the property holds |
+
+The property is not one line. It needs a ghost field (`issued`, the lines of a refund emitted and not known to be refused), three updates (`Confirm` sets it, `RefundFailed` and `Resolve` with `done` false clear it) and one `never` for each of the four lines: 8 lines in all (`docs/demo/part4/mutation-c.diff`). The line for the stage: **the key is a local fact, which a lint can see; a second request for the same order is a path fact, which only the check over the machine sees, and only once the property is written.**
+
+What this part does not show. It does not show that poly finds the double refund unaided: someone has to write the property, and the shipped properties of the kept build did not catch the mutation. It does not show that a TypeScript team cannot write the state that prevents it (`ts-kept` keeps a ledger of refunds in code and refuses a second one). It shows what each tool sees: the lint reads a line, and the check walks the machine.
+
 ## What Act 1 proves, and what it does not
 
 It proves that two builds from the same prompt both chose a key, and that in poly the choice is enforced by the toolchain and in TypeScript it is not. It shows that removing the key from the TypeScript build produces a double refund when the request lets Stripe accept the second refund. It does not prove that an agent will omit the key: in this experiment neither did. It does not show that poly checks the amount: it does not. It does not generalise beyond one prompt, two kept builds and one fault.
 
 ## Conclusion
 
-The experiment found no difference in what the two builds did: both kept builds refund once, and both refund the wrong amount. The difference is in what holds the key in place. In TypeScript, one removed line leaves a build that starts, answers, and, when the request allows it, refunds a customer twice. In poly, the same removal is a finding with a witness, and the build is not admitted. The checker is silent on the amount, and the script says so.
+The experiment found no difference in what the two builds did: both kept builds refund once, and both refund the wrong amount. The difference is in what holds the key in place. In TypeScript, one removed line leaves a build that starts, answers, and, when the request allows it, refunds a customer twice. In poly, the same removal is a finding with a witness, and the build is not admitted. The checker is silent on the amount, and the script says so. A lint sees the key, which is a line, and does not see a second refund for the same order, which is a path: the check sees it once its property is written (part 4).
 
 ## Glossary
 
@@ -89,4 +117,8 @@ The experiment found no difference in what the two builds did: both kept builds 
 - **Mutation:** a copy of a kept build with one line removed.
 - **`PL4003`:** an irreversible effect may be retried with no guarantee that the target runs it once.
 - **Witness:** the steps, listed by the checker, by which a property is broken.
+- **Lint:** a static rule over the text of a program; here, that a POST to /v1/refunds carries an Idempotency-Key.
+- **Path fact:** a fact about the sequences of steps of a machine (a second refund after an uncertain end), which no single line states.
+- **Mutation (c):** the kept poly build with `RefundUnknown` going to `Idle` in place of `Review`.
+- **Property `no-reissue`:** no refund is emitted again while an earlier one is issued or not known to be refused.
 - **Admitted:** accepted by the runtime at start. A build with an unaccepted finding is not admitted.

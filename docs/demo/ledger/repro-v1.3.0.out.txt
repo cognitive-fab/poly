@@ -1,0 +1,6 @@
+s1 refund-twice refunds at the stand-in: 1 {"ch_ex1001":0,"ch_ex1002":4000,"ch_demo9031":0}
+s1 refund-twice refunds at the stand-in: 2 {"ch_ex1001":0,"ch_ex1002":8000,"ch_demo9031":0}
+s3 refund-synthetic refunds at the stand-in: 3 {"ch_ex1001":0,"ch_ex1002":8000,"ch_demo9031":4000}
+s3 refund-synthetic refunds at the stand-in: 4 {"ch_ex1001":0,"ch_ex1002":8000,"ch_demo9031":8000}
+guest 1 heard ["We are processing the refund of 40 euros. It will appear in your account shortly.","We are processing the refund of 40 euros. It will appear in your account shortly."]
+guest 3 heard ["Your refund of 40 euros is on its way.","Your refund of 40 euros is on its way."]
