@@ -15,7 +15,9 @@
 // DF10: --live and --stub-model need --cap-usd, at most 10 dollars. The spend never exceeds it, the room stops when it is reached, and a
 // spend line follows each reply. --stub-model runs the live path over a local stub: no key, no network.
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { networkInterfaces, tmpdir } from 'node:os';
+import { getHeapStatistics } from 'node:v8';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -181,6 +183,21 @@ export async function main(argv, io = {}) {
   return 0;
 }
 
+/**
+ * DF26: the check of the Desk (5762 states) runs in this process, and with Node's default heap (about 4.3 GB) it ran out of memory. Below
+ * 7000 MB the launcher starts itself again with 8 GB; once re-executed (POLY_DEMO_HEAP_REEXEC) it never does so again.
+ */
+export function heapArgsFor(limitMb, env = {}) {
+  if (limitMb >= 7000 || env.POLY_DEMO_HEAP_REEXEC === '1') return [];
+  return ['--max-old-space-size=8192'];
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main(process.argv.slice(2)).then((code) => process.exit(code), (e) => { console.error(e.message); process.exit(1); });
+  const heap = heapArgsFor(Math.floor(getHeapStatistics().heap_size_limit / (1024 * 1024)), process.env);
+  if (heap.length > 0) {
+    const child = spawn(process.execPath, [...heap, process.argv[1], ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, POLY_DEMO_HEAP_REEXEC: '1' } });
+    child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+  } else {
+    main(process.argv.slice(2)).then((code) => process.exit(code), (e) => { console.error(e.message); process.exit(1); });
+  }
 }
