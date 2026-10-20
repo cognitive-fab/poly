@@ -20,6 +20,7 @@ const clockAt = (start = 1_790_000_000_000) => { let t = start; return { now: ()
 
 function makeHarness() {
   const state = {
+    eventSources: [],
     elements: {},
     elementsByType: {},
     submitHandler: null,
@@ -117,7 +118,7 @@ function makeHarness() {
   const sandbox = {
     document: fakeDocument,
     fetch: fakeFetch,
-    EventSource: class { constructor(url) { this.url = url; this.onmessage = null; } },
+    EventSource: class { constructor(url) { this.url = url; this.onmessage = null; state.eventSources.push(this); } },
     setTimeout: fakeSetTimeout,
     clearTimeout: fakeClearTimeout,
     AbortController: AbortController,
@@ -590,3 +591,51 @@ test('DF18.3: C real room server with six event streams open, seventh POST /api/
     await server.close();
   }
 }, { timeout: 10000 });
+
+// ---- DF18.3: hardening found by review of the page script --------
+
+test('DF18.3: (h) the limit passing while the answer body is being read still gives the timeout message', async () => {
+  const { state } = await runPageScript();
+  await new Promise((r) => setImmediate(r));
+  submit(state, 'hello');
+  await new Promise((r) => setImmediate(r));
+  const sayCall = state.fetchCalls.find((c) => c.url === '/api/say');
+  // The headers came; the body never does, and the abort rejects the read.
+  sayCall.deferred.resolve({ ok: true, status: 200, json: () => new Promise((_, reject) => { sayCall.options.signal.addEventListener('abort', () => reject({ name: 'AbortError' })); }) });
+  await new Promise((r) => setImmediate(r));
+  fireTimer(state, 10000);
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(state.elements.status.textContent, 'The room did not answer. Close other tabs of this page, reload, and send again.');
+  assert.equal(state.elements.b.disabled, false);
+  assert.equal(state.elements.t.value, 'hello');
+});
+
+test('DF18.3: (i) an answer body of null enables the button and says the message could not be sent', async () => {
+  const { state } = await runPageScript();
+  await new Promise((r) => setImmediate(r));
+  submit(state, 'hello');
+  await new Promise((r) => setImmediate(r));
+  const sayCall = state.fetchCalls.find((c) => c.url === '/api/say');
+  sayCall.deferred.resolve({ ok: true, status: 200, json: async () => null });
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(state.elements.status.textContent, 'The message could not be sent.');
+  assert.equal(state.elements.b.disabled, false);
+});
+
+test('DF18.3: (j) a halted event while a request waits keeps the page stopped when the answer comes', async () => {
+  const { state } = await runPageScript();
+  await new Promise((r) => setImmediate(r));
+  submit(state, 'hello');
+  await new Promise((r) => setImmediate(r));
+  const sayCall = state.fetchCalls.find((c) => c.url === '/api/say');
+  state.eventSources[0].onmessage({ data: JSON.stringify({ kind: 'halted' }) });
+  assert.equal(state.elements.status.textContent, 'The presenter has stopped the room.');
+  sayCall.deferred.resolve({ ok: true, status: 200, json: async () => ({ ok: true }) });
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(state.elements.status.textContent, 'The presenter has stopped the room.');
+  assert.equal(state.elements.b.disabled, true);
+  assert.equal(state.elements.t.disabled, true);
+});

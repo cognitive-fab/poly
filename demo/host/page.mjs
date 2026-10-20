@@ -24,7 +24,8 @@ button { cursor: pointer; }
 export function roomPageScript() {
   return String.raw`const log = document.getElementById('log'), status = document.getElementById('status'), input = document.getElementById('t'), button = document.getElementById('b');
 const add = (text, me) => { const li = document.createElement('li'); if (me) li.className = 'me'; li.textContent = text; log.appendChild(li); li.scrollIntoView({ block: 'end' }); };
-const halted = () => { status.textContent = 'The presenter has stopped the room.'; input.disabled = true; button.disabled = true; };
+let stopped = false;
+const halted = () => { stopped = true; status.textContent = 'The presenter has stopped the room.'; input.disabled = true; button.disabled = true; };
 fetch('/api/me').then((r) => r.json()).then((me) => { if (!me.persona) { status.textContent = 'The room is full.'; return; } document.getElementById('who').textContent = me.persona.id + ' (' + me.persona.display + ')'; if (me.killed) halted(); });
 const events = new EventSource('/api/events');
 events.onmessage = (e) => { const ev = JSON.parse(e.data); if (ev.kind === 'reply') add(ev.text, false); if (ev.kind === 'halted') halted(); };
@@ -44,12 +45,14 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   let failure = null;
   try {
     const r = await fetch('/api/say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal: controller.signal });
-    j = await r.json().catch(() => ({}));
+    // An abort while the body is read is the timeout too; a body that is not JSON, or is null, is an answer with no reason.
+    j = (await r.json().catch((err) => { if (controller.signal.aborted) throw err; return {}; })) || {};
   } catch (err) {
     failure = controller.signal.aborted || (err && err.name === 'AbortError') ? 'timeout' : 'error';
   }
   clearTimeout(timer);
   sending = false;
+  if (stopped) return; // the presenter stopped the room while the request waited: the page stays stopped
   if (failure === 'timeout') { status.textContent = 'The room did not answer. Close other tabs of this page, reload, and send again.'; button.disabled = false; return; }
   if (failure) { status.textContent = 'The message could not be sent.'; button.disabled = false; return; }
   if (j.reason === 'halted') { halted(); return; }
