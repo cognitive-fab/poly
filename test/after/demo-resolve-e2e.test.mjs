@@ -119,8 +119,13 @@ test('DF21, DF22, DAC26: with lost-all, refund ends Checking, resolve moves Unkn
     // (e) Journal replays with 0 divergences and contains Resolve step
     const journal = await rt.getJournal(deskId);
     const resolveSteps = journal.filter((x) => x.action === 'Resolve');
-    assert.ok(resolveSteps.length > 0, 'Resolve step should be journaled');
-    assert.ok(resolveSteps[0].step_kind === 'accepted', 'Resolve step should be accepted');
+    // Every attempt is a row of the journal: the four refusals of (b) and the second resolve of (d) are rejected, the one of (c) is accepted.
+    const accepted = resolveSteps.filter((x) => x.step_kind === 'accepted');
+    assert.equal(accepted.length, 1, 'one Resolve step is accepted, the signed one');
+    assert.equal(accepted[0].data.done, true);
+    assert.equal(accepted[0].data.$claims.principal, 'presenter', 'the step is journaled with the claims of the person who signed it');
+    const rejected = resolveSteps.filter((x) => x.step_kind === 'rejected');
+    assert.deepEqual(rejected.map((x) => x.reject_reason), ['claims-unverified', 'claims-unverified', 'claims-unverified', 'claims-unverified', 'not-unknown']);
 
     const [run] = await replayRuntime(rt, { runs: [deskId] });
     assert.deepEqual(run.diagnostics.map((d) => d.message), []);
@@ -148,8 +153,8 @@ test('DF21, DF22, DAC26: with down, refund ends Checking, resolve not-done empti
   });
 
   try {
-    const { rt, room, standIn } = demo;
-    const g1 = room.join('s1');
+    const { room, standIn } = demo;
+    room.join('s1');
     const heard = { s1: [] };
     room.subscribe('s1', (e) => heard.s1.push(e));
 
