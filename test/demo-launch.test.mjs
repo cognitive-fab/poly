@@ -36,3 +36,63 @@ test('DF7: the launcher\'s arguments are strict: recorded is the default, live i
   assert.throws(() => parseArgs(['--nope']), /unknown/);
   assert.throws(() => parseArgs(['--live', '--recorded']), /either/);
 });
+
+// DF26, DAC30: the launcher gives itself 8 GB of heap when it runs with less.
+test('DF26: heapArgsFor(4288, {}) returns max-old-space-size=8192', async () => {
+  const { heapArgsFor } = await import('../demo/launch.mjs');
+  const result = heapArgsFor(4288, {});
+  assert.deepEqual(result, ['--max-old-space-size=8192']);
+});
+
+test('DF26: heapArgsFor(6999, {}) returns max-old-space-size=8192', async () => {
+  const { heapArgsFor } = await import('../demo/launch.mjs');
+  const result = heapArgsFor(6999, {});
+  assert.deepEqual(result, ['--max-old-space-size=8192']);
+});
+
+test('DF26: heapArgsFor(7000, {}) returns empty', async () => {
+  const { heapArgsFor } = await import('../demo/launch.mjs');
+  const result = heapArgsFor(7000, {});
+  assert.deepEqual(result, []);
+});
+
+test('DF26: heapArgsFor(8192, {}) returns empty', async () => {
+  const { heapArgsFor } = await import('../demo/launch.mjs');
+  const result = heapArgsFor(8192, {});
+  assert.deepEqual(result, []);
+});
+
+test('DF26: heapArgsFor(4288, { POLY_DEMO_HEAP_REEXEC: "1" }) returns empty', async () => {
+  const { heapArgsFor } = await import('../demo/launch.mjs');
+  const result = heapArgsFor(4288, { POLY_DEMO_HEAP_REEXEC: '1' });
+  assert.deepEqual(result, []);
+});
+
+// DF26, DAC30: the serial suite runs with 8 GB of heap.
+test('DF26: package.json test script has --max-old-space-size=8192 for serial tests and not for parallel', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const testDir = dirname(fileURLToPath(import.meta.url));
+  const packagePath = join(testDir, '..', 'package.json');
+  const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
+  const testScript = pkg.scripts.test;
+
+  // Find the command with test/after/*.test.mjs
+  const afterMatch = testScript.match(/[^&]*test\/after\/\*\.test\.mjs[^&]*/);
+  assert(afterMatch, 'test script should contain a command with test/after/*.test.mjs');
+  const afterCommand = afterMatch[0];
+  assert(afterCommand.includes('--max-old-space-size=8192'), 'command with test/after/*.test.mjs should include --max-old-space-size=8192');
+
+  // Find the command with "test/*.test.mjs" (exact pattern)
+  const parallelMatch = testScript.match(/[^&]*"test\/\*\.test\.mjs"[^&]*/);
+  assert(parallelMatch, 'test script should contain a command with "test/*.test.mjs"');
+  const parallelCommand = parallelMatch[0];
+  assert(!parallelCommand.includes('--max-old-space-size=8192'), 'command with "test/*.test.mjs" should not include --max-old-space-size=8192');
+
+  // Verify both were found exactly once
+  const afterCount = (testScript.match(/test\/after\/\*\.test\.mjs/g) || []).length;
+  const parallelCount = (testScript.match(/"test\/\*\.test\.mjs"/g) || []).length;
+  assert.equal(afterCount, 1, 'test/after/*.test.mjs should appear exactly once');
+  assert.equal(parallelCount, 1, '"test/*.test.mjs" should appear exactly once');
+});
