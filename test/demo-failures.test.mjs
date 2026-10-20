@@ -768,6 +768,7 @@ test('DF13.4: describeFailure extracts HTTP form from mixed error text', async (
   assert.ok(!line.includes('suffix'), `should not include suffix, got: ${line}`);
 });
 
+// DF14, DAC19: no request holds temperature field
 test('DF13.1: the answer request has correct structure and content', async () => {
   const t = recordingTransport(stubTransport());
   const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
@@ -783,10 +784,10 @@ test('DF13.1: the answer request has correct structure and content', async () =>
   assert.equal(t.records.length, 1, 'should make exactly one request');
   const body = parseBody(t.records[0]);
   const keys = Object.keys(body).sort();
-  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys: ${keys}`);
+  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), `wrong keys: ${keys}`);
   assert.equal(body.model, 'small-model-id', 'model should be small-model-id');
   assert.ok(Number.isInteger(body.max_tokens) && body.max_tokens === 400, `max_tokens should be 400, got ${body.max_tokens}`);
-  assert.equal(body.temperature, 0.3, `temperature should be 0.3, got ${body.temperature}`);
+  assert.equal(Object.hasOwn(body, 'temperature'), false, 'temperature should not be in body');
   assert.ok(typeof body.system === 'string' && body.system.length > 0, 'system should be non-empty string');
   assert.equal(body.messages.length, 1, 'should have one message');
   const msg = body.messages[0];
@@ -808,6 +809,7 @@ test('DF13.1: the answer request has correct structure and content', async () =>
   checkFinite(body);
 });
 
+// DF14, DAC19: no request holds temperature field
 test('DF13.1: the reply request has correct structure and content', async () => {
   const t = recordingTransport(stubTransport());
   const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
@@ -817,10 +819,10 @@ test('DF13.1: the reply request has correct structure and content', async () => 
   assert.equal(t.records.length, 1, 'should make exactly one request for reply');
   const body = parseBody(t.records[0]);
   const keys = Object.keys(body).sort();
-  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys for reply: ${keys}`);
+  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), `wrong keys for reply: ${keys}`);
   assert.equal(body.model, 'small-model-id', 'reply model should be small-model-id');
   assert.ok(Number.isInteger(body.max_tokens) && body.max_tokens === 400, `reply max_tokens should be 400, got ${body.max_tokens}`);
-  assert.equal(body.temperature, 0.3, `reply temperature should be 0.3, got ${body.temperature}`);
+  assert.equal(Object.hasOwn(body, 'temperature'), false, 'temperature should not be in reply body');
   assert.ok(body.messages.length > 0, 'reply should have messages');
   const jsonStr = JSON.stringify(body);
   noNulls(body, 'the reply request');
@@ -832,6 +834,7 @@ test('DF13.1: the reply request has correct structure and content', async () => 
   checkFinite(body);
 });
 
+// DF14, DAC19: no request holds temperature field
 test('DF13.1: the amount request has correct structure and content (vote of 5)', async () => {
   const t = recordingTransport(stubTransport());
   const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
@@ -843,11 +846,68 @@ test('DF13.1: the amount request has correct structure and content (vote of 5)',
   for (let i = 0; i < t.records.length; i++) {
     const body = parseBody(t.records[i]);
     const keys = Object.keys(body).sort();
-    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys in amount request ${i}: ${keys}`);
+    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), `wrong keys in amount request ${i}: ${keys}`);
     assert.equal(body.model, 'small-model-id', `amount request ${i} model should be small-model-id`);
     assert.ok(Number.isInteger(body.max_tokens) && body.max_tokens > 0, `amount request ${i} max_tokens should be whole number above 0, got ${body.max_tokens}`);
-    assert.ok(Number.isFinite(body.temperature), `amount request ${i} temperature should be finite, got ${body.temperature}`);
+    assert.equal(Object.hasOwn(body, 'temperature'), false, `amount request ${i} should not have temperature field`);
     const jsonStr = JSON.stringify(body);
     noNulls(body, `the amount request ${i}`);
+  }
+});
+
+// ---- DF14: no request of any provider holds temperature --------
+
+test('DF14: no request of any provider holds temperature', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const materials = {
+    bodies: { m: 'where is my order?' },
+    items: { o: [
+      { id: 'o-9011', body: 'Order 9011: a desk lamp, delivered on 2 October.' },
+      { id: 'o-9012', body: 'Order 9012: a sofa.' },
+    ] },
+  };
+  const limits = { maxInputTokens: 2000, maxTokens: 400 };
+
+  // Call tiers.small (classify, a vote of 5)
+  const beforeSmall = t.records.length;
+  await providers.tiers.small({ decision: 'classify', payload: {}, intent: 'i', limits }, materials);
+  const afterSmall = t.records.length;
+  const smallCount = afterSmall - beforeSmall;
+
+  // Call tiers.large (classify, a vote of 5)
+  const beforeLarge = t.records.length;
+  await providers.tiers.large({ decision: 'classify', payload: {}, intent: 'i', limits }, materials);
+  const afterLarge = t.records.length;
+  const largeCount = afterLarge - beforeLarge;
+
+  // Call decisions.amount.provider (a vote of 5)
+  const beforeAmount = t.records.length;
+  await providers.decisions.amount.provider({ decision: 'amount', payload: {}, intent: 'i', limits }, materials);
+  const afterAmount = t.records.length;
+  const amountCount = afterAmount - beforeAmount;
+
+  // Call decisions.answer.provider (1 request)
+  const beforeAnswer = t.records.length;
+  await providers.decisions.answer.provider({ decision: 'answer', payload: {}, intent: 'i', limits }, materials);
+  const afterAnswer = t.records.length;
+  const answerCount = afterAnswer - beforeAnswer;
+
+  // Call decisions.reply.provider with Unsure (1 request)
+  const beforeReply = t.records.length;
+  await providers.decisions.reply.provider({ decision: 'reply', payload: { outcome: 'Unsure' }, intent: 'i', limits }, materials);
+  const afterReply = t.records.length;
+  const replyCount = afterReply - beforeReply;
+
+  // Total should be at least 5 + 5 + 5 + 1 + 1 = 17
+  const totalCount = afterReply;
+  assert.ok(totalCount >= 17, `should have at least 17 total requests, got ${totalCount}: small=${smallCount}, large=${largeCount}, amount=${amountCount}, answer=${answerCount}, reply=${replyCount}`);
+
+  // Assert that every recorded request has no temperature field and correct keys
+  for (let i = 0; i < t.records.length; i++) {
+    const body = parseBody(t.records[i]);
+    const keys = Object.keys(body).sort();
+    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), `request ${i}: wrong keys: ${keys}`);
+    assert.equal(Object.hasOwn(body, 'temperature'), false, `request ${i}: should not have temperature field`);
   }
 });

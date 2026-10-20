@@ -376,10 +376,10 @@ test('DF13.1: a guest saying "where is my order?" triggers an answer request wit
 
     // Check the structure and content
     const keys = Object.keys(answerRequest).sort();
-    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system', 'temperature'].sort(), `wrong keys: ${keys}`);
+    assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), `wrong keys: ${keys}`);
     assert.equal(answerRequest.model, smallPrice.model, `model should be ${smallPrice.model}`);
     assert.ok(Number.isInteger(answerRequest.max_tokens) && answerRequest.max_tokens > 0, `max_tokens should be whole number above 0, got ${answerRequest.max_tokens}`);
-    assert.equal(answerRequest.temperature, 0.3, `temperature should be 0.3, got ${answerRequest.temperature}`);
+    assert.equal(Object.hasOwn(answerRequest, 'temperature'), false, 'temperature should not be in answer request');
     assert.ok(typeof answerRequest.system === 'string' && answerRequest.system.length > 0, 'system should be non-empty string');
     assert.ok(Array.isArray(answerRequest.messages) && answerRequest.messages.length > 0, 'messages should be non-empty array');
 
@@ -400,6 +400,13 @@ test('DF13.1: a guest saying "where is my order?" triggers an answer request wit
       if (typeof val === 'object' && val !== null) Object.values(val).forEach(checkFinite);
     };
     checkFinite(answerRequest);
+
+    // DF14: verify no recorded request body holds temperature field (including classify votes)
+    assert.ok(recordedBodies.length > 1, 'should have recorded multiple requests');
+    for (let i = 0; i < recordedBodies.length; i++) {
+      const body = recordedBodies[i];
+      assert.equal(Object.hasOwn(body, 'temperature'), false, `recorded body ${i}: should not have temperature field`);
+    }
   } finally {
     if (demo) await demo.close();
     rmSync(workdir, { recursive: true, force: true, maxRetries: 3 });
