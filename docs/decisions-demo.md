@@ -117,3 +117,15 @@ Step 3 is accepted on these conditions, all met before Step 4:
   - `demo/baseline/arm-poly.md` sha256:f0f5ebedc8d73d2bf5ccb3fe3278128d178adf1124ef9ed38b8a9df18a2c93e6
 
   The owner makes the pre-registration commit and runs the pilots. No agent does.
+
+## v1.3.1: the double refund (owner, 2026-10-20)
+
+Rulings on the finding of the review of the v1.3 pages (Q1): the concierge can refund twice on one thread. The specification is DF19 to DF25 and DAC24 to DAC29 of `docs/proposals/demo-refund.md`.
+
+- **The ledger is per Desk.** `Items` is opaque (PS1.4b), so the Desk cannot hold state per order. The ledger `None`, `Unknown`, `Issued` is per customer thread, and while it is not `None` the Desk emits no refund intent. A guest with two orders cannot refund the second in the same thread until the first is resolved. The specification, the pages and the release notes say so.
+- **Per-order identity is a v2.0 proposal,** not a v1.4 item: a conceptual data layer in which a machine can read a key of a cited item.
+- **An ambiguous end is not a refusal.** `exhausted` goes to `RefundUnknown`; the guest hears that the refund is being checked, not `Declined`. `Declined` is told only for a definite refusal.
+- **A person ends Unknown.** `Resolve(done)` is signed with the presenter key like `approve` and journaled. The presenter command is `resolve <desk> done|not-done`, used after reading the Stripe stand-in's status in `status`.
+- **A 409 from Stripe is retried.** It can mean that the first request with the key is still executing.
+- **The sixth attack** of Act 2 is `refund 40` twice: the second is refused by the program, not by the handler.
+- **The check costs more.** The Desk grows from 2114 to 5762 states and its check from 4 minutes 4 seconds to 7 minutes 7 seconds on the reference machine. Claims of `Resolve` are reduced to the principal (the adapter checks kind, attestation and assurance, K11), because the adapter's four fields would have nearly doubled the transitions (939,206 against 484,008) and more than doubled the check (16 minutes 35 seconds against 7 minutes 7 seconds) for no stronger claim.
