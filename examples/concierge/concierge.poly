@@ -13,14 +13,26 @@
 // It acts on one order: the customer's own orders are retrieved, the amount decision cites the one the message is about,
 // and the refund carries that item set (`one order`, S462), so the host never picks which charge to refund. The handler
 // reads the order (`items.read`), refuses unless it is the requesting customer's, and refunds no more than was paid.
+//
+// A thread has one refund at a time (DF19, v1.3.1). The key of S526 makes the retries of one refund intent safe, but a
+// second request creates a new intent with a new key, and the Desk would form it. So the Desk keeps a ledger: a refund
+// issued, or whose outcome is not known, blocks a new refund intent on that thread, and the path property `no-reissue`
+// checks it. An ambiguous end (`exhausted`) is told as Checking, not Declined, and a person ends it with Resolve.
 module concierge
 
 audience { public < customer < staff }
 
 enum Branch { Refund, Status, Other }
 
-// What a reply tells the customer; the decision that writes it reads this and the customer's message.
-enum Outcome { Refunded, Declined, Unsure, Status, Other }
+// What a reply tells the customer; the decision that writes it reads this and the customer's message. Declined is for a
+// refusal after which the target did not execute. Checking is for a refund that may have executed and is being looked
+// at by a person; Already is for a request on a thread that has a refund issued (DF19).
+enum Outcome { Refunded, Declined, Unsure, Status, Other, Checking, Already }
+
+// DF19: what this Desk knows of its refunds. Unknown is a refund intent whose outcome is not known: in flight, waiting for
+// a person's approval, or ended with no answer. The ledger is per Desk, that is per customer thread, not per order:
+// `Items` is opaque (PS1.4b), so the Desk cannot tell which order a citation names.
+enum Ledger { None, Unknown, Issued }
 
 // AC30, PT28.3a: the extracted amount, a record of one field with a strict domain.
 type Amount = { value: 0..500 }
@@ -29,6 +41,11 @@ enum Phase { Idle, Classifying, Looking, Finding, Citing, Extracting, Refunding,
 
 // S450: the bound action's claims, a field of the WhatsApp kind's Sender claims.
 claims Customer {
+  principal: Principal
+}
+
+// DF21: the person who ends an Unknown refund. The host's verifier gives it only for a person's signed record (S107, K11).
+claims Operator {
   principal: Principal
 }
 
@@ -83,6 +100,7 @@ service machine Desk {
     large    : bool      = false
     acking   : bool      = false
     inflight : 0..3      = 0
+    refund   : Ledger    = None
   }
 
   action Start()
@@ -96,6 +114,8 @@ service machine Desk {
   action Unextracted()
   action Refunded()
   action RefundFailed()
+  action RefundUnknown()
+  action Resolve(done: bool)
   action Answered(text: Content)
   action AnswerFailed()
   action Acked(text: Content)
@@ -184,9 +204,19 @@ service machine Desk {
     require phase == Extracting else reject "not-extracting"
     if conf >= 0.8 {
       if cites.count == 1 {
-        phase' = Refunding
-        large' = value > 100
-        emit refund(amount: value, customer: customer, order: cites)
+        if refund == None {
+          phase' = Refunding
+          large' = value > 100
+          refund' = Unknown
+          emit refund(amount: value, customer: customer, order: cites)
+        } else {
+          phase' = Answering
+          if refund == Unknown {
+            decide reply(question: question, outcome: Checking)
+          } else {
+            decide reply(question: question, outcome: Already)
+          }
+        }
       } else {
         phase' = Answering
         decide reply(question: question, outcome: Unsure)
@@ -206,13 +236,36 @@ service machine Desk {
   on Refunded {
     require phase == Refunding else reject "not-refunding"
     phase' = Answering
+    refund' = Issued
     decide reply(question: question, outcome: Refunded)
   }
 
+  // DF19: a definite refusal. Nothing executed, so the ledger is clear again and the customer may ask once more.
   on RefundFailed {
     require phase == Refunding else reject "not-refunding"
     phase' = Answering
+    refund' = None
     decide reply(question: question, outcome: Declined)
+  }
+
+  // DF19: every attempt ended without an answer, or the window lapsed (PS23.2). The refund may exist, so the guest is not told
+  // Declined and the ledger stays Unknown until a person resolves it.
+  on RefundUnknown {
+    require phase == Refunding else reject "not-refunding"
+    phase' = Answering
+    decide reply(question: question, outcome: Checking)
+  }
+
+  // DF21: a person, having looked at the Stripe dashboard, says whether the refund exists. A channel cannot dispatch this:
+  // the host does, with a signed record. It sends no reply.
+  on Resolve(done) by op: Operator {
+    require refund == Unknown else reject "not-unknown"
+    require phase != Refunding else reject "refund-in-flight"
+    if done {
+      refund' = Issued
+    } else {
+      refund' = None
+    }
   }
 
   on Answered(text) {
@@ -270,6 +323,10 @@ service machine Desk {
       inflight' = 0
     }
   }
+
+  // DF19: no refund intent is emitted while this Desk has one issued or unknown. The key of S526 covers the retries of one
+  // intent; this covers a second intent with a new key, which PS23.3 and PT33.11 (S527) leave to the program.
+  never no-reissue: emit refund while refund != None
 
   decision classify(body: Content) -> Branch {
     route triage
@@ -334,6 +391,7 @@ service machine Desk {
     idempotent header "Idempotency-Key" window 24h
     ok -> Refunded()
     failed -> RefundFailed()
+    exhausted -> RefundUnknown()
   }
 }
 

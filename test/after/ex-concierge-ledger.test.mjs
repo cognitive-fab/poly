@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, cpSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ROOT } from '../helpers.mjs';
@@ -28,7 +28,6 @@ export function deriveAmountedUnguarded(src) {
 
   // Find the matching closing brace of the entire if-else block
   let braceDepth = 0;
-  let elseLineIdx = -1;
   let endLineIdx = -1;
 
   for (let i = ifLineIdx; i < lines.length; i++) {
@@ -40,9 +39,6 @@ export function deriveAmountedUnguarded(src) {
     if (braceDepth === 0 && i > ifLineIdx) {
       endLineIdx = i;
       break;
-    }
-    if (braceDepth === 1 && !elseLineIdx && line.trim().startsWith('} else {')) {
-      elseLineIdx = i;
     }
   }
 
@@ -77,14 +73,14 @@ function setupDir(src) {
   const tmpDir = join(tmpdir(), `ledger-test-${Math.random().toString(36).slice(2)}`);
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(join(tmpDir, 'concierge.poly'), src);
-  writeFileSync(join(tmpDir, 'concierge.policy.poly'), require('node:fs').readFileSync(join(EX, 'concierge.policy.poly'), 'utf8'));
+  writeFileSync(join(tmpDir, 'concierge.policy.poly'), readFileSync(join(EX, 'concierge.policy.poly'), 'utf8'));
   cpSync(join(EX, 'maps'), join(tmpDir, 'maps'), { recursive: true });
   cpSync(join(EX, 'prices'), join(tmpDir, 'prices'), { recursive: true });
   return tmpDir;
 }
 
 test('DF19 item 9 first paragraph: example checks CLEAN with no-reissue property (not vacuous), instance pinned', { timeout: 600_000 }, async () => {
-  const src = require('node:fs').readFileSync(join(EX, 'concierge.poly'), 'utf8');
+  const src = readFileSync(join(EX, 'concierge.poly'), 'utf8');
   const tmpDir = setupDir(src);
   try {
     const { stdout, status } = runChecker(tmpDir);
@@ -101,7 +97,7 @@ test('DF19 item 9 first paragraph: example checks CLEAN with no-reissue property
 });
 
 test('DF19 item 6: variant with ledger kept but not consulted gives PL3002 no-reissue with 10-step witness', { timeout: 600_000 }, async () => {
-  const src = require('node:fs').readFileSync(join(EX, 'concierge.poly'), 'utf8');
+  const src = readFileSync(join(EX, 'concierge.poly'), 'utf8');
   const variant = deriveAmountedUnguarded(src);
   const tmpDir = setupDir(variant);
   try {
@@ -112,12 +108,17 @@ test('DF19 item 6: variant with ledger kept but not consulted gives PL3002 no-re
     assert.match(stdout, /PL3002 STEP_PROPERTY  no-reissue/, 'PL3002 for no-reissue property found');
     assert.match(stdout, /witness \(10 steps\)/, 'witness has 10 steps');
 
-    // Extract the witness lines to check the last action
-    const witnessMatch = stdout.match(/witness \(10 steps\):([\s\S]*?)(?=\n  [a-zA-Z]|$)/);
-    assert.ok(witnessMatch, 'witness section found');
-    const witnessText = witnessMatch[1];
-    const witnessLines = witnessText.trim().split('\n');
-    assert.equal(witnessLines.length, 10, `witness has ${witnessLines.length} lines (expected 10)`);
+    // The finding of the Desk, not of the configuration (`app.no-reissue`, a witness of global steps): ten lines indented by four
+    // spaces follow its `witness (10 steps):` line, the first is the Got of the customer and the last is the second Amounted.
+    const all = stdout.split('\n');
+    const at = all.findIndex((l) => /PL3002\s+STEP_PROPERTY\s+no-reissue$/.test(l));
+    assert.ok(at >= 0, 'the finding of the Desk is in the output');
+    const w = all.findIndex((l, i) => i > at && /^ {2}witness \(10 steps\):$/.test(l));
+    assert.ok(w > at, 'the Desk finding has a witness of 10 steps');
+    const witnessLines = all.slice(w + 1, w + 11);
+    assert.ok(witnessLines.every((l) => l.startsWith('    ')), 'ten witness lines follow');
+    assert.ok(!(all[w + 11] ?? '').startsWith('    '), 'and no eleventh');
+    assert.equal(witnessLines[0].trim().split(/[(\s]/)[0], 'Got');
 
     const lastLine = witnessLines[witnessLines.length - 1].trim();
     assert.match(lastLine, /Amounted/, 'last action is Amounted');

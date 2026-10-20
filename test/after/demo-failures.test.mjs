@@ -272,10 +272,10 @@ test('DF12.5: the instance is unchanged by timeout rewrite; compare example-time
       const exampleSig = instanceSignature(demoExample.admission);
       const copySig = instanceSignature(demoDemo.admission);
 
-      // The instances should be identical: { Desk: 2114, Notice: 28, support.Conversation: 342, staff.Conversation: 666, payments.Grant: 13, triage.Route: 6, spend.Budget: 96 }
+      // The instances should be identical: { Desk: 5762, Notice: 28, support.Conversation: 342, staff.Conversation: 666, payments.Grant: 13, triage.Route: 6, spend.Budget: 96 }
       // This is the instance printed at launch for this demo
       const expectedStates = {
-        Desk: 2114,
+        Desk: 5762,
         Notice: 28,
         'support.Conversation': 342,
         'staff.Conversation': 666,
@@ -565,9 +565,9 @@ test('DF16: amount decision cut off at realistic limit reports the count', { tim
       }
     }
 
-    // The instance from DF12 item 5: Desk 2114, Notice 28, support.Conversation 342, staff.Conversation 666, payments.Grant 13, triage.Route 6, spend.Budget 96
+    // The instance of DF19 item 5 (v1.3.1; the instance of DF12 item 5 had Desk 2114): Desk 5762, Notice 28, support.Conversation 342, staff.Conversation 666, payments.Grant 13, triage.Route 6, spend.Budget 96
     const expectedInstance = {
-      Desk: 2114,
+      Desk: 5762,
       Notice: 28,
       'support.Conversation': 342,
       'staff.Conversation': 666,
