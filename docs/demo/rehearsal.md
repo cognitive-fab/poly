@@ -382,6 +382,33 @@ Before it, a live launch needs price tables read from the vendor's page. The fil
 
 Do not guess a price. Do not commit these files. After the rehearsal, restore them (step 4).
 
+A live launch also needs the calibration maps relabelled for the models named in the price tables. The committed maps in `demo/concierge/maps/` are fitted for the example's own models, and the checker refuses a tier whose map is fitted for another model than its price table's `model` (`PL6842`). Do this after you have set `model` in both price tables. It sets `fittedFor` to the table's model and recomputes `digest` with `digest` from `@poly/core`, over `decision`, `version`, `fittedFor` and `points`. The points are not changed. Run it from the repository root, after `npm run build`:
+
+```powershell
+$js = @'
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const core = join(process.cwd(), 'packages/poly-core/dist/src/index.js');
+const { digest } = await import(pathToFileURL(core).href);
+for (const tier of ['small', 'large']) {
+  const price = JSON.parse(
+    readFileSync(`demo/concierge/prices/${tier}.json`, 'utf8'));
+  const file = `demo/concierge/maps/${tier}.json`;
+  const map = JSON.parse(readFileSync(file, 'utf8'));
+  map.fittedFor = price.model;
+  const { decision, version, fittedFor, points } = map;
+  map.digest = digest({ decision, version, fittedFor, points });
+  writeFileSync(file, JSON.stringify(map, null, 2) + '\n');
+  console.log(tier, 'fittedFor', fittedFor);
+}
+'@
+Set-Content -Path "$env:TEMP\relabel-maps.mjs" -Value $js
+node "$env:TEMP\relabel-maps.mjs"
+```
+
+It prints one line for each tier. The relabelled maps are stand-ins: they say nothing about the model in the room (see `docs/demo/calibration-for-release.md`). Do not commit them. After the rehearsal, restore them (step 4).
+
 Set the key in this window only. Use the masked prompt, so the key is not echoed and is not saved in your history. The key is read as a secure string and turned into plain text only inside the environment variable. No other variable holds it, and `$secure` is removed at once:
 
 ```powershell
@@ -423,7 +450,7 @@ spend: $0.0100 of $1.00 cap, 50 model calls
 Start the room, with a log file in a folder you keep (the run's own folder is removed at `quit`):
 
 ```powershell
-$log = "$HOMEpoly-demo-live.log"
+$log = "$env:TEMP\poly-live.log"
 node demo/launch.mjs --live --cap-usd 5 --log $log
 ```
 
@@ -507,14 +534,14 @@ If `dist` is missing, the package is not built. Run `npm run build` once from th
 
 ```powershell
 Remove-Item Env:ANTHROPIC_API_KEY -ErrorAction SilentlyContinue
-git checkout -- demo/concierge/prices
+git checkout -- demo/concierge/prices demo/concierge/maps
 git status --short
 docker desktop stop
 ```
 
 You should see no file in the status, and `Stopping Docker Desktop`.
 
-If the status lists a file under `demo/concierge/prices`, the checkout did not run in the repository root. Run it again from there. If it lists another file, you changed it during the rehearsal. Look at it before you decide.
+The prices are filled in with the vendor's figures and the maps are relabelled locally for a live run (`PL6842`, step 2.6), and neither is ever committed. The checkout restores both folders to the committed files. If the status lists a file under `demo/concierge/prices` or `demo/concierge/maps`, the checkout did not run in the repository root. Run it again from there. If it lists another file, you changed it during the rehearsal. Look at it before you decide.
 
 Close the window. The key lived in this window only.
 
