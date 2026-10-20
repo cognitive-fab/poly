@@ -1080,15 +1080,16 @@ test('DF15.1: amount decision with negative value gives "no ask gave an allowed 
   );
 });
 
-test('DF15.1: amount decision with max_tokens stop_reason gives "no ask gave an allowed answer (5 asks: 5 reply cut off)"', async () => {
+test('DF15.1: amount decision with max_tokens stop_reason gives "no ask gave an allowed answer (5 asks: 5 reply cut off at 200 tokens)"', async () => {
   const t = recordingTransport({
-    async request() {
+    async request(r) {
+      const body = JSON.parse(r.body);
       return {
         status: 200,
         headers: {},
         body: JSON.stringify({
           content: [{ type: 'text', text: '{"value":450,' }],
-          usage: { input_tokens: 50, output_tokens: 20 },
+          usage: { input_tokens: 50, output_tokens: body.max_tokens },
           stop_reason: 'max_tokens',
         }),
       };
@@ -1101,7 +1102,7 @@ test('DF15.1: amount decision with max_tokens stop_reason gives "no ask gave an 
     providers.decisions.amount.provider(question, materials),
     (e) => {
       assert.ok(e instanceof ProviderError);
-      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 reply cut off\)/);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 reply cut off at 200 tokens\)/);
       return true;
     },
   );
@@ -1229,15 +1230,16 @@ test('DF15.1: tier decision with disallowed answer gives "no allowed answer (5 a
   );
 });
 
-test('DF15.1: tier decision with max_tokens stop_reason gives "no allowed answer (5 asks: 5 reply cut off)"', async () => {
+test('DF15.1: tier decision with max_tokens stop_reason gives "no allowed answer (5 asks: 5 reply cut off at 80 tokens)"', async () => {
   const t = recordingTransport({
-    async request() {
+    async request(r) {
+      const body = JSON.parse(r.body);
       return {
         status: 200,
         headers: {},
         body: JSON.stringify({
           content: [{ type: 'text', text: '{"answer":"Ref' }],
-          usage: { input_tokens: 50, output_tokens: 20 },
+          usage: { input_tokens: 50, output_tokens: body.max_tokens },
           stop_reason: 'max_tokens',
         }),
       };
@@ -1250,7 +1252,7 @@ test('DF15.1: tier decision with max_tokens stop_reason gives "no allowed answer
     providers.tiers.small(question, materials),
     (e) => {
       assert.ok(e instanceof ProviderError);
-      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 reply cut off\)/);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 reply cut off at 80 tokens\)/);
       return true;
     },
   );
@@ -1337,15 +1339,16 @@ test('DF15.1: answer decision with empty answer gives "the model gave no text (1
   );
 });
 
-test('DF15.1: answer decision with max_tokens stop_reason gives "the model gave no text (1 ask: reply cut off)"', async () => {
+test('DF15.1: answer decision with max_tokens stop_reason gives "the model gave no text (1 ask: reply cut off at 400 tokens)"', async () => {
   const t = recordingTransport({
-    async request() {
+    async request(r) {
+      const body = JSON.parse(r.body);
       return {
         status: 200,
         headers: {},
         body: JSON.stringify({
           content: [{ type: 'text', text: '{"answer":"Your ord' }],
-          usage: { input_tokens: 50, output_tokens: 20 },
+          usage: { input_tokens: 50, output_tokens: body.max_tokens },
           stop_reason: 'max_tokens',
         }),
       };
@@ -1358,7 +1361,7 @@ test('DF15.1: answer decision with max_tokens stop_reason gives "the model gave 
     providers.decisions.answer.provider(question, materials),
     (e) => {
       assert.ok(e instanceof ProviderError);
-      assert.match(e.message, /the model gave no text \(1 ask: reply cut off\)/);
+      assert.match(e.message, /the model gave no text \(1 ask: reply cut off at 400 tokens\)/);
       return true;
     },
   );
@@ -1794,4 +1797,315 @@ test('DF15.5: parseArgs refuses --log when parent folder does not exist', async 
   const nonExistentPath = join('/nonexistent/folder/that/does/not/exist', 'log.txt');
   const argv = ['--stub-model', '--cap-usd', '5', '--log', nonExistentPath];
   assert.throws(() => parseArgs(argv), LaunchRefused, 'should refuse --log with non-existent parent folder');
+});
+
+// ---- DF16.1: limits when a question carries none --------
+
+test('DF16.1: amount decision with no limits uses 200 max_tokens per ask (400 total over 5 asks)', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.amount.provider(question, materials);
+  assert.ok(t.records.length >= 5, 'should have at least 5 requests for the vote');
+  for (let i = 0; i < 5; i++) {
+    const body = parseBody(t.records[i]);
+    assert.equal(body.max_tokens, 200, `amount ask ${i} should have max_tokens 200`);
+  }
+});
+
+test('DF16.1: answer decision with no limits uses 400 max_tokens', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'where is my order?' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.answer.provider(question, materials);
+  assert.equal(t.records.length, 1, 'should have exactly 1 request');
+  const body = parseBody(t.records[0]);
+  assert.equal(body.max_tokens, 400, 'answer should have max_tokens 400');
+});
+
+test('DF16.1: reply decision with no limits and payload Unsure uses 400 max_tokens', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'reply', payload: { outcome: 'Unsure' }, intent: 'i' };
+  const materials = { bodies: { m: 'please refund' }, items: {} };
+  await providers.decisions.reply.provider(question, materials);
+  assert.equal(t.records.length, 1, 'should have exactly 1 request');
+  const body = parseBody(t.records[0]);
+  assert.equal(body.max_tokens, 400, 'reply should have max_tokens 400');
+});
+
+test('DF16.1: tier decision with no limits uses 80 max_tokens per ask (400 total over 5 asks)', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'classify', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund me 450' }, items: {} };
+  await providers.tiers.small(question, materials);
+  assert.ok(t.records.length >= 5, 'should have at least 5 requests for the vote');
+  for (let i = 0; i < 5; i++) {
+    const body = parseBody(t.records[i]);
+    assert.equal(body.max_tokens, 80, `tier ask ${i} should have max_tokens 80`);
+  }
+});
+
+test('DF16.1: amount with limits maxTokens 1500 uses 300 per ask (1500 over 5 asks)', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i', limits: { maxInputTokens: 2000, maxTokens: 1500 } };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.amount.provider(question, materials);
+  assert.ok(t.records.length >= 5, 'should have at least 5 requests');
+  for (let i = 0; i < 5; i++) {
+    const body = parseBody(t.records[i]);
+    assert.equal(body.max_tokens, 300, `amount ask ${i} with limits should have max_tokens 300`);
+  }
+});
+
+test('DF16.1: amount with limits maxTokens 400 uses 80 per ask (400 over 5 asks)', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i', limits: { maxInputTokens: 2000, maxTokens: 400 } };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.amount.provider(question, materials);
+  assert.ok(t.records.length >= 5, 'should have at least 5 requests');
+  for (let i = 0; i < 5; i++) {
+    const body = parseBody(t.records[i]);
+    assert.equal(body.max_tokens, 80, `amount ask ${i} with limits 400 should have max_tokens 80`);
+  }
+});
+
+// ---- DF16.2: system text and request body structure --------
+
+test('DF16.2: amount request system text contains required phrases', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.amount.provider(question, materials);
+  assert.ok(t.records.length >= 1);
+  const body = parseBody(t.records[0]);
+  assert.ok(body.system.includes('with no other text'), 'system should include "with no other text"');
+  assert.ok(body.system.includes('begin the reply with {'), 'system should include "begin the reply with {" (lowercase b)');
+  assert.ok(body.system.includes('no reasoning'), 'system should include "no reasoning"');
+  assert.ok(body.system.includes('no preamble'), 'system should include "no preamble"');
+  assert.ok(body.system.includes('no code fence'), 'system should include "no code fence"');
+  assert.ok(body.system.includes('"value": <a bare JSON number>'), 'system should include the bare number shape');
+});
+
+test('DF16.2: TASKS.amount contains required phrases', async () => {
+  const { TASKS } = await import('../demo/host/live-providers.mjs');
+  assert.ok(TASKS.amount.includes('Begin the reply with {'), 'TASKS.amount should contain "Begin the reply with {" (uppercase B)');
+  assert.ok(TASKS.amount.includes('no code fence'), 'TASKS.amount should contain "no code fence"');
+});
+
+test('DF16.2: amount request has exactly four keys in body', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.amount.provider(question, materials);
+  const body = parseBody(t.records[0]);
+  const keys = Object.keys(body).sort();
+  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), 'request body should have exactly four keys');
+});
+
+test('DF16.2: amount request has one user message with no assistant message', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.amount.provider(question, materials);
+  const body = parseBody(t.records[0]);
+  assert.equal(body.messages.length, 1, 'should have exactly one message');
+  assert.equal(body.messages[0].role, 'user', 'the message should have role user');
+  assert.ok(typeof body.messages[0].content === 'string' && body.messages[0].content.length > 0, 'message content should be non-empty string');
+});
+
+test('DF16.2: stub still recognizes amount task', async () => {
+  const t = stubTransport();
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result, 'stub should recognize amount task and return a result');
+  assert.equal(result.answer.value, 450, 'stub should extract the amount 450 from the message');
+});
+
+// ---- DF16.3: count line formatting for cut-off asks --------
+
+test('DF16.3: amount decision with mixed cut-off counts formats line correctly', async () => {
+  let callCount = 0;
+  const t = recordingTransport({
+    async request() {
+      const outputs = [80, 80, 80, 200, 200];
+      const currentOutput = outputs[callCount % outputs.length];
+      callCount++;
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":' }],
+          usage: { input_tokens: 50, output_tokens: currentOutput },
+          stop_reason: 'max_tokens',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 3 reply cut off at 80 tokens, 2 reply cut off at 200 tokens\)/);
+      return true;
+    },
+  );
+});
+
+test('DF16.3: mixed rejection reasons format with counts in order', async () => {
+  let callCount = 0;
+  const t = recordingTransport({
+    async request() {
+      const responses = [
+        { text: '{"value":"$1"}', reason: 'max_tokens', output: 200 },
+        { text: '{"value":"$1"}', reason: 'end_turn', output: 20 },
+        { text: '{"value":"$1"}', reason: 'end_turn', output: 20 },
+        { text: 'just prose', reason: 'end_turn', output: 20 },
+        { text: 'just prose', reason: 'end_turn', output: 20 },
+      ];
+      const response = responses[callCount % responses.length];
+      callCount++;
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: response.text }],
+          usage: { input_tokens: 50, output_tokens: response.output },
+          stop_reason: response.reason,
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /\(5 asks: 2 reply cut off at 200 tokens, 2 value a string, 1 no JSON object\)/);
+      return true;
+    },
+  );
+});
+
+test('DF16.3: describeFailure keeps cut-off with token count', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 reply cut off at 80 tokens)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /^decision failed: amount, tier none, no allowed answer \(5 asks: 5 reply cut off at 80 tokens\)$/);
+});
+
+test('DF16.3: describeFailure on no text keeps cut-off with token count', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: 'the model gave no text (1 ask: reply cut off at 400 tokens)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /^decision failed: answer, tier none, no text \(1 ask: reply cut off at 400 tokens\)$/);
+});
+
+test('DF16.3: describeFailure still accepts suffix-free "5 reply cut off"', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 reply cut off)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /no allowed answer \(5 asks: 5 reply cut off\)/);
+});
+
+test('DF16.3: describeFailure drops suffix with word', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 reply cut off at many tokens)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /^decision failed: amount, tier none, no allowed answer$/);
+  assert.ok(!line.includes('('), 'parenthesis should be dropped when suffix has a word');
+});
+
+test('DF16.3: describeFailure accepts 9-digit token count', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 reply cut off at 999999999 tokens)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /no allowed answer \(5 asks: 5 reply cut off at 999999999 tokens\)/);
+});
+
+test('DF16.3: describeFailure drops 11-digit token count', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 reply cut off at 99999999999 tokens)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /^decision failed: amount, tier none, no allowed answer$/);
+  assert.ok(!line.includes('('), 'parenthesis should be dropped when number exceeds 9 digits');
+});
+
+test('DF16.3: reply decision with max_tokens cut-off gives "the model gave no text (1 ask: reply cut off at 400 tokens)"', async () => {
+  const t = recordingTransport({
+    async request(r) {
+      const body = JSON.parse(r.body);
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"answer":"Your ord' }],
+          usage: { input_tokens: 50, output_tokens: body.max_tokens },
+          stop_reason: 'max_tokens',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'reply', payload: { outcome: 'Unsure' }, intent: 'i' };
+  const materials = { bodies: { m: 'please refund' }, items: {} };
+  await assert.rejects(
+    providers.decisions.reply.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /the model gave no text \(1 ask: reply cut off at 400 tokens\)/);
+      return true;
+    },
+  );
 });

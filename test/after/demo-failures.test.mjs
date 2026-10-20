@@ -466,3 +466,121 @@ test('DF15: a refund question whose amount comes back as "$450" says why, with t
     rmSync(sourceDir, { recursive: true, force: true, maxRetries: 3 });
   }
 });
+
+// ---- DF16: amount has realistic output limit, reply begins with JSON, token counts on cut-off ----
+
+test('DF16: amount decision cut off at realistic limit reports the count', { timeout: 1_800_000 }, async () => {
+  const { assembleDemo } = await import('../../demo/host/assemble.mjs');
+  const { makeDemoConcierge } = await import('../../demo/scripts/make-demo-concierge.mjs');
+  const { TASKS } = await import('../../demo/host/live-providers.mjs');
+  const { stubTransport } = await import('../../demo/host/stub-model.mjs');
+  const workdir = mkdtempSync(join(tmpdir(), 'demo-failures-df16-'));
+  const sourceDir = mkdtempSync(join(tmpdir(), 'demo-copy-df16-'));
+
+  // Create demo copy with price tables that pass the gate
+  makeDemoConcierge({ out: sourceDir });
+  const smallOriginal = JSON.parse(readFileSync(join(sourceDir, 'prices', 'small.json'), 'utf8'));
+  const largeOriginal = JSON.parse(readFileSync(join(sourceDir, 'prices', 'large.json'), 'utf8'));
+  const smallPrice = { ...smallOriginal, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
+  const largePrice = { ...largeOriginal, source: 'https://pricing.vendorco.net/page', readOn: new Date().toISOString().slice(0, 10) };
+  writeFileSync(join(sourceDir, 'prices', 'small.json'), JSON.stringify(smallPrice));
+  writeFileSync(join(sourceDir, 'prices', 'large.json'), JSON.stringify(largePrice));
+
+  // Recording transport that cuts off amount asks
+  const recorded = [];
+  const inner = stubTransport();
+  const transport = {
+    async request(r) {
+      const body = JSON.parse(r.body);
+      recorded.push(body);
+      const user = body.messages[0].content;
+      if (user.includes(TASKS.amount)) {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            content: [{ type: 'text', text: '{"value":' }],
+            usage: { input_tokens: 50, output_tokens: body.max_tokens },
+            stop_reason: 'max_tokens',
+          }),
+        };
+      }
+      return inner.request(r);
+    },
+  };
+
+  const lines = [];
+  let demo;
+  try {
+    demo = await assembleDemo({
+      mode: 'live',
+      apiKey: 'stub-key-for-test',
+      workdir,
+      capUsd: 5,
+      now: () => Date.now(),
+      startWorkers: true,
+      limits: { minGapMs: 1000 },
+      source: sourceDir,
+      modelTransport: transport,
+      onFailure: (line) => lines.push(line),
+    });
+
+    const guest = demo.room.join('s1');
+    assert.deepEqual(await demo.room.say('s1', 'refund 450 for my order'), { ok: true });
+
+    // Wait up to 40 seconds for the amount failure line
+    const until = Date.now() + 40_000;
+    while (Date.now() < until && !lines.some((l) => l.includes('amount'))) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    // Check the failure line
+    const amountLine = lines.find((l) => l.includes('amount'));
+    assert.ok(amountLine, 'should have an amount failure line');
+    assert.equal(
+      amountLine,
+      'decision failed: amount, tier none, no allowed answer (5 asks: 5 reply cut off at 200 tokens)',
+      `amount line should have token count, got: ${amountLine}`,
+    );
+
+    // Check that recorded amount requests each have max_tokens 200
+    const amountRequests = recorded.filter((b) => b.messages[0].content.includes(TASKS.amount));
+    assert.ok(amountRequests.length >= 5, `should have at least 5 amount requests, got ${amountRequests.length}`);
+    for (let i = 0; i < 5; i++) {
+      assert.equal(amountRequests[i].max_tokens, 200, `amount request ${i} should have max_tokens 200`);
+    }
+
+    // Check the admitted instance
+    assert.ok(demo.admission, 'demo should have admission');
+    assert.ok(demo.admission.report, 'admission should have report');
+    assert.ok(demo.admission.report.files, 'report should have files');
+
+    // Build machine signature from admission
+    const machines = {};
+    for (const file of demo.admission.report.files) {
+      if (Array.isArray(file.machines)) {
+        for (const m of file.machines) {
+          machines[m.machine] = m.instance?.states ?? 0;
+        }
+      }
+    }
+
+    // The instance from DF12 item 5: Desk 2114, Notice 28, support.Conversation 342, staff.Conversation 666, payments.Grant 13, triage.Route 6, spend.Budget 96
+    const expectedInstance = {
+      Desk: 2114,
+      Notice: 28,
+      'support.Conversation': 342,
+      'staff.Conversation': 666,
+      'payments.Grant': 13,
+      'triage.Route': 6,
+      'spend.Budget': 96,
+    };
+
+    assert.deepEqual(machines, expectedInstance, 'admitted instance should match expected');
+    assert.equal(demo.admission.report.verdict, 'CLEAN', 'verdict should be CLEAN');
+  } finally {
+    if (demo) await demo.close();
+    rmSync(workdir, { recursive: true, force: true, maxRetries: 3 });
+    rmSync(sourceDir, { recursive: true, force: true, maxRetries: 3 });
+  }
+});
