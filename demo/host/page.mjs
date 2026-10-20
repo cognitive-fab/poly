@@ -20,6 +20,48 @@ button { cursor: pointer; }
 #status { min-height: 1.4em; }
 `;
 
+/** The script of the room page (DF18 item 3): a function of its own so that a test can run it. */
+export function roomPageScript() {
+  return String.raw`const log = document.getElementById('log'), status = document.getElementById('status'), input = document.getElementById('t'), button = document.getElementById('b');
+const add = (text, me) => { const li = document.createElement('li'); if (me) li.className = 'me'; li.textContent = text; log.appendChild(li); li.scrollIntoView({ block: 'end' }); };
+const halted = () => { status.textContent = 'The presenter has stopped the room.'; input.disabled = true; button.disabled = true; };
+fetch('/api/me').then((r) => r.json()).then((me) => { if (!me.persona) { status.textContent = 'The room is full.'; return; } document.getElementById('who').textContent = me.persona.id + ' (' + me.persona.display + ')'; if (me.killed) halted(); });
+const events = new EventSource('/api/events');
+events.onmessage = (e) => { const ev = JSON.parse(e.data); if (ev.kind === 'reply') add(ev.text, false); if (ev.kind === 'halted') halted(); };
+// DF18 item 3: the page says it is sending, and gives up on the host after 10 seconds, so a request that the browser holds in a queue is not silent.
+let sending = false;
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (sending) return;
+  const text = input.value.trim();
+  if (!text) return;
+  sending = true;
+  button.disabled = true;
+  status.textContent = 'Sending...';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  let j = null;
+  let failure = null;
+  try {
+    const r = await fetch('/api/say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal: controller.signal });
+    j = await r.json().catch(() => ({}));
+  } catch (err) {
+    failure = controller.signal.aborted || (err && err.name === 'AbortError') ? 'timeout' : 'error';
+  }
+  clearTimeout(timer);
+  sending = false;
+  if (failure === 'timeout') { status.textContent = 'The room did not answer. Close other tabs of this page, reload, and send again.'; button.disabled = false; return; }
+  if (failure) { status.textContent = 'The message could not be sent.'; button.disabled = false; return; }
+  if (j.reason === 'halted') { halted(); return; }
+  button.disabled = false;
+  if (j.ok) { add(text, true); input.value = ''; status.textContent = ''; }
+  else if (j.reason === 'too-fast') status.textContent = 'One message every 5 seconds. Try again in ' + Math.ceil((j.retryInMs || 0) / 1000) + ' s.';
+  else if (j.reason === 'too-many') status.textContent = 'That is the 12 messages each guest may send.';
+  else if (j.reason === 'too-long') status.textContent = 'At most 280 characters.';
+  else status.textContent = 'The message could not be sent.';
+});`;
+}
+
 /** The room page. The behaviour is the browser's: it posts to /api/say and listens on /api/events. */
 export function roomPage() {
   return `<!doctype html>
@@ -35,25 +77,7 @@ export function roomPage() {
 <p id="status" class="note" role="status"></p>
 </main>
 <script>
-const log = document.getElementById('log'), status = document.getElementById('status'), input = document.getElementById('t'), button = document.getElementById('b');
-const add = (text, me) => { const li = document.createElement('li'); if (me) li.className = 'me'; li.textContent = text; log.appendChild(li); li.scrollIntoView({ block: 'end' }); };
-const halted = () => { status.textContent = 'The presenter has stopped the room.'; input.disabled = true; button.disabled = true; };
-fetch('/api/me').then((r) => r.json()).then((me) => { if (!me.persona) { status.textContent = 'The room is full.'; return; } document.getElementById('who').textContent = me.persona.id + ' (' + me.persona.display + ')'; if (me.killed) halted(); });
-const events = new EventSource('/api/events');
-events.onmessage = (e) => { const ev = JSON.parse(e.data); if (ev.kind === 'reply') add(ev.text, false); if (ev.kind === 'halted') halted(); };
-document.getElementById('f').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const text = input.value.trim();
-  if (!text) return;
-  const r = await fetch('/api/say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
-  const j = await r.json().catch(() => ({}));
-  if (j.ok) { add(text, true); input.value = ''; status.textContent = ''; }
-  else if (j.reason === 'too-fast') status.textContent = 'One message every 5 seconds. Try again in ' + Math.ceil((j.retryInMs || 0) / 1000) + ' s.';
-  else if (j.reason === 'too-many') status.textContent = 'That is the 12 messages each guest may send.';
-  else if (j.reason === 'too-long') status.textContent = 'At most 280 characters.';
-  else if (j.reason === 'halted') halted();
-  else status.textContent = 'The message could not be sent.';
-});
+${roomPageScript()}
 </script></body></html>`;
 }
 

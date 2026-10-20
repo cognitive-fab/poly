@@ -317,7 +317,7 @@ test('DF18.3: (e) ok: true clears input and status, enables button, adds message
   await new Promise((r) => setImmediate(r));
 
   // Check: input cleared, status cleared, button enabled
-  assert.equal(input.value, '', 'input cleared');
+  assert.equal(state.elements.t.value, '', 'input cleared');
   assert.equal(status.textContent, '', 'status cleared');
   assert.equal(button.disabled, false, 'button enabled');
 
