@@ -45,13 +45,18 @@ Both agents got the same prompt: a WhatsApp refund agent that talks to Stripe. T
 
 The room ran live over a real model under a spend cap, driven by the owner. Status questions and refusals work; a refund of 450 goes to approval, and after the approval the handler read the charge and refused with no request to the refund endpoint; a request for 5,000 is refused at dispatch (AC30: the completion is outside `0..500`), journaled with rule S140, and the guest hears the `Unsure` reply.
 
-The rehearsal found five failures, each fixed with a test that reproduces it:
+The live rehearsal found eight failures, each fixed with a test that reproduces it:
 
 1. The decision timeouts of the example (800 ms) could not hold a vote of five asks against a live provider (two round trips). Both tiers timed out while the abandoned calls were still billed. The demo copy sets longer timeouts.
 2. A request with `temperature` was refused by the model (`temperature` is deprecated for it). No request holds it now.
-3. The amount vote had 80 output tokens an ask and every reply was cut off. It has 200.
-4. A reply that begins with prose was not parsed. The prompt now asks for a bare JSON number and a reply that begins with `{`, and the parse accepts a bare number or a string of digits with an optional `.00` and nothing else.
-5. A silent failure on the terminal. Every failed decision, and a refused key, is a line now.
+3. The amount vote had 80 output tokens an ask and every reply was cut off (the live log showed `5 reply cut off`). It has 200. As a precaution, not as a cause the log showed, the prompt now asks for a bare JSON number and a reply that begins with `{`, and the parse accepts a bare number or a string of digits with an optional `.00` and nothing else.
+4. A failure was silent on the terminal. Every failed decision, and a refused key, is a line now.
+5. The calibration maps were fitted for other models, and the checker refused the tiers (`PL6842`). For the rehearsal the owner relabelled them locally; the maps are still stand-ins (see the known limits).
+6. The browser allows a few connections to one host, each room tab holds one for its events, and stale tabs from earlier launches kept theirs, so the browser queued `Send` behind them and the page said nothing. The runbook says to keep one room tab and one staff tab, and the page now says `Sending...` and gives up after 10 seconds.
+7. `approve <intent>` printed `undefined`, because the runtime returns nothing. It now says that the intent was approved and by which key, or why it was refused.
+8. The failure line for an amount outside its domain read `not recognised`. It reads `outside its domain (0 to 500)` now.
+
+Before the live run, the free rehearsal in Windows PowerShell 5.1 had found five faults of the runbook and the host: poly builds that take longer than 15 seconds to start in the container (the copy of the tree, not the admission), commands that split when pasted, `openssl` missing from the path, a room that accepted a message and never answered it (the stub cited no order and the orders table served dates the program calls stale), and a `status` field read as the room's answers. Each is fixed and recorded in `docs/demo/rehearsal-dry-run/`.
 
 Two of the findings were about the demo, not the model: the stub answered instantly and hid the timeouts, and the first dry run checked only that the room accepted a message, not that an answer reached the page.
 
@@ -62,13 +67,13 @@ The loop found a real defect in a shipped example (`examples/inbox`): a rule min
 ## Known limits
 
 - **The calibration maps are stand-ins.** `demo/concierge/maps/` holds the example's maps, fitted for another model. For a rehearsal the owner relabels them to the models in use and recomputes the digests locally; that is not committed. `docs/demo/calibration-for-release.md` states the two ways to a release: one calibration run with `poly journal fit`, or maps named as stand-ins on the stage.
-- **The timeouts are provisional.** The demo copy has classify 20 s and amount, answer and reply 10 s, as ceilings. `launch.mjs --measure-latency` measures a whole call of each tier with the owner's key and a cap, and suggests `max(2, ceil(2 * max / 1000))` seconds. It has not been run live.
+- **The timeouts are provisional.** The demo copy has classify 20 s and amount, answer and reply 10 s, as ceilings. `launch.mjs --measure-latency` measures a whole call of each tier with the owner's key and a cap, and suggests `max(2, ceil(2 * max / 1000))` seconds. The owner ran it live, 5 whole calls for each tier. Small tier: runs 1915, 1488, 1488, 1568 and 1550 ms, median 1550 ms, max 1915 ms, suggested 4 s. Large tier: runs 3160, 2450, 3543, 1886 and 2840 ms, median 2840 ms, max 3543 ms, suggested 8 s. The copy's 20 s (classify, which holds both tiers) and 10 s (amount, answer and reply) are above both suggestions. They remain ceilings that the owner set, not values derived from the measurement.
 - **The out-of-domain reply.** An amount above what the type allows is refused correctly, and the guest hears the `Unsure` reply, not "above what can be refunded". The Desk's failure action carries no reason. Option A of `docs/demo/proposal-out-of-domain-outcome.md` (the runtime names the reason, the program branches, `Outcome` gains `OutOfRange`) is the item for v1.4, with its touch list in `docs/demo/step13-list.md`. The terminal line is exact today: `outside its domain (0 to 500)`.
 - **The wrong amount (A1).** All the builds that were driven refunded more than the 40.00 requested, in the control run too: `ts-kept` 100.00, `poly-kept` 60.00, `poly-pilot-3` 100.00. Each set the amount from the order. `poly check` proves that no line is refunded twice (over its finite model). It does not cover how much: in the poly build the amount is computed in a JavaScript handler, outside the machine.
 - **The stand-in is not Stripe.** It is read from Stripe's documentation, and K17 (that a provider honours the key) is an assumption that poly lists and does not verify.
 - **No journal command in the launcher.** The launcher keeps its run in a temporary folder that it removes at `quit`. The proof that the journal replays with no divergence is the recorded end-to-end test.
 - **The room page.** A tab left over from an earlier launch keeps its connection to the host and the browser queues a new `Send` behind it. The page now says it is sending and gives up after 10 seconds; one event stream for each session, and the release of a hidden page's connection, are proposed for later (`docs/demo/rehearsal.md`).
-- **A decision that fails sends nothing.** When a decision fails, the program returns to idle and the guest hears nothing, or the acknowledgement of the next message. This is the behaviour of `examples/concierge`, unchanged.
+- **Which failed paths send nothing.** In `examples/concierge`, unchanged, a failed `answer` decision (a status question whose answer fails or cites no order) and a failed `reply` decision (the last step of every path) return the Desk to idle: the guest hears nothing, and the next message may get only the acknowledgement. A failed `classify` (every tier failed), a failed lookup, a failed `amount` (live, for the request of 5,000) and an amount with low confidence or without exactly one cited order send the `Unsure` reply, and a failed refund sends the `Declined` reply.
 - **The history.** Three commits of a test writer sit in the history against its brief (`b26d1b91`, `fdad87c8`, `75ae0132`). They change one test file.
 
 ## Evidence for the release
@@ -82,7 +87,7 @@ Run on the commit `8c034a8b` (the last code commit; the working tree was clean, 
 
 ## Conclusion
 
-v1.3 makes one thing a property the checker demands: an irreversible effect that may be retried must say how the target is kept from running it twice. The demo shows it twice. In Act 1 both agents chose a key, and removing it from the TypeScript build is invisible to its tests and, when the request allows, refunds a customer twice, while removing it from the poly build is a finding with a witness and a build that is not admitted. In Act 2 the same checked program held on live input from a real model: the refusals, the approval and the domain held, and the five failures the rehearsal found were failures of the host and the prompts, each now a line on the terminal and a test. What the checker does not cover is named above: the amount, the calibration and the guest's words when a number is out of range.
+v1.3 makes one thing a property the checker demands: an irreversible effect that may be retried must say how the target is kept from running it twice. The demo shows it twice. In Act 1 both agents chose a key, and removing it from the TypeScript build is invisible to its tests and, when the request allows, refunds a customer twice, while removing it from the poly build is a finding with a witness and a build that is not admitted. In Act 2 the same checked program held on live input from a real model: the refusals, the approval and the domain held, and the eight failures the live rehearsal found were failures of the host, the prompts and the page, each now a line on the terminal and a test. What the checker does not cover is named above: the amount, the calibration and the guest's words when a number is out of range.
 
 ## Glossary
 
