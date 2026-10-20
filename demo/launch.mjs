@@ -26,13 +26,14 @@ import { recordedOrdersOf } from './host/recorded-orders.mjs';
 import { formatSpend, parseCap } from './host/spend.mjs';
 import { openRunLog } from './host/run-log.mjs';
 import { runApprove } from './host/approval.mjs';
+import { runResolve } from './host/resolve.mjs';
 import { startRoomServer } from './host/server.mjs';
 import { liveTransport } from './host/live-transport.mjs';
 import { DEMO_TIMEOUTS, makeDemoConcierge } from './scripts/make-demo-concierge.mjs';
 
 /** The launcher's arguments, strictly: an unknown flag or a bad port is an error. */
 export function parseArgs(argv) {
-  const out = { mode: 'recorded', port: 8080, lan: false, size: 40 };
+  const out = { mode: 'recorded', port: 8080, lan: false, size: 40, standInFault: null };
   let chose = null;
   let cap = null;
   let stubLatency = null;
@@ -53,6 +54,11 @@ export function parseArgs(argv) {
     else if (a === '--cap-usd') cap = parseCap(argv[++i]);
     else if (a === '--stub-latency') stubLatency = whole(a, argv[++i], 0, 60000);
     else if (a === '--measure-latency') measure = true;
+    else if (a === '--stand-in-fault') {
+      const v = argv[++i];
+      if (v !== 'lost-all' && v !== 'down') throw new LaunchRefused(`--stand-in-fault names lost-all or down, not ${v}`);
+      out.standInFault = v;
+    }
     else if (a === '--runs') runs = whole(a, argv[++i], 1, 20);
     else if (a === '--log') {
       const v = argv[++i];
@@ -67,6 +73,7 @@ export function parseArgs(argv) {
   }
   if (out.mode !== 'recorded' && cap === null) throw new LaunchRefused('a live or stub launch needs a spend cap: --cap-usd <dollars>, at most 10');
   if (cap !== null && out.mode === 'recorded') throw new LaunchRefused('--cap-usd applies to a live or stub launch: a recorded run spends nothing');
+  if (out.standInFault !== null && out.mode === 'live') throw new LaunchRefused('--stand-in-fault applies to --recorded or --stub-model: a live show has no fault');
   if (logFile !== null && measure) throw new LaunchRefused('--log applies to a room launch, not to --measure-latency');
   if (logFile !== null && !existsSync(dirname(resolvePath(logFile)))) throw new LaunchRefused(`--log: the folder of ${logFile} does not exist`);
   if (stubLatency !== null && out.mode !== 'stub-model') throw new LaunchRefused('--stub-latency applies to --stub-model alone');
@@ -124,7 +131,7 @@ export async function main(argv, io = {}) {
     demo = await assembleDemo({
       // DF11 item 3: the recorded room's first two guests own the orders its recorded answers cite.
       ordersOf: args.mode === 'recorded' ? recordedOrdersOf(JSON.parse(readFileSync(RECORDED_ANSWERS, 'utf8'))) : null,
-      mode: args.mode, workdir, apiKey, modelTransport: args.mode === 'live' ? liveTransport() : null, size: args.size, startWorkers: true, capUsd: args.capUsd ?? null, stubLatencyMs: args.stubLatencyMs ?? 0,
+      mode: args.mode, workdir, apiKey, modelTransport: args.mode === 'live' ? liveTransport() : null, size: args.size, standInFault: args.standInFault ?? 'none', startWorkers: true, capUsd: args.capUsd ?? null, stubLatencyMs: args.stubLatencyMs ?? 0,
       onFailure: onFailureLine,
       onReply: () => { if (demo?.meter) spendLine(formatSpend(demo.meter)); },
       onKill: (by) => { if (by === 'spend-cap' && demo?.meter) spendLine(`spend cap reached: ${formatSpend(demo.meter)}. The room has stopped.`); },
@@ -146,28 +153,30 @@ export async function main(argv, io = {}) {
   const server = await startRoomServer({ room: demo.room, staff: demo.staff, presenterToken, host: args.lan ? '0.0.0.0' : '127.0.0.1', port: args.port, limiter: demo.limiter });
   io.out(`Room page:    ${[`http://127.0.0.1:${server.port}/`, ...(args.lan ? lanAddresses().map((a) => `http://${a}:${server.port}/`) : [])].join('   ')}`);
   io.out(`Staff panel:  http://127.0.0.1:${server.port}/presenter/staff?t=${presenterToken}   (this machine only; the token is shown here and nowhere else)`);
-  io.out('Presenter prompt: status | staff | approve <intent> | kill | quit');
+  io.out('Presenter prompt: status | staff | approve <intent> | resolve <desk> done|not-done | kill | quit');
+  if (args.standInFault) io.out(`The Stripe mock-up has the fault ${args.standInFault}: every refund request is ${args.standInFault === 'down' ? 'answered 503 and applies nothing' : 'applied once and its answer lost'} (a rehearsal; the show has none).`);
 
   const noticing = setInterval(() => { demo.pumpStaff().catch(() => {}); }, 1000);
   noticing.unref?.();
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const statusOf = () => ({ ...demo.room.stats(), stripe: demo.standIn.report(), ...(demo.meter ? { spend: formatSpend(demo.meter) } : {}) });
+  const statusOf = () => demo.status();
   const stop = async () => { clearInterval(noticing); rl.close(); await server.close(); await demo.close(); rmSync(workdir, { recursive: true, force: true }); };
   await new Promise((resolve) => {
     rl.on('line', async (line) => {
-      const [cmd, arg] = line.trim().split(/\s+/);
+      const [cmd, arg, arg2] = line.trim().split(/\s+/);
       try {
-        if (cmd === 'status') { const st = statusOf(); io.out(JSON.stringify(st)); log?.status(st); }
+        if (cmd === 'status') { const st = await statusOf(); io.out(JSON.stringify(st)); log?.status(st); }
         else if (cmd === 'staff') for (const e of demo.staff.entries()) io.out(`${new Date(e.at).toLocaleTimeString()}  ${e.text}`);
         else if (cmd === 'approve') { const r = await runApprove(demo, arg); io.out(r.line); log?.line(r.line); }
+        else if (cmd === 'resolve') { const r = await runResolve(demo, arg, arg2); io.out(r.line); log?.line(r.line); }
         else if (cmd === 'kill') { demo.room.kill('presenter'); io.out('The room has stopped. Nothing more reaches the concierge.'); }
         else if (cmd === 'quit') resolve();
-        else if (cmd) io.out('status | staff | approve <intent> | kill | quit');
+        else if (cmd) io.out('status | staff | approve <intent> | resolve <desk> done|not-done | kill | quit');
       } catch (e) { io.err(`${cmd}: ${e.message}`); }
     });
     rl.on('close', resolve);
   });
-  log?.status(statusOf()); // the final status
+  log?.status(await statusOf()); // the final status
   await stop();
   return 0;
 }

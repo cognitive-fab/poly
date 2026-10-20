@@ -28,8 +28,8 @@ test('DF6: the live transport reaches the model provider alone: any other host i
 });
 
 test('DF7: the launcher\'s arguments are strict: recorded is the default, live is named, and an unknown flag or a bad port is refused', () => {
-  assert.deepEqual(parseArgs([]), { mode: 'recorded', port: 8080, lan: false, size: 40 });
-  assert.deepEqual(parseArgs(['--live', '--cap-usd', '5', '--port', '9000', '--lan']), { mode: 'live', port: 9000, lan: true, size: 40, capUsd: 5 });
+  assert.deepEqual(parseArgs([]), { mode: 'recorded', port: 8080, lan: false, size: 40, standInFault: null });
+  assert.deepEqual(parseArgs(['--live', '--cap-usd', '5', '--port', '9000', '--lan']), { mode: 'live', port: 9000, lan: true, size: 40, standInFault: null, capUsd: 5 });
   assert.equal(parseArgs(['--recorded']).mode, 'recorded');
   assert.throws(() => parseArgs(['--port', 'abc']), /port/);
   assert.throws(() => parseArgs(['--port', '70000']), /port/);

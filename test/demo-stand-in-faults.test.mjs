@@ -103,7 +103,8 @@ test('DF22: standIn.reset() switches the fault on a running stand-in', async () 
     // Next request succeeds
     const response = await call(s, authority, { method: 'POST', path: '/v1/refunds', headers: { ...FORM, 'idempotency-key': 'k2' }, body: 'charge=ch_ex1002&amount=4000' });
     assert.equal(response.status, 200);
-    assert.equal(s.report().refunds, 2);
+    // reset starts the stand-in again from its charges, so the refund of the lost-all request is gone and only this one exists.
+    assert.equal(s.report().refunds, 1);
   });
 });
 

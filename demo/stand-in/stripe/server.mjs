@@ -74,8 +74,12 @@ export async function startStandIn({ authority, port = 0, host = '127.0.0.1', ch
       if (!authorised || headers.authorization !== `Bearer ${connect.accessToken}`) refused = jsonReply(401, { error: { type: 'invalid_request_error', message: 'Invalid API Key provided.' } });
       else if (headers['stripe-account'] !== undefined && headers['stripe-account'] !== connect.account) refused = jsonReply(403, { error: { type: 'invalid_request_error', message: 'The provided key does not have access to that account.' } });
     }
-    const handled = refused ? { ...refused, body: JSON.parse(refused.body), applied: false } : stripe.handle({ method, path, headers, body });
     const rule = ruleFor(script, { host: hostName, method, path }, counts);
+    // DF22: `down` answers 503 and applies nothing, so the request never reaches the stripe model.
+    const down = !refused && rule?.then === 'unavailable';
+    const handled = refused ? { ...refused, body: JSON.parse(refused.body), applied: false }
+      : down ? { status: 503, headers: { 'content-type': 'application/json' }, body: { error: { type: 'api_error', message: 'The stand-in is unavailable (fault: down).' } }, applied: false }
+      : stripe.handle({ method, path, headers, body });
     // The authorization value is never kept: only its scheme is.
     log.push({
       seq: log.length + 1, host: hostName, method, path,

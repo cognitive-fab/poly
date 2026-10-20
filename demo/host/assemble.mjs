@@ -9,7 +9,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { grantRequestSubject, signRecord } from '@poly/core';
+import { grantRequestSubject, invocationSubject, signRecord } from '@poly/core';
 import { whatsapp, slack, postgresSource, oauthVault, kmsStore, credentialIngress } from '@poly/io';
 import { load } from '@poly/runtime';
 import { createAuthority } from '../stand-in/stripe/tls.mjs';
@@ -26,7 +26,8 @@ import { developmentHttp, mintDevelopmentToken, memoryWrap } from './vault.mjs';
 import { makeProviders } from './live-providers.mjs';
 import { checkPrices } from './price-gate.mjs';
 import { LaunchRefused } from './launch-refused.mjs';
-import { createSpendMeter, meteredTransport, parseCap } from './spend.mjs';
+import { createSpendMeter, formatSpend, meteredTransport, parseCap } from './spend.mjs';
+import { operatorVerifier } from './resolve.mjs';
 import { stubTransport } from './stub-model.mjs';
 import { domainsOf, routesOf, watchFailures } from './failures.mjs';
 
@@ -79,10 +80,11 @@ export function modelSide({ mode, source, now = () => Date.now(), apiKey = null,
  *   size, ordersOf   the persona pool and, for a test, the orders each persona holds
  *   startWorkers     run the runtime's own workers (the launcher); a test settles by hand
  *   limits      overrides of the room's limits
+ *   standInFault   the stand-in's fault script by name (DF22): 'none' (the default), 'lost-all' or 'down'; the show uses none
  */
 export async function assembleDemo({
   mode = 'recorded', workdir, now = () => Date.now(), answers = null, apiKey = null, models = null, modelTransport = null,
-  size = 40, ordersOf = null, startWorkers = false, limits = {}, onKill = () => {}, onReply = () => {}, onFailure = null, stubLatencyMs = 0, capUsd = null, meter: givenMeter = null, source = join(ROOT, 'demo', 'concierge'),
+  size = 40, ordersOf = null, standInFault = 'none', startWorkers = false, limits = {}, onKill = () => {}, onReply = () => {}, onFailure = null, stubLatencyMs = 0, capUsd = null, meter: givenMeter = null, source = join(ROOT, 'demo', 'concierge'),
 }) {
   if (!workdir) throw new Error('the demo needs a folder for its run');
   mkdirSync(workdir, { recursive: true });
@@ -109,10 +111,12 @@ export async function assembleDemo({
   const authority = createAuthority();
   const connect = { accessToken: mintDevelopmentToken(), account: ACCOUNT };
   const charges = personas.flatMap((p) => p.orders.map((o) => ({ id: o.charge, amount: o.paid, currency: 'usd' })));
-  const standIn = await startStandIn({ authority, charges, connect, now });
+  const standIn = await startStandIn({ authority, charges, connect, now, fault: standInFault });
 
   const admission = await admitDemoConcierge({ source, workdir });
-  const verifier = (c) => (c ? { principal: c.principal } : null);
+  // DF21: the claims of Resolve come from a person's signed invocation record and from nothing else.
+  const holder = (k) => ({ name: k.name, keyId: k.keyId, publicKey: k.publicKey });
+  const verifier = operatorVerifier({ people: [holder(admission.person)], agents: [holder(admission.agent)] });
   const rt = await load(admission.build, { certificate: admission.certificate, trust: admission.trust, now, verifier });
 
   const wa = { appSecret: secret(), accessToken: secret(), phoneNumberId: '106540352242922', verifyToken: secret(), apiVersion: 'v23.0' };
@@ -175,6 +179,34 @@ export async function assembleDemo({
       const desks = [];
       for (const p of pool.claimed()) desks.push(await rt.threadId('support', p.phone));
       return forwardEscalations(rt, { desks, notice, noticed });
+    },
+    /**
+     * DF21: what the presenter's `status` prints: the room's statistics, the stand-in's report, the guests whose Desk has a refund of
+     * Unknown outcome (DF19) and, with a meter, the spend line.
+     */
+    async status() {
+      const unknown = [];
+      for (const p of pool.claimed()) {
+        const id = await rt.threadId('support', p.phone);
+        let st = null;
+        try { st = (await rt.getState(id)).state; } catch { st = null; }
+        if (st?.refund === 'Unknown') unknown.push(p.id);
+      }
+      return { ...room.stats(), stripe: standIn.report(), unknown: unknown.sort(), ...(meter ? { spend: formatSpend(meter) } : {}) };
+    },
+    /** DF21: a person ends an Unknown refund of a guest's Desk: the presenter's signed invocation record, dispatched as Resolve. */
+    async resolve(desk, outcome) {
+      if (outcome !== 'done' && outcome !== 'not-done') throw new Error('resolve: the outcome is done or not-done');
+      const persona = pool.claimed().find((p) => p.id === desk);
+      const instance = persona ? await rt.threadId('support', persona.phone) : null;
+      if (!instance || !(await rt.instances()).some((i) => i.id === instance)) throw new Error(`no desk for ${desk}`);
+      const done = outcome === 'done';
+      const actionId = `resolve-${randomBytes(6).toString('hex')}`;
+      const at = new Date(now()).toISOString();
+      const credentials = signRecord({ kind: 'invocation', subject: invocationSubject({ instance, action: 'Resolve', data: { done }, actionId }), by: admission.person.keyId, at }, admission.person.privateKeyPem);
+      const r = await rt.dispatch(instance, 'Resolve', { done }, { credentials, actionId });
+      if (r.stepKind !== 'accepted') throw new Error(`the Resolve step was refused: ${r.rejectReason ?? r.stepKind}`);
+      return { resolved: true, desk, instance, outcome, by: admission.person.keyId, at };
     },
     /** The presenter's approval of an escalated intent: the person's signed record (PF9.6). */
     async approve(intentId) {

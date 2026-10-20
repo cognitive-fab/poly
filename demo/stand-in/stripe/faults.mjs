@@ -6,10 +6,15 @@
 //                reaches the client; every later request is normal. It is the first attempt's lost answer of the witness of PS23.8.
 //   hold         the same request is applied, and the connection is held open with no answer for `ms` before it is dropped, for a build
 //                that only fails on a timeout.
+//   lost-all     (DF22) every POST /v1/refunds is applied once (the key holds, so one refund object exists) and its connection is reset
+//                before the answer, so every attempt of the effect is lost. It rehearses an ambiguous end (Unknown, DF19).
+//   down         (DF22) every POST /v1/refunds is answered 503 and applies nothing. It rehearses an ambiguous end with no refund.
 //   none         nothing is faulted (the control).
 export const FAULTS = {
   none: { name: 'none', rules: [] },
   'lost-answer': { name: 'lost-answer', rules: [{ host: 'api.stripe.com', method: 'POST', path: '/v1/refunds', nth: 1, then: 'reset' }] },
+  'lost-all': { name: 'lost-all', rules: [{ host: 'api.stripe.com', method: 'POST', path: '/v1/refunds', every: true, then: 'reset' }] },
+  down: { name: 'down', rules: [{ host: 'api.stripe.com', method: 'POST', path: '/v1/refunds', every: true, then: 'unavailable' }] },
   hold: { name: 'hold', rules: [{ host: 'api.stripe.com', method: 'POST', path: '/v1/refunds', nth: 1, then: 'hold', ms: 15_000 }] },
 };
 
@@ -29,7 +34,7 @@ export function ruleFor(script, request, counts) {
     if (rule.host !== request.host || rule.method !== request.method || rule.path !== request.path) continue;
     const n = (counts.get(rule) ?? 0) + 1;
     counts.set(rule, n);
-    if (n === rule.nth) return rule;
+    if (rule.every === true || n === rule.nth) return rule;
   }
   return null;
 }
