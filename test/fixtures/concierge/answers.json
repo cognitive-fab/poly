@@ -75,8 +75,8 @@
       "replies": {
         "Refunded": "We are sorry about the lamp. A refund of 40 euros is on its way.",
         "Declined": "We could not issue the refund now. A member of staff will contact you.",
-        "Checking": "Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
-        "Already": "A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else."
+        "Checking": "Your refund for the lamp is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
+        "Already": "A refund has already been issued on this conversation, so we cannot issue another one for the lamp here. A member of staff can help with anything else."
       }
     },
     {
@@ -110,8 +110,8 @@
       "replies": {
         "Refunded": "Your refund of 250 has been approved and is on its way.",
         "Declined": "We could not issue the refund now. A member of staff will contact you.",
-        "Checking": "Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
-        "Already": "A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else."
+        "Checking": "Your refund for the sofa is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
+        "Already": "A refund has already been issued on this conversation, so we cannot issue another one for the sofa here. A member of staff can help with anything else."
       }
     },
     {
@@ -205,8 +205,8 @@
       "replies": {
         "Refunded": "Your refund of 500 has been approved and is on its way.",
         "Declined": "We could not issue the refund now. A member of staff will contact you.",
-        "Checking": "Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
-        "Already": "A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else."
+        "Checking": "A refund on this conversation is being checked, so the 500 you asked for will not be issued until a member of staff confirms it.",
+        "Already": "A refund has already been issued on this conversation, so the 500 you asked for cannot be issued here. A member of staff can help with anything else."
       }
     },
     {
@@ -270,8 +270,8 @@
       "replies": {
         "Refunded": "We are processing the refund of 40 euros. It will appear in your account shortly.",
         "Declined": "We could not issue the refund now. A member of staff will contact you.",
-        "Checking": "Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
-        "Already": "A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else."
+        "Checking": "Your refund for the chairs is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
+        "Already": "A refund has already been issued on this conversation, so we cannot issue another one for the chairs here. A member of staff can help with anything else."
       }
     },
     {
@@ -305,8 +305,8 @@
       "replies": {
         "Refunded": "Your refund of 40 euros is on its way.",
         "Declined": "We could not issue the refund now. A member of staff will contact you.",
-        "Checking": "Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
-        "Already": "A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else."
+        "Checking": "Your refund for the desk lamp is being checked. A member of staff will confirm it, and nothing more will be issued until they do.",
+        "Already": "A refund has already been issued on this conversation, so we cannot issue another one for the desk lamp here. A member of staff can help with anything else."
       }
     }
   ],

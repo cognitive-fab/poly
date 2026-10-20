@@ -61,7 +61,6 @@ test('DF21, DF22, DAC26: with lost-all, refund ends Checking, resolve moves Unkn
 
     const checkingText = replyOf('refund-twice', 'Checking');
     assert.equal(heard.s1.at(-1).text, checkingText);
-    assert.equal(heard.s1.at(-1).text, 'Your refund is being checked. A member of staff will confirm it, and nothing more will be issued until they do.');
 
     const status = await demo.status();
     assert.deepEqual(status.unknown, ['guest-01']);
@@ -108,7 +107,6 @@ test('DF21, DF22, DAC26: with lost-all, refund ends Checking, resolve moves Unkn
     await say('refund-twice');
     const alreadyText = replyOf('refund-twice', 'Already');
     assert.equal(heard.s1.at(-1).text, alreadyText);
-    assert.equal(heard.s1.at(-1).text, 'A refund has already been issued on this conversation, so we cannot issue another one here. A member of staff can help with anything else.');
     const postsAfterAlready = standIn.log().filter((e) => e.host === 'api.stripe.com' && e.method === 'POST').length;
     assert.equal(postsAfterAlready, postsBeforeAlready);
 

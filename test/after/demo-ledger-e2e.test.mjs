@@ -27,12 +27,16 @@ test('DF19, DF21, DF24: refund ledger and escalation', { timeout: 3_600_000 }, a
   let now = 1_790_000_000_000;
   const clock = { now: () => now, advance: (ms) => { now += ms; } };
   const workdir = mkdtempSync(join(tmpdir(), 'demo-ledger-'));
-  const demo = await assembleDemo({ mode: 'recorded', workdir, now: clock.now, ordersOf, size: 4 });
+  const failures = [];
+  const demo = await assembleDemo({ mode: 'recorded', workdir, now: clock.now, ordersOf, size: 4, onFailure: (line) => failures.push(line) });
   try {
     // The pool hands out guests in the order of the joins: s1 is guest-01 (cust-a), s2 is guest-02 (cust-b), s3 is guest-03.
-    demo.room.join('s1');
-    demo.room.join('s2');
-    demo.room.join('s3');
+    const persona = { s1: demo.room.join('s1'), s2: demo.room.join('s2'), s3: demo.room.join('s3') };
+    // What the Desk of a session did last, for the message of a failed assertion.
+    const diag = async (session) => {
+      const rows = await demo.rt.getJournal(await demo.rt.threadId('support', persona[session].phone));
+      return JSON.stringify({ failures: failures.slice(-4), journal: rows.slice(-8).map((j) => [j.action, j.step_kind, j.reject_reason ?? null]), status: await demo.status(), outbox: demo.rt.store.db.prepare('SELECT kind, status, attempts, last_error FROM pr_outbox WHERE last_error IS NOT NULL').all().slice(-5) });
+    };
     const heard = { s2: [], s1: [], s3: [] };
     demo.room.subscribe('s2', (e) => heard.s2.push(e));
     demo.room.subscribe('s1', (e) => heard.s1.push(e));
@@ -46,7 +50,7 @@ test('DF19, DF21, DF24: refund ledger and escalation', { timeout: 3_600_000 }, a
 
     // Guest 2 (cust-b, sofa, ch_ex2001, paid 30000)
 
-    await t.test('(1) escalation timeout: no POST until 25 hours; reply Declined; ledger clears', async () => {
+    await t.test('(1) escalation never approved: no POST; after 25 hours the ledger is clear and the guest hears nothing (window closed)', async () => {
       await say('s2', 'refund-large');
       await demo.settle();
       assert.equal(postCount(), 0, 'no POST sent (waiting for approval)');
@@ -57,7 +61,13 @@ test('DF19, DF21, DF24: refund ledger and escalation', { timeout: 3_600_000 }, a
       // Advance 25 hours
       for (let i = 0; i < 30; i++) { clock.advance(3_600_000); await demo.settle(); }
 
-      assert.equal(heard.s2.at(-1).text, replyOf('refund-large', 'Declined'), 'reply is Declined after timeout');
+      // The Desk was told RefundFailed (the escalation was denied: escalation-timeout) and answered Declined, but the guest's last message
+      // is 25 hours old, so WhatsApp's window is closed and the send is refused (SendRejected, AC15). The ledger is clear all the same.
+      const rows = await demo.rt.getJournal(await demo.rt.threadId('support', persona.s2.phone));
+      const actions = rows.filter((j) => j.step_kind === 'accepted').map((j) => j.action);
+      assert.ok(actions.includes('RefundFailed'), `RefundFailed was delivered ${await diag('s2')}`);
+      assert.ok(actions.includes('SendRejected'), `the Declined reply was refused: the window of 24 hours had closed ${await diag('s2')}`);
+      assert.equal(heard.s2.length, 0, 'and the guest heard nothing');
       status = await demo.status();
       assert.ok(!status.unknown.includes('guest-02'), 'guest-02 is no longer in unknown list (ledger cleared)');
     });
@@ -101,8 +111,7 @@ test('DF19, DF21, DF24: refund ledger and escalation', { timeout: 3_600_000 }, a
       const posts = demo.standIn.log().slice(logBefore).filter((e) => e.method === 'POST' && e.host === 'api.stripe.com' && e.status === 200);
       assert.equal(posts.length, 1, 'one refund POST after approval');
       const post = posts[0];
-      assert.equal(post.params.charge, 'ch_ex2001', 'refund targets correct charge');
-      assert.equal(post.params.amount, '25000', 'refund amount is 250 euros (25000 cents)');
+      assert.deepEqual(Object.fromEntries(post.params), { charge: 'ch_ex2001', amount: '25000', reason: 'requested_by_customer' }, 'the refund names the sofa charge and 250 euros');
       assert.equal(heard.s2.at(-1).text, replyOf('refund-large', 'Refunded'), 'reply is Refunded');
       const status2 = await demo.status();
       assert.ok(!status2.unknown.includes('guest-02'), 'guest-02 no longer in unknown after approval');
@@ -159,7 +168,7 @@ test('DF19, DF21, DF24: refund ledger and escalation', { timeout: 3_600_000 }, a
     await t.test('(8) sixth attack on chairs: second refund-twice is blocked, reply Already', async () => {
       const logBefore = demo.standIn.log().length;
       await say('s1', 'refund-twice');
-      assert.equal(heard.s1.at(-1).text, replyOf('refund-twice', 'Already'), 'reply is Already (ledger blocks)');
+      assert.equal(heard.s1.at(-1).text, replyOf('refund-twice', 'Already'), `reply is Already (ledger blocks) ${await diag('s1')}`);
       assert.equal(logSince(logBefore), 0, 'no log entries (ledger prevents request)');
     });
 
@@ -179,7 +188,7 @@ test('DF19, DF21, DF24: refund ledger and escalation', { timeout: 3_600_000 }, a
       // Comment: on v1.3.0, this second request would refund again (8000 of 12000).
       const logBefore2 = demo.standIn.log().length;
       await say('s3', 'refund-synthetic');
-      assert.equal(heard.s3.at(-1).text, replyOf('refund-synthetic', 'Already'), 'reply is Already (ledger blocks)');
+      assert.equal(heard.s3.at(-1).text, replyOf('refund-synthetic', 'Already'), `reply is Already (ledger blocks) ${await diag('s3')}`);
       assert.equal(logSince(logBefore2), 0, 'no log entries (ledger prevents request)');
     });
   } finally {
