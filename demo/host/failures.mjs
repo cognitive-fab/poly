@@ -3,6 +3,18 @@
 // says, for each, the decision, the tier and the reason, and nothing else: the line holds one reason from a fixed list, never the
 // message, so it can hold no key, no body and no customer's text.
 
+/**
+ * DF17 item 2: the domain of each decision whose result type is declared `type T = { value: min..max }`, as { [decision]: { min, max } }.
+ * A decision whose type is anything else has no entry.
+ */
+export function domainsOf(programText) {
+  const types = {};
+  for (const m of programText.matchAll(/^type (\w+) = \{ value: (\d+)\.\.(\d+) \}/gm)) types[m[1]] = { min: Number(m[2]), max: Number(m[3]) };
+  const out = {};
+  for (const m of programText.matchAll(/^[ \t]*decision (\w+)\([^)]*\) -> (\w+)/gm)) if (types[m[2]]) out[m[1]] = { ...types[m[2]] };
+  return out;
+}
+
 /** The routes of a program's text: each decision with a `route <name>`, the route's effect kind and its tiers in order. */
 export function routesOf(programText) {
   const routes = [];
@@ -48,7 +60,7 @@ const REASONS = [
 
 /** One line for a failed row of the outbox, or null for a row that is not a decision's (or has no error). */
 export function describeFailure(row, context = {}) {
-  const { routes = [], secrets = [] } = context;
+  const { routes = [], secrets = [], domains = {} } = context;
   if (!row || typeof row.last_error !== 'string' || row.last_error === '' || typeof row.kind !== 'string') return null;
   const route = routes.find((r) => r.kind === row.kind);
   if (!route && !row.kind.startsWith('decision.')) return null;
@@ -57,7 +69,10 @@ export function describeFailure(row, context = {}) {
   if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = null; } }
   const tier = route && Number.isInteger(payload?.tier) ? (route.tiers[payload.tier] ?? 'none') : 'none';
   let reason = 'not recognised';
-  for (const [re, say] of REASONS) {
+  // DF17 item 2: the dispatch refusal of AC30 (S140), with the bounds of the program's type and no value.
+  const outside = /outside its type/.test(row.last_error);
+  if (outside) reason = domains[decision] ? `outside its domain (${domains[decision].min} to ${domains[decision].max})` : 'outside its type';
+  else for (const [re, say] of REASONS) {
     const m = re.exec(row.last_error);
     if (m) { reason = say(m, secrets, row.last_error); break; }
   }

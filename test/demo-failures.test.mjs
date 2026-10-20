@@ -293,9 +293,10 @@ test('DF12.3: watchFailures polls the database and calls onLine once per distinc
   stop();
   // Should have called onLine once for the first row (on first poll), then once for the second row (on second poll).
   // The first row appears again on the second poll but is not a new distinct tuple.
-  assert.ok(lines.length >= 1);
-  assert.ok(lines.some((l) => l.includes('classify')));
-  assert.ok(lines.some((l) => l.includes('amount')));
+  // Once per distinct (intent, attempts, error): the first row comes back on every poll and is not told again.
+  assert.equal(lines.length, 2, JSON.stringify(lines));
+  assert.equal(lines.filter((l) => l.includes('classify')).length, 1);
+  assert.equal(lines.filter((l) => l.includes('amount')).length, 1);
 });
 
 // ---- DF12.5: makeDemoConcierge timeouts --------
@@ -2397,4 +2398,19 @@ test('DF17.3: runApprove handles non-Error thrown values', async () => {
   assert.equal(result.ok, false);
   assert.ok(result.line);
   assert.ok(result.line.startsWith('approval refused:'));
+});
+
+test('DF17.3: runApprove reads the message of a plain object and survives an object with no prototype', async () => {
+  const { runApprove } = await import('../demo/host/approval.mjs');
+  const plain = await runApprove({ approve: async () => { throw { message: 'the escalation expired' }; } }, 'i-1');
+  assert.deepEqual(plain, { ok: false, line: 'approval refused: the escalation expired' });
+  const bare = await runApprove({ approve: async () => { throw Object.create(null); } }, 'i-1');
+  assert.equal(bare.ok, false);
+  assert.match(bare.line, /^approval refused: /);
+});
+
+test('DF17.1: domainsOf ignores a decision named in a comment', async () => {
+  const { domainsOf } = await import('../demo/host/failures.mjs');
+  const text = 'type Amount = { value: 0..500 }\n// decision refund() -> Amount\n  decision amount(text: Content) -> Amount {\n';
+  assert.deepEqual(domainsOf(text), { amount: { min: 0, max: 500 } });
 });

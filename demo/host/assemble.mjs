@@ -28,7 +28,7 @@ import { checkPrices } from './price-gate.mjs';
 import { LaunchRefused } from './launch-refused.mjs';
 import { createSpendMeter, meteredTransport, parseCap } from './spend.mjs';
 import { stubTransport } from './stub-model.mjs';
-import { routesOf, watchFailures } from './failures.mjs';
+import { domainsOf, routesOf, watchFailures } from './failures.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const hostModule = (f) => import(pathToFileURL(join(ROOT, 'examples', 'concierge', 'host', f)).href);
@@ -166,7 +166,7 @@ export async function assembleDemo({
   const noticed = new Set();
   if (startWorkers) rt.startWorkers();
   // DF12 item 3: each failed decision is a line. The watcher reads the runtime's ledger.
-  const watcher = onFailure ? watchFailures({ db: rt.store.db, context: { routes: routesOf(readFileSync(join(source, 'concierge.poly'), 'utf8')), secrets: apiKey ? [apiKey] : [] }, onLine: onFailure }) : null;
+  const watcher = onFailure ? watchFailures({ db: rt.store.db, context: { ...(() => { const text = readFileSync(join(source, 'concierge.poly'), 'utf8'); return { routes: routesOf(text), domains: domainsOf(text) }; })(), secrets: apiKey ? [apiKey] : [] }, onLine: onFailure }) : null;
 
   return {
     mode, meter, rt, room, pool, staff, standIn, admission, providers, db, settle, wa, limiter, connect,
@@ -179,7 +179,11 @@ export async function assembleDemo({
     /** The presenter's approval of an escalated intent: the person's signed record (PF9.6). */
     async approve(intentId) {
       const esc = await rt.escalationOf(intentId);
-      return rt.approve(signRecord({ kind: 'approval', subject: esc?.hash ?? 'none', by: admission.person.keyId, at: new Date(now()).toISOString() }, admission.person.privateKeyPem));
+      // DF17 item 3: no escalation, nothing is signed, and the message says what to do.
+      if (!esc) throw new Error(`no escalation was found for intent ${intentId}: copy the id from the staff panel`);
+      const at = new Date(now()).toISOString();
+      await rt.approve(signRecord({ kind: 'approval', subject: esc.hash, by: admission.person.keyId, at }, admission.person.privateKeyPem));
+      return { approved: true, intent: intentId, by: admission.person.keyId, subject: esc.hash, at };
     },
     async close() {
       if (closed) return;

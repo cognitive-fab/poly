@@ -25,6 +25,7 @@ import { formatLatency, measureLatency } from './host/latency.mjs';
 import { recordedOrdersOf } from './host/recorded-orders.mjs';
 import { formatSpend, parseCap } from './host/spend.mjs';
 import { openRunLog } from './host/run-log.mjs';
+import { runApprove } from './host/approval.mjs';
 import { startRoomServer } from './host/server.mjs';
 import { liveTransport } from './host/live-transport.mjs';
 import { DEMO_TIMEOUTS, makeDemoConcierge } from './scripts/make-demo-concierge.mjs';
@@ -158,7 +159,7 @@ export async function main(argv, io = {}) {
       try {
         if (cmd === 'status') { const st = statusOf(); io.out(JSON.stringify(st)); log?.status(st); }
         else if (cmd === 'staff') for (const e of demo.staff.entries()) io.out(`${new Date(e.at).toLocaleTimeString()}  ${e.text}`);
-        else if (cmd === 'approve' && arg) io.out(JSON.stringify(await demo.approve(arg)));
+        else if (cmd === 'approve') { const r = await runApprove(demo, arg); io.out(r.line); log?.line(r.line); }
         else if (cmd === 'kill') { demo.room.kill('presenter'); io.out('The room has stopped. Nothing more reaches the concierge.'); }
         else if (cmd === 'quit') resolve();
         else if (cmd) io.out('status | staff | approve <intent> | kill | quit');
