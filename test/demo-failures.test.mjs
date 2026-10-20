@@ -911,3 +911,887 @@ test('DF14: no request of any provider holds temperature', async () => {
     assert.equal(Object.hasOwn(body, 'temperature'), false, `request ${i}: should not have temperature field`);
   }
 });
+
+// ---- DF15.1: reasons - rejection messages for various reply shapes --------
+
+test('DF15.1: amount decision with prose reply gives "no ask gave an allowed answer (5 asks: 5 no JSON object)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: 'I cannot provide a refund amount' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 no JSON object\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: amount decision with missing value gives "no ask gave an allowed answer (5 asks: 5 value missing)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 value missing\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: amount decision with null value gives "no ask gave an allowed answer (5 asks: 5 value missing)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":null,"cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 value missing\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: amount decision with string value gives "no ask gave an allowed answer (5 asks: 5 value a string)"', async () => {
+  for (const stringValue of ['$450', '"$450"', '"450"', '"5,000"', '"450.50"', '"450.0"', '"-450"', '"0450"', '" 450"']) {
+    const t = recordingTransport({
+      async request() {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            content: [{ type: 'text', text: `{"value":${stringValue},"cites":["o-9011"]}` }],
+            usage: { input_tokens: 50, output_tokens: 20 },
+            stop_reason: 'end_turn',
+          }),
+        };
+      },
+    });
+    const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+    const question = { decision: 'amount', payload: {}, intent: 'i' };
+    const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+    await assert.rejects(
+      providers.decisions.amount.provider(question, materials),
+      (e) => {
+        assert.ok(e instanceof ProviderError, `for ${stringValue}`);
+        assert.match(e.message, /value a string/, `for ${stringValue}`);
+        return true;
+      },
+    );
+  }
+});
+
+test('DF15.1: amount decision with non-integer value gives "no ask gave an allowed answer (5 asks: 5 value not a whole number)"', async () => {
+  for (const badValue of [450.5, true, false, [], {}]) {
+    const t = recordingTransport({
+      async request() {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            content: [{ type: 'text', text: `{"value":${typeof badValue === 'object' ? JSON.stringify(badValue) : badValue},"cites":["o-9011"]}` }],
+            usage: { input_tokens: 50, output_tokens: 20 },
+            stop_reason: 'end_turn',
+          }),
+        };
+      },
+    });
+    const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+    const question = { decision: 'amount', payload: {}, intent: 'i' };
+    const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+    await assert.rejects(
+      providers.decisions.amount.provider(question, materials),
+      (e) => {
+        assert.ok(e instanceof ProviderError, `for ${badValue}`);
+        assert.match(e.message, /value not a whole number/, `for ${badValue}`);
+        return true;
+      },
+    );
+  }
+});
+
+test('DF15.1: amount decision with negative value gives "no ask gave an allowed answer (5 asks: 5 value negative)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":-450,"cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 value negative\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: amount decision with max_tokens stop_reason gives "no ask gave an allowed answer (5 asks: 5 reply cut off)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":450,' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'max_tokens',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 reply cut off\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: mixed rejection reasons show counts in decreasing order', async () => {
+  let callCount = 0;
+  const t = recordingTransport({
+    async request() {
+      const responses = [
+        '{"value":"$1"}',
+        '{"value":"$1"}',
+        '{"value":"$1"}',
+        'just prose',
+        'just prose',
+      ];
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: responses[callCount % responses.length] }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  // Override request to count calls
+  const originalRequest = t.request.bind(t);
+  t.request = async (...args) => {
+    callCount++;
+    return originalRequest(...args);
+  };
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /\(5 asks: 3 value a string, 2 no JSON object\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: tier decision with prose gives "no allowed answer (5 asks: 5 no JSON object)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: 'I am not sure' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'classify', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund me 450' }, items: {} };
+  await assert.rejects(
+    providers.tiers.small(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 no JSON object\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: tier decision with missing answer gives "no allowed answer (5 asks: 5 answer missing)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"x":1}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'classify', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund me 450' }, items: {} };
+  await assert.rejects(
+    providers.tiers.small(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 answer missing\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: tier decision with disallowed answer gives "no allowed answer (5 asks: 5 answer not allowed)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"answer":"Maybe"}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'classify', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund me 450' }, items: {} };
+  await assert.rejects(
+    providers.tiers.small(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 answer not allowed\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: tier decision with max_tokens stop_reason gives "no allowed answer (5 asks: 5 reply cut off)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"answer":"Ref' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'max_tokens',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'classify', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund me 450' }, items: {} };
+  await assert.rejects(
+    providers.tiers.small(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /no ask gave an allowed answer \(5 asks: 5 reply cut off\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: answer decision with prose gives "the model gave no text (1 ask: no JSON object)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: 'Your order is on file.' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'where is my order?' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /the model gave no text \(1 ask: no JSON object\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: answer decision with missing answer gives "the model gave no text (1 ask: answer missing)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'where is my order?' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /the model gave no text \(1 ask: answer missing\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: answer decision with empty answer gives "the model gave no text (1 ask: answer missing)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"answer":""}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'where is my order?' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /the model gave no text \(1 ask: answer missing\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: answer decision with max_tokens stop_reason gives "the model gave no text (1 ask: reply cut off)"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"answer":"Your ord' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'max_tokens',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'answer', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'where is my order?' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.answer.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.match(e.message, /the model gave no text \(1 ask: reply cut off\)/);
+      return true;
+    },
+  );
+});
+
+test('DF15.1: no rejection message contains words from the reply', async () => {
+  const markerWord = 'zebra-marker-unique-xyz';
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: `This reply contains ${markerWord} inside it` }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await assert.rejects(
+    providers.decisions.amount.provider(question, materials),
+    (e) => {
+      assert.ok(e instanceof ProviderError);
+      assert.ok(!e.message.includes(markerWord), `message should not contain marker word: ${e.message}`);
+      assert.ok(!e.message.includes('This reply contains'), 'message should not contain reply text');
+      return true;
+    },
+  );
+});
+
+// ---- DF15.2: describeFailure with parenthesis counts --------
+
+test('DF15.2: describeFailure on amount failure with parenthesis counts', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 value a string)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /^decision failed: amount, tier none, no allowed answer \(5 asks: 5 value a string\)$/);
+});
+
+test('DF15.2: describeFailure keeps mixed parenthesis', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 3 value a string, 2 no JSON object)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /no allowed answer \(5 asks: 3 value a string, 2 no JSON object\)/);
+});
+
+test('DF15.2: describeFailure on route call with parenthesis', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'route.triage.call',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 no JSON object)',
+    payload: { tier: 0 },
+  };
+  const context = {
+    routes: [{ kind: 'route.triage.call', decision: 'classify', tiers: ['small', 'large'] }],
+    secrets: [],
+  };
+  const line = describeFailure(row, context);
+  assert.match(line, /decision failed: classify, tier small, no allowed answer \(5 asks: 5 no JSON object\)/);
+});
+
+test('DF15.2: describeFailure drops parenthesis with unknown word', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.amount',
+    attempts: 1,
+    last_error: 'no ask gave an allowed answer (5 asks: 5 zebra-marker)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /^decision failed: amount, tier none, no allowed answer$/);
+  assert.ok(!line.includes('zebra-marker'));
+  assert.ok(!line.includes('('));
+});
+
+test('DF15.2: describeFailure on no text with parenthesis', async () => {
+  const { describeFailure } = await import('../demo/host/failures.mjs');
+  const row = {
+    kind: 'decision.answer',
+    attempts: 1,
+    last_error: 'the model gave no text (1 ask: reply cut off)',
+    payload: {},
+  };
+  const context = { routes: [], secrets: [] };
+  const line = describeFailure(row, context);
+  assert.match(line, /no text \(1 ask: reply cut off\)/);
+});
+
+// ---- DF15.3: strict parse of amount --------
+
+test('DF15.3: amount accepts JSON number 450', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":450,"cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 450);
+});
+
+test('DF15.3: amount accepts string "450"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":"450","cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 450);
+});
+
+test('DF15.3: amount accepts string "450.00"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":"450.00","cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 450);
+});
+
+test('DF15.3: amount accepts 5000 (domain refuses it later)', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":5000,"cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 5000 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 5000);
+});
+
+test('DF15.3: amount accepts string "5000"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":"5000","cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 5000 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 5000);
+});
+
+test('DF15.3: amount accepts 0', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":0,"cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 0 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 0);
+});
+
+test('DF15.3: amount accepts string "0"', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '{"value":"0","cites":["o-9011"]}' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 0 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 0);
+});
+
+test('DF15.3: amount accepts JSON in prose (first object extracted)', async () => {
+  const t = recordingTransport({
+    async request() {
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          content: [{ type: 'text', text: '```json\n{"value":450,"cites":["o-9011"]}\n```' }],
+          usage: { input_tokens: 50, output_tokens: 20 },
+          stop_reason: 'end_turn',
+        }),
+      };
+    },
+  });
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result);
+  assert.equal(result.value, 450);
+});
+
+// ---- DF15.4: prompt for amount decision --------
+
+test('DF15.4: amount request prompt shape and task sentence', async () => {
+  const t = recordingTransport(stubTransport());
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  await providers.decisions.amount.provider(question, materials);
+  assert.ok(t.records.length >= 1, 'should make at least one request (vote of 5)');
+  const firstReq = t.records[0];
+  const body = parseBody(firstReq);
+  const system = body.system;
+  const messages = body.messages;
+  assert.ok(system.includes('with no other text'), 'system should mention "with no other text"');
+  assert.ok(system.includes('"value": <a bare JSON number>'), 'system should include bare number shape');
+  assert.ok(messages.length > 0, 'should have messages');
+  const userMsg = messages[0].content;
+  assert.ok(userMsg.includes(TASKS.amount), `user message should include task sentence: ${TASKS.amount}`);
+  assert.ok(TASKS.amount.includes('bare JSON number'), 'task sentence should mention "bare JSON number"');
+  assert.ok(TASKS.amount.includes('no quotes'), 'task sentence should mention "no quotes"');
+  assert.ok(TASKS.amount.includes('currency sign'), 'task sentence should mention "currency sign"');
+  assert.ok(TASKS.amount.includes('separators'), 'task sentence should mention "separators"');
+  const keys = Object.keys(body).sort();
+  assert.deepEqual(keys, ['max_tokens', 'messages', 'model', 'system'].sort(), 'request body should have only expected keys');
+});
+
+test('DF15.4: stub still recognizes amount task', async () => {
+  const t = stubTransport();
+  const providers = makeProviders({ transport: t, apiKey: 'stub-key-for-test', models: { small: 'small-model-id', large: 'large-model-id' } });
+  const question = { decision: 'amount', payload: {}, intent: 'i' };
+  const materials = { bodies: { m: 'refund 450 for my order' }, items: { o: [{ id: 'o-9011', body: 'Order 9011: a desk lamp.' }] } };
+  const result = await providers.decisions.amount.provider(question, materials);
+  assert.ok(result, 'stub should recognize amount task and return a result');
+  assert.equal(result.value, 450, 'stub should extract the amount 450 from the message');
+});
+
+// ---- DF15.5: --log flag and openRunLog --------
+
+test('DF15.5: parseArgs accepts --log with a path', () => {
+  const r = parseArgs(['--stub-model', '--cap-usd', '5', '--log', '/tmp/log.txt']);
+  assert.equal(r.logFile, '/tmp/log.txt', 'logFile should be set to the path');
+});
+
+test('DF15.5: parseArgs refuses bare --log without a path', () => {
+  assert.throws(() => parseArgs(['--stub-model', '--cap-usd', '5', '--log']), LaunchRefused, 'bare --log should be refused');
+});
+
+test('DF15.5: parseArgs refuses --log with another flag following', () => {
+  assert.throws(() => parseArgs(['--stub-model', '--cap-usd', '5', '--log', '--stub-latency', '100']), LaunchRefused, '--log followed by another flag should be refused');
+});
+
+test('DF15.5: parseArgs refuses --log with --measure-latency', () => {
+  assert.throws(() => parseArgs(['--live', '--cap-usd', '5', '--log', '/tmp/log.txt', '--measure-latency']), LaunchRefused, '--log with --measure-latency should be refused');
+});
+
+test('DF15.5: parseArgs without --log has no logFile key', () => {
+  const r = parseArgs(['--stub-model', '--cap-usd', '5']);
+  assert.equal(Object.hasOwn(r, 'logFile'), false, 'logFile key should not exist when --log is not given');
+});
+
+test('DF15.5: openRunLog exported from run-log.mjs', async () => {
+  const { openRunLog } = await import('../demo/host/run-log.mjs');
+  assert.equal(typeof openRunLog, 'function', 'openRunLog should be exported');
+});
+
+test('DF15.5: openRunLog appends ISO time and text to line', async () => {
+  const { openRunLog } = await import('../demo/host/run-log.mjs');
+  const tmpdir = mkdtempSync(join(tmpdir(), 'run-log-'));
+  const logFile = join(tmpdir, 'test.log');
+  try {
+    let now = 0;
+    const fakeNow = () => now;
+    const log = openRunLog(logFile, { now: fakeNow });
+    now = new Date('2026-10-19T15:30:00.000Z').getTime();
+    log.line('test line');
+    const content = readFileSync(logFile, 'utf8');
+    assert.ok(content.includes('2026-10-19T15:30:00'), 'should include ISO timestamp');
+    assert.ok(content.includes('test line'), 'should include line text');
+    assert.ok(content.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z test line/), 'should have ISO time then space then text');
+    log.close();
+  } finally {
+    rmSync(tmpdir, { recursive: true, force: true });
+  }
+});
+
+test('DF15.5: openRunLog appends status with ISO time and no reply list', async () => {
+  const { openRunLog } = await import('../demo/host/run-log.mjs');
+  const tmpdir = mkdtempSync(join(tmpdir(), 'run-log-'));
+  const logFile = join(tmpdir, 'test.log');
+  try {
+    let now = 0;
+    const fakeNow = () => now;
+    const log = openRunLog(logFile, { now: fakeNow });
+    now = new Date('2026-10-19T15:30:00.000Z').getTime();
+    const statusObj = {
+      room: 1,
+      stripe: {
+        posts: [],
+        reply: ['customer text', 'another reply'],
+        refunds: 0,
+      },
+      spend: 's',
+    };
+    log.status(statusObj);
+    const content = readFileSync(logFile, 'utf8');
+    assert.ok(content.includes('2026-10-19T15:30:00'), 'should include ISO timestamp');
+    assert.ok(content.includes('status '), 'should include "status " prefix');
+    const jsonPart = content.slice(content.indexOf('{'));
+    const parsed = JSON.parse(jsonPart.trim());
+    assert.ok(parsed.stripe, 'parsed JSON should have stripe field');
+    assert.ok(!parsed.stripe.reply, 'stripe should not have reply field');
+    assert.ok(Array.isArray(parsed.stripe.posts), 'stripe should have posts field');
+    assert.ok(typeof parsed.stripe.refunds === 'number', 'stripe should have refunds field');
+    // Verify original object is not changed
+    assert.ok(statusObj.stripe.reply, 'original object should still have reply list');
+    log.close();
+  } finally {
+    rmSync(tmpdir, { recursive: true, force: true });
+  }
+});
+
+test('DF15.5: openRunLog appends to file instead of overwriting', async () => {
+  const { openRunLog } = await import('../demo/host/run-log.mjs');
+  const tmpdir = mkdtempSync(join(tmpdir(), 'run-log-'));
+  const logFile = join(tmpdir, 'test.log');
+  try {
+    let now = 0;
+    const fakeNow = () => now;
+    const log1 = openRunLog(logFile, { now: fakeNow });
+    now = new Date('2026-10-19T15:30:00.000Z').getTime();
+    log1.line('first line');
+    log1.close();
+    const log2 = openRunLog(logFile, { now: fakeNow });
+    now = new Date('2026-10-19T15:31:00.000Z').getTime();
+    log2.line('second line');
+    log2.close();
+    const content = readFileSync(logFile, 'utf8');
+    assert.ok(content.includes('first line'), 'should contain first line');
+    assert.ok(content.includes('second line'), 'should contain second line');
+    const lines = content.trim().split('\n');
+    assert.equal(lines.length, 2, 'should have two lines');
+  } finally {
+    rmSync(tmpdir, { recursive: true, force: true });
+  }
+});
+
+test('DF15.5: parseArgs refuses --log when parent folder does not exist', async () => {
+  const { parseArgs } = await import('../demo/launch.mjs');
+  const nonExistentPath = join('/nonexistent/folder/that/does/not/exist', 'log.txt');
+  const argv = ['--stub-model', '--cap-usd', '5', '--log', nonExistentPath];
+  assert.throws(() => parseArgs(argv), LaunchRefused, 'should refuse --log with non-existent parent folder');
+});
