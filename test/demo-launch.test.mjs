@@ -68,8 +68,8 @@ test('DF26: heapArgsFor(4288, { POLY_DEMO_HEAP_REEXEC: "1" }) returns empty', as
   assert.deepEqual(result, []);
 });
 
-// DF26, DAC30: the serial suite runs with 8 GB of heap.
-test('DF26: package.json test script has --max-old-space-size=8192 for serial tests and not for parallel', async () => {
+// DF26, DAC30: the serial suite runs with 8 GB of heap via env-file.
+test('DF26: package.json test script has --env-file for serial tests, parallel tests lack it, and the env file holds NODE_OPTIONS', async () => {
   const { readFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   const { dirname, join } = await import('node:path');
@@ -82,17 +82,23 @@ test('DF26: package.json test script has --max-old-space-size=8192 for serial te
   const afterMatch = testScript.match(/[^&]*test\/after\/\*\.test\.mjs[^&]*/);
   assert(afterMatch, 'test script should contain a command with test/after/*.test.mjs');
   const afterCommand = afterMatch[0];
-  assert(afterCommand.includes('--max-old-space-size=8192'), 'command with test/after/*.test.mjs should include --max-old-space-size=8192');
+  assert(afterCommand.includes('--env-file=test/fixtures/serial-heap.env'), 'command with test/after/*.test.mjs should include --env-file=test/fixtures/serial-heap.env');
 
   // Find the command with "test/*.test.mjs" (exact pattern)
   const parallelMatch = testScript.match(/[^&]*"test\/\*\.test\.mjs"[^&]*/);
   assert(parallelMatch, 'test script should contain a command with "test/*.test.mjs"');
   const parallelCommand = parallelMatch[0];
-  assert(!parallelCommand.includes('--max-old-space-size=8192'), 'command with "test/*.test.mjs" should not include --max-old-space-size=8192');
+  assert(!parallelCommand.includes('--env-file'), 'command with "test/*.test.mjs" should not include --env-file');
 
   // Verify both were found exactly once
   const afterCount = (testScript.match(/test\/after\/\*\.test\.mjs/g) || []).length;
   const parallelCount = (testScript.match(/"test\/\*\.test\.mjs"/g) || []).length;
   assert.equal(afterCount, 1, 'test/after/*.test.mjs should appear exactly once');
   assert.equal(parallelCount, 1, '"test/*.test.mjs" should appear exactly once');
+
+  // Read and verify the env file
+  const envPath = join(testDir, '..', 'test', 'fixtures', 'serial-heap.env');
+  const envContent = readFileSync(envPath, 'utf-8');
+  const envLines = envContent.split('\n').filter(line => line.trim().length > 0);
+  assert(envLines.includes('NODE_OPTIONS=--max-old-space-size=8192'), 'serial-heap.env should contain the line NODE_OPTIONS=--max-old-space-size=8192');
 });
