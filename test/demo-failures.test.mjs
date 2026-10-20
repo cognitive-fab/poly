@@ -883,7 +883,7 @@ test('DF14: no request of any provider holds temperature', async () => {
 
   // Call decisions.amount.provider (a vote of 5)
   const beforeAmount = t.records.length;
-  await providers.decisions.amount.provider({ decision: 'amount', payload: {}, intent: 'i', limits }, materials);
+  await providers.decisions.amount.provider({ decision: 'amount', payload: {}, intent: 'i' }, materials);
   const afterAmount = t.records.length;
   const amountCount = afterAmount - beforeAmount;
 
@@ -1996,7 +1996,7 @@ test('DF16.3: mixed rejection reasons format with counts in order', async () => 
     providers.decisions.amount.provider(question, materials),
     (e) => {
       assert.ok(e instanceof ProviderError);
-      assert.match(e.message, /\(5 asks: 2 reply cut off at 200 tokens, 2 value a string, 1 no JSON object\)/);
+      assert.match(e.message, /\(5 asks: 2 no JSON object, 2 value a string, 1 reply cut off at 200 tokens\)/);
       return true;
     },
   );

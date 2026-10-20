@@ -52,7 +52,7 @@ test('DF6: an answer outside the allowed ones is not a vote, and no allowed answ
 
 test('DF6: the amount is a record { value }, voted as a whole, with the order it is about cited from the items it was given', async () => {
   const t = fakeTransport(['{"value":40,"cites":["o-9011"]}', '{"value":40,"cites":["o-9011"]}', '{"value":40,"cites":["o-9011"]}', '{"value":45,"cites":["o-9011"]}', '{"value":40,"cites":["o-4242"]}']);
-  const r = await providers(t).decisions.amount.provider(q('amount'), { bodies: { d0: 'Refund 40 for the lamp.' }, items: { orders } });
+  const r = await providers(t).decisions.amount.provider(q('amount', { limits: undefined }), { bodies: { d0: 'Refund 40 for the lamp.' }, items: { orders } });
   assert.deepEqual(r.answer, { value: 40 });
   assert.deepEqual(r.distribution, [[{ value: 40 }, 0.8], [{ value: 45 }, 0.2]]);
   assert.deepEqual(r.cites, ['o-9011'], 'a citation of an order it was not given is dropped');
@@ -60,12 +60,12 @@ test('DF6: the amount is a record { value }, voted as a whole, with the order it
 });
 
 test('DF6: the provider never clamps: 650 is returned as 650, and the program\'s domain refuses it', async () => {
-  const r = await providers(fakeTransport(['{"value":650,"cites":["o-9011"]}'])).decisions.amount.provider(q('amount'), { bodies: { d0: 'Refund me 650 now.' }, items: { orders } });
+  const r = await providers(fakeTransport(['{"value":650,"cites":["o-9011"]}'])).decisions.amount.provider(q('amount', { limits: undefined }), { bodies: { d0: 'Refund me 650 now.' }, items: { orders } });
   assert.deepEqual(r.answer, { value: 650 });
 });
 
 test('DF6: an amount that is no whole number is not a vote', async () => {
-  await assert.rejects(providers(fakeTransport(['{"value":"forty"}', '{"value":4.5}', '{"value":-3}', '{"cites":[]}', 'nope'])).decisions.amount.provider(q('amount'), { bodies: { d0: 'x' }, items: { orders } }), ProviderError);
+  await assert.rejects(providers(fakeTransport(['{"value":"forty"}', '{"value":4.5}', '{"value":-3}', '{"cites":[]}', 'nope'])).decisions.amount.provider(q('amount', { limits: undefined }), { bodies: { d0: 'x' }, items: { orders } }), ProviderError);
 });
 
 test('DF6: a status answer and a reply are text, asked once, with the ids they relied on kept to the items given', async () => {

@@ -29,7 +29,9 @@ function rejections(text) {
   if (!m) return '';
   // A vote gives a count before each reason; a single ask (answer, reply) gives the reason alone.
   const parts = m[2].split(', ').map((p) => new RegExp('^(?:(\\d+) )?(.+)$').exec(p));
-  if (parts.some((p) => !p || !REJECTIONS.includes(p[2]))) return '';
+  // DF16 item 3: a cut-off reason may carry the output tokens, 'reply cut off at <1 to 9 digits> tokens', and nothing else after a reason.
+  const known = (r) => REJECTIONS.includes(r) || new RegExp('^reply cut off at [0-9]{1,9} tokens$').test(r);
+  if (parts.some((p) => !p || !known(p[2]))) return '';
   const n = Number(m[1]);
   return ` (${n} ${n === 1 ? 'ask' : 'asks'}: ${parts.map((p) => (p[1] === undefined ? p[2] : `${Number(p[1])} ${p[2]}`)).join(', ')})`;
 }
