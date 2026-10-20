@@ -15,7 +15,7 @@ Step 13 runs the full suite. This list holds what is to be done before it or wit
 
 ## Decisions waiting for the owner
 
-6. **The out-of-domain outcome** (`docs/demo/proposal-out-of-domain-outcome.md`): A, B or C, and the wording of the reply.
+6. **The out-of-domain outcome**: decided for v1.3 as option C (no change: the guest hears the `Unsure` reply, and the terminal line says `outside its domain (0 to 500)`). **Option A is the v1.4 item.** Its touch list, from `docs/demo/proposal-out-of-domain-outcome.md`: the runtime gives the failed hook the reason `outside-type` for a refusal under S140 (`poly-runtime`, its tests, and the documentation of the reason in PS and PT); the Desk's `Unextracted` takes a `reason` and a handler branches on it; `Outcome` gains `OutOfRange`; `examples/concierge/concierge.poly` changes and the demo copy is generated again; the Desk instance (2114 states today) grows and the check runs again (91 to 176 s), so the certificate and the verdict baseline are produced again; the recorded fixture gets `replies.OutOfRange` for `refund-outside`; the end-to-end test, `demo-room-answers`, the runbook table of step 2.5 and the row of DS2 that says the Desk replies that it is unsure change; the policy and the budget do not.
 7. **The calibration maps** (`docs/demo/calibration-for-release.md`): one calibration run and `poly journal fit`, or named stand-ins.
 8. **The timeouts of the demo copy** are provisional ceilings (classify 20 s, amount, answer and reply 10 s). Run `--measure-latency` and set them from the report.
 9. **The amount vote's output limit** is 200 tokens an ask by the host's default. Check the counts in the log of the next live run (`reply cut off at <n> tokens` should not appear).
