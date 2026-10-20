@@ -56,12 +56,12 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
   if (typeof apiKey !== 'string' || apiKey === '') throw new Error('the model provider has no key');
   const requests = [];
 
-  async function ask(model, system, user, maxTokens, temperature) {
+  async function ask(model, system, user, maxTokens) {
     const r = await transport.request({
       method: 'POST',
       url: API_URL,
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': API_VERSION },
-      body: JSON.stringify({ model, max_tokens: maxTokens, temperature, system, messages: [{ role: 'user', content: user }] }),
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
     });
     requests.push({ model, maxTokens });
     if (r.status === 401 || r.status === 403) throw new ProviderAuthError(r.status);
@@ -106,9 +106,9 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
     if (perOutput < 8) throw new ProviderError(`the declared output limit (${limits.maxTokens}) is too small for ${samples} asks`);
     const { system, user } = prompt(q, materials, shape, allowed, perInput, extra);
     let first;
-    try { first = await ask(model, system, user, perOutput, 1); } catch (e) { if (e instanceof ProviderAuthError) onAuthFailure(e); throw e; }
+    try { first = await ask(model, system, user, perOutput); } catch (e) { if (e instanceof ProviderAuthError) onAuthFailure(e); throw e; }
     if (first.input > perInput) throw new ProviderError(`the message counts ${first.input} tokens, over its share of ${perInput} (the declared input limit, ${limits.maxInputTokens}, over ${samples} asks); nothing more was asked`);
-    const settled = [{ status: 'fulfilled', value: first }, ...(await Promise.allSettled(Array.from({ length: samples - 1 }, () => ask(model, system, user, perOutput, 1))))];
+    const settled = [{ status: 'fulfilled', value: first }, ...(await Promise.allSettled(Array.from({ length: samples - 1 }, () => ask(model, system, user, perOutput))))];
     const failed = settled.find((s) => s.status === 'rejected');
     if (failed) {
       const auth = settled.find((s) => s.status === 'rejected' && s.reason instanceof ProviderAuthError);
@@ -140,7 +140,7 @@ export function makeProviders({ transport, apiKey, models, samples = 5, charsPer
     checkLimits(limits);
     const { system, user } = prompt(q, materials, q.decision === 'reply' ? '{"answer": "<the reply>"}' : '{"answer": "<the answer>", "cites": ["<order id>", ...]}', null, limits.maxInputTokens, extra);
     let one;
-    try { one = await ask(model, system, user, limits.maxTokens, 0.3); } catch (e) { if (e instanceof ProviderAuthError) onAuthFailure(e); throw e; }
+    try { one = await ask(model, system, user, limits.maxTokens); } catch (e) { if (e instanceof ProviderAuthError) onAuthFailure(e); throw e; }
     const o = objectIn(one.text);
     if (!o || typeof o.answer !== 'string' || o.answer.trim() === '') throw new ProviderError('the model gave no text');
     return { answer: o.answer, cites: Array.isArray(o.cites) ? o.cites.filter((c) => typeof c === 'string') : [], usage: { input: one.input, output: one.output } };

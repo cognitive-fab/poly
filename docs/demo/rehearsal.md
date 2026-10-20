@@ -293,6 +293,16 @@ This is what the first rehearsal got wrong.
 - **The `status` command** prints JSON. Its `stripe` field is the report of the Stripe mock-up. The `reply` list inside it belongs to the mock-up's WhatsApp sink, which the room does not use, so it stays empty. Do not read it as the room's answers. Read the page.
 - **A message can get no answer.** When a decision fails (the model has no answer, or a status answer cites no order), the program goes back to idle and sends nothing. That is the program's behaviour (`examples/concierge`, unchanged). If a message shows on the page and nothing follows, the answer failed. Look for the cause in the presenter's window.
 
+### Browser tabs: one room tab, one staff tab
+
+The room page can block without saying so. Each room tab keeps one connection open to the host for its events, and the staff panel keeps one more. A browser allows a few connections to one address at a time (six, for HTTP/1.1). Tabs left over from earlier launches keep their connections even when their launcher is gone, and the browser holds the `Send` of a new tab in a queue behind them. The page then shows your message as sent, or nothing at all, and no error.
+
+Before each launch of Act 2:
+
+- close every tab of an earlier launch (the room page, the staff panel and any error page);
+- open exactly one room tab for each guest and exactly one staff tab;
+- if a message seems to hang, close the other tabs of the same address and reload before you look anywhere else.
+
 ### 2.3 Prove the refusals (free)
 
 ```powershell
@@ -503,6 +513,25 @@ You should see no file in the status, and `Stopping Docker Desktop`.
 If the status lists a file under `demo/concierge/prices`, the checkout did not run in the repository root. Run it again from there. If it lists another file, you changed it during the rehearsal. Look at it before you decide.
 
 Close the window. The key lived in this window only.
+
+## Notes for the release
+
+### The calibration maps
+
+The maps are stand-ins today. `docs/demo/calibration-for-release.md` states the two ways to the release.
+
+### The room page, for v1.3 (proposal, no code yet)
+
+The room page (`demo/host/page.mjs`) hangs without a word when the browser has no free connection to the host. The cause is on the page: the `Send` handler awaits `fetch('/api/say')` with no sign that it is waiting and no limit on the wait, and each tab holds an event stream open. The fix proposed for v1.3:
+
+1. **A sending state.** On submit, disable the button and show `Sending...` at once, so that a queued request looks like what it is.
+2. **A timeout on `/api/say`.** Give the request an `AbortController` with a limit of 10 seconds. On expiry, show `The room did not answer. Close other tabs of this page, reload, and send again.` and enable the button.
+3. **The state of the event stream.** Show `Reconnecting...` when the `EventSource` reports an error and clear it on open, so that a page with no stream does not look alive.
+4. **One stream for each session.** On the host, when a new event stream opens for a session, close the older one of the same session after sending it a `superseded` event, which the page shows as `This page was replaced by a newer tab.` A stale tab then frees its connection when its session reconnects elsewhere.
+5. **Free the connection of a hidden page.** Close the `EventSource` on `pagehide` and reopen it on `pageshow`, so that a tab sent to the background does not hold a connection.
+6. **A test.** A fast test of the pure parts (the state transitions of the page as a function of events), and a heavy test with a host and six held connections, in which a seventh `Send` answers within its limit with the message of item 2 and not with silence.
+
+Items 1 and 2 are the smallest change and remove the silence. Item 4 removes the usual cause.
 
 ## Conclusion
 
