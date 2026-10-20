@@ -1,0 +1,262 @@
+# State diagrams of the checked machines
+
+These two diagrams are drawn by `demo/scripts/make-diagrams.mjs` from the reachable graph that `poly-ref` explores for the checked instance, the same graph the check walks. They are projections of the checked model, not the model: many states of the instance are drawn as one box, and each edge is an accepted step, once for each (from, action, to). Regenerate them with `node demo/scripts/make-diagrams.mjs docs/demo/diagrams`. A test compares the files with a fresh run, byte for byte.
+
+## The Ticket of poly-kept
+
+One ticket is one order's refunds. The edge from `Refunding` to `Review` is the ambiguous end: every attempt ended without an answer, so a person decides, and `Resolve` is the only way out of `Review`. This is the design that keeps a second refund from being issued after an uncertain one (mutation (c) of Act 1 removes it).
+
+```mermaid
+%% A projection of the checked model of support.Ticket of the kept poly build, onto `phase`: 226 states of the checked instance drawn as the boxes they project to. It is not the model.
+%% An edge is an accepted step, once for each (from, action, to), with the effects it emits after the slash.
+stateDiagram-v2
+    Closed --> [*]
+    Confirming --> Idle : Cancel / whatsapp.ticket
+    Confirming --> Refunding : Confirm / stripe.refund
+    Idle --> Confirming : RequestAll / whatsapp.ticket
+    Idle --> Confirming : RequestLine / whatsapp.ticket
+    New --> Idle : Open
+    Refunding --> Closed : RefundOk / whatsapp.ticket
+    Refunding --> Idle : RefundFailed / whatsapp.ticket
+    Refunding --> Idle : RefundOk / whatsapp.ticket
+    Refunding --> Review : RefundUnknown / whatsapp.ticket
+    Review --> Closed : Resolve / whatsapp.ticket
+    Review --> Idle : Resolve / whatsapp.ticket
+    [*] --> New
+```
+
+## The Desk of the concierge (v1.3.1)
+
+The boxes are `<phase>_<refund>`. The second part is the ledger of DF19: `None` (no refund issued or open on this thread), `Unknown` (a refund in flight, waiting for approval, or ended without an answer) and `Issued`. A refund request leaves `Extracting_None` for `Refunding_Unknown`; `Refunded` makes the ledger `Issued`; `RefundFailed` (a definite refusal) makes it `None` again; `RefundUnknown` leaves it `Unknown`; and `Resolve`, signed by a person, moves `Unknown` to `Issued` or to `None`. While the ledger is not `None`, `Amounted` takes the `Answering` branch and emits no refund, which is the path property `no-reissue`. The ledger is per thread, not per order (`Items` is opaque, PS1.4b).
+
+```mermaid
+%% A projection of the checked model of concierge.Desk of examples/concierge, onto `phase` and `refund`: 5762 states of the checked instance drawn as the boxes they project to. It is not the model.
+%% An edge is an accepted step, once for each (from, action, to), with the effects it emits after the slash.
+stateDiagram-v2
+    Answering_Issued --> Answering_Issued : AckFailed
+    Answering_Issued --> Answering_Issued : Acked
+    Answering_Issued --> Answering_Issued : Delivered
+    Answering_Issued --> Answering_Issued : Got / decision.ack
+    Answering_Issued --> Answering_Issued : SendFailed
+    Answering_Issued --> Answering_Issued : SendRejected
+    Answering_Issued --> Answering_Issued : Start
+    Answering_Issued --> Idle_Issued : AnswerFailed
+    Answering_Issued --> Idle_Issued : Answered
+    Answering_None --> Answering_None : AckFailed
+    Answering_None --> Answering_None : Acked
+    Answering_None --> Answering_None : Delivered
+    Answering_None --> Answering_None : Got / decision.ack
+    Answering_None --> Answering_None : SendFailed
+    Answering_None --> Answering_None : SendRejected
+    Answering_None --> Answering_None : Start
+    Answering_None --> Idle_None : AnswerFailed
+    Answering_None --> Idle_None : Answered
+    Answering_Unknown --> Answering_Issued : Resolve
+    Answering_Unknown --> Answering_None : Resolve
+    Answering_Unknown --> Answering_Unknown : AckFailed
+    Answering_Unknown --> Answering_Unknown : Acked
+    Answering_Unknown --> Answering_Unknown : Delivered
+    Answering_Unknown --> Answering_Unknown : Got / decision.ack
+    Answering_Unknown --> Answering_Unknown : SendFailed
+    Answering_Unknown --> Answering_Unknown : SendRejected
+    Answering_Unknown --> Answering_Unknown : Start
+    Answering_Unknown --> Idle_Unknown : AnswerFailed
+    Answering_Unknown --> Idle_Unknown : Answered
+    Citing_Issued --> Citing_Issued : AckFailed
+    Citing_Issued --> Citing_Issued : Acked
+    Citing_Issued --> Citing_Issued : Delivered
+    Citing_Issued --> Citing_Issued : Got / decision.ack
+    Citing_Issued --> Citing_Issued : SendFailed
+    Citing_Issued --> Citing_Issued : SendRejected
+    Citing_Issued --> Citing_Issued : Start
+    Citing_Issued --> Idle_Issued : AnswerFailed
+    Citing_Issued --> Idle_Issued : Cited
+    Citing_None --> Citing_None : AckFailed
+    Citing_None --> Citing_None : Acked
+    Citing_None --> Citing_None : Delivered
+    Citing_None --> Citing_None : Got / decision.ack
+    Citing_None --> Citing_None : SendFailed
+    Citing_None --> Citing_None : SendRejected
+    Citing_None --> Citing_None : Start
+    Citing_None --> Idle_None : AnswerFailed
+    Citing_None --> Idle_None : Cited
+    Citing_Unknown --> Citing_Issued : Resolve
+    Citing_Unknown --> Citing_None : Resolve
+    Citing_Unknown --> Citing_Unknown : AckFailed
+    Citing_Unknown --> Citing_Unknown : Acked
+    Citing_Unknown --> Citing_Unknown : Delivered
+    Citing_Unknown --> Citing_Unknown : Got / decision.ack
+    Citing_Unknown --> Citing_Unknown : SendFailed
+    Citing_Unknown --> Citing_Unknown : SendRejected
+    Citing_Unknown --> Citing_Unknown : Start
+    Citing_Unknown --> Idle_Unknown : AnswerFailed
+    Citing_Unknown --> Idle_Unknown : Cited
+    Classifying_Issued --> Answering_Issued : Classified / decision.reply
+    Classifying_Issued --> Answering_Issued : Unclassified / decision.reply
+    Classifying_Issued --> Classifying_Issued : AckFailed
+    Classifying_Issued --> Classifying_Issued : Acked
+    Classifying_Issued --> Classifying_Issued : Delivered
+    Classifying_Issued --> Classifying_Issued : Got / decision.ack
+    Classifying_Issued --> Classifying_Issued : SendFailed
+    Classifying_Issued --> Classifying_Issued : SendRejected
+    Classifying_Issued --> Classifying_Issued : Start
+    Classifying_Issued --> Finding_Issued : Classified / source.orders.retrieve
+    Classifying_Issued --> Looking_Issued : Classified / source.orders.retrieve
+    Classifying_None --> Answering_None : Classified / decision.reply
+    Classifying_None --> Answering_None : Unclassified / decision.reply
+    Classifying_None --> Classifying_None : AckFailed
+    Classifying_None --> Classifying_None : Acked
+    Classifying_None --> Classifying_None : Delivered
+    Classifying_None --> Classifying_None : Got / decision.ack
+    Classifying_None --> Classifying_None : SendFailed
+    Classifying_None --> Classifying_None : SendRejected
+    Classifying_None --> Classifying_None : Start
+    Classifying_None --> Finding_None : Classified / source.orders.retrieve
+    Classifying_None --> Looking_None : Classified / source.orders.retrieve
+    Classifying_Unknown --> Answering_Unknown : Classified / decision.reply
+    Classifying_Unknown --> Answering_Unknown : Unclassified / decision.reply
+    Classifying_Unknown --> Classifying_Issued : Resolve
+    Classifying_Unknown --> Classifying_None : Resolve
+    Classifying_Unknown --> Classifying_Unknown : AckFailed
+    Classifying_Unknown --> Classifying_Unknown : Acked
+    Classifying_Unknown --> Classifying_Unknown : Delivered
+    Classifying_Unknown --> Classifying_Unknown : Got / decision.ack
+    Classifying_Unknown --> Classifying_Unknown : SendFailed
+    Classifying_Unknown --> Classifying_Unknown : SendRejected
+    Classifying_Unknown --> Classifying_Unknown : Start
+    Classifying_Unknown --> Finding_Unknown : Classified / source.orders.retrieve
+    Classifying_Unknown --> Looking_Unknown : Classified / source.orders.retrieve
+    Extracting_Issued --> Answering_Issued : Amounted / decision.reply
+    Extracting_Issued --> Answering_Issued : Unextracted / decision.reply
+    Extracting_Issued --> Extracting_Issued : AckFailed
+    Extracting_Issued --> Extracting_Issued : Acked
+    Extracting_Issued --> Extracting_Issued : Delivered
+    Extracting_Issued --> Extracting_Issued : Got / decision.ack
+    Extracting_Issued --> Extracting_Issued : SendFailed
+    Extracting_Issued --> Extracting_Issued : SendRejected
+    Extracting_Issued --> Extracting_Issued : Start
+    Extracting_None --> Answering_None : Amounted / decision.reply
+    Extracting_None --> Answering_None : Unextracted / decision.reply
+    Extracting_None --> Extracting_None : AckFailed
+    Extracting_None --> Extracting_None : Acked
+    Extracting_None --> Extracting_None : Delivered
+    Extracting_None --> Extracting_None : Got / decision.ack
+    Extracting_None --> Extracting_None : SendFailed
+    Extracting_None --> Extracting_None : SendRejected
+    Extracting_None --> Extracting_None : Start
+    Extracting_None --> Refunding_Unknown : Amounted / payments.refund
+    Extracting_Unknown --> Answering_Unknown : Amounted / decision.reply
+    Extracting_Unknown --> Answering_Unknown : Unextracted / decision.reply
+    Extracting_Unknown --> Extracting_Issued : Resolve
+    Extracting_Unknown --> Extracting_None : Resolve
+    Extracting_Unknown --> Extracting_Unknown : AckFailed
+    Extracting_Unknown --> Extracting_Unknown : Acked
+    Extracting_Unknown --> Extracting_Unknown : Delivered
+    Extracting_Unknown --> Extracting_Unknown : Got / decision.ack
+    Extracting_Unknown --> Extracting_Unknown : SendFailed
+    Extracting_Unknown --> Extracting_Unknown : SendRejected
+    Extracting_Unknown --> Extracting_Unknown : Start
+    Finding_Issued --> Answering_Issued : LookupFailed / decision.reply
+    Finding_Issued --> Extracting_Issued : Found / decision.amount
+    Finding_Issued --> Finding_Issued : AckFailed
+    Finding_Issued --> Finding_Issued : Acked
+    Finding_Issued --> Finding_Issued : Delivered
+    Finding_Issued --> Finding_Issued : Got / decision.ack
+    Finding_Issued --> Finding_Issued : SendFailed
+    Finding_Issued --> Finding_Issued : SendRejected
+    Finding_Issued --> Finding_Issued : Start
+    Finding_None --> Answering_None : LookupFailed / decision.reply
+    Finding_None --> Extracting_None : Found / decision.amount
+    Finding_None --> Finding_None : AckFailed
+    Finding_None --> Finding_None : Acked
+    Finding_None --> Finding_None : Delivered
+    Finding_None --> Finding_None : Got / decision.ack
+    Finding_None --> Finding_None : SendFailed
+    Finding_None --> Finding_None : SendRejected
+    Finding_None --> Finding_None : Start
+    Finding_Unknown --> Answering_Unknown : LookupFailed / decision.reply
+    Finding_Unknown --> Extracting_Unknown : Found / decision.amount
+    Finding_Unknown --> Finding_Issued : Resolve
+    Finding_Unknown --> Finding_None : Resolve
+    Finding_Unknown --> Finding_Unknown : AckFailed
+    Finding_Unknown --> Finding_Unknown : Acked
+    Finding_Unknown --> Finding_Unknown : Delivered
+    Finding_Unknown --> Finding_Unknown : Got / decision.ack
+    Finding_Unknown --> Finding_Unknown : SendFailed
+    Finding_Unknown --> Finding_Unknown : SendRejected
+    Finding_Unknown --> Finding_Unknown : Start
+    Idle_Issued --> Classifying_Issued : Got / decision.classify
+    Idle_Issued --> Idle_Issued : AckFailed
+    Idle_Issued --> Idle_Issued : Acked
+    Idle_Issued --> Idle_Issued : Delivered
+    Idle_Issued --> Idle_Issued : SendFailed
+    Idle_Issued --> Idle_Issued : SendRejected
+    Idle_Issued --> Idle_Issued : Start
+    Idle_None --> Classifying_None : Got / decision.classify
+    Idle_None --> Idle_None : AckFailed
+    Idle_None --> Idle_None : Acked
+    Idle_None --> Idle_None : Delivered
+    Idle_None --> Idle_None : SendFailed
+    Idle_None --> Idle_None : SendRejected
+    Idle_None --> Idle_None : Start
+    Idle_Unknown --> Classifying_Unknown : Got / decision.classify
+    Idle_Unknown --> Idle_Issued : Resolve
+    Idle_Unknown --> Idle_None : Resolve
+    Idle_Unknown --> Idle_Unknown : AckFailed
+    Idle_Unknown --> Idle_Unknown : Acked
+    Idle_Unknown --> Idle_Unknown : Delivered
+    Idle_Unknown --> Idle_Unknown : SendFailed
+    Idle_Unknown --> Idle_Unknown : SendRejected
+    Idle_Unknown --> Idle_Unknown : Start
+    Looking_Issued --> Answering_Issued : LookupFailed / decision.reply
+    Looking_Issued --> Citing_Issued : Found / decision.answer
+    Looking_Issued --> Looking_Issued : AckFailed
+    Looking_Issued --> Looking_Issued : Acked
+    Looking_Issued --> Looking_Issued : Delivered
+    Looking_Issued --> Looking_Issued : Got / decision.ack
+    Looking_Issued --> Looking_Issued : SendFailed
+    Looking_Issued --> Looking_Issued : SendRejected
+    Looking_Issued --> Looking_Issued : Start
+    Looking_None --> Answering_None : LookupFailed / decision.reply
+    Looking_None --> Citing_None : Found / decision.answer
+    Looking_None --> Looking_None : AckFailed
+    Looking_None --> Looking_None : Acked
+    Looking_None --> Looking_None : Delivered
+    Looking_None --> Looking_None : Got / decision.ack
+    Looking_None --> Looking_None : SendFailed
+    Looking_None --> Looking_None : SendRejected
+    Looking_None --> Looking_None : Start
+    Looking_Unknown --> Answering_Unknown : LookupFailed / decision.reply
+    Looking_Unknown --> Citing_Unknown : Found / decision.answer
+    Looking_Unknown --> Looking_Issued : Resolve
+    Looking_Unknown --> Looking_None : Resolve
+    Looking_Unknown --> Looking_Unknown : AckFailed
+    Looking_Unknown --> Looking_Unknown : Acked
+    Looking_Unknown --> Looking_Unknown : Delivered
+    Looking_Unknown --> Looking_Unknown : Got / decision.ack
+    Looking_Unknown --> Looking_Unknown : SendFailed
+    Looking_Unknown --> Looking_Unknown : SendRejected
+    Looking_Unknown --> Looking_Unknown : Start
+    Refunding_Unknown --> Answering_Issued : Refunded / decision.reply
+    Refunding_Unknown --> Answering_None : RefundFailed / decision.reply
+    Refunding_Unknown --> Answering_Unknown : RefundUnknown / decision.reply
+    Refunding_Unknown --> Refunding_Unknown : AckFailed
+    Refunding_Unknown --> Refunding_Unknown : Acked
+    Refunding_Unknown --> Refunding_Unknown : Delivered
+    Refunding_Unknown --> Refunding_Unknown : Got / decision.ack
+    Refunding_Unknown --> Refunding_Unknown : SendFailed
+    Refunding_Unknown --> Refunding_Unknown : SendRejected
+    Refunding_Unknown --> Refunding_Unknown : Start
+    [*] --> Idle_None
+```
+
+## Conclusion
+
+The Ticket keeps its ambiguity in a phase of its own, and the Desk keeps it in a field. In both, the way out is a person's signed step, and the diagrams show it as the only edge that leaves the uncertain box.
+
+## Glossary
+
+- **Projection:** the checked states drawn as the value of one or two fields.
+- **Ledger:** the Desk's record of its refunds: `None`, `Unknown`, `Issued`.
+- **Unknown:** a refund whose outcome is not known to the program.
+- **Resolve:** the step in which a person, with a signed record, says whether an unknown refund exists.

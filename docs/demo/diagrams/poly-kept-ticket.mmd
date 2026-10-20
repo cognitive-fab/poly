@@ -1,0 +1,16 @@
+%% A projection of the checked model of support.Ticket of the kept poly build, onto `phase`: 226 states of the checked instance drawn as the boxes they project to. It is not the model.
+%% An edge is an accepted step, once for each (from, action, to), with the effects it emits after the slash.
+stateDiagram-v2
+    Closed --> [*]
+    Confirming --> Idle : Cancel / whatsapp.ticket
+    Confirming --> Refunding : Confirm / stripe.refund
+    Idle --> Confirming : RequestAll / whatsapp.ticket
+    Idle --> Confirming : RequestLine / whatsapp.ticket
+    New --> Idle : Open
+    Refunding --> Closed : RefundOk / whatsapp.ticket
+    Refunding --> Idle : RefundFailed / whatsapp.ticket
+    Refunding --> Idle : RefundOk / whatsapp.ticket
+    Refunding --> Review : RefundUnknown / whatsapp.ticket
+    Review --> Closed : Resolve / whatsapp.ticket
+    Review --> Idle : Resolve / whatsapp.ticket
+    [*] --> New
