@@ -44,7 +44,9 @@ export async function refund(payload, caps) {
   if (payload.amount * 100 > paid.amount - paid.amount_refunded) throw refuse('the amount exceeds what was paid on the order\'s charge');
   // The key is not the handler's to send: the refund is declared `idempotent header "Idempotency-Key"`, so the runtime sends the intent id on this write and on each retry (PT33.4), and a lost answer cannot refund twice.
   const res = await caps.api.post(REFUNDS_URL, form, { headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-  // A 4xx is Stripe refusing this refund and will again; anything else is tried again.
-  if (res.status !== 200) throw res.status >= 400 && res.status < 500 && res.status !== 429 ? refuse(`refunds.create answered ${res.status}`) : new Error(`refunds.create answered ${res.status}`);
+  // A 4xx is Stripe refusing this refund and will again; anything else is tried again. A 409 is not a refusal (DF20): a keyed request that
+  // meets the first request with its key still in progress gets a 409, so the target may be executing it, and a permanent error would
+  // clear the ledger of the Desk (DF19) while it does. 429 is a rate limit. Both are retried with the same key.
+  if (res.status !== 200) throw res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 409 ? refuse(`refunds.create answered ${res.status}`) : new Error(`refunds.create answered ${res.status}`);
   return { ok: true };
 }
