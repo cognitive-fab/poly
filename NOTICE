@@ -1,0 +1,20 @@
+poly
+Copyright 2026 Cognitive Fab LLC
+
+poly is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The engines poly runs are copied unchanged into vendor/ and keep their own
+licences. Each folder's PROVENANCE.md gives the source commit and the hash of
+every file.
+
+| Folder | Licence | Where stated |
+|---|---|---|
+| vendor/polygraph | Apache-2.0 | vendor/polygraph/LICENSE |
+| vendor/polyflow | Apache-2.0 | vendor/polyflow/LICENSE |
+| vendor/sam-pattern | ISC (Copyright 2019 Jean-Jacques Dubray) | head of vendor/sam-pattern/dist/SAM.js |
+| vendor/polyaxion (polyaxion, polysec-core, polyman) | BUSL-1.1, Licensor: Cognitive Fab LLC | the LICENSE file of each package |
+| peers/polycheck | Apache-2.0 | optional peer; its files are not in this repository (see peers/polycheck/PROVENANCE.md) |
+
+The BUSL-1.1 packages are not covered by poly's Apache-2.0 licence. Read their
+LICENSE files (Additional Use Grant and Change Date) before using poly in
+production.
