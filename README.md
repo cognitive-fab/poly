@@ -14,7 +14,22 @@ poly adds no new checking, simulation or governance engine. It is a compiler, a 
 | Learn | Polyx, polyness |
 | Simulate (v2) | Polytrion |
 
-> Status: specification, draft v0.6 (after five reviews). No code yet.
+> Status: v1.3. The compiler, the model checker (`poly-ref`), the durable runtime, the effect gate and the ledger are implemented and tested. The specifications below are the source of truth. What changed in each release is in [`docs/release-notes-v1.3.md`](docs/release-notes-v1.3.md) and the notes before it.
+
+## Try it
+
+Node 22 or later.
+
+```
+npm ci
+npm run build
+node packages/poly-check/dist/src/cli.js check examples/hello/hello.poly
+npm test
+```
+
+The examples are in [`examples/`](examples/README.md). Each begins with the verdict the checker must give it.
+
+poly vendors the engines it runs (`vendor/`, each pinned by hash in its `PROVENANCE.md`). Licences are in [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). To report a bug or propose a change, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Hello, world
 
