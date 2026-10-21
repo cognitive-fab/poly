@@ -8,7 +8,9 @@ import { dirname, join } from 'node:path';
 
 /** What the arm gets, as [source in the repository, path in tools/poly/]. A folder is copied whole. */
 export const REFERENCE_SOURCES = [
-  ['README.md', 'README.md'],
+  // A frozen copy of the README as it stood when the baseline was pre-registered. The public README has since changed; this copy keeps
+  // the reference, and so the pinned scaffold digest, byte for byte what the two agents were given.
+  ['demo/baseline/reference/README.md', 'README.md'],
   ['docs/03-technical-spec.md', 'docs/03-technical-spec.md'],
   ['docs/04-semantics.md', 'docs/04-semantics.md'],
   ['examples/hello', 'examples/hello'],
@@ -112,7 +114,8 @@ export function writeReference(ws, root) {
   for (const [from, to] of REFERENCE_SOURCES) {
     const dest = join(ws, 'tools', 'poly', to);
     mkdirSync(dirname(dest), { recursive: true });
-    if (REFERENCE_EDITS[from]) writeFileSync(dest, applyEdits(from, readFileSync(join(root, from), 'utf8')));
+    // The edits are keyed by the path in tools/poly/, which is the README's own name whichever file it is read from.
+    if (REFERENCE_EDITS[to]) writeFileSync(dest, applyEdits(to, readFileSync(join(root, from), 'utf8')));
     else cpSync(join(root, from), dest, { recursive: true });
   }
 }
