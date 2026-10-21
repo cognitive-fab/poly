@@ -1,0 +1,69 @@
+concierge.poly:276  PL3002 STEP_PROPERTY  one-refund
+  never one-refund is violated by Amounted; the witness takes a step nothing in its environment asked for (environment: unconstrained, PS4.4)
+  witness (10 steps):
+    Got(null, {principal:p1})     Idle/null/false/null/false/false/0/false      -> Classifying/p1/false/null/false/false/0/false   emits decision.classify
+    Classified(Refund, 0, 0)      Classifying/p1/false/null/false/false/0/false -> Finding/p1/false/null/false/false/0/false   emits source.orders.retrieve
+    Found({count:0})              Finding/p1/false/null/false/false/0/false     -> Extracting/p1/false/null/false/false/0/false   emits decision.amount
+    Amounted(0, 800, {count:1})   Extracting/p1/false/null/false/false/0/false  -> Refunding/p1/false/null/false/false/0/true   emits payments.refund
+    Refunded()                    Refunding/p1/false/null/false/false/0/true    -> Answering/p1/false/null/false/false/0/true   emits decision.reply
+    Answered(null)                Answering/p1/false/null/false/false/0/true    -> Idle/p1/false/null/false/false/1/true   emits sendTo
+    Got(null, {principal:p1})     Idle/p1/false/null/false/false/1/true         -> Classifying/p1/false/null/false/false/1/true   emits decision.classify
+    Classified(Refund, 0, 0)      Classifying/p1/false/null/false/false/1/true  -> Finding/p1/false/null/false/false/1/true   emits source.orders.retrieve
+    Found({count:0})              Finding/p1/false/null/false/false/1/true      -> Extracting/p1/false/null/false/false/1/true   emits decision.amount
+    Amounted(0, 800, {count:1})   Extracting/p1/false/null/false/false/1/true   -> Refunding/p1/false/null/false/false/1/true   emits payments.refund
+concierge.poly:276  PL3002 STEP_PROPERTY  app.one-refund
+  app: never one-refund is violated by Amounted
+  witness (14 global steps):
+    input   Start@app
+    deliver Open(app) -> app/support
+    input   Inbound@app/support
+    input   Inbound@app/support
+    deliver Got(none, {principal:"p1"}) -> app
+    input   Classified@app
+    input   Found@app
+    input   Amounted@app
+    input   Refunded@app
+    input   Answered@app
+    deliver Got(none, {principal:"p1"}) -> app
+    input   Classified@app
+    input   Found@app
+    input   Amounted@app
+  no test export until M4
+warning: the calibration map maps/small.json of tier small of route triage: it sends the 499 raw values 1 to 499 (thousandths) to 0, a band wider than 100; a map is a step function (PT24), and it is used as it is
+warning: the calibration map maps/large.json of tier large of route triage: it sends the 499 raw values 1 to 499 (thousandths) to 0, a band wider than 100; a map is a step function (PT24), and it is used as it is
+Desk: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (226950 transitions and 163404 property evaluations agree) · model-check FINDINGS (3026 states explored) · deadlock CLEAN (service: exempt (PS1.7)) · flow CLEAN (6482 states with their taints (PS17.3)) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38)) · decisions CLEAN (5 decisions, each answer at each interval of its confidence and margin (PD1.4b); the completion step alone (S75))
+  retry-safe  payments.refund  irreversible, attempts 5, keyed Idempotency-Key within 24h (K17)
+  class  payments.refund  irreversible
+Notice: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (504 transitions and 28 property evaluations agree) · model-check CLEAN (28 states explored) · deadlock CLEAN (service: exempt (PS1.7)) · flow CLEAN (28 states with their taints (PS17.3)) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38)) · decisions CLEAN (1 decision, each answer at each interval of its confidence and margin (PD1.4b); the completion step alone (S75))
+support.Conversation: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (20178 transitions and 114228 property evaluations agree) · model-check CLEAN (342 states explored) · deadlock CLEAN (service: exempt (PS1.7)) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  channel.support.send  irreversible, attempts 1, at most once
+  class  channel.support.send  irreversible
+staff.Conversation: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (49950 transitions and 297036 property evaluations agree) · model-check CLEAN (666 states explored) · deadlock CLEAN (service: exempt (PS1.7)) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  channel.staff.send  irreversible, attempts 1, at most once
+  class  channel.staff.send  irreversible
+payments.Grant: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (104 transitions and 546 property evaluations agree) · model-check CLEAN (13 states explored) · deadlock CLEAN (13 states) · liveness CLEAN (1 property under weak fairness (PS6.4)) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  retry-safe  credential.revoke  irreversible, attempts 5, idempotent by nature "RFC 7009" (K18)
+  class  credential.refresh  reversible
+  class  credential.revoke  irreversible
+triage.Route: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (36 transitions and 198 property evaluations agree) · model-check CLEAN (6 states explored) · deadlock CLEAN (6 states) · liveness CLEAN (1 property under weak fairness (PS6.4)) · effects CLEAN (no path property, so polyrun check-effects did not run; PL4002 decided by poly-ref alone (S38))
+  class  route.triage.call  none
+spend.Budget: parse-type CLEAN · lower CLEAN · validate CLEAN · translation-validation CLEAN (2976 transitions and 15456 property evaluations agree) · model-check CLEAN (96 states explored) · deadlock CLEAN (96 states)
+configuration support: configuration FINDINGS (42395 global states, 1094124 global steps; the flow rule over 55051 global states with their taints (PS17.3))
+configuration staff: configuration CLEAN (3620 global states, 194795 global steps; the flow rule over 3620 global states with their taints (PS17.3))
+verdict: FINDINGS (exit 1)  concierge.Desk  over inflight ∈ 0..3; Got.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002"}; Found.items ∈ Items count 0..2; Cited.text ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002"}; Cited.cites ∈ Items count 0..2; Classified.branch ∈ Branch; Classified.conf ∈ {0}; Classified.margin ∈ {0}; Amounted.value ∈ 0..500 at {0, 101} cut by {100} (S458); Amounted.conf ∈ {0, 800}; Amounted.cites ∈ Items count 0..2; Answered.text ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002"}; Acked.text ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002"}; SendRejected.reason ∈ {"window-closed"}; 3 principal representatives (PD5.1.3c); 2 content representatives and none (PS4.1f); 3026 states; kernel assumptions K7, K11, K17
+         concierge.Notice  over sending ∈ 0..3; Got.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002"}; Noted.text ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002"}; Notify.text ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002"}; SendRejected.reason ∈ {"channel-archived", "rate-limited"}; 2 content representatives and none (PS4.1f); 28 states; kernel assumptions K7
+         concierge.support.Conversation  over waiting ∈ 0..2; queued ∈ 0..2; pending ∈ 0..3; Open.app ∈ {none, concierge.Desk#1, concierge.Desk#2}; Inbound.from ∈ {"wa-1", "wa-2"}; Inbound.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002", "sha256:0000000000000000000000000000000000000000000000000000000000000003"}; Reply.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002", "sha256:0000000000000000000000000000000000000000000000000000000000000003"}; Template.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002", "sha256:0000000000000000000000000000000000000000000000000000000000000003"}; 2 principal representatives (PD5.1.3c); 3 content representatives and none (PS4.1f); 342 states; kernel assumptions K7, K11
+         concierge.staff.Conversation  over waiting ∈ 0..2; queued ∈ 0..2; pending ∈ 0..3; Open.app ∈ {none, concierge.Notice#1, concierge.Notice#2}; Inbound.channel ∈ {"C-1", "C-2"}; Inbound.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002", "sha256:0000000000000000000000000000000000000000000000000000000000000003"}; Inbound.event ∈ Event; Reply.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002", "sha256:0000000000000000000000000000000000000000000000000000000000000003"}; Template.body ∈ {null, "sha256:0000000000000000000000000000000000000000000000000000000000000001", "sha256:0000000000000000000000000000000000000000000000000000000000000002", "sha256:0000000000000000000000000000000000000000000000000000000000000003"}; 2 principal representatives (PD5.1.3c); 3 content representatives and none (PS4.1f); 666 states; kernel assumptions K7, K11
+         concierge.payments.Grant  over attempt ∈ 0..3; Callback.granted ∈ ScopeSet; Refreshed.valid ∈ bool; 13 states; kernel assumptions K7, K18
+         concierge.triage.Route  over tier ∈ 0..1; left ∈ 0..1; Answer.conf ∈ {0, 800}; Answer.margin ∈ {0, 100}; 6 states; kernel assumptions K7
+         concierge.spend.Budget  over cap ∈ 0..3; spent ∈ 0..18; reserved ∈ 0..3; overrun ∈ 0..15; Open.limit ∈ 0..3; Reserve.r ∈ 1..3; Settle.r ∈ 1..3; Settle.actual ∈ 0..6; Release.r ∈ 1..3; 96 states; kernel assumptions K7
+         concierge.support  over app: Desk, concierge.support.Conversation[0..0]: concierge.support.Conversation; transit ≤ 3; instances ≤ 2; 42395 global states; kernel assumptions K1, K2, K4, K7, K8
+         concierge.staff  over app: Notice, concierge.staff.Conversation[0..0]: concierge.staff.Conversation; transit ≤ 3; instances ≤ 2; 3620 global states; kernel assumptions K1, K2, K4, K7, K8
+         Desk: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         Notice: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         support.Conversation: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         staff.Conversation: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         payments.Grant: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+         triage.Route: emission without a state change (PL4002) decided by poly-ref alone (polyrun check-effects did not run: no path property, S38, or the machine spawns detached children, S60)
+engines: sam-pattern 2.3.0, polygraph 8.4.0, polygraph sam-pattern (vendored) 2.3.0, poly-ref 0.0.0
+exit 1
