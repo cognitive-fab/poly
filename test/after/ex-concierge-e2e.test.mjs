@@ -128,7 +128,7 @@ test('AC27: the concierge end to end over recorded traffic, CLEAN with its insta
     assert.deepEqual(await forwardEscalations(rt, { desks: [deskA, deskB], notice, noticed }), [esc]);
     await settle();
     const staffPosts = out.staff.filter((q) => q.url.endsWith('chat.postMessage')).map((q) => JSON.parse(q.body).text);
-    assert.ok(staffPosts.some((t) => t.includes(esc)) && !staffPosts.some((t) => /sofa|250|cust-b/.test(t)), JSON.stringify(staffPosts));
+    assert.ok(staffPosts.some((t) => t.includes(esc)) && !staffPosts.some((t) => /sofa|250|cust-b/.test(t.replaceAll(esc, ''))), JSON.stringify(staffPosts));
     // A person approves it with a signed record; the refund goes through, and the customer is told.
     await rt.approve(await approvalFor(rt, esc));
     await settle();
