@@ -132,19 +132,20 @@ test('AC27: the concierge end to end over recorded traffic, CLEAN with its insta
     // A person approves it with a signed record; the refund goes through, and the customer is told.
     await rt.approve(await approvalFor(rt, esc));
     await settle();
-    assert.deepEqual(stripe.slice(2).map((q) => [q.method, q.url]), [['GET', `${CHARGES_URL}ch_ex2001`], ['POST', REFUNDS_URL]]);
+    assert.deepEqual(stripe.slice(2).map((q) => [q.method, q.url, q.account]), [['GET', `${CHARGES_URL}ch_ex2001`, 'acct_1Merchant'], ['POST', REFUNDS_URL, 'acct_1Merchant']]);
     assert.deepEqual(Object.fromEntries(new URLSearchParams(stripe[3].body)), { charge: 'ch_ex2001', amount: '25000', reason: 'requested_by_customer' });
     assert.match(sendsTo(PHONES['wa-2']).at(-1), /refund/i);
 
     // Replay: every run folds through poly-ref's δ with no divergence, the routes' tier choices among them, and every
     // gate session replays its decisions.
     const replays = await replayRuntime(rt);
-    for (const x of replays) assert.deepEqual([x.run, x.diagnostics, x.notRun ?? null, x.gateNotRun], [x.run, [], null, 0], JSON.stringify(x));
+    for (const x of replays) assert.deepEqual([x.diagnostics, x.notRun ?? null, x.gateNotRun], [[], null, 0], `${x.run}: ${JSON.stringify(x)}`);
     const kinds = new Set(replays.map((x) => x.machine));
     for (const m of ['concierge.Desk', 'concierge.Notice', 'concierge.triage.Route', 'concierge.support.Conversation', 'concierge.staff.Conversation']) assert.ok(kinds.has(m), `${m} in ${[...kinds].join(', ')}`);
     const sessions = await replaySessions(rt);
     assert.ok(sessions.length > 0 && sessions.every((s) => s.diagnostics.length === 0 && s.notRun.length === 0), JSON.stringify(sessions.filter((s) => s.diagnostics.length || s.notRun.length)));
     const grant = replays.filter((x) => x.machine === 'concierge.payments.Grant');
+    assert.ok(grant.length > 0, 'the grant of the merchant was replayed');
     console.log(`AC27 replay: ${replays.length} runs, ${replays.reduce((n, x) => n + x.rows, 0)} rows, ${grant.length} grant run(s); ${sessions.length} gate sessions, ${sessions.reduce((n, s) => n + s.proposals, 0)} proposals; divergences: ${replays.reduce((n, x) => n + x.diagnostics.length, 0) + sessions.reduce((n, s) => n + s.diagnostics.length, 0)}`);
   } finally { await rt.close(); }
 });
